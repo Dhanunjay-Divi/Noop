@@ -13,7 +13,7 @@ object PlannedWorkoutTitleClassifier {
     private val combiningMarks = Regex("\\p{M}+")
 
     private fun normalizeForComparison(value: String): String = Normalizer
-        .normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFKD)
         .replace(combiningMarks, "")
 
     private fun normalizedTokenSet(vararg values: String): Set<String> =

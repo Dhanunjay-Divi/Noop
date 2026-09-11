@@ -1193,6 +1193,18 @@ extension WhoopStore {
                 columns: ["deviceId", "day", "loggedAt"]
             )
         }
+        // v56: hydration rows enter the managed pipeline under the storage map's client-encrypted
+        // contract. This installs local tracking/backfill for v55 databases; production transport
+        // stays gated until the adapter implements client encryption and key recovery.
+        migrator.registerMigration("v56-managed-hydration-document") { db in
+            try installManagedDocumentTriggers(
+                db,
+                specs: managedDocumentTableSpecs.filter {
+                    $0.tableName == "hydrationEntry"
+                },
+                seedExisting: true
+            )
+        }
         return migrator
     }
 

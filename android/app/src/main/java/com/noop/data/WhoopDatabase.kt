@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 46
+const val NOOP_DATABASE_SCHEMA_VERSION = 47
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -1132,6 +1132,22 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v46 -> v47: force one complete WeightRecord projection after the unsupported legacy BMI rows
+         * were removed. Resetting only this cursor makes the next granted Health Connect reconcile
+         * bootstrap WeightRecord, rebuild the full supported history, and recreate BMI only when the
+         * profile height is confirmed. Keeping this separate also repairs databases that already ran v46.
+         */
+        internal const val HEALTH_CONNECT_BMI_REBUILD_MIGRATION_SQL =
+            "DELETE FROM `healthConnectSyncState` WHERE `recordType` = " +
+                "'androidx.health.connect.client.records.WeightRecord'"
+
+        internal val MIGRATION_46_47 = object : Migration(46, 47) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(HEALTH_CONNECT_BMI_REBUILD_MIGRATION_SQL)
+            }
+        }
+
         private data class ManagedDocumentTriggerSpec(
             val table: String,
             val documentKind: String,
@@ -1485,7 +1501,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37,
                     MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40,
                     MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44,
-                    MIGRATION_44_45, MIGRATION_45_46,
+                    MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

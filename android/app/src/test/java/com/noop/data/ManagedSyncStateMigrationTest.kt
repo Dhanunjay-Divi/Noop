@@ -58,7 +58,7 @@ class ManagedSyncStateMigrationTest {
         assertTrue(statements[3].contains("`objectCRC32C` TEXT"))
         assertEquals(41, WhoopDatabase.MIGRATION_41_42.startVersion)
         assertEquals(42, WhoopDatabase.MIGRATION_41_42.endVersion)
-        assertEquals(46, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     @Test
@@ -77,7 +77,7 @@ class ManagedSyncStateMigrationTest {
         )
         assertEquals(42, WhoopDatabase.MIGRATION_42_43.startVersion)
         assertEquals(43, WhoopDatabase.MIGRATION_42_43.endVersion)
-        assertEquals(46, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     @Test
@@ -92,7 +92,7 @@ class ManagedSyncStateMigrationTest {
         assertFalse(statement.contains("ALTER TABLE"))
         assertEquals(43, WhoopDatabase.MIGRATION_43_44.startVersion)
         assertEquals(44, WhoopDatabase.MIGRATION_43_44.endVersion)
-        assertEquals(46, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     @Test
@@ -109,6 +109,6 @@ class ManagedSyncStateMigrationTest {
         assertFalse(statements.any { it.uppercase().contains("DELETE ") })
         assertEquals(44, WhoopDatabase.MIGRATION_44_45.startVersion)
         assertEquals(45, WhoopDatabase.MIGRATION_44_45.endVersion)
-        assertEquals(46, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
     }
 }

@@ -302,6 +302,9 @@ internal suspend fun <T> loadTodayBestEffortResult(
 internal suspend fun <T> loadTodayBestEffort(load: suspend () -> T): T? =
     loadTodayBestEffortResult(load).value
 
+internal fun <T> TodayBestEffortRead<T>.retainingPreviousOnFailure(previous: T?): T? =
+    if (succeeded) value else previous
+
 internal fun todayRestResultBucket(count: Int): String = when {
     count <= 0 -> "empty"
     count <= 30 -> "up_to_30"
@@ -1038,9 +1041,13 @@ fun TodayScreen(
     // Repository.hydrationSeq trigger.
     val hydrationSeq by HydrationStore.mutationSeq.collectAsStateWithLifecycle()
     LaunchedEffect(days, hydrationEnabled, hydrationSeq) {
-        hydrationTotalMl = if (hydrationEnabled) {
-            runCatching { HydrationStore.total(viewModel.repo) }.getOrNull()
-        } else null
+        if (!hydrationEnabled) {
+            hydrationTotalMl = null
+            return@LaunchedEffect
+        }
+        hydrationTotalMl = loadTodayBestEffortResult {
+            HydrationStore.total(viewModel.repo)
+        }.retainingPreviousOnFailure(hydrationTotalMl)
     }
     // The day's Effort/strain (0..100) drives the goal's effort bump. Prefer the live in-progress Effort
     // for today (floored at the stored value, mirroring the Effort gauge) so the goal reflects a hard day

@@ -19,6 +19,8 @@ class PlannedWorkoutTitleClassifierTest {
             "Spin class",
             "Trail running",
             "10K training",
+            "ＹＯＧＡ",
+            "ＭＯＲＮＩＮＧ　ＲＵＮ",
         ).forEach {
             assertTrue("Expected workout title: $it", PlannedWorkoutTitleClassifier.isWorkoutTitle(it))
         }
@@ -59,6 +61,7 @@ class PlannedWorkoutTitleClassifierTest {
             "Running payroll",
             "Morning backup run",
             "Disaster recovery runbook",
+            "ＹＯＧＡ　ＷＯＲＫＳＨＯＰ",
             "Run errands",
             "School run",
             "Dry run",

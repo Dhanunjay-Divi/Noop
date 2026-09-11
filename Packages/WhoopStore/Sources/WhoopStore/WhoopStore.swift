@@ -6,7 +6,7 @@ import WhoopProtocol
 /// transient, compressed, prunable outbox. Built on GRDB/SQLite.
 public enum WhoopStoreInfo {
     /// Bumped whenever the migrator gains a new migration.
-    public static let schemaVersion = 55
+    public static let schemaVersion = 56
 
     // NOOP opens this file through two pools (the BLE writer and the read repository). SQLite's cache
     // and mmap limits apply per connection, so the old desktop-sized values could make a large iPhone

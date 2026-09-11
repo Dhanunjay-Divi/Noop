@@ -56,6 +56,15 @@ struct ManagedDocumentTableSpec {
 }
 
 extension WhoopStore {
+    private struct ManagedHydrationProjection: Hashable {
+        let deviceId: String
+        let day: String
+    }
+
+    private static let managedHydrationTable = "hydrationEntry"
+    private static let managedHydrationDevice = "hydration"
+    private static let managedHydrationMetricKey = "hydration"
+
     static let managedDocumentTableSpecs: [ManagedDocumentTableSpec] = [
         .init(
             tableName: "journal",
@@ -119,6 +128,11 @@ extension WhoopStore {
             keyColumns: ["id"]
         ),
         .init(
+            tableName: "hydrationEntry",
+            documentKind: "hydration",
+            keyColumns: ["id"]
+        ),
+        .init(
             tableName: "dayOwnership",
             documentKind: "day_ownership",
             keyColumns: ["day"]
@@ -168,9 +182,33 @@ extension WhoopStore {
             t.column("guardId", .integer).primaryKey()
         }
 
+        try installManagedDocumentTriggers(
+            db,
+            specs: managedDocumentTableSpecs,
+            seedExisting: true
+        )
+    }
+
+    static func installManagedDocumentTriggers(
+        _ db: Database,
+        specs: [ManagedDocumentTableSpec],
+        seedExisting: Bool
+    ) throws {
         let now = "CAST(strftime('%s', 'now') AS INTEGER) * 1000"
-        for spec in managedDocumentTableSpecs {
+        for spec in specs {
             let table = spec.tableName
+            let tableExists = try Bool.fetchOne(
+                db,
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = ?
+                    )
+                    """,
+                arguments: [table]
+            ) ?? false
+            guard tableExists else { continue }
+
             let newKey = spec.localKeySQL(row: "NEW")
             let oldKey = spec.localKeySQL(row: "OLD")
             let newEligible = spec.eligibility("NEW")
@@ -182,7 +220,7 @@ extension WhoopStore {
                 """
 
             try db.execute(sql: """
-                CREATE TRIGGER "managed_document_\(table)_insert"
+                CREATE TRIGGER IF NOT EXISTS "managed_document_\(table)_insert"
                 AFTER INSERT ON "\(table)"
                 BEGIN
                     \(managedDocumentDirtySQL(
@@ -196,7 +234,7 @@ extension WhoopStore {
                 END
                 """)
             try db.execute(sql: """
-                CREATE TRIGGER "managed_document_\(table)_delete"
+                CREATE TRIGGER IF NOT EXISTS "managed_document_\(table)_delete"
                 AFTER DELETE ON "\(table)"
                 BEGIN
                     \(managedDocumentDirtySQL(
@@ -210,7 +248,7 @@ extension WhoopStore {
                 END
                 """)
             try db.execute(sql: """
-                CREATE TRIGGER "managed_document_\(table)_update"
+                CREATE TRIGGER IF NOT EXISTS "managed_document_\(table)_update"
                 AFTER UPDATE ON "\(table)"
                 BEGIN
                     \(managedDocumentDirtySQL(
@@ -235,6 +273,7 @@ extension WhoopStore {
                     ));
                 END
                 """)
+            guard seedExisting else { continue }
             try db.execute(sql: """
                 INSERT INTO managedDocumentDirty (
                     tableName, localKey, documentKind, generation,
@@ -590,14 +629,27 @@ extension WhoopStore {
                 }) else {
                     throw ManagedDocumentStoreError.invalidState
                 }
+                let hydrationProjection = tableName == Self.managedHydrationTable
+                    ? try Self.storedHydrationProjection(
+                        db,
+                        localKey: localKey,
+                        spec: spec
+                    )
+                    : nil
                 try db.execute(
                     sql: """
                         DELETE FROM "\(tableName)"
                         WHERE \(spec.localKeySQL(row: tableName)) = ?
-                        """,
+                    """,
                     arguments: [localKey]
                 )
                 let changed = db.changesCount
+                if let hydrationProjection {
+                    try Self.refreshManagedHydrationProjection(
+                        db,
+                        projection: hydrationProjection
+                    )
+                }
                 try Self.upsertManagedDocumentState(
                     db,
                     accountScopeHash: accountScopeHash,
@@ -640,6 +692,21 @@ extension WhoopStore {
                 throw ManagedDocumentStoreError.invalidPayload
             }
 
+            let priorHydrationProjection: ManagedHydrationProjection?
+            let newHydrationProjection: ManagedHydrationProjection?
+            if tableName == Self.managedHydrationTable {
+                priorHydrationProjection = try Self.storedHydrationProjection(
+                    db,
+                    key: key
+                )
+                newHydrationProjection = try Self.validatedHydrationProjection(
+                    record: record
+                )
+            } else {
+                priorHydrationProjection = nil
+                newHydrationProjection = nil
+            }
+
             let values = try columns.map { column in
                 try Self.databaseValue(record[column])
             }
@@ -655,10 +722,20 @@ extension WhoopStore {
                     VALUES (\(placeholders))
                     ON CONFLICT(\(spec.keyColumns.map { "\"\($0)\"" }.joined(separator: ", ")))
                     DO UPDATE SET \(updates)
-                    """,
+                """,
                 arguments: StatementArguments(values)
             )
             let changed = db.changesCount
+            for projection in Set(
+                [priorHydrationProjection, newHydrationProjection].compactMap { $0 }
+            ).sorted(by: {
+                ($0.deviceId, $0.day) < ($1.deviceId, $1.day)
+            }) {
+                try Self.refreshManagedHydrationProjection(
+                    db,
+                    projection: projection
+                )
+            }
             let localKey = try Self.localKey(
                 db,
                 tableName: tableName,
@@ -778,6 +855,134 @@ extension WhoopStore {
             }
         }
         return object
+    }
+
+    private static func validatedHydrationProjection(
+        record: [String: Any]
+    ) throws -> ManagedHydrationProjection {
+        guard let id = record["id"] as? String,
+              !id.isEmpty,
+              let deviceId = record["deviceId"] as? String,
+              deviceId == managedHydrationDevice,
+              let day = record["day"] as? String,
+              day.range(
+                  of: #"^\d{4}-\d{2}-\d{2}$"#,
+                  options: .regularExpression
+              ) != nil,
+              positiveWholeNumber(record["amountML"]),
+              positiveWholeNumber(record["loggedAt"]) else {
+            throw ManagedDocumentStoreError.invalidPayload
+        }
+        return ManagedHydrationProjection(deviceId: deviceId, day: day)
+    }
+
+    private static func storedHydrationProjection(
+        _ db: Database,
+        key: [String: Any]
+    ) throws -> ManagedHydrationProjection? {
+        guard let id = key["id"] as? String, !id.isEmpty else {
+            throw ManagedDocumentStoreError.invalidPayload
+        }
+        return try Row.fetchOne(
+            db,
+            sql: """
+                SELECT deviceId, day
+                FROM hydrationEntry
+                WHERE id = ?
+                """,
+            arguments: [id]
+        ).map {
+            try storedHydrationProjection(row: $0)
+        }
+    }
+
+    private static func storedHydrationProjection(
+        _ db: Database,
+        localKey: String,
+        spec: ManagedDocumentTableSpec
+    ) throws -> ManagedHydrationProjection? {
+        try Row.fetchOne(
+            db,
+            sql: """
+                SELECT deviceId, day
+                FROM hydrationEntry AS candidate
+                WHERE \(spec.localKeySQL(row: "candidate")) = ?
+                """,
+            arguments: [localKey]
+        ).map {
+            try storedHydrationProjection(row: $0)
+        }
+    }
+
+    private static func storedHydrationProjection(
+        row: Row
+    ) throws -> ManagedHydrationProjection {
+        let deviceId: String = row["deviceId"]
+        let day: String = row["day"]
+        guard deviceId == managedHydrationDevice,
+              day.range(
+                  of: #"^\d{4}-\d{2}-\d{2}$"#,
+                  options: .regularExpression
+              ) != nil else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+        return ManagedHydrationProjection(deviceId: deviceId, day: day)
+    }
+
+    private static func refreshManagedHydrationProjection(
+        _ db: Database,
+        projection: ManagedHydrationProjection
+    ) throws {
+        try db.execute(
+            sql: "INSERT OR IGNORE INTO managedPruneGuard (guardId) VALUES (1)"
+        )
+        let ownsGuard = db.changesCount > 0
+        defer {
+            if ownsGuard {
+                try? db.execute(
+                    sql: "DELETE FROM managedPruneGuard WHERE guardId = 1"
+                )
+            }
+        }
+
+        let total = try Double.fetchOne(
+            db,
+            sql: """
+                SELECT COALESCE(SUM(CAST(amountML AS REAL)), 0.0)
+                FROM hydrationEntry
+                WHERE deviceId = ? AND day = ?
+                """,
+            arguments: [projection.deviceId, projection.day]
+        ) ?? 0
+        guard total.isFinite, total >= 0 else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+        try db.execute(
+            sql: """
+                INSERT INTO metricSeries (deviceId, day, key, value)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(deviceId, day, key) DO UPDATE SET
+                    value = excluded.value
+                """,
+            arguments: [
+                projection.deviceId,
+                projection.day,
+                managedHydrationMetricKey,
+                total,
+            ]
+        )
+    }
+
+    private static func positiveWholeNumber(_ value: Any?) -> Bool {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else {
+            return false
+        }
+        let candidate = number.doubleValue
+        return candidate.isFinite
+            && candidate > 0
+            && floor(candidate) == candidate
+            && candidate <= Double(Int64.max)
     }
 
     private static func canonicalJSONObject(_ object: [String: Any]) throws -> Data {

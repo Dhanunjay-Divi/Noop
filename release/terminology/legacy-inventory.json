@@ -3,9 +3,9 @@
     "compatibility": 1701,
     "core": 4972,
     "customer": 813,
-    "fixture": 5342,
-    "generated": 14,
-    "historical": 3034,
+    "fixture": 5350,
+    "generated": 15,
+    "historical": 3035,
     "import": 870,
     "persisted": 667
   },
@@ -7017,7 +7017,7 @@
         662,
         662,
         667,
-        1224
+        1236
       ],
       "occurrenceCount": 27,
       "path": "Packages/WhoopStore/Sources/WhoopStore/Database.swift",
@@ -8363,7 +8363,7 @@
       ],
       "occurrenceCount": 24,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/LabMarkerStoreTests.swift",
-      "sha256": "4904f2affc0736984e092e8e9f12af2b0de0797724f68ecf82902b1acf2f6bc3",
+      "sha256": "9964fd7d90bd63a5d21d0c030ee56b36d3daa0af13cd21fa5734c5e3528ff71c",
       "tokenCounts": {
         "my-whoop": 6,
         "whoopstore": 16,
@@ -8448,15 +8448,20 @@
         9,
         77,
         86,
-        143,
-        176,
-        206
+        144,
+        215,
+        216,
+        367,
+        400,
+        428,
+        439,
+        454
       ],
-      "occurrenceCount": 9,
+      "occurrenceCount": 14,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/ManagedSyncDocumentsTests.swift",
-      "sha256": "4a5976dcae916122aad0fca4a7a979ad4ffc3df3c25fab45b69c9b715ee58221",
+      "sha256": "38a5ea0f52071c997e488f70e9de67bfe24351466805c05884b5c8208f7c0cfd",
       "tokenCounts": {
-        "whoopstore": 8,
+        "whoopstore": 13,
         "whoopstoretests": 1
       }
     },
@@ -8506,7 +8511,7 @@
       ],
       "occurrenceCount": 14,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/ManagedSyncStateTests.swift",
-      "sha256": "d1bab39549648ff209ce1ef4b45254f7b6ebc772fad1081fb0ffa3678ffb324f",
+      "sha256": "af3e18cd0d7d068c3ade2ce67d5998fdd5231c48cf6ea02adc681f53cd85fc49",
       "tokenCounts": {
         "my-whoop": 2,
         "whoopstore": 10,
@@ -8612,7 +8617,7 @@
       ],
       "occurrenceCount": 53,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/MetricsCacheTests.swift",
-      "sha256": "64342411b8f9122b8ad64602089e4e072b272813e7ea99148574c6f0dcde7954",
+      "sha256": "475ade2fc152d224ea7744d8587f88a8e3e5ab22b743657250cbad6737d42d6d",
       "tokenCounts": {
         "my-whoop": 4,
         "my-whoop-noop": 9,
@@ -8660,7 +8665,7 @@
       ],
       "occurrenceCount": 33,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/MigrationTests.swift",
-      "sha256": "99b2995e3ffe5bc600531521419ae74d359d20cfdef8bde247b045fb34039d0a",
+      "sha256": "0950ec6374fbba6b696a6ebc34f7a02e24392b96507accff7effde25ed0a5a64",
       "tokenCounts": {
         "my-whoop": 2,
         "whoop": 2,
@@ -9099,7 +9104,7 @@
       ],
       "occurrenceCount": 4,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/ScaffoldTests.swift",
-      "sha256": "f4289d4f9423b22b2d243b2c3630fc88949d11ecbebe1cdd87041f204cec54ac",
+      "sha256": "411f75fed64a3689341332cf06cb35bb877571eb8cd5519acb886b8d0bdb5391",
       "tokenCounts": {
         "whoopstore": 2,
         "whoopstoreinfo": 1,
@@ -9187,7 +9192,7 @@
       ],
       "occurrenceCount": 13,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/SleepMotionStateTests.swift",
-      "sha256": "c6b57fa46b208007c8884515eca3456799d7af58147ceb8dfc08e1b2e3f54f23",
+      "sha256": "ff3ed3f3c51ad77bd109fe74d5a78892d6fb16ce191b3a82e9d6d3f7824c2450",
       "tokenCounts": {
         "my-whoop": 1,
         "whoopprotocol": 1,
@@ -18167,6 +18172,18 @@
       }
     },
     {
+      "category": "generated",
+      "lineNumbers": [
+        0
+      ],
+      "occurrenceCount": 1,
+      "path": "android/app/schemas/com.noop.data.WhoopDatabase/47.json",
+      "sha256": "fc88dee0b0917ac3be2a3b5e269cead3213ad392250dfc0896bd39fd5ca4156d",
+      "tokenCounts": {
+        "whoopdatabase": 1
+      }
+    },
+    {
       "category": "historical",
       "lineNumbers": [
         0,
@@ -18353,13 +18370,14 @@
       "category": "historical",
       "lineNumbers": [
         19,
-        64
+        82,
+        83
       ],
-      "occurrenceCount": 2,
+      "occurrenceCount": 3,
       "path": "android/app/src/androidTest/java/com/noop/data/SleepGravityBmiCleanupMigrationInstrumentedTest.kt",
-      "sha256": "15063944245823342c9006dbff52c9830b57152ec4c613d5e679995c9a856c80",
+      "sha256": "e8c8da87195f1b604c8bc061e10e8d4a9b583046d40f0676c80d26bea1fab54e",
       "tokenCounts": {
-        "whoopdatabase": 2
+        "whoopdatabase": 3
       }
     },
     {
@@ -21528,14 +21546,14 @@
         695,
         695,
         703,
-        1464,
-        1467,
-        1491,
-        1494,
+        1480,
+        1483,
+        1507,
         1510,
-        1510,
-        1511,
-        1511
+        1526,
+        1526,
+        1527,
+        1527
       ],
       "occurrenceCount": 46,
       "path": "android/app/src/main/java/com/noop/data/WhoopDatabase.kt",
@@ -21559,8 +21577,8 @@
         879,
         882,
         885,
-        1491,
-        1510
+        1507,
+        1526
       ],
       "occurrenceCount": 9,
       "path": "android/app/src/main/java/com/noop/data/WhoopDatabase.kt",
@@ -25601,66 +25619,66 @@
       "category": "core",
       "lineNumbers": [
         214,
-        484,
-        809,
-        870,
-        932,
-        933,
-        1185,
-        1186,
-        1188,
-        1219,
-        1256,
-        1391,
-        1392,
-        1437,
-        1489,
-        1627,
-        1629,
-        1645,
-        1646,
-        1647,
-        1658,
-        1660,
-        1661,
-        1661,
-        1718,
-        2225,
-        2411,
-        4343,
-        5043,
-        5108,
-        5464,
-        5466,
-        5490,
-        5617,
-        5982,
-        6065,
-        6067,
-        6134,
-        6164,
-        6193,
-        6194,
-        6196,
-        6228,
-        6242,
-        6251,
-        6252,
-        6323,
-        6365,
-        6448,
-        6475,
-        7201,
-        7394,
-        7442,
-        7775,
-        7776,
-        7786,
-        8282,
-        8692,
-        8692,
-        8761,
-        8801
+        487,
+        812,
+        873,
+        935,
+        936,
+        1192,
+        1193,
+        1195,
+        1226,
+        1263,
+        1398,
+        1399,
+        1444,
+        1496,
+        1634,
+        1636,
+        1652,
+        1653,
+        1654,
+        1665,
+        1667,
+        1668,
+        1668,
+        1725,
+        2232,
+        2418,
+        4350,
+        5050,
+        5115,
+        5471,
+        5473,
+        5497,
+        5624,
+        5989,
+        6072,
+        6074,
+        6141,
+        6171,
+        6200,
+        6201,
+        6203,
+        6235,
+        6249,
+        6258,
+        6259,
+        6330,
+        6372,
+        6455,
+        6482,
+        7208,
+        7401,
+        7449,
+        7782,
+        7783,
+        7793,
+        8289,
+        8699,
+        8699,
+        8768,
+        8808
       ],
       "occurrenceCount": 61,
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -25683,9 +25701,9 @@
     {
       "category": "customer",
       "lineNumbers": [
-        5559,
-        8809,
-        8809
+        5566,
+        8816,
+        8816
       ],
       "occurrenceCount": 3,
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -25699,29 +25717,29 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        867,
-        869,
         870,
-        882,
-        954,
-        994,
-        1228,
-        1254,
-        1254,
-        1256,
-        1302,
-        1374,
-        1390,
-        1390,
-        1403,
-        1435,
-        1435,
-        1437,
-        1438,
-        1568,
-        1644,
-        7775,
-        7776
+        872,
+        873,
+        885,
+        957,
+        997,
+        1235,
+        1261,
+        1261,
+        1263,
+        1309,
+        1381,
+        1397,
+        1397,
+        1410,
+        1442,
+        1442,
+        1444,
+        1445,
+        1575,
+        1651,
+        7782,
+        7783
       ],
       "occurrenceCount": 23,
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -30519,15 +30537,18 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        15,
         17,
-        18
+        20,
+        24,
+        25,
+        26,
+        27
       ],
-      "occurrenceCount": 3,
+      "occurrenceCount": 6,
       "path": "android/app/src/test/java/com/noop/data/SleepGravityBmiCleanupMigrationTest.kt",
-      "sha256": "d3a826fb8ecd50b492d1bc7667a12d6318570346c7d79cd604ea6e5ebfdafb44",
+      "sha256": "0a875b7029f1d115db0bce7883340c50ef31ec2567b7b485b53fd5e4c6ad0d69",
       "tokenCounts": {
-        "whoopdatabase": 3
+        "whoopdatabase": 6
       }
     },
     {
@@ -35048,11 +35069,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        36
+        40
       ],
       "occurrenceCount": 1,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "c05b420ef8421d034615fc724784b9786fbceb7d6dd4d81596cbcbd0347cf739",
+      "sha256": "8c21806c15e60fd5e5c72f2a3cbc617759cf6068a6b602d23b9c4b5fa034315d",
       "tokenCounts": {
         "whoopstore": 1
       }
@@ -35260,12 +35281,12 @@
     {
       "category": "historical",
       "lineNumbers": [
-        230,
-        261
+        263,
+        296
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-11-product-safety-quality-audit.md",
-      "sha256": "6f7fd97b7ecc34914cfb269f57e892d548b7a23204fa02bd6f08aca1d0307408",
+      "sha256": "f0ba152c0e75a81fc57360521d765aa364c35f3d1f2c9ff7c079158c8ae9c6f3",
       "tokenCounts": {
         "whoopstore": 2
       }
@@ -35279,7 +35300,7 @@
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "4bb1353df4b2df243f335bd29fc32f37f577bf366b60b9666e3717d0e9b33b98",
+      "sha256": "8553219343cbead78d83a1ea6bcbf86bbfdad8bdf7b9b8ad14a13079a0597177",
       "tokenCounts": {
         "whoop": 2,
         "whoopstore": 1
@@ -37498,7 +37519,7 @@
       }
     }
   ],
-  "occurrenceCount": 17413,
+  "occurrenceCount": 17423,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

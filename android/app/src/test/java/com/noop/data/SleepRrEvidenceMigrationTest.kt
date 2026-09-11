@@ -30,6 +30,6 @@ class SleepRrEvidenceMigrationTest {
     fun migrationVersionPairIs34To35() {
         assertEquals(34, WhoopDatabase.MIGRATION_34_35.startVersion)
         assertEquals(35, WhoopDatabase.MIGRATION_34_35.endVersion)
-        assertEquals(46, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
     }
 }

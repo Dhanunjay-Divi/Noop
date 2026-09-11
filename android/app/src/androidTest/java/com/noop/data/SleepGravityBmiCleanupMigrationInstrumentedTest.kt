@@ -55,15 +55,34 @@ class SleepGravityBmiCleanupMigrationInstrumentedTest {
                 "INSERT INTO `metricSeries` (`deviceId`, `day`, `key`, `value`) VALUES (?, ?, ?, ?)",
                 arrayOf<Any?>("manual", "2026-09-10", "bmi", 23.4),
             )
+            database.execSQL(
+                "INSERT INTO `healthConnectSyncState` (`recordType`, `changesToken`, `updatedAt`) " +
+                    "VALUES (?, ?, ?)",
+                arrayOf<Any?>(
+                    "androidx.health.connect.client.records.WeightRecord",
+                    "weight-token",
+                    1_800_000_000_000L,
+                ),
+            )
+            database.execSQL(
+                "INSERT INTO `healthConnectSyncState` (`recordType`, `changesToken`, `updatedAt`) " +
+                    "VALUES (?, ?, ?)",
+                arrayOf<Any?>(
+                    "androidx.health.connect.client.records.StepsRecord",
+                    "steps-token",
+                    1_800_000_000_000L,
+                ),
+            )
         }
 
         migrationHelper.runMigrationsAndValidate(
             DATABASE_NAME,
-            46,
+            47,
             true,
             WhoopDatabase.MIGRATION_45_46,
+            WhoopDatabase.MIGRATION_46_47,
         ).use { database ->
-            assertEquals(46, database.version)
+            assertEquals(47, database.version)
             database.query("SELECT `gravitySparse` FROM `sleepSession`").use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertTrue(cursor.isNull(0))
@@ -82,6 +101,20 @@ class SleepGravityBmiCleanupMigrationInstrumentedTest {
             ).use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals(2, cursor.getInt(0))
+            }
+            database.query(
+                "SELECT COUNT(*) FROM `healthConnectSyncState` " +
+                    "WHERE `recordType` = 'androidx.health.connect.client.records.WeightRecord'",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+            database.query(
+                "SELECT `changesToken` FROM `healthConnectSyncState` " +
+                    "WHERE `recordType` = 'androidx.health.connect.client.records.StepsRecord'",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("steps-token", cursor.getString(0))
             }
         }
     }

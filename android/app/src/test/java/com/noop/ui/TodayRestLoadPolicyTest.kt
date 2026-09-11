@@ -65,6 +65,17 @@ class TodayRestLoadPolicyTest {
     }
 
     @Test
+    fun bestEffortStateRetainsThePreviousValueOnlyOnReadFailure() = runBlocking {
+        val failed = loadTodayBestEffortResult<Double?> { error("transient") }
+        val confirmedMissing = loadTodayBestEffortResult<Double?> { null }
+        val refreshed = loadTodayBestEffortResult<Double?> { 500.0 }
+
+        assertEquals(237.0, failed.retainingPreviousOnFailure(237.0))
+        assertEquals(null, confirmedMissing.retainingPreviousOnFailure(237.0))
+        assertEquals(500.0, refreshed.retainingPreviousOnFailure(237.0))
+    }
+
+    @Test
     fun permanentFailureStopsAtTheBoundedAttemptLimit() = runBlocking {
         var calls = 0
         try {

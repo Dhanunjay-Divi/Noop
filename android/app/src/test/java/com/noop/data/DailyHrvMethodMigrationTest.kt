@@ -22,7 +22,7 @@ class DailyHrvMethodMigrationTest {
     fun migrationVersionPairIs35To36() {
         assertEquals(35, WhoopDatabase.MIGRATION_35_36.startVersion)
         assertEquals(36, WhoopDatabase.MIGRATION_35_36.endVersion)
-        assertEquals(46, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     @Test

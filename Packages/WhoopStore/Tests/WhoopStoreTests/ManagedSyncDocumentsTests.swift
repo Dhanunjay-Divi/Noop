@@ -139,6 +139,230 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         XCTAssertTrue(afterDelete.isEmpty)
     }
 
+    func testV56SeedsExistingHydrationRowsAndInstallsDurableTriggers() throws {
+        let queue = try DatabaseQueue()
+        let migrator = WhoopStore.makeMigrator()
+        try migrator.migrate(queue, upTo: "v55-hydration-entry")
+        try queue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO hydrationEntry
+                        (id, deviceId, day, amountML, loggedAt)
+                    VALUES (?, 'hydration', '2026-09-11', 237, 1789142400)
+                    """,
+                arguments: ["11111111-2222-4333-8444-555555555555"]
+            )
+        }
+
+        try migrator.migrate(queue)
+
+        let seeded = try queue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT documentKind, generation, operation
+                    FROM managedDocumentDirty
+                    WHERE tableName = 'hydrationEntry'
+                    """
+            )
+        }
+        XCTAssertEqual(seeded?["documentKind"] as String?, "hydration")
+        XCTAssertEqual(seeded?["generation"] as Int64?, 1)
+        XCTAssertEqual(seeded?["operation"] as String?, "upsert")
+
+        let triggerNames = try queue.read { db in
+            try String.fetchAll(
+                db,
+                sql: """
+                    SELECT name FROM sqlite_master
+                    WHERE type = 'trigger'
+                      AND name LIKE 'managed_document_hydrationEntry_%'
+                    ORDER BY name
+                    """
+            )
+        }
+        XCTAssertEqual(
+            triggerNames,
+            [
+                "managed_document_hydrationEntry_delete",
+                "managed_document_hydrationEntry_insert",
+                "managed_document_hydrationEntry_update",
+            ]
+        )
+
+        try queue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE hydrationEntry SET amountML = 500
+                    WHERE id = ?
+                    """,
+                arguments: ["11111111-2222-4333-8444-555555555555"]
+            )
+        }
+        let updatedGeneration = try queue.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: """
+                    SELECT generation FROM managedDocumentDirty
+                    WHERE tableName = 'hydrationEntry'
+                    """
+            )
+        }
+        XCTAssertEqual(updatedGeneration, 2)
+    }
+
+    func testHydrationDocumentsRoundTripEntriesProjectionAndTombstoneWithoutEcho() async throws {
+        let source = try await WhoopStore.inMemory()
+        let destination = try await WhoopStore.inMemory()
+        let day = "2026-09-11"
+        let entryID = "11111111-2222-4333-8444-555555555555"
+        let documentID = "99999999-8888-5777-8666-555555555555"
+
+        let insertedEntry = HydrationLogEntry(
+            id: entryID,
+            day: day,
+            amountML: 237,
+            loggedAt: 1_789_142_400
+        )
+        try await source.replaceHydrationLogEntries(
+            [insertedEntry],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+        let insertedCandidate = try await hydrationCandidate(in: source)
+        let inserted = try XCTUnwrap(insertedCandidate)
+        XCTAssertEqual(inserted.documentKind, "hydration")
+        XCTAssertEqual(try payloadRecord(inserted)["amountML"] as? Int64, 237)
+        try await acknowledge(
+            inserted,
+            revision: 1,
+            documentID: documentID,
+            store: source
+        )
+
+        let insertedApply = try await destination.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: inserted.documentKind,
+            documentID: documentID,
+            revision: 1,
+            contentSHA256: String(repeating: "1", count: 64),
+            payloadJSON: inserted.payloadJSON,
+            deleted: false,
+            appliedAtMs: 1_000
+        )
+        XCTAssertEqual(insertedApply.changedRows, 1)
+        let insertedEntries = try await destination.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        XCTAssertEqual(
+            insertedEntries,
+            [insertedEntry]
+        )
+        let insertedMetric = try await hydrationMetric(
+            in: destination,
+            day: day
+        )
+        XCTAssertEqual(
+            insertedMetric,
+            237
+        )
+
+        let updatedEntry = HydrationLogEntry(
+            id: entryID,
+            day: day,
+            amountML: 500,
+            loggedAt: 1_789_142_460
+        )
+        try await source.replaceHydrationLogEntries(
+            [updatedEntry],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+        let updatedCandidate = try await hydrationCandidate(in: source)
+        let updated = try XCTUnwrap(updatedCandidate)
+        try await acknowledge(
+            updated,
+            revision: 2,
+            documentID: documentID,
+            store: source
+        )
+        _ = try await destination.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: updated.documentKind,
+            documentID: documentID,
+            revision: 2,
+            contentSHA256: String(repeating: "2", count: 64),
+            payloadJSON: updated.payloadJSON,
+            deleted: false,
+            appliedAtMs: 2_000
+        )
+        let updatedEntries = try await destination.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        XCTAssertEqual(
+            updatedEntries,
+            [updatedEntry]
+        )
+        let updatedMetric = try await hydrationMetric(
+            in: destination,
+            day: day
+        )
+        XCTAssertEqual(
+            updatedMetric,
+            500
+        )
+
+        try await source.replaceHydrationLogEntries(
+            [],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+        let deletedCandidate = try await hydrationCandidate(in: source)
+        let deleted = try XCTUnwrap(deletedCandidate)
+        XCTAssertTrue(deleted.deleted)
+        let deletedApply = try await destination.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: deleted.documentKind,
+            documentID: documentID,
+            revision: 3,
+            contentSHA256: String(repeating: "3", count: 64),
+            payloadJSON: nil,
+            deleted: true,
+            appliedAtMs: 3_000
+        )
+        XCTAssertEqual(deletedApply.changedRows, 1)
+        let deletedEntries = try await destination.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        XCTAssertTrue(deletedEntries.isEmpty)
+        let deletedMetric = try await hydrationMetric(
+            in: destination,
+            day: day
+        )
+        XCTAssertEqual(
+            deletedMetric,
+            0
+        )
+        let destinationPending = try await destination.pendingManagedDocuments(
+            accountScopeHash: scope,
+            limit: 10
+        )
+        XCTAssertTrue(destinationPending.isEmpty)
+        let dirtyWindows = try await destination.registryWriter.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM managedDirtyWindow"
+            ) ?? -1
+        }
+        XCTAssertEqual(dirtyWindows, 0)
+    }
+
     func testPreferencesStageAndRemoteApplyShareOneRevisionedDocument() async throws {
         let store = try await WhoopStore.inMemory()
         let first = Data(#"{"settings.schemaVersion":4,"units.system":"metric"}"#.utf8)
@@ -200,15 +424,39 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         return try XCTUnwrap(root["record"] as? [String: Any])
     }
 
+    private func hydrationCandidate(
+        in store: WhoopStore
+    ) async throws -> ManagedLocalDocumentCandidate? {
+        try await store.pendingManagedDocuments(
+            accountScopeHash: scope,
+            limit: 10
+        ).first {
+            $0.tableName == "hydrationEntry"
+        }
+    }
+
+    private func hydrationMetric(
+        in store: WhoopStore,
+        day: String
+    ) async throws -> Double? {
+        try await store.metricSeries(
+            deviceId: "hydration",
+            key: "hydration",
+            from: day,
+            to: day
+        ).first?.value
+    }
+
     private func acknowledge(
         _ candidate: ManagedLocalDocumentCandidate,
         revision: Int64,
+        documentID: String = UUID().uuidString.lowercased(),
         store: WhoopStore
     ) async throws {
         try await store.acknowledgeManagedDocument(
             accountScopeHash: scope,
             candidate: candidate,
-            documentID: UUID().uuidString.lowercased(),
+            documentID: documentID,
             remoteRevision: revision,
             remoteContentSHA256: String(repeating: "e", count: 64),
             acknowledgedAtMs: revision * 1_000
