@@ -146,7 +146,8 @@ class WindDownStore(private val prefs: SharedPreferences) {
             nowSec: Long = System.currentTimeMillis() / 1_000L,
         ): Boolean {
             val database = WhoopDatabase.get(context.applicationContext)
-            val activeDeviceId = DeviceRegistry(database).activeDeviceId() ?: "my-whoop"
+            val activeDeviceId =
+                DeviceRegistry(database).activeDeviceId() ?: WhoopRepository.WHOOP_SOURCE
             val sessions = WhoopRepository.from(context.applicationContext)
                 .computedSleepSessionsUnion(
                     deviceId = activeDeviceId,

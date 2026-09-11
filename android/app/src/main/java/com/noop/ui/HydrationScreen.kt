@@ -22,11 +22,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocalDrink
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -60,6 +63,7 @@ import com.noop.analytics.HydrationGoal
 import com.noop.analytics.HydrationStore
 import com.noop.notif.HydrationReminderPrefs
 import com.noop.notif.HydrationReminderScheduler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -91,12 +95,52 @@ private val LIQUID_HERO_RADIUS = 26.dp
  *  absurd 50-litre day. A 3-litre container covers any realistic bottle/jug. Mirrors the iOS clamp. */
 private const val MAX_CUSTOM_ML: Int = 3000
 
+private enum class HydrationUIFailure { LOAD, SAVE }
+
 /** Parse a custom-amount field to a clamped whole-ml value in 1..[MAX_CUSTOM_ML], or null when the text
  *  isn't a usable positive number. Pure + side-effect-free so the dialog's confirm gate is unit-testable. */
 internal fun parseCustomHydrationMl(text: String): Int? {
     val n = text.trim().toIntOrNull() ?: return null
     if (n <= 0) return null
     return n.coerceAtMost(MAX_CUSTOM_ML)
+}
+
+internal fun hydrationHeroDescription(
+    totalMl: Double?,
+    goalMl: Int,
+    missingText: String,
+): String {
+    val goalLitres = goalMl.coerceAtLeast(0) / 1000.0
+    val confirmed = HydrationStore.confirmedTotal(totalMl)
+    return if (confirmed == null) {
+        "Hydration today. $missingText. Goal ${String.format(Locale.US, "%.1f", goalLitres)} litres."
+    } else {
+        val percent = if (goalMl > 0) {
+            kotlin.math.min(100, ((confirmed / goalMl) * 100).toInt())
+        } else {
+            0
+        }
+        "Hydration today. ${String.format(Locale.US, "%.1f", confirmed / 1000.0)} of " +
+            "${String.format(Locale.US, "%.1f", goalLitres)} litres. $percent percent of goal."
+    }
+}
+
+internal fun hydrationHistoryDescription(
+    history: List<Pair<String, Double?>>,
+    missingText: String,
+): String {
+    if (history.isEmpty()) return "Last 7 days. $missingText."
+    val days = history.joinToString(separator = ". ") { (dayKey, value) ->
+        val label = runCatching {
+            LocalDate.parse(dayKey)
+                .format(DateTimeFormatter.ofPattern("EEEE", Locale.US))
+        }.getOrDefault(dayKey)
+        val amount = HydrationStore.confirmedTotal(value)?.let {
+            "${String.format(Locale.US, "%.1f", it / 1000.0)} litres"
+        } ?: missingText
+        "$label: $amount"
+    }
+    return "Last 7 days. $days."
 }
 
 /**
@@ -127,26 +171,44 @@ fun HydrationScreen(viewModel: AppViewModel) {
     // day-cycle sky off gets the flat canvas here too). Mirrors iOS `showDayCycleBackground ? ... : nil`.
     val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
     val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
+    val notLoggedText = uiString(R.string.appwide_hydration_not_logged)
+    val unavailableText = uiString(R.string.appwide_hydration_unavailable)
+    val loadFailedText = uiString(R.string.appwide_hydration_load_failed)
+    val saveFailedText = uiString(R.string.appwide_hydration_save_failed)
+    val retryHydrationText = uiString(R.string.appwide_hydration_retry)
+    val dismissText = uiString(R.string.appwide_action_dismiss)
 
     // Today's running total + the per-day history, loaded off the gesture path and refreshed after a log.
-    var totalMl by remember { mutableStateOf(0.0) }
+    var totalMl by remember { mutableStateOf<Double?>(null) }
     var reading by remember { mutableStateOf<HydrationStore.Reading?>(null) }
-    var history by remember { mutableStateOf<List<Pair<String, Double>>>(emptyList()) }
+    var history by remember { mutableStateOf<List<Pair<String, Double?>>>(emptyList()) }
+    var hasLoadedHydration by remember { mutableStateOf(false) }
+    var hydrationFailure by remember { mutableStateOf<HydrationUIFailure?>(null) }
     // A simple reload key the log taps bump so the LaunchedEffect re-reads the store.
     var reloadTick by remember { mutableStateOf(0) }
     LaunchedEffect(reloadTick, strain, goalMl) {
-        reading = runCatching { HydrationStore.reading(viewModel.repo) }.getOrNull()
-        totalMl = reading?.valueMl ?: 0.0
-        history = runCatching { HydrationStore.history(viewModel.repo, days = 7) }.getOrDefault(emptyList())
-        val reminders = HydrationReminderPrefs.config(context)
-        if (reminders.adaptiveEnabled) {
-            val changed = HydrationReminderPrefs.updateAdaptiveContext(
-                context = context,
-                effort = strain,
-                consumedMl = reading?.valueMl,
-                goalMl = reading?.let { goalMl },
-            )
-            if (changed && reminders.enabled) HydrationReminderScheduler.reconcile(context)
+        try {
+            val loadedReading = HydrationStore.reading(viewModel.repo)
+            val loadedHistory = HydrationStore.history(viewModel.repo, days = 7)
+            reading = loadedReading
+            totalMl = loadedReading?.valueMl
+            history = loadedHistory
+            hasLoadedHydration = true
+            if (hydrationFailure == HydrationUIFailure.LOAD) hydrationFailure = null
+            val reminders = HydrationReminderPrefs.config(context)
+            if (reminders.adaptiveEnabled) {
+                val changed = HydrationReminderPrefs.updateAdaptiveContext(
+                    context = context,
+                    effort = strain,
+                    consumedMl = loadedReading?.valueMl,
+                    goalMl = loadedReading?.let { goalMl },
+                )
+                if (changed && reminders.enabled) HydrationReminderScheduler.reconcile(context)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            hydrationFailure = HydrationUIFailure.LOAD
         }
     }
 
@@ -161,21 +223,42 @@ fun HydrationScreen(viewModel: AppViewModel) {
 
     val log: (Int) -> Unit = { amount ->
         scope.launch {
-            runCatching { HydrationStore.log(viewModel.repo, amount) }
-            if (amount > 0) lastLoggedMl = amount
-            reloadTick += 1
+            try {
+                HydrationStore.log(viewModel.repo, amount)
+                if (amount > 0) lastLoggedMl = amount
+                hydrationFailure = null
+                reloadTick += 1
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                hydrationFailure = HydrationUIFailure.SAVE
+            }
         }
     }
     // Remove [amount] ml from the day total (the undo / delete-a-log path, #798). Clears the pending undo.
     val remove: (Int) -> Unit = { amount ->
         scope.launch {
-            runCatching { HydrationStore.remove(viewModel.repo, amount) }
-            lastLoggedMl = null
-            reloadTick += 1
+            try {
+                HydrationStore.remove(viewModel.repo, amount)
+                lastLoggedMl = null
+                hydrationFailure = null
+                reloadTick += 1
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                hydrationFailure = HydrationUIFailure.SAVE
+            }
         }
     }
 
-    val fraction = if (goalMl > 0) (totalMl / goalMl).toFloat() else 0f
+    val fraction = if (goalMl > 0) ((totalMl ?: 0.0) / goalMl).toFloat() else 0f
+    val observedTotalMl = totalMl
+    val missingStateText =
+        if (!hasLoadedHydration && hydrationFailure == HydrationUIFailure.LOAD) {
+            unavailableText
+        } else {
+            notLoggedText
+        }
     val accent = hydrationAccent
 
     // #798 - the custom-amount entry. Logs any whole-ml amount the Sip/Cup/Bottle quick buttons don't
@@ -207,6 +290,55 @@ fun HydrationScreen(viewModel: AppViewModel) {
         // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
+        hydrationFailure?.let { failure ->
+            item {
+                NoopCard(padding = 14.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.WaterDrop,
+                            contentDescription = null,
+                            tint = Palette.statusWarning,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            if (failure == HydrationUIFailure.LOAD) loadFailedText else saveFailedText,
+                            style = NoopType.subhead,
+                            color = Palette.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            onClick = {
+                                if (failure == HydrationUIFailure.LOAD) {
+                                    reloadTick += 1
+                                } else {
+                                    hydrationFailure = null
+                                }
+                            },
+                        ) {
+                            Icon(
+                                if (failure == HydrationUIFailure.LOAD) {
+                                    Icons.Filled.Refresh
+                                } else {
+                                    Icons.Filled.Close
+                                },
+                                contentDescription =
+                                    if (failure == HydrationUIFailure.LOAD) {
+                                        retryHydrationText
+                                    } else {
+                                        dismissText
+                                    },
+                                tint = Palette.accent,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // HERO — the day's intake as a LiquidVessel (water in a vessel: the literal fit), with the litre
         // figure counting up over it, floating on the frosted translucent-black liquid hero card so it reads
         // crisp on the day-of-sky. The daily goal is a LiquidTube beneath. Same fraction math + accent +
@@ -218,7 +350,14 @@ fun HydrationScreen(viewModel: AppViewModel) {
                     .clip(RoundedCornerShape(LIQUID_HERO_RADIUS))
                     .background(LIQUID_HERO_FILL.copy(alpha = LIQUID_HERO_FILL.alpha * CardAppearance.opacity))
                     .border(1.dp, Color.White.copy(alpha = 0.11f * CardAppearance.opacity), RoundedCornerShape(LIQUID_HERO_RADIUS))
-                    .padding(20.dp),
+                    .padding(20.dp)
+                    .clearAndSetSemantics {
+                        contentDescription = hydrationHeroDescription(
+                            totalMl = observedTotalMl,
+                            goalMl = goalMl,
+                            missingText = missingStateText,
+                        )
+                    },
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -232,7 +371,7 @@ fun HydrationScreen(viewModel: AppViewModel) {
                         LiquidVessel(
                             value = fraction.toDouble().coerceIn(0.0, 1.0),
                             tint = accent,
-                            animated = totalMl > 0.0,
+                            animated = observedTotalMl != null,
                             modifier = Modifier.size(184.dp),
                         )
                         // The litre count-up over the vessel — white, tabular, a soft shadow for legibility,
@@ -242,18 +381,26 @@ fun HydrationScreen(viewModel: AppViewModel) {
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.clearAndSetSemantics {},
                         ) {
-                            CountUpText(
-                                value = totalMl / 1000.0,
-                                format = { String.format(Locale.US, "%.1f", it) },
-                                style = NoopType.number(40f, weight = FontWeight.Bold).copy(
-                                    shadow = Shadow(
-                                        color = Color.Black.copy(alpha = 0.5f),
-                                        offset = Offset(0f, 1f),
-                                        blurRadius = 6f,
+                            if (observedTotalMl == null) {
+                                Text(
+                                    missingStateText,
+                                    style = NoopType.headline,
+                                    color = Color.White,
+                                )
+                            } else {
+                                CountUpText(
+                                    value = observedTotalMl / 1000.0,
+                                    format = { String.format(Locale.US, "%.1f", it) },
+                                    style = NoopType.number(40f, weight = FontWeight.Bold).copy(
+                                        shadow = Shadow(
+                                            color = Color.Black.copy(alpha = 0.5f),
+                                            offset = Offset(0f, 1f),
+                                            blurRadius = 6f,
+                                        ),
                                     ),
-                                ),
-                                color = Color.White,
-                            )
+                                    color = Color.White,
+                                )
+                            }
                             Text(
                                 String.format(Locale.US, "of %.1f L", goalMl / 1000.0),
                                 style = NoopType.subhead,
@@ -276,7 +423,14 @@ fun HydrationScreen(viewModel: AppViewModel) {
                             },
                     )
                     Text(
-                        uiString(R.string.l10n_hydration_screen_kotlin_math_min_100_fraction_100_72f2dfde, kotlin.math.min(100, (fraction * 100).toInt())),
+                        if (observedTotalMl == null) {
+                            missingStateText
+                        } else {
+                            uiString(
+                                R.string.l10n_hydration_screen_kotlin_math_min_100_fraction_100_72f2dfde,
+                                kotlin.math.min(100, (fraction * 100).toInt()),
+                            )
+                        },
                         style = NoopType.footnote,
                         color = Color.White.copy(alpha = 0.6f),
                     )
@@ -334,7 +488,12 @@ fun HydrationScreen(viewModel: AppViewModel) {
             NoopCard(padding = 18.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Overline("Last 7 days")
-                    HydrationHistoryBars(history = history, goalMl = goalMl, accent = accent)
+                    HydrationHistoryBars(
+                        history = history,
+                        goalMl = goalMl,
+                        accent = accent,
+                        missingText = missingStateText,
+                    )
                 }
             }
         }
@@ -345,9 +504,9 @@ fun HydrationScreen(viewModel: AppViewModel) {
             NoopCard(padding = 18.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Overline("Today")
-                    if (totalMl <= 0.0) {
+                    if (observedTotalMl == null) {
                         Text(
-                            uiString(R.string.l10n_hydration_screen_no_drinks_logged_yet_tap_sip_cc0d2f72),
+                            missingStateText,
                             style = NoopType.subhead,
                             color = Palette.textSecondary,
                         )
@@ -370,7 +529,10 @@ fun HydrationScreen(viewModel: AppViewModel) {
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                uiString(R.string.l10n_hydration_screen_totalml_toint_ml_522b262a, totalMl.toInt()),
+                                uiString(
+                                    R.string.l10n_hydration_screen_totalml_toint_ml_522b262a,
+                                    observedTotalMl.toInt(),
+                                ),
                                 style = NoopType.headline.copy(fontWeight = FontWeight.SemiBold),
                                 color = Palette.textPrimary,
                             )
@@ -468,23 +630,29 @@ private fun LiquidLogTile(
  */
 @Composable
 private fun HydrationHistoryBars(
-    history: List<Pair<String, Double>>,
+    history: List<Pair<String, Double?>>,
     goalMl: Int,
     accent: Color,
+    missingText: String,
 ) {
     if (history.isEmpty()) {
-        Text(uiString(R.string.l10n_hydration_screen_no_history_yet_933f417e), style = NoopType.footnote, color = Palette.textTertiary)
+        Text(missingText, style = NoopType.footnote, color = Palette.textTertiary)
         return
     }
     val goal = goalMl.coerceAtLeast(1).toDouble()
     val track = Palette.textPrimary.copy(alpha = 0.10f)
     val priorBar = accent.copy(alpha = 0.45f)
     val lastIndex = history.lastIndex
-    val maxMl = history.maxOf { it.second }
+    val maxMl = history.mapNotNull { it.second }.maxOrNull() ?: 0.0
     // Scale the bars to the LARGER of the goal and the biggest day, so an over-goal day doesn't clip.
     val ceiling = kotlin.math.max(goal, maxMl).coerceAtLeast(1.0)
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = hydrationHistoryDescription(history, missingText)
+        },
+    ) {
         Canvas(modifier = Modifier.fillMaxWidth().height(96.dp)) {
             val n = history.size
             val gap = 10.dp.toPx()
@@ -494,7 +662,7 @@ private fun HydrationHistoryBars(
                 val x = i * (barW + gap)
                 // Track (full-height faint bar).
                 drawRoundRectBar(x, 0f, barW, size.height, corner, track)
-                val frac = (ml / ceiling).toFloat().coerceIn(0f, 1f)
+                val frac = ((ml ?: 0.0) / ceiling).toFloat().coerceIn(0f, 1f)
                 if (frac > 0f) {
                     val h = size.height * frac
                     val color = if (i == lastIndex) accent else priorBar

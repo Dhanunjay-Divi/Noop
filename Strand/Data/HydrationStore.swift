@@ -12,9 +12,30 @@ import StrandAnalytics
 //
 // This is the BYTE-PARITY twin of the Android `com.noop.analytics.HydrationStore`: identical source id
 // ("hydration"), identical key ("hydration"), identical additive-accumulation logic, identical 7-day
-// history projection (one row per local calendar day, 0 for empty days, oldest first). Apple Health water
+// history projection (one row per local calendar day, nil for empty days, oldest first). Apple Health water
 // stays in its own source partition and is merged conservatively at read time so mirrored logs are not
 // blindly added. NOOP per-tap entries remain editable and local to this device.
+
+enum HydrationMutationResult: Equatable, Sendable {
+    /// The canonical row and editable entry state were both updated. `nil` is a successful cleared day.
+    case saved(totalML: Double?)
+    case failed
+
+    var succeeded: Bool {
+        if case .saved = self { return true }
+        return false
+    }
+
+    var totalML: Double? {
+        guard case .saved(let totalML) = self else { return nil }
+        return totalML
+    }
+}
+
+private enum HydrationPersistenceError: Error {
+    case storeUnavailable
+    case writeRejected
+}
 
 enum HydrationStore {
     /// Source/device id the hydration total is written under — its own local-only source so it is never
@@ -28,17 +49,36 @@ enum HydrationStore {
     /// MUST match the Android `NoopPrefs.KEY_HYDRATION_TRACKING` so the toggle reads the same on both.
     static let enabledKey = "noop.hydrationTracking"
 
-    /// UserDefaults prefix for the per-day entry list (#798). One JSON array per local day, keyed
-    /// `noop.hydrationEntries.<yyyy-MM-dd>`. Local-only, on-device, never synced - the same privacy posture
-    /// as the day total. The day total in `metricSeries` stays the canonical figure the rest of the app
-    /// reads (Today card, ring, 7-day history); the entry list is the editable detail behind it, kept in
-    /// sync so deleting/editing an entry re-derives and re-banks the total.
+    /// Legacy UserDefaults prefix retained only for one-time migration. New editable entries live in
+    /// SQLite and commit in the same transaction as the `metricSeries` day total.
     static let entriesKeyPrefix = "noop.hydrationEntries."
 
     /// AppStorage key for the user's custom container size (ml) (#798). Default `cupML` until set.
     static let customSizeKey = "noop.hydrationCustomSizeML"
 
     static func entriesKey(forDay dayKey: String) -> String { entriesKeyPrefix + dayKey }
+
+    static var notLoggedText: String {
+        String(localized: "appwide.hydration.not_logged")
+    }
+
+    static func confirmedTotal(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value > 0 else { return nil }
+        return value
+    }
+
+    static func observedTotal(_ noopML: Double?, _ appleHealthML: Double?) -> Double? {
+        [confirmedTotal(noopML), confirmedTotal(appleHealthML)].compactMap { $0 }.max()
+    }
+
+    static func cardValue(
+        totalML: Double?,
+        goalML: Int,
+        missingText: String = notLoggedText
+    ) -> String {
+        guard let totalML = confirmedTotal(totalML) else { return missingText }
+        return HydrationGoal.cardValueString(totalML: totalML, goalML: goalML)
+    }
 }
 
 enum HydrationReadingSource: Equatable, Sendable {
@@ -57,8 +97,7 @@ struct HydrationReading: Equatable, Sendable {
 // MARK: - Per-entry model (#798) - individual logged drinks for edit/delete
 
 /// One logged drink: a stable id, the amount (ml) and the wall-clock time it was logged. Local-only;
-/// persisted as a JSON array per local day. `Codable`/`Equatable` so the list round-trips through
-/// UserDefaults and is unit-testable.
+/// persisted in the same SQLite transaction as the daily total.
 struct HydrationEntry: Identifiable, Equatable, Codable {
     let id: UUID
     var amountMl: Int
@@ -106,51 +145,76 @@ extension Repository {
 
     /// Source-aware observed total. NOOP and Apple Health can contain duplicate logs for the same drink,
     /// so they are never added blindly; the higher source total is the conservative observed lower bound.
-    func hydrationReading(day: String) async -> HydrationReading? {
-        guard let store = await storeHandle() else { return nil }
-        async let noopRead = store.metricSeries(
-            deviceId: HydrationStore.sourceId,
-            key: HydrationStore.key,
-            from: day,
-            to: day
-        )
-        async let healthRead = store.metricSeries(
-            deviceId: Self.appleHealthSource,
-            key: HydrationStore.key,
-            from: day,
-            to: day
-        )
-        let noop = ((try? await noopRead) ?? []).first?.value
-        let health = ((try? await healthRead) ?? []).first?.value
-        let noopML = max(0, noop?.isFinite == true ? (noop ?? 0) : 0)
-        let healthML = max(0, health?.isFinite == true ? (health ?? 0) : 0)
-        guard noop != nil || health != nil else { return nil }
-        let source: HydrationReadingSource
-        if noop != nil, health != nil {
-            source = .both
-        } else {
-            source = noop != nil ? .noop : .appleHealth
+    func hydrationReading(day: String) async throws -> HydrationReading? {
+        #if DEBUG
+        if hydrationReadFailureForTesting {
+            recordHydrationPersistence(
+                operation: "read",
+                outcome: "failed",
+                failureKind: "injected"
+            )
+            throw HydrationPersistenceError.writeRejected
         }
-        return HydrationReading(
-            valueML: max(noopML, healthML),
-            source: source,
-            noopML: noopML,
-            appleHealthML: healthML
-        )
+        #endif
+        guard let store = await storeHandle() else {
+            recordHydrationPersistence(
+                operation: "read",
+                outcome: "failed",
+                failureKind: "store_unavailable"
+            )
+            throw HydrationPersistenceError.storeUnavailable
+        }
+        do {
+            async let noopRead = store.metricSeries(
+                deviceId: HydrationStore.sourceId,
+                key: HydrationStore.key,
+                from: day,
+                to: day
+            )
+            async let healthRead = store.metricSeries(
+                deviceId: Self.appleHealthSource,
+                key: HydrationStore.key,
+                from: day,
+                to: day
+            )
+            let (noopRows, healthRows) = try await (noopRead, healthRead)
+            let noop = HydrationStore.confirmedTotal(noopRows.first?.value)
+            let health = HydrationStore.confirmedTotal(healthRows.first?.value)
+            guard let observed = HydrationStore.observedTotal(noop, health) else { return nil }
+            let source: HydrationReadingSource
+            if noop != nil, health != nil {
+                source = .both
+            } else {
+                source = noop != nil ? .noop : .appleHealth
+            }
+            return HydrationReading(
+                valueML: observed,
+                source: source,
+                noopML: noop ?? 0,
+                appleHealthML: health ?? 0
+            )
+        } catch {
+            recordHydrationPersistence(
+                operation: "read",
+                outcome: "failed",
+                failureKind: AppDiagnosticsRecorder.failureKind(error)
+            )
+            throw error
+        }
     }
 
-    func hydrationTotal(day: String) async -> Double {
-        await hydrationReading(day: day)?.valueML ?? 0
+    func hydrationTotal(day: String) async throws -> Double? {
+        try await hydrationReading(day: day)?.valueML
     }
 
-    private func noopHydrationTotal(day: String, store: WhoopStore) async -> Double {
-        let points = (try? await store.metricSeries(
+    private func noopHydrationTotal(day: String, store: WhoopStore) async throws -> Double {
+        let points = try await store.metricSeries(
             deviceId: HydrationStore.sourceId,
             key: HydrationStore.key,
             from: day,
             to: day
-        )) ?? []
-        return points.first?.value ?? 0
+        )
+        return HydrationStore.confirmedTotal(points.first?.value) ?? 0
     }
 
     /// Log `amountMl` of fluid for `day` (defaults to today's local day). Reads the day's current total
@@ -158,112 +222,311 @@ extension Repository {
     /// the new day total (ml). Additive by design — each tap is a quick-add, like the WHOOP buttons.
     /// Mirrors Android `HydrationStore.log`.
     @discardableResult
-    func logHydration(amountMl: Int, day: String? = nil) async -> Double {
+    func logHydration(amountMl: Int, day: String? = nil) async -> HydrationMutationResult {
         let dayKey = day ?? Repository.localDayKey(Date())
-        guard amountMl > 0 else { return await hydrationTotal(day: dayKey) }
-        if let logged = await logHydrationConfirmed(amountMl: amountMl, day: dayKey) {
-            return logged
+        guard amountMl > 0 else { return .failed }
+        return await performSerializedHydrationMutation { [self] in
+            #if DEBUG
+            if hydrationWriteFailureForTesting {
+                recordHydrationPersistence(
+                    operation: "add",
+                    outcome: "failed",
+                    failureKind: "injected"
+                )
+                return .failed
+            }
+            #endif
+            guard let store = await storeHandle() else {
+                recordHydrationPersistence(
+                    operation: "add",
+                    outcome: "failed",
+                    failureKind: "store_unavailable"
+                )
+                return .failed
+            }
+            do {
+                let entries = HydrationEntries.adding(
+                    try await hydrationEntries(day: dayKey),
+                    amountMl: amountMl
+                )
+                let next = try await store.replaceHydrationLogEntries(
+                    Self.storedHydrationEntries(entries, day: dayKey),
+                    deviceId: HydrationStore.sourceId,
+                    day: dayKey,
+                    metricKey: HydrationStore.key
+                )
+                noteHydrationChanged()
+                recordHydrationPersistence(operation: "add", outcome: "saved")
+                return .saved(totalML: next)
+            } catch {
+                recordHydrationPersistence(
+                    operation: "add",
+                    outcome: "failed",
+                    failureKind: AppDiagnosticsRecorder.failureKind(error)
+                )
+                return .failed
+            }
         }
-        return await hydrationTotal(day: dayKey)
     }
 
     /// Confirmation-aware quick add for one-tap UI. Returns nil unless the canonical metric row was
     /// durably written, so callers never animate success or consume an action after a failed store write.
     @discardableResult
     func logHydrationConfirmed(amountMl: Int, day: String? = nil) async -> Double? {
-        let dayKey = day ?? Repository.localDayKey(Date())
-        guard amountMl > 0, let store = await storeHandle() else { return nil }
-        let current = await noopHydrationTotal(day: dayKey, store: store)
-        let next = current + Double(amountMl)
-        do {
-            let changed = try await store.upsertMetricSeries(
-                [MetricPoint(day: dayKey, key: HydrationStore.key, value: next)],
-                deviceId: HydrationStore.sourceId
-            )
-            guard changed > 0 else { return nil }
-        } catch {
-            return nil
-        }
-        // #798 - also record the per-entry row so the detail can show, edit and delete this exact drink.
-        let entries = HydrationEntries.adding(Self.hydrationEntries(day: dayKey), amountMl: amountMl)
-        Self.writeHydrationEntries(entries, day: dayKey)
-        // #989: hydration writes never bump refreshSeq, so tell the Today card directly.
-        noteHydrationChanged()
-        return next
+        let result = await logHydration(amountMl: amountMl, day: day)
+        guard case .saved(let totalML?) = result else { return nil }
+        return totalML
     }
 
     // MARK: - Per-entry edit/delete (#798)
 
-    /// Today (or `day`)'s individual logged drinks, oldest first, as persisted in UserDefaults. Empty when
-    /// nothing has been logged that day. Local-only; never synced.
-    func hydrationEntries(day: String? = nil) -> [HydrationEntry] {
-        Self.hydrationEntries(day: day ?? Repository.localDayKey(Date()))
+    /// Today (or `day`)'s individual logged drinks, oldest first. Legacy UserDefaults rows are migrated
+    /// once into SQLite before being removed, so an update cannot split the editable list from its total.
+    func hydrationEntries(day: String? = nil) async throws -> [HydrationEntry] {
+        let dayKey = day ?? Repository.localDayKey(Date())
+        #if DEBUG
+        if hydrationReadFailureForTesting {
+            throw HydrationPersistenceError.writeRejected
+        }
+        #endif
+        guard let store = await storeHandle() else {
+            throw HydrationPersistenceError.storeUnavailable
+        }
+        let stored = try await store.hydrationLogEntries(
+            deviceId: HydrationStore.sourceId,
+            day: dayKey
+        )
+        if !stored.isEmpty {
+            return Self.hydrationEntries(stored)
+        }
+
+        let legacy = Self.legacyHydrationEntries(day: dayKey)
+        if !legacy.isEmpty {
+            _ = try await store.replaceHydrationLogEntries(
+                Self.storedHydrationEntries(legacy, day: dayKey),
+                deviceId: HydrationStore.sourceId,
+                day: dayKey,
+                metricKey: HydrationStore.key
+            )
+            UserDefaults.standard.removeObject(
+                forKey: HydrationStore.entriesKey(forDay: dayKey)
+            )
+            return legacy
+        }
+
+        // A pre-entry build may have only the scalar row. Materialize it once as an editable entry so
+        // the next delete/edit cannot accidentally discard that confirmed amount.
+        let existingTotal = try await noopHydrationTotal(day: dayKey, store: store)
+        guard existingTotal > 0 else { return [] }
+        let migrated = [
+            HydrationEntry(
+                amountMl: max(1, Int(existingTotal.rounded())),
+                loggedAt: Date()
+            ),
+        ]
+        _ = try await store.replaceHydrationLogEntries(
+            Self.storedHydrationEntries(migrated, day: dayKey),
+            deviceId: HydrationStore.sourceId,
+            day: dayKey,
+            metricKey: HydrationStore.key
+        )
+        return migrated
     }
 
     /// Delete one logged entry by id, then re-derive the day total from the surviving entries and re-bank it
     /// into `metricSeries` so the ring, Today card and 7-day history all reflect the deletion. Returns the
     /// new day total (ml).
     @discardableResult
-    func deleteHydrationEntry(id: UUID, day: String? = nil) async -> Double {
+    func deleteHydrationEntry(
+        id: UUID,
+        day: String? = nil
+    ) async -> HydrationMutationResult {
         let dayKey = day ?? Repository.localDayKey(Date())
-        let next = HydrationEntries.removing(Self.hydrationEntries(day: dayKey), id: id)
-        Self.writeHydrationEntries(next, day: dayKey)
-        return await rebankHydrationTotal(entries: next, day: dayKey)
+        return await performSerializedHydrationMutation { [self] in
+            do {
+                let next = HydrationEntries.removing(
+                    try await hydrationEntries(day: dayKey),
+                    id: id
+                )
+                return await persistHydrationEntries(
+                    next,
+                    day: dayKey,
+                    operation: "delete"
+                )
+            } catch {
+                recordHydrationPersistence(
+                    operation: "delete",
+                    outcome: "failed",
+                    failureKind: AppDiagnosticsRecorder.failureKind(error)
+                )
+                return .failed
+            }
+        }
     }
 
     /// Set an existing entry's amount (a non-positive amount deletes it), then re-derive + re-bank the day
     /// total. Returns the new day total (ml). Backs the "edit a logged drink / set a custom size" flow.
     @discardableResult
-    func updateHydrationEntry(id: UUID, amountMl: Int, day: String? = nil) async -> Double {
+    func updateHydrationEntry(
+        id: UUID,
+        amountMl: Int,
+        day: String? = nil
+    ) async -> HydrationMutationResult {
         let dayKey = day ?? Repository.localDayKey(Date())
-        let next = HydrationEntries.updating(Self.hydrationEntries(day: dayKey), id: id, amountMl: amountMl)
-        Self.writeHydrationEntries(next, day: dayKey)
-        return await rebankHydrationTotal(entries: next, day: dayKey)
-    }
-
-    /// Re-derive the day total from `entries` and upsert it into `metricSeries` (the canonical total). The
-    /// per-entry list is the source of truth for an edited/deleted day; this keeps the rest of the app in sync.
-    @discardableResult
-    private func rebankHydrationTotal(entries: [HydrationEntry], day dayKey: String) async -> Double {
-        let total = HydrationEntries.total(entries)
-        if let store = await storeHandle() {
-            _ = try? await store.upsertMetricSeries(
-                [MetricPoint(day: dayKey, key: HydrationStore.key, value: total)],
-                deviceId: HydrationStore.sourceId)
+        return await performSerializedHydrationMutation { [self] in
+            do {
+                let next = HydrationEntries.updating(
+                    try await hydrationEntries(day: dayKey),
+                    id: id,
+                    amountMl: amountMl
+                )
+                return await persistHydrationEntries(
+                    next,
+                    day: dayKey,
+                    operation: "update"
+                )
+            } catch {
+                recordHydrationPersistence(
+                    operation: "update",
+                    outcome: "failed",
+                    failureKind: AppDiagnosticsRecorder.failureKind(error)
+                )
+                return .failed
+            }
         }
-        // #989: edits/deletes funnel through here; tell the Today card directly (see logHydration).
-        noteHydrationChanged()
-        return total
     }
 
-    // MARK: - Entry persistence (UserDefaults JSON, one array per local day)
+    /// The editable rows and scalar projection commit together; the focused UI revision advances only after
+    /// the transaction succeeds.
+    private func persistHydrationEntries(
+        _ entries: [HydrationEntry],
+        day dayKey: String,
+        operation: String
+    ) async -> HydrationMutationResult {
+        #if DEBUG
+        if hydrationWriteFailureForTesting {
+            recordHydrationPersistence(
+                operation: operation,
+                outcome: "failed",
+                failureKind: "injected"
+            )
+            return .failed
+        }
+        #endif
+        guard let store = await storeHandle() else {
+            recordHydrationPersistence(
+                operation: operation,
+                outcome: "failed",
+                failureKind: "store_unavailable"
+            )
+            return .failed
+        }
+        do {
+            let total = try await store.replaceHydrationLogEntries(
+                Self.storedHydrationEntries(entries, day: dayKey),
+                deviceId: HydrationStore.sourceId,
+                day: dayKey,
+                metricKey: HydrationStore.key
+            )
+            noteHydrationChanged()
+            recordHydrationPersistence(operation: operation, outcome: "saved")
+            return .saved(totalML: total)
+        } catch {
+            recordHydrationPersistence(
+                operation: operation,
+                outcome: "failed",
+                failureKind: AppDiagnosticsRecorder.failureKind(error)
+            )
+            return .failed
+        }
+    }
 
-    fileprivate static func hydrationEntries(day dayKey: String) -> [HydrationEntry] {
+    private func recordHydrationPersistence(
+        operation: String,
+        outcome: String,
+        failureKind: String? = nil
+    ) {
+        var fields = [
+            "operation": operation,
+            "outcome": outcome,
+        ]
+        if let failureKind {
+            fields["failure_kind"] = failureKind
+        }
+        AppDiagnosticsRecorder.shared.record(
+            "hydration.persistence",
+            fields: fields
+        )
+    }
+
+    // MARK: - Entry persistence
+
+    fileprivate static func legacyHydrationEntries(day dayKey: String) -> [HydrationEntry] {
         guard let data = UserDefaults.standard.data(forKey: HydrationStore.entriesKey(forDay: dayKey)),
               let decoded = try? JSONDecoder().decode([HydrationEntry].self, from: data) else { return [] }
         return decoded.sorted { $0.loggedAt < $1.loggedAt }
     }
 
-    fileprivate static func writeHydrationEntries(_ entries: [HydrationEntry], day dayKey: String) {
-        let key = HydrationStore.entriesKey(forDay: dayKey)
-        if entries.isEmpty {
-            UserDefaults.standard.removeObject(forKey: key)
-        } else if let data = try? JSONEncoder().encode(entries) {
-            UserDefaults.standard.set(data, forKey: key)
+    fileprivate static func hydrationEntries(
+        _ stored: [HydrationLogEntry]
+    ) -> [HydrationEntry] {
+        stored.compactMap { entry in
+            guard let id = UUID(uuidString: entry.id) else { return nil }
+            return HydrationEntry(
+                id: id,
+                amountMl: entry.amountML,
+                loggedAt: Date(timeIntervalSince1970: TimeInterval(entry.loggedAt))
+            )
+        }
+    }
+
+    fileprivate static func storedHydrationEntries(
+        _ entries: [HydrationEntry],
+        day dayKey: String
+    ) -> [HydrationLogEntry] {
+        entries.map {
+            HydrationLogEntry(
+                id: $0.id.uuidString.lowercased(),
+                day: dayKey,
+                amountML: $0.amountMl,
+                loggedAt: max(1, Int($0.loggedAt.timeIntervalSince1970))
+            )
         }
     }
 
     /// The last `days` local-day totals up to and including today, OLDEST first, as (day, ml) pairs — one
-    /// entry per calendar day with 0 for days that have no log. Backs the 7-day mini bar history. `days`
+    /// entry per calendar day with nil for days that have no confirmed log. Backs the 7-day mini bar
+    /// history. `days`
     /// is clamped ≥ 1. Mirrors Android `HydrationStore.history` (a single ranged read projected onto the
-    /// full day grid so empty days read as 0 rather than vanishing).
-    func hydrationHistory(days: Int = 7, now: Date = Date()) async -> [(day: String, value: Double)] {
+    /// full day grid so unlogged days remain explicit missing values rather than vanishing or becoming zero).
+    func hydrationHistory(
+        days: Int = 7,
+        now: Date = Date()
+    ) async throws -> [(day: String, value: Double?)] {
         let n = max(1, days)
         let from = now.addingTimeInterval(-Double(n - 1) * 86_400)
         let fromKey = Repository.localDayKey(from)
         let toKey = Repository.localDayKey(now)
         let byDay: [String: Double]
-        if let store = await storeHandle() {
+        #if DEBUG
+        if hydrationReadFailureForTesting {
+            recordHydrationPersistence(
+                operation: "history",
+                outcome: "failed",
+                failureKind: "injected"
+            )
+            throw HydrationPersistenceError.writeRejected
+        }
+        #endif
+        guard let store = await storeHandle() else {
+            recordHydrationPersistence(
+                operation: "history",
+                outcome: "failed",
+                failureKind: "store_unavailable"
+            )
+            throw HydrationPersistenceError.storeUnavailable
+        }
+        do {
             async let noopRead = store.metricSeries(
                 deviceId: HydrationStore.sourceId,
                 key: HydrationStore.key,
@@ -276,21 +539,31 @@ extension Repository {
                 from: fromKey,
                 to: toKey
             )
+            let (noopRows, healthRows) = try await (noopRead, healthRead)
             let noop = Dictionary(
-                ((try? await noopRead) ?? []).map { ($0.day, $0.value) },
+                noopRows.compactMap { row in
+                    HydrationStore.confirmedTotal(row.value).map { (row.day, $0) }
+                },
                 uniquingKeysWith: { _, last in last }
             )
             let health = Dictionary(
-                ((try? await healthRead) ?? []).map { ($0.day, $0.value) },
+                healthRows.compactMap { row in
+                    HydrationStore.confirmedTotal(row.value).map { (row.day, $0) }
+                },
                 uniquingKeysWith: { _, last in last }
             )
             byDay = noop.merging(health) { max($0, $1) }
-        } else {
-            byDay = [:]
+        } catch {
+            recordHydrationPersistence(
+                operation: "history",
+                outcome: "failed",
+                failureKind: AppDiagnosticsRecorder.failureKind(error)
+            )
+            throw error
         }
         return (0..<n).map { i in
             let key = Repository.localDayKey(now.addingTimeInterval(-Double(n - 1 - i) * 86_400))
-            return (key, byDay[key] ?? 0)
+            return (key, byDay[key])
         }
     }
 

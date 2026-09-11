@@ -2617,10 +2617,8 @@ struct TodayView: View {
             let value = ageMetricsLoadedProfileState == profile.ageMetricStateToken ? vitalityToday : nil
             return value.map { "\(Int($0.rounded()))" } ?? "-"
         case .hydration:
-            // "<total> / <goal> L" in litres to 1 dp (the string bakes in the " L" itself). Always shows a
-            // value (a fresh day reads "0.0 / 3.2 L"); the goal is always derivable from the profile.
             guard let goal = hydrationGoalML else { return "-" }
-            return HydrationGoal.cardValueString(totalML: hydrationTotalML ?? 0, goalML: goal)
+            return HydrationStore.cardValue(totalML: hydrationTotalML, goalML: goal)
         case .coupled:
             // A tap-through row with no metric value of its own, the row shows just the chevron. Returning
             // an empty string (not "-") renders no number and leaves it un-dimmed (it isn't a missing value).
@@ -4358,8 +4356,13 @@ struct TodayView: View {
         let hydrationTotalLocal: Double?
         let hydrationGoalLocal: Int?
         if hydrationEnabled {
-            hydrationTotalLocal = await repo.hydrationTotal(
-                day: Repository.localDayKey(Date()))
+            do {
+                hydrationTotalLocal = try await repo.hydrationTotal(
+                    day: Repository.localDayKey(Date())
+                )
+            } catch {
+                hydrationTotalLocal = hydrationTotalML
+            }
             hydrationGoalLocal = repo.hydrationGoalML(profileSex: requestedProfileSex)
         } else {
             hydrationTotalLocal = nil
@@ -4458,7 +4461,13 @@ struct TodayView: View {
     /// One metricSeries row + a UserDefaults read, cheap enough to run on every pass.
     private func reloadHydration() async {
         if hydrationEnabled {
-            hydrationTotalML = await repo.hydrationTotal(day: Repository.localDayKey(Date()))
+            do {
+                hydrationTotalML = try await repo.hydrationTotal(
+                    day: Repository.localDayKey(Date())
+                )
+            } catch {
+                // Preserve the last confirmed value. The focused Hydration screen owns retry UI.
+            }
             hydrationGoalML = repo.hydrationGoalML(profileSex: profile.sex)
         } else {
             hydrationTotalML = nil

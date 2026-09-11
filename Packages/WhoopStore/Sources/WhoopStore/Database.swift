@@ -1176,6 +1176,23 @@ extension WhoopStore {
                     .defaults(to: false)
             }
         }
+        // v55: editable Apple hydration entries and their daily metric projection must commit together.
+        // This replaces the former split SQLite/UserDefaults write without changing Android's scalar-only
+        // hydration contract.
+        migrator.registerMigration("v55-hydration-entry") { db in
+            try db.create(table: "hydrationEntry") { t in
+                t.column("id", .text).primaryKey()
+                t.column("deviceId", .text).notNull()
+                t.column("day", .text).notNull()
+                t.column("amountML", .integer).notNull()
+                t.column("loggedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_hydrationEntry_device_day_loggedAt",
+                on: "hydrationEntry",
+                columns: ["deviceId", "day", "loggedAt"]
+            )
+        }
         return migrator
     }
 

@@ -455,6 +455,57 @@ final class DailyReviewNotificationsTests: XCTestCase {
             deliveryToken: delivery, kind: .candidate, startSec: start, defaults: defaults
         ))
     }
+
+    func testPostSyncBudgetAllowsOnlyOneRoutineNotificationLane() async {
+        let budget = PostSyncRoutineNotificationBudget()
+        let notifications = AutoWorkoutNotificationClientSpy(status: .authorized)
+        PuffinExperiment.setAutoWorkoutMode(.ask)
+        UserDefaults.standard.set(true, forKey: AutoWorkoutNotifications.enabledKey)
+
+        await AutoWorkoutNotifications.postIfAuthorized(
+            startSec: 1_700_200_000,
+            endSec: 1_700_201_200,
+            client: notifications.client,
+            budget: budget
+        )
+
+        XCTAssertEqual(budget.claimedLane, .autoWorkout)
+        XCTAssertEqual(notifications.requests.count, 1)
+        XCTAssertFalse(budget.claim(.postWorkoutSummary))
+        XCTAssertEqual(budget.claimedLane, .autoWorkout)
+    }
+
+    func testFailedPostReleasesBudgetForLowerPriorityLane() async {
+        let budget = PostSyncRoutineNotificationBudget()
+        let notifications = AutoWorkoutNotificationClientSpy(status: .authorized)
+        notifications.failAdds = true
+        PuffinExperiment.setAutoWorkoutMode(.ask)
+        UserDefaults.standard.set(true, forKey: AutoWorkoutNotifications.enabledKey)
+
+        await AutoWorkoutNotifications.postIfAuthorized(
+            startSec: 1_700_300_000,
+            endSec: 1_700_301_200,
+            client: notifications.client,
+            budget: budget
+        )
+
+        XCTAssertNil(budget.claimedLane)
+        XCTAssertFalse(budget.isClaimed)
+        XCTAssertTrue(budget.reserve(.morningRecap))
+        XCTAssertTrue(budget.commit(.morningRecap))
+        XCTAssertEqual(budget.claimedLane, .morningRecap)
+        XCTAssertTrue(notifications.requests.isEmpty)
+    }
+
+    func testWrongLaneCannotCommitOrReleaseReservation() {
+        let budget = PostSyncRoutineNotificationBudget()
+
+        XCTAssertTrue(budget.reserve(.postWorkoutSummary))
+        XCTAssertFalse(budget.commit(.morningRecap))
+        budget.release(.morningRecap)
+        XCTAssertFalse(budget.reserve(.adaptiveDay))
+        XCTAssertTrue(budget.commit(.postWorkoutSummary))
+    }
 }
 
 @MainActor
@@ -567,6 +618,40 @@ final class MorningRecapNotificationsTests: XCTestCase {
         XCTAssertEqual(outcome, .denied)
         XCTAssertEqual(notifications.authorizationRequestCount, 1)
         XCTAssertFalse(MorningRecapNotifications.isEnabled)
+    }
+
+    func testExhaustedPostSyncBudgetKeepsRecapEligibleForLaterSync() async {
+        let notifications = MorningRecapNotificationClientSpy(status: .authorized)
+        UserDefaults.standard.set(true, forKey: MorningRecapNotifications.enabledKey)
+        let exhausted = PostSyncRoutineNotificationBudget()
+        XCTAssertTrue(exhausted.claim(.autoWorkout))
+
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-09-11",
+            chargeOrRestPresent: true,
+            client: notifications.client,
+            budget: exhausted
+        )
+
+        XCTAssertTrue(notifications.requests.isEmpty)
+        XCTAssertNil(
+            UserDefaults.standard.string(forKey: MorningRecapNotifications.lastReportDayKey)
+        )
+
+        let laterSync = PostSyncRoutineNotificationBudget()
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-09-11",
+            chargeOrRestPresent: true,
+            client: notifications.client,
+            budget: laterSync
+        )
+
+        XCTAssertEqual(laterSync.claimedLane, .morningRecap)
+        XCTAssertEqual(notifications.requests.count, 1)
+        XCTAssertEqual(
+            UserDefaults.standard.string(forKey: MorningRecapNotifications.lastReportDayKey),
+            "2026-09-11"
+        )
     }
 }
 
@@ -859,6 +944,7 @@ private final class AutoWorkoutNotificationClientSpy {
     var authorizationResult = false
     var authorizationRequestCount = 0
     var suspendAdds = false
+    var failAdds = false
     private(set) var requests: [String: UNNotificationRequest] = [:]
     private(set) var removalCount = 0
     private(set) var addCount = 0
@@ -881,7 +967,7 @@ private final class AutoWorkoutNotificationClientSpy {
             },
             add: { [weak self] request in
                 guard let self else { return }
-                await self.add(request)
+                try await self.add(request)
             },
             remove: { [weak self] identifiers in
                 self?.remove(identifiers)
@@ -889,8 +975,11 @@ private final class AutoWorkoutNotificationClientSpy {
         )
     }
 
-    private func add(_ request: UNNotificationRequest) async {
+    private func add(_ request: UNNotificationRequest) async throws {
         addCount += 1
+        if failAdds {
+            throw TestError.rejected
+        }
         if suspendAdds {
             addStarted = true
             addStartedContinuation?.resume()
@@ -898,6 +987,10 @@ private final class AutoWorkoutNotificationClientSpy {
             await withCheckedContinuation { addResumeContinuation = $0 }
         }
         requests[request.identifier] = request
+    }
+
+    private enum TestError: Error {
+        case rejected
     }
 
     func waitUntilAddStarts() async {

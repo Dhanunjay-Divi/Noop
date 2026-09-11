@@ -55,7 +55,8 @@
     "v51-managed-window-upload-state",
     "v52-managed-dirty-windows",
     "v53-managed-snapshot-restore-checkpoint",
-    "v54-managed-document-sync"
+    "v54-managed-document-sync",
+    "v55-hydration-entry"
   ],
   "divergenceReasons": {
     "battery-alter-append-order": "REAL COLUMN-ORDER DRIFT (CLAUDE.md: 'column order in a Room CREATE TABLE must match the entity field order'). GRDB appended `synced` (v5) then `charging` (v6) with ALTER TABLE, which can only append; the Room entity declares `charging` before `synced`. Same columns, same types, different positions — so any positional copy (INSERT INTO battery SELECT * FROM …) swaps them. Fixing it means reordering the Room entity's fields, which changes Room's identity hash and therefore needs a version bump plus a no-op migration.",
@@ -834,6 +835,56 @@
         "sampleType"
       ],
       "indices": []
+    },
+    "hydrationEntry": {
+      "platform": "ios_only",
+      "reason": "Apple exposes editable per-drink hydration rows. They share one GRDB transaction with the scalar daily projection; Android currently exposes scalar correction only.",
+      "columns": [
+        {
+          "name": "id",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "deviceId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "day",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "amountML",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "loggedAt",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indices": [
+        {
+          "name": "idx_hydrationEntry_device_day_loggedAt",
+          "unique": false,
+          "columns": [
+            "deviceId",
+            "day",
+            "loggedAt"
+          ]
+        }
+      ]
     },
     "hrSample": {
       "platform": "both",

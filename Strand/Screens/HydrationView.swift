@@ -5,6 +5,11 @@ import StrandAnalytics
 import UIKit
 #endif
 
+private enum HydrationUIFailure: Equatable {
+    case load
+    case save
+}
+
 // MARK: - Hydration detail (opt-in, confirmed NOOP + Apple Health records)
 //
 // Liquid finish: water in a vessel is the literal metaphor, so the hero is the canonical `LiquidVessel`
@@ -22,8 +27,8 @@ struct HydrationView: View {
 
     /// Today's running total (ml) + the 7-day history (oldest→newest), loaded off the gesture path and
     /// refreshed after each log. A reload key the taps bump so the `.task` re-reads the store.
-    @State private var totalML: Double = 0
-    @State private var history: [(day: String, value: Double)] = []
+    @State private var totalML: Double?
+    @State private var history: [(day: String, value: Double?)] = []
     @State private var reloadTick = 0
     /// The animated fill the hero vessel + tube drive to on appear and after each log, so the liquid
     /// rises smoothly rather than snapping (the Today HeroScoreCell idiom).
@@ -32,6 +37,8 @@ struct HydrationView: View {
     /// edited in the amount sheet (nil when the sheet is closed).
     @State private var entries: [HydrationEntry] = []
     @State private var editingEntry: HydrationEntry?
+    @State private var hasLoadedHydration = false
+    @State private var hydrationFailure: HydrationUIFailure?
     /// #798 - the user's custom container size (ml), editable from the custom-size sheet. Persisted local-only.
     @AppStorage(HydrationStore.customSizeKey) private var customSizeML = HydrationGoal.cupML
     @State private var showCustomSizeSheet = false
@@ -52,7 +59,9 @@ struct HydrationView: View {
     @Environment(\.openURL) private var openURL
 
     private var goalML: Int { repo.hydrationGoalML(profileSex: profile.sex) }
-    private var fraction: Double { HydrationGoal.fraction(totalML: totalML, goalML: goalML) }
+    private var fraction: Double {
+        totalML.map { HydrationGoal.fraction(totalML: $0, goalML: goalML) } ?? 0
+    }
     private var percent: Int { min(100, Int((fraction * 100).rounded(.towardZero))) }
 
     var body: some View {
@@ -63,6 +72,7 @@ struct HydrationView: View {
                        // tabs carry, so Hydration sits in one atmosphere.
                        topBackground: liquidScaffoldSky()) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                hydrationFailureSection
                 ringSection
                 logSection
                 reminderSection
@@ -117,6 +127,55 @@ struct HydrationView: View {
 
     // MARK: - Hero (the vessel: water filling toward the goal, in litres)
 
+    private var missingStateText: String {
+        if !hasLoadedHydration, hydrationFailure == .load {
+            return String(localized: "appwide.hydration.unavailable")
+        }
+        return HydrationStore.notLoggedText
+    }
+
+    @ViewBuilder
+    private var hydrationFailureSection: some View {
+        if let hydrationFailure {
+            card(padding: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(StrandPalette.statusWarning)
+                        .accessibilityHidden(true)
+                    Text(
+                        hydrationFailure == .load
+                            ? String(localized: "appwide.hydration.load_failed")
+                            : String(localized: "appwide.hydration.save_failed")
+                    )
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button {
+                        if hydrationFailure == .load {
+                            Task { await reload() }
+                        } else {
+                            self.hydrationFailure = nil
+                        }
+                    } label: {
+                        Image(systemName: hydrationFailure == .load ? "arrow.clockwise" : "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(StrandPalette.accent)
+                    .accessibilityLabel(
+                        hydrationFailure == .load
+                            ? String(localized: "appwide.hydration.retry")
+                            : String(localized: "appwide.action.dismiss")
+                    )
+                }
+            }
+        }
+    }
+
     private var ringSection: some View {
         card {
             VStack(spacing: NoopMetrics.cardInnerSpacing) {
@@ -128,11 +187,17 @@ struct HydrationView: View {
                     LiquidVessel(value: heroFraction, tint: StrandPalette.accent, animated: true)
                         .frame(width: 184, height: 184)
                     VStack(spacing: 2) {
-                        CountUpText(value: HydrationGoal.litres(fromML: totalML),
-                                    format: { String(format: "%.1f", $0) },
-                                    font: StrandFont.rounded(40, weight: .bold),
-                                    color: StrandPalette.onDarkPrimary)
-                            .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
+                        if let totalML {
+                            CountUpText(value: HydrationGoal.litres(fromML: totalML),
+                                        format: { String(format: "%.1f", $0) },
+                                        font: StrandFont.rounded(40, weight: .bold),
+                                        color: StrandPalette.onDarkPrimary)
+                                .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
+                        } else {
+                            Text(missingStateText)
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.onDarkPrimary)
+                        }
                         Text(String(localized: "of \(String(format: "%.1f", HydrationGoal.litres(fromML: Double(goalML)))) L"))
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.onDarkSecondary)
@@ -141,9 +206,11 @@ struct HydrationView: View {
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Hydration today")
-                .accessibilityValue("\(String(format: "%.1f", HydrationGoal.litres(fromML: totalML))) of \(String(format: "%.1f", HydrationGoal.litres(fromML: Double(goalML)))) litres")
+                .accessibilityValue(totalML.map {
+                    "\(String(format: "%.1f", HydrationGoal.litres(fromML: $0))) of \(String(format: "%.1f", HydrationGoal.litres(fromML: Double(goalML)))) litres"
+                } ?? missingStateText)
 
-                Text("\(percent)% of today's goal")
+                Text(totalML == nil ? missingStateText : "\(percent)% of today's goal")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
             }
@@ -565,12 +632,16 @@ struct HydrationView: View {
 
     @ViewBuilder private var historyBars: some View {
         if history.isEmpty {
-            Text("No history yet.")
+            Text(
+                !hasLoadedHydration && hydrationFailure == .load
+                    ? String(localized: "appwide.hydration.unavailable")
+                    : "No history yet."
+            )
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
         } else {
             // Scale the bars to the LARGER of the goal and the biggest day, so an over-goal day doesn't clip.
-            let ceiling = max(Double(max(goalML, 1)), history.map(\.value).max() ?? 0, 1)
+            let ceiling = max(Double(max(goalML, 1)), history.compactMap(\.value).max() ?? 0, 1)
             let lastIndex = history.count - 1
             HStack(alignment: .bottom, spacing: 10) {
                 ForEach(Array(history.enumerated()), id: \.element.day) { idx, bar in
@@ -579,7 +650,7 @@ struct HydrationView: View {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(StrandPalette.textPrimary.opacity(0.10))
                                 .frame(height: 96)
-                            let frac = min(1.0, max(0.0, bar.value / ceiling))
+                            let frac = min(1.0, max(0.0, (bar.value ?? 0) / ceiling))
                             if frac > 0 {
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                                     .fill(idx == lastIndex ? StrandPalette.accent
@@ -593,7 +664,9 @@ struct HydrationView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(weekdayInitial(bar.day)): \(String(format: "%.1f", HydrationGoal.litres(fromML: bar.value))) litres")
+                    .accessibilityLabel(bar.value.map {
+                        "\(weekdayInitial(bar.day)): \(String(format: "%.1f", HydrationGoal.litres(fromML: $0))) litres"
+                    } ?? "\(weekdayInitial(bar.day)): \(HydrationStore.notLoggedText)")
                 }
             }
         }
@@ -605,12 +678,12 @@ struct HydrationView: View {
         card(padding: 18) {
             VStack(alignment: .leading, spacing: NoopMetrics.space2) {
                 Text("Today").strandOverline()
-                if totalML <= 0 {
-                    Text("No drinks logged yet. Tap Sip, Cup or Bottle to start.")
+                if totalML == nil {
+                    Text(missingStateText)
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
-                } else {
+                } else if let totalML {
                     HStack(spacing: 10) {
                         Image(systemName: "drop.fill")
                             .font(.system(size: 15, weight: .semibold))
@@ -662,27 +735,49 @@ struct HydrationView: View {
     /// Log `ml` (additive day total + a per-entry row, #798) and refresh.
     private func add(ml: Int) async {
         guard ml > 0 else { return }
-        _ = await repo.logHydration(amountMl: ml)
-        reloadTick &+= 1
+        finishMutation(await repo.logHydration(amountMl: ml))
     }
 
     /// #798 - delete a logged drink, re-deriving the day total, then refresh.
     private func deleteEntry(_ entry: HydrationEntry) async {
-        _ = await repo.deleteHydrationEntry(id: entry.id)
-        reloadTick &+= 1
+        finishMutation(await repo.deleteHydrationEntry(id: entry.id))
     }
 
     /// #798 - set a logged drink's amount, re-deriving the day total, then refresh.
     private func updateEntry(_ entry: HydrationEntry, to ml: Int) async {
-        _ = await repo.updateHydrationEntry(id: entry.id, amountMl: ml)
+        finishMutation(
+            await repo.updateHydrationEntry(id: entry.id, amountMl: ml)
+        )
+    }
+
+    private func finishMutation(_ result: HydrationMutationResult) {
+        guard result.succeeded else {
+            hydrationFailure = .save
+            return
+        }
+        hydrationFailure = nil
         reloadTick &+= 1
     }
 
     /// Load today's total + the 7-day history + today's per-entry list from the store.
     private func reload() async {
-        totalML = await repo.hydrationTotal(day: Repository.localDayKey(Date()))
-        history = await repo.hydrationHistory(days: 7)
-        entries = repo.hydrationEntries()
+        do {
+            async let total = repo.hydrationTotal(day: Repository.localDayKey(Date()))
+            async let recent = repo.hydrationHistory(days: 7)
+            let (loadedTotal, loadedHistory) = try await (total, recent)
+            guard !Task.isCancelled else { return }
+            totalML = loadedTotal
+            history = loadedHistory
+            entries = try await repo.hydrationEntries()
+            hasLoadedHydration = true
+            if hydrationFailure == .load {
+                hydrationFailure = nil
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            hydrationFailure = .load
+        }
     }
 }
 
@@ -715,39 +810,41 @@ private struct HydrationAmountSheet: View {
     static func clamp(_ value: Int) -> Int { min(maxML, max(minML, value)) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
-            Text(title)
-                .font(StrandFont.title2)
-                .foregroundStyle(StrandPalette.textPrimary)
-            HStack {
-                Text("Amount")
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                Spacer()
-                Text("\(ml) ml")
-                    .font(StrandFont.rounded(28, weight: .bold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                Text(title)
+                    .font(StrandFont.title2)
                     .foregroundStyle(StrandPalette.textPrimary)
-                    .monospacedDigit()
+                HStack {
+                    Text("Amount")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Spacer()
+                    Text("\(ml) ml")
+                        .font(StrandFont.rounded(28, weight: .bold))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .monospacedDigit()
+                }
+                Stepper(value: $ml, in: Self.minML...Self.maxML, step: Self.stepML) {
+                    Text("Adjust amount")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+                .accessibilityLabel("Amount in millilitres")
+                .accessibilityValue("\(ml) millilitres")
+                HStack(spacing: NoopMetrics.gap) {
+                    NoopButton("Cancel", kind: .secondary, fullWidth: true) { onCancel() }
+                    NoopButton("Save", kind: .primary, fullWidth: true) { onSave(Self.clamp(ml)) }
+                }
             }
-            Stepper(value: $ml, in: Self.minML...Self.maxML, step: Self.stepML) {
-                Text("Adjust amount")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
-            }
-            .accessibilityLabel("Amount in millilitres")
-            .accessibilityValue("\(ml) millilitres")
-            HStack(spacing: NoopMetrics.gap) {
-                NoopButton("Cancel", kind: .secondary, fullWidth: true) { onCancel() }
-                NoopButton("Save", kind: .primary, fullWidth: true) { onSave(Self.clamp(ml)) }
-            }
+            .padding(NoopMetrics.space5)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(NoopMetrics.space5)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
         // iOS-only sheet sizing - macOS sheets are free-floating windows and reject detents (see the
         // shared `noopSheetPresentation` note); the call site stays cross-platform via this guard.
         #if os(iOS)
-        .presentationDetents([.height(300)])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         #endif
     }

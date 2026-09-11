@@ -174,6 +174,9 @@ public struct DeviceRegistryStore: Sendable {
         // dedicated `nutrition-log` id, so an explicit source deletion must remove both entries and
         // their metricSeries projections.
         "nutritionEntry",
+        // v55: editable hydration rows are canonical, device-scoped health data. They must not
+        // survive an explicit source deletion while their scalar metric projection is removed.
+        "hydrationEntry",
     ]
 
     /// Permanently delete every recorded sample/derived row belonging to one device, across all

@@ -324,10 +324,57 @@ enum ContextualInterventionCenter {
         }
     }
 
+    /// Awaited post-sync path for adaptive-day guidance. The budget is reserved only while the
+    /// notification boundary is active, committed after Notification Center accepts a still-current
+    /// request, and released on every rejected/stale/error path so a lower-priority routine lane can run.
+    @discardableResult
+    static func post(
+        _ candidate: ContextualInterventionCandidate,
+        using budget: PostSyncRoutineNotificationBudget,
+        onRetry: (@MainActor @Sendable (Date) -> Void)? = nil
+    ) async -> Bool {
+        guard candidate.kind.isAdaptiveDayGuidance,
+              deliveryConsentCurrent(for: candidate) else { return false }
+        guard !budget.isClaimed else {
+            presentAdaptiveAction(candidate)
+            return false
+        }
+        guard !deliveriesInFlight.contains(candidate.kind),
+              budget.reserve(.adaptiveDay) else {
+            presentAdaptiveAction(candidate)
+            return false
+        }
+
+        deliveriesInFlight.insert(candidate.kind)
+        let delivered = await deliver(candidate, onRetry: onRetry)
+        if delivered {
+            guard budget.commit(.adaptiveDay) else {
+                rejectDelivery(candidate, on: .current())
+                budget.release(.adaptiveDay)
+                deliveriesInFlight.remove(candidate.kind)
+                startPendingDeliveryLoopIfNeeded()
+                return false
+            }
+        } else {
+            budget.release(.adaptiveDay)
+        }
+        deliveriesInFlight.remove(candidate.kind)
+        startPendingDeliveryLoopIfNeeded()
+        return delivered
+    }
+
+    private static func startPendingDeliveryLoopIfNeeded() {
+        guard !deliveryLoopRunning, !pendingDeliveries.isEmpty else { return }
+        deliveryLoopRunning = true
+        Task { @MainActor in
+            await drainPendingDeliveries()
+        }
+    }
+
     private static func drainPendingDeliveries() async {
         while !pendingDeliveries.isEmpty {
             let pending = pendingDeliveries.removeFirst()
-            await deliver(
+            _ = await deliver(
                 pending.candidate,
                 onRetry: pending.onRetry
             )
@@ -343,19 +390,19 @@ enum ContextualInterventionCenter {
     private static func deliver(
         _ candidate: ContextualInterventionCandidate,
         onRetry: (@MainActor @Sendable (Date) -> Void)?
-    ) async {
+    ) async -> Bool {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard deliveryConsentCurrent(for: candidate),
               isAuthorized(settings.authorizationStatus) else {
             rejectDelivery(candidate, on: center)
-            return
+            return false
         }
 
         await DailyReviewNotifications.ensurePrivacyCategory(on: center)
         guard deliveryConsentCurrent(for: candidate) else {
             rejectDelivery(candidate, on: center)
-            return
+            return false
         }
 
         let defaults = UserDefaults.standard
@@ -393,7 +440,7 @@ enum ContextualInterventionCenter {
                 identifier: "contextual-\(candidate.kind.rawValue)",
                 categoryIdentifier: DailyReviewNotifications.privacyCategoryID
             )
-            return
+            return false
         }
 
         let content = UNMutableNotificationContent()
@@ -420,7 +467,7 @@ enum ContextualInterventionCenter {
         do {
             guard deliveryConsentCurrent(for: candidate) else {
                 rejectDelivery(candidate, on: center)
-                return
+                return false
             }
             try await LocalNotificationLifecycle.schedule(
                 UNNotificationRequest(
@@ -434,7 +481,7 @@ enum ContextualInterventionCenter {
             )
             guard deliveryConsentCurrent(for: candidate) else {
                 rejectDelivery(candidate, on: center)
-                return
+                return false
             }
             if candidate.kind == .adaptivePlannedWorkout {
                 guard AdaptivePlannedWorkoutScheduler.scheduleDeliveryExpiry(
@@ -444,7 +491,7 @@ enum ContextualInterventionCenter {
                     center: center
                 ) else {
                     rejectDelivery(candidate, on: center)
-                    return
+                    return false
                 }
             }
             if candidate.kind.isAdaptiveDayGuidance {
@@ -474,9 +521,27 @@ enum ContextualInterventionCenter {
             if candidate.kind == .adaptiveTravel {
                 AdaptiveDayTimeZoneStore.discardPending()
             }
+            return true
         } catch {
             // A rejected request remains eligible while its evidence is fresh.
+            return false
         }
+    }
+
+    private static func presentAdaptiveAction(
+        _ candidate: ContextualInterventionCandidate
+    ) {
+        guard candidate.kind.isAdaptiveDayGuidance,
+              deliveryConsentCurrent(for: candidate) else { return }
+        ContextualActionCenter.shared.presentRecovery(
+            title: candidate.title,
+            detail: candidate.body,
+            fingerprint: candidate.fingerprint,
+            evidence: candidate.evidence,
+            observedAt: candidate.observedAt,
+            maximumAge: candidate.maximumAge,
+            route: candidate.route
+        )
     }
 
     private static func deliveryConsentCurrent(

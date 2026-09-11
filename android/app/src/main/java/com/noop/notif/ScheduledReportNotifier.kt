@@ -12,6 +12,54 @@ import com.noop.ui.NoopPrefs
 import com.noop.ui.appLaunchIntent
 import kotlin.math.roundToInt
 
+/**
+ * One completed sync can materialize several routine prompts at once. The first eligible lane owns
+ * this process-local budget; lower lanes keep their persisted frontiers untouched and may retry later.
+ * Safety paging and active-workout cautions deliberately bypass this budget.
+ */
+class PostSyncRoutineNotificationBudget {
+    enum class Lane(val storageKey: String) {
+        AUTO_WORKOUT("auto_workout"),
+        ADAPTIVE_DAY("adaptive_day"),
+        POST_WORKOUT_SUMMARY("post_workout_summary"),
+        MORNING_RECAP("morning_recap"),
+    }
+
+    private var claimed: Lane? = null
+    private var reserved: Lane? = null
+
+    @get:Synchronized
+    val claimedLane: Lane?
+        get() = claimed
+
+    @get:Synchronized
+    val isClaimed: Boolean
+        get() = claimed != null
+
+    @Synchronized
+    fun reserve(lane: Lane): Boolean {
+        if (claimed != null || reserved != null) return false
+        reserved = lane
+        return true
+    }
+
+    @Synchronized
+    fun commit(lane: Lane): Boolean {
+        if (claimed != null || reserved != lane) return false
+        reserved = null
+        claimed = lane
+        return true
+    }
+
+    @Synchronized
+    fun release(lane: Lane) {
+        if (reserved == lane) reserved = null
+    }
+
+    @Synchronized
+    fun claim(lane: Lane): Boolean = reserve(lane) && commit(lane)
+}
+
 // MARK: - Scheduled report notifications (#517)
 //
 // Two opt-in, default-OFF system notifications, no AI involved:
@@ -102,7 +150,8 @@ object ScheduledReportNotifier {
         chargePct: Int?,
         restPct: Int?,
         materializedAfterSync: Boolean,
-    ) {
+        budget: PostSyncRoutineNotificationBudget? = null,
+    ): Boolean {
         // reportDay is the banked night's day (the resolved today-row's `day`), NOT LocalDate.now() — the
         // calendar day rolls at midnight while the row still resolves to last night's until a new night is
         // banked, which re-fired the recap at the start of a new day for late-nighters (#567).
@@ -113,18 +162,24 @@ object ScheduledReportNotifier {
                 lastNotifiedDay = NoopPrefs.reportMorningDay(context),
                 reportDay = reportDay,
             )
-        ) return
-        val copy = ScheduledReportPolicy.morningCopy(chargePct, restPct) ?: return
-        runCatching {
+        ) return false
+        val copy = ScheduledReportPolicy.morningCopy(chargePct, restPct) ?: return false
+        val lane = PostSyncRoutineNotificationBudget.Lane.MORNING_RECAP
+        var reserved = false
+        return runCatching {
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
                 NotificationLifecycleLedger.suppressed(
                     context,
                     NotificationLifecycleId.MORNING_REPORT,
                     NotificationLifecycleCategory.STATUS,
                 )
-                return
+                return@runCatching false
             }
             ensureChannel(context)
+            if (budget?.reserve(lane) == false) {
+                return@runCatching false
+            }
+            reserved = budget != null
             if (!post(
                     context,
                     NotificationPlatformIdentity.NotificationId.MORNING_REPORT,
@@ -133,17 +188,30 @@ object ScheduledReportNotifier {
                     copy.first,
                     copy.second,
                 )
-            ) return
+            ) {
+                budget?.release(lane)
+                reserved = false
+                return@runCatching false
+            }
+            if (budget != null && !budget.commit(lane)) {
+                cancelMorning(context)
+                budget.release(lane)
+                reserved = false
+                return@runCatching false
+            }
+            reserved = false
             // Mark fired only after a successful post, so a notifications-disabled night still notifies
             // once they're re-enabled while the same night's row is showing.
             NoopPrefs.setReportMorningDay(context, reportDay)
+            true
         }.onFailure {
+            if (reserved) budget?.release(lane)
             NotificationLifecycleLedger.unknown(
                 context,
                 NotificationLifecycleId.MORNING_REPORT,
                 NotificationLifecycleCategory.STATUS,
             )
-        }
+        }.getOrElse { false }
     }
 
     /**
@@ -158,31 +226,38 @@ object ScheduledReportNotifier {
         newestWorkoutTs: Long?,
         title: String,
         body: String,
-    ) {
+        budget: PostSyncRoutineNotificationBudget? = null,
+    ): Boolean {
         if (NoopPrefs.postWorkoutReportEnabled(context) &&
             !NoopPrefs.reportWorkoutFrontierInitialized(context)
         ) {
             // Upgrade/process-order safety: an enabled preference without the companion frontier came
             // from an older build. Snapshot existing history silently instead of announcing an old row.
             seedWorkoutFrontier(context, newestWorkoutTs)
-            return
+            return false
         }
         if (!ScheduledReportPolicy.shouldNotifyWorkout(
                 enabled = NoopPrefs.postWorkoutReportEnabled(context),
                 newestWorkoutTs = newestWorkoutTs,
                 lastWorkoutTs = NoopPrefs.reportLastWorkoutTs(context),
             )
-        ) return
-        runCatching {
+        ) return false
+        val lane = PostSyncRoutineNotificationBudget.Lane.POST_WORKOUT_SUMMARY
+        var reserved = false
+        return runCatching {
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
                 NotificationLifecycleLedger.suppressed(
                     context,
                     NotificationLifecycleId.WORKOUT_REPORT,
                     NotificationLifecycleCategory.STATUS,
                 )
-                return
+                return@runCatching false
             }
             ensureChannel(context)
+            if (budget?.reserve(lane) == false) {
+                return@runCatching false
+            }
+            reserved = budget != null
             // Enforce redaction at the final posting boundary too. One caller can produce a lean
             // no-Effort summary without going through workoutCopy(); it must not leak duration, HR,
             // sport, or another health detail onto the lock screen.
@@ -195,15 +270,28 @@ object ScheduledReportNotifier {
                     privateCopy.first,
                     privateCopy.second,
                 )
-            ) return
+            ) {
+                budget?.release(lane)
+                reserved = false
+                return@runCatching false
+            }
+            if (budget != null && !budget.commit(lane)) {
+                cancelWorkout(context)
+                budget.release(lane)
+                reserved = false
+                return@runCatching false
+            }
+            reserved = false
             newestWorkoutTs?.let { NoopPrefs.setReportLastWorkoutTs(context, it) }
+            true
         }.onFailure {
+            if (reserved) budget?.release(lane)
             NotificationLifecycleLedger.unknown(
                 context,
                 NotificationLifecycleId.WORKOUT_REPORT,
                 NotificationLifecycleCategory.STATUS,
             )
-        }
+        }.getOrElse { false }
     }
 
     /**

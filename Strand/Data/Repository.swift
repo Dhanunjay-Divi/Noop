@@ -597,6 +597,32 @@ final class Repository: ObservableObject {
     /// so the card sat stale until an unrelated sync landed. Race-free: Repository is @MainActor.
     @Published private(set) var hydrationSeq = 0
     func noteHydrationChanged() { hydrationSeq += 1 }
+    /// A hydration mutation spans an async read-modify-write. Main-actor isolation alone does not make
+    /// that span atomic because another tap can enter while the first store call is suspended. Chain each
+    /// operation behind the prior task so rapid adds, edits, and deletes cannot overwrite one another.
+    private var hydrationMutationTail: Task<HydrationMutationResult, Never>?
+    func performSerializedHydrationMutation(
+        _ operation: @escaping @MainActor @Sendable () async -> HydrationMutationResult
+    ) async -> HydrationMutationResult {
+        let predecessor = hydrationMutationTail
+        let task = Task { @MainActor in
+            _ = await predecessor?.value
+            return await operation()
+        }
+        hydrationMutationTail = task
+        return await task.value
+    }
+    #if DEBUG
+    private(set) var hydrationReadFailureForTesting = false
+    private(set) var hydrationWriteFailureForTesting = false
+    func setHydrationFailureForTesting(
+        reads: Bool = false,
+        writes: Bool = false
+    ) {
+        hydrationReadFailureForTesting = reads
+        hydrationWriteFailureForTesting = writes
+    }
+    #endif
 
     /// Bumped whenever a period-start row is logged or removed. Cycle surfaces can refresh the
     /// sensitive local series without forcing an unrelated full strap-data reload.

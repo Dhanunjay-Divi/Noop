@@ -70,6 +70,7 @@ import com.noop.ingest.HealthConnectWriter
 import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.notif.AdaptiveDayEvaluator
 import com.noop.notif.InactivityNotifier
+import com.noop.notif.PostSyncRoutineNotificationBudget
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StaleSyncReminderScheduler
 import com.noop.notif.StressBreathingNotifier
@@ -2420,39 +2421,7 @@ class WhoopBleClient(
                 )
             },
             afterAnalysis = {
-                // These actions are structurally unreachable until IntelligenceEngine succeeds.
-                try {
-                    val merged = repository.daysMerged(sourceId)
-                    val newest = merged.maxByOrNull { it.day }?.day ?: "-"
-                    val todayKey = com.noop.ui.logicalDayKeyNow()
-                    val present = if (merged.any { it.day == todayKey }) "present" else "MISSING"
-                    log(
-                        "Backfill: ${merged.size} day(s) banked; newest=$newest, " +
-                            "dashboard-today=$todayKey ($present)",
-                    )
-                    val localKey = java.time.LocalDate.now().toString()
-                    val todayRow = com.noop.ui.resolveTodayRow(merged, todayKey, localKey)
-                    if (todayRow?.totalSleepMin != null) {
-                        ScheduledReportNotifier.onMorning(
-                            context = context,
-                            reportDay = todayRow.day,
-                            chargePct = todayRow.recovery.scorePctOrNull(),
-                            restPct = RestScorer.restFromDaily(todayRow).scorePctOrNull(),
-                            materializedAfterSync = true,
-                        )
-                    }
-                    ScheduledReportNotifier.onWorkout(
-                        context = context,
-                        newestWorkoutTs = repository.latestWorkoutStartAllSources(),
-                        title = "",
-                        body = "",
-                    )
-                } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
-                    throw cancelled
-                } catch (failure: Throwable) {
-                    log("Backfill: post-sync report refresh failed: ${failure.message}")
-                }
-
+                val notificationBudget = PostSyncRoutineNotificationBudget()
                 try {
                     AutoWorkoutCandidateNotifier.afterReanalysis(
                         context = context,
@@ -2464,6 +2433,7 @@ class WhoopBleClient(
                             } else {
                                 null
                             },
+                        budget = notificationBudget,
                     )
                 } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                     throw cancelled
@@ -2476,11 +2446,60 @@ class WhoopBleClient(
                         context = context,
                         repository = repository,
                         deviceId = sourceId,
+                        notificationBudget = notificationBudget,
                     )
                 } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
                     log("Backfill: adaptive day guidance failed: ${failure.message}")
+                }
+
+                // These actions are structurally unreachable until IntelligenceEngine succeeds.
+                try {
+                    val merged = repository.daysMerged(sourceId)
+                    val newest = merged.maxByOrNull { it.day }?.day ?: "-"
+                    val todayKey = com.noop.ui.logicalDayKeyNow()
+                    val present = if (merged.any { it.day == todayKey }) "present" else "MISSING"
+                    log(
+                        "Backfill: ${merged.size} day(s) banked; newest=$newest, " +
+                            "dashboard-today=$todayKey ($present)",
+                    )
+                    val localKey = java.time.LocalDate.now().toString()
+                    val todayRow = com.noop.ui.resolveTodayRow(merged, todayKey, localKey)
+                    if (!notificationBudget.isClaimed) {
+                        ScheduledReportNotifier.onWorkout(
+                            context = context,
+                            newestWorkoutTs = repository.latestWorkoutStartAllSources(),
+                            title = "",
+                            body = "",
+                            budget = notificationBudget,
+                        )
+                    }
+                    if (!notificationBudget.isClaimed && todayRow?.totalSleepMin != null) {
+                        ScheduledReportNotifier.onMorning(
+                            context = context,
+                            reportDay = todayRow.day,
+                            chargePct = todayRow.recovery.scorePctOrNull(),
+                            restPct = RestScorer.restFromDaily(todayRow).scorePctOrNull(),
+                            materializedAfterSync = true,
+                            budget = notificationBudget,
+                        )
+                    }
+                } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    log("Backfill: post-sync report refresh failed: ${failure.message}")
+                }
+
+                notificationBudget.claimedLane?.let { lane ->
+                    AppDiagnosticsRecorder.record(
+                        "post_sync.notification_budget",
+                        fields = mapOf(
+                            "lane" to lane.storageKey,
+                            "outcome" to "claimed",
+                            "source" to "band_history",
+                        ),
+                    )
                 }
 
                 if (NoopPrefs.hcWriteback(context)) {

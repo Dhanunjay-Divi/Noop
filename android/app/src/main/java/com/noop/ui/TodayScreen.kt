@@ -175,6 +175,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -768,6 +769,7 @@ fun TodayScreen(
     // aren't reactive) and re-read on the editor's save, exactly like enabledKeyMetrics above.
     var showLayoutEditor by remember { mutableStateOf(false) }
     var sectionOrder by remember { mutableStateOf(TodayLayoutPrefs.order(context)) }
+    var todayDetailsExpanded by rememberSaveable { mutableStateOf(false) }
     // #today-layout (hold-to-drag): the hoisted list state (the drag math needs layoutInfo + scrollBy) and
     // the live drag state. The frame loop below runs ONLY while a section is lifted: each frame it retries
     // the swap (so a card held still at a viewport edge keeps reordering as the list scrolls under it —
@@ -1029,7 +1031,7 @@ fun TodayScreen(
     // "Sky behind cards" (opt-in, default OFF): extend the day-cycle sky behind the WHOLE scroll so the
     // Card-transparency slider reveals it under every card (no effect when the scene is off). Read once.
     val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
-    var hydrationTotalMl by remember { mutableStateOf(0.0) }
+    var hydrationTotalMl by remember { mutableStateOf<Double?>(null) }
     // #989: `days` only changes on a data refresh, which a hydration write never causes, so the card sat
     // stale after logging a drink until an unrelated sync landed. Keying on the store's mutationSeq too
     // re-reads the one metric row the moment a drink is logged / edited / deleted. Mirrors the iOS
@@ -1037,8 +1039,8 @@ fun TodayScreen(
     val hydrationSeq by HydrationStore.mutationSeq.collectAsStateWithLifecycle()
     LaunchedEffect(days, hydrationEnabled, hydrationSeq) {
         hydrationTotalMl = if (hydrationEnabled) {
-            runCatching { HydrationStore.total(viewModel.repo) }.getOrDefault(0.0)
-        } else 0.0
+            runCatching { HydrationStore.total(viewModel.repo) }.getOrNull()
+        } else null
     }
     // The day's Effort/strain (0..100) drives the goal's effort bump. Prefer the live in-progress Effort
     // for today (floored at the stored value, mirroring the Effort gauge) so the goal reflects a hard day
@@ -1931,6 +1933,10 @@ fun TodayScreen(
         // neighbours as it crosses their centres (the screen-level frame loop also auto-scrolls at the
         // viewport edges and keeps swapping while it does), and the order persists on drop. The stagger
         // index follows the section's live position.
+        val firstVisibleTodayDetailSection = sectionOrder.firstOrNull { section ->
+            section.isTodayDetailSection() &&
+                (section != TodaySection.TARGET || selectedDayOffset == 0)
+        }
         sectionOrder.forEach { section ->
             // Entrance stagger keyed on the section's FIXED default position, not its live position: the
             // stagger only matters on first appearance (staggeredAppear latches), and a live-position
@@ -1956,7 +1962,12 @@ fun TodayScreen(
                     selectedDayOffset == 0
                 else -> true
             }
-            if (!sectionVisible) return@forEach
+            val isTodayDetail = section.isTodayDetailSection()
+            if (!sectionVisible ||
+                (isTodayDetail && !todayDetailsExpanded && section != firstVisibleTodayDetailSection)
+            ) {
+                return@forEach
+            }
             item(key = TODAY_SECTION_KEY_PREFIX + section.raw) {
                 TodayReorderableSection(
                     section = section,
@@ -2052,67 +2063,91 @@ fun TodayScreen(
                                 showLiveSession = true
                             },
                         )
-                        TodaySection.WHY -> DailyPlanWhySection(
-                            readiness = dailyActionReadiness,
-                            modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
-                        )
-                        TodaySection.TARGET -> DailyPlanTargetSection(
-                            plan = dailyActionPlan,
-                            checkIn = dailyActionCheckIn,
-                            onCheckIn = updateDailyActionCheckIn,
-                            currentEffort = displayMetric?.strain,
-                            notificationEnabled = strainTargetEnabled,
-                            notificationPermissionDenied = strainTargetPermissionDenied,
-                            showNotificationControl = selectedDayOffset == 0,
-                            onNotificationEnabledChange = { enabled ->
-                                if (!enabled) {
-                                    applyStrainTargetPreference(false)
-                                } else if (reportNotificationsAvailable(context)) {
-                                    strainTargetEnabled = true
-                                    strainTargetPermissionDenied = false
-                                    NoopPrefs.setStrainTargetEnabled(context, true)
-                                    StrainTargetNotifier.onStrainTarget(
-                                        context,
-                                        selectedDayKey,
-                                        displayMetric?.strain,
-                                        dailyActionPlan.target,
-                                    )
-                                } else if (
-                                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                    ContextCompat.checkSelfPermission(
-                                        context,
-                                        Manifest.permission.POST_NOTIFICATIONS,
-                                    ) != PackageManager.PERMISSION_GRANTED
-                                ) {
-                                    strainTargetPermissionLauncher.launch(
-                                        Manifest.permission.POST_NOTIFICATIONS,
-                                    )
-                                } else {
-                                    applyStrainTargetPreference(
-                                        false,
-                                        permissionDenied = true,
-                                    )
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
-                        )
-                        TodaySection.WATCH -> DailyPlanWatchSection(
-                            readiness = dailyActionReadiness,
-                            modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
-                        )
+                        TodaySection.WHY -> TodayDetailSection(
+                            showDisclosure = section == firstVisibleTodayDetailSection,
+                            expanded = todayDetailsExpanded,
+                            onToggle = { todayDetailsExpanded = !todayDetailsExpanded },
+                        ) {
+                            DailyPlanWhySection(
+                                readiness = dailyActionReadiness,
+                                modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                            )
+                        }
+                        TodaySection.TARGET -> TodayDetailSection(
+                            showDisclosure = section == firstVisibleTodayDetailSection,
+                            expanded = todayDetailsExpanded,
+                            onToggle = { todayDetailsExpanded = !todayDetailsExpanded },
+                        ) {
+                            DailyPlanTargetSection(
+                                plan = dailyActionPlan,
+                                checkIn = dailyActionCheckIn,
+                                onCheckIn = updateDailyActionCheckIn,
+                                currentEffort = displayMetric?.strain,
+                                notificationEnabled = strainTargetEnabled,
+                                notificationPermissionDenied = strainTargetPermissionDenied,
+                                showNotificationControl = selectedDayOffset == 0,
+                                onNotificationEnabledChange = { enabled ->
+                                    if (!enabled) {
+                                        applyStrainTargetPreference(false)
+                                    } else if (reportNotificationsAvailable(context)) {
+                                        strainTargetEnabled = true
+                                        strainTargetPermissionDenied = false
+                                        NoopPrefs.setStrainTargetEnabled(context, true)
+                                        StrainTargetNotifier.onStrainTarget(
+                                            context,
+                                            selectedDayKey,
+                                            displayMetric?.strain,
+                                            dailyActionPlan.target,
+                                        )
+                                    } else if (
+                                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                        ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.POST_NOTIFICATIONS,
+                                        ) != PackageManager.PERMISSION_GRANTED
+                                    ) {
+                                        strainTargetPermissionLauncher.launch(
+                                            Manifest.permission.POST_NOTIFICATIONS,
+                                        )
+                                    } else {
+                                        applyStrainTargetPreference(
+                                            false,
+                                            permissionDenied = true,
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                            )
+                        }
+                        TodaySection.WATCH -> TodayDetailSection(
+                            showDisclosure = section == firstVisibleTodayDetailSection,
+                            expanded = todayDetailsExpanded,
+                            onToggle = { todayDetailsExpanded = !todayDetailsExpanded },
+                        ) {
+                            DailyPlanWatchSection(
+                                readiness = dailyActionReadiness,
+                                modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                            )
+                        }
                         // The plain-English read-out, the Charge-tinted Synthesis card. Mirrors the iOS
                         // Synthesis InsightCard; carries the last scored day's read at the rollover (#543).
-                        TodaySection.SYNTHESIS -> Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
-                            SynthesisHeroCard(
-                                day = displayMetric,
-                                recoveryCalibration = recoveryCalibration,
-                                carriedDay = lastScoredRecoveryDay,
-                                days = days,
-                                displayName = displayName,
-                                synthesisExpanded = synthesisExpanded,
-                                onToggleSynthesis = { synthesisExpanded = !synthesisExpanded },
-                                onOpenReadiness = { showChargeBreakdown = true },
-                            )
+                        TodaySection.SYNTHESIS -> TodayDetailSection(
+                            showDisclosure = section == firstVisibleTodayDetailSection,
+                            expanded = todayDetailsExpanded,
+                            onToggle = { todayDetailsExpanded = !todayDetailsExpanded },
+                        ) {
+                            Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
+                                SynthesisHeroCard(
+                                    day = displayMetric,
+                                    recoveryCalibration = recoveryCalibration,
+                                    carriedDay = lastScoredRecoveryDay,
+                                    days = days,
+                                    displayName = displayName,
+                                    synthesisExpanded = synthesisExpanded,
+                                    onToggleSynthesis = { synthesisExpanded = !synthesisExpanded },
+                                    onOpenReadiness = { showChargeBreakdown = true },
+                                )
+                            }
                         }
                         // METRICS: header + Edit affordance (#251) + the tile grid. Previously two
                         // LazyColumn items; merged into ONE (a section must be a single keyed item for the
@@ -2405,6 +2440,77 @@ fun TodayScreen(
 }
 
 // MARK: - Evidence-gated Daily Action
+
+private fun TodaySection.isTodayDetailSection(): Boolean = when (this) {
+    TodaySection.WHY,
+    TodaySection.TARGET,
+    TodaySection.WATCH,
+    TodaySection.SYNTHESIS -> true
+    else -> false
+}
+
+@Composable
+private fun TodayDetailSection(
+    showDisclosure: Boolean,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Metrics.space12),
+    ) {
+        if (showDisclosure) {
+            val label = stringResource(
+                if (expanded) R.string.daily_plan_details_hide
+                else R.string.daily_plan_details_show,
+            )
+            val disclosureState = stringResource(
+                if (expanded) R.string.appwide_a11y_expanded
+                else R.string.appwide_a11y_collapsed,
+            )
+            NoopCard(padding = 0.dp) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics {
+                            stateDescription = disclosureState
+                        }
+                        .clickable(
+                            role = Role.Button,
+                            onClickLabel = label,
+                            onClick = onToggle,
+                        )
+                        .padding(horizontal = Metrics.space16),
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = null,
+                        tint = Palette.accent,
+                        modifier = Modifier.size(Metrics.iconSmall),
+                    )
+                    Text(
+                        label,
+                        modifier = Modifier.weight(1f),
+                        style = NoopType.subhead,
+                        color = Palette.textPrimary,
+                    )
+                    Icon(
+                        if (expanded) Icons.Filled.KeyboardArrowUp
+                        else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = Palette.textSecondary,
+                        modifier = Modifier.size(Metrics.iconSmall),
+                    )
+                }
+            }
+        }
+        if (expanded) content()
+    }
+}
 
 /// Joins ALREADY-localized fragments for an accessibility description. Exists so composed a11y strings
 /// never appear as literals inside `semantics { }`, which the i18n audit treats as un-extracted copy.
@@ -6013,7 +6119,7 @@ private fun YourCardsSection(
     importedStepsForDay: Int?,
     estimatedStepsForDay: Int?,
     caloriesForDay: Double?,
-    hydrationTotalMl: Double,
+    hydrationTotalMl: Double?,
     hydrationGoalMl: Int,
     onOpenHydration: () -> Unit,
     onOpenStress: () -> Unit,
@@ -6022,6 +6128,7 @@ private fun YourCardsSection(
     onOpenCoupled: () -> Unit,
     onCustomise: () -> Unit,
 ) {
+    val hydrationNotLoggedText = uiString(R.string.appwide_hydration_not_logged)
     Box(modifier = Modifier.fillMaxWidth().staggeredAppear(2)) {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
             // Header: "YOUR CARDS" overline + a right-aligned blue EDIT action (the WHOOP ✎ affordance).
@@ -6050,6 +6157,7 @@ private fun YourCardsSection(
                         caloriesForDay = caloriesForDay,
                         hydrationTotalMl = hydrationTotalMl,
                         hydrationGoalMl = hydrationGoalMl,
+                        hydrationNotLoggedText = hydrationNotLoggedText,
                     ),
                     tint = dashboardCardTint(card),
                     // #110: label the sleep row with its source + night (this section renders at offset 0
@@ -6190,8 +6298,9 @@ private fun dashboardCardValue(
     importedStepsForDay: Int?,
     estimatedStepsForDay: Int?,
     caloriesForDay: Double?,
-    hydrationTotalMl: Double,
+    hydrationTotalMl: Double?,
     hydrationGoalMl: Int,
+    hydrationNotLoggedText: String,
 ): String {
     fun withUnit(s: String): String =
         if (s == NO_DATA) NO_DATA else if (card.unit.isEmpty()) s else "$s ${card.unit}"
@@ -6240,11 +6349,10 @@ private fun dashboardCardValue(
         DashboardCard.VITALITY ->
             vitality?.let { it.roundToInt().toString() } ?: NO_DATA
         DashboardCard.HYDRATION ->
-            // "<total> / <goal> L" in litres to 1 dp, e.g. "1.2 / 3.2 L". Always shows a value (a fresh
-            // day reads "0.0 / 3.2 L"), since the goal is always derivable from the profile.
-            String.format(
-                Locale.US, "%.1f / %.1f L",
-                hydrationTotalMl / 1000.0, hydrationGoalMl / 1000.0,
+            HydrationStore.cardValue(
+                hydrationTotalMl,
+                hydrationGoalMl,
+                hydrationNotLoggedText,
             )
         DashboardCard.COUPLED ->
             // A tap-through row with no metric value of its own, the row shows just the chevron. An empty

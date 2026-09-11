@@ -242,6 +242,7 @@ capture as-usual asUsual light large disabled ready || exit 1
 capture recovery-shift belowUsual light large disabled recoveryShift || exit 1
 capture stop painOrUnwell light large disabled stop || exit 1
 capture accessibility-stop painOrUnwell light accessibility-large disabled stop || exit 1
+capture accessibility5-stop painOrUnwell light accessibility-extra-extra-extra-large disabled stop || exit 1
 capture dark-contrast-ready asUsual dark large enabled ready || exit 1
 capture planned-workout asUsual light large disabled ready 1 || exit 1
 

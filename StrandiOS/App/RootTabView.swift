@@ -500,12 +500,12 @@ struct RootTabView: View {
 
     private func refreshAdaptiveHydrationContext() async {
         let day = Repository.localDayKey(Date())
-        let reading = await repo.hydrationReading(day: day)
+        let reading = try? await repo.hydrationReading(day: day)
         HydrationReminders.updateAdaptiveContext(
             temperatureC: nil,
             effort: repo.localCalendarToday?.strain,
             consumedML: reading?.valueML,
-            goalML: repo.hydrationGoalML(profileSex: profile.sex)
+            goalML: reading.map { _ in repo.hydrationGoalML(profileSex: profile.sex) }
         )
     }
 

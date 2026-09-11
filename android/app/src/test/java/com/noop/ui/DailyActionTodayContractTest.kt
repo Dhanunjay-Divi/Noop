@@ -31,9 +31,12 @@ class DailyActionTodayContractTest {
         assertTrue(today.contains("NoopPrefs.setDailyActionCheckIn("))
         assertTrue(today.contains("viewModel.onAdaptiveDayInputsChanged()"))
         assertTrue(today.contains("DailyActionPlanner.plan("))
-        assertTrue(today.contains("TodaySection.WHY -> DailyPlanWhySection("))
-        assertTrue(today.contains("TodaySection.TARGET -> DailyPlanTargetSection("))
-        assertTrue(today.contains("TodaySection.WATCH -> DailyPlanWatchSection("))
+        assertTrue(today.contains("TodaySection.WHY -> TodayDetailSection("))
+        assertTrue(today.contains("DailyPlanWhySection("))
+        assertTrue(today.contains("TodaySection.TARGET -> TodayDetailSection("))
+        assertTrue(today.contains("DailyPlanTargetSection("))
+        assertTrue(today.contains("TodaySection.WATCH -> TodayDetailSection("))
+        assertTrue(today.contains("DailyPlanWatchSection("))
         assertTrue(
             today.contains(
                 "it.flag == ReadinessEngine.Flag.WATCH || it.flag == ReadinessEngine.Flag.BAD"

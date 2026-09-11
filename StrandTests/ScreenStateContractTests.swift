@@ -51,6 +51,96 @@ final class ScreenStateContractTests: XCTestCase {
         XCTAssertTrue(rhythm.contains("kind: .empty"))
         XCTAssertFalse(nutrition.contains("Loading your private nutrition log"))
     }
+
+    func testExternalHealthProjectionReconcilesOptInRoutineNotifications() throws {
+        let iosApp = try sourceText("StrandiOS/App/StrandiOSApp.swift")
+        let appleModel = try sourceText("Strand/App/AppModel.swift")
+        let androidWorker = try sourceText(
+            "android/app/src/main/java/com/noop/ingest/HealthConnectAutoSync.kt"
+        )
+
+        XCTAssertTrue(iosApp.contains(
+            "await model.processAppleHealthProjectionChange("
+        ))
+        XCTAssertTrue(appleModel.contains(
+            "func processAppleHealthProjectionChange("
+        ))
+        XCTAssertTrue(appleModel.contains(
+            "postSyncRoutineCoordinationActive = true"
+        ))
+        XCTAssertTrue(appleModel.contains(
+            "await evaluateContextualInterventions(\n            notificationBudget: notificationBudget"
+        ))
+        XCTAssertTrue(androidWorker.contains("if (outcome.rebuilt)"))
+        XCTAssertTrue(androidWorker.contains("ScheduledReportNotifier.onWorkout("))
+        XCTAssertTrue(androidWorker.contains("AdaptiveDayEvaluator.evaluateAndNotify("))
+        XCTAssertTrue(androidWorker.contains("ScheduledReportNotifier.onMorning("))
+        XCTAssertTrue(androidWorker.contains("\"source\" to \"external_health\""))
+    }
+}
+
+/// Dynamic Type must reach the user's selected accessibility size across app
+/// content. Fixed navigation chrome may retain a local cap when it preserves
+/// stable destinations and spoken labels.
+final class RootDynamicTypeContractTests: XCTestCase {
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func text(_ relativePath: String) throws -> String {
+        try String(
+            contentsOf: repoRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    func testAppleAppRootsDoNotClampAccessibilityText() throws {
+        let macApp = try text("Strand/App/StrandApp.swift")
+        let iosApp = try text("StrandiOS/App/StrandiOSApp.swift")
+        let globalClamp = ".dynamicTypeSize(...DynamicTypeSize.accessibility1)"
+
+        XCTAssertFalse(macApp.contains(globalClamp))
+        XCTAssertFalse(iosApp.contains(globalClamp))
+    }
+
+    func testFixedIOSNavigationChromeKeepsLocalLargeTextBehavior() throws {
+        let shell = try text("StrandiOS/App/RootTabView.swift")
+
+        XCTAssertTrue(shell.contains(
+            "compact && !dynamicTypeSize.isAccessibilitySize"
+        ))
+        XCTAssertTrue(shell.contains(
+            ".dynamicTypeSize(...DynamicTypeSize.xxLarge)"
+        ))
+    }
+
+    func testTodayContentHonorsAccessibilityTextAndQAExpandsTheRealPlan() throws {
+        let today = try text("Strand/Liquid/LiquidTodayView.swift")
+        let localClamp = ".dynamicTypeSize(...DynamicTypeSize.accessibility1)"
+
+        XCTAssertFalse(today.contains(localClamp))
+        XCTAssertTrue(today.contains("if dynamicTypeSize.isAccessibilitySize"))
+        XCTAssertTrue(today.contains(
+            "@State private var todayDetailsExpanded = Self.initialTodayDetailsExpanded"
+        ))
+        XCTAssertTrue(today.contains(
+            #"CommandLine.arguments.contains("--demo-daily-plan")"#
+        ))
+        XCTAssertTrue(today.contains(
+            "targetSection.id(Self.dailyPlanAnchorID)"
+        ))
+    }
+
+    func testDailyPlanVisualMatrixIncludesMaximumAccessibilityText() throws {
+        let script = try text("Tools/ios-daily-plan-visual-qa.sh")
+
+        XCTAssertTrue(script.contains("accessibility5-stop"))
+        XCTAssertTrue(script.contains(
+            "accessibility-extra-extra-extra-large"
+        ))
+    }
 }
 
 /// Pins the production nutrition UI to the same provenance and fast-repeat contract as storage.
@@ -231,6 +321,8 @@ final class TabShellVisualQAContractTests: XCTestCase {
         XCTAssertTrue(script.contains("iPhone-17-Pro-Max"))
         XCTAssertTrue(script.contains("iPhone-17e"))
         XCTAssertTrue(script.contains("--demo-tab today"))
+        XCTAssertTrue(script.contains("today-accessibility"))
+        XCTAssertTrue(script.contains("--demo-daily-plan"))
         XCTAssertTrue(script.contains("--demo-tab trends"))
         XCTAssertTrue(script.contains("--demo-tab sleep"))
         XCTAssertTrue(script.contains("--demo-tab more"))
@@ -553,7 +645,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 645)
+        XCTAssertEqual(source.count, 653)
         XCTAssertEqual(
             source["appwide.terms.title"]?["en"],
             "NOOP Band is coming"

@@ -1,6 +1,7 @@
 import Foundation
 import UserNotifications
 import StrandAnalytics
+import WhoopStore
 
 enum ReminderSleepSource: String, Equatable, Sendable { case wearable, appleHealth, mixed, none }
 
@@ -78,14 +79,96 @@ struct WindDownNotificationCopy: Equatable, Sendable {
     let body: String
 }
 
+/// Conservative, best-effort evidence that the user is already asleep when a wind-down reminder is
+/// pending. Only a fresh, locally computed, stage-rich session can suppress a reminder. Missing,
+/// imported-summary, sparse, edited, malformed, stale, or future evidence deliberately fails open.
+enum WindDownSleepStatePolicy {
+    static let maximumSessionAge: TimeInterval = 18 * 60 * 60
+    static let maximumObservationLag: TimeInterval = 30 * 60
+    static let maximumObservationLead: TimeInterval = 5 * 60
+    private static let asleepStages = Set(["light", "deep", "rem"])
+    private static let knownStages = asleepStages.union(["wake", "awake"])
+
+    struct Evidence: Equatable, Sendable {
+        let sessionStart: Int
+        let observedThrough: Int
+        let lastStage: String
+    }
+
+    static func evidence(from session: CachedSleepSession) -> Evidence? {
+        guard !session.userEdited,
+              session.gravitySparse == false,
+              let json = session.stagesJSON,
+              let data = json.data(using: .utf8),
+              let segments = try? JSONDecoder().decode([StageSegment].self, from: data),
+              !segments.isEmpty else { return nil }
+
+        var previousEnd = Int.min
+        var observedThrough = Int.min
+        var lastStage: String?
+        for segment in segments {
+            let stage = segment.stage.lowercased()
+            guard segment.end > segment.start,
+                  segment.start >= session.effectiveStartTs - 60,
+                  segment.end <= session.endTs + 60,
+                  segment.start >= previousEnd,
+                  knownStages.contains(stage) else { return nil }
+            previousEnd = segment.end
+            observedThrough = segment.end
+            lastStage = stage
+        }
+        guard observedThrough > session.effectiveStartTs,
+              let lastStage else { return nil }
+        return Evidence(
+            sessionStart: session.effectiveStartTs,
+            observedThrough: observedThrough,
+            lastStage: lastStage
+        )
+    }
+
+    static func activeSleepEvidence(
+        sessions: [CachedSleepSession],
+        now: Date = Date()
+    ) -> Evidence? {
+        let nowSeconds = Int(now.timeIntervalSince1970)
+        return sessions.compactMap(evidence(from:))
+            .filter {
+                asleepStages.contains($0.lastStage)
+                    && $0.sessionStart <= nowSeconds
+                    && nowSeconds - $0.sessionStart <= Int(maximumSessionAge)
+                    && $0.observedThrough <= nowSeconds + Int(maximumObservationLead)
+                    && nowSeconds - $0.observedThrough <= Int(maximumObservationLag)
+            }
+            .max { $0.observedThrough < $1.observedThrough }
+    }
+
+    static func shouldSuppress(
+        sessions: [CachedSleepSession],
+        now: Date = Date()
+    ) -> Bool {
+        activeSleepEvidence(sessions: sessions, now: now) != nil
+    }
+}
+
+struct ScheduledWindDownReminder: Codable, Equatable, Sendable {
+    let identifier: String
+    let fireTimestamp: Int
+    let dayKey: String
+
+    var fireDate: Date {
+        Date(timeIntervalSince1970: TimeInterval(fireTimestamp))
+    }
+}
+
 /// The wind-down nudge (#207) — a gentle, NON-critical evening local notification suggesting it's
 /// time to start winding down so the user can reach their usual wake time well-rested.
 ///
 /// Cross-platform (macOS + iOS): a sideloaded backgrounded app can't fire a dependable LOUD wake
 /// alarm (no critical-alert entitlement), but it CAN post a calm daily reminder. The nudge fires on a
-/// repeating calendar trigger at a time DERIVED from the user's earliest wake time minus their usual
-/// sleep need minus a short lead. State is its own UserDefaults-backed store so it doesn't couple to
-/// the shared BehaviorStore. On-device only; nothing is sent anywhere.
+/// bounded set of dated calendar triggers at a time DERIVED from the user's earliest wake time minus
+/// their usual sleep need minus a short lead. Dated triggers allow fresh local sleep evidence to remove
+/// only the current night while later reminders remain intact. State is its own UserDefaults-backed
+/// store so it doesn't couple to the shared BehaviorStore. On-device only; nothing is sent anywhere.
 @MainActor
 enum WindDownNudge {
 
@@ -104,6 +187,8 @@ enum WindDownNudge {
         static let personalizationNights = "windDown.personalizationNights"
         static let personalizationLatestDay = "windDown.personalizationLatestDay"
         static let personalizationCurrent = "windDown.personalizationCurrent"
+        static let scheduledReminders = "windDown.scheduledReminders.v2"
+        static let sleepSuppressedDays = "windDown.sleepSuppressedDays.v1"
         // PR#554 (MumiZed) — per-day wake overrides. A JSON map of {weekday(1=Sun…7=Sat): wakeMinutes}.
         // Empty / no entry for a day = that day uses the default `wakeMinutes`, so the feature is purely
         // additive (no override → exactly the old single-time behaviour).
@@ -248,10 +333,7 @@ enum WindDownNudge {
     ) {
         guard on else {
             UserDefaults.standard.set(false, forKey: K.enabled)
-            // Clear the single trigger AND any per-day triggers (PR#554) so disabling leaves nothing behind.
-            LocalNotificationLifecycle.cancel(
-                identifiers: [requestId] + perDayRequestIds
-            )
+            cancelAllScheduledReminders()
             completion?(.off)
             return
         }
@@ -262,6 +344,7 @@ enum WindDownNudge {
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
                 UserDefaults.standard.set(true, forKey: K.enabled)
+                clearSleepSuppressedDays()
                 schedule()
                 completion?(.scheduled)
             case .notDetermined:
@@ -270,10 +353,12 @@ enum WindDownNudge {
                 let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
                 if granted {
                     UserDefaults.standard.set(true, forKey: K.enabled)
+                    clearSleepSuppressedDays()
                     schedule()
                     completion?(.scheduled)
                 } else {
                     UserDefaults.standard.set(false, forKey: K.enabled)
+                    cancelAllScheduledReminders(on: center)
                     LocalNotificationLifecycle.suppressed(identifier: requestId)
                     completion?(.denied)
                 }
@@ -281,6 +366,7 @@ enum WindDownNudge {
                 // .denied (or any future non-authorized case) — don't fake an enabled toggle. The caller
                 // surfaces a "notifications are off" prompt with a jump to Settings.
                 UserDefaults.standard.set(false, forKey: K.enabled)
+                cancelAllScheduledReminders(on: center)
                 LocalNotificationLifecycle.suppressed(identifier: requestId)
                 completion?(.denied)
             }
@@ -378,10 +464,7 @@ enum WindDownNudge {
     static func restoreScheduleIfAuthorized() {
         let center = UNUserNotificationCenter.current()
         guard isEnabled else {
-            LocalNotificationLifecycle.cancel(
-                identifiers: [requestId] + perDayRequestIds,
-                on: center
-            )
+            cancelAllScheduledReminders(on: center)
             return
         }
         Task { @MainActor in
@@ -408,6 +491,156 @@ enum WindDownNudge {
     /// Per-weekday request ids — cleared alongside the single id so toggling overrides on/off never leaves
     /// a stale trigger behind.
     private static var perDayRequestIds: [String] { (1...7).map { "\(requestId)-wd\($0)" } }
+    private static let suppressionLookAhead: TimeInterval = 12 * 60 * 60
+
+    private static var storedScheduledReminders: [ScheduledWindDownReminder] {
+        guard let data = UserDefaults.standard.data(forKey: K.scheduledReminders),
+              let reminders = try? JSONDecoder().decode([ScheduledWindDownReminder].self, from: data)
+        else { return [] }
+        return reminders
+    }
+
+    private static var sleepSuppressedDayKeys: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: K.sleepSuppressedDays) ?? [])
+    }
+
+    private static func storeScheduledReminders(_ reminders: [ScheduledWindDownReminder]) {
+        if reminders.isEmpty {
+            UserDefaults.standard.removeObject(forKey: K.scheduledReminders)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(reminders) else { return }
+        UserDefaults.standard.set(data, forKey: K.scheduledReminders)
+    }
+
+    private static func storeSleepSuppressedDayKeys(_ keys: Set<String>) {
+        let bounded = Array(keys.sorted().suffix(32))
+        if bounded.isEmpty {
+            UserDefaults.standard.removeObject(forKey: K.sleepSuppressedDays)
+        } else {
+            UserDefaults.standard.set(bounded, forKey: K.sleepSuppressedDays)
+        }
+    }
+
+    private static func clearSleepSuppressedDays() {
+        UserDefaults.standard.removeObject(forKey: K.sleepSuppressedDays)
+    }
+
+    private static func dayKey(for date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
+
+    private static func fireDate(
+        on day: Date,
+        minuteOfDay: Int,
+        calendar: Calendar
+    ) -> Date? {
+        guard let date = calendar.date(
+            bySettingHour: minuteOfDay / 60,
+            minute: minuteOfDay % 60,
+            second: 0,
+            of: day,
+            matchingPolicy: .nextTime,
+            repeatedTimePolicy: .first,
+            direction: .forward
+        ), calendar.isDate(date, inSameDayAs: day) else { return nil }
+        return date
+    }
+
+    /// Builds a bounded set of strictly future one-shot requests. Dated requests let fresh local sleep
+    /// evidence remove only the current sleep-window reminder instead of destroying every later night.
+    static func reminderSchedule(
+        now: Date = Date(),
+        horizonDays: Int = 14,
+        calendar: Calendar = .current,
+        excludedDayKeys: Set<String> = []
+    ) -> [ScheduledWindDownReminder] {
+        let targetCount = min(max(horizonDays, 1), 28)
+        let startDay = calendar.startOfDay(for: now)
+        var reminders: [ScheduledWindDownReminder] = []
+        var offset = 0
+        while reminders.count < targetCount, offset < targetCount + 32 {
+            defer { offset += 1 }
+            guard let day = calendar.date(byAdding: .day, value: offset, to: startDay) else {
+                continue
+            }
+            let weekday = calendar.component(.weekday, from: day)
+            let minute = nudgeMinuteOfDay(forWeekday: weekday)
+            guard let fireDate = fireDate(on: day, minuteOfDay: minute, calendar: calendar),
+                  fireDate > now else { continue }
+            let key = dayKey(for: fireDate, calendar: calendar)
+            guard !excludedDayKeys.contains(key) else { continue }
+            reminders.append(
+                ScheduledWindDownReminder(
+                    identifier: "\(requestId)-\(key)",
+                    fireTimestamp: Int(fireDate.timeIntervalSince1970),
+                    dayKey: key
+                )
+            )
+        }
+        return reminders
+    }
+
+    /// Selects only reminders in the active sleep window. The upper bound prevents evidence observed
+    /// after midnight from suppressing the following evening's reminder.
+    static func remindersToSuppress(
+        sessions: [CachedSleepSession],
+        scheduledReminders: [ScheduledWindDownReminder],
+        now: Date = Date()
+    ) -> [ScheduledWindDownReminder] {
+        guard let evidence = WindDownSleepStatePolicy.activeSleepEvidence(
+            sessions: sessions,
+            now: now
+        ) else { return [] }
+        let lower = evidence.sessionStart
+        let upper = Int(now.addingTimeInterval(suppressionLookAhead).timeIntervalSince1970)
+        return scheduledReminders.filter {
+            $0.fireTimestamp >= lower && $0.fireTimestamp <= upper
+        }
+    }
+
+    /// Remove a current-night reminder when fresh local stage evidence says the user is already asleep.
+    /// Future dated reminders remain scheduled, and the suppressed local day survives a schedule repair
+    /// so foregrounding the app cannot immediately re-add the same reminder.
+    static func suppressIfAlreadyAsleep(
+        sessions: [CachedSleepSession],
+        now: Date = Date(),
+        on center: UNUserNotificationCenter = .current()
+    ) {
+        guard isEnabled else { return }
+        let scheduled = storedScheduledReminders
+        let selected = remindersToSuppress(
+            sessions: sessions,
+            scheduledReminders: scheduled,
+            now: now
+        )
+        guard !selected.isEmpty else { return }
+
+        let identifiers = selected.map(\.identifier)
+        var suppressedDays = sleepSuppressedDayKeys
+        suppressedDays.formUnion(selected.map(\.dayKey))
+        storeSleepSuppressedDayKeys(suppressedDays)
+        storeScheduledReminders(
+            scheduled.filter { !identifiers.contains($0.identifier) }
+        )
+        for identifier in identifiers {
+            LocalNotificationLifecycle.suppressed(
+                identifier: identifier,
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+        }
+        LocalNotificationLifecycle.cancel(
+            identifiers: identifiers,
+            presented: true,
+            on: center
+        )
+    }
 
     static var notificationCopy: WindDownNotificationCopy {
         WindDownNotificationCopy(
@@ -428,54 +661,52 @@ enum WindDownNudge {
         return content
     }
 
-    private static func schedule() {
-        let center = UNUserNotificationCenter.current()
-        // Clear BOTH the single trigger and any per-day triggers so switching between the two modes (or
-        // editing an override) never double-fires or leaves an orphaned reminder.
+    private static func cancelAllScheduledReminders(
+        on center: UNUserNotificationCenter = .current()
+    ) {
+        let identifiers = [requestId] + perDayRequestIds
+            + storedScheduledReminders.map(\.identifier)
         LocalNotificationLifecycle.cancel(
-            identifiers: [requestId] + perDayRequestIds,
+            identifiers: Array(Set(identifiers)),
+            presented: true,
             on: center
         )
+        storeScheduledReminders([])
+    }
+
+    private static func schedule(
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) {
+        let center = UNUserNotificationCenter.current()
+        cancelAllScheduledReminders(on: center)
         DailyReviewNotifications.registerPrivacyCategory(on: center)
 
         let content = notificationContent()
-
-        // PR#554 — with per-day overrides set, fan out to seven weekday-pinned triggers each at that day's
-        // own nudge time; with none, keep the single daily trigger (identical to the pre-#554 behaviour).
-        if hasPerDayOverrides {
-            for weekday in 1...7 {
-                let minute = nudgeMinuteOfDay(forWeekday: weekday)
-                var comps = DateComponents()
-                comps.weekday = weekday   // Calendar weekday 1=Sun…7=Sat → fires weekly on that day
-                comps.hour = minute / 60
-                comps.minute = minute % 60
-                let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
-                LocalNotificationLifecycle.schedule(
-                    UNNotificationRequest(
-                        identifier: "\(requestId)-wd\(weekday)",
-                        content: content,
-                        trigger: trigger
-                    ),
-                    on: center
-                )
-            }
-            return
-        }
-
-        let minute = nudgeMinuteOfDay()
-        var comps = DateComponents()
-        comps.hour = minute / 60
-        comps.minute = minute % 60
-        // repeats: true → a daily calendar trigger; survives relaunch (it lives in the notification
-        // center, not the process), so the nudge keeps firing each evening without the app running.
-        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
-        LocalNotificationLifecycle.schedule(
-            UNNotificationRequest(
-                identifier: requestId,
-                content: content,
-                trigger: trigger
-            ),
-            on: center
+        let reminders = reminderSchedule(
+            now: now,
+            calendar: calendar,
+            excludedDayKeys: sleepSuppressedDayKeys
         )
+        storeScheduledReminders(reminders)
+        for reminder in reminders {
+            var components = calendar.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: reminder.fireDate
+            )
+            components.second = 0
+            let trigger = UNCalendarNotificationTrigger(
+                dateMatching: components,
+                repeats: false
+            )
+            LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(
+                    identifier: reminder.identifier,
+                    content: content,
+                    trigger: trigger
+                ),
+                on: center
+            )
+        }
     }
 }

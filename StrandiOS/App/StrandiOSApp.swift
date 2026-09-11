@@ -390,9 +390,9 @@ struct StrandiOSApp: App {
         }
         bridge.dataProjectionChanged = { [weak bridge, weak model] in
             guard let model else { return }
-            await model.refreshAfterAppleHealthSync(
-                authorized: bridge?.auth == .authorized)
-            model.repo.noteAgeMetricsChanged()
+            await model.processAppleHealthProjectionChange(
+                authorized: bridge?.auth == .authorized
+            )
         }
         // HealthKit may relaunch a terminated app in the background to deliver an observer update,
         // before a SwiftUI scene becomes active. Install observers at this process-launch boundary for
@@ -546,10 +546,6 @@ struct StrandiOSApp: App {
                     WidgetCenter.shared.reloadAllTimelines()
                 }
                 .chartStyle(chartStyleRaw)
-                // Dynamic Type now scales the prose/label roles (StrandFont). Cap the upper end so the
-                // fixed-geometry tiles/gauges stay legible at the largest accessibility sizes rather than
-                // clipping; the common Larger-Text range still scales fully.
-                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .onReceive(model.live.heartRateSamplePublisher) { sample in
                     guard launchAccess.isUnlocked,
                           acceptedTermsVersion == Terms.currentVersion,

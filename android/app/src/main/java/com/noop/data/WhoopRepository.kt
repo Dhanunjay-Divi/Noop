@@ -383,6 +383,11 @@ class WhoopRepository private constructor(
         },
     )
 
+    /** Small internal transaction seam for read-modify-write feature stores such as Hydration. */
+    internal suspend fun <R> runMetricMutationTransaction(
+        block: suspend () -> R,
+    ): R = transactor.run(block)
+
     // MARK: - Device
 
     suspend fun upsertDevice(id: String, mac: String? = null, name: String? = null) {

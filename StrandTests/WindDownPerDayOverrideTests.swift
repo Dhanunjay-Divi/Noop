@@ -1,4 +1,5 @@
 import XCTest
+import WhoopStore
 @testable import Strand
 
 /// PR#554 (MumiZed, reimplemented as NoopApp) — per-day wake overrides for the wind-down nudge.
@@ -17,6 +18,9 @@ final class WindDownPerDayOverrideTests: XCTestCase {
     private let sleepNeedKey = "windDown.sleepNeedMinutes"
     private let recoveryKey = "windDown.recoveryMinutes"
     private let leadKey = "windDown.leadMinutes"
+    private let enabledKey = "windDown.enabled"
+    private let scheduledRemindersKey = "windDown.scheduledReminders.v2"
+    private let sleepSuppressedDaysKey = "windDown.sleepSuppressedDays.v1"
 
     override func setUp() {
         super.setUp()
@@ -29,7 +33,10 @@ final class WindDownPerDayOverrideTests: XCTestCase {
     }
 
     private func clearPlannerDefaults() {
-        [perDayKey, wakeKey, sleepNeedKey, recoveryKey, leadKey].forEach {
+        [
+            perDayKey, wakeKey, sleepNeedKey, recoveryKey, leadKey, enabledKey,
+            scheduledRemindersKey, sleepSuppressedDaysKey,
+        ].forEach {
             UserDefaults.standard.removeObject(forKey: $0)
         }
     }
@@ -150,5 +157,233 @@ final class WindDownPerDayOverrideTests: XCTestCase {
         XCTAssertEqual(context.historyNights, 3)
         XCTAssertEqual(context.source, .mixed)
         XCTAssertEqual(context.recoveryMinutes, 45)
+    }
+
+    func testFreshComputedSessionEndingAsleepSuppressesWindDown() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let session = sleepSession(
+            start: Int(now.timeIntervalSince1970) - 90 * 60,
+            end: Int(now.timeIntervalSince1970) - 2 * 60,
+            lastStage: "deep"
+        )
+
+        XCTAssertTrue(
+            WindDownSleepStatePolicy.shouldSuppress(sessions: [session], now: now)
+        )
+    }
+
+    func testAwakeStaleEditedSparseAndSummaryOnlySessionsFailOpen() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let seconds = Int(now.timeIntervalSince1970)
+        let awake = sleepSession(
+            start: seconds - 90 * 60,
+            end: seconds - 2 * 60,
+            lastStage: "wake"
+        )
+        let stale = sleepSession(
+            start: seconds - 3 * 60 * 60,
+            end: seconds - 31 * 60,
+            lastStage: "rem"
+        )
+        let edited = sleepSession(
+            start: seconds - 90 * 60,
+            end: seconds - 2 * 60,
+            lastStage: "light",
+            userEdited: true
+        )
+        let sparse = sleepSession(
+            start: seconds - 90 * 60,
+            end: seconds - 2 * 60,
+            lastStage: "light",
+            gravitySparse: true
+        )
+        let summaryOnly = sleepSession(
+            start: seconds - 90 * 60,
+            end: seconds - 2 * 60,
+            lastStage: "light",
+            stagesJSON: #"{"light":80,"deep":10}"#
+        )
+
+        XCTAssertFalse(
+            WindDownSleepStatePolicy.shouldSuppress(
+                sessions: [awake, stale, edited, sparse, summaryOnly],
+                now: now
+            )
+        )
+    }
+
+    func testMalformedOrFutureSleepEvidenceFailsOpen() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let seconds = Int(now.timeIntervalSince1970)
+        let malformed = sleepSession(
+            start: seconds - 90 * 60,
+            end: seconds - 2 * 60,
+            lastStage: "light",
+            stagesJSON: #"[{"start":1800000000,"end":1799999940,"stage":"light"}]"#
+        )
+        let future = sleepSession(
+            start: seconds + 60,
+            end: seconds + 5 * 60,
+            lastStage: "light"
+        )
+
+        XCTAssertFalse(
+            WindDownSleepStatePolicy.shouldSuppress(
+                sessions: [malformed, future],
+                now: now
+            )
+        )
+    }
+
+    func testDatedScheduleUsesPerDayOverridesAndKeepsFourteenFutureNights() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 11, hour: 20
+        )))
+        WindDownNudge.setWakeMinutes(7 * 60)
+        WindDownNudge.setSleepNeedMinutes(8 * 60)
+        WindDownNudge.setLeadMinutes(30)
+        WindDownNudge.setWakeOverride(weekday: 7, minutes: 9 * 60)
+
+        let reminders = WindDownNudge.reminderSchedule(
+            now: now,
+            horizonDays: 14,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(reminders.count, 14)
+        XCTAssertEqual(Set(reminders.map(\.identifier)).count, 14)
+        XCTAssertTrue(reminders.allSatisfy { $0.fireDate > now })
+        let saturday = try XCTUnwrap(reminders.first {
+            calendar.component(.weekday, from: $0.fireDate) == 7
+        })
+        XCTAssertEqual(calendar.component(.hour, from: saturday.fireDate), 0)
+        XCTAssertEqual(calendar.component(.minute, from: saturday.fireDate), 30)
+    }
+
+    func testDatedSchedulePreservesLocalWallClockAcrossSpringDst() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 3, day: 7, hour: 23
+        )))
+        WindDownNudge.setWakeMinutes(7 * 60)
+        WindDownNudge.setSleepNeedMinutes(8 * 60)
+        WindDownNudge.setLeadMinutes(30)
+
+        let first = try XCTUnwrap(
+            WindDownNudge.reminderSchedule(
+                now: now,
+                horizonDays: 2,
+                calendar: calendar
+            ).first
+        )
+        let components = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: first.fireDate
+        )
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 3)
+        XCTAssertEqual(components.day, 8)
+        XCTAssertEqual(components.hour, 22)
+        XCTAssertEqual(components.minute, 30)
+    }
+
+    func testSleepWindowSuppressionPreservesTheNextEvening() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 12, hour: 0, minute: 10
+        )))
+        let sessionStart = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 11, hour: 21, minute: 30
+        )))
+        let observedThrough = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 12, hour: 0, minute: 8
+        )))
+        let currentNight = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 11, hour: 22
+        )))
+        let nextEvening = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 12, hour: 22
+        )))
+        let session = sleepSession(
+            start: Int(sessionStart.timeIntervalSince1970),
+            end: Int(observedThrough.timeIntervalSince1970),
+            lastStage: "rem"
+        )
+        let reminders = [
+            ScheduledWindDownReminder(
+                identifier: "wind-down-nudge-2026-09-11",
+                fireTimestamp: Int(currentNight.timeIntervalSince1970),
+                dayKey: "2026-09-11"
+            ),
+            ScheduledWindDownReminder(
+                identifier: "wind-down-nudge-2026-09-12",
+                fireTimestamp: Int(nextEvening.timeIntervalSince1970),
+                dayKey: "2026-09-12"
+            ),
+        ]
+
+        XCTAssertEqual(
+            WindDownNudge.remindersToSuppress(
+                sessions: [session],
+                scheduledReminders: reminders,
+                now: now
+            ).map(\.identifier),
+            ["wind-down-nudge-2026-09-11"]
+        )
+    }
+
+    func testSuppressedDayIsSkippedWithoutShorteningTheHorizon() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 11, hour: 20
+        )))
+        WindDownNudge.setWakeMinutes(7 * 60)
+        WindDownNudge.setSleepNeedMinutes(8 * 60)
+        WindDownNudge.setLeadMinutes(30)
+
+        let baseline = WindDownNudge.reminderSchedule(
+            now: now,
+            horizonDays: 14,
+            calendar: calendar
+        )
+        let excluded = try XCTUnwrap(baseline.first?.dayKey)
+        let filtered = WindDownNudge.reminderSchedule(
+            now: now,
+            horizonDays: 14,
+            calendar: calendar,
+            excludedDayKeys: [excluded]
+        )
+
+        XCTAssertEqual(filtered.count, 14)
+        XCTAssertFalse(filtered.contains { $0.dayKey == excluded })
+    }
+
+    private func sleepSession(
+        start: Int,
+        end: Int,
+        lastStage: String,
+        userEdited: Bool = false,
+        gravitySparse: Bool = false,
+        stagesJSON: String? = nil
+    ) -> CachedSleepSession {
+        let middle = start + (end - start) / 2
+        return CachedSleepSession(
+            startTs: start,
+            endTs: end,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: stagesJSON ?? """
+            [{"start":\(start),"end":\(middle),"stage":"light"},\
+            {"start":\(middle),"end":\(end),"stage":"\(lastStage)"}]
+            """,
+            userEdited: userEdited,
+            gravitySparse: gravitySparse
+        )
     }
 }

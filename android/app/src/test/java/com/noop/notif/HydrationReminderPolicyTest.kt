@@ -56,6 +56,7 @@ class HydrationReminderPolicyTest {
     @Test fun adaptiveTimingFallsBackToBaseWhenEvidenceIsMissingOrInvalid() {
         listOf(
             HydrationAdaptiveContext(null, null, null, 12 * 60),
+            HydrationAdaptiveContext(null, null, 2_500, 12 * 60),
             HydrationAdaptiveContext(Double.NaN, Double.NaN, 0, 12 * 60),
         ).forEach { context ->
             assertEquals(

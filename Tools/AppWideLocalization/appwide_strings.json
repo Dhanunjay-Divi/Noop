@@ -1,4 +1,26 @@
 {
+  "appwide.a11y.collapsed": {
+    "de": "Reduziert",
+    "en": "Collapsed",
+    "es": "Contraído",
+    "fr": "Réduit",
+    "it": "Compresso",
+    "pt-PT": "Recolhido",
+    "ru": "Свернуто",
+    "zh-Hans": "已折叠",
+    "zh-Hant": "已收合"
+  },
+  "appwide.a11y.expanded": {
+    "de": "Erweitert",
+    "en": "Expanded",
+    "es": "Expandido",
+    "fr": "Développé",
+    "it": "Espanso",
+    "pt-PT": "Expandido",
+    "ru": "Развернуто",
+    "zh-Hans": "已展开",
+    "zh-Hant": "已展開"
+  },
   "appwide.a11y.state_format": {
     "de": "%1$s. %2$s",
     "en": "%1$s. %2$s",
@@ -42,6 +64,72 @@
     "ru": "Примерно соответствует возрасту в профиле",
     "zh-Hans": "与个人资料年龄大致相同",
     "zh-Hant": "與個人資料年齡大致相同"
+  },
+  "appwide.hydration.not_logged": {
+    "de": "Nicht protokolliert",
+    "en": "Not logged",
+    "es": "No registrado",
+    "fr": "Non enregistré",
+    "it": "Non registrato",
+    "pt-PT": "Não registado",
+    "ru": "Не записано",
+    "zh-Hans": "未记录",
+    "zh-Hant": "未記錄"
+  },
+  "appwide.hydration.unavailable": {
+    "de": "Nicht verfügbar",
+    "en": "Unavailable",
+    "es": "No disponible",
+    "fr": "Indisponible",
+    "it": "Non disponibile",
+    "pt-PT": "Indisponível",
+    "ru": "Недоступно",
+    "zh-Hans": "暂不可用",
+    "zh-Hant": "暫不可用"
+  },
+  "appwide.hydration.load_failed": {
+    "de": "Hydration konnte nicht geladen werden. Versuche es erneut.",
+    "en": "Hydration couldn’t be loaded. Try again.",
+    "es": "No se pudo cargar la hidratación. Inténtalo de nuevo.",
+    "fr": "Impossible de charger l’hydratation. Réessayez.",
+    "it": "Impossibile caricare l’idratazione. Riprova.",
+    "pt-PT": "Não foi possível carregar a hidratação. Tente novamente.",
+    "ru": "Не удалось загрузить данные о воде. Повторите попытку.",
+    "zh-Hans": "无法加载饮水数据。请重试。",
+    "zh-Hant": "無法載入飲水資料。請再試一次。"
+  },
+  "appwide.hydration.save_failed": {
+    "de": "Dieser Wassereintrag konnte nicht gespeichert werden. Versuche es erneut.",
+    "en": "Couldn’t save that water entry. Try again.",
+    "es": "No se pudo guardar esa entrada de agua. Inténtalo de nuevo.",
+    "fr": "Impossible d’enregistrer cette consommation d’eau. Réessayez.",
+    "it": "Impossibile salvare questa registrazione d’acqua. Riprova.",
+    "pt-PT": "Não foi possível guardar este registo de água. Tente novamente.",
+    "ru": "Не удалось сохранить запись о воде. Повторите попытку.",
+    "zh-Hans": "无法保存这条饮水记录。请重试。",
+    "zh-Hant": "無法儲存這筆飲水記錄。請再試一次。"
+  },
+  "appwide.hydration.retry": {
+    "de": "Hydration erneut laden",
+    "en": "Retry hydration",
+    "es": "Reintentar hidratación",
+    "fr": "Réessayer l’hydratation",
+    "it": "Riprova idratazione",
+    "pt-PT": "Tentar hidratação novamente",
+    "ru": "Повторить загрузку данных о воде",
+    "zh-Hans": "重新加载饮水数据",
+    "zh-Hant": "重新載入飲水資料"
+  },
+  "appwide.action.dismiss": {
+    "de": "Schließen",
+    "en": "Dismiss",
+    "es": "Cerrar",
+    "fr": "Fermer",
+    "it": "Chiudi",
+    "pt-PT": "Fechar",
+    "ru": "Закрыть",
+    "zh-Hans": "关闭",
+    "zh-Hant": "關閉"
   },
   "appwide.fitness_age.value_format": {
     "de": "%1$d J.",

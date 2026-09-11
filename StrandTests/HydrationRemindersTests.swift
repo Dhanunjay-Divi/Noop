@@ -133,6 +133,21 @@ final class HydrationRemindersTests: XCTestCase {
         )
         XCTAssertEqual(noData.intervalMinutes, 120)
         XCTAssertTrue(noData.reasons.isEmpty)
+
+        let goalWithoutIntake = HydrationReminders.adaptivePlan(
+            baseInterval: 120,
+            start: 8 * 60,
+            end: 20 * 60,
+            context: .init(
+                temperatureC: nil,
+                effort: nil,
+                consumedML: nil,
+                goalML: 2_000,
+                minuteOfDay: 12 * 60
+            )
+        )
+        XCTAssertEqual(goalWithoutIntake.intervalMinutes, 120)
+        XCTAssertTrue(goalWithoutIntake.reasons.isEmpty)
     }
 
     func testAdaptiveProgressDoesNotGuessOutsideActiveHours() {

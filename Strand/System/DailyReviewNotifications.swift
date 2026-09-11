@@ -50,6 +50,51 @@ enum NotificationRouteBridge {
     }
 }
 
+/// One completed sync may make several routine notifications eligible at once. This in-memory budget
+/// lets the highest-priority eligible lane own that sync without consuming lower-lane dedupe state.
+/// Safety alerts and active-workout cautions do not use this budget.
+@MainActor
+final class PostSyncRoutineNotificationBudget {
+    enum Lane: String, Equatable, Sendable {
+        case autoWorkout = "auto_workout"
+        case adaptiveDay = "adaptive_day"
+        case postWorkoutSummary = "post_workout_summary"
+        case morningRecap = "morning_recap"
+    }
+
+    private(set) var claimedLane: Lane?
+    private var reservedLane: Lane?
+
+    var isClaimed: Bool {
+        claimedLane != nil
+    }
+
+    @discardableResult
+    func reserve(_ lane: Lane) -> Bool {
+        guard claimedLane == nil, reservedLane == nil else { return false }
+        reservedLane = lane
+        return true
+    }
+
+    @discardableResult
+    func commit(_ lane: Lane) -> Bool {
+        guard claimedLane == nil, reservedLane == lane else { return false }
+        reservedLane = nil
+        claimedLane = lane
+        return true
+    }
+
+    func release(_ lane: Lane) {
+        guard reservedLane == lane else { return }
+        reservedLane = nil
+    }
+
+    @discardableResult
+    func claim(_ lane: Lane) -> Bool {
+        reserve(lane) && commit(lane)
+    }
+}
+
 /// Two privacy-safe local reminders that help users review data already stored on their device.
 ///
 /// This is a true opt-in automation:
@@ -534,21 +579,24 @@ enum MorningRecapNotifications {
     static func postIfAuthorized(
         reportDay: String,
         chargeOrRestPresent: Bool,
-        materializedAfterSync: Bool = true
+        materializedAfterSync: Bool = true,
+        budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         await postIfAuthorized(
             reportDay: reportDay,
             chargeOrRestPresent: chargeOrRestPresent,
             materializedAfterSync: materializedAfterSync,
-            client: .system
+            client: .system,
+            budget: budget
         )
     }
 
     static func postIfAuthorized(
         reportDay: String,
         chargeOrRestPresent: Bool,
-        materializedAfterSync: Bool,
-        client: NotificationClient
+        materializedAfterSync: Bool = true,
+        client: NotificationClient,
+        budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         guard shouldNotify(
             enabled: isEnabled,
@@ -570,6 +618,14 @@ enum MorningRecapNotifications {
               isEnabled else { return }
         await client.preparePrivateCategory()
         guard generation == deliveryGeneration, isEnabled else { return }
+        let lane = PostSyncRoutineNotificationBudget.Lane.morningRecap
+        guard budget?.reserve(lane) ?? true else { return }
+        var committed = budget == nil
+        defer {
+            if !committed {
+                budget?.release(lane)
+            }
+        }
 
         let content = UNMutableNotificationContent()
         content.applyProminence(.ambient)
@@ -590,11 +646,18 @@ enum MorningRecapNotifications {
                 client.remove([requestID])
                 return
             }
+            if let budget {
+                guard budget.commit(lane) else {
+                    client.remove([requestID])
+                    return
+                }
+            }
+            committed = true
             UserDefaults.standard.set(reportDay, forKey: lastReportDayKey)
         } catch {
-            if generation != deliveryGeneration || !isEnabled {
-                client.remove([requestID])
-            }
+            // `add` can fail after Notification Center observed the request. Retract the stable
+            // identifier before releasing the budget so a lower-priority lane cannot double-stack.
+            client.remove([requestID])
         }
     }
 
@@ -769,13 +832,21 @@ enum PostWorkoutSummaryNotifications {
             && newestWorkoutStart.map { $0 > lastWorkoutStart } == true
     }
 
-    static func postIfAuthorized(newestWorkoutStart: Int?) async {
-        await postIfAuthorized(newestWorkoutStart: newestWorkoutStart, client: .system)
+    static func postIfAuthorized(
+        newestWorkoutStart: Int?,
+        budget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
+        await postIfAuthorized(
+            newestWorkoutStart: newestWorkoutStart,
+            client: .system,
+            budget: budget
+        )
     }
 
     static func postIfAuthorized(
         newestWorkoutStart: Int?,
-        client: NotificationClient
+        client: NotificationClient,
+        budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         guard isEnabled else {
             clear(client: client)
@@ -812,6 +883,14 @@ enum PostWorkoutSummaryNotifications {
               isEnabled else { return }
         await client.preparePrivateCategory()
         guard generation == deliveryGeneration, isEnabled else { return }
+        let lane = PostSyncRoutineNotificationBudget.Lane.postWorkoutSummary
+        guard budget?.reserve(lane) ?? true else { return }
+        var committed = budget == nil
+        defer {
+            if !committed {
+                budget?.release(lane)
+            }
+        }
 
         let text = copy
         let content = UNMutableNotificationContent()
@@ -833,13 +912,18 @@ enum PostWorkoutSummaryNotifications {
                 client.remove([requestID])
                 return
             }
+            if let budget {
+                guard budget.commit(lane) else {
+                    client.remove([requestID])
+                    return
+                }
+            }
+            committed = true
             // Advance only after Notification Center accepted the request. A denied or failed post can
             // retry on the next completed sync instead of losing the workout silently.
             advanceFrontier(to: newestWorkoutStart)
         } catch {
-            if generation != deliveryGeneration || !isEnabled {
-                client.remove([requestID])
-            }
+            client.remove([requestID])
         }
     }
 
@@ -1096,6 +1180,7 @@ enum AutoWorkoutNotifications {
         let startSec: Int
         let content: UNMutableNotificationContent
         let client: NotificationClient
+        let budget: PostSyncRoutineNotificationBudget?
     }
 
     /// Posting is serialized because every delivery intentionally replaces the same request identifier.
@@ -1166,25 +1251,51 @@ enum AutoWorkoutNotifications {
         AutoWorkoutSuggestionIdentity.token(startSec: startSec, endSec: endSec)
     }
 
-    static func postIfAuthorized(startSec: Int, endSec: Int) async {
-        await postIfAuthorized(startSec: startSec, endSec: endSec, client: .system)
+    static func postIfAuthorized(
+        startSec: Int,
+        endSec: Int,
+        budget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
+        await postIfAuthorized(
+            startSec: startSec,
+            endSec: endSec,
+            client: .system,
+            budget: budget
+        )
     }
 
     static func postIfAuthorized(
         startSec: Int,
         endSec: Int,
-        client: NotificationClient
+        client: NotificationClient,
+        budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         guard PuffinExperiment.autoDetectWorkoutsEnabled, isEnabled else {
             clear(client: client)
             return
         }
-        await post(kind: .candidate, startSec: startSec, endSec: endSec, client: client)
+        await post(
+            kind: .candidate,
+            startSec: startSec,
+            endSec: endSec,
+            client: client,
+            budget: budget
+        )
     }
 
-    static func postAutoSavedIfAuthorized(startSec: Int, endSec: Int) async {
+    static func postAutoSavedIfAuthorized(
+        startSec: Int,
+        endSec: Int,
+        budget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
         guard PuffinExperiment.autoWorkoutMode == .autoSave else { return }
-        await post(kind: .autoSaved, startSec: startSec, endSec: endSec, client: .system)
+        await post(
+            kind: .autoSaved,
+            startSec: startSec,
+            endSec: endSec,
+            client: .system,
+            budget: budget
+        )
     }
 
     enum Kind: String {
@@ -1212,7 +1323,8 @@ enum AutoWorkoutNotifications {
         kind: Kind,
         startSec: Int,
         endSec: Int,
-        client: NotificationClient
+        client: NotificationClient,
+        budget: PostSyncRoutineNotificationBudget?
     ) async {
         let candidateToken = token(startSec: startSec, endSec: endSec)
         let deliveryToken = kind.rawValue + ":" + candidateToken
@@ -1220,6 +1332,8 @@ enum AutoWorkoutNotifications {
                             startSec: startSec, defaults: .standard),
               activeDeliveryToken != deliveryToken,
               !deliveryQueue.contains(where: { $0.deliveryToken == deliveryToken }) else { return }
+        let lane = PostSyncRoutineNotificationBudget.Lane.autoWorkout
+        guard budget?.reserve(lane) ?? true else { return }
 
         let content = UNMutableNotificationContent()
         content.applyProminence(.ambient)
@@ -1237,7 +1351,8 @@ enum AutoWorkoutNotifications {
             kind: kind,
             startSec: startSec,
             content: content,
-            client: client
+            client: client,
+            budget: budget
         ))
         guard !isDrainingDeliveries else { return }
         isDrainingDeliveries = true
@@ -1252,6 +1367,13 @@ enum AutoWorkoutNotifications {
     }
 
     private static func deliver(_ delivery: QueuedDelivery) async {
+        let lane = PostSyncRoutineNotificationBudget.Lane.autoWorkout
+        var committed = delivery.budget == nil
+        defer {
+            if !committed {
+                delivery.budget?.release(lane)
+            }
+        }
         guard delivery.generation == deliveryGeneration,
               shouldDeliver(deliveryToken: delivery.deliveryToken, kind: delivery.kind,
                             startSec: delivery.startSec, defaults: .standard) else { return }
@@ -1276,15 +1398,20 @@ enum AutoWorkoutNotifications {
                 delivery.client.remove([requestID])
                 return
             }
+            if let budget = delivery.budget {
+                guard budget.commit(lane) else {
+                    delivery.client.remove([requestID])
+                    return
+                }
+            }
+            committed = true
             remember(deliveryToken: delivery.deliveryToken, defaults: .standard)
         } catch {
             // Keep the token unset so a later completed sync can retry delivery.
-            // The daemon can still have accepted a request before reporting a cancellation/error. The
-            // serialized drain guarantees this cleanup cannot erase a newer queued delivery.
-            if delivery.generation != deliveryGeneration
-                || (delivery.kind != .autoSaved && !isEnabled) {
-                delivery.client.remove([requestID])
-            }
+            // The daemon can still have accepted a request before reporting an error. Retract the
+            // stable identifier before releasing the sync slot; the serialized drain guarantees this
+            // cleanup cannot erase a newer queued delivery.
+            delivery.client.remove([requestID])
         }
     }
 

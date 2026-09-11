@@ -3301,7 +3301,7 @@ struct DailyOverviewSheet: View {
 
     private func loadHydration(day: String) async -> HydrationReading? {
         guard scope.loadsHydration else { return nil }
-        return await repo.hydrationReading(day: day)
+        return try? await repo.hydrationReading(day: day)
     }
 
     private func loadJournal(day: String) async -> [JournalEntry] {

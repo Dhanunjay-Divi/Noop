@@ -490,7 +490,9 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         )
         let scheduleTail = source[scheduleStart.lowerBound...]
         let scheduleGate = try XCTUnwrap(
-            scheduleTail.range(of: "guard operationalWorkStarted else { return }")
+            scheduleTail.range(
+                of: "guard operationalWorkStarted, !postSyncRoutineCoordinationActive else { return }"
+            )
         )
         let scheduledTask = try XCTUnwrap(
             scheduleTail.range(

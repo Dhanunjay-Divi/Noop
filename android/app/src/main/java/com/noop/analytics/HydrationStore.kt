@@ -1,8 +1,12 @@
 package com.noop.analytics
 
+import com.noop.AppDiagnosticsRecorder
 import com.noop.data.MetricSeriesRow
 import com.noop.data.WhoopRepository
 import java.util.TimeZone
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * HydrationStore — the logging + read seam for the opt-in Hydration tracker.
@@ -36,6 +40,7 @@ object HydrationStore {
      * hydration re-read on this too.
      */
     val mutationSeq = kotlinx.coroutines.flow.MutableStateFlow(0)
+    private val mutationMutex = Mutex()
 
     /** The generic metric-series key the day total is banked under (shared id; keep == the Swift key). */
     const val KEY: String = "hydration"
@@ -44,12 +49,17 @@ object HydrationStore {
      *  never confused with strap-imported or computed metrics. Matches the Swift source id. */
     const val SOURCE_ID: String = "hydration"
 
-    private fun validTotal(value: Double?): Double =
-        value?.takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0
+    internal fun confirmedTotal(value: Double?): Double? =
+        value?.takeIf { it.isFinite() && it > 0.0 }
 
     /** Conservative source merge: duplicate manual/relay records are possible, so never add totals. */
-    internal fun observedTotal(noopMl: Double?, healthConnectMl: Double?): Double =
-        maxOf(validTotal(noopMl), validTotal(healthConnectMl))
+    internal fun observedTotal(noopMl: Double?, healthConnectMl: Double?): Double? =
+        listOfNotNull(confirmedTotal(noopMl), confirmedTotal(healthConnectMl)).maxOrNull()
+
+    internal fun cardValue(totalMl: Double?, goalMl: Int, missingText: String): String =
+        confirmedTotal(totalMl)?.let {
+            String.format(java.util.Locale.US, "%.1f / %.1f L", it / 1000.0, goalMl / 1000.0)
+        } ?: missingText
 
     /** Seconds EAST of UTC for the device's current zone — the offset [AnalyticsEngine.dayString] needs
      *  to bucket a timestamp on the LOCAL calendar day (matches the dashboard's local "today" read). */
@@ -66,14 +76,21 @@ object HydrationStore {
      * A non-positive amount is a no-op. Returns the new day total (ml). Idempotency is by design absent —
      * each tap is an additive log, matching the WHOOP-style quick-add buttons.
      */
-    suspend fun log(repo: WhoopRepository, amountMl: Int, ts: Long = System.currentTimeMillis() / 1000L): Double {
+    suspend fun log(repo: WhoopRepository, amountMl: Int, ts: Long = System.currentTimeMillis() / 1000L): Double? {
         if (amountMl <= 0) return total(repo, ts)
         val day = dayKey(ts)
-        val current = noopTotal(repo, day)
-        val next = current + amountMl
-        repo.upsertMetricSeries(listOf(MetricSeriesRow(SOURCE_ID, day, KEY, next)))
-        mutationSeq.value += 1   // #989: tell Today's card directly (see mutationSeq)
-        return next
+        return mutationMutex.withLock {
+            recordedMutation("add") {
+                val next = repo.runMetricMutationTransaction {
+                    val current = noopTotal(repo, day)
+                    val total = current + amountMl
+                    repo.upsertMetricSeries(listOf(MetricSeriesRow(SOURCE_ID, day, KEY, total)))
+                    total
+                }
+                mutationSeq.value += 1
+                next
+            }
+        }
     }
 
     /**
@@ -97,12 +114,18 @@ object HydrationStore {
      * row, an entry isn't separately addressable - removing or editing a log is expressed as adjusting the
      * day total. Returns the new stored total (ml). Mirrors the iOS `setHydration`.
      */
-    suspend fun set(repo: WhoopRepository, totalMl: Double, ts: Long = System.currentTimeMillis() / 1000L): Double {
+    suspend fun set(repo: WhoopRepository, totalMl: Double, ts: Long = System.currentTimeMillis() / 1000L): Double? {
         val day = dayKey(ts)
         val next = clampedTotal(totalMl)
-        repo.upsertMetricSeries(listOf(MetricSeriesRow(SOURCE_ID, day, KEY, next)))
-        mutationSeq.value += 1   // #989: edits/deletes route through here too
-        return next
+        return mutationMutex.withLock {
+            recordedMutation("set") {
+                repo.runMetricMutationTransaction {
+                    repo.upsertMetricSeries(listOf(MetricSeriesRow(SOURCE_ID, day, KEY, next)))
+                }
+                mutationSeq.value += 1
+                confirmedTotal(next)
+            }
+        }
     }
 
     /**
@@ -111,13 +134,62 @@ object HydrationStore {
      * amount is a no-op. Returns the new day total (ml). Built on [set] + [afterRemoving] so the correction
      * math is shared + tested. Mirrors the iOS `removeHydration`.
      */
-    suspend fun remove(repo: WhoopRepository, amountMl: Int, ts: Long = System.currentTimeMillis() / 1000L): Double {
+    suspend fun remove(repo: WhoopRepository, amountMl: Int, ts: Long = System.currentTimeMillis() / 1000L): Double? {
         if (amountMl <= 0) return total(repo, ts)
-        return set(repo, afterRemoving(noopTotal(repo, dayKey(ts)), amountMl), ts)
+        val day = dayKey(ts)
+        return mutationMutex.withLock {
+            recordedMutation("remove") {
+                val next = repo.runMetricMutationTransaction {
+                    val adjusted = afterRemoving(noopTotal(repo, day), amountMl)
+                    repo.upsertMetricSeries(
+                        listOf(MetricSeriesRow(SOURCE_ID, day, KEY, adjusted)),
+                    )
+                    adjusted
+                }
+                mutationSeq.value += 1
+                confirmedTotal(next)
+            }
+        }
     }
 
+    private suspend fun <T> recordedMutation(
+        operation: String,
+        block: suspend () -> T,
+    ): T {
+        return try {
+            block().also {
+                AppDiagnosticsRecorder.record(
+                    "hydration.persistence",
+                    mapOf(
+                        "operation" to operation,
+                        "outcome" to "saved",
+                    ),
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            AppDiagnosticsRecorder.record(
+                "hydration.persistence",
+                mapOf(
+                    "operation" to operation,
+                    "outcome" to "failed",
+                    "failure_kind" to persistenceFailureKind(error),
+                ),
+            )
+            throw error
+        }
+    }
+
+    private fun persistenceFailureKind(error: Throwable): String =
+        when (error) {
+            is android.database.sqlite.SQLiteException -> "database"
+            is java.io.IOException -> "io"
+            else -> "unexpected"
+        }
+
     private suspend fun noopTotal(repo: WhoopRepository, day: String): Double =
-        validTotal(repo.metricSeries(SOURCE_ID, KEY, day, day).firstOrNull()?.value)
+        confirmedTotal(repo.metricSeries(SOURCE_ID, KEY, day, day).firstOrNull()?.value) ?: 0.0
 
     /** Source-aware confirmed intake for the local day containing [ts], or null when neither source
      * has a record. NOOP and Health Connect remain visible separately for honest UI/corrections. */
@@ -133,37 +205,37 @@ object HydrationStore {
             day,
             day,
         ).firstOrNull()
-        if (noopRow == null && healthRow == null) return null
-        val noop = validTotal(noopRow?.value)
-        val health = validTotal(healthRow?.value)
+        val noop = confirmedTotal(noopRow?.value)
+        val health = confirmedTotal(healthRow?.value)
+        val observed = observedTotal(noop, health) ?: return null
         val source = when {
-            noopRow != null && healthRow != null -> ReadingSource.BOTH
-            noopRow != null -> ReadingSource.NOOP
+            noop != null && health != null -> ReadingSource.BOTH
+            noop != null -> ReadingSource.NOOP
             else -> ReadingSource.HEALTH_CONNECT
         }
         return Reading(
-            valueMl = observedTotal(noop, health),
+            valueMl = observed,
             source = source,
-            noopMl = noop,
-            healthConnectMl = health,
+            noopMl = noop ?: 0.0,
+            healthConnectMl = health ?: 0.0,
         )
     }
 
-    /** The best confirmed fluid-intake total for the local day containing [ts], or 0 when unrecorded. */
-    suspend fun total(repo: WhoopRepository, ts: Long = System.currentTimeMillis() / 1000L): Double {
-        return reading(repo, ts)?.valueMl ?: 0.0
+    /** The best confirmed fluid-intake total for the local day containing [ts], or null when unrecorded. */
+    suspend fun total(repo: WhoopRepository, ts: Long = System.currentTimeMillis() / 1000L): Double? {
+        return reading(repo, ts)?.valueMl
     }
 
     /**
      * The last [days] local-day totals up to and including today, OLDEST first, as (dayKey, ml) pairs —
-     * one entry per calendar day with 0.0 for days that have no log. Backs the detail screen's 7-day
+     * one entry per calendar day with null for days that have no confirmed log. Backs the detail screen's 7-day
      * mini bar history. [days] is clamped ≥ 1.
      */
     suspend fun history(
         repo: WhoopRepository,
         days: Int = 7,
         nowSec: Long = System.currentTimeMillis() / 1000L,
-    ): List<Pair<String, Double>> {
+    ): List<Pair<String, Double?>> {
         val n = days.coerceAtLeast(1)
         val from = nowSec - (n - 1).toLong() * 86_400L
         val fromKey = dayKey(from)
@@ -171,13 +243,15 @@ object HydrationStore {
         // Keep sources separate and take the per-day max. Adding them would double a drink entered in
         // NOOP and mirrored into Health Connect by another app.
         val noopByDay = repo.metricSeries(SOURCE_ID, KEY, fromKey, toKey)
-            .associate { it.day to validTotal(it.value) }
+            .mapNotNull { row -> confirmedTotal(row.value)?.let { row.day to it } }
+            .toMap()
         val healthByDay = repo.metricSeries(
             WhoopRepository.HEALTH_CONNECT_SOURCE,
             KEY,
             fromKey,
             toKey,
-        ).associate { it.day to validTotal(it.value) }
+        ).mapNotNull { row -> confirmedTotal(row.value)?.let { row.day to it } }
+            .toMap()
         return (0 until n).map { i ->
             val key = dayKey(nowSec - (n - 1 - i).toLong() * 86_400L)
             key to observedTotal(noopByDay[key], healthByDay[key])

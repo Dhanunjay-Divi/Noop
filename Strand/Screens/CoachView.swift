@@ -1133,9 +1133,9 @@ struct CoachView: View {
         } else {
             setupKeyFocused = true
         }
-        NSLog(
-            "Tab shell keyboard QA focused mode=%@",
-            keepsKeyboardVisible ? "visible" : "restored"
+        VisualQALog.emit(
+            "Tab shell keyboard QA focused mode=" +
+                (keepsKeyboardVisible ? "visible" : "restored")
         )
 
         guard restoresNavigation else { return }
@@ -1143,7 +1143,7 @@ struct CoachView: View {
         guard !Task.isCancelled else { return }
         composerFocused = false
         setupKeyFocused = false
-        NSLog("Tab shell keyboard QA dismissed mode=restored")
+        VisualQALog.emit("Tab shell keyboard QA dismissed mode=restored")
     }
     #endif
 

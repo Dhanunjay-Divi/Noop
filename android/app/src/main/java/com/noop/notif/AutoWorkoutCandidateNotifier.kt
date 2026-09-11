@@ -86,16 +86,17 @@ object AutoWorkoutCandidateNotifier {
         repository: WhoopRepository,
         activeDeviceId: String,
         traceSink: ((String) -> Unit)? = null,
-    ) {
+        budget: PostSyncRoutineNotificationBudget? = null,
+    ): Boolean {
         val appContext = context.applicationContext
         val mode = NoopPrefs.autoWorkoutMode(appContext)
-        if (mode == AutoWorkoutMode.OFF) return
+        if (mode == AutoWorkoutMode.OFF) return false
 
         val days = try {
             repository.daysMerged(activeDeviceId)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
-            return
+            return false
         }
         val candidate = try {
             AutoWorkoutCandidateScan.latest(
@@ -108,52 +109,58 @@ object AutoWorkoutCandidateNotifier {
             )
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
-            return // best effort: detection/DB/notification work must never break sync or scoring
-        } ?: return
+            return false // best effort: detection/DB/notification work must never break sync or scoring
+        } ?: return false
 
         if (!AutoWorkoutBackgroundPolicy.shouldProcess(
                 candidate = candidate,
                 nowSec = System.currentTimeMillis() / 1_000L,
             )
-        ) return
+        ) return false
 
         if (mode == AutoWorkoutMode.AUTO_SAVE && AutoWorkoutAutomationPolicy.shouldAutoSave(candidate)) {
             val computedId = repository.computedDeviceId(activeDeviceId)
             val row = buildDetectedAutoWorkoutRow(computedId, candidate)
             val saved = row != null && runCatching { repository.saveManualWorkout(row) }.isSuccess
-            if (saved && row != null) {
+            if (saved) {
+                val savedRow = row ?: return false
                 AutoWorkoutPrefs.recordCandidateDecision(
                     appContext,
                     candidate,
                     AutoWorkoutPrefs.DecisionAction.AUTO_SAVED,
                     AutoWorkoutPrefs.DecisionActor.AUTOMATION,
-                    row.sport,
+                    savedRow.sport,
                 )
                 AutoWorkoutPrefs.recordReview(
                     appContext,
                     AutoWorkoutPrefs.Review(
-                        candidate.startSec, candidate.endSec, row.sport, row.deviceId, row.source,
+                        candidate.startSec,
+                        candidate.endSec,
+                        savedRow.sport,
+                        savedRow.deviceId,
+                        savedRow.source,
                         candidate.avgBpm, candidate.peakBpm,
                     ),
                 )
-                runCatching {
+                return runCatching {
                     postIfAuthorized(
                         appContext, candidate.startSec, candidate.endSec,
                         AutoWorkoutCandidateNotificationPolicy.Kind.AUTO_SAVED,
+                        budget,
                     )
-                }
-                return
+                }.getOrDefault(false)
             }
         }
 
         // Notification plumbing is strictly best-effort; an OEM manager/prefs failure cannot turn a
         // successful scoring pass into a sync failure.
-        runCatching {
+        return runCatching {
             postIfAuthorized(
                 appContext, candidate.startSec, candidate.endSec,
                 AutoWorkoutCandidateNotificationPolicy.Kind.CANDIDATE,
+                budget,
             )
-        }
+        }.getOrDefault(false)
     }
 
     /** Called by the visible Today path after it wins a harmless duplicate-save race with reanalysis. */
@@ -172,8 +179,9 @@ object AutoWorkoutCandidateNotifier {
         startSec: Long,
         endSec: Long,
         kind: AutoWorkoutCandidateNotificationPolicy.Kind,
-    ) {
-        synchronized(postLock) {
+        budget: PostSyncRoutineNotificationBudget? = null,
+    ): Boolean {
+        return synchronized(postLock) {
             val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
             val previous = prefs.getString(KEY_LAST_NOTIFIED_TOKEN, null)
             val candidateToken = AutoWorkoutCandidateNotificationPolicy.token(startSec, endSec)
@@ -197,9 +205,11 @@ object AutoWorkoutCandidateNotifier {
                     candidateToken = candidateToken,
                     lastNotifiedToken = previous,
                 )
-            ) return
+            ) return@synchronized false
 
-            val posted = runCatching {
+            val lane = PostSyncRoutineNotificationBudget.Lane.AUTO_WORKOUT
+            var reserved = false
+            val postedSuccessfully = runCatching {
                 if (!ensureUsableChannel(context)) {
                     NotificationLifecycleLedger.suppressed(
                         context,
@@ -208,6 +218,10 @@ object AutoWorkoutCandidateNotifier {
                     )
                     return@runCatching false
                 }
+                if (budget?.reserve(lane) == false) {
+                    return@runCatching false
+                }
+                reserved = budget != null
                 val copy = AutoWorkoutCandidateNotificationPolicy.privacySafeCopy(kind)
                 val openToday = NotificationPlatformIdentity.activityPendingIntent(
                     context,
@@ -225,7 +239,7 @@ object AutoWorkoutCandidateNotifier {
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                     .build()
-                NotificationLifecycleLedger.posted(
+                val posted = NotificationLifecycleLedger.posted(
                     context,
                     NotificationLifecycleId.AUTO_WORKOUT,
                     NotificationLifecycleCategory.RECOMMENDATION,
@@ -235,7 +249,26 @@ object AutoWorkoutCandidateNotifier {
                         notification,
                     )
                 }
+                if (!posted) {
+                    budget?.release(lane)
+                    reserved = false
+                    return@runCatching false
+                }
+                if (budget != null && !budget.commit(lane)) {
+                    NotificationManagerCompat.from(context).cancel(
+                        NotificationPlatformIdentity.NotificationId.AUTO_WORKOUT,
+                    )
+                    budget.release(lane)
+                    reserved = false
+                    return@runCatching false
+                }
+                reserved = false
+                true
             }.getOrElse {
+                if (reserved) budget?.release(lane)
+                NotificationManagerCompat.from(context).cancel(
+                    NotificationPlatformIdentity.NotificationId.AUTO_WORKOUT,
+                )
                 NotificationLifecycleLedger.unknown(
                     context,
                     NotificationLifecycleId.AUTO_WORKOUT,
@@ -245,9 +278,12 @@ object AutoWorkoutCandidateNotifier {
             }
 
             val next = AutoWorkoutCandidateNotificationPolicy.tokenAfterAttempt(
-                previous, deliveryToken, posted,
+                previous,
+                deliveryToken,
+                postedSuccessfully = postedSuccessfully,
             )
             if (next != previous) prefs.edit().putString(KEY_LAST_NOTIFIED_TOKEN, next).apply()
+            postedSuccessfully
         }
     }
 

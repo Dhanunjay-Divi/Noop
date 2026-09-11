@@ -39,6 +39,7 @@ import com.noop.analytics.AutoWorkoutDetector
 import com.noop.analytics.CoarseWorkoutClass
 import com.noop.data.DailyMetric
 import com.noop.notif.AutoWorkoutCandidateNotifier
+import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -217,7 +218,7 @@ fun AutoWorkoutNudgeCard(
     LaunchedEffect(days, mode, activeDeviceId) {
         val storedReview = AutoWorkoutPrefs.pendingReview(context)
         if (storedReview != null) {
-            val exists = runCatching {
+            val exists = try {
                 viewModel.repo.detectedWorkoutsUnion(
                     activeDeviceId,
                     storedReview.startSec - 1L,
@@ -227,7 +228,11 @@ fun AutoWorkoutNudgeCard(
                     it.startTs == storedReview.startSec && it.sport == storedReview.sport &&
                         it.source == storedReview.source && it.deviceId == storedReview.deviceId
                 }
-            }.getOrDefault(false)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                false
+            }
             if (exists) {
                 autoSavedReview = storedReview
                 candidate = null
@@ -247,7 +252,7 @@ fun AutoWorkoutNudgeCard(
             ) {
                 { line -> viewModel.ble.externalLog(line, com.noop.testcentre.TestDomain.WORKOUTS) }
             } else null
-        val next = runCatching {
+        val next = try {
             AutoWorkoutCandidateScan.latest(
                 repository = viewModel.repo,
                 activeDeviceId = activeDeviceId,
@@ -255,15 +260,28 @@ fun AutoWorkoutNudgeCard(
                 dismissedTokens = AutoWorkoutPrefs.dismissed(context),
                 traceSink = traceSink,
             )
-        }.getOrNull()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            null
+        }
         if (mode == AutoWorkoutMode.AUTO_SAVE && next != null &&
             AutoWorkoutAutomationPolicy.shouldAutoSave(next)
         ) {
             val computedId = viewModel.repo.computedDeviceId(activeDeviceId)
             val row = buildDetectedAutoWorkoutRow(computedId, next)
-            val saved = row != null && runCatching {
-                viewModel.repo.saveManualWorkout(row)
-            }.isSuccess
+            val saved = if (row == null) {
+                false
+            } else {
+                try {
+                    viewModel.repo.saveManualWorkout(row)
+                    true
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    false
+                }
+            }
             if (saved && row != null) {
                 AutoWorkoutPrefs.recordCandidateDecision(
                     context,

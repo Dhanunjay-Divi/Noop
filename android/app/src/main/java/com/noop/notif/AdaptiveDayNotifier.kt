@@ -602,6 +602,7 @@ object AdaptiveDayEvaluator {
         now: ZonedDateTime = ZonedDateTime.now(),
         sleepTargetMinutes: Int = WindDownStore.from(context).sleepNeedMinutes,
         sleepTargetIsExplicit: Boolean = WindDownStore.from(context).hasExplicitSleepNeed,
+        notificationBudget: PostSyncRoutineNotificationBudget? = null,
     ): AdaptiveDayGuidance.Recommendation? {
         val appContext = context.applicationContext
         if (!ManagedRuntimeGate.isAuthorized(appContext)) return null
@@ -681,7 +682,11 @@ object AdaptiveDayEvaluator {
                     appContext,
                     currentFingerprint = null,
                 )
-                AdaptiveDayNotifier.onRecommendation(appContext, recommendation)
+                AdaptiveDayNotifier.onRecommendation(
+                    appContext,
+                    recommendation,
+                    notificationBudget,
+                )
                 true
             }
             return recommendation
@@ -754,6 +759,7 @@ object AdaptiveDayEvaluator {
                             evaluationToken = evaluationToken,
                             calendarRevision = snapshot.revision,
                             now = now,
+                            notificationBudget = notificationBudget,
                         )
                         return@commitIfCurrent true
                     }
@@ -766,7 +772,11 @@ object AdaptiveDayEvaluator {
                 )
             }
             recommendation?.let {
-                AdaptiveDayNotifier.onRecommendation(appContext, it)
+                AdaptiveDayNotifier.onRecommendation(
+                    appContext,
+                    it,
+                    notificationBudget,
+                )
             }
             true
         }
@@ -1050,6 +1060,7 @@ object AdaptiveDayNotifier {
     fun onRecommendation(
         context: Context,
         recommendation: AdaptiveDayGuidance.Recommendation,
+        notificationBudget: PostSyncRoutineNotificationBudget? = null,
     ) {
         val (title, body) = copy(context, recommendation.kind)
         postCandidate(
@@ -1059,6 +1070,7 @@ object AdaptiveDayNotifier {
             body = body,
             route = NoopNotificationRoute.SLEEP,
             evidence = recommendation.evidence,
+            notificationBudget = notificationBudget,
             onRejected = { reason ->
                 if (
                     recommendation.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT &&
@@ -1082,6 +1094,7 @@ object AdaptiveDayNotifier {
         evaluationToken: Long,
         calendarRevision: Long,
         now: ZonedDateTime = ZonedDateTime.now(),
+        notificationBudget: PostSyncRoutineNotificationBudget? = null,
     ) {
         val observedAtMillis = now.toInstant().toEpochMilli()
         val candidate = AdaptiveDayDeliveryCandidate(
@@ -1106,6 +1119,7 @@ object AdaptiveDayNotifier {
             ),
             route = NoopNotificationRoute.WORKOUTS,
             evidence = plannedWorkoutEvidenceResources(adjustment.reason).map(context::getString),
+            notificationBudget = notificationBudget,
         )
     }
 
@@ -1188,6 +1202,7 @@ object AdaptiveDayNotifier {
         body: String,
         route: NoopNotificationRoute,
         evidence: List<String>,
+        notificationBudget: PostSyncRoutineNotificationBudget? = null,
         onRejected: (AdaptiveDayDeliveryReason) -> Unit = {},
         onPosted: () -> Unit = {},
     ) {
@@ -1286,15 +1301,48 @@ object AdaptiveDayNotifier {
                 return
             }
 
+            if (notificationBudget?.isClaimed == true) {
+                // The higher-priority sync lane already used the lock-screen slot. Preserve the useful
+                // in-app action without committing notification cooldown or dedupe state.
+                ContextualActionCenter.presentRecovery(
+                    context = context,
+                    title = title,
+                    detail = body,
+                    fingerprint = candidate.fingerprint,
+                    evidence = evidence,
+                    observedAtMillis = candidate.observedAtMillis,
+                    maximumAgeMillis = candidate.maximumAgeMillis,
+                    route = route,
+                    source = ContextualActionSource.ADAPTIVE_DAY,
+                )
+                return
+            }
+
             val manager = NotificationManagerCompat.from(context)
             var calendarConsentLost = false
             var plannedWorkoutExpired = false
+            var notificationBudgetLost = false
+            val budgetLane = PostSyncRoutineNotificationBudget.Lane.ADAPTIVE_DAY
+            var notificationBudgetReserved = false
+            fun releaseNotificationBudget() {
+                if (notificationBudgetReserved) {
+                    notificationBudget?.release(budgetLane)
+                    notificationBudgetReserved = false
+                }
+            }
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context = context,
                 nowMillis = deliveryAtMillis,
                 owner = deliveryOwner(candidate.kind),
                 identity = candidate.fingerprint,
             ) {
+                if (
+                    notificationBudget?.reserve(budgetLane) == false
+                ) {
+                    notificationBudgetLost = true
+                    return@postIfAllowed false
+                }
+                notificationBudgetReserved = notificationBudget != null
                 if (
                     candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
                     !plannedWorkoutDeliveryCurrent(context, candidate)
@@ -1343,17 +1391,42 @@ object AdaptiveDayNotifier {
                 }
                 posted
             }
+            if (notificationBudgetLost) {
+                if (
+                    candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
+                    !plannedWorkoutDeliveryCurrent(context, candidate)
+                ) {
+                    AdaptivePlannedWorkoutScheduler.cancel(context)
+                    suppress(context)
+                    return
+                }
+                ContextualActionCenter.presentRecovery(
+                    context = context,
+                    title = title,
+                    detail = body,
+                    fingerprint = candidate.fingerprint,
+                    evidence = evidence,
+                    observedAtMillis = candidate.observedAtMillis,
+                    maximumAgeMillis = candidate.maximumAgeMillis,
+                    route = route,
+                    source = ContextualActionSource.ADAPTIVE_DAY,
+                )
+                return
+            }
             if (plannedWorkoutExpired) {
+                releaseNotificationBudget()
                 onRejected(AdaptiveDayDeliveryReason.STALE)
                 suppress(context)
                 return
             }
             if (calendarConsentLost) {
+                releaseNotificationBudget()
                 AdaptivePlannedWorkoutScheduler.cancel(context)
                 suppress(context)
                 return
             }
             if (postResult.status != ContextualPromptPostStatus.ACCEPTED) {
+                releaseNotificationBudget()
                 if (postResult.status == ContextualPromptPostStatus.GLOBAL_COOLDOWN) {
                     if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
                         ContextualPromptDeliveryLedger.nextAllowedAtMillis(
@@ -1379,6 +1452,7 @@ object AdaptiveDayNotifier {
                 candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
                 !plannedWorkoutDeliveryCurrent(context, candidate)
             ) {
+                releaseNotificationBudget()
                 val released = ContextualPromptDeliveryLedger.reconcileIfOwned(
                     context,
                     ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
@@ -1400,6 +1474,23 @@ object AdaptiveDayNotifier {
                 suppress(context)
                 return
             }
+            if (
+                notificationBudgetReserved &&
+                notificationBudget?.commit(budgetLane) != true
+            ) {
+                releaseNotificationBudget()
+                ContextualPromptDeliveryLedger.reconcileIfOwned(
+                    context,
+                    deliveryOwner(candidate.kind),
+                    expectedAtMillis = acceptedReceipt.atMillis,
+                    onNotificationSlotOwnerRemoved = {
+                        cancelAdaptiveDayNotification(context)
+                    },
+                )
+                suppress(context)
+                return
+            }
+            notificationBudgetReserved = false
             ContextualActionCenter.presentRecovery(
                 context = context,
                 title = title,

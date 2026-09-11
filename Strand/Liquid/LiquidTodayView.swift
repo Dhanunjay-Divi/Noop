@@ -99,6 +99,7 @@ struct LiquidTodayView: View {
     @State private var showCustomise = false
     @State private var showSettings = false
     @State private var synthesisExpanded = false
+    @State private var todayDetailsExpanded = Self.initialTodayDetailsExpanded
     @State private var showLiveSession = false
     @State private var showNotificationPermissionAlert = false
 
@@ -384,6 +385,13 @@ struct LiquidTodayView: View {
     private static let patternsAnchorID = "liquidToday.patterns"
     private static let dailyPlanAnchorID = "liquidToday.dailyPlan"
     private static let keyMetricsAnchorID = "liquidToday.keyMetrics"
+    private static var initialTodayDetailsExpanded: Bool {
+        #if DEBUG
+        CommandLine.arguments.contains("--demo-daily-plan")
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
         liquidBody
@@ -434,30 +442,15 @@ struct LiquidTodayView: View {
                     // byte-identical "today.sectionOrder" key Android uses. A gated-off Start-session renders
                     // nothing and keeps its slot in the saved order.
                     ForEach(sectionOrder) { section in
-                        switch section {
-                        case .hero: heroCard
-                        case .liveSession: if liveSessionsBeta { liveSessionStartRow }
-                        // NEW (2026-08-22) — the three blocks that answer, in reading order: why is my
-                        // score that number, what should I do about it, and is anything off. They reuse
-                        // this screen's own card/glyph language and its already-loaded data, so nothing
-                        // existing moved and no new plumbing was introduced.
-                        case .why: whySection
-                        case .target:
-                            if selectedDayOffset == 0 {
-                                targetSection.id(Self.dailyPlanAnchorID)
+                        if isTodayDetailSection(section) {
+                            if section == firstVisibleTodayDetailSection {
+                                todayDetailsDisclosure
                             }
-                        case .watch: watchSection
-                        case .synthesis: synthesisSection
-                        case .keyMetrics: keyMetricsSection.id(Self.keyMetricsAnchorID)
-                        case .workouts: lastWorkoutsSection
-                        case .heartRate: heartRateSection
-                        case .recoveryVitals: recoveryVitalsSection
-                        case .yourCards: yourCardsSection
-                        // #656: the persistent journal widget (last-7-days strip + tap-through). Now a
-                        // reorderable section like the others — the Arrange sheet moves it. Today only;
-                        // the card self-hides when the reminder toggle is off (an empty branch renders
-                        // nothing yet keeps its slot). Twin of Android TodayScreen's JOURNAL arm.
-                        case .journal: if selectedDayOffset == 0 { JournalReminderCard() }
+                            if todayDetailsExpanded {
+                                todaySection(section)
+                            }
+                        } else {
+                            todaySection(section)
                         }
                     }
                     // The suggestion leaf owns the auto-detection mode and candidate gates, so mounting it
@@ -955,37 +948,155 @@ struct LiquidTodayView: View {
     }
     #endif
 
+    private func isTodayDetailSection(_ section: TodaySection) -> Bool {
+        switch section {
+        case .why, .target, .watch, .synthesis:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var firstVisibleTodayDetailSection: TodaySection? {
+        sectionOrder.first { section in
+            isTodayDetailSection(section) && (section != .target || selectedDayOffset == 0)
+        }
+    }
+
+    @ViewBuilder
+    private func todaySection(_ section: TodaySection) -> some View {
+        switch section {
+        case .hero:
+            heroCard
+        case .liveSession:
+            if liveSessionsBeta {
+                liveSessionStartRow
+            }
+        case .why:
+            whySection
+        case .target:
+            if selectedDayOffset == 0 {
+                targetSection.id(Self.dailyPlanAnchorID)
+            }
+        case .watch:
+            watchSection
+        case .synthesis:
+            synthesisSection
+        case .keyMetrics:
+            keyMetricsSection.id(Self.keyMetricsAnchorID)
+        case .workouts:
+            lastWorkoutsSection
+        case .heartRate:
+            heartRateSection
+        case .recoveryVitals:
+            recoveryVitalsSection
+        case .yourCards:
+            yourCardsSection
+        case .journal:
+            if selectedDayOffset == 0 { JournalReminderCard() }
+        }
+    }
+
+    private var todayDetailsDisclosure: some View {
+        Button {
+            withAnimation(StrandMotion.interactive) {
+                todayDetailsExpanded.toggle()
+            }
+        } label: {
+            HStack(spacing: NoopMetrics.space3) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(StrandPalette.accent)
+                    .accessibilityHidden(true)
+                Text(todayDetailsExpanded
+                     ? "daily_plan.details.hide"
+                     : "daily_plan.details.show")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Spacer(minLength: NoopMetrics.space2)
+                Image(systemName: todayDetailsExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(FrostedCardSurface(cornerRadius: NoopMetrics.cardRadius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(LiquidPressStyle())
+        .accessibilityHint(Text("daily_plan.details.hint"))
+        .accessibilityValue(
+            Text(todayDetailsExpanded
+                 ? "appwide.a11y.expanded"
+                 : "appwide.a11y.collapsed")
+        )
+    }
+
     /// Live Session entry (silent guardian, beta). It opens an explicit pre-session explanation; no
     /// realtime tracking begins until the separate Start confirmation on that screen.
     private var liveSessionStartRow: some View {
         Button { showLiveSession = true } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "shield.lefthalf.filled")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(StrandPalette.metricCyan)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text("appwide.live_session.start")
-                            .font(StrandFont.subhead)
-                            .foregroundStyle(StrandPalette.onDarkPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .layoutPriority(1)
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "shield.lefthalf.filled")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(StrandPalette.metricCyan)
+                                .padding(.top, 3)
+                            Text("appwide.live_session.start")
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.onDarkPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(StrandPalette.onDarkTertiary)
+                                .padding(.top, 5)
+                        }
                         Text("BETA")
                             .font(StrandFont.overlineScaled(8.5)).tracking(0)
                             .foregroundStyle(StrandPalette.onDarkSecondary)
                             .padding(.horizontal, 8).padding(.vertical, 2.5)
                             .background(Capsule().fill(.white.opacity(0.05))
                                 .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
+                            .fixedSize()
+                        Text("appwide.live_session.start_detail")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.onDarkSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text("appwide.live_session.start_detail")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.onDarkSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    HStack(spacing: 12) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(StrandPalette.metricCyan)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 8) {
+                                Text("appwide.live_session.start")
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.onDarkPrimary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .layoutPriority(1)
+                                Text("BETA")
+                                    .font(StrandFont.overlineScaled(8.5)).tracking(0)
+                                    .foregroundStyle(StrandPalette.onDarkSecondary)
+                                    .padding(.horizontal, 8).padding(.vertical, 2.5)
+                                    .background(Capsule().fill(.white.opacity(0.05))
+                                        .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
+                            }
+                            Text("appwide.live_session.start_detail")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.onDarkSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StrandPalette.onDarkTertiary)
+                    }
                 }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(StrandPalette.onDarkTertiary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -1323,11 +1434,11 @@ struct LiquidTodayView: View {
         case .hydration:
             cardLink(.hydration, title: card.title, sub: card.subtitle,
                      value: hydrationGoalML.map {
-                         HydrationGoal.cardValueString(totalML: hydrationTotalML ?? 0, goalML: $0)
+                         HydrationStore.cardValue(totalML: hydrationTotalML, goalML: $0)
                      } ?? "-",
                      symbol: card.icon, tint: StrandPalette.metricCyan,
-                     frac: hydrationGoalML.map {
-                         HydrationGoal.fraction(totalML: hydrationTotalML ?? 0, goalML: $0)
+                     frac: hydrationGoalML.flatMap { goal in
+                         hydrationTotalML.map { HydrationGoal.fraction(totalML: $0, goalML: goal) }
                      })
         case .coupled:
             // A tap-through to the full Coupled day screen. No value.
@@ -1945,9 +2056,11 @@ struct LiquidTodayView: View {
         return Button {
             setDailyActionCheckIn(value)
         } label: {
-            HStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(StrandFont.subhead)
                     .foregroundStyle(selected ? StrandPalette.accent : StrandPalette.textTertiary)
+                    .padding(.top, 2)
                 Text(label)
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
@@ -1977,19 +2090,37 @@ struct LiquidTodayView: View {
         action: String? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: symbol)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(StrandFont.headline)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                    Text(body)
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(body)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(body)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             if let action {
@@ -2314,12 +2445,24 @@ struct LiquidTodayView: View {
         let resp = displayDay?.respRateBpm ?? vitalsDay?.respRateBpm
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("RECOVERY VITALS").font(StrandFont.overline).tracking(0)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                    Spacer()
-                    if let line = vitalsProvenanceLine {
-                        Text(line).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("RECOVERY VITALS").font(StrandFont.overline).tracking(0)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        if let line = vitalsProvenanceLine {
+                            Text(line).font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text("RECOVERY VITALS").font(StrandFont.overline).tracking(0)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        Spacer()
+                        if let line = vitalsProvenanceLine {
+                            Text(line).font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
                     }
                 }
                 vitalRow(String(localized: "Heart-rate variability"), unitText(hrv, "ms"),
@@ -2332,12 +2475,25 @@ struct LiquidTodayView: View {
         }
     }
 
+    @ViewBuilder
     private func vitalRow(_ label: String, _ value: String, symbol: String) -> some View {
-        HStack(spacing: 12) {
-            MetricGlyph(symbol, size: 28)
-            Text(label).font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
-            Spacer()
-            Text(value).font(StrandFont.number(15)).foregroundStyle(StrandPalette.textPrimary)
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+                MetricGlyph(symbol, size: 28)
+                Text(label).font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                Text(value).font(StrandFont.number(15))
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
+        } else {
+            HStack(spacing: 12) {
+                MetricGlyph(symbol, size: 28)
+                Text(label).font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                Spacer()
+                Text(value).font(StrandFont.number(15))
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
         }
     }
 
@@ -2813,13 +2969,27 @@ struct LiquidTodayView: View {
             NavigationLink(value: TabRoute.dataSources) {
                 card {
                     VStack(spacing: 12) {
-                        HStack {
-                            Text("Synced from").font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
-                            Spacer()
-                            HStack(spacing: 4) {
-                                Text("View sources").font(StrandFont.subhead).foregroundStyle(StrandPalette.textTertiary)
-                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                        if dynamicTypeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Synced from").font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                Label("View sources", systemImage: "chevron.right")
+                                    .font(StrandFont.subhead)
                                     .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            HStack {
+                                Text("Synced from").font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                Spacer()
+                                HStack(spacing: 4) {
+                                    Text("View sources").font(StrandFont.subhead)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                }
                             }
                         }
                         LiquidStrapBatteryRow()
@@ -2837,15 +3007,30 @@ struct LiquidTodayView: View {
         // ObsidianFlow is adaptive — pearl in Light mode and obsidian in Dark mode — so section ink
         // must resolve with the appearance instead of assuming that an enabled scene is always dark.
         let color = StrandPalette.textSecondary
-        return HStack(alignment: .firstTextBaseline) {
-            Text(LocalizedStringKey(title))
-                .font(StrandFont.overline)
-                .tracking(0)
-                .foregroundStyle(color)
-            Spacer()
-            Text(LocalizedStringKey(trailing))
-                .font(StrandFont.caption)
-                .foregroundStyle(color)
+        return Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(LocalizedStringKey(title))
+                        .font(StrandFont.overline)
+                        .tracking(0)
+                        .foregroundStyle(color)
+                    Text(LocalizedStringKey(trailing))
+                        .font(StrandFont.caption)
+                        .foregroundStyle(color)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(LocalizedStringKey(title))
+                        .font(StrandFont.overline)
+                        .tracking(0)
+                        .foregroundStyle(color)
+                    Spacer()
+                    Text(LocalizedStringKey(trailing))
+                        .font(StrandFont.caption)
+                        .foregroundStyle(color)
+                }
+            }
         }
         .padding(.horizontal, 2)
         .padding(.top, 4)
@@ -2943,7 +3128,13 @@ struct LiquidTodayView: View {
         }
 
         if hydrationEnabled {
-            hydrationTotalML = await repo.hydrationTotal(day: Repository.localDayKey(Date()))
+            do {
+                hydrationTotalML = try await repo.hydrationTotal(
+                    day: Repository.localDayKey(Date())
+                )
+            } catch {
+                // Preserve the last confirmed value. The focused Hydration screen owns retry UI.
+            }
             hydrationGoalML = repo.hydrationGoalML(profileSex: profile.sex)
         } else {
             hydrationTotalML = nil
@@ -3256,7 +3447,8 @@ struct LiquidTodayView: View {
             temperatureC: temperatureC,
             effort: selectedDayOffset == 0 && isCurrentCalendarDay ? cachedDisplayDay?.strain : nil,
             consumedML: selectedDayOffset == 0 && isCurrentCalendarDay ? hydrationTotalML : nil,
-            goalML: selectedDayOffset == 0 && isCurrentCalendarDay ? hydrationGoalML : nil
+            goalML: selectedDayOffset == 0 && isCurrentCalendarDay && hydrationTotalML != nil
+                ? hydrationGoalML : nil
         )
     }
 
