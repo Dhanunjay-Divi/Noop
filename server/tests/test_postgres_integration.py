@@ -151,6 +151,22 @@ async def _wait_for_lock_waiters(pool, *, minimum: int) -> None:
     raise AssertionError(f"expected at least {minimum} lock waiters")
 
 
+async def _postgres_incident_location_count(
+    repository: PostgresRepository,
+    dispatch_id: str,
+) -> int:
+    return int(
+        await repository._require_pool().fetchval(
+            """
+            SELECT count(*)
+            FROM safety_incident_locations
+            WHERE dispatch_id = $1
+            """,
+            UUID(dispatch_id),
+        )
+    )
+
+
 def test_safety_migration_removes_legacy_constraints_before_state_conversion() -> None:
     sql = (MIGRATIONS / "006_safety_incidents.sql").read_text(encoding="utf-8")
 
@@ -1386,6 +1402,251 @@ async def test_postgres_safety_escalation_and_fall_event_contract() -> None:
                 await safety.set_paging_control(
                     enabled=bool(original_control["enabled"]),
                     reason="PostgreSQL Safety escalation integration test cleanup",
+                    expected_revision=int(current["revision"]),
+                    now=datetime.now(UTC),
+                )
+        await repository.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_postgres_terminal_incidents_delete_precise_location_rows() -> None:
+    repository = _repository(
+        pool_min_size=1,
+        pool_max_size=2,
+    )
+    safety = PostgresSafetyRepository(repository)
+    installation_id = str(uuid4())
+    profile_id = str(uuid4())
+    now = datetime.now(UTC)
+    original_control: dict | None = None
+    contact_ids: list[str] = []
+
+    await repository.startup()
+    try:
+        original_control = await safety.paging_control()
+        if not original_control["enabled"]:
+            await safety.set_paging_control(
+                enabled=True,
+                reason="PostgreSQL precise-location lifecycle integration test",
+                expected_revision=int(original_control["revision"]),
+                now=now,
+            )
+        await safety.create_profile(
+            profile_id=profile_id,
+            enrollment_id=str(uuid4()),
+            display_name="Location lifecycle integration",
+            installation_id=installation_id,
+            token_hash=hashlib.sha256(uuid4().bytes).hexdigest(),
+        )
+        for index in range(2):
+            invite_hash = hashlib.sha256(
+                f"location-lifecycle-invite-{uuid4()}".encode()
+            ).hexdigest()
+            contact_id = str(uuid4())
+            await safety.create_contact(
+                contact_id=contact_id,
+                profile_id=profile_id,
+                display_name=f"Contact {index}",
+                phone_e164=f"+1415555080{index}",
+                invite_token_hash=invite_hash,
+                invited_at=now,
+                invite_expires_at=now + timedelta(days=7),
+            )
+            await safety.decide_invitation(
+                invite_token_hash=invite_hash,
+                decision="accept",
+                now=now,
+            )
+            contact_ids.append(contact_id)
+
+        async def create_incident(
+            label: str,
+            *,
+            started_at: datetime,
+            expires_at: datetime | None = None,
+        ) -> str:
+            dispatch_id = str(uuid4())
+            await safety.create_dispatch(
+                dispatch_id=dispatch_id,
+                profile_id=profile_id,
+                idempotency_key=str(uuid4()),
+                request_hash=hashlib.sha256(label.encode()).hexdigest(),
+                trigger="manual_sos",
+                now=started_at,
+                expires_at=expires_at or started_at + timedelta(minutes=30),
+                voice_fallback_at=started_at + timedelta(seconds=90),
+            )
+            await safety.update_incident_location(
+                profile_id=profile_id,
+                dispatch_id=dispatch_id,
+                sequence=1,
+                latitude=40.7131,
+                longitude=-74.0057,
+                horizontal_accuracy_meters=12.0,
+                captured_at=started_at,
+                received_at=started_at,
+            )
+            assert await _postgres_incident_location_count(repository, dispatch_id) == 1
+            return dispatch_id
+
+        async def assert_terminal_location_deleted(
+            dispatch_id: str,
+            status: str,
+        ) -> None:
+            pool = repository._require_pool()
+            assert await _postgres_incident_location_count(repository, dispatch_id) == 0
+            assert (
+                await pool.fetchval(
+                    """
+                    SELECT status
+                    FROM safety_dispatches
+                    WHERE dispatch_id = $1
+                    """,
+                    UUID(dispatch_id),
+                )
+                == status
+            )
+            incident = await safety.dispatch(
+                profile_id=profile_id,
+                dispatch_id=dispatch_id,
+            )
+            assert incident["latest_location"] is None
+
+        for offset, (action, status) in enumerate(
+            (("resolve", "resolved"), ("cancel", "cancelled"))
+        ):
+            started_at = now + timedelta(minutes=offset)
+            dispatch_id = await create_incident(
+                f"owner-{action}",
+                started_at=started_at,
+            )
+            await safety.transition_dispatch(
+                profile_id=profile_id,
+                dispatch_id=dispatch_id,
+                action=action,
+                note=None,
+                now=started_at + timedelta(seconds=1),
+            )
+            await assert_terminal_location_deleted(dispatch_id, status)
+
+        sweep_started_at = now + timedelta(minutes=2)
+        sweep_expires_at = sweep_started_at + timedelta(seconds=5)
+        sweep_dispatch_id = await create_incident(
+            "expiry-sweep",
+            started_at=sweep_started_at,
+            expires_at=sweep_expires_at,
+        )
+        assert (
+            await safety.expire_due_dispatches(
+                now=sweep_expires_at + timedelta(seconds=1)
+            )
+            == 1
+        )
+        await assert_terminal_location_deleted(sweep_dispatch_id, "expired")
+
+        responder_started_at = now + timedelta(minutes=3)
+        responder_expires_at = responder_started_at + timedelta(seconds=5)
+        responder_dispatch_id = await create_incident(
+            "responder-link-expiry",
+            started_at=responder_started_at,
+            expires_at=responder_expires_at,
+        )
+        preview = await safety.responder_preview(
+            dispatch_id=responder_dispatch_id,
+            contact_id=contact_ids[0],
+            now=responder_expires_at + timedelta(seconds=1),
+        )
+        assert preview is not None
+        assert preview["status"] == "expired"
+        assert preview["latest_location"] is None
+        await assert_terminal_location_deleted(responder_dispatch_id, "expired")
+
+        responder_action_started_at = now + timedelta(minutes=3, seconds=10)
+        responder_action_expires_at = responder_action_started_at + timedelta(seconds=5)
+        responder_action_dispatch_id = await create_incident(
+            "responder-action-expiry",
+            started_at=responder_action_started_at,
+            expires_at=responder_action_expires_at,
+        )
+        with pytest.raises(
+            SafetyConflictError,
+            match="no longer accepting responses",
+        ):
+            await safety.record_responder_decision(
+                dispatch_id=responder_action_dispatch_id,
+                contact_id=contact_ids[0],
+                decision="responding",
+                source="sms_link",
+                now=responder_action_expires_at + timedelta(seconds=1),
+            )
+        await assert_terminal_location_deleted(responder_action_dispatch_id, "expired")
+
+        failure_started_at = now + timedelta(minutes=4)
+        failed_dispatch_id = await create_incident(
+            "all-delivery-failure",
+            started_at=failure_started_at,
+        )
+        pool = repository._require_pool()
+        await pool.execute(
+            """
+            UPDATE safety_deliveries
+            SET max_attempts = 1
+            WHERE dispatch_id = $1
+            """,
+            UUID(failed_dispatch_id),
+        )
+        sms_jobs = await safety.claim_due_deliveries(
+            worker_id="location-lifecycle-sms",
+            now=failure_started_at,
+            lease_until=failure_started_at + timedelta(seconds=30),
+            limit=10,
+        )
+        assert len(sms_jobs) == 2
+        for job in sms_jobs:
+            await safety.complete_delivery_attempt(
+                delivery_id=str(job["delivery_id"]),
+                attempt_id=str(job["attempt_id"]),
+                worker_id="location-lifecycle-sms",
+                submission_status="failed",
+                provider_reference=None,
+                error="synthetic provider rejection",
+                now=failure_started_at + timedelta(seconds=1),
+                retry_at=failure_started_at + timedelta(seconds=2),
+            )
+        voice_jobs = await safety.claim_due_deliveries(
+            worker_id="location-lifecycle-voice",
+            now=failure_started_at + timedelta(seconds=2),
+            lease_until=failure_started_at + timedelta(seconds=32),
+            limit=10,
+        )
+        assert len(voice_jobs) == 2
+        for job in voice_jobs:
+            await safety.complete_delivery_attempt(
+                delivery_id=str(job["delivery_id"]),
+                attempt_id=str(job["attempt_id"]),
+                worker_id="location-lifecycle-voice",
+                submission_status="failed",
+                provider_reference=None,
+                error="synthetic provider rejection",
+                now=failure_started_at + timedelta(seconds=3),
+                retry_at=failure_started_at + timedelta(seconds=4),
+            )
+        await assert_terminal_location_deleted(failed_dispatch_id, "failed")
+    finally:
+        try:
+            await safety.delete_profiles_for_installation(installation_id)
+        except Exception:
+            pass
+        if original_control is not None:
+            current = await safety.paging_control()
+            if bool(current["enabled"]) != bool(original_control["enabled"]):
+                await safety.set_paging_control(
+                    enabled=bool(original_control["enabled"]),
+                    reason="PostgreSQL precise-location lifecycle test cleanup",
                     expected_revision=int(current["revision"]),
                     now=datetime.now(UTC),
                 )

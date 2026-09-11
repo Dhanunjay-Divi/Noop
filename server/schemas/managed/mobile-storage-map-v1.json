@@ -159,6 +159,12 @@
       "platforms": ["android", "ios"],
       "target": null
     },
+    "hydrationEntry": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["ios"],
+      "target": "hydration"
+    },
     "metricSeries": {
       "classification": "chunk_stream",
       "platforms": ["android", "ios"],

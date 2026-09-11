@@ -101,7 +101,7 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | `NOOP_SAFETY_WORKER_ENABLED` | no | `true` | Run the in-process paging loop; Compose disables it on API processes and uses `safety-worker` |
 | `NOOP_SAFETY_WORKER_BATCH_SIZE` | no | `20` | Maximum jobs leased per worker cycle |
 | `NOOP_SAFETY_WORKER_MAX_CONCURRENCY` | no | `6` | Maximum concurrent submissions; must remain below the worker database-pool maximum |
-| `NOOP_SAFETY_INCIDENT_RETENTION_DAYS` | no | `0` | Days to keep terminal Safety incidents; `0` disables incident retention |
+| `NOOP_SAFETY_INCIDENT_RETENTION_DAYS` | no | `0` | Days to keep coordinate-free terminal Safety incident history; precise location is deleted at terminal transition; `0` disables history retention |
 | `NOOP_SAFETY_CONTACT_RETENTION_DAYS` | no | `0` | Days after expiry/decline/revocation to keep inactive contacts; accepted contacts are never aged; `0` disables |
 | `NOOP_SAFETY_RETENTION_INTERVAL_HOURS` | no | `24` | Hours between bounded Safety retention runs |
 | `NOOP_SAFETY_RETENTION_MAX_BATCHES_PER_RUN` | no | `20` | Maximum Safety retention batches per scheduled or manual run |

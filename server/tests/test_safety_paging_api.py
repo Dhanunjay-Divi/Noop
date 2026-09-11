@@ -328,7 +328,8 @@ def test_elapsed_acknowledged_page_does_not_block_a_new_sos() -> None:
         monitoring = await repository.monitoring_snapshot(now=elapsed_at)
         assert preview is not None
         assert preview["status"] == "expired"
-        assert monitoring["incidents"]["overdue"] == 1
+        assert monitoring["incidents"]["overdue"] == 0
+        assert repository._dispatches[dispatch_id]["status"] == "expired"
 
         next_page = await repository.create_dispatch(
             dispatch_id=str(uuid4()),
