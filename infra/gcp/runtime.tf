@@ -194,7 +194,7 @@ resource "google_cloud_run_v2_service" "api" {
   template {
     service_account                  = google_service_account.api.email
     timeout                          = "120s"
-    max_instance_request_concurrency = 20
+    max_instance_request_concurrency = 4
 
     scaling {
       min_instance_count = 0
@@ -438,6 +438,46 @@ resource "google_cloud_run_v2_service" "managed_api" {
         value = google_storage_bucket.raw_chunks.name
       }
       env {
+        name  = "NOOP_FEEDBACK_ENABLED"
+        value = tostring(var.enable_feedback_ingestion)
+      }
+      env {
+        name  = "NOOP_FEEDBACK_LIFECYCLE_ENABLED"
+        value = "false"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_BUCKET"
+        value = google_storage_bucket.feedback.name
+      }
+      env {
+        name  = "NOOP_FEEDBACK_RETENTION_DAYS"
+        value = tostring(var.feedback_retention_days)
+      }
+      env {
+        name  = "NOOP_FEEDBACK_LIFECYCLE_INTERVAL_SECONDS"
+        value = "300"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_RETENTION_BATCH_SIZE"
+        value = "100"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_UPLOAD_TTL_SECONDS"
+        value = "900"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_MAX_ARCHIVE_BYTES"
+        value = "20971520"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_DAILY_REPORT_LIMIT"
+        value = "6"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_PENDING_BYTE_LIMIT"
+        value = "67108864"
+      }
+      env {
         name  = "NOOP_MANAGED_SIGNER_EMAIL"
         value = google_service_account.managed_api.email
       }
@@ -488,6 +528,24 @@ resource "google_cloud_run_v2_service" "managed_api" {
         }
       }
       env {
+        name = "NOOP_FEEDBACK_CAPABILITY_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.feedback_capability_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "NOOP_FEEDBACK_CAPABILITY_PREVIOUS_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.feedback_capability_previous_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
         name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"
         value_source {
           secret_key_ref {
@@ -513,7 +571,7 @@ resource "google_cloud_run_v2_service" "managed_api" {
       resources {
         limits = {
           cpu    = "1"
-          memory = "512Mi"
+          memory = "1Gi"
         }
         cpu_idle          = true
         startup_cpu_boost = true
@@ -558,8 +616,13 @@ resource "google_cloud_run_v2_service" "managed_api" {
     google_secret_manager_secret_iam_member.managed_api_push_token_secret,
     google_secret_manager_secret_iam_member.managed_api_push_token_previous_secret,
     google_secret_manager_secret_iam_member.managed_api_replay_secret,
+    google_secret_manager_secret_iam_member.managed_api_feedback_capability_secret,
+    google_secret_manager_secret_iam_member.managed_api_feedback_capability_previous_secret,
     google_storage_bucket_iam_member.managed_api_raw_creator,
     google_storage_bucket_iam_member.managed_api_raw_reader,
+    google_storage_bucket_iam_member.managed_api_feedback_creator,
+    google_storage_bucket_iam_member.managed_api_feedback_reader,
+    google_storage_bucket_iam_member.managed_api_feedback_deleter,
     google_service_account_iam_member.managed_api_self_signer,
   ]
 }
@@ -935,6 +998,30 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value = var.project_id
         }
         env {
+          name  = "NOOP_MANAGED_STORAGE_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "NOOP_FEEDBACK_ENABLED"
+          value = "false"
+        }
+        env {
+          name  = "NOOP_FEEDBACK_LIFECYCLE_ENABLED"
+          value = tostring(var.enable_feedback_lifecycle)
+        }
+        env {
+          name  = "NOOP_FEEDBACK_BUCKET"
+          value = google_storage_bucket.feedback.name
+        }
+        env {
+          name  = "NOOP_FEEDBACK_RETENTION_DAYS"
+          value = tostring(var.feedback_retention_days)
+        }
+        env {
+          name  = "NOOP_FEEDBACK_RETENTION_BATCH_SIZE"
+          value = "100"
+        }
+        env {
           name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"
           value = "true"
         }
@@ -1014,6 +1101,7 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
     google_secret_manager_secret_iam_member.managed_lifecycle_push_token_previous_secret,
     google_secret_manager_secret_iam_member.managed_lifecycle_replay_secret,
     google_storage_bucket_iam_member.managed_lifecycle_raw_deleter,
+    google_storage_bucket_iam_member.managed_lifecycle_feedback_deleter,
     google_project_iam_member.managed_lifecycle_identity_deleter,
     google_project_iam_member.managed_lifecycle_push_sender,
   ]

@@ -170,9 +170,12 @@ def test_gcp_managed_identity_is_attested_and_uses_restricted_keys() -> None:
     assert "google_firebase_app_check_play_integrity_config" in identity
     assert 'service_id       = "identitytoolkit.googleapis.com"' in identity
     assert "enforcement_mode = var.managed_auth_app_check_enforcement" in identity
+    assert "autodelete_anonymous_users = true" in identity
+    assert "enabled = var.enable_feedback_ingestion" in identity
     assert 'default     = "com.noopapp.noop"' in variables
     assert 'default     = "com.noop.whoop.staging"' in variables
     assert 'var.managed_auth_app_check_enforcement == "ENFORCED"' in variables
+    assert "var.feedback_retention_days <= 28" in variables
     assert 'name  = "NOOP_MANAGED_PROJECT_ID"' in runtime
     assert "value = var.project_id" in runtime
     assert 'name  = "NOOP_MANAGED_PROJECT_NUMBER"' in runtime
@@ -181,6 +184,36 @@ def test_gcp_managed_identity_is_attested_and_uses_restricted_keys() -> None:
     assert "value = google_firebase_apple_app.staging[0].app_id" in runtime
     assert 'name  = "NOOP_MANAGED_ANDROID_APP_ID"' in runtime
     assert "value = google_firebase_android_app.staging[0].app_id" in runtime
+
+
+def test_gcp_feedback_lifecycle_is_independent_and_retention_bounded() -> None:
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    variables = (REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf").read_text(
+        encoding="utf-8"
+    )
+    staging = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "staging.tfvars.example"
+    ).read_text(encoding="utf-8")
+    lifecycle = runtime.split(
+        'resource "google_cloud_run_v2_job" "managed_lifecycle"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_job_iam_member" '
+        '"managed_lifecycle_scheduler"',
+        maxsplit=1,
+    )[0]
+
+    assert 'variable "enable_feedback_lifecycle"' in variables
+    assert "var.enable_feedback_lifecycle" in variables
+    assert "var.enable_feedback_lifecycle" in lifecycle
+    assert "tostring(var.enable_feedback_ingestion)" not in lifecycle
+    assert "var.feedback_retention_days <= 28" in variables
+    assert "var.feedback_retention_days <= 90" not in variables
+    assert "&& var.enable_feedback_lifecycle" in variables
+    assert "enable_feedback_lifecycle = false" in staging
+    assert "enable_feedback_ingestion = false" in staging
 
 
 def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
@@ -424,7 +457,11 @@ def test_gcp_managed_runtime_cannot_list_health_objects() -> None:
     assert "storage.objects.list" not in reader
     assert "storage.objects.list" not in lifecycle
     assert "roles/storage.objectViewer" not in iam
-    assert iam.count("google_project_iam_custom_role.managed_object_reader.id") == 2
+    assert iam.count("google_project_iam_custom_role.managed_object_reader.id") == 3
+    assert (
+        iam.count("google_project_iam_custom_role.managed_object_deleter.id")
+        == 3
+    )
 
 
 def test_gcp_database_has_staging_recovery_and_encryption_guards() -> None:

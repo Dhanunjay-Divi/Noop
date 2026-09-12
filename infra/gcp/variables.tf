@@ -59,6 +59,75 @@ variable "raw_bucket_name" {
   }
 }
 
+variable "feedback_retention_days" {
+  description = "Age at which explicitly submitted synthetic feedback archives are deleted."
+  type        = number
+  default     = 28
+
+  validation {
+    condition = (
+      floor(var.feedback_retention_days) == var.feedback_retention_days
+      && var.feedback_retention_days >= 1
+      && var.feedback_retention_days <= 28
+    )
+    error_message = "Feedback retention must be 1 through 28 days."
+  }
+}
+
+variable "feedback_bucket_name" {
+  description = "Optional globally unique override for the private feedback bucket."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.feedback_bucket_name == null
+      || can(regex("^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$", var.feedback_bucket_name))
+    )
+    error_message = "feedback_bucket_name must be a valid Cloud Storage bucket name."
+  }
+}
+
+variable "enable_feedback_lifecycle" {
+  description = "Drain feedback cleanup and retention independently of accepting new reports."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = (
+      !var.enable_feedback_lifecycle
+      || (
+        var.enable_managed_runtime
+        && var.enable_managed_database
+        && var.runtime_image != null
+      )
+    )
+    error_message = "enable_feedback_lifecycle requires the managed runtime, Cloud SQL, and a digest-pinned image."
+  }
+}
+
+variable "enable_feedback_ingestion" {
+  description = "Expose authenticated, App Check-protected app feedback ingestion. Keep false until privacy, abuse, and physical-client gates pass."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = (
+      !var.enable_feedback_ingestion
+      || (
+        var.enable_managed_runtime
+        && var.enable_managed_identity
+        && var.enable_managed_app_check
+        && var.managed_auth_app_check_enforcement == "ENFORCED"
+        && var.enable_managed_database
+        && var.runtime_image != null
+        && var.enable_feedback_lifecycle
+      )
+    )
+    error_message = "enable_feedback_ingestion requires the managed runtime, identity, enforced App Check, Cloud SQL, a digest-pinned image, and feedback lifecycle draining."
+  }
+}
+
 variable "enable_managed_database" {
   description = "Create the synthetic-only staging Cloud SQL instance."
   type        = bool
