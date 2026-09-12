@@ -7,6 +7,7 @@ import android.provider.Settings
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
@@ -35,6 +37,12 @@ class AppShellInstrumentedTest {
 
     private lateinit var scenario: ActivityScenario<MainActivity>
     private var originalAnimatorScale: String? = null
+    private var acceptedTermsWasPresent = false
+    private var originalAcceptedTermsVersion: String? = null
+    private var onboardedWasPresent = false
+    private var originalOnboarded = false
+    private var changelogWasPresent = false
+    private var originalLastSeenChangelog: String? = null
 
     @Before
     fun launchAcceptedApp() {
@@ -64,24 +72,29 @@ class AppShellInstrumentedTest {
                 Manifest.permission.POST_NOTIFICATIONS,
             )
         }
-        NoopPrefs.of(context).edit()
+        val prefs = NoopPrefs.of(context)
+        acceptedTermsWasPresent = prefs.contains(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION)
+        originalAcceptedTermsVersion =
+            prefs.getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, null)
+        onboardedWasPresent = prefs.contains(NoopPrefs.KEY_ONBOARDED)
+        originalOnboarded = prefs.getBoolean(NoopPrefs.KEY_ONBOARDED, false)
+        changelogWasPresent = prefs.contains(NoopPrefs.KEY_LAST_SEEN_CHANGELOG)
+        originalLastSeenChangelog =
+            prefs.getString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, null)
+        prefs.edit()
             .putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION)
             .putBoolean(NoopPrefs.KEY_ONBOARDED, true)
             .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
             .commit()
-        TodayLayoutPrefs.setOrder(
-            context,
-            listOf(TodaySection.KEY_METRICS) +
-                TodaySection.defaultOrder.filterNot { it == TodaySection.KEY_METRICS },
-        )
         scenario = ActivityScenario.launch(MainActivity::class.java)
         compose.waitUntil(timeoutMillis = 20_000) {
             runCatching {
-                compose.onAllNodesWithTag("noop.tab.today")
+                compose.onAllNodesWithTag("noop.today.list")
                     .fetchSemanticsNodes()
                     .isNotEmpty()
             }.getOrDefault(false)
         }
+        assertSelected("noop.tab.today")
     }
 
     @After
@@ -90,6 +103,7 @@ class AppShellInstrumentedTest {
             if (::scenario.isInitialized) scenario.close()
         } finally {
             val instrumentation = InstrumentationRegistry.getInstrumentation()
+            restorePreferences(instrumentation.targetContext)
             val restore = originalAnimatorScale?.let {
                 "settings put global animator_duration_scale $it"
             } ?: "settings delete global animator_duration_scale"
@@ -138,15 +152,17 @@ class AppShellInstrumentedTest {
     @Test
     fun todayMetricDetailKeepsTodaySelectedAndReselectReturnsToRoot() {
         val metricTag = "noop.today.metric.hrv"
-        compose.onNodeWithTag(metricTag).performScrollTo().performClick()
+        compose.onNodeWithTag("noop.today.list")
+            .performScrollToNode(hasTestTag(metricTag))
+        compose.onNodeWithTag(metricTag).performClick()
         compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodesWithTag(metricTag).fetchSemanticsNodes().isEmpty()
+            compose.onAllNodesWithTag("noop.today.list").fetchSemanticsNodes().isEmpty()
         }
         assertSelected("noop.tab.today")
 
         compose.onNodeWithTag("noop.tab.today").performClick()
         compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodesWithTag(metricTag).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithTag("noop.today.list").fetchSemanticsNodes().isNotEmpty()
         }
     }
 
@@ -201,6 +217,32 @@ class AppShellInstrumentedTest {
             .fetchSemanticsNode()
             .config[SemanticsProperties.Selected]
         assertTrue("$tag is not selected", selected)
+    }
+
+    private fun restorePreferences(context: android.content.Context) {
+        val editor = NoopPrefs.of(context).edit()
+        if (acceptedTermsWasPresent) {
+            editor.putString(
+                NoopPrefs.KEY_ACCEPTED_TERMS_VERSION,
+                originalAcceptedTermsVersion,
+            )
+        } else {
+            editor.remove(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION)
+        }
+        if (onboardedWasPresent) {
+            editor.putBoolean(NoopPrefs.KEY_ONBOARDED, originalOnboarded)
+        } else {
+            editor.remove(NoopPrefs.KEY_ONBOARDED)
+        }
+        if (changelogWasPresent) {
+            editor.putString(
+                NoopPrefs.KEY_LAST_SEEN_CHANGELOG,
+                originalLastSeenChangelog,
+            )
+        } else {
+            editor.remove(NoopPrefs.KEY_LAST_SEEN_CHANGELOG)
+        }
+        editor.commit()
     }
 
     private fun runShellCommand(

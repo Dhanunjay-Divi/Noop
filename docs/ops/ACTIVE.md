@@ -25,9 +25,12 @@ Last updated: **2026-09-12**
 
 The supplier-independent product, safety, and quality audit remains active on
 `codex/product-safety-quality-audit-20260911` and is tracked by protected pull
-request `#15`. The remote branch remains at committed correction head
-`5ddd812c`; the final correction set is intentionally local until one
-consolidated push.
+request `#15`. The first consolidated exact-SHA run used correction head
+`142eeec5`. Its Android production-shell job exposed one deterministic lazy-list
+test defect while the Android unit/build/lint job, server, Swift packages,
+repository gates, and macOS app job passed. Final local correction `8f5253c1`
+also removes the test's Today-order mutation and remains unpushed with this
+final record and policy refresh.
 
 The exact local wall now passes on the current implementation tree:
 `WhoopStore` 485 tests; `NoopRemoteSync` 123; `StrandAnalytics` 1,466 with
@@ -41,6 +44,17 @@ standalone Compose configuration, 227 Tools tests, 49 localization tests,
 health claims, strict i18n, required CI, calibration parity, terminology,
 release controls, legal inventory, provenance, private-data, operations-record,
 JSON, shell, and diff gates also pass locally.
+
+The production-shell correction now tags the real Today `LazyColumn`, scrolls
+to the lazily composed HRV tile through list semantics, waits on the Today-root
+marker rather than virtualized child visibility, restores the acceptance,
+onboarding, and changelog preferences it mutates, and leaves the user's Today
+order untouched. The exact-current API 35 App Shell class passes 5/5. The full
+local production shell passes 93 selected result cases with two intentional
+private-pilot skips and zero failures. Full and Demo unit suites, lint, APK
+assembly, and instrumentation-source compilation also pass after the
+correction. Independent review of the final list-modifier and navigation-test
+shape found no product, accessibility, or modifier-order regression.
 
 The current source partitions managed-document mutation intent by the account
 active at edit time on Apple schema v60 and Android Room v51. Legacy unowned
@@ -82,6 +96,14 @@ accessibility reading boundary. Eight exact-current Daily Plan captures pass;
 Android's measured `Scaffold` bottom inset and focused navigation contract pass
 without requiring an overlay copy of the iOS fix.
 
+The latest desktop, routine-notification, and calendar-guidance references were
+reviewed without importing their assets. NOOP already carries the useful
+contracts: metric-first desktop hierarchy, separate private and consented
+wind-down/journal/morning lanes, and a Daily Plan that can combine supported
+sleep/readiness evidence with a generic local workout window. Third-party
+branding/copy, retained calendar content, fixed prompt timing, and an
+unsupported "optimal performance" promise remain excluded.
+
 A delegated review initially returned migration and ownership findings from an
 earlier dirty-tree snapshot. Exact-current source inspection shows migrations
 034-037 are additive/read-only and Android ownership invalidation derives
@@ -97,9 +119,9 @@ hosted workflow, and its working tree is clean. The original multilingual
 supplier drop remains immutable outside Git. NOOP's intentional product
 translations, including Chinese locales, remain in the app.
 
-Fresh hosted required exact-SHA checks and protected integration remain
-pending. Round-owned Apple and dependency-audit scratch environments have
-been removed. Physical phones, exact band/firmware,
+Fresh hosted required exact-SHA checks on the corrected head and protected
+integration remain pending. Round-owned Apple and dependency-audit scratch
+environments have been removed. Physical phones, exact band/firmware,
 BLE/background/notification/haptic/battery/sensor behavior, real
 providers/carriers, client encryption/key recovery, public traffic, production
 health transfer, legal/terms, 24/7 operations, signing, stores, participants,

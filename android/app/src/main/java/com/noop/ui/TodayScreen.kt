@@ -1894,6 +1894,7 @@ fun TodayScreen(
     ) {
     LazyScreenScaffold(
         modifier = daySwipeModifier,
+        listModifier = Modifier.testTag("noop.today.list"),
         // title = null suppresses the big scaffold header (the nullable-title path); the compact
         // WHOOP-style top bar below replaces it, mirroring the iOS Today screen (todayTopBar).
         title = null,

@@ -2,12 +2,14 @@
 
 ## Status
 
-- State: `supplier-independent implementation, exact-current-tree local wall, and independent review complete; one consolidated push, protected checks, and normal PR #15 integration pending`
+- State: `supplier-independent implementation and exact-current-tree local wall complete; hosted Android production-shell correction verified locally; corrected exact-SHA checks and normal PR #15 integration pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `2efd5e89999bd54b3fd6e316322b39d7e953ee8f`
-- End implementation commits: committed corrective head `5ddd812c`; the final
-  exact-current-tree correction set remains local until the one consolidated push
+- End implementation commits: first consolidated hosted correction head
+  `142eeec5`; bounded production-shell code correction `8f5253c1`; this
+  durable record and refreshed policy evidence will form the replacement PR
+  head
 - Record commit or PR: pull request `#15`
 
 ## Objective
@@ -266,6 +268,14 @@ records. Concurrent development must remain isolated by worktree and branch.
   and the checked-in product mark resolve: 379 lines, 15,138 bytes, and 35
   local links with zero missing targets. The page makes no hardware, clinical,
   signing, store, or launch-readiness claim.
+- Reviewed the latest desktop, routine-notification, and calendar-guidance
+  references as interaction evidence rather than distributable assets. NOOP
+  retains its approved metric-first desktop hierarchy; wind-down, journal, and
+  morning prompts remain separate consented/private lanes; and Daily Plan may
+  combine supported sleep/readiness evidence with a generic local workout
+  window. Third-party marks, exact copy, retained calendar content, fixed
+  notification times, and the unsupported "optimal performance" claim were not
+  copied.
 - Closed two findings from the replacement exact-tree review of managed
   restore. The server change feed now joins a document on account scope,
   stable identifier, revision, and document kind, so equal identifiers across
@@ -289,6 +299,14 @@ records. Concurrent development must remain isolated by worktree and branch.
   Android already measures its navigation rail, applies that height through
   Material `Scaffold`, and adds system navigation-bar padding, so no matching
   source change was required.
+- Corrected the Android production-shell navigation test after the first
+  consolidated hosted run proved that the HRV tile was outside the composed
+  portion of Today's lazy list. `LazyScreenScaffold` now offers a distinct
+  modifier for the actual `LazyColumn`; Today exposes a stable list marker; the
+  test uses list-level `performScrollToNode`, validates the Today root rather
+  than virtualized child visibility, restores the acceptance/onboarding/
+  changelog state it mutates, and no longer overwrites the user's Today order.
+  No metric visibility, ordering, or health behavior changed.
 
 ## Data, privacy, and medical truth
 
@@ -402,20 +420,20 @@ records. Concurrent development must remain isolated by worktree and branch.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Worktree isolation | Audit branch created at `2efd5e89` while calendar work remains in a separate dirty worktree | Concurrent review can proceed without overwriting active implementation | Merge compatibility or production readiness |
-| Private reference inventory preflight | Private session export and reference-image/PDF sets were reviewed in place and excluded from Git | Inputs can inform the audit without redistributing private material | Accuracy, rights, clinical review, or physical behavior |
+| Private reference inventory preflight | Private session export and reference-image/PDF sets plus the latest desktop, routine-notification, and calendar-guidance screenshots were reviewed in place and excluded from Git | Inputs can inform interaction hierarchy, notification usefulness, and adaptive-day product decisions without redistributing private or third-party material | Accuracy, rights, clinical review, background delivery, or physical behavior |
 | Local source and round preflight | `CLAUDE.md`, operations contract, active handoff, and current release ledger reviewed | Audit is bounded by current repository rules | Any feature or external gate is complete |
 | Hydration, managed documents, and Apple schema | Exact-current-tree `WhoopStore` executed 485 tests with zero failures; the Apple schema oracle executed seven tests and matched the Android oracle. | Schemas v55-v60, hydration projection/tombstone/no-echo, generation-ledger repair, encrypted-row retention, conflict preservation, strict restore validation, account-partitioned mutation intent, and capability-versioned restore pass together. | Client encryption/key recovery, physical import-provider accuracy, or production transfer |
 | Managed client package | Exact-current-tree `NoopRemoteSync` executed 123 tests with zero failures. | Content-mode partitioning, server-readable allowlisting, local encrypted-row retention, account binding, conflict preservation, capability-version snapshot recovery, retry, and coordinator behavior remain coherent. | Production encryption, public traffic, or real participant transfer |
 | Shared health and guidance analytics | Exact-current-tree `StrandAnalytics` executed 1,466 tests with seven evidence-dependent skips and zero failures. | Body/BMI guards, hydration goals, sleep/recovery evidence gates, workout detection, adaptive guidance, and formula contracts pass on the current source. | Clinical validity, individual physiology, or physical sensor accuracy |
 | Complete Apple app suite | Exact-current-tree macOS `Strand` suite executed 1,850 tests with one external Xiaomi-fixture skip and zero failures after the final accessibility contract correction. The first clean macOS/iOS attempts ended only because the disk filled; round-owned derived data was removed and the clean rerun passed. | Current Apple app, persistence, notification, calendar, privacy, accessibility, performance, Safety, hydration, and lifecycle contracts pass together. | iOS background delivery, physical BLE, haptics, notification presentation, signing, or store behavior |
-| Android full matrix | Full and Demo each executed 4,455 tests with seven evidence-dependent skips and zero failures. Both lint variants, APK assemblies, and Full/Demo instrumentation-source compilation succeeded after the final BLE lock-screen privacy correction. | Room v46-v51, Health Connect BMI reprojection, exact-day hydration, account isolation, private notifications including the persistent connection service, generation-ledger behavior, capability-versioned restore, and both product variants compile and pass together. | Instrumentation execution on a device, signed install, OEM delivery timing, Health Connect provider behavior, or physical hardware |
+| Android full matrix | Full and Demo each executed 4,455 tests with seven evidence-dependent skips and zero failures. Both lint variants, APK assemblies, and Full/Demo instrumentation-source compilation succeeded after the final BLE lock-screen privacy correction and were rerun after the Today lazy-list correction. The exact-current API 35 `AppShellInstrumentedTest` class passed 5/5 after removing the layout mutation; the complete local production shell passed 93 selected result cases with two intentional private-pilot skips and zero failures. | Room v46-v51, Health Connect BMI reprojection, exact-day hydration, account isolation, private notifications including the persistent connection service, generation-ledger behavior, capability-versioned restore, both product variants, and the production Today/detail/reselection shell pass together on the managed emulator without changing or leaking the user's Today order. | Signed install, OEM delivery timing, Health Connect provider behavior, or physical hardware |
 | Durable analysis invalidation | Apple package/app tests and Android JVM/source-compilation gates cover all ten score-bearing tables, migration seeding and repair, blank-ID exclusion, snapshot-without-clear, crash/restart persistence, exact acknowledgement, partial failure, concurrent writes, outer UPSERT/REPLACE, forced passes, and source deletion. | Launch/resume and post-backfill work now use bounded durable generations rather than whole-history fingerprints, and current Swift/Kotlin/Room source compiles. | Participant-scale performance, Android device instrumentation execution, or physical BLE catch-up |
 | Complete Apple simulator graph | Unsigned generic `NOOPiOS` simulator build succeeded on the exact current source after the disk-only failed attempt was discarded. | The current iPhone app, Watch app, widgets, App Intents metadata, and embedded graph compile, link, and validate. | Signing, store acceptance, physical-device behavior, or UI interaction quality |
 | Deterministic visual matrices | The prior 42-state iPhone matrix remained green. The exact final Daily Plan matrix added eight current captures: normal, check-in, recovery-shift, planned-workout, dark/high-contrast, stop, and two accessibility text sizes. All were nonblank and manually inspected; the largest text sizes keep the target readable above an opaque navigation boundary. | Required simulator states preserve hierarchy, reachability, text visibility, and a stable navigation footprint on the current source. | VoiceOver focus order, haptics, notification presentation, physical display behavior, or hardware |
 | Android navigation accessibility | `PrimaryNavigationContractTest` passed on the exact source; review confirmed `Scaffold` applies its measured bottom-bar inset to the `NavHost`, while `GlassBottomBar` grows with wrapped text and applies system navigation-bar padding. | Android source retains a dynamic, non-overlapping navigation reservation rather than copying the iOS overlay implementation. | Runtime large-text behavior on a physical Android device or OEM font/rendering differences |
 | Complete server suite | The exact isolated PostgreSQL-backed wall executed 457 tests with one provider/environment skip and zero failures. Focused source, backup-contract, manifest, and live PostgreSQL regressions also pass for the non-destructive managed-document readiness replacement. The first post-review command accidentally exercised the unavailable TimescaleDB lane on local PostgreSQL 14; a fresh rerun with `NOOP_TEST_DATABASE_ENGINE=postgresql` passed against new isolated databases. | The current server, migrations, memory/PostgreSQL parity, backup contracts, Safety lifecycle, managed-document readiness, and kind-qualified change-feed joins pass together; migrations 034-037 preserve every legacy payload, revision, head, and change cursor. | Docker image deployment, encrypted backup/restore drill against staging, real providers/carriers, or public runtime |
-| Localization and repository policy | Strict i18n coverage, 49 standalone i18n tests, 227 Tools tests, eight health-claims tests plus the 1,230-file claims scan, required-CI, calibration parity, the 17,585-occurrence terminology inventory with zero forbidden uses, release controls, legal inventory, distribution provenance, private-data, operations-record, JSON, interpreter-aware shell, dependency, and diff gates pass locally. | Current source and release-control wiring reject new unlocalized copy, unsupported claims, forbidden vendor mappings, high-confidence secrets, and unreviewed distribution inputs. | Professional translation, hosted exact-SHA checks, or clinical/legal approval |
-| Review status | Pull request `#15` previously identified ten actionable lifecycle defects. The local correction closes managed-document content-mode/account isolation, BMI dependency, displayed-day hydration, cancellation, notification privacy, bounded Android ownership invalidation, non-destructive server migration staging, server Safety, and final Apple accessibility findings. Replacement exact-tree reviews then found the cross-kind document join, unversioned filtered cursor, stale current-schema instrumentation, unproven Room snapshot, and public BLE lock-screen health-summary defects. Direct Swift, Kotlin, Room, schema-oracle, memory, PostgreSQL, real 50-to-51 migration, incremental KSP, and tamper-regeneration evidence now covers those paths. The final independent exact-current-tree review returned no actionable finding. | Corrective work remains tied to concrete source review and direct regression evidence, including explicit rejection of stale review evidence. | Hosted exact-SHA verdict, physical behavior, or external launch gates |
+| Localization and repository policy | Strict i18n coverage, 49 standalone i18n tests, 227 Tools tests, eight health-claims tests plus the 1,230-file claims scan, required-CI, calibration parity, the 17,585-occurrence terminology inventory with zero forbidden uses, release controls, legal inventory, distribution provenance, private-data, operations-record, 107 tracked JSON parses, interpreter-aware shell checks, both prior locked dependency audits, and diff gates pass locally. A bounded high-confidence scan found zero secret signatures across 3,074 tracked text files. | Current source and release-control wiring reject new unlocalized copy, unsupported claims, forbidden vendor mappings, high-confidence secrets, malformed tracked JSON, and unreviewed distribution inputs. | Professional translation, hosted exact-SHA checks, or clinical/legal approval |
+| Review status | Pull request `#15` previously identified ten actionable lifecycle defects. The local correction closes managed-document content-mode/account isolation, BMI dependency, displayed-day hydration, cancellation, notification privacy, bounded Android ownership invalidation, non-destructive server migration staging, server Safety, and final Apple accessibility findings. Replacement exact-tree reviews then found the cross-kind document join, unversioned filtered cursor, stale current-schema instrumentation, unproven Room snapshot, and public BLE lock-screen health-summary defects. The first consolidated hosted Android production shell then found one lazy-composition test defect; the corrected list-level test passes focused and full managed-device execution. Direct Swift, Kotlin, Room, schema-oracle, memory, PostgreSQL, real 50-to-51 migration, incremental KSP, tamper-regeneration, and managed-emulator evidence now covers those paths. Final independent review of the corrected list modifier and navigation semantics returned no actionable finding. | Corrective work remains tied to concrete source review and direct regression evidence, including explicit rejection of stale review evidence. | Corrected hosted exact-SHA verdict, physical behavior, or external launch gates |
 | Project agent handoff | Root `AGENTS.md` points to the checked-in skill; `quick_validate.py` reports `Skill is valid!`; `bash -n` passes; the repository-local context snapshot runs against this dirty worktree; project and user-level skill copies are byte-identical; a read-only fresh-agent rehearsal recovered the branch, risks, invariants, verified/open split, and next command | A future agent entering the repository can discover the same stable engineering, medical-truth, privacy, parity, verification, and handoff contract and recover live context without the oversized chat | That any current feature, deployment, physical-device path, or external release gate is complete |
 | Owner-supplied band SDK static assessment | Android protocol AAR and latest iOS static archive were hashed; docs, headers, demo manifests/plists, platform slices, background hooks, license files, and embedded endpoint strings were inspected without executing or importing the binaries | A phone integration path exists in the package; commands must be serialized; model-gated history/backfill, connection confirmation, password rotation, haptics, and other optional APIs are present; the iOS package cannot serve Mac/simulator | Exact NOOP band capability, printed-label mapping, triple-tap possession, runtime egress, redistribution authority, signed app behavior, background reliability, sensor accuracy, or production readiness |
 | Separate SDK repository | Private `Dhanunjay-Divi/NoopBandSDK` created and pushed at `ee82cc0`; local validation passed 14 files with no CJK text, tracked supplier binary, or invalid JSON; repository contains no workflow | SDK ownership, language, binary, and release cadence are isolated from the app repository without spending hosted Actions | Supplier redistribution authority, adapter implementation, artifact publication, physical behavior, or production approval |
@@ -423,8 +441,8 @@ records. Concurrent development must remain isolated by worktree and branch.
 The exact-current-tree local wall and independent review above cover the
 current implementation. The generated terminology snapshot and repository
 policy gates are rerun after this record refresh. Fresh hosted required
-exact-SHA checks and normal protected integration remain required before this
-round can be closed.
+exact-SHA checks on the corrected head and normal protected integration remain
+required before this round can be closed.
 
 ## Physical device and deployment
 
@@ -449,13 +467,17 @@ round can be closed.
   skill and operations records.
 - Commits: body/notification `9547c394`; calendar integration `4f8682a6`;
   wind-down privacy `83ec8598`; durable handoff `6b78df33`; current mobile
-  reliability/accessibility `99a51b80`; Safety lifecycle `e35d1d37`
+  reliability/accessibility `99a51b80`; Safety lifecycle `e35d1d37`; first
+  consolidated correction `142eeec5`; production-shell correction `8f5253c1`
 - Branch and remote state: protected pull request `#15` and remote branch
-  `origin/codex/product-safety-quality-audit-20260911` exist at old head
-  `5ddd812c`. The final correction and exact-current-tree local wall remain unpushed so
-  one consolidated update can replace the canceled old Apple/Android runs.
-  Fresh hosted review, required exact-SHA checks, and normal integration remain
-  pending; earlier remote checks are not reused as proof.
+  `origin/codex/product-safety-quality-audit-20260911` carried the first
+  consolidated correction at `142eeec5`. That exact-SHA run passed the
+  Android unit/build/lint job, server, Swift packages, repository controls, and
+  macOS app job, but failed the Android production shell on one deterministic
+  lazy-list test. Local code commit `8f5253c1` contains the verified correction;
+  this record and refreshed generated policy evidence remain uncommitted. Fresh
+  corrected-head review, required exact-SHA checks, and normal integration
+  remain pending; the failed head is not reused as proof.
 - Repository visibility verified: inherited from current repository record
 - Version/build impact: Apple local database schema `54` to `60`; Android Room
   schema `45` to `51`; PostgreSQL migrations through `038`; no marketing
@@ -482,15 +504,19 @@ round can be closed.
 
 - Build: optional adult BMI from confirmed inputs; source/date-aware imported
   whole-body composition; neutral user-selected target status; separately
-  consented, private activity-suggestion notifications after eligible sync.
+  consented, private activity-suggestion notifications after eligible sync;
+  metric-first desktop hierarchy; private routine prompts; evidence-gated
+  Daily Plan use of a generic local workout window.
 - Defer: claims about reliable background/terminated delivery until physical
   iOS/Android evidence; supplied exercise videos/animations until rights,
   instruction quality, captions, reduced-motion behavior, and exercise-safety
-  review are documented.
+  review are documented; fixed notification timing until physical scheduling
+  and fatigue evidence exists.
 - Reject: band-inferred body fat or segmental composition; BMI interpretation
   for users below 20; pregnancy/eating-disorder/clinical target logic without a
   dedicated reviewed pathway; weight-gap-driven walking/exercise/calorie
-  prompts; automatic saving of unvalidated workout inference.
+  prompts; automatic saving of unvalidated workout inference; copied
+  third-party branding/copy or an "optimal performance" promise.
 - Decision-log entry: this round is the durable record until a dedicated
   product-decision registry is introduced.
 
@@ -537,9 +563,8 @@ round can be closed.
 ## Next round
 
 1. Regenerate final terminology and operations evidence, rerun repository
-   policy gates, create bounded local commits, and make one consolidated push
-   to pull request `#15`.
-2. Require fresh hosted review and every required exact-SHA check, then
+   policy gates, commit the durable record, and update pull request `#15` once.
+2. Require fresh corrected-head hosted review and every required exact-SHA check, then
    integrate through the normal protected merge path without bypassing a gate.
 3. Run the checked-in physical-device handoff on representative iOS and Android
    phones plus supported band firmware; record failures and logs rather than
