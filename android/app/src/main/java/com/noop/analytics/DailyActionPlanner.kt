@@ -67,7 +67,8 @@ object DailyActionPlanner {
     const val WORKOUT_SLEEP_DEFICIT_THRESHOLD_MINUTES = 45
     const val MINIMUM_PLANNED_WORKOUT_MINUTES = 10
     const val MAXIMUM_PLANNED_WORKOUT_MINUTES = 6 * 60
-    const val MAXIMUM_PLANNED_WORKOUT_LEAD_SECONDS = 24 * 60 * 60L
+    // A same-civil-day workout can be up to 25 elapsed hours away across a DST fall-back day.
+    const val MAXIMUM_PLANNED_WORKOUT_LEAD_SECONDS = 25 * 60 * 60L
 
     private const val planningLimitation =
         "This is a personal planning range, not a safety limit, diagnosis, or medical clearance."

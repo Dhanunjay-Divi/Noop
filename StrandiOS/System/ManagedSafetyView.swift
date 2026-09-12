@@ -343,7 +343,7 @@ struct ManagedSafetyView: View {
         Text(verbatim: contactCountLabel)
         .font(StrandFont.caption)
         .foregroundStyle(
-            outboundContacts.count >= minimumContacts
+            deliveryCapableContacts >= minimumContacts
                 ? StrandPalette.statusPositive
                 : StrandPalette.textTertiary
         )
@@ -468,7 +468,7 @@ struct ManagedSafetyView: View {
                 }
                 .disabled(!canStartPage)
 
-                if outboundContacts.count < minimumContacts {
+                if deliveryCapableContacts < minimumContacts {
                     Text(verbatim: contactsRemainingLabel)
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -646,6 +646,10 @@ struct ManagedSafetyView: View {
         service.safetyContacts?.minimumRequired ?? 2
     }
 
+    private var deliveryCapableContacts: Int {
+        service.safetyContacts?.deliveryCapableCount ?? 0
+    }
+
     private var activeOwnerIncident: ManagedSafetyIncident? {
         service.safetyIncidents.first {
             $0.role == "owner"
@@ -662,7 +666,7 @@ struct ManagedSafetyView: View {
 
     private var canStartPage: Bool {
         !service.isBusy
-            && outboundContacts.count >= minimumContacts
+            && deliveryCapableContacts >= minimumContacts
             && activeOwnerIncident == nil
             && (!shareLocation || locationReady)
     }
@@ -670,7 +674,7 @@ struct ManagedSafetyView: View {
     private var contactCountLabel: String {
         localizedFormat(
             "managed.safety.contact.count.format",
-            Int64(outboundContacts.count),
+            Int64(deliveryCapableContacts),
             Int64(minimumContacts)
         )
     }
@@ -678,7 +682,7 @@ struct ManagedSafetyView: View {
     private var contactsRemainingLabel: String {
         localizedFormat(
             "managed.safety.threshold.remaining.format",
-            Int64(max(0, minimumContacts - outboundContacts.count))
+            Int64(max(0, minimumContacts - deliveryCapableContacts))
         )
     }
 

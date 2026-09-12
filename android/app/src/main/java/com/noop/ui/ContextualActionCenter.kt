@@ -143,6 +143,27 @@ internal object ContextualActionStateStore {
     }
 }
 
+internal object ContextualActionRefreshPolicy {
+    fun refreshed(
+        existing: ContextualAction,
+        title: String,
+        detail: String,
+        evidence: List<String>,
+        expiresAtMillis: Long,
+        amountMl: Int?,
+        route: NoopNotificationRoute?,
+        source: ContextualActionSource?,
+    ): ContextualAction = existing.copy(
+        title = title,
+        detail = detail,
+        evidence = evidence.filter { it.isNotBlank() }.take(3),
+        expiresAtMillis = expiresAtMillis,
+        amountMl = amountMl ?: existing.amountMl,
+        route = route ?: existing.route,
+        source = source ?: existing.source,
+    )
+}
+
 internal data class ContextualActionIdentityState(
     val actions: List<ContextualAction>,
     val processingIds: Set<String>,
@@ -304,7 +325,7 @@ internal object ContextualActionCenter {
         evidence: List<String>,
         observedAtMillis: Long,
         maximumAgeMillis: Long,
-        route: NoopNotificationRoute = NoopNotificationRoute.SLEEP,
+        route: NoopNotificationRoute? = null,
         source: ContextualActionSource? = null,
     ) {
         present(
@@ -549,34 +570,32 @@ internal object ContextualActionCenter {
             val existingIndex = storedActions.indexOfFirst { it.id == id }
             if (existingIndex >= 0) {
                 val existing = storedActions[existingIndex]
+                val refreshed = storedActions.toMutableList()
+                refreshed[existingIndex] = ContextualActionRefreshPolicy.refreshed(
+                    existing = existing,
+                    title = title,
+                    detail = detail,
+                    evidence = evidence,
+                    expiresAtMillis = expiresAt,
+                    amountMl = amountMl,
+                    route = route,
+                    source = source,
+                )
                 if (
-                    existing.expiresAtMillis > now &&
-                    existing.source == null &&
-                    source != null
-                ) {
-                    val upgraded = storedActions.toMutableList()
-                    upgraded[existingIndex] = existing.copy(
-                        route = existing.route ?: route,
-                        source = source,
+                    writeStateLocked(
+                        context = app,
+                        actions = refreshed,
+                        synchronous = true,
                     )
-                    if (
-                        writeStateLocked(
-                            context = app,
-                            actions = upgraded,
-                            synchronous = true,
-                        )
-                    ) {
-                        storedActions = upgraded
-                        publishLocked()
-                        scheduleExpiryLocked()
-                    } else {
-                        AppDiagnosticsRecorder.record(
-                            "contextual_action.source_migration",
-                            fields = mapOf("outcome" to "commit_failed"),
-                        )
-                    }
+                ) {
+                    storedActions = refreshed
+                    publishLocked()
+                    scheduleExpiryLocked()
                 } else {
-                    removeExpiredLocked(app, now)
+                    AppDiagnosticsRecorder.record(
+                        "contextual_action.refresh",
+                        fields = mapOf("outcome" to "commit_failed"),
+                    )
                 }
                 return@synchronized
             }

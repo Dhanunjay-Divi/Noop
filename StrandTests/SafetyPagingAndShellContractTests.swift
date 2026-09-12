@@ -370,7 +370,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertEqual(requestedLocationSharing, [false, true])
     }
 
-    func testManagedBandSOSBypassesUnrelatedSafetyBusyGateAndCoalescesDuplicates() throws {
+    func testManagedBandSOSBypassesUnrelatedSafetyBusyGateAndSerializesIncidents() throws {
         let service = try source(
             "StrandiOS/System/ManagedCloudService.swift"
         )
@@ -396,18 +396,132 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             service[performStart.lowerBound..<recordStart.lowerBound]
         )
 
-        XCTAssertTrue(trigger.contains("if let bandSOSRequestTask"))
-        XCTAssertTrue(trigger.contains("bandSOSRequestTask = task"))
-        XCTAssertTrue(trigger.contains("await task.value"))
+        XCTAssertTrue(trigger.contains("return await performBandSOS("))
+        XCTAssertFalse(trigger.contains("Task {"))
+        XCTAssertFalse(trigger.contains("bandSOSRequestTask"))
         XCTAssertFalse(trigger.contains("beginSafetyAction()"))
         XCTAssertFalse(trigger.contains("refreshSafety()"))
 
         XCTAssertTrue(perform.contains("guard phase == .enrolled"))
+        XCTAssertTrue(perform.contains(
+            "try await refreshSafetyData(requireNewGeneration: true)"
+        ))
+        XCTAssertTrue(perform.contains("try Task.checkCancellation()"))
+        XCTAssertTrue(perform.contains("catch is CancellationError"))
+        XCTAssertTrue(perform.contains("guard bandSOSSetupReady"))
         XCTAssertTrue(perform.contains("createSafetyIncidentRequest("))
         XCTAssertTrue(perform.contains("scheduleBandSOSRefresh()"))
+        XCTAssertTrue(perform.contains(
+            "try await safetyIncidentGate.acquire()"
+        ))
+        XCTAssertTrue(perform.contains("safetyIncidentGate.release()"))
         XCTAssertFalse(perform.contains("beginSafetyAction()"))
         XCTAssertFalse(perform.contains("guard !isBusy"))
         XCTAssertFalse(perform.contains("guard !safetyRunning"))
+
+        let manualStart = try XCTUnwrap(
+            service.range(of: "func createSafetyIncident(")
+        )
+        let requestStart = try XCTUnwrap(
+            service.range(
+                of: "private func createSafetyIncidentRequest(",
+                range: manualStart.upperBound..<service.endIndex
+            )
+        )
+        let manual = String(
+            service[manualStart.lowerBound..<requestStart.lowerBound]
+        )
+        XCTAssertTrue(manual.contains(
+            "try await safetyIncidentGate.acquire()"
+        ))
+        XCTAssertTrue(manual.contains(
+            "try await refreshSafetyData(requireNewGeneration: true)"
+        ))
+        XCTAssertTrue(manual.contains("try Task.checkCancellation()"))
+        XCTAssertTrue(manual.contains("safetyIncidentGate.release()"))
+
+        XCTAssertTrue(service.contains(
+            "private let safetyIncidentGate = ManagedSafetyIncidentGate()"
+        ))
+        let refreshStart = try XCTUnwrap(
+            service.range(of: "private func refreshSafetyData(")
+        )
+        let loadStart = try XCTUnwrap(
+            service.range(
+                of: "private func loadSafetyData()",
+                range: refreshStart.upperBound..<service.endIndex
+            )
+        )
+        let refresh = String(
+            service[refreshStart.lowerBound..<loadStart.lowerBound]
+        )
+        XCTAssertTrue(refresh.contains(
+            "try await safetyRefreshTask.value"
+        ))
+        XCTAssertTrue(refresh.contains("try await task.value"))
+        XCTAssertGreaterThanOrEqual(
+            refresh.components(
+                separatedBy: "try Task.checkCancellation()"
+            ).count - 1,
+            3
+        )
+
+        let request = String(
+            service[requestStart.lowerBound..<refreshStart.lowerBound]
+        )
+        XCTAssertTrue(request.contains(
+            "let auth = try await authorization(forceRefresh: true)"
+        ))
+        XCTAssertTrue(request.contains("try Task.checkCancellation()"))
+        XCTAssertTrue(request.contains("authorization: auth"))
+        XCTAssertFalse(service.contains("safetyIncidentRunning"))
+        XCTAssertFalse(service.contains("safetyIncidentWaiters"))
+    }
+
+    func testAndroidBandSOSConvertsRequestFailuresIntoUnavailableOutcome() throws {
+        let service = try source(
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+        )
+        let start = try XCTUnwrap(
+            service.range(of: "suspend fun triggerBandSos(")
+        )
+        let end = try XCTUnwrap(
+            service.range(
+                of: "private fun recordBandSosOutcome(",
+                range: start.upperBound..<service.endIndex
+            )
+        )
+        let trigger = String(service[start.lowerBound..<end.lowerBound])
+
+        XCTAssertTrue(trigger.contains("catch (error: CancellationException)"))
+        XCTAssertTrue(trigger.contains("catch (error: Throwable)"))
+        XCTAssertTrue(trigger.contains("setSafetyStatus(userMessage(error))"))
+        XCTAssertTrue(trigger.contains("recordBandSosOutcome(\"rejected\")"))
+        XCTAssertTrue(trigger.contains(
+            "ManagedSafetyBandSosOutcome.Unavailable("
+        ))
+    }
+
+    func testManagedSafetyReadinessUsesDeliveryCapableContactsConsistently() throws {
+        let view = try source(
+            "StrandiOS/System/ManagedSafetyView.swift"
+        )
+        let android = try source(
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+        )
+
+        XCTAssertTrue(view.contains(
+            "deliveryCapableContacts >= minimumContacts"
+        ))
+        XCTAssertTrue(view.contains(
+            "if deliveryCapableContacts < minimumContacts"
+        ))
+        XCTAssertTrue(view.contains(
+            "Int64(deliveryCapableContacts)"
+        ))
+        XCTAssertTrue(android.contains(
+            "\"delivery_capable_contacts\" to"
+        ))
     }
 
     func testManagedBandSOSLocationRequiresConsentAndBackgroundAuthorization() {
@@ -976,7 +1090,10 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             "FROM managed_push_installations push"
         ))
         XCTAssertTrue(server.contains(
-            "ORDER BY account_id, installation_id"
+            "ORDER BY push.account_id, push.installation_id"
+        ))
+        XCTAssertTrue(server.contains(
+            "installation.status = 'active'"
         ))
         XCTAssertTrue(server.contains(
             "active_push_accounts"
@@ -1307,6 +1424,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             XCTAssertTrue(text.contains("\"managed_safety.band_sos\""))
             for outcome in [
                 "setup_unavailable", "already_active", "opened", "rejected",
+                "canceled",
             ] {
                 XCTAssertTrue(text.contains("\"\(outcome)\""), outcome)
             }

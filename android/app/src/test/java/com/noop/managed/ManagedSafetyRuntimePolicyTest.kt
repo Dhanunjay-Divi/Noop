@@ -39,6 +39,7 @@ class ManagedSafetyRuntimePolicyTest {
                 phase = ManagedCloudPhase.ENROLLED,
                 contacts = ManagedSafetyContacts(
                     contacts = emptyList(),
+                    deliveryCapableCount = 0,
                     minimumRequired = 1,
                     maximumAllowed = 5,
                 ),
@@ -50,6 +51,19 @@ class ManagedSafetyRuntimePolicyTest {
                 phase = ManagedCloudPhase.ENROLLED,
                 contacts = ManagedSafetyContacts(
                     contacts = listOf(acceptedContact),
+                    deliveryCapableCount = 1,
+                    minimumRequired = 1,
+                    maximumAllowed = 5,
+                ),
+            ),
+        )
+        assertTrue(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.ENROLLED,
+                contacts = ManagedSafetyContacts(
+                    contacts = listOf(acceptedContact),
+                    deliveryCapableCount = 0,
                     minimumRequired = 1,
                     maximumAllowed = 5,
                 ),
@@ -154,7 +168,7 @@ class ManagedSafetyRuntimePolicyTest {
     }
 
     @Test
-    fun incidentRequestReplaysOnlyForTheSameAccountAndOptions() {
+    fun incidentRequestReplaysSameIntentAndRotatesAfterIntentOrAccountChanges() {
         val firstId = UUID.fromString("00000000-0000-0000-0000-000000000201")
         val secondId = UUID.fromString("00000000-0000-0000-0000-000000000202")
         val firstScope = "a".repeat(64)
@@ -179,26 +193,28 @@ class ManagedSafetyRuntimePolicyTest {
                 createRequestId = { secondId },
             ),
         )
-        assertThrows(ManagedStorageException.Conflict::class.java) {
-            ManagedSafetyIncidentRequestPolicy.resolve(
-                existing = created,
-                accountScopeHash = firstScope,
-                trigger = "manual_sos",
-                durationHours = 12,
-                shareLocation = true,
-                createRequestId = { secondId },
-            )
-        }
-        assertThrows(ManagedStorageException.Conflict::class.java) {
-            ManagedSafetyIncidentRequestPolicy.resolve(
-                existing = created,
-                accountScopeHash = firstScope,
-                trigger = "band_sos",
-                durationHours = 8,
-                shareLocation = true,
-                createRequestId = { secondId },
-            )
-        }
+        val changedDuration = ManagedSafetyIncidentRequestPolicy.resolve(
+            existing = created,
+            accountScopeHash = firstScope,
+            trigger = "manual_sos",
+            durationHours = 12,
+            shareLocation = true,
+            createRequestId = { secondId },
+        )
+        assertEquals(secondId, changedDuration.requestId)
+        assertEquals(12, changedDuration.durationHours)
+
+        val changedTrigger = ManagedSafetyIncidentRequestPolicy.resolve(
+            existing = created,
+            accountScopeHash = firstScope,
+            trigger = "band_sos",
+            durationHours = 8,
+            shareLocation = false,
+            createRequestId = { secondId },
+        )
+        assertEquals(secondId, changedTrigger.requestId)
+        assertEquals("band_sos", changedTrigger.trigger)
+        assertFalse(changedTrigger.shareLocation)
         val otherAccount = ManagedSafetyIncidentRequestPolicy.resolve(
             existing = created,
             accountScopeHash = secondScope,

@@ -397,16 +397,16 @@ internal fun ManagedSafetySection(
                 kind = NoopButtonKind.Destructive,
                 fullWidth = true,
                 enabled = !state.busy &&
-                    outboundContacts.size >= minimum &&
+                    (contacts?.deliveryCapableCount ?: 0) >= minimum &&
                     activeOwner == null &&
                     locationIncidentReady,
                 onClick = { confirmPage = true },
             )
             when {
-                outboundContacts.size < minimum -> Text(
+                (contacts?.deliveryCapableCount ?: 0) < minimum -> Text(
                     stringResource(
                         R.string.managed_safety_threshold_remaining_format,
-                        minimum - outboundContacts.size,
+                        minimum - (contacts?.deliveryCapableCount ?: 0),
                     ),
                     style = NoopType.caption,
                     color = Palette.textTertiary,
@@ -562,7 +562,7 @@ internal fun ManagedSafetySection(
 
             ManagedSafetyContacts(
                 contacts = contacts?.contacts.orEmpty(),
-                outboundCount = outboundContacts.size,
+                outboundCount = contacts?.deliveryCapableCount ?: 0,
                 minimum = minimum,
                 busy = state.busy,
                 onRemove = { contactToRemove = it },

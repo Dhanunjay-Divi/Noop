@@ -108,7 +108,7 @@ internal fun shouldDisableBandSosPreference(
     enabled &&
         phase == ManagedCloudPhase.ENROLLED &&
         contacts != null &&
-        contacts.contacts.count { it.role == "contact" } < contacts.minimumRequired
+        contacts.deliveryCapableCount < contacts.minimumRequired
 
 private enum class CheckInPreset(val seconds: Long, val labelRes: Int) {
     Minutes15(15 * 60L, R.string.safety_duration_15_minutes),
@@ -165,8 +165,7 @@ fun SafetyCenterScreen() {
     val managedBandSosReady =
         managedState.phase == ManagedCloudPhase.ENROLLED &&
             managedState.safetyContacts?.let { contacts ->
-                contacts.contacts.count { it.role == "contact" } >=
-                    contacts.minimumRequired
+                contacts.deliveryCapableCount >= contacts.minimumRequired
             } == true
     val shouldDisableBandSos = shouldDisableBandSosPreference(
         enabled = sosGestureEnabled,

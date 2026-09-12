@@ -192,15 +192,18 @@ public struct ManagedSafetyContact: Codable, Equatable, Sendable, Identifiable {
 
 public struct ManagedSafetyContacts: Equatable, Sendable {
     public let contacts: [ManagedSafetyContact]
+    public let deliveryCapableCount: Int
     public let minimumRequired: Int
     public let maximumAllowed: Int
 
     public init(
         contacts: [ManagedSafetyContact],
+        deliveryCapableCount: Int,
         minimumRequired: Int,
         maximumAllowed: Int
     ) {
         self.contacts = contacts
+        self.deliveryCapableCount = deliveryCapableCount
         self.minimumRequired = minimumRequired
         self.maximumAllowed = maximumAllowed
     }

@@ -173,7 +173,8 @@ public enum DailyActionPlanner {
     public static let workoutSleepDeficitThresholdMinutes = 45
     public static let minimumPlannedWorkoutMinutes = 10
     public static let maximumPlannedWorkoutMinutes = 6 * 60
-    public static let maximumPlannedWorkoutLeadSeconds = 24 * 60 * 60
+    // A same-civil-day workout can be up to 25 elapsed hours away across a DST fall-back day.
+    public static let maximumPlannedWorkoutLeadSeconds = 25 * 60 * 60
 
     private static let planningLimitation =
         "This is a personal planning range, not a safety limit, diagnosis, or medical clearance."

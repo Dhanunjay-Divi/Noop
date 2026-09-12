@@ -5,6 +5,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 class DailyActionPlannerTest {
     private val today = "2026-08-22"
@@ -237,6 +239,50 @@ class DailyActionPlannerTest {
         )
         assertNull(plan.workoutAdjustment?.measuredSleepMinutes)
         assertEquals(ScoreConfidence.BUILDING, plan.workoutAdjustment?.confidence)
+    }
+
+    @Test fun fallbackDayAllowsElapsedLeadBeyond24HoursButRejectsAnotherCivilDay() {
+        val zone = ZoneId.of("America/New_York")
+        val now = ZonedDateTime.of(2026, 11, 1, 0, 0, 0, 0, zone)
+        val acceptedStart = ZonedDateTime.of(2026, 11, 1, 23, 30, 0, 0, zone)
+        val acceptedEnd = ZonedDateTime.of(2026, 11, 1, 23, 55, 0, 0, zone)
+        val nextDayStart = ZonedDateTime.of(2026, 11, 2, 0, 10, 0, 0, zone)
+        val nextDayEnd = ZonedDateTime.of(2026, 11, 2, 0, 40, 0, 0, zone)
+        val acceptedLead = acceptedStart.toEpochSecond() - now.toEpochSecond()
+        assertTrue(acceptedLead > 24 * 60 * 60L)
+        assertTrue(acceptedLead < 25 * 60 * 60L)
+
+        val day = "2026-11-01"
+        val accepted = DailyActionPlanner.plan(
+            today = day,
+            readiness = readiness(level = ReadinessEngine.Level.STRAINED, day = day),
+            checkIn = DailyActionPlanner.CheckIn.AS_USUAL,
+            recentEffort = history(),
+            plannedWorkout = plannedWorkout(
+                day = day,
+                startSec = acceptedStart.toEpochSecond(),
+                endSec = acceptedEnd.toEpochSecond(),
+            ),
+            nowSec = now.toEpochSecond(),
+        )
+        val rejected = DailyActionPlanner.plan(
+            today = day,
+            readiness = readiness(level = ReadinessEngine.Level.STRAINED, day = day),
+            checkIn = DailyActionPlanner.CheckIn.AS_USUAL,
+            recentEffort = history(),
+            plannedWorkout = plannedWorkout(
+                day = "2026-11-02",
+                startSec = nextDayStart.toEpochSecond(),
+                endSec = nextDayEnd.toEpochSecond(),
+            ),
+            nowSec = now.toEpochSecond(),
+        )
+
+        assertEquals(
+            DailyActionPlanner.WorkoutAdjustmentReason.RECOVERY_SHIFT,
+            accepted.workoutAdjustment?.reason,
+        )
+        assertNull(rejected.workoutAdjustment)
     }
 
     @Test fun thinSleepDifferenceAndInvalidWorkoutTimingFailClosed() {

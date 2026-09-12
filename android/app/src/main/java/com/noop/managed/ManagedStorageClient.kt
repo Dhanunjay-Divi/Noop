@@ -320,18 +320,27 @@ class ManagedStorageClient(
                 .build(),
         )
         val rows = response.requireArray("contacts")
+        val deliveryCapableCount = if (response.has("delivery_capable_count")) {
+            response.requiredNonnegativeInt("delivery_capable_count")
+        } else {
+            0
+        }
+        val contacts = buildList {
+            for (index in 0 until rows.length()) {
+                add(parseSafetyContact(rows.requireObject(index)))
+            }
+        }
         if (rows.length() > 25 ||
+            deliveryCapableCount > contacts.count { it.role == "contact" } ||
+            deliveryCapableCount > 5 ||
             response.requiredNonnegativeInt("minimum_required") != 2 ||
             response.requiredNonnegativeInt("maximum_allowed") != 5
         ) {
             throw ManagedStorageException.InvalidResponse()
         }
         ManagedSafetyContacts(
-            contacts = buildList {
-                for (index in 0 until rows.length()) {
-                    add(parseSafetyContact(rows.requireObject(index)))
-                }
-            },
+            contacts = contacts,
+            deliveryCapableCount = deliveryCapableCount,
             minimumRequired = 2,
             maximumAllowed = 5,
         )

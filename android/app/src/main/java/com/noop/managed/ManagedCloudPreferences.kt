@@ -730,14 +730,12 @@ internal object ManagedSafetyIncidentRequestPolicy {
         require(accountScopeHash.matches(Regex("^[0-9a-f]{64}$")))
         require(trigger in setOf("manual_sos", "band_sos"))
         require(durationHours in setOf(8, 12))
-        if (existing?.accountScopeHash == accountScopeHash) {
-            if (
-                existing.trigger != trigger ||
-                existing.durationHours != durationHours ||
-                existing.shareLocation != shareLocation
-            ) {
-                throw ManagedStorageException.Conflict()
-            }
+        if (
+            existing?.accountScopeHash == accountScopeHash &&
+            existing.trigger == trigger &&
+            existing.durationHours == durationHours &&
+            existing.shareLocation == shareLocation
+        ) {
             return existing
         }
         return ManagedSafetyIncidentRequestRecord(

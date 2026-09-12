@@ -1352,6 +1352,10 @@ class FakeManagedSafetyRepository:
             }
         ]
 
+    async def contact_snapshot(self, **kwargs):
+        self.calls.append(("contact_snapshot", kwargs))
+        return await self.list_contacts(**kwargs), 1
+
     async def remove_contact(self, **kwargs):
         self.calls.append(("remove_contact", kwargs))
 
@@ -1405,8 +1409,14 @@ class RateLimitedManagedSafetyRepository(FakeManagedSafetyRepository):
 
 
 class FakeManagedSafetyPushService:
-    def __init__(self, repository: FakeManagedSafetyRepository) -> None:
+    def __init__(
+        self,
+        repository: FakeManagedSafetyRepository,
+        *,
+        available: bool = True,
+    ) -> None:
         self.repository = repository
+        self.available = available
         self.registrations = []
         self.dispatches = []
 
@@ -1442,6 +1452,36 @@ def test_managed_safety_routes_fail_closed_without_configured_repository() -> No
         )
     assert response.status_code == 503
     assert response.json()["detail"] == "managed Safety is not configured"
+
+
+def test_managed_safety_incident_fails_before_persistence_when_push_is_unavailable() -> (
+    None
+):
+    safety = FakeManagedSafetyRepository()
+    push = FakeManagedSafetyPushService(safety, available=False)
+    client, _ = _managed_client(
+        managed_safety_repository=safety,
+        managed_safety_push_service=push,
+    )
+    with client:
+        contacts = client.get(
+            "/v1/managed/safety/contacts",
+            headers=_managed_headers(),
+        )
+        incident = client.post(
+            "/v1/managed/safety/incidents",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "trigger": "manual_sos",
+                "duration_hours": 8,
+                "share_location": False,
+            },
+        )
+    assert contacts.status_code == 200
+    assert contacts.json()["delivery_capable_count"] == 0
+    assert incident.status_code == 503
+    assert not any(call[0] == "create_incident" for call in safety.calls)
 
 
 def test_managed_safety_push_registration_never_echoes_token() -> None:
@@ -1553,6 +1593,7 @@ def test_managed_safety_account_flow_is_identity_and_installation_bound() -> Non
     assert request.status_code == 201
     assert decided.json()["request"]["status"] == "accepted"
     assert contacts.json()["minimum_required"] == 2
+    assert contacts.json()["delivery_capable_count"] == 1
     assert incident.status_code == 202
     assert incident.json()["push_outcome"] == "attempted"
     create_call = next(call for call in safety.calls if call[0] == "create_incident")
@@ -1566,7 +1607,11 @@ def test_managed_safety_account_flow_is_identity_and_installation_bound() -> Non
 
 def test_managed_safety_incident_quota_returns_retry_after() -> None:
     safety = RateLimitedManagedSafetyRepository()
-    client, _ = _managed_client(managed_safety_repository=safety)
+    push = FakeManagedSafetyPushService(safety)
+    client, _ = _managed_client(
+        managed_safety_repository=safety,
+        managed_safety_push_service=push,
+    )
 
     with client:
         response = client.post(

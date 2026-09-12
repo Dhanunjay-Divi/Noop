@@ -305,7 +305,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     ) == PackageManager.PERMISSION_GRANTED
                     if (calendarGranted) {
                         plannedWorkoutCalendarPermissionUnavailable = false
-                        viewModel.onPlannedWorkoutCalendarChanged()
+                        viewModel.refreshPlannedWorkoutCalendar()
                     } else {
                         plannedWorkoutCalendarPermissionUnavailable = true
                         if (commitPlannedWorkoutCalendarConsent(false)) {

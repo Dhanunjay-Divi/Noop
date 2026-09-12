@@ -230,6 +230,80 @@ final class DailyActionPlannerTests: XCTestCase {
         XCTAssertEqual(plan.workoutAdjustment?.confidence, .building)
     }
 
+    func testFallbackDayAllowsElapsedLeadBeyond24HoursButRejectsAnotherCivilDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(
+            TimeZone(identifier: "America/New_York")
+        )
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 1,
+            hour: 0
+        )))
+        let acceptedStart = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 1,
+            hour: 23,
+            minute: 30
+        )))
+        let acceptedEnd = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 1,
+            hour: 23,
+            minute: 55
+        )))
+        let nextDayStart = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 2,
+            hour: 0,
+            minute: 10
+        )))
+        let nextDayEnd = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 2,
+            hour: 0,
+            minute: 40
+        )))
+        let nowSec = Int(now.timeIntervalSince1970)
+        let acceptedLead = Int(acceptedStart.timeIntervalSince(now))
+        XCTAssertGreaterThan(acceptedLead, 24 * 60 * 60)
+        XCTAssertLessThan(acceptedLead, 25 * 60 * 60)
+
+        let day = "2026-11-01"
+        let accepted = DailyActionPlanner.plan(
+            today: day,
+            readiness: readiness(level: .strained, day: day),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            plannedWorkout: plannedWorkout(
+                day: day,
+                startSec: Int(acceptedStart.timeIntervalSince1970),
+                endSec: Int(acceptedEnd.timeIntervalSince1970)
+            ),
+            nowSec: nowSec
+        )
+        let rejected = DailyActionPlanner.plan(
+            today: day,
+            readiness: readiness(level: .strained, day: day),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            plannedWorkout: plannedWorkout(
+                day: "2026-11-02",
+                startSec: Int(nextDayStart.timeIntervalSince1970),
+                endSec: Int(nextDayEnd.timeIntervalSince1970)
+            ),
+            nowSec: nowSec
+        )
+
+        XCTAssertEqual(accepted.workoutAdjustment?.reason, .recoveryShift)
+        XCTAssertNil(rejected.workoutAdjustment)
+    }
+
     func testThinSleepDifferenceAndInvalidWorkoutTimingFailClosed() {
         let thinDifference = DailyActionPlanner.plan(
             today: today,

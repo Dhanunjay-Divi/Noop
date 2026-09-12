@@ -1458,6 +1458,7 @@ final class ManagedStorageClientTests: XCTestCase {
                       "accepted_at":"2026-09-08T09:01:00Z"
                     }
                   ],
+                  "delivery_capable_count":2,
                   "minimum_required":2,
                   "maximum_allowed":5
                 }
@@ -1534,6 +1535,7 @@ final class ManagedStorageClientTests: XCTestCase {
             authorization: authorization
         )
         XCTAssertEqual(contacts.contacts.count, 2)
+        XCTAssertEqual(contacts.deliveryCapableCount, 2)
         let creation = try await client.createSafetyIncident(
             trigger: "band_sos",
             durationHours: 8,
@@ -1553,6 +1555,42 @@ final class ManagedStorageClientTests: XCTestCase {
             authorization: authorization
         )
         XCTAssertEqual(location.sequence, 3)
+    }
+
+    func testManagedSafetyContactsMissingDeliveryCapabilityFailsClosed() async throws {
+        let (client, authorization) = try makeClient()
+        let contactID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000109"
+        )!
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/managed/safety/contacts")
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                  "contacts":[{
+                    "profile_id":"\(contactID)",
+                    "display_name":"Contact",
+                    "role":"contact",
+                    "accepted_at":"2026-09-08T09:00:00Z"
+                  }],
+                  "minimum_required":2,
+                  "maximum_allowed":5
+                }
+                """.utf8)
+            )
+        }
+
+        let contacts = try await client.safetyContacts(
+            authorization: authorization
+        )
+        XCTAssertEqual(contacts.contacts.count, 1)
+        XCTAssertEqual(contacts.deliveryCapableCount, 0)
     }
 
     func testManagedSafetyRetainedOwnerIncidentAllowsErasedParticipants() async throws {

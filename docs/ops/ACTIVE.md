@@ -36,19 +36,21 @@ geometry probe with native current-iOS scroll geometry and carries the
 measured persistent-navigation height only into pushed content tails.
 
 The exact local wall now passes on the current implementation tree:
-`WhoopStore` 485 tests; `NoopRemoteSync` 123; `StrandAnalytics` 1,466 with
-seven evidence-dependent skips; Apple app 1,850 with one external-fixture
-skip; Android Full and Demo 4,455 each with seven evidence-dependent skips,
+`WhoopStore` 488 tests; `NoopRemoteSync` 127; `StrandAnalytics` 1,467 with
+seven evidence-dependent skips; Apple app 1,854 with one external-fixture
+skip; Android Full and Demo 4,461 each with seven evidence-dependent skips,
 plus both lint variants, APK assemblies, and instrumentation-source
-compilation; and the PostgreSQL-backed server 456 with one provider/environment
-skip. The complete isolated iPhone UI suite passes 21/21, its high-risk subset
-passes 8/8, the unsigned generic iOS Simulator graph builds, and the shared
-macOS app builds. Ruff, both locked Python dependency audits,
-migration-manifest and backup/deployment contracts, 227 Tools tests, 49
-localization tests, health claims, strict i18n, required CI, calibration parity,
-terminology, release controls, legal inventory, provenance, private-data,
-operations-record, JSON, shell, and diff gates also pass locally. Docker is not
-installed on this machine, so no local container/Compose execution is claimed.
+compilation; and the PostgreSQL-backed server 457 with one provider/environment
+skip. The complete isolated iPhone 17 Pro UI suite executes 35 tests with one
+intentional private-pilot skip and zero failures; the unsigned generic iOS
+Simulator graph and universal macOS app build both pass. Ruff, both locked
+Python dependency audits, migration-manifest and backup/deployment contracts,
+227 Tools tests, 49 localization tests, health claims, strict i18n, required
+CI, calibration parity, terminology, release controls including the
+high-confidence credential scan, legal inventory, provenance, private-data,
+all 52 operations records, 107 tracked JSON parses, shell, and diff gates also
+pass locally. Docker is not installed on this machine, so no local
+container/Compose execution is claimed.
 
 The production-shell correction now tags the real Today `LazyColumn`, scrolls
 to the lazily composed HRV tile through list semantics, waits on the Today-root
@@ -79,6 +81,28 @@ change-feed document lookup is now qualified by document kind, and both mobile
 clients persist change-feed capability version `1`. A legacy filtered cursor
 must complete a supported-kind snapshot before incremental changes advance;
 failed or stale completion cannot mark a newer cursor current.
+
+The final Safety review is also closed locally. Server contact snapshots and
+incident creation lock active account/profile/installation state and reject
+runtime push unavailability before persistence. Android serializes incident
+creation with a dedicated mutex. Apple shares one cancellation-aware FIFO gate
+between manual and band requests, removes cancelled waiters, releases cancelled
+handoffs, propagates cancellation through shared refresh, and rechecks before
+authorization and creation. The first independent reviewer found one
+unstructured-refresh cancellation hole; the corrected exact-current source,
+46 focused Apple Safety tests, package gate regressions, Android tests, and
+457-case server suite pass, and re-review returned no actionable findings.
+
+Legacy settings restore is bounded rather than destructive: both platforms
+retain schema-v5 weekday wake compatibility, Android can round-trip the old
+wind-down recovery field without mapping it, and stale planner-derived
+recovery clears for every verified full database replacement independently of
+the optional settings sidecar. Database-only restore clears it on both
+platforms; Android clears before sidecar application, so empty, malformed, and
+unknown-only sidecars cannot preserve stale derived state. Settings-only import
+does not clear it. Calendar resume now coalesces an active refresh, and
+same-identity contextual actions update their evidence without losing identity
+or route.
 
 The final review then found that Android's persistent connection notification
 could expose Recovery and Effort while locked. That service now uses the shared
@@ -124,7 +148,7 @@ hosted workflow, and its working tree is clean. The original multilingual
 supplier drop remains immutable outside Git. NOOP's intentional product
 translations, including Chinese locales, remain in the app.
 
-Fresh hosted required exact-SHA checks on the corrected head and protected
+Fresh hosted required exact-SHA checks on the replacement head and protected
 integration remain pending. Round-owned Apple and dependency-audit scratch
 environments have been removed. Physical phones, exact band/firmware,
 BLE/background/notification/haptic/battery/sensor behavior, real

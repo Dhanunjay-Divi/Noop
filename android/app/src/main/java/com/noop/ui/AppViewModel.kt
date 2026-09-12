@@ -860,7 +860,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             analyzeKick.trySend(Unit)
             viewModelScope.launch { refreshAdaptiveHydrationContext() }
             viewModelScope.launch { refreshCycleTracking() }
-            onPlannedWorkoutCalendarChanged()
+            refreshPlannedWorkoutCalendar()
             refreshAgeMetricsIfProfileChanged()
         }
         override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
@@ -3204,6 +3204,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             currentFingerprint = null,
         )
         plannedWorkoutCalendarEvaluationJob?.cancel()
+        plannedWorkoutCalendarEvaluationJob = viewModelScope.launch {
+            PlannedWorkoutCalendarStore.refresh(
+                context = appContext,
+                force = true,
+            )
+            evaluateAdaptiveDayGuidance()
+        }
+    }
+
+    fun refreshPlannedWorkoutCalendar() {
+        reconcilePlannedWorkoutCalendarObserver()
+        if (plannedWorkoutCalendarEvaluationJob?.isActive == true) return
+        AdaptiveDayEvaluationGate.invalidate()
         plannedWorkoutCalendarEvaluationJob = viewModelScope.launch {
             PlannedWorkoutCalendarStore.refresh(
                 context = appContext,

@@ -146,10 +146,30 @@ class PlannedWorkoutCalendarSnapshotTest {
         val resumeStart = viewModel.indexOf("override fun onActivityResumed")
         val resumeEnd = viewModel.indexOf("override fun onActivityCreated", resumeStart)
         assertTrue(resumeStart >= 0 && resumeEnd > resumeStart)
-        assertTrue(
-            viewModel.substring(resumeStart, resumeEnd)
-                .contains("onPlannedWorkoutCalendarChanged()"),
+        val resume = viewModel.substring(resumeStart, resumeEnd)
+        assertTrue(resume.contains("refreshPlannedWorkoutCalendar()"))
+        assertTrue(!resume.contains("onPlannedWorkoutCalendarChanged()"))
+
+        val refreshStart = viewModel.indexOf("fun refreshPlannedWorkoutCalendar()")
+        val refreshEnd = viewModel.indexOf(
+            "fun onAdaptiveDayInputsChanged()",
+            refreshStart,
         )
+        assertTrue(refreshStart >= 0 && refreshEnd > refreshStart)
+        val resumeRefresh = viewModel.substring(refreshStart, refreshEnd)
+        assertTrue(resumeRefresh.contains("reconcilePlannedWorkoutCalendarObserver()"))
+        val activeJobGuard =
+            resumeRefresh.indexOf("plannedWorkoutCalendarEvaluationJob?.isActive == true")
+        val generationInvalidation =
+            resumeRefresh.indexOf("AdaptiveDayEvaluationGate.invalidate()")
+        assertTrue(activeJobGuard >= 0)
+        assertTrue(generationInvalidation > activeJobGuard)
+        assertTrue(!resumeRefresh.contains("plannedWorkoutCalendarEvaluationJob?.cancel()"))
+        assertTrue(resumeRefresh.contains("force = true"))
+        assertTrue(resumeRefresh.contains("evaluateAdaptiveDayGuidance()"))
+        assertTrue(!resumeRefresh.contains("PlannedWorkoutCalendarStore.invalidate()"))
+        assertTrue(!resumeRefresh.contains("AdaptivePlannedWorkoutScheduler.cancel("))
+        assertTrue(!resumeRefresh.contains("reconcilePlannedWorkoutArtifacts("))
     }
 
     @Test
@@ -173,6 +193,7 @@ class PlannedWorkoutCalendarSnapshotTest {
         val source = source("com/noop/ui/AutomationsScreen.kt")
         assertTrue(!source.contains("PlannedWorkoutCalendarStore.refresh(ctx, force = true)"))
         assertTrue(source.countOccurrences("viewModel.onPlannedWorkoutCalendarChanged()") >= 4)
+        assertTrue(source.contains("viewModel.refreshPlannedWorkoutCalendar()"))
     }
 
     @Test

@@ -94,8 +94,7 @@ final class ManagedCloudService: ObservableObject {
     var bandSOSSetupReady: Bool {
         guard phase == .enrolled,
               let contacts = safetyContacts else { return false }
-        let outbound = contacts.contacts.filter { $0.role == "contact" }
-        return outbound.count >= contacts.minimumRequired
+        return contacts.deliveryCapableCount >= contacts.minimumRequired
     }
 
     var bandSOSSetupMessage: String {
@@ -109,8 +108,10 @@ final class ManagedCloudService: ObservableObject {
                 localized: "appwide.managed_safety.band_sos.load_contacts"
             )
         }
-        let outbound = contacts.contacts.filter { $0.role == "contact" }
-        let remaining = max(contacts.minimumRequired - outbound.count, 0)
+        let remaining = max(
+            contacts.minimumRequired - contacts.deliveryCapableCount,
+            0
+        )
         return remaining == 0
             ? ""
             : String(
@@ -174,8 +175,9 @@ final class ManagedCloudService: ObservableObject {
     private var running = false
     private var socialRunning = false
     private var safetyRunning = false
+    private var safetyRefreshTask: Task<Void, Error>?
     private var safetyBootstrapTask: Task<Void, Never>?
-    private var bandSOSRequestTask: Task<BandSOSOutcome, Never>?
+    private let safetyIncidentGate = ManagedSafetyIncidentGate()
     private weak var managedRepository: Repository?
     private var managedDocumentProfileBindingTask: Task<Void, Never>?
     private var disconnecting = false
@@ -688,7 +690,7 @@ final class ManagedCloudService: ObservableObject {
         guard beginSafetyAction() else { return }
         defer { endSafetyAction() }
         await runSafetyOperation("refresh") {
-            try await refreshSafetyData()
+            try await refreshSafetyData(requireNewGeneration: true)
         }
     }
 
@@ -697,35 +699,53 @@ final class ManagedCloudService: ObservableObject {
         shareLocation: Bool
     ) async -> BandSOSOutcome {
         bootstrap()
-        if let bandSOSRequestTask {
-            recordBandSOSOutcome("coalesced")
-            return await bandSOSRequestTask.value
-        }
-        let task = Task { @MainActor [weak self] in
-            guard let self else {
-                return BandSOSOutcome.unavailable(
-                    String(
-                        localized:
-                            "appwide.managed_safety.band_sos.request_rejected"
-                    )
-                )
-            }
-            return await self.performBandSOS(
-                durationHours: durationHours == 12 ? 12 : 8,
-                shareLocation: shareLocation
-            )
-        }
-        bandSOSRequestTask = task
-        let outcome = await task.value
-        bandSOSRequestTask = nil
-        return outcome
+        return await performBandSOS(
+            durationHours: durationHours == 12 ? 12 : 8,
+            shareLocation: shareLocation
+        )
     }
 
     private func performBandSOS(
         durationHours: Int,
         shareLocation: Bool
     ) async -> BandSOSOutcome {
+        do {
+            try await safetyIncidentGate.acquire()
+        } catch {
+            recordBandSOSOutcome("canceled")
+            return .unavailable(
+                String(
+                    localized:
+                        "appwide.managed_safety.band_sos.request_rejected"
+                )
+            )
+        }
+        defer { safetyIncidentGate.release() }
         guard phase == .enrolled else {
+            recordBandSOSOutcome("setup_unavailable")
+            return .unavailable(bandSOSSetupMessage)
+        }
+        do {
+            try await refreshSafetyData(requireNewGeneration: true)
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            recordBandSOSOutcome("canceled")
+            return .unavailable(
+                String(
+                    localized:
+                        "appwide.managed_safety.band_sos.request_rejected"
+                )
+            )
+        } catch {
+            safetyStatus = Self.userMessage(for: error)
+            recordBandSOSOutcome("setup_unavailable")
+            return .unavailable(
+                safetyStatus.isEmpty
+                    ? bandSOSSetupMessage
+                    : safetyStatus
+            )
+        }
+        guard bandSOSSetupReady else {
             recordBandSOSOutcome("setup_unavailable")
             return .unavailable(bandSOSSetupMessage)
         }
@@ -758,6 +778,19 @@ final class ManagedCloudService: ObservableObject {
                 recordBandSOSOutcome("opened")
                 return .opened
             }
+        } catch is CancellationError {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "canceled",
+                fields: ["operation": "band_sos"]
+            )
+            recordBandSOSOutcome("canceled")
+            return .unavailable(
+                String(
+                    localized:
+                        "appwide.managed_safety.band_sos.request_rejected"
+                )
+            )
         } catch {
             safetyStatus = Self.userMessage(for: error)
             AppDiagnosticsRecorder.shared.endOperation(
@@ -960,8 +993,35 @@ final class ManagedCloudService: ObservableObject {
     ) async -> ManagedSafetyIncident? {
         guard beginSafetyAction() else { return nil }
         defer { endSafetyAction() }
+        do {
+            try await safetyIncidentGate.acquire()
+        } catch {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.incident_gate",
+                fields: [
+                    "operation": "incident_create",
+                    "outcome": "canceled",
+                ]
+            )
+            return nil
+        }
+        defer { safetyIncidentGate.release() }
         var createdIncident: ManagedSafetyIncident?
         await runSafetyOperation("incident_create") {
+            try await refreshSafetyData(requireNewGeneration: true)
+            try Task.checkCancellation()
+            guard bandSOSSetupReady else {
+                safetyStatus = bandSOSSetupMessage
+                return
+            }
+            guard !safetyIncidents.contains(where: {
+                $0.role == "owner"
+                    && ["open", "acknowledged"].contains($0.status)
+            }) else {
+                safetyStatus = String(localized: "A Safety page is already active.")
+                return
+            }
+            try Task.checkCancellation()
             createdIncident = try await createSafetyIncidentRequest(
                 trigger: trigger,
                 durationHours: durationHours,
@@ -986,14 +1046,17 @@ final class ManagedCloudService: ObservableObject {
             durationHours: durationHours,
             shareLocation: effectiveShareLocation
         )
+        try Task.checkCancellation()
         let creation: ManagedSafetyIncidentCreation
         do {
+            let auth = try await authorization(forceRefresh: true)
+            try Task.checkCancellation()
             creation = try await client().createSafetyIncident(
                 trigger: trigger,
                 durationHours: durationHours,
                 shareLocation: effectiveShareLocation,
                 requestID: request.requestID,
-                authorization: try await authorization(forceRefresh: true)
+                authorization: auth
             )
         } catch {
             if Self.shouldRetireSafetyIncidentRequest(error) {
@@ -1012,7 +1075,9 @@ final class ManagedCloudService: ObservableObject {
             localized: "Safety page started. Push delivery is best effort; call emergency services for immediate danger."
         )
         if refreshAfterCreation {
-            try await refreshSafetyData()
+            Task { @MainActor [weak self] in
+                try? await self?.refreshSafetyData()
+            }
         }
         return creation.incident
     }
@@ -1894,11 +1959,34 @@ final class ManagedCloudService: ObservableObject {
         }
     }
 
-    private func refreshSafetyData() async throws {
+    private func refreshSafetyData(
+        requireNewGeneration: Bool = false
+    ) async throws {
+        if let safetyRefreshTask {
+            try await safetyRefreshTask.value
+            try Task.checkCancellation()
+            if !requireNewGeneration {
+                return
+            }
+            while self.safetyRefreshTask != nil {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.loadSafetyData()
+        }
+        safetyRefreshTask = task
+        defer { safetyRefreshTask = nil }
+        try await task.value
+        try Task.checkCancellation()
+    }
+
+    private func loadSafetyData() async throws {
         guard phase == .enrolled else {
             throw ManagedCloudError.consentRequired
         }
-        guard !safetyRunning else { return }
         safetyRunning = true
         defer { safetyRunning = false }
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
@@ -1936,6 +2024,8 @@ final class ManagedCloudService: ObservableObject {
                 outcome: "completed",
                 fields: [
                     "contacts": String(contacts.contacts.count),
+                    "delivery_capable_contacts":
+                        String(contacts.deliveryCapableCount),
                     "requests": String(requests.count),
                     "incidents": String(incidents.count),
                     "active_incidents": String(
@@ -2834,12 +2924,10 @@ final class ManagedCloudService: ObservableObject {
                ManagedCloudSafetyIncidentRequest.self,
                from: data
            ),
-           existing.accountScopeHash == scope {
-            guard existing.trigger == trigger,
-                  existing.durationHours == durationHours,
-                  existing.shareLocation == shareLocation else {
-                throw ManagedStorageError.conflict
-            }
+           existing.accountScopeHash == scope,
+           existing.trigger == trigger,
+           existing.durationHours == durationHours,
+           existing.shareLocation == shareLocation {
             return existing
         }
         let created = ManagedCloudSafetyIncidentRequest(

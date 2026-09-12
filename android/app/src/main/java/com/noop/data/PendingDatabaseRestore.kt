@@ -116,20 +116,41 @@ object PendingDatabaseRestore {
         val files = Fileset(context)
         val marker = readMarker(files.marker) ?: return
         if (marker.phase != Phase.APPLIED) return
-        val restoredSettings = marker.hasSettings && files.settings.exists() && runCatching {
-            BackupSettingsBridge.apply(context.applicationContext, files.settings.readText())
-            true
-        }.getOrDefault(false)
-        if (restoredSettings) {
+        val appContext = context.applicationContext
+        val restoredPreferences = restorePreferencesAfterConfirmedOpen(
+            hasSettings = marker.hasSettings,
+            settingsExists = files.settings.exists(),
+            applySettings = {
+                BackupSettingsBridge.apply(appContext, files.settings.readText())
+            },
+            clearDerivedPlannerState = {
+                BackupSettingsBridge.clearDerivedPlannerState(appContext)
+            },
+        )
+        if (restoredPreferences) {
             // Preference mirrors and OS schedulers may already have been initialized earlier in this
             // launch. Reconcile only after Room accepted the replacement and settings were committed.
-            BackupSettingsBridge.reconcileAfterRestore(context.applicationContext)
+            BackupSettingsBridge.reconcileAfterRestore(appContext)
         }
         cleanupStaging(files, keepRollback = false)
         runCatching {
-            com.noop.ui.NoopPrefs.of(context.applicationContext).edit()
+            com.noop.ui.NoopPrefs.of(appContext).edit()
                 .putLong("backup.lastRestoreAt", System.currentTimeMillis() / 1000L).apply()
         }
+    }
+
+    internal fun restorePreferencesAfterConfirmedOpen(
+        hasSettings: Boolean,
+        settingsExists: Boolean,
+        applySettings: () -> Unit,
+        clearDerivedPlannerState: () -> Unit,
+    ): Boolean {
+        val clearedDerivedPlannerState = runCatching(clearDerivedPlannerState).isSuccess
+        if (!clearedDerivedPlannerState) return false
+        if (hasSettings && settingsExists) {
+            runCatching(applySettings)
+        }
+        return true
     }
 
     fun stillSameAppliedFile(context: Context, preparation: Preparation): Boolean {

@@ -24,11 +24,11 @@ import org.json.JSONObject
  * ZIP entry — `settings.json`, a flat JSON object — carrying exactly one WHITELISTED set of keys.
  *
  * The whitelist is the portable contract. Shared keys keep the same canonical names and JSON kinds
- * as Apple; Android v5 adds planner-continuity fields that older readers safely ignore. V1 carried profile/unit
+ * as Apple; v5 adds portable weekday wake overrides that older readers safely ignore. V1 carried profile/unit
  * values, v2 added a schema stamp and exact civil birthday, v3 added a bounded set of durable,
  * user-authored display, dashboard, reminder, HRV, and Sleep Planner preferences, v4 adds the
- * optional user-selected target weight, and Android v5 preserves the wind-down planner's bounded
- * recovery adjustment and validated weekday wake overrides. Only stable,
+ * optional user-selected target weight, and v5 preserves validated user-authored weekday wake
+ * overrides. Only stable,
  * non-device-specific values are allowed. NEVER add credentials, device/peripheral/install ids,
  * sync cursors, active alarm epochs, or delivery de-dup state: backups get
  * copied into cloud folders and attached to GitHub issues, so this file must stay safe to share.
@@ -45,6 +45,7 @@ object BackupSettingsCodec {
     const val SCHEMA_VERSION = 5
     const val SCHEMA_VERSION_KEY = "settings.schemaVersion"
     const val DATE_OF_BIRTH_KEY = "profile.dateOfBirth"
+    internal const val LEGACY_RECOVERY_MINUTES_KEY = "windDown.recoveryMinutes"
 
     /** The JSON kind a whitelisted key must decode to. Anything else is dropped, never guessed at. */
     enum class Kind { BOOL, INT, DOUBLE, STRING, CIVIL_DATE }
@@ -90,7 +91,6 @@ object BackupSettingsCodec {
         "windDown.enabled" to Kind.BOOL,
         "windDown.sleepNeedMinutes" to Kind.INT,
         "windDown.goalMode" to Kind.STRING,
-        "windDown.recoveryMinutes" to Kind.INT,
         "windDown.leadMinutes" to Kind.INT,
         "sleepPlanner.wakeMinutes" to Kind.INT,
         "windDown.perDayWakeMinutes" to Kind.STRING,
@@ -113,6 +113,9 @@ object BackupSettingsCodec {
         "hydrationReminders.adaptiveEnabled" to Kind.BOOL,
         "hydrationReminders.strapBuzzEnabled" to Kind.BOOL,
     )
+    private val LEGACY_ROUND_TRIP_ONLY: Map<String, Kind> = mapOf(
+        LEGACY_RECOVERY_MINUTES_KEY to Kind.INT,
+    )
 
     /**
      * Encode the whitelisted subset of [values] as the flat `settings.json` object, or null when
@@ -121,7 +124,7 @@ object BackupSettingsCodec {
      */
     fun encode(values: Map<String, Any?>): String? {
         val obj = JSONObject()
-        for ((key, kind) in WHITELIST) {
+        for ((key, kind) in WHITELIST + LEGACY_ROUND_TRIP_ONLY) {
             if (key == SCHEMA_VERSION_KEY) continue
             val coerced = normalized(key, values[key], kind) ?: continue
             obj.put(key, coerced)
@@ -139,7 +142,7 @@ object BackupSettingsCodec {
     fun decode(json: String): Map<String, Any> {
         val obj = runCatching { JSONObject(json) }.getOrNull() ?: return emptyMap()
         val out = LinkedHashMap<String, Any>()
-        for ((key, kind) in WHITELIST) {
+        for ((key, kind) in WHITELIST + LEGACY_ROUND_TRIP_ONLY) {
             if (!obj.has(key)) continue
             normalized(key, obj.opt(key), kind)?.let { out[key] = it }
         }
@@ -204,7 +207,7 @@ object BackupSettingsCodec {
             "windDown.sleepNeedMinutes" -> boundedInt(coerced, 5 * 60..11 * 60)
             "windDown.goalMode" ->
                 allowedString(coerced, setOf("target", "balance", "extraOpportunity"))
-            "windDown.recoveryMinutes" ->
+            LEGACY_RECOVERY_MINUTES_KEY ->
                 boundedInt(coerced, 0..WindDownStore.RECOVERY_MAX)
             "windDown.leadMinutes" -> boundedInt(coerced, 0..120)
             "windDown.perDayWakeMinutes" ->
@@ -312,7 +315,6 @@ object BackupSettingsBridge {
         "windDown.enabled" to "windDown.enabled",
         "windDown.sleepNeedMinutes" to "windDown.sleepNeedMinutes",
         "windDown.goalMode" to "windDown.goalMode",
-        "windDown.recoveryMinutes" to "windDown.recoveryMinutes",
         "windDown.leadMinutes" to "windDown.leadMinutes",
         "sleepPlanner.wakeMinutes" to "windDown.wakeMinutes",
         "windDown.perDayWakeMinutes" to "windDown.perDayWakeMinutes",
@@ -393,8 +395,22 @@ object BackupSettingsBridge {
     internal fun applyWindDownSettings(
         prefs: SharedPreferences,
         values: Map<String, Any>,
+        clearDerivedPlannerState: Boolean = false,
     ) {
         apply(prefs, WIND_DOWN_KEYS, values)
+        if (clearDerivedPlannerState) {
+            clearDerivedPlannerState(prefs)
+        }
+    }
+
+    fun clearDerivedPlannerState(context: Context) {
+        clearDerivedPlannerState(
+            context.getSharedPreferences("noop_wind_down", Context.MODE_PRIVATE),
+        )
+    }
+
+    internal fun clearDerivedPlannerState(prefs: SharedPreferences) {
+        prefs.edit().remove(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY).apply()
     }
 
     /** Refresh process mirrors and OS schedules after settings were committed with the restored DB. */

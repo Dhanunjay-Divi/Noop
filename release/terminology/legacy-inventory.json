@@ -6950,7 +6950,7 @@
       "lineNumbers": [
         0,
         0,
-        315
+        342
       ],
       "occurrenceCount": 3,
       "path": "Packages/WhoopStore/Sources/WhoopStore/BackupSettings.swift",
@@ -7482,9 +7482,9 @@
         5,
         127,
         142,
-        337,
-        416,
-        482
+        339,
+        418,
+        484
       ],
       "occurrenceCount": 8,
       "path": "Packages/WhoopStore/Sources/WhoopStore/PendingDatabaseRestore.swift",
@@ -7938,7 +7938,7 @@
         0,
         2,
         26,
-        85
+        89
       ],
       "occurrenceCount": 5,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/BackupSettingsTests.swift",
@@ -8875,12 +8875,12 @@
         103,
         120,
         183,
-        228,
-        267,
-        274,
-        284,
-        315,
-        318
+        258,
+        297,
+        304,
+        314,
+        345,
+        348
       ],
       "occurrenceCount": 19,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/PendingDatabaseRestoreTests.swift",
@@ -15853,11 +15853,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        1432,
-        1494,
-        1494,
-        1494,
-        1495
+        1550,
+        1612,
+        1612,
+        1612,
+        1613
       ],
       "occurrenceCount": 5,
       "path": "StrandTests/SafetyPagingAndShellContractTests.swift",
@@ -16956,14 +16956,14 @@
       "category": "core",
       "lineNumbers": [
         14,
-        2506,
-        3209,
-        3214,
-        3232,
-        3239,
-        3241,
-        3317,
-        3323
+        2596,
+        3297,
+        3302,
+        3320,
+        3327,
+        3329,
+        3405,
+        3411
       ],
       "occurrenceCount": 9,
       "path": "StrandiOS/System/ManagedCloudService.swift",
@@ -21163,7 +21163,7 @@
       "category": "core",
       "lineNumbers": [
         18,
-        187
+        190
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/data/BackupSettings.kt",
@@ -21538,7 +21538,7 @@
       "category": "core",
       "lineNumbers": [
         81,
-        200
+        221
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/data/PendingDatabaseRestore.kt",
@@ -22470,16 +22470,16 @@
         28,
         29,
         122,
-        1998,
-        2714,
-        2714,
-        2723,
-        2723,
-        2736,
-        2737,
-        2738,
-        3016,
-        3018
+        2069,
+        2785,
+        2785,
+        2794,
+        2794,
+        2807,
+        2808,
+        2809,
+        3087,
+        3089
       ],
       "occurrenceCount": 14,
       "path": "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
@@ -24107,22 +24107,22 @@
         2907,
         3030,
         3035,
-        3295,
-        3296,
-        3300,
-        3301,
-        3315,
-        3316,
-        3342,
-        3343,
-        3565,
-        3566,
-        3584,
-        3603,
-        3646,
-        3776,
-        3898,
-        3919
+        3308,
+        3309,
+        3313,
+        3314,
+        3328,
+        3329,
+        3355,
+        3356,
+        3578,
+        3579,
+        3597,
+        3616,
+        3659,
+        3789,
+        3911,
+        3932
       ],
       "occurrenceCount": 90,
       "path": "android/app/src/main/java/com/noop/ui/AppViewModel.kt",
@@ -24147,10 +24147,10 @@
         1073,
         2247,
         2248,
-        3565,
-        3566,
-        3735,
-        3737
+        3578,
+        3579,
+        3748,
+        3750
       ],
       "occurrenceCount": 10,
       "path": "android/app/src/main/java/com/noop/ui/AppViewModel.kt",
@@ -25274,8 +25274,8 @@
       "category": "core",
       "lineNumbers": [
         68,
-        332,
-        1062
+        331,
+        1061
       ],
       "occurrenceCount": 3,
       "path": "android/app/src/main/java/com/noop/ui/SafetyCenterScreen.kt",
@@ -29755,7 +29755,7 @@
       "category": "fixture",
       "lineNumbers": [
         51,
-        112
+        111
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/test/java/com/noop/data/BackupSettingsCodecTest.kt",
@@ -35436,7 +35436,7 @@
       ],
       "occurrenceCount": 1,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "d9525dd83bf9b77619558b45b6173e3cd5b302df748781f2050dc2fb87bc48fd",
+      "sha256": "8dc503569cfce4302981df97e47ff9657250afef17b285add7fccfd4578f07d4",
       "tokenCounts": {
         "whoopstore": 1
       }
@@ -35646,12 +35646,12 @@
     {
       "category": "historical",
       "lineNumbers": [
-        443,
-        482
+        470,
+        509
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-11-product-safety-quality-audit.md",
-      "sha256": "e1e2d08bbb206f42de0cf11207fe4f685fa94851ad1ef151444e90a985f0d375",
+      "sha256": "19a49ac06db1a234ed4643d9d7d3407a8795b123841e1e376999bf9d6d65b332",
       "tokenCounts": {
         "whoopstore": 2
       }
@@ -35665,7 +35665,7 @@
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "f568a4dd5f1b8136a41775934e00ba2f5b428518e17f05140cb29e082da00bc6",
+      "sha256": "aee06ed80a6d1ef8626832c9af292d82a0c24d9ba3504f11cabd83c15faa26ca",
       "tokenCounts": {
         "whoop": 2,
         "whoopstore": 1

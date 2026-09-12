@@ -179,7 +179,7 @@ final class ContextualActionCenter: ObservableObject {
         evidence: [String],
         observedAt: Date,
         maximumAge: TimeInterval,
-        route: NoopNotificationRoute = .sleep
+        route: NoopNotificationRoute? = nil
     ) {
         present(
             kind: .recovery,
@@ -463,8 +463,24 @@ final class ContextualActionCenter: ObservableObject {
               !dismissedIDs.contains(id),
               !completedIDs.contains(id) else { return }
 
-        if actions.contains(where: { $0.id == id }) {
-            removeExpired(now: now)
+        if let index = actions.firstIndex(where: { $0.id == id }) {
+            let existing = actions[index]
+            actions[index] = ContextualAction(
+                id: existing.id,
+                kind: existing.kind,
+                title: title,
+                detail: detail,
+                evidence: Array(
+                    evidence.filter {
+                        !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }.prefix(3)
+                ),
+                createdAt: existing.createdAt,
+                expiresAt: expiresAt,
+                amountML: amountML ?? existing.amountML,
+                route: route ?? existing.route
+            )
+            persist()
             return
         }
 
@@ -483,7 +499,11 @@ final class ContextualActionCenter: ObservableObject {
                 kind: kind,
                 title: title,
                 detail: detail,
-                evidence: Array(evidence.filter { !$0.isEmpty }.prefix(3)),
+                evidence: Array(
+                    evidence.filter {
+                        !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }.prefix(3)
+                ),
                 createdAt: observedAt,
                 expiresAt: expiresAt,
                 amountML: amountML,

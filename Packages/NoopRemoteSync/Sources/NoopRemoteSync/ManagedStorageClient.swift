@@ -76,8 +76,36 @@ public actor ManagedStorageClient {
     }
     private struct SafetyContactsResponse: Decodable {
         let contacts: [ManagedSafetyContact]
+        let deliveryCapableCount: Int
         let minimumRequired: Int
         let maximumAllowed: Int
+
+        private enum CodingKeys: String, CodingKey {
+            case contacts
+            case deliveryCapableCount
+            case minimumRequired
+            case maximumAllowed
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            contacts = try values.decode(
+                [ManagedSafetyContact].self,
+                forKey: .contacts
+            )
+            deliveryCapableCount = try values.decodeIfPresent(
+                Int.self,
+                forKey: .deliveryCapableCount
+            ) ?? 0
+            minimumRequired = try values.decode(
+                Int.self,
+                forKey: .minimumRequired
+            )
+            maximumAllowed = try values.decode(
+                Int.self,
+                forKey: .maximumAllowed
+            )
+        }
     }
     private struct SafetyIncidentResponse: Decodable {
         let incident: ManagedSafetyIncident
@@ -504,14 +532,21 @@ public actor ManagedStorageClient {
             method: "GET",
             authorization: authorization
         )
+        let outboundCount = response.contacts.lazy.filter {
+            $0.role == "contact"
+        }.count
         guard response.minimumRequired == 2,
               response.maximumAllowed == 5,
+              response.deliveryCapableCount >= 0,
+              response.deliveryCapableCount <= outboundCount,
+              response.deliveryCapableCount <= response.maximumAllowed,
               response.contacts.count <= 25 else {
             throw ManagedStorageError.invalidResponse
         }
         try response.contacts.forEach(Self.validate)
         return ManagedSafetyContacts(
             contacts: response.contacts,
+            deliveryCapableCount: response.deliveryCapableCount,
             minimumRequired: response.minimumRequired,
             maximumAllowed: response.maximumAllowed
         )

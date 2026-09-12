@@ -124,6 +124,8 @@ class ManagedCloudService private constructor(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val syncMutex = Mutex()
     private val socialMutex = Mutex()
+    private val safetyActionMutex = Mutex()
+    private val safetyIncidentMutex = Mutex()
     private val safetyMutex = Mutex()
     private val managedPushRegistrationMutex = Mutex()
     private val safetyLocationUpdateMutex = Mutex()
@@ -226,7 +228,7 @@ class ManagedCloudService private constructor(context: Context) {
         val snapshot = state.value
         val contacts = snapshot.safetyContacts ?: return false
         return snapshot.phase == ManagedCloudPhase.ENROLLED &&
-            contacts.contacts.count { it.role == "contact" } >= contacts.minimumRequired
+            contacts.deliveryCapableCount >= contacts.minimumRequired
     }
 
     fun bandSosSetupMessage(): String {
@@ -238,7 +240,7 @@ class ManagedCloudService private constructor(context: Context) {
             ?: return text(R.string.appwide_managed_safety_band_sos_load_contacts)
         val remaining = (
             contacts.minimumRequired -
-                contacts.contacts.count { it.role == "contact" }
+                contacts.deliveryCapableCount
             ).coerceAtLeast(0)
         return if (remaining == 0) {
             ""
@@ -757,38 +759,69 @@ class ManagedCloudService private constructor(context: Context) {
         shareLocation: Boolean,
     ): ManagedSafetyBandSosOutcome {
         bootstrap()
-        refreshSafety()
-        if (!bandSosSetupReady()) {
-            recordBandSosOutcome("setup_unavailable")
-            return ManagedSafetyBandSosOutcome.Unavailable(bandSosSetupMessage())
-        }
-        if (state.value.safetyIncidents.any {
-                it.role == "owner" && it.status in setOf("open", "acknowledged")
+        return safetyIncidentMutex.withLock {
+            if (state.value.phase != ManagedCloudPhase.ENROLLED) {
+                recordBandSosOutcome("setup_unavailable")
+                return@withLock ManagedSafetyBandSosOutcome.Unavailable(
+                    bandSosSetupMessage(),
+                )
             }
-        ) {
-            recordBandSosOutcome("already_active")
-            return ManagedSafetyBandSosOutcome.AlreadyActive
-        }
-        val incident = createSafetyIncident(
-            trigger = "band_sos",
-            durationHours = if (durationHours == 12) 12 else 8,
-            shareLocation = shareLocation,
-        ) ?: run {
-            recordBandSosOutcome("rejected")
-            return ManagedSafetyBandSosOutcome.Unavailable(
-                state.value.safetyStatus.ifBlank {
-                    text(R.string.appwide_managed_safety_band_sos_request_rejected)
-                },
-            )
-        }
-        return if (incident.status in setOf("open", "acknowledged")) {
-            recordBandSosOutcome("opened")
-            ManagedSafetyBandSosOutcome.Opened
-        } else {
-            recordBandSosOutcome("rejected")
-            ManagedSafetyBandSosOutcome.Unavailable(
-                text(R.string.appwide_managed_safety_band_sos_request_rejected),
-            )
+            try {
+                refreshSafetyData()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                setSafetyStatus(userMessage(error))
+                recordBandSosOutcome("setup_unavailable")
+                return@withLock ManagedSafetyBandSosOutcome.Unavailable(
+                    state.value.safetyStatus.ifBlank {
+                        text(R.string.appwide_managed_safety_band_sos_request_rejected)
+                    },
+                )
+            }
+            if (!bandSosSetupReady()) {
+                recordBandSosOutcome("setup_unavailable")
+                return@withLock ManagedSafetyBandSosOutcome.Unavailable(
+                    bandSosSetupMessage(),
+                )
+            }
+            if (hasActiveOwnedSafetyIncident()) {
+                recordBandSosOutcome("already_active")
+                return@withLock ManagedSafetyBandSosOutcome.AlreadyActive
+            }
+            val incident = try {
+                createSafetyIncidentRequest(
+                    trigger = "band_sos",
+                    durationHours = if (durationHours == 12) 12 else 8,
+                    shareLocation = shareLocation,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                setSafetyStatus(userMessage(error))
+                recordBandSosOutcome("rejected")
+                return@withLock ManagedSafetyBandSosOutcome.Unavailable(
+                    state.value.safetyStatus.ifBlank {
+                        text(R.string.appwide_managed_safety_band_sos_request_rejected)
+                    },
+                )
+            } ?: run {
+                recordBandSosOutcome("rejected")
+                return@withLock ManagedSafetyBandSosOutcome.Unavailable(
+                    state.value.safetyStatus.ifBlank {
+                        text(R.string.appwide_managed_safety_band_sos_request_rejected)
+                    },
+                )
+            }
+            if (incident.status in setOf("open", "acknowledged")) {
+                recordBandSosOutcome("opened")
+                ManagedSafetyBandSosOutcome.Opened
+            } else {
+                recordBandSosOutcome("rejected")
+                ManagedSafetyBandSosOutcome.Unavailable(
+                    text(R.string.appwide_managed_safety_band_sos_request_rejected),
+                )
+            }
         }
     }
 
@@ -951,6 +984,33 @@ class ManagedCloudService private constructor(context: Context) {
         durationHours: Int,
         shareLocation: Boolean,
     ): ManagedSafetyIncident? {
+        var created: ManagedSafetyIncident? = null
+        safetyAction("incident_create") {
+            safetyIncidentMutex.withLock {
+                refreshSafetyData()
+                if (!bandSosSetupReady()) {
+                    setSafetyStatus(bandSosSetupMessage())
+                    return@withLock
+                }
+                if (hasActiveOwnedSafetyIncident()) {
+                    setSafetyStatus(text(R.string.managed_safety_active_page_exists))
+                    return@withLock
+                }
+                created = createSafetyIncidentRequest(
+                    trigger = trigger,
+                    durationHours = durationHours,
+                    shareLocation = shareLocation,
+                )
+            }
+        }
+        return created
+    }
+
+    private suspend fun createSafetyIncidentRequest(
+        trigger: String,
+        durationHours: Int,
+        shareLocation: Boolean,
+    ): ManagedSafetyIncident? {
         if (!ManagedSafetyLocationAuthorization.isAuthorized(appContext, shareLocation)) {
             com.noop.AppDiagnosticsRecorder.record(
                 "managed_safety.location_authorization",
@@ -959,46 +1019,55 @@ class ManagedCloudService private constructor(context: Context) {
             setSafetyStatus(text(R.string.managed_safety_location_background_body))
             return null
         }
-        var created: ManagedSafetyIncident? = null
-        safetyAction("incident_create") {
-            val request = preferences.safetyIncidentRequest(
-                accountScopeHash = accountScopeHash(),
+        val request = preferences.safetyIncidentRequest(
+            accountScopeHash = accountScopeHash(),
+            trigger = trigger,
+            durationHours = durationHours,
+            shareLocation = shareLocation,
+        )
+        val creation = try {
+            client().createSafetyIncident(
+                authorization = authorization(forceRefresh = true),
+                requestId = request.requestId,
                 trigger = trigger,
                 durationHours = durationHours,
                 shareLocation = shareLocation,
             )
-            val creation = try {
-                client().createSafetyIncident(
-                    authorization = authorization(forceRefresh = true),
-                    requestId = request.requestId,
-                    trigger = trigger,
-                    durationHours = durationHours,
-                    shareLocation = shareLocation,
-                )
-            } catch (error: Throwable) {
-                if (shouldRetireSafetyIncidentRequest(error)) {
-                    preferences.clearSafetyIncidentRequest(request.requestId)
-                }
-                throw error
+        } catch (error: Throwable) {
+            if (shouldRetireSafetyIncidentRequest(error)) {
+                preferences.clearSafetyIncidentRequest(request.requestId)
             }
-            preferences.clearSafetyIncidentRequest(request.requestId)
-            created = creation.incident
-            preferences.safetyEnabled = true
-            ManagedCloudScheduler.reconcile(appContext)
-            replaceState {
-                it.copy(
-                    safetyIncidents = replaceSafetyIncident(
-                        creation.incident,
-                        it.safetyIncidents,
-                    ),
-                    safetyStatus = text(R.string.managed_safety_status_page_started),
-                )
-            }
-            reconcileManagedSafetyLocationSession()
-            refreshSafetyData()
+            throw error
         }
-        return created
+        preferences.clearSafetyIncidentRequest(request.requestId)
+        preferences.safetyEnabled = true
+        ManagedCloudScheduler.reconcile(appContext)
+        replaceState {
+            it.copy(
+                safetyIncidents = replaceSafetyIncident(
+                    creation.incident,
+                    it.safetyIncidents,
+                ),
+                safetyStatus = text(R.string.managed_safety_status_page_started),
+            )
+        }
+        reconcileManagedSafetyLocationSession()
+        scope.launch {
+            try {
+                refreshSafetyData()
+            } catch (_: CancellationException) {
+                // Service cancellation does not change the accepted incident result.
+            } catch (_: Throwable) {
+                // The created incident is already in local state; refresh records its own bounded failure.
+            }
+        }
+        return creation.incident
     }
+
+    private fun hasActiveOwnedSafetyIncident(): Boolean =
+        state.value.safetyIncidents.any {
+            it.role == "owner" && it.status in setOf("open", "acknowledged")
+        }
 
     suspend fun updateSafetyLocation(
         incidentId: UUID,
@@ -1749,8 +1818,8 @@ class ManagedCloudService private constructor(context: Context) {
     private suspend fun safetyAction(
         operation: String,
         body: suspend () -> Unit,
-    ) {
-        if (!beginSafetyAction()) return
+    ) = safetyActionMutex.withLock {
+        if (!beginSafetyAction()) return@withLock
         try {
             runSafetyOperation(operation, body)
         } finally {
@@ -1831,6 +1900,8 @@ class ManagedCloudService private constructor(context: Context) {
                 outcome = "completed",
                 fields = mapOf(
                     "contacts" to contacts.contacts.size.toString(),
+                    "delivery_capable_contacts" to
+                        contacts.deliveryCapableCount.toString(),
                     "requests" to requests.size.toString(),
                     "incidents" to incidents.size.toString(),
                     "active_incidents" to incidents.count {

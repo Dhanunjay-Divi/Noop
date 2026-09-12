@@ -127,6 +127,51 @@ final class ContextualActionPolicyTests: XCTestCase {
     }
 
     @MainActor
+    func testSameFingerprintRefreshesContentWithoutChangingIdentity() throws {
+        let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "state"
+        let observedAt = Date()
+        let center = ContextualActionCenter(defaults: defaults, storageKey: storageKey)
+        center.presentRecovery(
+            title: "Initial title",
+            detail: "Initial detail",
+            fingerprint: "same-signal",
+            evidence: ["Initial evidence", "   "],
+            observedAt: observedAt,
+            maximumAge: 30 * 60,
+            route: .workouts
+        )
+        let original = try XCTUnwrap(center.visibleActions.first)
+        XCTAssertEqual(original.evidence, ["Initial evidence"])
+
+        center.presentRecovery(
+            title: "Updated title",
+            detail: "Updated detail",
+            fingerprint: "same-signal",
+            evidence: ["Updated evidence", "", "Second evidence"],
+            observedAt: observedAt.addingTimeInterval(60),
+            maximumAge: 90 * 60
+        )
+
+        let updated = try XCTUnwrap(center.visibleActions.first)
+        XCTAssertEqual(updated.id, original.id)
+        XCTAssertEqual(updated.createdAt, original.createdAt)
+        XCTAssertEqual(updated.title, "Updated title")
+        XCTAssertEqual(updated.detail, "Updated detail")
+        XCTAssertEqual(updated.evidence, ["Updated evidence", "Second evidence"])
+        XCTAssertEqual(updated.route, .workouts)
+        XCTAssertGreaterThan(updated.expiresAt, original.expiresAt)
+
+        let restored = try XCTUnwrap(
+            ContextualActionCenter(defaults: defaults, storageKey: storageKey)
+                .visibleActions.first
+        )
+        XCTAssertEqual(restored, updated)
+    }
+
+    @MainActor
     func testPlannedWorkoutReconciliationKeepsCurrentAndRemovesOnlyStaleWorkoutAction() {
         let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

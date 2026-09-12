@@ -209,4 +209,40 @@ class ContextualActionPolicyTest {
         assertFalse(committed)
         assertFalse(prefs.contains("state"))
     }
+
+    @Test fun sameFingerprintRefreshPreservesIdentityAndOriginalCreationTime() {
+        val original = ContextualAction(
+            id = "recovery:same-signal",
+            kind = ContextualActionKind.RECOVERY,
+            title = "Initial title",
+            detail = "Initial detail",
+            evidence = listOf("Initial evidence"),
+            createdAtMillis = 1_000L,
+            expiresAtMillis = 2_000L,
+            amountMl = 250,
+            route = NoopNotificationRoute.WORKOUTS,
+            source = ContextualActionSource.ADAPTIVE_DAY,
+        )
+
+        val refreshed = ContextualActionRefreshPolicy.refreshed(
+            existing = original,
+            title = "Updated title",
+            detail = "Updated detail",
+            evidence = listOf("Updated evidence", "", "Second evidence"),
+            expiresAtMillis = 9_000L,
+            amountMl = null,
+            route = null,
+            source = null,
+        )
+
+        assertEquals(original.id, refreshed.id)
+        assertEquals(original.createdAtMillis, refreshed.createdAtMillis)
+        assertEquals("Updated title", refreshed.title)
+        assertEquals("Updated detail", refreshed.detail)
+        assertEquals(listOf("Updated evidence", "Second evidence"), refreshed.evidence)
+        assertEquals(9_000L, refreshed.expiresAtMillis)
+        assertEquals(250, refreshed.amountMl)
+        assertEquals(NoopNotificationRoute.WORKOUTS, refreshed.route)
+        assertEquals(ContextualActionSource.ADAPTIVE_DAY, refreshed.source)
+    }
 }

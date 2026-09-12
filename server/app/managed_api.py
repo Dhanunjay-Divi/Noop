@@ -271,6 +271,15 @@ def managed_router(
             )
         return safety_push_service
 
+    def require_available_safety_push() -> ManagedSafetyPushService:
+        push = require_safety_push()
+        if not push.available:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="managed Safety push is temporarily unavailable",
+            )
+        return push
+
     @router.post(
         "/enroll",
         status_code=status.HTTP_201_CREATED,
@@ -527,10 +536,14 @@ def managed_router(
     ) -> dict:
         repository = require_safety_repository()
         try:
+            contacts, delivery_capable_count = await repository.contact_snapshot(
+                principal=identity.principal,
+            )
+            if safety_push_service is None or not safety_push_service.available:
+                delivery_capable_count = 0
             return {
-                "contacts": await repository.list_contacts(
-                    principal=identity.principal,
-                ),
+                "contacts": contacts,
+                "delivery_capable_count": delivery_capable_count,
                 "minimum_required": 2,
                 "maximum_allowed": 5,
             }
@@ -571,27 +584,26 @@ def managed_router(
         identity: ManagedRequestIdentity = Depends(require_identity),
     ) -> dict:
         repository = require_safety_repository()
+        push = require_available_safety_push()
         try:
             incident = await repository.create_incident(
                 principal=identity.principal,
                 request=body,
             )
             duplicate = bool(incident.get("duplicate", False))
-            delivery_outcome = "not_configured"
-            if safety_push_service is not None:
-                try:
-                    await safety_push_service.dispatch(
-                        principal=identity.principal,
-                        incident_id=UUID(incident["incident_id"]),
-                    )
-                    incident = await repository.get_incident(
-                        principal=identity.principal,
-                        incident_id=UUID(incident["incident_id"]),
-                    )
-                    incident["duplicate"] = duplicate
-                    delivery_outcome = "attempted"
-                except ManagedStorageError:
-                    delivery_outcome = "deferred"
+            delivery_outcome = "attempted"
+            try:
+                await push.dispatch(
+                    principal=identity.principal,
+                    incident_id=UUID(incident["incident_id"]),
+                )
+                incident = await repository.get_incident(
+                    principal=identity.principal,
+                    incident_id=UUID(incident["incident_id"]),
+                )
+                incident["duplicate"] = duplicate
+            except ManagedStorageError:
+                delivery_outcome = "deferred"
             emit_operational_event(
                 "managed_safety.incident_created",
                 service="noop-managed-api",

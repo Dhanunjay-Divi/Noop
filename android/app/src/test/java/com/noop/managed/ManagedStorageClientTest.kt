@@ -1121,6 +1121,7 @@ class ManagedStorageClientTest {
                                 .put(safetyContact(firstId, "First"))
                                 .put(safetyContact(secondId, "Second")),
                         )
+                        .put("delivery_capable_count", 2)
                         .put("minimum_required", 2)
                         .put("maximum_allowed", 5)
                     "/v1/managed/safety/incidents" -> {
@@ -1170,7 +1171,9 @@ class ManagedStorageClientTest {
         )
         assertEquals("android-installation", registration.installationId)
         assertEquals("token", registration.targetKind)
-        assertEquals(2, client.safetyContacts(authorization).contacts.size)
+        val contacts = client.safetyContacts(authorization)
+        assertEquals(2, contacts.contacts.size)
+        assertEquals(2, contacts.deliveryCapableCount)
         val creation = client.createSafetyIncident(
             authorization = authorization,
             requestId = UUID.randomUUID(),
@@ -1190,6 +1193,46 @@ class ManagedStorageClientTest {
             capturedAt = "2026-09-08T10:01:00Z",
         )
         assertEquals(3L, location.sequence)
+    }
+
+    @Test
+    fun managedSafetyContactsMissingDeliveryCapabilityFailsClosed() = runTest {
+        val contactId =
+            UUID.fromString("00000000-0000-0000-0000-000000000109")
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                assertEquals(
+                    "/v1/managed/safety/contacts",
+                    request.url.encodedPath,
+                )
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "contacts",
+                            org.json.JSONArray().put(
+                                JSONObject()
+                                    .put("profile_id", contactId.toString())
+                                    .put("display_name", "Contact")
+                                    .put("role", "contact")
+                                    .put(
+                                        "accepted_at",
+                                        "2026-09-08T09:00:00Z",
+                                    ),
+                            ),
+                        )
+                        .put("minimum_required", 2)
+                        .put("maximum_allowed", 5)
+                        .toString(),
+                )
+            },
+        )
+
+        val contacts = client.safetyContacts(authorization)
+        assertEquals(1, contacts.contacts.size)
+        assertEquals(0, contacts.deliveryCapableCount)
     }
 
     @Test

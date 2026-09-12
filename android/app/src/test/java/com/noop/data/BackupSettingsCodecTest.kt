@@ -65,7 +65,6 @@ class BackupSettingsCodecTest {
             "windDown.enabled" to true,
             "windDown.sleepNeedMinutes" to 510,
             "windDown.goalMode" to "extraOpportunity",
-            "windDown.recoveryMinutes" to 45,
             "windDown.leadMinutes" to 45,
             "sleepPlanner.wakeMinutes" to 390,
             "windDown.perDayWakeMinutes" to """{"1":480,"7":540}""",
@@ -114,7 +113,6 @@ class BackupSettingsCodecTest {
         assertEquals(false, back["noop.showDayCycleBackground"])
         assertEquals(true, back["today.keyMetricsDetailed"])
         assertEquals("extraOpportunity", back["windDown.goalMode"])
-        assertEquals(45, back["windDown.recoveryMinutes"])
         assertEquals(390, back["sleepPlanner.wakeMinutes"])
         assertEquals(
             mapOf(1 to 480, 7 to 540),
@@ -161,12 +159,11 @@ class BackupSettingsCodecTest {
         )
     }
 
-    @Test fun windDownRecoveryAndOverridesAreValidatedRestoredAndUsedBySchedule() {
+    @Test fun windDownOverridesAreValidatedRestoredAndUsedBySchedule() {
         val json = JSONObject()
             .put(BackupSettingsCodec.SCHEMA_VERSION_KEY, 5)
             .put("windDown.enabled", true)
             .put("windDown.sleepNeedMinutes", 8 * 60)
-            .put("windDown.recoveryMinutes", 45)
             .put("windDown.leadMinutes", 30)
             .put("sleepPlanner.wakeMinutes", 7 * 60)
             .put("windDown.perDayWakeMinutes", """{"7":540}""")
@@ -178,7 +175,7 @@ class BackupSettingsCodecTest {
         val restored = WindDownStore(prefs)
 
         assertTrue(restored.enabled)
-        assertEquals(45, restored.recoveryMinutes)
+        assertEquals(0, restored.recoveryMinutes)
         assertEquals(mapOf(7 to 9 * 60), restored.perDayWakeOverrides)
         val plan = requireNotNull(
             WindDownScheduler.nextDatedPlan(
@@ -195,9 +192,9 @@ class BackupSettingsCodecTest {
         assertEquals(7, plan.wakeWeekday)
         assertEquals(9, wake.hour)
         assertEquals(0, wake.minute)
-        assertEquals(11, windDown.dayOfMonth)
-        assertEquals(23, windDown.hour)
-        assertEquals(45, windDown.minute)
+        assertEquals(12, windDown.dayOfMonth)
+        assertEquals(0, windDown.hour)
+        assertEquals(30, windDown.minute)
     }
 
     @Test fun malformedWindDownPlannerBackupValuesAreDropped() {
@@ -216,10 +213,32 @@ class BackupSettingsCodecTest {
             )
             assertNull(raw, decoded["windDown.perDayWakeMinutes"])
         }
-        val invalidRecovery = BackupSettingsCodec.decode(
-            """{"windDown.recoveryMinutes":61}""",
+        val legacyRecovery = BackupSettingsCodec.decode(
+            """{"settings.schemaVersion":5,"windDown.recoveryMinutes":45}""",
         )
-        assertNull(invalidRecovery["windDown.recoveryMinutes"])
+        assertEquals(45, legacyRecovery["windDown.recoveryMinutes"])
+        assertTrue(
+            requireNotNull(BackupSettingsCodec.encode(legacyRecovery))
+                .contains("\"windDown.recoveryMinutes\":45"),
+        )
+    }
+
+    @Test fun restoreClearsPreexistingDerivedRecovery() {
+        val prefs = FakeSharedPreferences()
+        prefs.edit().putInt("windDown.recoveryMinutes", 45).commit()
+        BackupSettingsBridge.applyWindDownSettings(
+            prefs,
+            mapOf("windDown.sleepNeedMinutes" to 8 * 60),
+        )
+        assertEquals(45, WindDownStore(prefs).recoveryMinutes)
+        BackupSettingsBridge.applyWindDownSettings(
+            prefs,
+            mapOf("windDown.sleepNeedMinutes" to 8 * 60),
+            clearDerivedPlannerState = true,
+        )
+        val restored = WindDownStore(prefs)
+        assertEquals(0, restored.recoveryMinutes)
+        assertFalse(prefs.contains("windDown.recoveryMinutes"))
     }
 
     // ── Codec: whitelist + type enforcement ──────────────────────────────────────

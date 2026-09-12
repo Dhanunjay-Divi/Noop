@@ -4209,7 +4209,7 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
             contact=first,
             contact_name="First",
         )
-        await _accept_contact(
+        second_profile, _ = await _accept_contact(
             managed,
             safety,
             owner=owner,
@@ -4230,7 +4230,11 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
             """,
             second.account_id,
         )
-        assert len(await safety.list_contacts(principal=owner)) == 1
+        contacts, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert len(contacts) == 1
+        assert delivery_capable_count == 1
         with pytest.raises(ManagedConflictError):
             await safety.create_incident(
                 principal=owner,
@@ -4249,6 +4253,32 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
             """,
             second.account_id,
         )
+        contacts, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert len(contacts) == 2
+        assert delivery_capable_count == 1
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_social_profiles
+            SET status = 'disabled', updated_at = clock_timestamp()
+            WHERE profile_id = $1
+            """,
+            UUID(second_profile["profile_id"]),
+        )
+        contacts, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert len(contacts) == 1
+        assert delivery_capable_count == 1
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_social_profiles
+            SET status = 'active', updated_at = clock_timestamp()
+            WHERE profile_id = $1
+            """,
+            UUID(second_profile["profile_id"]),
+        )
         installation_id = f"android-inactive-{uuid4().hex}"
         await _installation(
             primary,
@@ -4265,6 +4295,42 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
                 target_kind="token",
                 token=f"fcm-token:inactive_{uuid4().hex}",
             ),
+        )
+        contacts, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert len(contacts) == 2
+        assert delivery_capable_count == 2
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_account_installations
+            SET status = 'limited'
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            second.account_id,
+            installation_id,
+        )
+        _, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert delivery_capable_count == 1
+        with pytest.raises(ManagedConflictError):
+            await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=uuid4(),
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_account_installations
+            SET status = 'active'
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            second.account_id,
+            installation_id,
         )
         incident = await safety.create_incident(
             principal=owner,
