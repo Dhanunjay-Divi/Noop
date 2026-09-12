@@ -137,6 +137,7 @@ final class MoreListParityTests: XCTestCase {
     func testCustomiPhoneTabBarHasOneMeasuredSafeAreaReservation() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
         let scaffold = try sourceText("Strand/Screens/ScreenScaffold.swift")
+        let tabRoutes = try sourceText("Strand/App/TabRoute.swift")
         let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
         let visualHarness = try sourceText("Tools/ios-tab-shell-visual-qa.sh")
 
@@ -205,8 +206,44 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertFalse(shell.contains("UIResponder.keyboardWillHideNotification"),
                        "Restoring during keyboard dismissal briefly lays the bar out in mid-screen.")
 
-        XCTAssertFalse(scaffold.contains("tabBarClearance"),
-                       "ScreenScaffold must not duplicate the shell's measured reservation.")
+        XCTAssertTrue(scaffold.contains("@Environment(\\.persistentBottomChromeInset)"))
+        XCTAssertTrue(scaffold.contains(
+            ".padding(.bottom, NoopMetrics.space4 + persistentBottomChromeInset)"
+        ))
+        XCTAssertTrue(shell.contains(
+            ".tabRouteDestinations(\n                    persistentBottomChromeInset: visibleTabBarHeight"
+        ))
+        XCTAssertTrue(tabRoutes.contains(
+            "\\.persistentBottomChromeInset,\n                    persistentBottomChromeInset"
+        ))
+        let safeAreaStart = try XCTUnwrap(
+            shell.range(of: ".safeAreaInset(edge: .bottom, spacing: 0)")
+        )
+        let accessibilityBoundary = try XCTUnwrap(
+            shell.range(
+                of: "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize",
+                range: safeAreaStart.upperBound..<shell.endIndex
+            )
+        )
+        XCTAssertFalse(
+            shell[safeAreaStart.lowerBound..<accessibilityBoundary.lowerBound]
+                .contains("persistentBottomChromeInset"),
+            "Tab roots must keep the single shell safe-area reservation without a second content tail."
+        )
+        let moreDestinationStart = try XCTUnwrap(
+            shell.range(of: ".navigationDestination(for: MoreDestination.self)")
+        )
+        let moreDestinationEnd = try XCTUnwrap(
+            shell.range(
+                of: ".environment(\\.scrollToTopSignal, scrollSignal)",
+                range: moreDestinationStart.upperBound..<shell.endIndex
+            )
+        )
+        XCTAssertTrue(
+            shell[moreDestinationStart.lowerBound..<moreDestinationEnd.lowerBound]
+                .contains("\\.persistentBottomChromeInset"),
+            "Pushed More destinations need the measured tail reservation."
+        )
         XCTAssertFalse(liquidToday.contains("Color.clear.frame(height: 90)"),
                        "LiquidToday must inherit the tab-root reservation instead of a magic spacer.")
         XCTAssertTrue(liquidToday.contains(".padding(.bottom, NoopMetrics.space4)"),
@@ -218,6 +255,22 @@ final class MoreListParityTests: XCTestCase {
                       "Liquid Today's bottom proof must wait for async cards instead of racing a timer.")
         XCTAssertTrue(liquidToday.contains("--demo-scroll-bottom"),
                       "Both scroll implementations need the DEBUG runtime bottom-reachability proof.")
+    }
+
+    func testLiquidTodayUsesNativeModernScrollGeometry() throws {
+        let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+
+        XCTAssertTrue(liquidToday.contains(".modifier(LegacyLiquidTodayScrollOffsetProbe())"))
+        XCTAssertTrue(liquidToday.contains("content.onScrollGeometryChange(for: CGFloat.self)"))
+        XCTAssertTrue(liquidToday.contains(
+            "-(geometry.contentOffset.y + geometry.contentInsets.top)"
+        ))
+        XCTAssertFalse(
+            liquidToday.contains(
+                "GeometryReader { g in\n                    Color.clear.preference"
+            ),
+            "The zero-height LazyVStack probe can trap iOS 26 in an unbounded layout transaction."
+        )
     }
 
     /// The reference interaction is an Instagram-style glass island: labelled at rest, compact while

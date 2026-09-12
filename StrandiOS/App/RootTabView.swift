@@ -225,7 +225,6 @@ struct RootTabView: View {
                     .frame(height: visibleTabBarHeight)
                     .accessibilityHidden(true)
             }
-
             if !keyboardVisible, dynamicTypeSize.isAccessibilitySize {
                 // At accessibility text sizes a single line can be taller than the floating rail. Keep
                 // the glass treatment, but give it an opaque reading boundary so active content never
@@ -853,7 +852,9 @@ struct RootTabView: View {
             view
                 .background(StrandPalette.surfaceBase.ignoresSafeArea())
                 .toolbar(.hidden, for: .navigationBar)
-                .tabRouteDestinations()
+                .tabRouteDestinations(
+                    persistentBottomChromeInset: visibleTabBarHeight
+                )
         }
         // Drive this tab's root scroll-to-top on an at-root re-tap (#198 follow-up); read by ScreenScaffold
         // / LiquidTodayView inside. Only THIS tab's token changes on its reselect, so the others don't scroll.
@@ -963,6 +964,14 @@ struct RootTabView: View {
                 ZStack {
                     StrandPalette.surfaceBase.ignoresSafeArea()
                     route.destination
+                        // The shell's safe-area inset protects the live viewport. iOS 26 does not
+                        // consistently translate that ancestor inset into scroll-content tail space
+                        // for pushed destinations, so only the pushed subtree receives a matching
+                        // endpoint reservation. The More root keeps the single shell-owned inset.
+                        .environment(
+                            \.persistentBottomChromeInset,
+                            visibleTabBarHeight
+                        )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .onAppear {
                             AppDiagnosticsRecorder.shared.record(

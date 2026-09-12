@@ -61,9 +61,15 @@ extension View {
     /// Maps every `TabRoute` push to its screen. Apply once to the ROOT content of each
     /// `NavigationStack` that hosts a tab-root view (the iOS tab shell's stacks; the macOS
     /// Today detail pane and TrendsView's own macOS wrap).
-    func tabRouteDestinations() -> some View {
+    func tabRouteDestinations(
+        persistentBottomChromeInset: CGFloat = 0
+    ) -> some View {
         navigationDestination(for: TabRoute.self) { route in
             TabRouteDestination(route: route)
+                .environment(
+                    \.persistentBottomChromeInset,
+                    persistentBottomChromeInset
+                )
         }
     }
 }

@@ -2,14 +2,14 @@
 
 ## Status
 
-- State: `supplier-independent implementation and exact-current-tree local wall complete; hosted Android production-shell correction verified locally; corrected exact-SHA checks and normal PR #15 integration pending`
+- State: `supplier-independent implementation and exact-current-tree local wall complete; final iPhone scroll and persistent-navigation correction verified locally; corrected exact-SHA checks and normal PR #15 integration pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `2efd5e89999bd54b3fd6e316322b39d7e953ee8f`
 - End implementation commits: first consolidated hosted correction head
-  `142eeec5`; bounded production-shell code correction `8f5253c1`; this
-  durable record and refreshed policy evidence will form the replacement PR
-  head
+  `142eeec5`; latest pushed production-shell correction `66c2b0a9`; the
+  locally verified iPhone correction, durable record, and refreshed policy
+  evidence will form the replacement PR head
 - Record commit or PR: pull request `#15`
 
 ## Objective
@@ -307,6 +307,24 @@ records. Concurrent development must remain isolated by worktree and branch.
   than virtualized child visibility, restores the acceptance/onboarding/
   changelog state it mutates, and no longer overwrites the user's Today order.
   No metric visibility, ordering, or health behavior changed.
+- Corrected a current-iOS Today scroll stall reproduced by repeated direction
+  changes. A zero-height `GeometryReader` preference probe inside the lazy
+  content could leave iOS in an unbounded layout transaction. Current iOS now
+  reports a normalized scroll position through native scroll geometry; iOS 17
+  and macOS retain one full-content compatibility probe outside the lazy
+  stack. Pull-to-refresh, interaction ownership, shell compaction, and
+  scroll-to-top continue to consume the same normalized offset.
+- Corrected the final-control reachability defect on pushed iPhone
+  destinations. The shell measures its persistent navigation once, keeps one
+  viewport safe-area reservation for tab roots, and passes the measured height
+  only to pushed screen content as a tail reservation. Sleep Planner exposes
+  stable weekday-row accessibility identities, and UI coverage accepts either
+  compact or accessibility-expanded navigation without weakening the endpoint
+  clearance assertion.
+- Updated two source-contract tests whose old slice ended at the removed
+  geometry modifier. They now inspect the real `liquidBody` mount boundary and
+  continue to require both the health alert and auto-detected workout card in
+  their production order.
 
 ## Data, privacy, and medical truth
 
@@ -425,16 +443,17 @@ records. Concurrent development must remain isolated by worktree and branch.
 | Hydration, managed documents, and Apple schema | Exact-current-tree `WhoopStore` executed 485 tests with zero failures; the Apple schema oracle executed seven tests and matched the Android oracle. | Schemas v55-v60, hydration projection/tombstone/no-echo, generation-ledger repair, encrypted-row retention, conflict preservation, strict restore validation, account-partitioned mutation intent, and capability-versioned restore pass together. | Client encryption/key recovery, physical import-provider accuracy, or production transfer |
 | Managed client package | Exact-current-tree `NoopRemoteSync` executed 123 tests with zero failures. | Content-mode partitioning, server-readable allowlisting, local encrypted-row retention, account binding, conflict preservation, capability-version snapshot recovery, retry, and coordinator behavior remain coherent. | Production encryption, public traffic, or real participant transfer |
 | Shared health and guidance analytics | Exact-current-tree `StrandAnalytics` executed 1,466 tests with seven evidence-dependent skips and zero failures. | Body/BMI guards, hydration goals, sleep/recovery evidence gates, workout detection, adaptive guidance, and formula contracts pass on the current source. | Clinical validity, individual physiology, or physical sensor accuracy |
-| Complete Apple app suite | Exact-current-tree macOS `Strand` suite executed 1,850 tests with one external Xiaomi-fixture skip and zero failures after the final accessibility contract correction. The first clean macOS/iOS attempts ended only because the disk filled; round-owned derived data was removed and the clean rerun passed. | Current Apple app, persistence, notification, calendar, privacy, accessibility, performance, Safety, hydration, and lifecycle contracts pass together. | iOS background delivery, physical BLE, haptics, notification presentation, signing, or store behavior |
+| Complete Apple app suite | Exact-current-tree macOS `Strand` suite executed 1,850 passing tests with one expected external Xiaomi-fixture skip and zero failures after the final Today scroll and persistent-navigation correction. Two stale source-contract tests first failed because they still sliced at the removed geometry modifier; the contracts were corrected to inspect the real production mount boundary, their focused rerun passed, and the complete suite then passed. | Current Apple app, persistence, notification, calendar, privacy, accessibility, performance, Safety, hydration, Today feature mounts, and lifecycle contracts pass together. | iOS background delivery, physical BLE, haptics, notification presentation, signing, or store behavior |
+| iPhone UI and navigation regression wall | The complete isolated iPhone UI suite passed 21/21 tests. Its high-risk subset passed 8/8, including repeated tab navigation, compact navigation, semantic green switches, Sleep Planner final-control and weekday endpoint clearance, strength body-map persistence, the complete Today metric catalog, and Today scroll performance. The focused scroll reproduction also passed with peak physical memory near 42 MB. | The corrected simulator build can repeatedly scroll Today and expose real endpoint controls above either compact or accessibility-expanded persistent navigation without the reproduced freeze or overlap. | VoiceOver traversal, physical-device memory pressure, signed distribution, or background collection |
 | Android full matrix | Full and Demo each executed 4,455 tests with seven evidence-dependent skips and zero failures. Both lint variants, APK assemblies, and Full/Demo instrumentation-source compilation succeeded after the final BLE lock-screen privacy correction and were rerun after the Today lazy-list correction. The exact-current API 35 `AppShellInstrumentedTest` class passed 5/5 after removing the layout mutation; the complete local production shell passed 93 selected result cases with two intentional private-pilot skips and zero failures. | Room v46-v51, Health Connect BMI reprojection, exact-day hydration, account isolation, private notifications including the persistent connection service, generation-ledger behavior, capability-versioned restore, both product variants, and the production Today/detail/reselection shell pass together on the managed emulator without changing or leaking the user's Today order. | Signed install, OEM delivery timing, Health Connect provider behavior, or physical hardware |
 | Durable analysis invalidation | Apple package/app tests and Android JVM/source-compilation gates cover all ten score-bearing tables, migration seeding and repair, blank-ID exclusion, snapshot-without-clear, crash/restart persistence, exact acknowledgement, partial failure, concurrent writes, outer UPSERT/REPLACE, forced passes, and source deletion. | Launch/resume and post-backfill work now use bounded durable generations rather than whole-history fingerprints, and current Swift/Kotlin/Room source compiles. | Participant-scale performance, Android device instrumentation execution, or physical BLE catch-up |
 | Complete Apple simulator graph | Unsigned generic `NOOPiOS` simulator build succeeded on the exact current source after the disk-only failed attempt was discarded. | The current iPhone app, Watch app, widgets, App Intents metadata, and embedded graph compile, link, and validate. | Signing, store acceptance, physical-device behavior, or UI interaction quality |
 | Deterministic visual matrices | The prior 42-state iPhone matrix remained green. The exact final Daily Plan matrix added eight current captures: normal, check-in, recovery-shift, planned-workout, dark/high-contrast, stop, and two accessibility text sizes. All were nonblank and manually inspected; the largest text sizes keep the target readable above an opaque navigation boundary. | Required simulator states preserve hierarchy, reachability, text visibility, and a stable navigation footprint on the current source. | VoiceOver focus order, haptics, notification presentation, physical display behavior, or hardware |
 | Android navigation accessibility | `PrimaryNavigationContractTest` passed on the exact source; review confirmed `Scaffold` applies its measured bottom-bar inset to the `NavHost`, while `GlassBottomBar` grows with wrapped text and applies system navigation-bar padding. | Android source retains a dynamic, non-overlapping navigation reservation rather than copying the iOS overlay implementation. | Runtime large-text behavior on a physical Android device or OEM font/rendering differences |
-| Complete server suite | The exact isolated PostgreSQL-backed wall executed 457 tests with one provider/environment skip and zero failures. Focused source, backup-contract, manifest, and live PostgreSQL regressions also pass for the non-destructive managed-document readiness replacement. The first post-review command accidentally exercised the unavailable TimescaleDB lane on local PostgreSQL 14; a fresh rerun with `NOOP_TEST_DATABASE_ENGINE=postgresql` passed against new isolated databases. | The current server, migrations, memory/PostgreSQL parity, backup contracts, Safety lifecycle, managed-document readiness, and kind-qualified change-feed joins pass together; migrations 034-037 preserve every legacy payload, revision, head, and change cursor. | Docker image deployment, encrypted backup/restore drill against staging, real providers/carriers, or public runtime |
+| Complete server suite | A fresh exact-tree run against a uniquely named local PostgreSQL 14 database passed 456 tests with one intentional provider/environment skip and one dependency deprecation warning. Ruff check, Ruff formatting, and audits of both locked dependency sets also passed with no known vulnerabilities. The Docker CLI is not installed on this machine, so image construction and Compose execution were not claimed; deployment and backup contracts remain directly tested in the Python wall and hosted server workflow. | The current server, standard-PostgreSQL migrations, memory/PostgreSQL parity, backup/deployment contracts, Safety lifecycle, managed-document readiness, and kind-qualified change-feed joins pass together. | Local Docker image execution, encrypted staging restore, real providers/carriers, or public runtime |
 | Localization and repository policy | Strict i18n coverage, 49 standalone i18n tests, 227 Tools tests, eight health-claims tests plus the 1,230-file claims scan, required-CI, calibration parity, the 17,585-occurrence terminology inventory with zero forbidden uses, release controls, legal inventory, distribution provenance, private-data, operations-record, 107 tracked JSON parses, interpreter-aware shell checks, both prior locked dependency audits, and diff gates pass locally. A bounded high-confidence scan found zero secret signatures across 3,074 tracked text files. | Current source and release-control wiring reject new unlocalized copy, unsupported claims, forbidden vendor mappings, high-confidence secrets, malformed tracked JSON, and unreviewed distribution inputs. | Professional translation, hosted exact-SHA checks, or clinical/legal approval |
 | Review status | Pull request `#15` previously identified ten actionable lifecycle defects. The local correction closes managed-document content-mode/account isolation, BMI dependency, displayed-day hydration, cancellation, notification privacy, bounded Android ownership invalidation, non-destructive server migration staging, server Safety, and final Apple accessibility findings. Replacement exact-tree reviews then found the cross-kind document join, unversioned filtered cursor, stale current-schema instrumentation, unproven Room snapshot, and public BLE lock-screen health-summary defects. The first consolidated hosted Android production shell then found one lazy-composition test defect; the corrected list-level test passes focused and full managed-device execution. Direct Swift, Kotlin, Room, schema-oracle, memory, PostgreSQL, real 50-to-51 migration, incremental KSP, tamper-regeneration, and managed-emulator evidence now covers those paths. Final independent review of the corrected list modifier and navigation semantics returned no actionable finding. | Corrective work remains tied to concrete source review and direct regression evidence, including explicit rejection of stale review evidence. | Corrected hosted exact-SHA verdict, physical behavior, or external launch gates |
-| Project agent handoff | Root `AGENTS.md` points to the checked-in skill; `quick_validate.py` reports `Skill is valid!`; `bash -n` passes; the repository-local context snapshot runs against this dirty worktree; project and user-level skill copies are byte-identical; a read-only fresh-agent rehearsal recovered the branch, risks, invariants, verified/open split, and next command | A future agent entering the repository can discover the same stable engineering, medical-truth, privacy, parity, verification, and handoff contract and recover live context without the oversized chat | That any current feature, deployment, physical-device path, or external release gate is complete |
+| Project agent handoff | Root `AGENTS.md` points to the checked-in skill; `quick_validate.py` reports `Skill is valid!`; `bash -n` passes; the repository-local context snapshot runs against this dirty worktree; project and user-level skill copies are byte-identical by recursive diff and per-file SHA-256; a read-only fresh-agent rehearsal recovered the branch, risks, invariants, verified/open split, and next command | A future agent entering the repository can discover the same stable engineering, medical-truth, privacy, parity, verification, and handoff contract and recover live context without the oversized chat | That any current feature, deployment, physical-device path, or external release gate is complete |
 | Owner-supplied band SDK static assessment | Android protocol AAR and latest iOS static archive were hashed; docs, headers, demo manifests/plists, platform slices, background hooks, license files, and embedded endpoint strings were inspected without executing or importing the binaries | A phone integration path exists in the package; commands must be serialized; model-gated history/backfill, connection confirmation, password rotation, haptics, and other optional APIs are present; the iOS package cannot serve Mac/simulator | Exact NOOP band capability, printed-label mapping, triple-tap possession, runtime egress, redistribution authority, signed app behavior, background reliability, sensor accuracy, or production readiness |
 | Separate SDK repository | Private `Dhanunjay-Divi/NoopBandSDK` created and pushed at `ee82cc0`; local validation passed 14 files with no CJK text, tracked supplier binary, or invalid JSON; repository contains no workflow | SDK ownership, language, binary, and release cadence are isolated from the app repository without spending hosted Actions | Supplier redistribution authority, adapter implementation, artifact publication, physical behavior, or production approval |
 
@@ -468,17 +487,20 @@ required before this round can be closed.
 - Commits: body/notification `9547c394`; calendar integration `4f8682a6`;
   wind-down privacy `83ec8598`; durable handoff `6b78df33`; current mobile
   reliability/accessibility `99a51b80`; Safety lifecycle `e35d1d37`; first
-  consolidated correction `142eeec5`; production-shell correction `8f5253c1`
-- Branch and remote state: protected pull request `#15` and remote branch
-  `origin/codex/product-safety-quality-audit-20260911` carried the first
-  consolidated correction at `142eeec5`. That exact-SHA run passed the
-  Android unit/build/lint job, server, Swift packages, repository controls, and
-  macOS app job, but failed the Android production shell on one deterministic
-  lazy-list test. Local code commit `8f5253c1` contains the verified correction;
-  this record and refreshed generated policy evidence remain uncommitted. Fresh
-  corrected-head review, required exact-SHA checks, and normal integration
-  remain pending; the failed head is not reused as proof.
-- Repository visibility verified: inherited from current repository record
+  consolidated correction `142eeec5`; latest pushed production-shell
+  correction `66c2b0a9`; final iPhone correction and this evidence record in
+  the replacement commit
+- Branch and remote state: protected pull request `#15` previously evaluated
+  pushed head `66c2b0a9`. Its exact-SHA run passed Android, server, Swift-package,
+  repository-control, and macOS jobs but exposed the iOS Today scroll stall and
+  pushed-destination endpoint defect. The replacement commit contains the
+  fully verified local correction, this record, and refreshed generated policy
+  evidence. Fresh corrected-head review, every required exact-SHA check, and
+  normal integration remain pending; the failed hosted head is not reused as
+  proof.
+- Repository visibility verified: `PUBLIC` before final protected integration;
+  the owner-requested return to `PRIVATE` occurs only after the merge is
+  verified so required checks are not silently disrupted mid-review
 - Version/build impact: Apple local database schema `54` to `60`; Android Room
   schema `45` to `51`; PostgreSQL migrations through `038`; no marketing
   version change
@@ -541,9 +563,9 @@ required before this round can be closed.
   password is not cryptographic owner identity. The binaries remain outside Git
   until supplier distribution, dependency, privacy, egress, update, and
   security gates pass.
-- PostgreSQL integration ran against two isolated synthetic local databases
-  and passed. Real Safety provider, carrier, contact, and location delivery was
-  not enabled.
+- PostgreSQL integration ran against isolated synthetic local databases and
+  passed. Docker is unavailable on this machine, and real Safety provider,
+  carrier, contact, and location delivery was not enabled.
 - Managed health-document production transfer remains blocked because the
   storage policy requires client encryption and key recovery, neither of which
   is implemented. The fresh correction keeps encrypted personal documents
@@ -562,14 +584,19 @@ required before this round can be closed.
 
 ## Next round
 
-1. Regenerate final terminology and operations evidence, rerun repository
-   policy gates, commit the durable record, and update pull request `#15` once.
-2. Require fresh corrected-head hosted review and every required exact-SHA check, then
-   integrate through the normal protected merge path without bypassing a gate.
-3. Run the checked-in physical-device handoff on representative iOS and Android
+1. Regenerate final terminology and operations evidence, rerun affected
+   repository policy gates, commit the durable record, and update pull request
+   `#15` once.
+2. Require fresh corrected-head hosted review and every required exact-SHA
+   check, then integrate through the normal protected merge path without
+   bypassing a gate.
+3. After verified integration, return the repository to private visibility and
+   remove only round-owned databases, temporary evidence, daemons, and the
+   audit worktree.
+4. Run the checked-in physical-device handoff on representative iOS and Android
    phones plus supported band firmware; record failures and logs rather than
    treating simulator evidence as hardware evidence.
-4. Complete legal, carrier, provider, signing, store, participant, licensing,
+5. Complete legal, carrier, provider, signing, store, participant, licensing,
    and operational-readiness gates before any production launch claim.
 
 ## Privacy check

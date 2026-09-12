@@ -761,7 +761,10 @@ struct SmartAlarmView: View {
                        displayedComponents: .hourAndMinute)
                 .labelsHidden()
                 .accessibilityLabel("\(Self.weekdayName(weekday)) wake time")
+                .accessibilityIdentifier("noop.sleep-planner.wake.\(weekday)")
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("noop.sleep-planner.wake-row.\(weekday)")
     }
 
     /// A binding for one weekday's wake override — reads the effective minute, writes a NEW override (a pick

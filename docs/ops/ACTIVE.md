@@ -28,22 +28,27 @@ The supplier-independent product, safety, and quality audit remains active on
 request `#15`. The first consolidated exact-SHA run used correction head
 `142eeec5`. Its Android production-shell job exposed one deterministic lazy-list
 test defect while the Android unit/build/lint job, server, Swift packages,
-repository gates, and macOS app job passed. Final local correction `8f5253c1`
-also removes the test's Today-order mutation and remains unpushed with this
-final record and policy refresh.
+repository gates, and macOS app job passed. Pushed correction `66c2b0a9`
+closes that test defect without changing the user's Today order. Its hosted
+iOS run then exposed a repeatable Today scroll stall and pushed-destination
+endpoint overlap; the current local correction replaces the lazy-stack
+geometry probe with native current-iOS scroll geometry and carries the
+measured persistent-navigation height only into pushed content tails.
 
 The exact local wall now passes on the current implementation tree:
 `WhoopStore` 485 tests; `NoopRemoteSync` 123; `StrandAnalytics` 1,466 with
 seven evidence-dependent skips; Apple app 1,850 with one external-fixture
 skip; Android Full and Demo 4,455 each with seven evidence-dependent skips,
 plus both lint variants, APK assemblies, and instrumentation-source
-compilation; and the PostgreSQL-backed server 457 with one provider/environment
-skip. The unsigned generic iOS Simulator graph builds. Ruff, both locked Python
-dependency audits, migration-manifest integrity, backup shell syntax,
-standalone Compose configuration, 227 Tools tests, 49 localization tests,
-health claims, strict i18n, required CI, calibration parity, terminology,
-release controls, legal inventory, provenance, private-data, operations-record,
-JSON, shell, and diff gates also pass locally.
+compilation; and the PostgreSQL-backed server 456 with one provider/environment
+skip. The complete isolated iPhone UI suite passes 21/21, its high-risk subset
+passes 8/8, the unsigned generic iOS Simulator graph builds, and the shared
+macOS app builds. Ruff, both locked Python dependency audits,
+migration-manifest and backup/deployment contracts, 227 Tools tests, 49
+localization tests, health claims, strict i18n, required CI, calibration parity,
+terminology, release controls, legal inventory, provenance, private-data,
+operations-record, JSON, shell, and diff gates also pass locally. Docker is not
+installed on this machine, so no local container/Compose execution is claimed.
 
 The production-shell correction now tags the real Today `LazyColumn`, scrolls
 to the lazily composed HRV tile through list semantics, waits on the Today-root
@@ -128,6 +133,11 @@ health transfer, legal/terms, 24/7 operations, signing, stores, participants,
 and media licensing remain external gates. Rest display freshness is fixed,
 but issue `#977` still intentionally leaves a chargeable day without staged
 sleep as a missing Rest signal rather than inventing a score.
+
+The canonical repository is currently public only to reduce the owner's hosted
+Actions cost during this audit. It must return to private visibility after the
+corrected head passes required checks and merges normally; visibility must not
+change in the middle of required-check evaluation.
 
 The detailed paragraphs below are chronological progress notes. Where they
 describe an earlier dirty-tree total or a pending source correction, the

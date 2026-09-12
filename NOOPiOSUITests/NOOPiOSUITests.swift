@@ -920,18 +920,28 @@ final class NOOPiOSUITests: XCTestCase {
 
         let finalControl = app.switches["noop.sleep-planner.per-day"]
         let compactNavigation = app.buttons["noop.tab.compact"]
+        let expandedNavigation = app.buttons["noop.tab.4"]
         let quickActions = app.buttons["noop.quick-actions"]
         XCTAssertTrue(finalControl.waitForExistence(timeout: 20))
-        XCTAssertTrue(compactNavigation.waitForExistence(timeout: 5))
-        XCTAssertTrue(quickActions.exists)
+        XCTAssertTrue(
+            compactNavigation.exists || expandedNavigation.waitForExistence(timeout: 5),
+            "Navigation must remain available in its compact or accessibility-expanded presentation."
+        )
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
+        var navigationY = compactNavigation.exists
+            ? compactNavigation.frame.minY
+            : expandedNavigation.frame.minY
         var firstFloatingControlY = min(
-            compactNavigation.frame.minY,
+            navigationY,
             quickActions.frame.minY
         )
         for _ in 0..<10 where finalControl.frame.maxY + 8 > firstFloatingControlY {
             app.swipeUp()
+            navigationY = compactNavigation.exists
+                ? compactNavigation.frame.minY
+                : expandedNavigation.frame.minY
             firstFloatingControlY = min(
-                compactNavigation.frame.minY,
+                navigationY,
                 quickActions.frame.minY
             )
         }
@@ -951,25 +961,36 @@ final class NOOPiOSUITests: XCTestCase {
             "--demo-more-route", "alarms",
             "--demo-compact-tab-bar",
             "--demo-sleep-per-day",
+            "--demo-scroll-bottom",
         ]
         app.launch()
 
-        let monday = app.staticTexts["Monday"]
-        let sundayWakeTime = app.descendants(matching: .any)["Sunday wake time"]
+        let sundayWakeRow = app.otherElements["noop.sleep-planner.wake-row.1"]
         let compactNavigation = app.buttons["noop.tab.compact"]
+        let expandedNavigation = app.buttons["noop.tab.4"]
         let quickActions = app.buttons["noop.quick-actions"]
         let perDay = app.switches["noop.sleep-planner.per-day"]
         XCTAssertTrue(perDay.waitForExistence(timeout: 20))
         XCTAssertEqual(perDay.value as? String, "1")
-        XCTAssertTrue(monday.waitForExistence(timeout: 5))
-        XCTAssertTrue(sundayWakeTime.waitForExistence(timeout: 5))
-        var firstFloatingControlY = min(compactNavigation.frame.minY, quickActions.frame.minY)
-        for _ in 0..<8 where sundayWakeTime.frame.maxY + 8 > firstFloatingControlY {
+        XCTAssertTrue(sundayWakeRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            compactNavigation.exists || expandedNavigation.waitForExistence(timeout: 5),
+            "Navigation must remain available in its compact or accessibility-expanded presentation."
+        )
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
+        var navigationY = compactNavigation.exists
+            ? compactNavigation.frame.minY
+            : expandedNavigation.frame.minY
+        var firstFloatingControlY = min(navigationY, quickActions.frame.minY)
+        for _ in 0..<8 where sundayWakeRow.frame.maxY + 8 > firstFloatingControlY {
             app.swipeUp()
-            firstFloatingControlY = min(compactNavigation.frame.minY, quickActions.frame.minY)
+            navigationY = compactNavigation.exists
+                ? compactNavigation.frame.minY
+                : expandedNavigation.frame.minY
+            firstFloatingControlY = min(navigationY, quickActions.frame.minY)
         }
-        XCTAssertTrue(sundayWakeTime.isHittable)
-        XCTAssertLessThanOrEqual(sundayWakeTime.frame.maxY + 8, firstFloatingControlY)
+        XCTAssertTrue(sundayWakeRow.isHittable)
+        XCTAssertLessThanOrEqual(sundayWakeRow.frame.maxY + 8, firstFloatingControlY)
     }
 
     func testDeviceActionsAndFooterClearPersistentNavigation() {

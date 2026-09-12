@@ -12101,22 +12101,22 @@
       "category": "core",
       "lineNumbers": [
         16,
-        514,
-        518,
-        1221,
-        1225,
-        1450,
-        2626,
-        3376,
-        3385,
-        3387,
-        3389,
-        3412,
-        3721,
-        3794,
-        3917,
-        3925,
-        4446
+        507,
+        511,
+        1214,
+        1218,
+        1443,
+        2619,
+        3369,
+        3378,
+        3380,
+        3382,
+        3405,
+        3714,
+        3787,
+        3910,
+        3918,
+        4502
       ],
       "occurrenceCount": 17,
       "path": "Strand/Liquid/LiquidTodayView.swift",
@@ -12133,19 +12133,19 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        1348,
-        1353,
-        1458,
-        1464,
-        1527,
-        3363,
-        3365,
-        3367,
-        3369,
-        3371,
-        3373,
-        3843,
-        3858
+        1341,
+        1346,
+        1451,
+        1457,
+        1520,
+        3356,
+        3358,
+        3360,
+        3362,
+        3364,
+        3366,
+        3836,
+        3851
       ],
       "occurrenceCount": 13,
       "path": "Strand/Liquid/LiquidTodayView.swift",
@@ -35432,7 +35432,7 @@
     {
       "category": "historical",
       "lineNumbers": [
-        36
+        39
       ],
       "occurrenceCount": 1,
       "path": "docs/ops/ACTIVE.md",
@@ -35646,8 +35646,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        425,
-        463
+        443,
+        482
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-11-product-safety-quality-audit.md",
@@ -35665,7 +35665,7 @@
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "c8673fe22701c64c6e30c33be8084564302f8ad67ffe65fe2dffd2586f426cfc",
+      "sha256": "f568a4dd5f1b8136a41775934e00ba2f5b428518e17f05140cb29e082da00bc6",
       "tokenCounts": {
         "whoop": 2,
         "whoopstore": 1

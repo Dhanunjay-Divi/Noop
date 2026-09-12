@@ -418,13 +418,6 @@ struct LiquidTodayView: View {
             VStack(spacing: 0) {
                 // Zero-height scroll-to-top anchor (#198 follow-up): the target for an at-root Today re-tap.
                 Color.clear.frame(height: 0).id(Self.topAnchorID)
-                // Scroll-offset probe at the very top (before padding), so its minY in the scroll's
-                // coordinate space reads the top OVERSCROLL: ~0 at rest, positive as you pull down.
-                GeometryReader { g in
-                    Color.clear.preference(key: PullOffsetKey.self,
-                                           value: g.frame(in: .named(Self.pullSpace)).minY)
-                }
-                .frame(height: 0)
 
                 liquidRefreshIndicator   // grows in the revealed space; a vessel filling with the pull
 
@@ -475,6 +468,7 @@ struct LiquidTodayView: View {
                 // this entire root, so scrolling here must expose the true final card above that bar.
                 Color.clear.frame(height: 0).id(Self.bottomAnchorID)
             }
+            .modifier(LegacyLiquidTodayScrollOffsetProbe())
             #if os(macOS)
             // Keep the phone-shaped column readable + centred on the wide mac detail pane. The sky is a
             // ScrollView background (full-bleed), so constraining the content column here doesn't touch it.
@@ -486,13 +480,12 @@ struct LiquidTodayView: View {
             active: repo.historyWritesActive,
             blocked: $historyWriteQueryGate
         ))
-        .coordinateSpace(name: Self.pullSpace)
-        .onPreferenceChange(PullOffsetKey.self) { offset in
+        .modifier(LiquidTodayScrollPositionReporter { offset in
             scrollTracker.offset = offset
             scrollInteraction.observe(offset: offset)
             handlePull(offset)
             reportScrollPosition(offset)
-        }
+        })
         .environment(\.noopInteractionInProgress, scrollInteraction.isActive)
         .onDisappear { scrollInteraction.reset() }
         // The original satin-obsidian field is a FIXED full-bleed backdrop behind the scroll content,
@@ -4357,10 +4350,73 @@ private final class LiquidTodayScrollTracker {
     var offset: CGFloat = 0
 }
 
-/// Carries the Today scroll's top overscroll offset up to the view for the custom liquid pull-to-refresh.
+/// Carries the legacy Today scroll offset up to the view for pull-to-refresh and shell compaction.
 private struct PullOffsetKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// A geometry preference remains necessary on iOS 17 and macOS. Attach it to the full scroll content:
+/// a zero-height probe inside the LazyVStack can trap iOS 26 in an unbounded layout transaction after
+/// repeated direction changes.
+private struct LegacyLiquidTodayScrollOffsetProbe: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 18.0, *) {
+            content
+        } else {
+            legacyProbe(content)
+        }
+        #else
+        legacyProbe(content)
+        #endif
+    }
+
+    private func legacyProbe(_ content: Content) -> some View {
+        content.background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: PullOffsetKey.self,
+                    value: geometry.frame(in: .named(LiquidTodayView.pullSpace)).minY
+                )
+            }
+        }
+    }
+}
+
+/// Native scroll geometry avoids layout feedback on current iOS and reports normalized values:
+/// zero at rest, negative down-page progress, and positive top overscroll. Legacy platforms retain
+/// the full-content preference probe above.
+private struct LiquidTodayScrollPositionReporter: ViewModifier {
+    let report: (CGFloat) -> Void
+    @State private var legacyTopOffset: CGFloat?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                -(geometry.contentOffset.y + geometry.contentInsets.top)
+            } action: { _, offset in
+                report(offset)
+            }
+        } else {
+            legacyReporter(content)
+        }
+        #else
+        legacyReporter(content)
+        #endif
+    }
+
+    private func legacyReporter(_ content: Content) -> some View {
+        content
+            .coordinateSpace(name: LiquidTodayView.pullSpace)
+            .onPreferenceChange(PullOffsetKey.self) { offset in
+                if legacyTopOffset == nil { legacyTopOffset = offset }
+                report(offset - (legacyTopOffset ?? offset))
+            }
+    }
 }
 
 // MARK: - NOOP wordmark (centred, with a tap easter egg)
