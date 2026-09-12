@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">該放鬆了</string>
-    <string name="wind_down_notification_body">計畫的就寢時間快到了。請在適合你的時候開始放鬆。</string>
+    <string name="wind_down_notification_body">計畫：%1$s 開始放鬆；%2$s 就寢，如適合你。</string>
     <string name="wind_down_channel_name">睡前放鬆提醒</string>
     <string name="wind_down_channel_description">在計畫就寢時間前傳送的可選晚間提醒。</string>
     <string name="sleep_planner_title">睡眠規劃</string>

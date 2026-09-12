@@ -37,6 +37,7 @@ struct RootTabView: View {
     @EnvironmentObject private var router: NavRouter
     @EnvironmentObject private var updateStore: UpdateStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject private var contextualActions = ContextualActionCenter.shared
 
     /// Which quick-action screen the centre FAB is presenting (nil = sheet closed).
@@ -185,8 +186,9 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        // Keep the custom bar over a full-bleed page and reserve its measured height inside scroll
-        // content. Content remains fully opaque up to that reserved strip.
+        // Keep the custom bar over a full-bleed page and reserve its measured height as a real safe-area
+        // inset. A content margin only extends a ScrollView's endpoint; it still lets large Dynamic Type
+        // rows render underneath the persistent controls while the user is reading them.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
@@ -218,7 +220,30 @@ struct RootTabView: View {
             // steal gestures from Trends' year strip (and other horizontally scrolling controls), while
             // pushed pages already need the system edge-swipe for Back. Native iOS tab bars do not require
             // page swiping, so leave horizontal gestures to the content that owns them.
-            .contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear
+                    .frame(height: visibleTabBarHeight)
+                    .accessibilityHidden(true)
+            }
+
+            if !keyboardVisible, dynamicTypeSize.isAccessibilitySize {
+                // At accessibility text sizes a single line can be taller than the floating rail. Keep
+                // the glass treatment, but give it an opaque reading boundary so active content never
+                // competes with persistent navigation. The safe-area inset above preserves reachability.
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: StrandPalette.surfaceBase.opacity(0), location: 0),
+                        .init(color: StrandPalette.surfaceBase.opacity(0.98), location: 0.08),
+                        .init(color: StrandPalette.surfaceBase, location: 1),
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: visibleTabBarHeight + 28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
 
             if !keyboardVisible {
                 HStack(alignment: .center, spacing: 8) {
@@ -233,11 +258,11 @@ struct RootTabView: View {
                             resetTabBarScrollTracking()
                         },
                         onReselect: { tag in
-                            // Re-tapping the active tab refreshes that page's data (2026-07-02) and, from a
-                            // subpage, pops that tab's stack back to its root (#135) — an animated pop via the
-                            // path, not a rebuild. At the root the pop is skipped, so scroll position survives
-                            // and the refresh doesn't double with a re-run of the root's `.task` (#198).
-                            Task { await repo.refresh() }
+                            // Re-tapping the active tab is navigation-only: from a subpage it pops that tab's
+                            // stack to its root (#135); at the root it scrolls the existing screen to the top
+                            // (#198). Data refresh remains owned by explicit pull-to-refresh and the app's
+                            // launch/sync/staleness paths, so this frequent gesture never starts a broad
+                            // history read or invalidates an otherwise-current Today screen.
                             tabBarCompact = false
                             if !tabPaths[tag].isEmpty {
                                 tabPaths[tag] = NavigationPath()
@@ -406,6 +431,7 @@ struct RootTabView: View {
                 AppScrollHitchMonitor.shared.end(reason: "scene_inactive")
                 return
             }
+            WindDownNudge.restoreScheduleIfAuthorized()
             Task { await contextualActions.importDeliveredNotifications() }
         }
         // Quick-action sheet presents with the calm easing (~0.42s) per the README sheet spec —
@@ -505,7 +531,16 @@ struct RootTabView: View {
             temperatureC: nil,
             effort: repo.localCalendarToday?.strain,
             consumedML: reading?.valueML,
-            goalML: reading.map { _ in repo.hydrationGoalML(profileSex: profile.sex) }
+            goalML: reading.flatMap { _ in
+                repo.hydrationGoalML(
+                    profileAge: profile.age,
+                    ageConfirmed: profile.ageInputConfirmed,
+                    profileSex: profile.sex,
+                    sexConfirmed: profile.sexInputConfirmed,
+                    weightKg: profile.weightKg,
+                    weightConfirmed: profile.weightInputConfirmed
+                )
+            }
         )
     }
 
@@ -1716,7 +1751,7 @@ private struct FloatingTabBar: View {
     /// Compact mode is an explicit disclosure control, not a re-select gesture. Expanding must therefore
     /// preserve the current navigation stack, scroll position, and cached data.
     var onExpand: () -> Void = {}
-    /// Fires when the user taps the ALREADY-active tab (2026-07-02: re-tap should refresh).
+    /// Fires when the user taps the already-active tab so the shell can pop or scroll to the root.
     var onReselect: (Int) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency

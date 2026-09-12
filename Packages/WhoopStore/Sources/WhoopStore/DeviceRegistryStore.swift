@@ -37,9 +37,21 @@ public struct DeviceRegistryStore: Sendable {
     /// I1: promoting one device demotes whatever was active, atomically (single write transaction).
     public func setActive(_ id: String) throws {
         try dbQueue.write { db in
+            let previous = try String.fetchOne(
+                db,
+                sql: "SELECT id FROM pairedDevice WHERE status = 'active' LIMIT 1"
+            )
+            if previous == id {
+                try db.execute(
+                    sql: "UPDATE pairedDevice SET lastSeenAt = ? WHERE id = ?",
+                    arguments: [Int(Date().timeIntervalSince1970), id]
+                )
+                return
+            }
             try db.execute(sql: "UPDATE pairedDevice SET status = 'paired' WHERE status = 'active'")
             try db.execute(sql: "UPDATE pairedDevice SET status = 'active', lastSeenAt = ? WHERE id = ?",
                            arguments: [Int(Date().timeIntervalSince1970), id])
+            try AnalysisOwnershipInvalidation.mark(db)
         }
     }
 
@@ -55,7 +67,20 @@ public struct DeviceRegistryStore: Sendable {
 
     public func archive(_ id: String) throws {
         try dbQueue.write { db in
+            guard let status = try String.fetchOne(
+                db,
+                sql: "SELECT status FROM pairedDevice WHERE id = ?",
+                arguments: [id]
+            ),
+            status != DeviceStatus.archived.rawValue else {
+                return
+            }
             try db.execute(sql: "UPDATE pairedDevice SET status = 'archived' WHERE id = ?", arguments: [id])
+            try db.execute(
+                sql: "DELETE FROM dayOwnership WHERE deviceId = ?",
+                arguments: [id]
+            )
+            try AnalysisOwnershipInvalidation.mark(db)
         }
     }
 
@@ -177,6 +202,9 @@ public struct DeviceRegistryStore: Sendable {
         // v55: editable hydration rows are canonical, device-scoped health data. They must not
         // survive an explicit source deletion while their scalar metric projection is removed.
         "hydrationEntry",
+        // v57: analysis generation/acknowledgement state is keyed by source and must be removed with that
+        // source. Leaving it behind would retain an identifier and trigger a meaningless future rescore.
+        "analysisDirtySource",
     ]
 
     /// Permanently delete every recorded sample/derived row belonging to one device, across all
@@ -197,10 +225,24 @@ public struct DeviceRegistryStore: Sendable {
 
     public func setDayOwner(day: String, deviceId: String, locked: Bool) throws {
         try dbQueue.write { db in
+            let previous = try Row.fetchOne(
+                db,
+                sql: "SELECT deviceId, locked FROM dayOwnership WHERE day = ?",
+                arguments: [day]
+            )
+            if let previous,
+               (previous["deviceId"] as String) == deviceId,
+               (previous["locked"] as Int) == (locked ? 1 : 0) {
+                return
+            }
             try db.execute(sql: """
                 INSERT INTO dayOwnership (day, deviceId, locked) VALUES (?, ?, ?)
                 ON CONFLICT(day) DO UPDATE SET deviceId = excluded.deviceId, locked = excluded.locked
             """, arguments: [day, deviceId, locked ? 1 : 0])
+            try AnalysisOwnershipInvalidation.mark(
+                db,
+                affectedRange: AnalysisOwnershipInvalidation.dayRange(day)
+            )
         }
     }
 

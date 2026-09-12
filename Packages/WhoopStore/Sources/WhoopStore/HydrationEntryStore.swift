@@ -59,7 +59,10 @@ extension WhoopStore {
         failAfterMetricWriteForTesting: Bool = false
     ) async throws -> Double? {
         guard entries.allSatisfy({
-            !$0.id.isEmpty && $0.day == day && $0.amountML > 0 && $0.loggedAt > 0
+            UUID(uuidString: $0.id) != nil
+                && $0.day == day
+                && $0.amountML > 0
+                && $0.loggedAt > 0
         }) else {
             throw HydrationEntryStoreError.invalidEntry
         }
@@ -103,4 +106,48 @@ extension WhoopStore {
             return total > 0 ? total : nil
         }
     }
+
+    #if DEBUG
+    /// Seeds an intentionally unvalidated persistence state for corruption-path app tests.
+    /// Production writes must continue through `replaceHydrationLogEntries`.
+    public func seedHydrationPersistenceForTesting(
+        _ entries: [HydrationLogEntry],
+        deviceId: String,
+        day: String,
+        metricKey: String,
+        totalML: Double
+    ) async throws {
+        try syncWrite { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO metricSeries (deviceId, day, key, value)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(deviceId, day, key) DO UPDATE SET
+                        value = excluded.value
+                    """,
+                arguments: [deviceId, day, metricKey, totalML]
+            )
+            try db.execute(
+                sql: "DELETE FROM hydrationEntry WHERE deviceId = ? AND day = ?",
+                arguments: [deviceId, day]
+            )
+            for entry in entries {
+                try db.execute(
+                    sql: """
+                        INSERT INTO hydrationEntry
+                            (id, deviceId, day, amountML, loggedAt)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                    arguments: [
+                        entry.id,
+                        deviceId,
+                        entry.day,
+                        entry.amountML,
+                        entry.loggedAt,
+                    ]
+                )
+            }
+        }
+    }
+    #endif
 }

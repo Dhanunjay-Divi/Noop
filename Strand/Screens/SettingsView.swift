@@ -1700,15 +1700,13 @@ struct SettingsView: View {
         }
     }
 
-    /// Live Sessions (beta) — the silent-guardian in-workout coach. Default ON (the entry itself is
-    /// BETA-labelled on the Liquid Today); off removes the Start-session control entirely. Same key the
-    /// Today entry reads (`LiveSessionPrefs.betaKey`).
-    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = true
+    /// Live Sessions (beta) — explicit opt-in until supported-band cues are hardware validated.
+    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = false
     private var liveSessionsCard: some View {
         SettingsSection(
             icon: "shield.lefthalf.filled",
             title: "Experimental · Live Sessions",
-            blurb: "A one-tap guarded workout: Noop Band watches your heart rate against a zone gated on today's Recovery and only vibrates to correct course. Silence means you're on track."
+            blurb: "Live heart-rate coaching against a range shaped by today's Recovery. The screen always shows state; wrist cues require a connected, bonded, supported band and enabled wrist alerts."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
                 Toggle(isOn: $liveSessionsBeta) {
@@ -1717,7 +1715,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
                 .toggleStyle(.noopSwitch)
-                Text("Silence-first Noop Band coaching during workouts.")
+                Text("appwide.live_session.start_detail")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

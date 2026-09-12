@@ -27,6 +27,26 @@ public enum BodyProfilePolicy {
     private static let plausibleHeightCm = 100.0...250.0
     private static let plausibleBMI = 5.0...100.0
 
+    /// Whether a stored or imported BMI may be presented as this user's adult screening metric.
+    ///
+    /// The BMI record itself can remain in local history regardless of this result. Presentation is
+    /// withheld until the user has confirmed adult age, height, and the current weight context.
+    public static func canPresentAdultBMI(
+        age: Int,
+        currentWeightKg: Double,
+        heightCm: Double,
+        ageConfirmed: Bool,
+        heightConfirmed: Bool,
+        currentWeightConfirmed: Bool
+    ) -> Bool {
+        adultBMI(
+            age: age,
+            weightKg: currentWeightKg,
+            heightCm: heightCm,
+            measurementsConfirmed: ageConfirmed && heightConfirmed && currentWeightConfirmed
+        ) != nil
+    }
+
     public static func adultBMI(
         age: Int,
         weightKg: Double,

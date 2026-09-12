@@ -1,5 +1,9 @@
 package com.noop.data
 
+import com.noop.alarm.WindDownScheduler
+import com.noop.alarm.WindDownStore
+import com.noop.testing.FakeSharedPreferences
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -8,6 +12,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.time.Instant
+import java.time.ZoneId
+import java.util.TimeZone
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -18,8 +25,8 @@ import java.util.zip.ZipOutputStream
  * Plain JVM (real org.json + java.util.zip, no Robolectric); the SharedPreferences apply/snapshot
  * bridge needs a Context and is covered by the shared restore path at the platform level.
  *
- * Twin of the Apple `BackupSettingsTests` in Packages/WhoopStore — the canonical keys and kinds
- * asserted here are the cross-platform contract, so a drift on either side fails one of the twins.
+ * Shared fields mirror the Apple `BackupSettingsTests`; Android v5 planner-continuity fields are
+ * additive and remain unknown-key-safe for older or cross-platform readers.
  */
 class BackupSettingsCodecTest {
 
@@ -58,8 +65,10 @@ class BackupSettingsCodecTest {
             "windDown.enabled" to true,
             "windDown.sleepNeedMinutes" to 510,
             "windDown.goalMode" to "extraOpportunity",
+            "windDown.recoveryMinutes" to 45,
             "windDown.leadMinutes" to 45,
             "sleepPlanner.wakeMinutes" to 390,
+            "windDown.perDayWakeMinutes" to """{"1":480,"7":540}""",
             "notif.masterEnabled" to true,
             "notif.onlyWhenWorn" to true,
             "notif.quietHoursEnabled" to true,
@@ -89,7 +98,7 @@ class BackupSettingsCodecTest {
 
         assertEquals(34, back["profile.age"])
         assertEquals("1992-11-03", back["profile.dateOfBirth"])
-        assertEquals(4, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
+        assertEquals(5, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
         assertEquals("female", back["profile.sex"])
         assertEquals(62.5, back["profile.weightKg"])
         assertEquals(60.0, back["profile.targetWeightKg"])
@@ -105,7 +114,12 @@ class BackupSettingsCodecTest {
         assertEquals(false, back["noop.showDayCycleBackground"])
         assertEquals(true, back["today.keyMetricsDetailed"])
         assertEquals("extraOpportunity", back["windDown.goalMode"])
+        assertEquals(45, back["windDown.recoveryMinutes"])
         assertEquals(390, back["sleepPlanner.wakeMinutes"])
+        assertEquals(
+            mapOf(1 to 480, 7 to 540),
+            WindDownStore.decodeWakeOverrides(back["windDown.perDayWakeMinutes"] as? String),
+        )
         assertEquals(120, back["hydrationReminders.intervalMinutes"])
         assertEquals(false, back["hydrationReminders.adaptiveEnabled"])
         assertEquals(values.size + 1, back.size)
@@ -145,6 +159,67 @@ class BackupSettingsCodecTest {
                 profileKeys,
             BackupSettingsBridge.mappedCanonicalKeys,
         )
+    }
+
+    @Test fun windDownRecoveryAndOverridesAreValidatedRestoredAndUsedBySchedule() {
+        val json = JSONObject()
+            .put(BackupSettingsCodec.SCHEMA_VERSION_KEY, 5)
+            .put("windDown.enabled", true)
+            .put("windDown.sleepNeedMinutes", 8 * 60)
+            .put("windDown.recoveryMinutes", 45)
+            .put("windDown.leadMinutes", 30)
+            .put("sleepPlanner.wakeMinutes", 7 * 60)
+            .put("windDown.perDayWakeMinutes", """{"7":540}""")
+            .toString()
+        val restoredValues = BackupSettingsCodec.decode(json)
+        val prefs = FakeSharedPreferences()
+
+        BackupSettingsBridge.applyWindDownSettings(prefs, restoredValues)
+        val restored = WindDownStore(prefs)
+
+        assertTrue(restored.enabled)
+        assertEquals(45, restored.recoveryMinutes)
+        assertEquals(mapOf(7 to 9 * 60), restored.perDayWakeOverrides)
+        val plan = requireNotNull(
+            WindDownScheduler.nextDatedPlan(
+                defaultWakeMinutes = restored.wakeMinutes,
+                wakeOverrides = restored.perDayWakeOverrides,
+                targetSleepMinutes = restored.targetSleepMinutes,
+                leadMinutes = restored.leadMinutes,
+                nowMs = Instant.parse("2026-09-11T12:00:00Z").toEpochMilli(),
+                timeZone = TimeZone.getTimeZone("UTC"),
+            ),
+        )
+        val wake = Instant.ofEpochMilli(plan.wakeAtMillis).atZone(ZoneId.of("UTC"))
+        val windDown = Instant.ofEpochMilli(plan.windDownAtMillis).atZone(ZoneId.of("UTC"))
+        assertEquals(7, plan.wakeWeekday)
+        assertEquals(9, wake.hour)
+        assertEquals(0, wake.minute)
+        assertEquals(11, windDown.dayOfMonth)
+        assertEquals(23, windDown.hour)
+        assertEquals(45, windDown.minute)
+    }
+
+    @Test fun malformedWindDownPlannerBackupValuesAreDropped() {
+        val invalidOverrides = listOf(
+            """{"0":480}""",
+            """{"7":1440}""",
+            """{"7":540.5}""",
+            """{"07":540}""",
+            """[{"7":540}]""",
+        )
+        for (raw in invalidOverrides) {
+            val decoded = BackupSettingsCodec.decode(
+                JSONObject()
+                    .put("windDown.perDayWakeMinutes", raw)
+                    .toString(),
+            )
+            assertNull(raw, decoded["windDown.perDayWakeMinutes"])
+        }
+        val invalidRecovery = BackupSettingsCodec.decode(
+            """{"windDown.recoveryMinutes":61}""",
+        )
+        assertNull(invalidRecovery["windDown.recoveryMinutes"])
     }
 
     // ── Codec: whitelist + type enforcement ──────────────────────────────────────

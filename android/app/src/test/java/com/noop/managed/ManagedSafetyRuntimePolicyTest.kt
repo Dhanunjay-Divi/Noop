@@ -1,5 +1,6 @@
 package com.noop.managed
 
+import com.noop.ui.shouldDisableBandSosPreference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -9,6 +10,97 @@ import org.junit.Test
 import java.util.UUID
 
 class ManagedSafetyRuntimePolicyTest {
+    @Test
+    fun bandSosPreferenceWaitsForAConfirmedContactSnapshotBeforeDisabling() {
+        val acceptedContact = ManagedSafetyContact(
+            profileId = UUID.fromString("00000000-0000-0000-0000-000000000111"),
+            displayName = "Contact",
+            role = "contact",
+            acceptedAt = "2026-09-12T00:00:00Z",
+        )
+
+        assertFalse(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.SIGNED_OUT,
+                contacts = null,
+            ),
+        )
+        assertFalse(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.ENROLLED,
+                contacts = null,
+            ),
+        )
+        assertTrue(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.ENROLLED,
+                contacts = ManagedSafetyContacts(
+                    contacts = emptyList(),
+                    minimumRequired = 1,
+                    maximumAllowed = 5,
+                ),
+            ),
+        )
+        assertFalse(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.ENROLLED,
+                contacts = ManagedSafetyContacts(
+                    contacts = listOf(acceptedContact),
+                    minimumRequired = 1,
+                    maximumAllowed = 5,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun locationSharingRequiresForegroundAndBackgroundAuthorization() {
+        assertTrue(
+            ManagedSafetyLocationAuthorization.canStartIncident(
+                shareLocation = false,
+                sdkInt = 35,
+                foregroundGranted = false,
+                backgroundGranted = false,
+            ),
+        )
+        assertFalse(
+            ManagedSafetyLocationAuthorization.canStartIncident(
+                shareLocation = true,
+                sdkInt = 35,
+                foregroundGranted = false,
+                backgroundGranted = true,
+            ),
+        )
+        assertFalse(
+            ManagedSafetyLocationAuthorization.canStartIncident(
+                shareLocation = true,
+                sdkInt = 35,
+                foregroundGranted = true,
+                backgroundGranted = false,
+            ),
+        )
+        assertTrue(
+            ManagedSafetyLocationAuthorization.canStartIncident(
+                shareLocation = true,
+                sdkInt = 35,
+                foregroundGranted = true,
+                backgroundGranted = true,
+            ),
+        )
+        assertTrue(
+            ManagedSafetyLocationAuthorization.canStartIncident(
+                shareLocation = true,
+                sdkInt = 28,
+                foregroundGranted = true,
+                backgroundGranted = false,
+            ),
+        )
+    }
+
     @Test
     fun notificationRegistrationRequiresUsableAppAndChannelDelivery() {
         assertTrue(
@@ -70,6 +162,7 @@ class ManagedSafetyRuntimePolicyTest {
         val created = ManagedSafetyIncidentRequestPolicy.resolve(
             existing = null,
             accountScopeHash = firstScope,
+            trigger = "manual_sos",
             durationHours = 8,
             shareLocation = true,
             createRequestId = { firstId },
@@ -80,6 +173,7 @@ class ManagedSafetyRuntimePolicyTest {
             ManagedSafetyIncidentRequestPolicy.resolve(
                 existing = created,
                 accountScopeHash = firstScope,
+                trigger = "manual_sos",
                 durationHours = 8,
                 shareLocation = true,
                 createRequestId = { secondId },
@@ -89,7 +183,18 @@ class ManagedSafetyRuntimePolicyTest {
             ManagedSafetyIncidentRequestPolicy.resolve(
                 existing = created,
                 accountScopeHash = firstScope,
+                trigger = "manual_sos",
                 durationHours = 12,
+                shareLocation = true,
+                createRequestId = { secondId },
+            )
+        }
+        assertThrows(ManagedStorageException.Conflict::class.java) {
+            ManagedSafetyIncidentRequestPolicy.resolve(
+                existing = created,
+                accountScopeHash = firstScope,
+                trigger = "band_sos",
+                durationHours = 8,
                 shareLocation = true,
                 createRequestId = { secondId },
             )
@@ -97,12 +202,14 @@ class ManagedSafetyRuntimePolicyTest {
         val otherAccount = ManagedSafetyIncidentRequestPolicy.resolve(
             existing = created,
             accountScopeHash = secondScope,
+            trigger = "band_sos",
             durationHours = 8,
             shareLocation = true,
             createRequestId = { secondId },
         )
         assertNotEquals(created.requestId, otherAccount.requestId)
         assertEquals(secondScope, otherAccount.accountScopeHash)
+        assertEquals("band_sos", otherAccount.trigger)
     }
 
     @Test

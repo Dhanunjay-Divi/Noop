@@ -59,6 +59,18 @@ class RecentDaysMergeOrderTest {
         assert(WhoopRepository.RECENT_DAYS_CAP >= 730) {
             "RECENT_DAYS_CAP must cover the deepest dashboard range"
         }
+        assert(
+            WhoopRepository.RECENT_SLEEP_LOOKBACK_DAYS >
+                WhoopRepository.RECENT_DAYS_CAP,
+        ) {
+            "Sleep lookback must retain a bridge before the oldest dashboard day"
+        }
+        assert(
+            WhoopRepository.RECENT_SLEEP_SESSION_CAP >=
+                WhoopRepository.RECENT_DAYS_CAP * 3,
+        ) {
+            "Sleep fragment cap must allow multiple blocks per retained day"
+        }
     }
 
     @Test

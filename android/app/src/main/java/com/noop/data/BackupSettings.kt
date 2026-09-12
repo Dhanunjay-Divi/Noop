@@ -2,7 +2,6 @@ package com.noop.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.noop.alarm.SmartAlarmStore
 import com.noop.alarm.WindDownScheduler
 import com.noop.alarm.WindDownStore
 import com.noop.notif.HydrationReminderScheduler
@@ -24,13 +23,14 @@ import org.json.JSONObject
  * the "restore doesn't bring back settings/weight/height" half of #1000. This adds a SECOND, optional
  * ZIP entry — `settings.json`, a flat JSON object — carrying exactly one WHITELISTED set of keys.
  *
- * The whitelist is the contract, defined once per platform and mirrored byte-for-byte by the Apple
- * `BackupSettings.whitelist` (same canonical key strings, same JSON kinds). V1 carried profile/unit
+ * The whitelist is the portable contract. Shared keys keep the same canonical names and JSON kinds
+ * as Apple; Android v5 adds planner-continuity fields that older readers safely ignore. V1 carried profile/unit
  * values, v2 added a schema stamp and exact civil birthday, v3 added a bounded set of durable,
- * user-authored display, dashboard, reminder, HRV, and Sleep Planner preferences, and v4 adds the
- * optional user-selected target weight. Only stable,
+ * user-authored display, dashboard, reminder, HRV, and Sleep Planner preferences, v4 adds the
+ * optional user-selected target weight, and Android v5 preserves the wind-down planner's bounded
+ * recovery adjustment and validated weekday wake overrides. Only stable,
  * non-device-specific values are allowed. NEVER add credentials, device/peripheral/install ids,
- * sync cursors, active alarm epochs, delivery de-dup state, or derived planner outputs: backups get
+ * sync cursors, active alarm epochs, or delivery de-dup state: backups get
  * copied into cloud folders and attached to GitHub issues, so this file must stay safe to share.
  * Unknown keys in an incoming `settings.json` are dropped; a backup with no `settings.json` (every
  * pre-#1000 backup) is a DB-only restore, as before.
@@ -42,7 +42,7 @@ object BackupSettingsCodec {
 
     /** Canonical entry name inside the `.noopbak` ZIP. Matches the Apple exporter byte-for-byte. */
     const val ENTRY_NAME = "settings.json"
-    const val SCHEMA_VERSION = 4
+    const val SCHEMA_VERSION = 5
     const val SCHEMA_VERSION_KEY = "settings.schemaVersion"
     const val DATE_OF_BIRTH_KEY = "profile.dateOfBirth"
 
@@ -51,12 +51,13 @@ object BackupSettingsCodec {
 
     /**
      * THE whitelist — the only keys `settings.json` may carry, keyed by their CANONICAL
-     * (platform-neutral) names. Mirrors the Apple `BackupSettings.whitelist` exactly.
+     * (platform-neutral) names. Shared keys mirror Apple; Android-only additive keys remain
+     * unknown-key-safe for older and cross-platform readers.
      *
      * Profile fields power zones/calories/baselines. V3 adds only preferences describing the user's
      * intended setup. Deliberately excluded: credentials, step calibration, device bindings,
      * permission receipts, install/migration state, sync cursors, scheduled-alarm epochs, notification
-     * delivery de-duplication, and planner-derived recovery minutes.
+     * delivery de-duplication, and active alarm epochs.
      */
     val WHITELIST: Map<String, Kind> = linkedMapOf(
         SCHEMA_VERSION_KEY to Kind.INT,
@@ -89,8 +90,10 @@ object BackupSettingsCodec {
         "windDown.enabled" to Kind.BOOL,
         "windDown.sleepNeedMinutes" to Kind.INT,
         "windDown.goalMode" to Kind.STRING,
+        "windDown.recoveryMinutes" to Kind.INT,
         "windDown.leadMinutes" to Kind.INT,
         "sleepPlanner.wakeMinutes" to Kind.INT,
+        "windDown.perDayWakeMinutes" to Kind.STRING,
         "notif.masterEnabled" to Kind.BOOL,
         "notif.onlyWhenWorn" to Kind.BOOL,
         "notif.quietHoursEnabled" to Kind.BOOL,
@@ -201,7 +204,11 @@ object BackupSettingsCodec {
             "windDown.sleepNeedMinutes" -> boundedInt(coerced, 5 * 60..11 * 60)
             "windDown.goalMode" ->
                 allowedString(coerced, setOf("target", "balance", "extraOpportunity"))
+            "windDown.recoveryMinutes" ->
+                boundedInt(coerced, 0..WindDownStore.RECOVERY_MAX)
             "windDown.leadMinutes" -> boundedInt(coerced, 0..120)
+            "windDown.perDayWakeMinutes" ->
+                (coerced as? String)?.let(WindDownStore::normalizedWakeOverrides)
             "sleepPlanner.wakeMinutes",
             "notif.quietStartMinutes", "notif.quietEndMinutes",
             "inactivity.activeStartMinutes", "inactivity.activeEndMinutes",
@@ -305,10 +312,10 @@ object BackupSettingsBridge {
         "windDown.enabled" to "windDown.enabled",
         "windDown.sleepNeedMinutes" to "windDown.sleepNeedMinutes",
         "windDown.goalMode" to "windDown.goalMode",
+        "windDown.recoveryMinutes" to "windDown.recoveryMinutes",
         "windDown.leadMinutes" to "windDown.leadMinutes",
-    )
-    private val SLEEP_PLANNER_KEYS = linkedMapOf(
-        "sleepPlanner.wakeMinutes" to "alarm.targetMinutes",
+        "sleepPlanner.wakeMinutes" to "windDown.wakeMinutes",
+        "windDown.perDayWakeMinutes" to "windDown.perDayWakeMinutes",
     )
 
     /** Canonical non-profile keys with an explicit SharedPreferences destination. */
@@ -319,7 +326,6 @@ object BackupSettingsBridge {
             addAll(INACTIVITY_KEYS.keys)
             addAll(HYDRATION_REMINDER_KEYS.keys)
             addAll(WIND_DOWN_KEYS.keys)
-            addAll(SLEEP_PLANNER_KEYS.keys)
         }
 
     /** The whitelisted, user-SET settings of this device as the `settings.json` string, or null. */
@@ -346,11 +352,6 @@ object BackupSettingsBridge {
         snapshot(
             context.getSharedPreferences("noop_wind_down", Context.MODE_PRIVATE),
             WIND_DOWN_KEYS,
-            values,
-        )
-        snapshot(
-            context.getSharedPreferences("noop_smart_alarm", Context.MODE_PRIVATE),
-            SLEEP_PLANNER_KEYS,
             values,
         )
         return BackupSettingsCodec.encode(values)
@@ -383,16 +384,17 @@ object BackupSettingsBridge {
             HYDRATION_REMINDER_KEYS,
             values,
         )
-        apply(
-            context.getSharedPreferences("noop_wind_down", Context.MODE_PRIVATE),
-            WIND_DOWN_KEYS,
-            values,
+        applyWindDownSettings(
+            prefs = context.getSharedPreferences("noop_wind_down", Context.MODE_PRIVATE),
+            values = values,
         )
-        apply(
-            context.getSharedPreferences("noop_smart_alarm", Context.MODE_PRIVATE),
-            SLEEP_PLANNER_KEYS,
-            values,
-        )
+    }
+
+    internal fun applyWindDownSettings(
+        prefs: SharedPreferences,
+        values: Map<String, Any>,
+    ) {
+        apply(prefs, WIND_DOWN_KEYS, values)
     }
 
     /** Refresh process mirrors and OS schedules after settings were committed with the restored DB. */
@@ -403,15 +405,10 @@ object BackupSettingsBridge {
         runCatching { HydrationReminderScheduler.reconcile(appContext) }
         runCatching {
             val windDown = WindDownStore.from(appContext)
-            if (windDown.enabled) {
-                WindDownScheduler.schedule(
-                    appContext,
-                    windDown,
-                    SmartAlarmStore.from(appContext).targetMinutes,
-                )
-            } else {
-                WindDownScheduler.cancel(appContext)
-            }
+            WindDownScheduler.reconcilePersisted(appContext, windDown)
+        }.onFailure {
+            WindDownStore.from(appContext).enabled = false
+            WindDownScheduler.cancel(appContext)
         }
     }
 

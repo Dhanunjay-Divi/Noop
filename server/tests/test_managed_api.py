@@ -67,6 +67,7 @@ class FakeManagedRepository:
         ]
         self.chunk_rows: list[dict] = []
         self.document_rows: list[dict] = []
+        self.change_rows: list[dict] = []
         self.available_chunk_row: dict | None = None
         self.chunk_list_calls: list[dict] = []
         self.chunk_reservations = []
@@ -224,15 +225,26 @@ class FakeManagedRepository:
         principal: ManagedPrincipal,
         after_sequence: int,
         limit: int,
+        document_kinds: list[str] | None = None,
     ) -> dict:
         assert principal == self.principal
         assert after_sequence == 4
         assert limit == 20
+        high_watermark = (
+            int(self.change_rows[-1]["sequence"]) if self.change_rows else 4
+        )
+        rows = [
+            row
+            for row in self.change_rows
+            if row["resource_kind"] != "document"
+            or document_kinds is None
+            or row["document"]["document_kind"] in document_kinds
+        ]
         return {
-            "changes": [],
+            "changes": rows,
             "minimum_sequence": 1,
-            "high_watermark": 4,
-            "next_sequence": 4,
+            "high_watermark": high_watermark,
+            "next_sequence": high_watermark,
             "has_more": False,
         }
 
@@ -675,6 +687,121 @@ def test_managed_change_feed_uses_monotonic_sequence_cursor() -> None:
     }
 
 
+def test_managed_change_feed_preserves_mixed_document_modes_and_tombstones() -> None:
+    client, repository = _managed_client()
+    now = datetime.now(UTC).replace(microsecond=0)
+    encrypted_id = uuid4()
+    day_ownership_id = uuid4()
+    repository.change_rows = [
+        {
+            "sequence": 5,
+            "change_event_id": str(uuid4()),
+            "resource_kind": "document",
+            "resource_id": str(encrypted_id),
+            "resource_revision": 1,
+            "operation": "upsert",
+            "content_sha256": "a" * 64,
+            "data_class": "user_documents",
+            "event_start": None,
+            "event_end": None,
+            "metadata": {"document_kind": "journal"},
+            "occurred_at": now,
+            "document": {
+                "document_kind": "journal",
+                "document_id": str(encrypted_id),
+                "revision": 1,
+                "content_mode": "client_encrypted",
+                "client_key_id": str(uuid4()),
+                "updated_at": now,
+                "deleted_at": None,
+            },
+        },
+        {
+            "sequence": 6,
+            "change_event_id": str(uuid4()),
+            "resource_kind": "document",
+            "resource_id": str(day_ownership_id),
+            "resource_revision": 2,
+            "operation": "tombstone",
+            "content_sha256": "b" * 64,
+            "data_class": "user_documents",
+            "event_start": None,
+            "event_end": None,
+            "metadata": {"document_kind": "day_ownership"},
+            "occurred_at": now,
+            "document": {
+                "document_kind": "day_ownership",
+                "document_id": str(day_ownership_id),
+                "revision": 2,
+                "content_mode": "server_readable",
+                "client_key_id": None,
+                "updated_at": now,
+                "deleted_at": now,
+            },
+        },
+    ]
+
+    with client:
+        response = client.get(
+            "/v1/managed/changes?after_sequence=4&limit=20",
+            headers=_managed_headers(),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["high_watermark"] == 6
+    assert body["next_sequence"] == 6
+    assert [
+        (
+            change["document"]["document_kind"],
+            change["document"]["content_mode"],
+            change["operation"],
+        )
+        for change in body["changes"]
+    ] == [
+        ("journal", "client_encrypted", "upsert"),
+        ("day_ownership", "server_readable", "tombstone"),
+    ]
+
+    with client:
+        filtered = client.get(
+            (
+                "/v1/managed/changes?after_sequence=4&limit=20"
+                "&document_kind=day_ownership"
+            ),
+            headers=_managed_headers(),
+        )
+
+    assert filtered.status_code == 200
+    filtered_body = filtered.json()
+    assert filtered_body["high_watermark"] == 6
+    assert filtered_body["next_sequence"] == 6
+    assert filtered_body["has_more"] is False
+    assert [
+        change["document"]["document_kind"] for change in filtered_body["changes"]
+    ] == ["day_ownership"]
+
+
+def test_managed_change_feed_rejects_invalid_document_kind_filters() -> None:
+    client, _ = _managed_client()
+    with client:
+        duplicate = client.get(
+            (
+                "/v1/managed/changes?after_sequence=4&limit=20"
+                "&document_kind=day_ownership"
+                "&document_kind=day_ownership"
+            ),
+            headers=_managed_headers(),
+        )
+        unknown = client.get(
+            ("/v1/managed/changes?after_sequence=4&limit=20&document_kind=unsupported"),
+            headers=_managed_headers(),
+        )
+
+    assert duplicate.status_code == 422
+    assert unknown.status_code == 422
+
+
 def test_managed_chunk_reservation_issues_one_bounded_upload_contract() -> None:
     client, repository = _managed_client(object_store=UploadObjectStore())
     now = datetime.now(UTC).replace(microsecond=0)
@@ -837,6 +964,60 @@ def test_managed_document_cursor_is_atomic() -> None:
     assert response.json()["detail"] == (
         "all managed document cursor fields are required"
     )
+
+
+def test_managed_document_rejects_plaintext_sensitive_kind() -> None:
+    document_id = uuid4()
+    client, _ = _managed_client()
+    with client:
+        response = client.put(
+            f"/v1/managed/documents/journal/{document_id}",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "document_kind": "journal",
+                "document_id": str(document_id),
+                "base_revision": 0,
+                "content_mode": "server_readable",
+                "payload_json": {"notes": "must remain encrypted"},
+                "updated_at": datetime.now(UTC).isoformat(),
+                "deleted": False,
+            },
+        )
+
+    assert response.status_code == 422
+
+
+def test_managed_document_rejects_plaintext_escape_inside_day_ownership() -> None:
+    document_id = uuid4()
+    client, _ = _managed_client()
+    with client:
+        response = client.put(
+            f"/v1/managed/documents/day_ownership/{document_id}",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "document_kind": "day_ownership",
+                "document_id": str(document_id),
+                "base_revision": 0,
+                "content_mode": "server_readable",
+                "payload_json": {
+                    "schema_version": 1,
+                    "table": "dayOwnership",
+                    "key": {"day": "2026-09-11"},
+                    "record": {
+                        "day": "2026-09-11",
+                        "deviceId": "test-device",
+                        "locked": 0,
+                        "notes": "must remain encrypted",
+                    },
+                },
+                "updated_at": datetime.now(UTC).isoformat(),
+                "deleted": False,
+            },
+        )
+
+    assert response.status_code == 422
 
 
 def test_managed_installations_can_list_and_revoke_another_device() -> None:
@@ -1340,6 +1521,7 @@ def test_managed_safety_account_flow_is_identity_and_installation_bound() -> Non
             headers=_managed_headers(),
             json={
                 "request_id": str(uuid4()),
+                "trigger": "band_sos",
                 "duration_hours": 8,
                 "share_location": True,
             },
@@ -1373,6 +1555,8 @@ def test_managed_safety_account_flow_is_identity_and_installation_bound() -> Non
     assert contacts.json()["minimum_required"] == 2
     assert incident.status_code == 202
     assert incident.json()["push_outcome"] == "attempted"
+    create_call = next(call for call in safety.calls if call[0] == "create_incident")
+    assert create_call[1]["request"].trigger == "band_sos"
     assert push.dispatches[0]["incident_id"] == safety.incident_id
     assert location.status_code == 200
     assert location.json()["location"]["sequence"] == 1

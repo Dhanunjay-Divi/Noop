@@ -18,6 +18,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -111,6 +112,7 @@ import com.noop.ble.WhoopModel
 import com.noop.data.ImportSummary
 import com.noop.ingest.AppleHealthImporter
 import com.noop.ingest.HealthConnectImporter
+import com.noop.ingest.HealthConnectReconciler
 import com.noop.ingest.WhoopCsvImporter
 import com.noop.notif.DailyReviewReminders
 import com.noop.NoopApplication
@@ -782,17 +784,18 @@ private fun OnboardingFooter(
     enabled: Boolean,
     onNext: () -> Unit,
 ) {
+    val reduceMotion = rememberReduceMotion()
     val animated by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = tween(Motion.durationStandard),
+        animationSpec = if (reduceMotion) snap() else tween(Motion.durationStandard),
         label = uiString(R.string.l10n_onboarding_screen_onboardingprogress_6e1e5c29),
     )
     val pulseTransition = rememberInfiniteTransition(
         label = uiString(R.string.l10n_onboarding_screen_onboardingprogress_6e1e5c29),
     )
     val pulsePhase by pulseTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
+        initialValue = if (reduceMotion) 0.35f else 0f,
+        targetValue = if (reduceMotion) 0.35f else 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(
                 durationMillis = 900,
@@ -1461,11 +1464,12 @@ private fun ImportStep(viewModel: AppViewModel) {
             }.getOrDefault(emptySet())
             if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
                 runImport {
-                    val profile = ProfileStore.from(context)
-                    HealthConnectImporter.import(
-                        context,
-                        viewModel.repo,
-                        profile.bodyCompositionImportHeightCm,
+                    HealthConnectReconciler.importNow(
+                        context = context,
+                        repository = viewModel.repo,
+                        currentHeightCm = {
+                            ProfileStore.from(context).bodyCompositionImportHeightCm
+                        },
                     )
                 }
             } else {
@@ -1488,11 +1492,12 @@ private fun ImportStep(viewModel: AppViewModel) {
             val missing = HealthConnectImporter.missingReadPermissions(granted)
             if (missing.isEmpty()) {
                 runImport {
-                    val profile = ProfileStore.from(context)
-                    HealthConnectImporter.import(
-                        context,
-                        viewModel.repo,
-                        profile.bodyCompositionImportHeightCm,
+                    HealthConnectReconciler.importNow(
+                        context = context,
+                        repository = viewModel.repo,
+                        currentHeightCm = {
+                            ProfileStore.from(context).bodyCompositionImportHeightCm
+                        },
                     )
                 }
             } else {

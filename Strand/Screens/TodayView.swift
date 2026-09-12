@@ -1968,7 +1968,7 @@ struct TodayView: View {
     private var heroSection: some View {
         let d = displayDay
         let score = d?.recovery
-        return heroSectionBody(d: d, score: score)
+        heroSectionBody(d: d, score: score)
             // A tactile landing when the day's Charge resolves. Deliberately `.light` and NOT `.success`:
             // this fires on a 14 as readily as on a 94, and a celebratory buzz on someone's worst recovery
             // morning is the kind of tone-deaf detail that makes an app feel like it isn't listening. The
@@ -2515,7 +2515,7 @@ struct TodayView: View {
                           value: dashboardValue(card), route: .sleep)
         case .hydration:
             pinnedCardRow(icon: card.icon, tint: tint, title: card.title, subtitle: card.subtitle,
-                          value: dashboardValue(card), route: .hydration)
+                          value: dashboardValue(card), route: .hydration(day: selectedDayKey))
         case .coupled:
             // The Coupled view row (#43) carries NO metric value, it is a tap-through to the full
             // coupled day screen. An empty value renders just the icon + title + subtitle + chevron.
@@ -4273,7 +4273,13 @@ struct TodayView: View {
         let requestDeviceId = repo.deviceId
         let requestRefreshSeq = repo.refreshSeq
         let requestedAgeMetricState = profile.ageMetricStateToken
+        let requestedProfileAge = profile.age
+        let requestedAgeConfirmed = profile.ageInputConfirmed
         let requestedProfileSex = profile.sex
+        let requestedSexConfirmed = profile.sexInputConfirmed
+        let requestedWeightKg = profile.weightKg
+        let requestedWeightConfirmed = profile.weightInputConfirmed
+        let requestedHydrationDayKey = selectedDayKey
         let daysSnapshot = repo.days
         // 14-day sparklines, Whoop + Apple Health. These reads are mutually independent (distinct
         // metric keys/sources), so kick them all off concurrently with `async let` and await the
@@ -4358,12 +4364,20 @@ struct TodayView: View {
         if hydrationEnabled {
             do {
                 hydrationTotalLocal = try await repo.hydrationTotal(
-                    day: Repository.localDayKey(Date())
+                    day: requestedHydrationDayKey
                 )
             } catch {
                 hydrationTotalLocal = hydrationTotalML
             }
-            hydrationGoalLocal = repo.hydrationGoalML(profileSex: requestedProfileSex)
+            hydrationGoalLocal = repo.hydrationGoalML(
+                profileAge: requestedProfileAge,
+                ageConfirmed: requestedAgeConfirmed,
+                profileSex: requestedProfileSex,
+                sexConfirmed: requestedSexConfirmed,
+                weightKg: requestedWeightKg,
+                weightConfirmed: requestedWeightConfirmed,
+                day: requestedHydrationDayKey
+            )
         } else {
             hydrationTotalLocal = nil
             hydrationGoalLocal = nil
@@ -4384,7 +4398,8 @@ struct TodayView: View {
         guard !Task.isCancelled,
               requestDeviceId == repo.deviceId,
               requestRefreshSeq == repo.refreshSeq,
-              requestedAgeMetricState == profile.ageMetricStateToken else { return false }
+              requestedAgeMetricState == profile.ageMetricStateToken,
+              requestedHydrationDayKey == selectedDayKey else { return false }
 
         let historyWideSparks: [String: [Double]] = [
             "recovery": recoverySparkLocal,
@@ -4456,19 +4471,29 @@ struct TodayView: View {
         // refreshSeq, so a restored total could be stale. It is re-read live instead (see loadAll).
     }
 
-    /// #989: today's hydration total + goal, re-read wherever staleness could show: the history-wide load,
-    /// the same-seq cache restore, a hydration mutation (`repo.hydrationSeq`), and the feature toggle.
+    /// #989: the selected day's hydration total + goal, re-read wherever staleness could show: the
+    /// history-wide load, same-seq cache restore, a hydration mutation, and the feature toggle.
     /// One metricSeries row + a UserDefaults read, cheap enough to run on every pass.
     private func reloadHydration() async {
+        let requestedDayKey = selectedDayKey
         if hydrationEnabled {
             do {
-                hydrationTotalML = try await repo.hydrationTotal(
-                    day: Repository.localDayKey(Date())
-                )
+                let loaded = try await repo.hydrationTotal(day: requestedDayKey)
+                guard requestedDayKey == selectedDayKey else { return }
+                hydrationTotalML = loaded
             } catch {
                 // Preserve the last confirmed value. The focused Hydration screen owns retry UI.
             }
-            hydrationGoalML = repo.hydrationGoalML(profileSex: profile.sex)
+            guard requestedDayKey == selectedDayKey else { return }
+            hydrationGoalML = repo.hydrationGoalML(
+                profileAge: profile.age,
+                ageConfirmed: profile.ageInputConfirmed,
+                profileSex: profile.sex,
+                sexConfirmed: profile.sexInputConfirmed,
+                weightKg: profile.weightKg,
+                weightConfirmed: profile.weightInputConfirmed,
+                day: requestedDayKey
+            )
         } else {
             hydrationTotalML = nil
             hydrationGoalML = nil

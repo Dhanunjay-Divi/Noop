@@ -368,6 +368,201 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(appliedChunkCount, 0)
     }
 
+    func testFilteredEmptyChangePageAdvancesCursorToHighWatermark() async throws {
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+        let state = CoordinatorState()
+        let transport = CoordinatorTransport(feedHighWatermark: 7)
+        let coordinator = ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        )
+
+        let result = try await coordinator.sync(
+            source: source,
+            authorization: authorization,
+            now: Date(timeIntervalSince1970: 0),
+            dataClasses: [],
+            maxChangePages: 1,
+            maxDocumentUploads: 0
+        )
+
+        let currentSequence = await state.currentSequence()
+        let restoreCreations = await transport.restoreCreationCount()
+        XCTAssertEqual(result.appliedChanges, 0)
+        XCTAssertFalse(result.hasMoreChanges)
+        XCTAssertEqual(currentSequence, 7)
+        XCTAssertEqual(restoreCreations, 0)
+    }
+
+    func testChangeFeedCapabilityUpgradeSnapshotsBeforeIncrementalSync() async throws {
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+        let state = CoordinatorState(changeFeedCapabilityVersion: 0)
+        let transport = CoordinatorTransport(feedHighWatermark: 99)
+
+        let result = try await ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        ).sync(
+            source: source,
+            authorization: authorization,
+            now: Date(timeIntervalSince1970: 0),
+            dataClasses: ["essential_timeseries"],
+            maxChangePages: 1,
+            maxDocumentUploads: 0
+        )
+
+        let restoreCreations = await transport.restoreCreationCount()
+        let currentSequence = await state.currentSequence()
+        let capabilityVersion = await state.currentChangeFeedCapabilityVersion()
+        let checkpoint = await state.currentSnapshotCheckpoint()
+        XCTAssertEqual(result.appliedChanges, 0)
+        XCTAssertFalse(result.hasMoreChanges)
+        XCTAssertEqual(restoreCreations, 1)
+        XCTAssertEqual(currentSequence, 99)
+        XCTAssertEqual(
+            capabilityVersion,
+            ManagedSyncCoordinator.changeFeedCapabilityVersion
+        )
+        XCTAssertNil(checkpoint)
+    }
+
+    func testFailedCapabilityUpgradeSnapshotDoesNotAdvanceCursorOrVersion() async throws {
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+        let state = CoordinatorState(changeFeedCapabilityVersion: 0)
+        let transport = CoordinatorTransport(failSnapshotNotFound: true)
+
+        let result = try await ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        ).sync(
+            source: source,
+            authorization: authorization,
+            now: Date(timeIntervalSince1970: 0),
+            dataClasses: ["essential_timeseries"],
+            maxChangePages: 1,
+            maxDocumentUploads: 0
+        )
+
+        let currentSequence = await state.currentSequence()
+        let capabilityVersion = await state.currentChangeFeedCapabilityVersion()
+        let checkpointVersion = await state.currentSnapshotCheckpoint()?
+            .changeFeedCapabilityVersion
+        XCTAssertTrue(result.hasMoreChanges)
+        XCTAssertEqual(currentSequence, 0)
+        XCTAssertEqual(capabilityVersion, 0)
+        XCTAssertEqual(
+            checkpointVersion,
+            ManagedSyncCoordinator.changeFeedCapabilityVersion
+        )
+    }
+
+    func testUnappliedDocumentDoesNotAdvanceChangeCursor() async throws {
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+        let ciphertext = Data(repeating: 0x2a, count: 32)
+        let document = ManagedDocument(
+            documentKind: .journal,
+            documentID: UUID(),
+            revision: 1,
+            originInstallationID: "remote-installation",
+            contentMode: "client_encrypted",
+            clientKeyID: UUID(),
+            contentSHA256: ManagedDigest.sha256(ciphertext),
+            payloadJSON: nil,
+            payloadCiphertextBase64: ciphertext.base64EncodedString(),
+            updatedAt: "2026-09-12T00:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+        let metadata = document.changeMetadata
+        let change = ManagedChangeFeed.Change(
+            sequence: 1,
+            resourceKind: metadata.resourceKind,
+            resourceID: metadata.resourceID,
+            operation: metadata.operation,
+            contentSHA256: metadata.contentSHA256,
+            dataClass: metadata.dataClass,
+            eventStart: metadata.eventStart,
+            eventEnd: metadata.eventEnd,
+            chunk: metadata.chunk,
+            document: metadata.document
+        )
+        let state = CoordinatorState()
+        let coordinator = ManagedSyncCoordinator(
+            transport: CoordinatorTransport(
+                changes: [change],
+                remoteDocuments: [document.documentID: document]
+            ),
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: RejectingDocumentRestore()
+        )
+
+        do {
+            _ = try await coordinator.sync(
+                source: source,
+                authorization: authorization,
+                now: Date(timeIntervalSince1970: 0),
+                dataClasses: [],
+                maxChangePages: 1
+            )
+            XCTFail("Expected unapplied document to stop the feed")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidConfiguration)
+        }
+        let currentSequence = await state.currentSequence()
+        XCTAssertEqual(currentSequence, 0)
+    }
+
     func testDocumentsWaitForChangeBacklogThenUploadAndAcknowledge() async throws {
         let source = try ManagedSourceDescriptor(
             localSourceID: "strap",
@@ -640,6 +835,8 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
             snapshotCheckpoint: ManagedSnapshotRestoreCheckpoint(
                 requestID: staleRequestID,
                 dataClasses: ["essential_timeseries"],
+                changeFeedCapabilityVersion:
+                    ManagedSyncCoordinator.changeFeedCapabilityVersion,
                 restoreJobID: UUID(),
                 snapshotAt: "2026-09-01T00:00:00Z",
                 changeSequence: 7,
@@ -852,9 +1049,17 @@ private actor PrunedWindowState: ManagedSyncStateStoring {
     }
 
     func changeSequence() async throws -> Int64 { 0 }
+    func changeFeedCapabilityVersion() async throws -> Int {
+        ManagedSyncCoordinator.changeFeedCapabilityVersion
+    }
     func saveChangeSequence(_ sequence: Int64) async throws {}
     func isChangeApplied(_ change: ManagedChangeFeed.Change) async throws -> Bool { false }
     func recordAppliedChange(_ change: ManagedChangeFeed.Change) async throws {}
+
+    func finishSnapshotRestore(
+        changeSequence: Int64,
+        changeFeedCapabilityVersion: Int
+    ) async throws {}
 }
 
 private actor PrunedWindowRestore: ManagedRestoreApplying {
@@ -971,7 +1176,7 @@ private actor PrunedWindowTransport: ManagedStorageTransport {
     ) async throws -> ManagedChangeFeed {
         ManagedChangeFeed(
             changes: [],
-            minimumSequence: 0,
+            minimumSequence: 1,
             highWatermark: sequence,
             nextSequence: sequence,
             hasMore: false
@@ -1090,6 +1295,7 @@ private actor CoordinatorState: ManagedSyncStateStoring {
     private var checkpoint = ManagedUploadCheckpoint()
     private var window: ManagedWindowUpload?
     private var sequence: Int64 = 0
+    private var capabilityVersion: Int
     private var generation: Int64 = 0
     private let localChunkIDs: Set<UUID>
     private var acknowledgements = 0
@@ -1099,15 +1305,19 @@ private actor CoordinatorState: ManagedSyncStateStoring {
 
     init(
         localChunkIDs: Set<UUID> = [],
-        snapshotCheckpoint: ManagedSnapshotRestoreCheckpoint? = nil
+        snapshotCheckpoint: ManagedSnapshotRestoreCheckpoint? = nil,
+        changeFeedCapabilityVersion: Int =
+            ManagedSyncCoordinator.changeFeedCapabilityVersion
     ) {
         self.localChunkIDs = localChunkIDs
         self.snapshotCheckpoint = snapshotCheckpoint
+        capabilityVersion = changeFeedCapabilityVersion
     }
 
     func currentCheckpoint() -> ManagedUploadCheckpoint { checkpoint }
     func currentWindow() -> ManagedWindowUpload? { window }
     func currentSequence() -> Int64 { sequence }
+    func currentChangeFeedCapabilityVersion() -> Int { capabilityVersion }
     func acknowledgementCount() -> Int { acknowledgements }
     func currentSnapshotCheckpoint() -> ManagedSnapshotRestoreCheckpoint? {
         snapshotCheckpoint
@@ -1226,6 +1436,10 @@ private actor CoordinatorState: ManagedSyncStateStoring {
 
     func changeSequence() async throws -> Int64 { sequence }
 
+    func changeFeedCapabilityVersion() async throws -> Int {
+        capabilityVersion
+    }
+
     func saveChangeSequence(_ sequence: Int64) async throws {
         self.sequence = max(self.sequence, sequence)
     }
@@ -1251,8 +1465,12 @@ private actor CoordinatorState: ManagedSyncStateStoring {
         snapshotClears += 1
     }
 
-    func finishSnapshotRestore(changeSequence: Int64) async throws {
+    func finishSnapshotRestore(
+        changeSequence: Int64,
+        changeFeedCapabilityVersion: Int
+    ) async throws {
         sequence = max(sequence, changeSequence)
+        capabilityVersion = changeFeedCapabilityVersion
         snapshotCheckpoint = nil
     }
 }
@@ -1278,6 +1496,25 @@ private actor CoordinatorRestore: ManagedRestoreApplying {
         document: ManagedDocument,
         change: ManagedChangeFeed.Change
     ) async throws {}
+}
+
+private actor RejectingDocumentRestore: ManagedRestoreApplying {
+    func apply(
+        chunk: ManagedChunkPayload,
+        change: ManagedChangeFeed.Change
+    ) async throws {}
+
+    func hydrate(
+        chunk: ManagedChunkPayload,
+        source: ManagedSourceDescriptor
+    ) async throws {}
+
+    func apply(
+        document: ManagedDocument,
+        change: ManagedChangeFeed.Change
+    ) async throws {
+        throw ManagedStorageError.invalidConfiguration
+    }
 }
 
 private actor CoordinatorDocumentOutbox: ManagedDocumentOutbox {
@@ -1342,8 +1579,10 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     private let failFirstCompletion: Bool
     private let feedChanges: [ManagedChangeFeed.Change]
     private let snapshotChunks: [ManagedAvailableChunk]
+    private let remoteDocuments: [UUID: ManagedDocument]
     private let expireFirstChangeCursor: Bool
     private let failSnapshotNotFound: Bool
+    private let feedHighWatermark: Int64?
     private let restoreJobID = UUID()
     private var uploads = 0
     private var completions = 0
@@ -1357,14 +1596,18 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         failFirstCompletion: Bool = false,
         changes: [ManagedChangeFeed.Change] = [],
         snapshotChunks: [ManagedAvailableChunk] = [],
+        remoteDocuments: [UUID: ManagedDocument] = [:],
         expireFirstChangeCursor: Bool = false,
-        failSnapshotNotFound: Bool = false
+        failSnapshotNotFound: Bool = false,
+        feedHighWatermark: Int64? = nil
     ) {
         self.failFirstCompletion = failFirstCompletion
         feedChanges = changes
         self.snapshotChunks = snapshotChunks
+        self.remoteDocuments = remoteDocuments
         self.expireFirstChangeCursor = expireFirstChangeCursor
         self.failSnapshotNotFound = failSnapshotNotFound
+        self.feedHighWatermark = feedHighWatermark
     }
 
     func uploadCount() -> Int { uploads }
@@ -1444,14 +1687,21 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         let selected = Array(
             feedChanges.filter { $0.sequence > sequence }.prefix(limit)
         )
+        let highWatermark = max(
+            sequence,
+            feedHighWatermark ?? feedChanges.last?.sequence ?? sequence
+        )
+        let hasMore = feedChanges.contains {
+            $0.sequence > (selected.last?.sequence ?? sequence)
+        }
         return ManagedChangeFeed(
             changes: selected,
-            minimumSequence: 0,
-            highWatermark: feedChanges.last?.sequence ?? sequence,
-            nextSequence: selected.last?.sequence ?? sequence,
-            hasMore: feedChanges.contains {
-                $0.sequence > (selected.last?.sequence ?? sequence)
-            }
+            minimumSequence: 1,
+            highWatermark: highWatermark,
+            nextSequence: hasMore
+                ? (selected.last?.sequence ?? sequence)
+                : highWatermark,
+            hasMore: hasMore
         )
     }
 
@@ -1550,7 +1800,12 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         revision: Int64?,
         authorization: ManagedAuthorization
     ) async throws -> ManagedDocument {
-        throw ManagedStorageError.invalidResponse
+        guard let document = remoteDocuments[id],
+              document.documentKind == kind,
+              revision.map({ document.revision == $0 }) ?? true else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return document
     }
 
     func putDocument(

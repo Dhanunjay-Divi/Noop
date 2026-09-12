@@ -42,6 +42,111 @@ data class DeviceRow(
     val lastSeen: Long? = null,
 )
 
+/**
+ * Durable O(1) scoring-input invalidation, one generation ledger per source.
+ *
+ * Score-bearing triggers advance [generation]. Analysis snapshots that value without clearing it and
+ * advances [acknowledgedGeneration] only after the complete scoring persistence boundary succeeds.
+ * Process death or partial failure before acknowledgement therefore remains pending by construction,
+ * while a write that lands during analysis advances beyond the acknowledged snapshot.
+ */
+@Entity(tableName = "analysisDirtySource")
+data class AnalysisDirtySourceRow(
+    @PrimaryKey
+    val deviceId: String,
+    val generation: Long,
+    val acknowledgedGeneration: Long,
+    val earliestAffectedTs: Long?,
+    val latestAffectedTs: Long?,
+)
+
+/** Aggregate timestamp bounds returned by Room for ownership-wide invalidation. */
+data class AnalysisAffectedRange(
+    val earliestAffectedTs: Long?,
+    val latestAffectedTs: Long?,
+)
+
+/** Immutable generation snapshot owned by one analysis attempt. */
+data class AnalysisInputGenerationClaim(
+    val deviceId: String,
+    val generation: Long,
+    val earliestAffectedTs: Long? = null,
+    val latestAffectedTs: Long? = null,
+)
+
+internal fun AnalysisInputGenerationClaim.affectedTimeRange(): LongRange? {
+    val earliest = earliestAffectedTs ?: return null
+    val latest = latestAffectedTs ?: return null
+    if (earliest < 0L || latest < earliest) return null
+    return earliest..latest
+}
+
+/** Exact source-generation snapshot plus the completed scan range that may advance it. */
+internal data class AnalysisInputClaimProgress(
+    val claim: AnalysisInputGenerationClaim,
+    val scanStartTs: Long?,
+    val scanEndTs: Long?,
+) {
+    fun scanCoverage(): LongRange? {
+        val start = scanStartTs ?: return null
+        val end = scanEndTs ?: return null
+        return if (start <= end) start..end else null
+    }
+}
+
+/** Durable non-biometric invalidations that require a complete scoring pass. */
+internal object AnalysisInvalidationSource {
+    const val OWNERSHIP = "noop.internal.analysis.ownership"
+}
+
+/**
+ * Sources whose dirty generation was fully handled by one analysis attempt.
+ *
+ * Selected sources are marked when their score-bearing rows are read. Non-selected candidates are marked
+ * only after the complete scored window has successfully evaluated the immutable ownership snapshot.
+ * A claimed source outside that snapshot remains pending.
+ */
+internal class AnalysisInputConsumption {
+    private val consumedSourceIds = linkedSetOf<String>()
+    private val ownershipEvaluatedSourceIds = linkedSetOf<String>()
+    private var ownershipEvaluationCompleted = false
+    private var scanCoverage: LongRange? = null
+
+    fun markSourceConsumed(deviceId: String) {
+        if (deviceId.isNotBlank()) consumedSourceIds += deviceId
+    }
+
+    fun markSourcesEvaluatedForOwnership(
+        deviceIds: Collection<String>,
+        scanStartTs: Long,
+        scanEndTs: Long,
+    ) {
+        ownershipEvaluatedSourceIds += deviceIds.filter(String::isNotBlank)
+        if (scanStartTs <= scanEndTs) {
+            ownershipEvaluationCompleted = true
+            scanCoverage = scanStartTs..scanEndTs
+        }
+    }
+
+    internal fun progressFor(
+        claims: Collection<AnalysisInputGenerationClaim>,
+    ): List<AnalysisInputClaimProgress> = claims.map { claim ->
+        val sourceWasEvaluated =
+            if (claim.deviceId == AnalysisInvalidationSource.OWNERSHIP) {
+                ownershipEvaluationCompleted
+            } else {
+                claim.deviceId in consumedSourceIds ||
+                    claim.deviceId in ownershipEvaluatedSourceIds
+            }
+        val coverage = scanCoverage.takeIf { sourceWasEvaluated }
+        AnalysisInputClaimProgress(
+            claim = claim,
+            scanStartTs = coverage?.first,
+            scanEndTs = coverage?.last,
+        )
+    }
+}
+
 /** Heart-rate sample. Swift `hrSample` (v1). PK (deviceId, ts). */
 @Entity(tableName = "hrSample", primaryKeys = ["deviceId", "ts"])
 data class HrSample(
@@ -404,6 +509,97 @@ data class MetricSeriesRow(
 )
 
 /**
+ * One editable, user-authored drink. Rows and the matching daily [MetricSeriesRow] projection are
+ * mutated in one Room transaction so process death cannot leave the list and visible total apart.
+ */
+@Entity(
+    tableName = "hydrationEntry",
+    indices = [
+        Index(
+            name = "idx_hydrationEntry_device_day_loggedAt",
+            value = ["deviceId", "day", "loggedAt"],
+        ),
+    ],
+)
+data class HydrationEntryRow(
+    @PrimaryKey
+    val id: String,
+    val deviceId: String,
+    val day: String,
+    val amountML: Int,
+    val loggedAt: Long,
+)
+
+data class HydrationEntryMutationResult(
+    val changed: Boolean,
+    val totalML: Double?,
+)
+
+internal class HydrationEntryIntegrityException :
+    IllegalStateException("Hydration entries and their daily projection are not safely editable.")
+
+/** Shared validation for Room mutations and the feature store. */
+internal object HydrationEntryContract {
+    const val SOURCE_ID = "hydration"
+    const val METRIC_KEY = "hydration"
+    const val MAX_ENTRY_ML = 10_000
+    const val MAX_DAY_ML = 10_000
+
+    fun validated(row: HydrationEntryRow): HydrationEntryRow {
+        require(row.deviceId == SOURCE_ID) { "invalid hydration source" }
+        requireCanonicalDay(row.day)
+        require(row.amountML in 1..MAX_ENTRY_ML) { "invalid hydration amount" }
+        require(row.loggedAt > 0L) { "invalid hydration timestamp" }
+        require(runCatching { java.util.UUID.fromString(row.id) }.isSuccess) {
+            "invalid hydration entry id"
+        }
+        return row
+    }
+
+    fun requireCanonicalDay(day: String): String {
+        val parsed = runCatching { java.time.LocalDate.parse(day) }.getOrNull()
+        require(parsed?.toString() == day) { "invalid hydration day" }
+        return day
+    }
+
+    fun total(entries: List<HydrationEntryRow>): Long {
+        var total = 0L
+        for (entry in entries) {
+            validated(entry)
+            total = Math.addExact(total, entry.amountML.toLong())
+            require(total <= MAX_DAY_ML) { "hydration day total exceeds limit" }
+        }
+        return total
+    }
+
+    /**
+     * A positive scalar with no matching rows is a legacy-only record. Fractional, malformed, or
+     * over-limit scalars also stay scalar-only. Mutations fail closed so none of them can be silently
+     * replaced by a partial entry list.
+     */
+    fun requireEditableProjection(
+        scalar: Double?,
+        entries: List<HydrationEntryRow>,
+    ): Long {
+        val entryTotal = total(entries)
+        if (entryTotal == 0L) {
+            if (scalar == null || scalar == 0.0) return 0L
+            throw HydrationEntryIntegrityException()
+        }
+        if (scalar == null ||
+            !scalar.isFinite() ||
+            scalar <= 0.0 ||
+            scalar > MAX_DAY_ML.toDouble() ||
+            scalar % 1.0 != 0.0 ||
+            scalar.toLong() != entryTotal
+        ) {
+            throw HydrationEntryIntegrityException()
+        }
+        return entryTotal
+    }
+}
+
+/**
  * Lab Book marker reading (Health Records pillar). Swift `labMarker` (Database.swift v17 /
  * LabMarkerStore.swift). The richer source-of-truth behind the daily `metricSeries` projection:
  * one row per dated reading the USER entered themselves, a day can hold several readings, each
@@ -548,7 +744,9 @@ data class AppleDaily(
 )
 
 /**
- * Durable Health Connect change cursor, one row per Health Connect record type.
+ * Durable Health Connect change cursor, normally one row per Health Connect record type. Reserved
+ * `noop.internal.*` rows hold local projection dependency fingerprints in the same durable store;
+ * they are never sent to the provider change API.
  *
  * Health Connect deletion events expose only an opaque record id. Keeping a token per record type
  * preserves the missing type context and lets the reconciler replay a page after process death: a

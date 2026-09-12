@@ -372,7 +372,7 @@ internal object DailyReviewReminderNotifier {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .protectPrivateContent(context, CHANNEL_ID)
             .build()
         val posted = NotificationLifecycleLedger.posted(
             context,

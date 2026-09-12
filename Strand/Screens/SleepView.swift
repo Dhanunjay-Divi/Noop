@@ -154,9 +154,9 @@ struct SleepView: View {
                         if let sleepUndo { sleepUndoBanner(sleepUndo) }
                         restHero(resolved).staggeredAppear(index: 0)
                         SleepPlannerShortcutCard().staggeredAppear(index: 1)
-                        SleepMarkCard().staggeredAppear(index: 2)
-                        hero(resolved).staggeredAppear(index: 3)
-                        metricGrid(resolved).staggeredAppear(index: 4)
+                        hero(resolved).staggeredAppear(index: 2)
+                        metricGrid(resolved).staggeredAppear(index: 3)
+                        SleepMarkCard().staggeredAppear(index: 4)
                         sleepDebtLedger(resolved).staggeredAppear(index: 5)
                         if canPublishDetailedStages(for: heroNight(resolved)) {
                             stagesVsTypical(resolved).staggeredAppear(index: 6)
@@ -3345,8 +3345,7 @@ private struct SleepMarkCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Sleep marks", overline: "Tap to log",
-                          trailing: String(localized: "Phase 1"))
+            SectionHeader("Sleep marks", overline: "Tap to log")
             NoopCard(tint: StrandPalette.restColor) {
                 VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                     Text("Tap when you're heading to bed or when you wake. Each tap is logged with the time. It doesn't change tonight's detected sleep.")
@@ -3939,6 +3938,13 @@ private struct SleepPlannerShortcutCard: View {
             }
         }
         .onAppear { windDownEnabled = WindDownNudge.isEnabled }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: WindDownNudge.stateDidChange
+            )
+        ) { _ in
+            windDownEnabled = WindDownNudge.isEnabled
+        }
         .alert("Notifications are off", isPresented: $showNotificationPermissionAlert) {
             Button("Open Settings") {
                 #if os(iOS)
@@ -4002,6 +4008,8 @@ private struct SleepPlannerShortcutCard: View {
                     case .denied:
                         windDownEnabled = false
                         showNotificationPermissionAlert = true
+                    case .failed:
+                        windDownEnabled = false
                     case .off:
                         windDownEnabled = false
                     }
@@ -4021,10 +4029,11 @@ private struct SleepPlannerShortcutCard: View {
     }
 
     private var windDownSummary: String {
-        let weekday = Calendar.current.component(.weekday, from: Date())
-        let minute = WindDownNudge.nudgeMinuteOfDay(forWeekday: weekday)
+        let next = WindDownNudge.nextDatedPlan()
         return windDownEnabled
-            ? String(localized: "Tonight at \(clockText(minute))")
+            ? String(
+                localized: "Tonight at \(clockText(next?.windDownDate ?? Date()))"
+            )
             : String(localized: "Optional reminder based on your sleep target")
     }
 
@@ -4048,6 +4057,10 @@ private struct SleepPlannerShortcutCard: View {
         components.minute = minutes % 60
         let date = Calendar.current.date(from: components) ?? Date()
         return date.formatted(date: .omitted, time: .shortened)
+    }
+
+    private func clockText(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
     }
 
     private func durationText(_ minutes: Int) -> String {

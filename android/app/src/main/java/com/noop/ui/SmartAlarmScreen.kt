@@ -1,11 +1,15 @@
 package com.noop.ui
 
+import android.Manifest
 import com.noop.R
 import androidx.compose.ui.res.stringResource
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +30,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,18 +40,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.noop.analytics.ScoreConfidence
 import com.noop.analytics.SleepDebt
 import com.noop.analytics.SleepGoalMode
 import com.noop.analytics.SleepPlan
 import com.noop.analytics.SleepPlanner
+import com.noop.alarm.WindDownScheduler
 import com.noop.automation.AlarmTapAutomationPrefs
 import com.noop.automation.AlarmTapResponse
 import com.noop.ble.PuffinExperiment
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
+import java.time.Instant
+import java.util.TimeZone
 import kotlin.math.abs
 
 /**
@@ -73,6 +86,8 @@ fun SmartAlarmScreen(vm: AppViewModel) {
     val sleepTargetMinutes by vm.windDownSleepNeedMinutes.collectAsStateWithLifecycle()
     val sleepGoalMode by vm.windDownGoalMode.collectAsStateWithLifecycle()
     val windDownLeadMinutes by vm.windDownLeadMinutes.collectAsStateWithLifecycle()
+    val windDownWakeMinutes by vm.windDownWakeMinutes.collectAsStateWithLifecycle()
+    val windDownWakeOverrides by vm.windDownWakeOverrides.collectAsStateWithLifecycle()
     val days by vm.recentDays.collectAsStateWithLifecycle()
     // #536: the hint adapts to bond state — the strap can only be armed when a WHOOP 4.0 is connected.
     val liveState = vm.live.collectAsStateWithLifecycle().value
@@ -118,14 +133,36 @@ fun SmartAlarmScreen(vm: AppViewModel) {
         )
     }
     val sleepPlan = remember(
-        targetMinutes,
+        windDownWakeMinutes,
+        windDownWakeOverrides,
         sleepTargetMinutes,
         sleepGoalMode,
         windDownLeadMinutes,
         plannerLedger,
     ) {
+        val zone = TimeZone.getDefault()
+        val provisionalPlan = SleepPlanner.plan(
+            wakeMinute = windDownWakeMinutes,
+            sleepTargetMinutes = sleepTargetMinutes,
+            windDownLeadMinutes = windDownLeadMinutes,
+            debtBalanceMinutes = plannerLedger.balanceMin.takeIf {
+                plannerLedger.nightCount > 0
+            },
+            historyNights = plannerLedger.nightCount,
+            goalMode = sleepGoalMode,
+        )
+        val nextWakeMinute = WindDownScheduler.nextDatedPlan(
+            defaultWakeMinutes = windDownWakeMinutes,
+            wakeOverrides = windDownWakeOverrides,
+            targetSleepMinutes = provisionalPlan.sleepOpportunityMinutes,
+            leadMinutes = windDownLeadMinutes,
+            timeZone = zone,
+        )?.wakeAtMillis?.let { epoch ->
+            val time = Instant.ofEpochMilli(epoch).atZone(zone.toZoneId()).toLocalTime()
+            time.hour * 60 + time.minute
+        } ?: windDownWakeMinutes
         SleepPlanner.plan(
-            wakeMinute = targetMinutes,
+            wakeMinute = nextWakeMinute,
             sleepTargetMinutes = sleepTargetMinutes,
             windDownLeadMinutes = windDownLeadMinutes,
             debtBalanceMinutes = plannerLedger.balanceMin.takeIf { plannerLedger.nightCount > 0 },
@@ -298,7 +335,8 @@ fun SmartAlarmScreen(vm: AppViewModel) {
             WindDownCard(
                 vm = vm,
                 plan = sleepPlan,
-                wakeMinutes = targetMinutes,
+                wakeMinutes = windDownWakeMinutes,
+                wakeOverrides = windDownWakeOverrides,
                 sleepTargetMinutes = sleepTargetMinutes,
                 leadMinutes = windDownLeadMinutes,
             )
@@ -585,11 +623,53 @@ private fun WindDownCard(
     vm: AppViewModel,
     plan: SleepPlan,
     wakeMinutes: Int,
+    wakeOverrides: Map<Int, Int>,
     sleepTargetMinutes: Int,
     leadMinutes: Int,
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val enabled by vm.windDownEnabled.collectAsStateWithLifecycle()
     val goalMode by vm.windDownGoalMode.collectAsStateWithLifecycle()
+    val openSettingsLabel = stringResource(R.string.appwide_action_open_settings)
+    var notificationsBlocked by remember {
+        mutableStateOf(enabled && !vm.windDownNotificationsAvailable())
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val committed = granted && vm.setWindDownEnabled(true)
+        notificationsBlocked = !committed
+    }
+
+    fun requestEnable() {
+        val needsRuntimePermission =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+        if (needsRuntimePermission) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            notificationsBlocked = !vm.setWindDownEnabled(true)
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, enabled) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
+            val available = vm.windDownNotificationsAvailable()
+            if (enabled && !available) {
+                notificationsBlocked = true
+            } else if (available) {
+                notificationsBlocked = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     NoopCard(padding = 20.dp, tint = if (enabled) DomainTheme.Rest.color else null) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -604,8 +684,43 @@ private fun WindDownCard(
                 label = uiString(R.string.l10n_smart_alarm_screen_remind_me_to_wind_down_4839f0d0),
                 help = stringResource(R.string.sleep_planner_nudge_help),
                 checked = enabled,
-                onChange = { vm.setWindDownEnabled(it) },
+                onChange = { want ->
+                    if (want) {
+                        requestEnable()
+                    } else {
+                        vm.setWindDownEnabled(false)
+                        notificationsBlocked = false
+                    }
+                },
             )
+            if (notificationsBlocked) {
+                RowDividerLocal()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            onClickLabel = openSettingsLabel,
+                            role = Role.Button,
+                        ) {
+                            context.startActivity(
+                                vm.windDownNotificationSettingsIntent()
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        },
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.appwide_notifications_system_disabled),
+                        style = NoopType.footnote,
+                        color = Palette.statusCritical,
+                    )
+                    Text(
+                        openSettingsLabel,
+                        style = NoopType.footnote,
+                        color = DomainTheme.Rest.color,
+                    )
+                }
+            }
             RowDividerLocal()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -663,9 +778,16 @@ private fun WindDownCard(
                 TimeChip(
                     minutes = wakeMinutes,
                     accessibilityLabel = stringResource(R.string.sleep_planner_wake_time),
-                    onPicked = { vm.setPhoneAlarmTargetMinutes(it) },
+                    onPicked = { vm.setWindDownWakeMinutes(it) },
                 )
             }
+            RowDividerLocal()
+            AlarmDayOverridePicker(
+                defaultMinutes = wakeMinutes,
+                enabledDays = emptySet(),
+                overrides = wakeOverrides,
+                onSetOverride = vm::setWindDownWakeOverride,
+            )
             Text(
                 if (plan.recoveryMinutes > 0)
                     stringResource(R.string.sleep_planner_recovery_added, durationLabel(plan.recoveryMinutes))

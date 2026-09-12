@@ -369,10 +369,6 @@
       "Saved"
     ],
     [
-      "android/app/src/main/java/com/noop/ui/HydrationScreen.kt",
-      "of %.1f L"
-    ],
-    [
       "android/app/src/main/java/com/noop/ui/InsightsHubScreen.kt",
       "d = %.2f"
     ],
@@ -1147,10 +1143,6 @@
       "NOOP never shows you a number it had to make up. If a score isn't ready, it tells you why and what to do next. Everything here runs on your device, from Noop Band."
     ],
     [
-      "Strand/Screens/HydrationView.swift",
-      "Progress toward today's goal"
-    ],
-    [
       "Strand/Screens/InsightsHubView.swift",
       "d = %.2f"
     ],
@@ -1353,10 +1345,6 @@
     [
       "Strand/Screens/SettingsView.swift",
       "Reviews each scored wake block for real evidence of getting up (walking cadence, a change in body position) instead of just a heart-rate rise. A wake block with no locomotion and a stable posture - a hot night, a brief turn-over - is folded back into light sleep; a real get-up is left alone. It checks how much motion detail Noop Band actually recorded and stays off when a night is too sparse to trust. Off by default; takes effect on the next nights staged."
-    ],
-    [
-      "Strand/Screens/SettingsView.swift",
-      "Silence-first Noop Band coaching during workouts."
     ],
     [
       "Strand/Screens/SettingsView.swift",

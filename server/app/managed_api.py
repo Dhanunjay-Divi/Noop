@@ -1424,12 +1424,25 @@ def managed_router(
         identity: ManagedRequestIdentity = Depends(require_identity),
         after_sequence: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=500)] = 200,
+        document_kind: Annotated[list[str] | None, Query()] = None,
     ) -> dict:
+        if document_kind is not None and (
+            len(document_kind) > len(DOCUMENT_KINDS)
+            or len(set(document_kind)) != len(document_kind)
+            or any(kind not in DOCUMENT_KINDS for kind in document_kind)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="invalid managed document kind filter",
+            )
         try:
             return await repository.list_changes(
                 principal=identity.principal,
                 after_sequence=after_sequence,
                 limit=limit,
+                document_kinds=sorted(document_kind)
+                if document_kind is not None
+                else None,
             )
         except ManagedStorageError as error:
             _raise_managed(error)

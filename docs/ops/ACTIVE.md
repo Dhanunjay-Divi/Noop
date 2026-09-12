@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-11**
+Last updated: **2026-09-12**
 
 ## Repository
 
@@ -8,7 +8,8 @@ Last updated: **2026-09-11**
 - Canonical protected branch: `main`
 - Active audit worktree: `/private/tmp/noop-product-audit-20260911`
 - Active audit branch: `codex/product-safety-quality-audit-20260911`
-- Remote branches: `origin/main`
+- Remote branches: `origin/main`,
+  `origin/codex/product-safety-quality-audit-20260911`
 - GitHub repository relationship: standalone, with no parent reported at the
   last authenticated check
 - Current source-rights record:
@@ -22,41 +23,89 @@ Last updated: **2026-09-11**
 
 ### Current audited state
 
-The supplier-independent product, safety, and quality audit is complete locally
-on `codex/product-safety-quality-audit-20260911` and tracked by protected pull
-request `#15`. Commits `99a51b80` and `e35d1d37` plus the corrective head add
-schema-v55 editable hydration entries and schema-v56 managed tracking,
-matched missing/error and accessibility semantics, one routine-notification
-budget per completed sync, private sleep-aware wind-down behavior, uncapped
-Today Dynamic Type, and terminal-state Safety location deletion in memory and
-PostgreSQL. Two hosted-review passes identified ten concrete defects. The
-current source purges legacy terminal Safety locations, renews Apple's dated
-wind-down schedule, adds Android Room v46 sleep evidence/BMI cleanup and v47
-selective WeightRecord reprojection, retracts stale calendar artifacts,
-releases queued Apple notification budgets before discard, compatibility-
-normalizes Android workout titles, preserves confirmed Today hydration across
-transient reads, and makes Apple hydration document restoration update its
-scalar projection without outbox echo. The exact current tree passes 452
-WhoopStore tests, 110 NoopRemoteSync tests, 1,779 Apple app tests with one
-external-fixture skip, 4,316 tests in each Android variant with seven
-evidence-dependent skips plus lint and both APK assemblies, 340 server tests
-with 94 environment/provider skips plus Ruff, the complete unsigned
-app/widget/Watch graph, a successful managed API 35 production shell whose XML
-reports 55 cases with two credential-gated skips and zero failures/errors, and
-a directly inspected 42-capture iPhone visual matrix. The exact-tree
-terminology, claims, privacy, CI, calibration, legal, operations, i18n,
-secret-pattern, schema, diff, 227-tool-test, and 49-i18n-test policy wall
-passes; the project/user `noop-ops` skill copies are validated and
-byte-identical. Apple row-level hydration restoration is intentionally
-different from Android's scalar/chunk path. Production health-document
-transfer remains disabled because policy requires client encryption while the
-native pilot adapter is still server-readable. Final exact-SHA checks, a fresh
-no-findings hosted review, normal integration, and round-owned cleanup remain
-in this round. Physical phones, band/firmware,
-BLE/background/notification/haptic/battery/sensor behavior, configured
-PostgreSQL, real providers/carriers, client encryption/key recovery, public
-traffic, production health transfer, legal/terms, 24/7 operations, signing,
-stores, participants, and media licensing remain external gates.
+The supplier-independent product, safety, and quality audit remains active on
+`codex/product-safety-quality-audit-20260911` and is tracked by protected pull
+request `#15`. The remote branch remains at committed correction head
+`5ddd812c`; the final correction set is intentionally local until one
+consolidated push.
+
+The exact local wall now passes on the current implementation tree:
+`WhoopStore` 485 tests; `NoopRemoteSync` 123; `StrandAnalytics` 1,466 with
+seven evidence-dependent skips; Apple app 1,850 with one external-fixture
+skip; Android Full and Demo 4,455 each with seven evidence-dependent skips,
+plus both lint variants, APK assemblies, and instrumentation-source
+compilation; and the PostgreSQL-backed server 457 with one provider/environment
+skip. The unsigned generic iOS Simulator graph builds. Ruff, both locked Python
+dependency audits, migration-manifest integrity, backup shell syntax,
+standalone Compose configuration, 227 Tools tests, 49 localization tests,
+health claims, strict i18n, required CI, calibration parity, terminology,
+release controls, legal inventory, provenance, private-data, operations-record,
+JSON, shell, and diff gates also pass locally.
+
+The current source partitions managed-document mutation intent by the account
+active at edit time on Apple schema v60 and Android Room v51. Legacy unowned
+intent is quarantined instead of attributed to a later account; signed-out
+edits create no upload intent; client-encrypted hydration, journal,
+preferences, and other personal documents remain local because client
+encryption and key recovery are not implemented. PostgreSQL migrations 034-037
+expand the managed-document kind registry and store aggregate contract-v2
+readiness without changing any document, head, or change cursor. The stricter
+database content-mode constraint remains deliberately absent until versioned
+clients can encrypt, restore, and backfill every supported personal document.
+Migration 038 adds accepted-contact band-origin SOS admission and coalescing
+without enabling automatic medical or fall inference.
+
+The replacement exact-tree review also closed two restore defects: server
+change-feed document lookup is now qualified by document kind, and both mobile
+clients persist change-feed capability version `1`. A legacy filtered cursor
+must complete a supported-kind snapshot before incremental changes advance;
+failed or stale completion cannot mark a newer cursor current.
+
+The final review then found that Android's persistent connection notification
+could expose Recovery and Effort while locked. That service now uses the shared
+neutral public version, and the privacy contract includes the BLE package.
+Room schema generation retains a valid proof across unrelated incremental KSP
+work, rejects an unproven export, and regenerates a deliberately tampered
+schema to the canonical hash. A real 50-to-51 migration preserves an existing
+cursor and interrupted snapshot state.
+
+The source also includes editable hydration rows on both platforms, exact-day
+Today routing, dependency-driven Health Connect BMI reprojection, bounded
+analysis generation ledgers instead of launch/resume whole-history
+fingerprinting, private notification construction, sleep-aware wind-down,
+routine-notification budgeting, accessibility corrections, and terminal Safety
+location deletion. The root README has been completely replaced with a
+product-first, local-first, launch-honest guide whose local links resolve.
+Maximum Dynamic Type evidence also corrected the iPhone floating-navigation
+reservation: the measured rail now owns one real safe-area inset and an opaque
+accessibility reading boundary. Eight exact-current Daily Plan captures pass;
+Android's measured `Scaffold` bottom inset and focused navigation contract pass
+without requiring an overlay copy of the iOS fix.
+
+A delegated review initially returned migration and ownership findings from an
+earlier dirty-tree snapshot. Exact-current source inspection shows migrations
+034-037 are additive/read-only and Android ownership invalidation derives
+bounded persisted input times. Replacement reviews drove the change-feed,
+capability-version, current-schema, Room-proof, and BLE lock-screen
+corrections; the final exact-current-tree verdict is clean.
+
+The owner-supplied HBand/Veepoo package was assessed without importing its
+private binaries. The neutral SDK boundary is a separate private
+`Dhanunjay-Divi/NoopBandSDK` repository at `ee82cc0`; its 14 tracked files pass
+English-language, binary, and JSON gates, it contains no supplier payload or
+hosted workflow, and its working tree is clean. The original multilingual
+supplier drop remains immutable outside Git. NOOP's intentional product
+translations, including Chinese locales, remain in the app.
+
+Fresh hosted required exact-SHA checks and protected integration remain
+pending. Round-owned Apple and dependency-audit scratch environments have
+been removed. Physical phones, exact band/firmware,
+BLE/background/notification/haptic/battery/sensor behavior, real
+providers/carriers, client encryption/key recovery, public traffic, production
+health transfer, legal/terms, 24/7 operations, signing, stores, participants,
+and media licensing remain external gates. Rest display freshness is fixed,
+but issue `#977` still intentionally leaves a chargeable day without staged
+sleep as a missing Rest signal rather than inventing a score.
 
 The detailed paragraphs below are chronological progress notes. Where they
 describe an earlier dirty-tree total or a pending source correction, the

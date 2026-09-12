@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">Il est temps de vous détendre</string>
-    <string name="wind_down_notification_body">Votre heure de coucher prévue approche. Commencez à vous détendre quand cela vous convient.</string>
+    <string name="wind_down_notification_body">Plan : détente à %1$s ; coucher à %2$s, si cela vous convient.</string>
     <string name="wind_down_channel_name">Rappel de détente</string>
     <string name="wind_down_channel_description">Rappel facultatif avant l’heure de coucher prévue.</string>
     <string name="sleep_planner_title">Planificateur de sommeil</string>

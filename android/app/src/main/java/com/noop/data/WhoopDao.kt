@@ -1252,6 +1252,24 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("SELECT * FROM sleepSession WHERE deviceId = :deviceId ORDER BY startTs ASC")
     fun sleepSessionsFlow(deviceId: String): Flow<List<SleepSession>>
 
+    /**
+     * Bounded reactive sleep timeline for dashboard edit-day precedence. The end-time predicate retains
+     * a session that starts before the dashboard window but bridges into it. The inner newest-first limit
+     * caps pathological fragmentation; the outer order restores the chronological contract expected by
+     * wake-day grouping.
+     */
+    @Query(
+        "SELECT * FROM (" +
+            "SELECT * FROM sleepSession WHERE deviceId = :deviceId AND endTs >= :from " +
+            "ORDER BY startTs DESC LIMIT :limit" +
+            ") AS recent ORDER BY startTs ASC"
+    )
+    fun recentSleepSessionsFlow(
+        deviceId: String,
+        from: Long,
+        limit: Int,
+    ): Flow<List<SleepSession>>
+
     /** Keyset-paged twin used by optional self-hosted export so local deletes cannot shift an OFFSET. */
     @Query(
         "SELECT * FROM sleepSession WHERE deviceId = :deviceId AND startTs >= :from AND startTs <= :to " +
@@ -1334,6 +1352,199 @@ interface WhoopDao : DeviceRegistryDao {
      *  user-owned local series such as period-start history; unrelated keys and sources are untouched. */
     @Query("DELETE FROM metricSeries WHERE deviceId = :deviceId AND key = :key")
     suspend fun deleteMetricSeries(deviceId: String, key: String): Int
+
+    // MARK: - Durable editable hydration log
+
+    @Query(
+        "SELECT * FROM hydrationEntry WHERE deviceId = :deviceId AND day = :day " +
+            "ORDER BY loggedAt ASC, id ASC",
+    )
+    suspend fun hydrationEntries(deviceId: String, day: String): List<HydrationEntryRow>
+
+    @Query("SELECT * FROM hydrationEntry WHERE id = :id")
+    suspend fun hydrationEntry(id: String): HydrationEntryRow?
+
+    @Query(
+        "SELECT value FROM metricSeries WHERE deviceId = :deviceId " +
+            "AND day = :day AND `key` = :metricKey LIMIT 1",
+    )
+    suspend fun hydrationProjectionValue(
+        deviceId: String,
+        day: String,
+        metricKey: String,
+    ): Double?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertHydrationEntryRaw(row: HydrationEntryRow)
+
+    @Query(
+        "UPDATE hydrationEntry SET amountML = :amountML, loggedAt = :loggedAt " +
+            "WHERE id = :id AND deviceId = :deviceId AND day = :day",
+    )
+    suspend fun updateHydrationEntryRaw(
+        id: String,
+        deviceId: String,
+        day: String,
+        amountML: Int,
+        loggedAt: Long,
+    ): Int
+
+    @Query(
+        "DELETE FROM hydrationEntry WHERE id = :id AND deviceId = :deviceId AND day = :day",
+    )
+    suspend fun deleteHydrationEntryRaw(id: String, deviceId: String, day: String): Int
+
+    @Query("DELETE FROM hydrationEntry WHERE deviceId = :deviceId AND day = :day")
+    suspend fun deleteHydrationEntriesForDayRaw(deviceId: String, day: String): Int
+
+    /**
+     * Adds one entry and reprojects the scalar in one transaction. The existing projection is checked
+     * first, so an unmigrated or malformed legacy scalar cannot be silently replaced.
+     */
+    @Transaction
+    suspend fun addHydrationEntry(row: HydrationEntryRow): HydrationEntryMutationResult {
+        val clean = HydrationEntryContract.validated(row)
+        val existing = hydrationEntries(clean.deviceId, clean.day)
+        HydrationEntryContract.requireEditableProjection(
+            hydrationProjectionValue(
+                clean.deviceId,
+                clean.day,
+                HydrationEntryContract.METRIC_KEY,
+            ),
+            existing,
+        )
+        insertHydrationEntryRaw(clean)
+        return reprojectHydrationDay(clean.deviceId, clean.day, changed = true)
+    }
+
+    /** Exact-ID edit; entries cannot be moved between devices or local days. */
+    @Transaction
+    suspend fun updateHydrationEntry(row: HydrationEntryRow): HydrationEntryMutationResult {
+        val clean = HydrationEntryContract.validated(row)
+        val current = hydrationEntry(clean.id)
+            ?: return HydrationEntryMutationResult(changed = false, totalML = null)
+        if (current.deviceId != clean.deviceId || current.day != clean.day) {
+            throw HydrationEntryIntegrityException()
+        }
+        val existing = hydrationEntries(clean.deviceId, clean.day)
+        HydrationEntryContract.requireEditableProjection(
+            hydrationProjectionValue(
+                clean.deviceId,
+                clean.day,
+                HydrationEntryContract.METRIC_KEY,
+            ),
+            existing,
+        )
+        val changed = updateHydrationEntryRaw(
+            id = clean.id,
+            deviceId = clean.deviceId,
+            day = clean.day,
+            amountML = clean.amountML,
+            loggedAt = clean.loggedAt,
+        ) == 1
+        return reprojectHydrationDay(clean.deviceId, clean.day, changed)
+    }
+
+    /** Exact-ID delete; a stale UI cannot delete a same-ID row from another day. */
+    @Transaction
+    suspend fun deleteHydrationEntry(
+        id: String,
+        deviceId: String,
+        day: String,
+    ): HydrationEntryMutationResult {
+        val canonicalDay = HydrationEntryContract.requireCanonicalDay(day)
+        val current = hydrationEntry(id)
+            ?: return HydrationEntryMutationResult(changed = false, totalML = null)
+        if (current.deviceId != deviceId || current.day != canonicalDay) {
+            throw HydrationEntryIntegrityException()
+        }
+        val existing = hydrationEntries(deviceId, canonicalDay)
+        HydrationEntryContract.requireEditableProjection(
+            hydrationProjectionValue(
+                deviceId,
+                canonicalDay,
+                HydrationEntryContract.METRIC_KEY,
+            ),
+            existing,
+        )
+        val changed = deleteHydrationEntryRaw(id, deviceId, canonicalDay) == 1
+        return reprojectHydrationDay(deviceId, canonicalDay, changed)
+    }
+
+    @Transaction
+    suspend fun clearHydrationEntries(
+        deviceId: String,
+        day: String,
+    ): HydrationEntryMutationResult {
+        val canonicalDay = HydrationEntryContract.requireCanonicalDay(day)
+        val existing = hydrationEntries(deviceId, canonicalDay)
+        HydrationEntryContract.requireEditableProjection(
+            hydrationProjectionValue(
+                deviceId,
+                canonicalDay,
+                HydrationEntryContract.METRIC_KEY,
+            ),
+            existing,
+        )
+        val changed = deleteHydrationEntriesForDayRaw(deviceId, canonicalDay) > 0
+        return reprojectHydrationDay(deviceId, canonicalDay, changed)
+    }
+
+    /**
+     * Compatibility/correction path used by the store's direct-total API. Replacement is still
+     * all-or-nothing and refuses a scalar-only legacy day.
+     */
+    @Transaction
+    suspend fun replaceHydrationEntries(
+        deviceId: String,
+        day: String,
+        rows: List<HydrationEntryRow>,
+    ): HydrationEntryMutationResult {
+        val canonicalDay = HydrationEntryContract.requireCanonicalDay(day)
+        require(rows.map(HydrationEntryRow::id).toSet().size == rows.size) {
+            "duplicate hydration entry id"
+        }
+        val clean = rows.map(HydrationEntryContract::validated)
+        require(clean.all { it.deviceId == deviceId && it.day == canonicalDay }) {
+            "hydration replacement crossed day or source"
+        }
+        val existing = hydrationEntries(deviceId, canonicalDay)
+        HydrationEntryContract.requireEditableProjection(
+            hydrationProjectionValue(
+                deviceId,
+                canonicalDay,
+                HydrationEntryContract.METRIC_KEY,
+            ),
+            existing,
+        )
+        HydrationEntryContract.total(clean)
+        deleteHydrationEntriesForDayRaw(deviceId, canonicalDay)
+        for (row in clean) insertHydrationEntryRaw(row)
+        return reprojectHydrationDay(deviceId, canonicalDay, changed = existing != clean)
+    }
+
+    @Transaction
+    suspend fun reprojectHydrationDay(
+        deviceId: String,
+        day: String,
+        changed: Boolean,
+    ): HydrationEntryMutationResult {
+        val total = HydrationEntryContract.total(hydrationEntries(deviceId, day))
+        upsertMetricSeries(
+            listOf(
+                MetricSeriesRow(
+                    deviceId = deviceId,
+                    day = day,
+                    key = HydrationEntryContract.METRIC_KEY,
+                    value = total.toDouble(),
+                ),
+            ),
+        )
+        return HydrationEntryMutationResult(
+            changed = changed,
+            totalML = total.takeIf { it > 0L }?.toDouble(),
+        )
+    }
 
     // MARK: - Editable nutrition log (Swift nutritionEntry v39)
 
@@ -1841,9 +2052,13 @@ interface WhoopDao : DeviceRegistryDao {
 
     /** Every workout from every device/source that overlaps [from, to]. Auto-suggestion exclusion must
      *  be source-complete: imported files, current/old straps, computed siblings and future sources all
-     *  suppress a duplicate prompt without maintaining a hard-coded id list. */
+     *  suppress a duplicate prompt without maintaining a hard-coded id list. Invalid zero/negative
+     *  intervals use the same one-second normalization as the in-memory exact-window filter. */
     @Query(
-        "SELECT * FROM workout WHERE endTs >= :from AND startTs <= :to " +
+        "SELECT * FROM workout WHERE " +
+            "(CASE WHEN endTs > startTs THEN endTs " +
+            "WHEN startTs < 9223372036854775807 THEN startTs + 1 ELSE startTs END) > :from " +
+            "AND startTs <= :to " +
             "ORDER BY startTs ASC LIMIT :limit"
     )
     suspend fun workoutsOverlappingAllSources(from: Long, to: Long, limit: Int): List<WorkoutRow>
@@ -1869,6 +2084,19 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("SELECT COUNT(*) FROM workout WHERE deviceId = :deviceId AND startTs >= :from AND startTs <= :to")
     suspend fun workoutsCount(deviceId: String, from: Long, to: Long): Int
 
+    /** Exact natural-key count across a read-side source union without materializing workout rows. */
+    @Query(
+        "SELECT COUNT(*) FROM (" +
+            "SELECT startTs, sport FROM workout " +
+            "WHERE deviceId IN (:deviceIds) AND startTs >= :from AND startTs <= :to " +
+            "GROUP BY startTs, sport)"
+    )
+    suspend fun workoutsDistinctCount(
+        deviceIds: List<String>,
+        from: Long,
+        to: Long,
+    ): Int
+
     @Query(
         "SELECT COALESCE(SUM(steps), 0) FROM workout " +
             "WHERE deviceId = :deviceId AND steps IS NOT NULL AND startTs >= :from AND startTs < :to"
@@ -1884,6 +2112,12 @@ interface WhoopDao : DeviceRegistryDao {
             "ORDER BY day ASC"
     )
     suspend fun appleDaily(deviceId: String, from: String, to: String): List<AppleDaily>
+
+    @Query(
+        "SELECT * FROM appleDaily WHERE deviceId = :deviceId AND weightKg IS NOT NULL " +
+            "ORDER BY day DESC LIMIT 1"
+    )
+    suspend fun latestAppleDailyWeight(deviceId: String): AppleDaily?
 
     @Query(
         "SELECT * FROM liveSession WHERE deviceId = :deviceId " +
@@ -1963,46 +2197,132 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun latestHrSampleTs(deviceId: String): Long?
 
     @Query("SELECT COUNT(*) FROM hrSample") suspend fun countHr(): Int
-    /** #836/#1196: whole-history token across every raw stream consumed by daily scoring. History can
-     * deliver HR before R-R or motion; every later score-bearing chunk must invalidate the watermark. */
-    @Query(
-        "SELECT " +
-            "(SELECT COUNT(*) FROM hrSample) + " +
-            "(SELECT COUNT(*) FROM ppgHrSample) + " +
-            "(SELECT COUNT(*) FROM rrInterval) + " +
-            "(SELECT COUNT(*) FROM gravitySample) + " +
-            "(SELECT COUNT(*) FROM respSample) + " +
-            "(SELECT COUNT(*) FROM skinTempSample) + " +
-            "(SELECT COUNT(*) FROM spo2Sample) + " +
-            "(SELECT COUNT(*) FROM stepSample) + " +
-            "(SELECT COUNT(*) FROM sleepStateSample) + " +
-            "(SELECT COUNT(*) FROM event)",
-    )
-    suspend fun countAnalysisFingerprintRows(): Int
+
+    // MARK: - O(1) analysis-input gate
 
     @Query(
-        "SELECT COALESCE(MAX(ts), 0) FROM (" +
-            "SELECT ts FROM hrSample " +
-            "UNION ALL " +
-            "SELECT ts FROM ppgHrSample " +
-            "UNION ALL " +
-            "SELECT ts FROM rrInterval " +
-            "UNION ALL " +
-            "SELECT ts FROM gravitySample " +
-            "UNION ALL " +
-            "SELECT ts FROM respSample " +
-            "UNION ALL " +
-            "SELECT ts FROM skinTempSample " +
-            "UNION ALL " +
-            "SELECT ts FROM spo2Sample " +
-            "UNION ALL " +
-            "SELECT ts FROM stepSample " +
-            "UNION ALL " +
-            "SELECT ts FROM sleepStateSample " +
-            "UNION ALL " +
-            "SELECT ts FROM event)",
+        "SELECT EXISTS(SELECT 1 FROM analysisDirtySource " +
+            "WHERE deviceId = :deviceId AND generation > acknowledgedGeneration)",
     )
-    suspend fun maxAnalysisFingerprintTs(): Long
+    suspend fun isAnalysisSourceDirty(deviceId: String): Boolean
+
+    @Query(
+        "SELECT deviceId, generation, earliestAffectedTs, latestAffectedTs " +
+            "FROM analysisDirtySource " +
+            "WHERE deviceId IN (:deviceIds) AND generation > acknowledgedGeneration " +
+            "ORDER BY deviceId",
+    )
+    suspend fun pendingAnalysisInputClaims(
+        deviceIds: List<String>,
+    ): List<AnalysisInputGenerationClaim>
+
+    @Query("SELECT * FROM analysisDirtySource WHERE deviceId = :deviceId")
+    suspend fun analysisDirtySource(deviceId: String): AnalysisDirtySourceRow?
+
+    /**
+     * Indexed existence proof used only for a malformed/missing dirty-window bound. Every score-bearing
+     * table has a primary-key/index prefix on deviceId, so each EXISTS stops at its first matching row.
+     */
+    @Query(
+        "SELECT CASE WHEN " +
+            "EXISTS(SELECT 1 FROM hrSample WHERE deviceId = :deviceId) OR " +
+            "EXISTS(SELECT 1 FROM ppgHrSample WHERE deviceId = :deviceId) OR " +
+            "EXISTS(SELECT 1 FROM rrInterval WHERE deviceId = :deviceId) OR " +
+            "EXISTS(SELECT 1 FROM gravitySample WHERE deviceId = :deviceId) OR " +
+            "EXISTS(SELECT 1 FROM respSample WHERE deviceId = :deviceId) OR " +
+            "EXISTS(SELECT 1 FROM skinTempSample WHERE deviceId = :deviceId) OR " +
+            "EXISTS(SELECT 1 FROM spo2Sample WHERE deviceId = :deviceId) OR " +
+            "EXISTS(SELECT 1 FROM stepSample WHERE deviceId = :deviceId) OR " +
+            "EXISTS(SELECT 1 FROM sleepStateSample WHERE deviceId = :deviceId) OR " +
+            "EXISTS(SELECT 1 FROM event WHERE deviceId = :deviceId) " +
+            "THEN 1 ELSE 0 END",
+    )
+    suspend fun hasScoreBearingHistory(deviceId: String): Boolean
+
+    /** Global indexed existence proof for the synthetic ownership invalidation source. */
+    @Query(
+        "SELECT CASE WHEN " +
+            "EXISTS(SELECT 1 FROM hrSample) OR " +
+            "EXISTS(SELECT 1 FROM ppgHrSample) OR " +
+            "EXISTS(SELECT 1 FROM rrInterval) OR " +
+            "EXISTS(SELECT 1 FROM gravitySample) OR " +
+            "EXISTS(SELECT 1 FROM respSample) OR " +
+            "EXISTS(SELECT 1 FROM skinTempSample) OR " +
+            "EXISTS(SELECT 1 FROM spo2Sample) OR " +
+            "EXISTS(SELECT 1 FROM stepSample) OR " +
+            "EXISTS(SELECT 1 FROM sleepStateSample) OR " +
+            "EXISTS(SELECT 1 FROM event) " +
+            "THEN 1 ELSE 0 END",
+    )
+    suspend fun hasAnyScoreBearingHistory(): Boolean
+
+    /**
+     * Acknowledge only the exact successfully processed snapshot. Generation and both bounds participate
+     * in the compare-and-set, so a concurrent trigger cannot lose or narrow its newly expanded window.
+     */
+    @Query(
+        "UPDATE analysisDirtySource SET acknowledgedGeneration = :generation, " +
+            "earliestAffectedTs = NULL, latestAffectedTs = NULL " +
+            "WHERE deviceId = :deviceId " +
+            "AND generation = :generation " +
+            "AND acknowledgedGeneration < :generation " +
+            "AND earliestAffectedTs IS :expectedEarliestAffectedTs " +
+            "AND latestAffectedTs IS :expectedLatestAffectedTs",
+    )
+    suspend fun acknowledgeExactAnalysisInputGeneration(
+        deviceId: String,
+        generation: Long,
+        expectedEarliestAffectedTs: Long?,
+        expectedLatestAffectedTs: Long?,
+    ): Int
+
+    /**
+     * Remove only the completed newest tail of an exact unchanged snapshot. The remaining range stays on
+     * the same generation and will anchor the next bounded historical pass at [newLatestAffectedTs].
+     */
+    @Query(
+        "UPDATE analysisDirtySource SET latestAffectedTs = :newLatestAffectedTs " +
+            "WHERE deviceId = :deviceId " +
+            "AND generation = :generation " +
+            "AND acknowledgedGeneration < :generation " +
+            "AND earliestAffectedTs = :expectedEarliestAffectedTs " +
+            "AND latestAffectedTs = :expectedLatestAffectedTs " +
+            "AND :newLatestAffectedTs >= :expectedEarliestAffectedTs " +
+            "AND :newLatestAffectedTs < :expectedLatestAffectedTs",
+    )
+    suspend fun shrinkExactAnalysisInputNewestTail(
+        deviceId: String,
+        generation: Long,
+        expectedEarliestAffectedTs: Long,
+        expectedLatestAffectedTs: Long,
+        newLatestAffectedTs: Long,
+    ): Int
+
+    /** Test/setup helper: exact acknowledgements commit atomically. Runtime uses resumable finalization. */
+    @Transaction
+    suspend fun acknowledgeAnalysisInputClaims(
+        claims: List<AnalysisInputGenerationClaim>,
+    ): Int {
+        val normalized = claims
+            .asSequence()
+            .filter { it.deviceId.isNotBlank() && it.generation > 0L }
+            .groupBy(AnalysisInputGenerationClaim::deviceId)
+            .map { (deviceId, sourceClaims) ->
+                sourceClaims.maxBy(AnalysisInputGenerationClaim::generation)
+            }
+            .sortedBy(AnalysisInputGenerationClaim::deviceId)
+            .toList()
+        var updated = 0
+        for (claim in normalized) {
+            updated += acknowledgeExactAnalysisInputGeneration(
+                deviceId = claim.deviceId,
+                generation = claim.generation,
+                expectedEarliestAffectedTs = claim.earliestAffectedTs,
+                expectedLatestAffectedTs = claim.latestAffectedTs,
+            )
+        }
+        return updated
+    }
 
     // Raw measured-HR aggregate retained for diagnostics and database summaries.
     @Query("SELECT COALESCE(MAX(ts), 0) FROM hrSample") suspend fun maxHrTs(): Long

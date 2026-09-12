@@ -18,22 +18,66 @@ final class DeviceRegistryStoreTests: XCTestCase {
     }
 
     func testSetActiveEnforcesSingleActive() throws {
-        let store = DeviceRegistryStore(dbQueue: try makeDB())
+        let dbq = try makeDB()
+        let store = DeviceRegistryStore(dbQueue: dbq)
         try store.add(PairedDevice(id: "polar-1", brand: "Polar", model: "H10", sourceKind: .liveBLE,
                                    capabilities: [.hr, .hrv], status: .paired, addedAt: 1, lastSeenAt: 1))
+        try dbq.write { db in
+            try db.execute(
+                sql: "INSERT INTO hrSample (deviceId, ts, bpm) VALUES ('my-whoop', 100, 60)"
+            )
+            try db.execute(
+                sql: "INSERT INTO hrSample (deviceId, ts, bpm) VALUES ('polar-1', 200, 61)"
+            )
+        }
         try store.setActive("polar-1")
         XCTAssertEqual(try store.activeDeviceId(), "polar-1")
         let statuses = Dictionary(uniqueKeysWithValues: try store.all().map { ($0.id, $0.status) })
         XCTAssertEqual(statuses["polar-1"], .active)
         XCTAssertEqual(statuses["my-whoop"], .paired)   // the previously-active device was demoted
         XCTAssertEqual(try store.all().filter { $0.status == .active }.count, 1)  // I1
+        let ownership = try dbq.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM analysisDirtySource WHERE deviceId = ?",
+                arguments: [AnalysisInputSource.ownership]
+            )
+        }
+        XCTAssertEqual(ownership?["generation"] as Int64?, 1)
+        XCTAssertEqual(ownership?["earliestAffectedTs"] as Int64?, 100)
+        XCTAssertEqual(ownership?["latestAffectedTs"] as Int64?, 200)
+
+        try store.setActive("polar-1")
+        let unchangedGeneration = try dbq.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT generation FROM analysisDirtySource WHERE deviceId = ?",
+                arguments: [AnalysisInputSource.ownership]
+            )
+        }
+        XCTAssertEqual(unchangedGeneration, 1)
     }
 
     func testArchiveKeepsRowAndClearsActive() throws {
-        let store = DeviceRegistryStore(dbQueue: try makeDB())
+        let dbq = try makeDB()
+        let store = DeviceRegistryStore(dbQueue: dbq)
+        try store.setDayOwner(
+            day: "2026-06-15",
+            deviceId: "my-whoop",
+            locked: true
+        )
         try store.archive("my-whoop")
         XCTAssertEqual(try store.all().first?.status, .archived)   // I4: row kept
         XCTAssertNil(try store.activeDeviceId())
+        XCTAssertNil(try store.dayOwner("2026-06-15"))
+        let generation = try dbq.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT generation FROM analysisDirtySource WHERE deviceId = ?",
+                arguments: [AnalysisInputSource.ownership]
+            )
+        }
+        XCTAssertEqual(generation, 2)
     }
 
     func testSeededWhoopHasNilPeripheralId() throws {
@@ -191,6 +235,57 @@ final class DeviceRegistryStoreTests: XCTestCase {
         try store.setPeripheralId("my-whoop", peripheralId: pid)
         XCTAssertEqual(try store.device(forPeripheralId: pid)?.id, "my-whoop")
         XCTAssertNil(try store.device(forPeripheralId: "no-such-peripheral"))
+    }
+
+    func testDayOwnerChangeInvalidatesOnlyOnceAndCarriesItsCalendarDay() throws {
+        let dbq = try makeDB()
+        let store = DeviceRegistryStore(dbQueue: dbq)
+
+        try store.setDayOwner(
+            day: "2026-06-15",
+            deviceId: "my-whoop",
+            locked: true
+        )
+        let first = try dbq.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM analysisDirtySource WHERE deviceId = ?",
+                arguments: [AnalysisInputSource.ownership]
+            )
+        }
+        let earliest: Int64? = first?["earliestAffectedTs"]
+        let latest: Int64? = first?["latestAffectedTs"]
+        XCTAssertEqual(first?["generation"] as Int64?, 1)
+        XCTAssertNotNil(earliest)
+        XCTAssertEqual(earliest, latest)
+
+        try store.setDayOwner(
+            day: "2026-06-15",
+            deviceId: "my-whoop",
+            locked: true
+        )
+        let repeated = try dbq.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT generation FROM analysisDirtySource WHERE deviceId = ?",
+                arguments: [AnalysisInputSource.ownership]
+            )
+        }
+        XCTAssertEqual(repeated, 1)
+
+        try store.setDayOwner(
+            day: "2026-06-15",
+            deviceId: "my-whoop",
+            locked: false
+        )
+        let changed = try dbq.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT generation FROM analysisDirtySource WHERE deviceId = ?",
+                arguments: [AnalysisInputSource.ownership]
+            )
+        }
+        XCTAssertEqual(changed, 2)
     }
 
     // ah-delete (#616): deleteAllData(deviceId: "apple-health") clears every row stored under the

@@ -9,7 +9,7 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
     private let accountScopeHash = String(repeating: "d", count: 64)
 
     func testCanonicalChunkAppliesToIsolatedCloudSource() async throws {
-        let store = try await WhoopStore.inMemory()
+        let store = try await managedStore()
         let prepared = try XCTUnwrap(try makePreparedChunk(bpm: 68))
         let change = makeChange(for: prepared)
 
@@ -32,7 +32,7 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
     }
 
     func testPayloadWhoseContentDoesNotMatchChunkIdentityIsRejected() async throws {
-        let store = try await WhoopStore.inMemory()
+        let store = try await managedStore()
         let prepared = try XCTUnwrap(try makePreparedChunk(bpm: 68))
         let changedStream = ManagedChunkStreamPayload(
             streamKey: "heart_rate",
@@ -67,7 +67,7 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
     }
 
     func testDocumentFailsClosedWithoutDocumentRestorer() async throws {
-        let store = try await WhoopStore.inMemory()
+        let store = try await managedStore()
         let documentID = UUID()
         let digest = String(repeating: "b", count: 64)
         let updatedAt = "2026-09-03T00:00:00.000Z"
@@ -118,7 +118,7 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
     }
 
     func testDocumentUsesServerOperationVocabulary() async throws {
-        let store = try await WhoopStore.inMemory()
+        let store = try await managedStore()
         let restorer = DocumentRestoreSpy()
         let documentID = UUID()
         let digest = String(repeating: "c", count: 64)
@@ -175,8 +175,8 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
         XCTAssertEqual(operations, ["upsert", "tombstone"])
     }
 
-    func testJournalDocumentOutboxAndRestoreRoundTrip() async throws {
-        let source = try await WhoopStore.inMemory()
+    func testServerReadableOutboxSkipsEarlierEncryptedRowsAndRestoresWithoutEcho() async throws {
+        let source = try await managedStore()
         try await source.registryWriter.write { db in
             try db.execute(sql: """
                 INSERT INTO journal (
@@ -185,25 +185,47 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
                     'strap', '2026-09-04', 'late_caffeine', 1, 'after lunch', 2.5
                 )
                 """)
+            try db.execute(sql: """
+                INSERT INTO dayOwnership (day, deviceId, locked)
+                VALUES ('2026-09-11', 'strap', 1)
+                """)
+            try db.execute(sql: """
+                UPDATE managedDocumentDirty
+                SET updatedAtMs = CASE tableName
+                    WHEN 'journal' THEN 1
+                    WHEN 'dayOwnership' THEN 2
+                    ELSE updatedAtMs
+                END
+                """)
         }
         let sourceAdapter = try WhoopManagedDocumentAdapter(
             store: source,
             accountScopeHash: accountScopeHash
         )
-        let pendingDocuments = try await sourceAdapter.pendingDocuments(limit: 10)
+        let pendingDocuments = try await sourceAdapter.pendingDocuments(limit: 1)
         let pending = try XCTUnwrap(pendingDocuments.first)
-        XCTAssertEqual(pending.mutation.documentKind, .journal)
-        XCTAssertEqual(
-            pending.mutation.documentID.uuidString.lowercased(),
-            "a2810672-1c29-5e68-9ddd-45e8c3164500"
-        )
+        XCTAssertEqual(pending.mutation.documentKind, .dayOwnership)
+        XCTAssertEqual(pending.mutation.contentMode, "server_readable")
         XCTAssertEqual(pending.mutation.baseRevision, 0)
+        let encryptedBeforeAcknowledge = try await source.pendingManagedDocuments(
+            accountScopeHash: accountScopeHash,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        XCTAssertEqual(encryptedBeforeAcknowledge.map(\.tableName), ["journal"])
+
         let remote = try remoteDocument(for: pending.mutation)
         try await sourceAdapter.acknowledge(pending, remote: remote)
         let remaining = try await sourceAdapter.pendingDocuments(limit: 10)
         XCTAssertTrue(remaining.isEmpty)
+        let encryptedAfterAcknowledge = try await source.pendingManagedDocuments(
+            accountScopeHash: accountScopeHash,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        XCTAssertEqual(encryptedAfterAcknowledge, encryptedBeforeAcknowledge)
 
-        let destination = try await WhoopStore.inMemory()
+        let destination = try await managedStore()
         let destinationAdapter = try WhoopManagedDocumentAdapter(
             store: destination,
             accountScopeHash: accountScopeHash
@@ -220,56 +242,367 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
             try Row.fetchOne(
                 db,
                 sql: """
-                    SELECT answeredYes, notes, numericValue FROM journal
-                    WHERE deviceId = 'strap' AND day = '2026-09-04'
-                      AND question = 'late_caffeine'
+                    SELECT deviceId, locked FROM dayOwnership
+                    WHERE day = '2026-09-11'
                     """
             )
         }
-        XCTAssertEqual(restored?["answeredYes"] as Bool?, true)
-        XCTAssertEqual(restored?["notes"] as String?, "after lunch")
-        XCTAssertEqual(restored?["numericValue"] as Double?, 2.5)
+        XCTAssertEqual(restored?["deviceId"] as String?, "strap")
+        XCTAssertEqual(restored?["locked"] as Bool?, true)
         let destinationPending = try await destinationAdapter.pendingDocuments(
             limit: 10
         )
         XCTAssertTrue(destinationPending.isEmpty)
     }
 
-    func testPreferencesRestoreAppliesOnlyBackupWhitelist() async throws {
-        let source = try await WhoopStore.inMemory()
-        let payload = Data(
-            #"{"profile.age":34,"settings.schemaVersion":4,"units.system":"metric"}"#.utf8
+    func testEncryptedDocumentFailsClosedBeforeLaterServerReadableDocument() async throws {
+        let store = try await managedStore()
+        let adapter = try WhoopManagedDocumentAdapter(
+            store: store,
+            accountScopeHash: accountScopeHash
         )
-        try await source.stageManagedPreferences(payload, updatedAtMs: eventMs)
+        let applier = WhoopManagedRestoreApplier(
+            store: store,
+            documentRestore: adapter
+        )
+        let journalID = try XCTUnwrap(
+            UUID(uuidString: "11111111-1111-5111-8111-111111111111")
+        )
+        let encrypted = encryptedDocument(
+            kind: .journal,
+            documentID: journalID,
+            revision: 1
+        )
+        do {
+            try await applier.apply(
+                document: encrypted,
+                change: documentChange(encrypted, sequence: 1)
+            )
+            XCTFail("Expected unavailable client decryption to stop restore")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidConfiguration)
+        }
+
+        let ownership = try dayOwnershipDocument()
+        try await applier.apply(
+            document: ownership,
+            change: documentChange(ownership, sequence: 2)
+        )
+        let restored = try await store.registryWriter.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT deviceId, locked FROM dayOwnership
+                    WHERE day = '2026-09-11'
+                    """
+            )
+        }
+        XCTAssertEqual(restored?["deviceId"] as String?, "remote-band")
+        XCTAssertEqual(restored?["locked"] as Bool?, true)
+        let stateCount = try await store.registryWriter.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM managedDocumentState"
+            )
+        }
+        XCTAssertEqual(stateCount, 1)
+    }
+
+    func testEncryptedRestoreFailsClosedOnMalformedMetadataAndSensitivePlaintext() async throws {
+        let store = try await managedStore()
+        let adapter = try WhoopManagedDocumentAdapter(
+            store: store,
+            accountScopeHash: accountScopeHash
+        )
+        let applier = WhoopManagedRestoreApplier(
+            store: store,
+            documentRestore: adapter
+        )
+        let encrypted = encryptedDocument(
+            kind: .journal,
+            documentID: try XCTUnwrap(
+                UUID(uuidString: "33333333-3333-5333-8333-333333333333")
+            ),
+            revision: 1
+        )
+
+        do {
+            try await applier.apply(
+                document: encrypted,
+                change: documentChange(
+                    encrypted,
+                    metadataContentMode: "server_readable"
+                )
+            )
+            XCTFail("Expected mismatched encrypted metadata to fail closed")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let plaintextPayload: [String: ManagedDocumentJSONValue] = [
+            "secret": .string("not-server-readable"),
+        ]
+        let plaintextSensitive = ManagedDocument(
+            documentKind: .journal,
+            documentID: encrypted.documentID,
+            revision: 1,
+            originInstallationID: "ios-installation",
+            contentMode: "server_readable",
+            clientKeyID: nil,
+            contentSHA256: try canonicalDigest(plaintextPayload),
+            payloadJSON: plaintextPayload,
+            payloadCiphertextBase64: nil,
+            updatedAt: "2026-09-11T15:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+        do {
+            try await applier.apply(
+                document: plaintextSensitive,
+                change: documentChange(plaintextSensitive)
+            )
+            XCTFail("Expected plaintext sensitive document to fail closed")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+    }
+
+    func testEncryptedHydrationStopsRestoreWhilePlaintextHydrationIsRejected() async throws {
+        let store = try await managedStore()
+        try await store.replaceHydrationLogEntries(
+            [
+                HydrationLogEntry(
+                    id: "11111111-2222-4333-8444-555555555555",
+                    day: "2026-09-11",
+                    amountML: 237,
+                    loggedAt: 1_789_142_400
+                ),
+            ],
+            deviceId: "hydration",
+            day: "2026-09-11",
+            metricKey: "hydration"
+        )
+        let encryptedCandidates = try await store.pendingManagedDocuments(
+            accountScopeHash: accountScopeHash,
+            contentMode: .clientEncrypted,
+            limit: 1
+        )
+        let candidate = try XCTUnwrap(encryptedCandidates.first)
+        let adapter = try WhoopManagedDocumentAdapter(
+            store: store,
+            accountScopeHash: accountScopeHash
+        )
+        let emitted = try await adapter.pendingDocuments(limit: 10)
+        XCTAssertTrue(emitted.isEmpty)
+
+        let encrypted = try remoteDocument(
+            for: candidate,
+            kind: .hydration,
+            contentMode: "client_encrypted"
+        )
+        do {
+            try await adapter.apply(
+                document: encrypted,
+                change: documentChange(encrypted)
+            )
+            XCTFail("Expected unavailable client decryption to stop restore")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidConfiguration)
+        }
+
+        let plaintext = try remoteDocument(
+            for: candidate,
+            kind: .hydration,
+            contentMode: "server_readable"
+        )
+        do {
+            try await adapter.apply(
+                document: plaintext,
+                change: documentChange(plaintext)
+            )
+            XCTFail("Expected plaintext hydration restore to fail closed")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let retained = try await store.pendingManagedDocuments(
+            accountScopeHash: accountScopeHash,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        XCTAssertEqual(retained, [candidate])
+    }
+
+    func testRemoteConflictMapsToManagedStorageConflict() async throws {
+        let source = try await managedStore()
+        try await source.registryWriter.write { db in
+            try db.execute(sql: """
+                INSERT INTO dayOwnership (day, deviceId, locked)
+                VALUES ('2026-09-11', 'source', 1)
+                """)
+        }
         let sourceAdapter = try WhoopManagedDocumentAdapter(
             store: source,
             accountScopeHash: accountScopeHash
         )
         let pendingDocuments = try await sourceAdapter.pendingDocuments(limit: 1)
         let pending = try XCTUnwrap(pendingDocuments.first)
-        let remote = try remoteDocument(for: pending.mutation)
+        let firstRemote = try remoteDocument(for: pending.mutation)
 
-        let suite = "WhoopManagedSyncAdapterTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let destination = try await WhoopStore.inMemory()
+        let destination = try await managedStore()
         let destinationAdapter = try WhoopManagedDocumentAdapter(
             store: destination,
-            accountScopeHash: accountScopeHash,
-            preferencesDefaults: defaults
+            accountScopeHash: accountScopeHash
         )
         try await destinationAdapter.apply(
-            document: remote,
-            change: documentChange(remote)
+            document: firstRemote,
+            change: documentChange(firstRemote)
+        )
+        try await destination.registryWriter.write { db in
+            try db.execute(sql: """
+                UPDATE dayOwnership SET deviceId = 'local'
+                WHERE day = '2026-09-11'
+                """)
+        }
+
+        let remotePayload = dayOwnershipPayload(deviceID: "remote")
+        let secondRemote = ManagedDocument(
+            documentKind: .dayOwnership,
+            documentID: firstRemote.documentID,
+            revision: 2,
+            originInstallationID: "other-installation",
+            contentMode: "server_readable",
+            clientKeyID: nil,
+            contentSHA256: try canonicalDigest(remotePayload),
+            payloadJSON: remotePayload,
+            payloadCiphertextBase64: nil,
+            updatedAt: "2026-09-11T16:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+        do {
+            try await destinationAdapter.apply(
+                document: secondRemote,
+                change: documentChange(secondRemote)
+            )
+            XCTFail("Expected local generation conflict")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .conflict)
+        }
+
+        let retained = try await destination.registryWriter.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT owner.deviceId, state.remoteRevision,
+                           state.acknowledgedGeneration
+                    FROM dayOwnership AS owner
+                    JOIN managedDocumentState AS state
+                      ON state.tableName = 'dayOwnership'
+                     AND state.documentId = ?
+                    WHERE owner.day = '2026-09-11'
+                    """,
+                arguments: [firstRemote.documentID.uuidString.lowercased()]
+            )
+        }
+        XCTAssertEqual(retained?["deviceId"] as String?, "local")
+        XCTAssertEqual(retained?["remoteRevision"] as Int64?, 1)
+        XCTAssertEqual(retained?["acknowledgedGeneration"] as Int64?, 0)
+    }
+
+    func testMatchingUnknownOwnershipTombstoneRebasesPendingMutation() async throws {
+        let store = try await managedStore()
+        try await store.registryWriter.write { db in
+            try db.execute(sql: """
+                INSERT INTO dayOwnership (day, deviceId, locked)
+                VALUES ('2026-09-11', 'local', 1)
+                """)
+        }
+        let adapter = try WhoopManagedDocumentAdapter(
+            store: store,
+            accountScopeHash: accountScopeHash
+        )
+        let beforeCandidates = try await adapter.pendingDocuments(limit: 10)
+        let pendingBefore = try XCTUnwrap(beforeCandidates.first)
+        XCTAssertEqual(pendingBefore.mutation.baseRevision, 0)
+
+        let tombstone = dayOwnershipTombstone(
+            documentID: pendingBefore.mutation.documentID,
+            revision: 4
+        )
+        try await adapter.apply(
+            document: tombstone,
+            change: documentChange(tombstone)
+        )
+        try await adapter.apply(
+            document: tombstone,
+            change: documentChange(tombstone)
+        )
+        let newerTombstone = dayOwnershipTombstone(
+            documentID: pendingBefore.mutation.documentID,
+            revision: 7
+        )
+        try await adapter.apply(
+            document: newerTombstone,
+            change: documentChange(newerTombstone)
         )
 
-        XCTAssertEqual(defaults.integer(forKey: "profile.age"), 34)
-        XCTAssertEqual(defaults.string(forKey: "units.system"), "metric")
-        XCTAssertNil(defaults.object(forKey: "managedCloud.automatic.v1"))
-        let destinationPending = try await destinationAdapter.pendingDocuments(
-            limit: 10
+        let afterCandidates = try await adapter.pendingDocuments(limit: 10)
+        let pendingAfter = try XCTUnwrap(afterCandidates.first)
+        XCTAssertEqual(
+            pendingAfter.localIdentifier,
+            pendingBefore.localIdentifier
         )
-        XCTAssertTrue(destinationPending.isEmpty)
+        XCTAssertEqual(pendingAfter.generation, pendingBefore.generation)
+        XCTAssertEqual(
+            pendingAfter.mutation.documentID,
+            pendingBefore.mutation.documentID
+        )
+        XCTAssertEqual(
+            pendingAfter.mutation.payloadJSON,
+            pendingBefore.mutation.payloadJSON
+        )
+        XCTAssertEqual(
+            pendingAfter.mutation.contentSHA256,
+            pendingBefore.mutation.contentSHA256
+        )
+        XCTAssertEqual(pendingAfter.mutation.baseRevision, 7)
+        XCTAssertEqual(
+            try remoteDocument(for: pendingAfter.mutation).revision,
+            8
+        )
+    }
+
+    func testUnknownOwnershipTombstoneDoesNotBlockUnrelatedLocalOwnership() async throws {
+        let store = try await managedStore()
+        try await store.registryWriter.write { db in
+            try db.execute(sql: """
+                INSERT INTO dayOwnership (day, deviceId, locked)
+                VALUES ('2026-09-11', 'local', 1)
+                """)
+        }
+        let adapter = try WhoopManagedDocumentAdapter(
+            store: store,
+            accountScopeHash: accountScopeHash
+        )
+        let pendingBefore = try await adapter.pendingDocuments(limit: 10)
+        XCTAssertEqual(pendingBefore.count, 1)
+
+        let documentID = try XCTUnwrap(
+            UUID(uuidString: "99999999-8888-5777-8666-555555555555")
+        )
+        let tombstone = dayOwnershipTombstone(
+            documentID: documentID,
+            revision: 1
+        )
+
+        try await adapter.apply(
+            document: tombstone,
+            change: documentChange(tombstone)
+        )
+
+        let pendingAfter = try await adapter.pendingDocuments(limit: 10)
+        XCTAssertEqual(pendingAfter, pendingBefore)
     }
 
     private func makePreparedChunk(bpm: Int64) throws -> ManagedPreparedChunk? {
@@ -343,11 +676,209 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
         )
     }
 
+    private func remoteDocument(
+        for candidate: ManagedLocalDocumentCandidate,
+        kind: ManagedDocumentKind,
+        contentMode: String
+    ) throws -> ManagedDocument {
+        let payloadData = try XCTUnwrap(candidate.payloadJSON)
+        let payload = try JSONDecoder().decode(
+            [String: ManagedDocumentJSONValue].self,
+            from: payloadData
+        )
+        let documentID = ManagedDocumentStableIdentifier.uuid(
+            documentKind: kind.rawValue,
+            tableName: candidate.tableName,
+            keyJSON: candidate.keyJSON
+        )
+        if contentMode == "client_encrypted" {
+            let ciphertext = Data("opaque-test-ciphertext".utf8)
+            return ManagedDocument(
+                documentKind: kind,
+                documentID: documentID,
+                revision: 1,
+                originInstallationID: "ios-installation",
+                contentMode: contentMode,
+                clientKeyID: UUID(
+                    uuidString: "11111111-2222-4333-8444-555555555555"
+                ),
+                contentSHA256: ManagedDigest.sha256(ciphertext),
+                payloadJSON: nil,
+                payloadCiphertextBase64: ciphertext.base64EncodedString(),
+                updatedAt: "2026-09-11T15:00:00.000Z",
+                deletedAt: nil,
+                duplicate: false
+            )
+        }
+        return ManagedDocument(
+            documentKind: kind,
+            documentID: documentID,
+            revision: 1,
+            originInstallationID: "ios-installation",
+            contentMode: contentMode,
+            clientKeyID: nil,
+            contentSHA256: try canonicalDigest(payload),
+            payloadJSON: payload,
+            payloadCiphertextBase64: nil,
+            updatedAt: "2026-09-11T15:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+    }
+
+    private func dayOwnershipTombstone(
+        documentID: UUID,
+        revision: Int64
+    ) -> ManagedDocument {
+        let digest = ManagedDigest.sha256(
+            Data(
+                (
+                    "deleted:day_ownership:"
+                        + "\(documentID.uuidString.lowercased()):\(revision)"
+                ).utf8
+            )
+        )
+        return ManagedDocument(
+            documentKind: .dayOwnership,
+            documentID: documentID,
+            revision: revision,
+            originInstallationID: "other-installation",
+            contentMode: "server_readable",
+            clientKeyID: nil,
+            contentSHA256: digest,
+            payloadJSON: nil,
+            payloadCiphertextBase64: nil,
+            updatedAt: "2026-09-11T16:00:00.000Z",
+            deletedAt: "2026-09-11T16:00:00.000Z",
+            duplicate: false
+        )
+    }
+
+    private func managedStore() async throws -> WhoopStore {
+        let store = try await WhoopStore.inMemory()
+        try await store.activateManagedDocumentProfile(
+            accountScopeHash: accountScopeHash,
+            updatedAtMs: 1
+        )
+        return store
+    }
+
+    private func dayOwnershipPayload(
+        deviceID: String
+    ) -> [String: ManagedDocumentJSONValue] {
+        [
+            "schema_version": .integer(1),
+            "table": .string("dayOwnership"),
+            "key": .object([
+                "day": .string("2026-09-11"),
+            ]),
+            "record": .object([
+                "day": .string("2026-09-11"),
+                "deviceId": .string(deviceID),
+                "locked": .integer(1),
+            ]),
+        ]
+    }
+
+    private func dayOwnershipDocument() throws -> ManagedDocument {
+        let payload = dayOwnershipPayload(deviceID: "remote-band")
+        let key: [String: ManagedDocumentJSONValue] = [
+            "day": .string("2026-09-11"),
+        ]
+        return ManagedDocument(
+            documentKind: .dayOwnership,
+            documentID: ManagedDocumentStableIdentifier.uuid(
+                documentKind: ManagedDocumentKind.dayOwnership.rawValue,
+                tableName: "dayOwnership",
+                keyJSON: try canonicalData(key)
+            ),
+            revision: 1,
+            originInstallationID: "ios-installation",
+            contentMode: "server_readable",
+            clientKeyID: nil,
+            contentSHA256: try canonicalDigest(payload),
+            payloadJSON: payload,
+            payloadCiphertextBase64: nil,
+            updatedAt: "2026-09-11T15:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+    }
+
+    private func encryptedDocument(
+        kind: ManagedDocumentKind,
+        documentID: UUID,
+        revision: Int64,
+        deleted: Bool = false
+    ) -> ManagedDocument {
+        let updatedAt = "2026-09-11T15:00:00.000Z"
+        if deleted {
+            let digest = ManagedDigest.sha256(
+                Data(
+                    (
+                        "deleted:\(kind.rawValue):"
+                            + "\(documentID.uuidString.lowercased()):\(revision)"
+                    ).utf8
+                )
+            )
+            return ManagedDocument(
+                documentKind: kind,
+                documentID: documentID,
+                revision: revision,
+                originInstallationID: "ios-installation",
+                contentMode: "client_encrypted",
+                clientKeyID: nil,
+                contentSHA256: digest,
+                payloadJSON: nil,
+                payloadCiphertextBase64: nil,
+                updatedAt: updatedAt,
+                deletedAt: updatedAt,
+                duplicate: false
+            )
+        }
+
+        let ciphertext = Data(
+            "noop-encrypted-\(kind.rawValue)-payload".utf8
+        )
+        return ManagedDocument(
+            documentKind: kind,
+            documentID: documentID,
+            revision: revision,
+            originInstallationID: "ios-installation",
+            contentMode: "client_encrypted",
+            clientKeyID: UUID(
+                uuidString: "44444444-4444-5444-8444-444444444444"
+            ),
+            contentSHA256: ManagedDigest.sha256(ciphertext),
+            payloadJSON: nil,
+            payloadCiphertextBase64: ciphertext.base64EncodedString(),
+            updatedAt: updatedAt,
+            deletedAt: nil,
+            duplicate: false
+        )
+    }
+
+    private func canonicalDigest(
+        _ payload: [String: ManagedDocumentJSONValue]
+    ) throws -> String {
+        ManagedDigest.sha256(try canonicalData(payload))
+    }
+
+    private func canonicalData(
+        _ payload: [String: ManagedDocumentJSONValue]
+    ) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(payload)
+    }
+
     private func documentChange(
-        _ document: ManagedDocument
+        _ document: ManagedDocument,
+        sequence: Int64 = 1,
+        metadataContentMode: String? = nil
     ) -> ManagedChangeFeed.Change {
         ManagedChangeFeed.Change(
-            sequence: 1,
+            sequence: sequence,
             resourceKind: "document",
             resourceID: document.documentID,
             operation: document.deletedAt == nil ? "upsert" : "tombstone",
@@ -360,7 +891,7 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
                 documentKind: document.documentKind,
                 documentID: document.documentID,
                 revision: document.revision,
-                contentMode: document.contentMode,
+                contentMode: metadataContentMode ?? document.contentMode,
                 clientKeyID: document.clientKeyID,
                 updatedAt: document.updatedAt,
                 deletedAt: document.deletedAt

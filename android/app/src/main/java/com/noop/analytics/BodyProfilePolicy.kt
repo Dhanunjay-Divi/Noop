@@ -24,6 +24,25 @@ object BodyProfilePolicy {
     private val plausibleHeightCm = 100.0..250.0
     private val plausibleBmi = 5.0..100.0
 
+    /**
+     * Whether a stored or imported BMI may be presented as this user's adult screening metric.
+     *
+     * The raw record remains available to the import/storage layer when this returns false.
+     */
+    fun canPresentAdultBmi(
+        age: Int,
+        currentWeightKg: Double,
+        heightCm: Double,
+        ageConfirmed: Boolean,
+        heightConfirmed: Boolean,
+        currentWeightConfirmed: Boolean,
+    ): Boolean = adultBmi(
+        age = age,
+        weightKg = currentWeightKg,
+        heightCm = heightCm,
+        measurementsConfirmed = ageConfirmed && heightConfirmed && currentWeightConfirmed,
+    ) != null
+
     fun adultBmi(
         age: Int,
         weightKg: Double,

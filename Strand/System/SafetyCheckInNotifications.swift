@@ -8,7 +8,8 @@ import UserNotifications
 /// health data, or calls emergency services. Those constraints are repeated in the UI and pure policy.
 @MainActor
 enum SafetyCheckInNotifications {
-    static let requestIdentifier = "noop.safety.personal-check-in"
+    nonisolated static let requestIdentifier =
+        "noop.safety.personal-check-in"
 
     enum ScheduleOutcome: Equatable {
         case scheduled

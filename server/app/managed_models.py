@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
-from typing import Literal
+import unicodedata
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -250,6 +251,93 @@ MANAGED_DOCUMENT_KINDS = frozenset(
         "other",
     }
 )
+MANAGED_SERVER_READABLE_DOCUMENT_KINDS = frozenset(
+    {
+        "day_ownership",
+    }
+)
+MANAGED_CLIENT_ENCRYPTED_DOCUMENT_KINDS = (
+    MANAGED_DOCUMENT_KINDS - MANAGED_SERVER_READABLE_DOCUMENT_KINDS
+)
+MANAGED_DOCUMENT_CONTENT_MODES = {
+    kind: (
+        "server_readable"
+        if kind in MANAGED_SERVER_READABLE_DOCUMENT_KINDS
+        else "client_encrypted"
+    )
+    for kind in MANAGED_DOCUMENT_KINDS
+}
+
+
+def validate_managed_server_readable_payload(
+    document_kind: str,
+    payload_json: dict[str, Any],
+) -> None:
+    invalid = ValueError(
+        "server-readable document payload does not match its registered schema"
+    )
+    if (
+        document_kind != "day_ownership"
+        or not isinstance(payload_json, dict)
+        or set(payload_json)
+        != {
+            "schema_version",
+            "table",
+            "key",
+            "record",
+        }
+    ):
+        raise invalid
+
+    schema_version = payload_json.get("schema_version")
+    key = payload_json.get("key")
+    record = payload_json.get("record")
+    if (
+        type(schema_version) is not int
+        or schema_version != 1
+        or payload_json.get("table") != "dayOwnership"
+        or not isinstance(key, dict)
+        or set(key) != {"day"}
+        or not isinstance(record, dict)
+        or set(record) != {"day", "deviceId", "locked"}
+    ):
+        raise invalid
+
+    key_day = key.get("day")
+    record_day = record.get("day")
+    if (
+        not isinstance(key_day, str)
+        or key_day != record_day
+        or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", key_day) is None
+    ):
+        raise invalid
+    try:
+        parsed_day = date.fromisoformat(key_day)
+    except ValueError:
+        raise invalid from None
+    if not 2000 <= parsed_day.year <= 2099 or parsed_day.isoformat() != key_day:
+        raise invalid
+
+    device_id = record.get("deviceId")
+    try:
+        device_id_bytes = (
+            len(device_id.encode("utf-8")) if isinstance(device_id, str) else 0
+        )
+    except UnicodeEncodeError:
+        raise invalid from None
+    if (
+        not isinstance(device_id, str)
+        or not device_id
+        or device_id.strip() != device_id
+        or device_id_bytes > 256
+        or any(unicodedata.category(character) == "Cc" for character in device_id)
+    ):
+        raise invalid
+
+    locked = record.get("locked")
+    if not (type(locked) is bool or (type(locked) is int and locked in {0, 1})):
+        raise invalid
+
 
 ManagedDocumentKind = Literal[
     "automation",
@@ -297,6 +385,12 @@ class ManagedDocumentMutation(StrictModel):
     @model_validator(mode="after")
     def valid_payload(self) -> "ManagedDocumentMutation":
         self.updated_at = _utc(self.updated_at)
+        expected_content_mode = MANAGED_DOCUMENT_CONTENT_MODES[self.document_kind]
+        if self.content_mode != expected_content_mode:
+            raise ValueError(
+                f"{self.document_kind} documents require "
+                f"{expected_content_mode} content"
+            )
         if self.deleted:
             if (
                 self.client_key_id is not None
@@ -312,6 +406,10 @@ class ManagedDocumentMutation(StrictModel):
                 or self.payload_ciphertext_base64 is not None
             ):
                 raise ValueError("server-readable documents require only payload_json")
+            validate_managed_server_readable_payload(
+                self.document_kind,
+                self.payload_json,
+            )
         elif (
             self.client_key_id is None
             or self.payload_json is not None

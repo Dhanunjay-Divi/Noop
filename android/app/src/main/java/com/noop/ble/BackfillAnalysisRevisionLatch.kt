@@ -127,28 +127,6 @@ internal class BackfillAnalysisRevisionLatch {
 }
 
 /**
- * Runs one source's fingerprint-gated pass. The success-only callbacks are structurally unreachable when
- * fingerprinting or analysis throws, and the watermark is persisted last as the pass's commit record.
- */
-internal suspend fun runFingerprintGatedBackfillAnalysis(
-    readFingerprint: suspend () -> String,
-    readWatermark: () -> String?,
-    analyze: suspend () -> Unit,
-    afterAnalysis: suspend () -> Unit,
-    persistWatermark: (String) -> Unit,
-    onUpToDate: () -> Unit = {},
-) {
-    val fingerprint = readFingerprint()
-    if (fingerprint == readWatermark()) {
-        onUpToDate()
-        return
-    }
-    analyze()
-    afterAnalysis()
-    persistWatermark(fingerprint)
-}
-
-/**
  * Coroutine owner for [BackfillAnalysisRevisionLatch].
  *
  * The launch is two-phase: a claim is reserved first, then [CoroutineStart.UNDISPATCHED] proves the body
@@ -192,7 +170,8 @@ internal class BackfillAnalysisWorker(
 
     /**
      * Re-enqueues durable sources after process/service recreation. The active source should be supplied
-     * last so the shared persisted fingerprint finishes on the source the UI currently reads.
+     * last to preserve deterministic active-source ordering; each source's analysis generation is
+     * acknowledged independently by the processor.
      */
     fun resume(deviceIds: Collection<String>): List<BackfillAnalysisRevisionLatch.Revision> {
         val revisions = mutableListOf<BackfillAnalysisRevisionLatch.Revision>()

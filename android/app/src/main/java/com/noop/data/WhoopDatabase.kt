@@ -6,9 +6,11 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import java.time.LocalDate
+import java.time.ZoneId
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 47
+const val NOOP_DATABASE_SCHEMA_VERSION = 51
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -27,6 +29,7 @@ const val NOOP_DATABASE_SCHEMA_VERSION = 47
 @Database(
     entities = [
         DeviceRow::class,
+        AnalysisDirtySourceRow::class,
         HrSample::class,
         RrInterval::class,
         EventRow::class,
@@ -41,6 +44,7 @@ const val NOOP_DATABASE_SCHEMA_VERSION = 47
         DailyMetric::class,
         SleepSession::class,
         MetricSeriesRow::class,
+        HydrationEntryRow::class,
         JournalEntry::class,
         WorkoutRow::class,
         DismissedWorkout::class,
@@ -71,6 +75,7 @@ const val NOOP_DATABASE_SCHEMA_VERSION = 47
         ManagedChangeCursorEntity::class,
         ManagedAppliedChangeEntity::class,
         ManagedDocumentDirtyEntity::class,
+        ManagedLocalProfileEntity::class,
         ManagedDocumentStateEntity::class,
         ManagedDocumentApplyGuardEntity::class,
         ManagedSnapshotRestoreEntity::class,
@@ -1109,7 +1114,7 @@ abstract class WhoopDatabase : RoomDatabase() {
         internal val MIGRATION_44_45 = object : Migration(44, 45) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 for (statement in MANAGED_DOCUMENT_MIGRATION_SQL) db.execSQL(statement)
-                installManagedDocumentTriggers(db, seedExisting = true)
+                installLegacyManagedDocumentTriggers(db, seedExisting = true)
             }
         }
 
@@ -1145,6 +1150,366 @@ abstract class WhoopDatabase : RoomDatabase() {
         internal val MIGRATION_46_47 = object : Migration(46, 47) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(HEALTH_CONNECT_BMI_REBUILD_MIGRATION_SQL)
+            }
+        }
+
+        /**
+         * v47 -> v48: replace launch/resume's history-sized COUNT/MAX fingerprint with a durable
+         * per-source generation ledger. Analysis snapshots but does not clear `generation`, then advances
+         * `acknowledgedGeneration` only after the complete persistence boundary succeeds. Process death or
+         * partial failure before acknowledgement therefore remains dirty, while concurrent writes advance
+         * past the claimed generation.
+         *
+         * Score-bearing INSERT/DELETE/UPDATE triggers advance existing rows with UPDATE, then create a
+         * missing row through INSERT...SELECT...WHERE NOT EXISTS. There is no trigger-level conflict
+         * clause for an outer SQLite UPSERT/REPLACE policy to override.
+         *
+         * Existing source IDs are seeded from the same ten raw tables the old fingerprint scanned.
+         * Housekeeping-only `synced` updates and non-scoring battery/raw-waveform writes do not mark.
+         */
+        internal const val CREATE_ANALYSIS_DIRTY_SOURCE_SQL =
+            "CREATE TABLE IF NOT EXISTS `analysisDirtySource` (" +
+                "`deviceId` TEXT NOT NULL, `generation` INTEGER NOT NULL, " +
+                "`acknowledgedGeneration` INTEGER NOT NULL, " +
+                "`earliestAffectedTs` INTEGER, `latestAffectedTs` INTEGER, " +
+                "PRIMARY KEY(`deviceId`))"
+
+        internal fun analysisNonBlankDeviceIdSQL(expression: String): String =
+            "length(trim($expression, char(9) || char(10) || char(11) || " +
+                "char(12) || char(13) || ' ')) > 0"
+
+        internal val SEED_ANALYSIS_DIRTY_SOURCE_SQL = """
+            INSERT INTO `analysisDirtySource`
+                (`deviceId`, `generation`, `acknowledgedGeneration`,
+                 `earliestAffectedTs`, `latestAffectedTs`)
+            SELECT `deviceId`, 1, 0, MIN(`ts`), MAX(`ts`) FROM (
+                SELECT `deviceId`, `ts` FROM `hrSample`
+                UNION ALL SELECT `deviceId`, `ts` FROM `ppgHrSample`
+                UNION ALL SELECT `deviceId`, `ts` FROM `rrInterval`
+                UNION ALL SELECT `deviceId`, `ts` FROM `gravitySample`
+                UNION ALL SELECT `deviceId`, `ts` FROM `respSample`
+                UNION ALL SELECT `deviceId`, `ts` FROM `skinTempSample`
+                UNION ALL SELECT `deviceId`, `ts` FROM `spo2Sample`
+                UNION ALL SELECT `deviceId`, `ts` FROM `stepSample`
+                UNION ALL SELECT `deviceId`, `ts` FROM `sleepStateSample`
+                UNION ALL SELECT `deviceId`, `ts` FROM `event`
+            ) AS `source`
+            WHERE ${analysisNonBlankDeviceIdSQL("`deviceId`")}
+            GROUP BY `deviceId`
+        """.trimIndent()
+
+        internal data class AnalysisDirtyTriggerSpec(
+            val table: String,
+            val scoreColumns: List<String>,
+        )
+
+        internal val ANALYSIS_DIRTY_TRIGGER_SPECS = listOf(
+            AnalysisDirtyTriggerSpec("hrSample", listOf("deviceId", "ts", "bpm")),
+            AnalysisDirtyTriggerSpec(
+                "ppgHrSample",
+                listOf("deviceId", "ts", "bpm", "conf"),
+            ),
+            AnalysisDirtyTriggerSpec(
+                "rrInterval",
+                listOf("deviceId", "ts", "rrMs", "seq", "tsSuspect", "ord", "srcChannel"),
+            ),
+            AnalysisDirtyTriggerSpec(
+                "gravitySample",
+                listOf("deviceId", "ts", "x", "y", "z"),
+            ),
+            AnalysisDirtyTriggerSpec("respSample", listOf("deviceId", "ts", "raw")),
+            AnalysisDirtyTriggerSpec("skinTempSample", listOf("deviceId", "ts", "raw")),
+            AnalysisDirtyTriggerSpec("spo2Sample", listOf("deviceId", "ts", "red", "ir")),
+            AnalysisDirtyTriggerSpec(
+                "stepSample",
+                listOf("deviceId", "ts", "counter", "activityClass"),
+            ),
+            AnalysisDirtyTriggerSpec(
+                "sleepStateSample",
+                listOf("deviceId", "ts", "state"),
+            ),
+            AnalysisDirtyTriggerSpec(
+                "event",
+                listOf("deviceId", "ts", "kind", "payloadJSON"),
+            ),
+        )
+
+        private fun analysisDirtyAdvanceSQL(
+            deviceExpression: String,
+            earliestAffectedExpression: String,
+            latestAffectedExpression: String,
+            additionalPredicate: String = "1",
+        ): String {
+            val nonBlank = analysisNonBlankDeviceIdSQL(deviceExpression)
+            val predicate = "($nonBlank) AND ($additionalPredicate)"
+            return """
+                UPDATE `analysisDirtySource`
+                SET `generation` = `generation` + 1,
+                    `earliestAffectedTs` = CASE
+                        WHEN `earliestAffectedTs` IS NULL THEN $earliestAffectedExpression
+                        ELSE MIN(`earliestAffectedTs`, $earliestAffectedExpression)
+                    END,
+                    `latestAffectedTs` = CASE
+                        WHEN `latestAffectedTs` IS NULL THEN $latestAffectedExpression
+                        ELSE MAX(`latestAffectedTs`, $latestAffectedExpression)
+                    END
+                WHERE `deviceId` = $deviceExpression
+                  AND $predicate;
+                INSERT INTO `analysisDirtySource`
+                    (`deviceId`, `generation`, `acknowledgedGeneration`,
+                     `earliestAffectedTs`, `latestAffectedTs`)
+                SELECT $deviceExpression, 1, 0,
+                       $earliestAffectedExpression, $latestAffectedExpression
+                WHERE $predicate
+                  AND NOT EXISTS (
+                      SELECT 1 FROM `analysisDirtySource`
+                      WHERE `deviceId` = $deviceExpression
+                  );
+            """.trimIndent()
+        }
+
+        internal fun analysisDirtySourceTriggerSQL(): List<String> =
+            ANALYSIS_DIRTY_TRIGGER_SPECS.flatMap { spec ->
+                val prefix = "analysis_dirty_${spec.table}"
+                val updateColumns = spec.scoreColumns.joinToString(", ") { "`$it`" }
+                listOf(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `${prefix}_insert`
+                        AFTER INSERT ON `${spec.table}`
+                        BEGIN
+                            ${
+                                analysisDirtyAdvanceSQL(
+                                    "NEW.`deviceId`",
+                                    "NEW.`ts`",
+                                    "NEW.`ts`",
+                                )
+                            }
+                        END
+                    """.trimIndent(),
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `${prefix}_delete`
+                        AFTER DELETE ON `${spec.table}`
+                        BEGIN
+                            ${
+                                analysisDirtyAdvanceSQL(
+                                    "OLD.`deviceId`",
+                                    "OLD.`ts`",
+                                    "OLD.`ts`",
+                                )
+                            }
+                        END
+                    """.trimIndent(),
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `${prefix}_update`
+                        AFTER UPDATE OF $updateColumns ON `${spec.table}`
+                        BEGIN
+                            ${
+                                analysisDirtyAdvanceSQL(
+                                    "OLD.`deviceId`",
+                                    "CASE WHEN NEW.`deviceId` = OLD.`deviceId` " +
+                                        "THEN MIN(OLD.`ts`, NEW.`ts`) ELSE OLD.`ts` END",
+                                    "CASE WHEN NEW.`deviceId` = OLD.`deviceId` " +
+                                        "THEN MAX(OLD.`ts`, NEW.`ts`) ELSE OLD.`ts` END",
+                                )
+                            }
+                            ${
+                                analysisDirtyAdvanceSQL(
+                                    "NEW.`deviceId`",
+                                    "NEW.`ts`",
+                                    "NEW.`ts`",
+                                    "NEW.`deviceId` != OLD.`deviceId`",
+                                )
+                            }
+                        END
+                    """.trimIndent(),
+                )
+            }
+
+        internal fun installAnalysisDirtySourceTriggers(db: SupportSQLiteDatabase) {
+            for (statement in analysisDirtySourceTriggerSQL()) db.execSQL(statement)
+        }
+
+        internal val MIGRATION_47_48 = object : Migration(47, 48) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(CREATE_ANALYSIS_DIRTY_SOURCE_SQL)
+                db.execSQL(SEED_ANALYSIS_DIRTY_SOURCE_SQL)
+                installAnalysisDirtySourceTriggers(db)
+            }
+        }
+
+        /**
+         * v48 -> v49: editable local hydration rows. The existing scalar stays authoritative during
+         * migration; only canonical, positive, integral, bounded NOOP-local totals receive one
+         * deterministic legacy row. Health Connect remains in its separate source partition.
+         *
+         * No managed-document or upload trigger is installed for this table. Managed hydration stays
+         * behind its existing encryption/key-recovery/product gates.
+         */
+        internal val HYDRATION_ENTRY_MIGRATION_SQL = listOf(
+            """
+                CREATE TABLE IF NOT EXISTS `hydrationEntry` (
+                    `id` TEXT NOT NULL,
+                    `deviceId` TEXT NOT NULL,
+                    `day` TEXT NOT NULL,
+                    `amountML` INTEGER NOT NULL,
+                    `loggedAt` INTEGER NOT NULL,
+                    PRIMARY KEY(`id`)
+                )
+            """.trimIndent(),
+            """
+                CREATE INDEX IF NOT EXISTS `idx_hydrationEntry_device_day_loggedAt`
+                ON `hydrationEntry` (`deviceId`, `day`, `loggedAt`)
+            """.trimIndent(),
+        )
+
+        internal val HYDRATION_ENTRY_LEGACY_SELECT_SQL = """
+            SELECT
+                printf(
+                    '00000000-0000-5000-8000-%012x',
+                    `rowid`
+                ),
+                `deviceId`,
+                `day`,
+                CAST(`value` AS INTEGER)
+            FROM `metricSeries`
+            WHERE `deviceId` = '${HydrationEntryContract.SOURCE_ID}'
+              AND `key` = '${HydrationEntryContract.METRIC_KEY}'
+              AND `day` = date(`day`, '+0 days')
+              AND typeof(`value`) IN ('integer', 'real')
+              AND `value` > 0
+              AND `value` <= ${HydrationEntryContract.MAX_DAY_ML}
+              AND `value` = CAST(`value` AS INTEGER)
+        """.trimIndent()
+
+        internal const val HYDRATION_ENTRY_LEGACY_INSERT_SQL =
+            "INSERT INTO `hydrationEntry` (`id`, `deviceId`, `day`, `amountML`, `loggedAt`) " +
+                "VALUES (?, ?, ?, ?, ?)"
+
+        /**
+         * Pick an actual instant at local noon on [day]. A fixed UTC timestamp cannot preserve one
+         * represented local day across extreme offsets (UTC+14 would roll noon UTC into tomorrow).
+         * A civil day skipped by a timezone transition has no valid instant, so migration leaves that
+         * scalar untouched rather than creating an entry assigned to a different local date.
+         */
+        internal fun legacyHydrationLoggedAt(day: String, zoneId: ZoneId): Long? {
+            val localDay = runCatching { LocalDate.parse(day) }.getOrNull() ?: return null
+            if (localDay.toString() != day) return null
+            val localNoon = runCatching {
+                localDay.atTime(12, 0).atZone(zoneId)
+            }.getOrNull() ?: return null
+            return localNoon.takeIf { it.toLocalDate() == localDay }?.toEpochSecond()
+        }
+
+        private fun migrateLegacyHydrationEntries(
+            db: SupportSQLiteDatabase,
+            zoneId: ZoneId,
+        ) {
+            db.query(HYDRATION_ENTRY_LEGACY_SELECT_SQL).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val day = cursor.getString(2)
+                    val loggedAt = legacyHydrationLoggedAt(day, zoneId) ?: continue
+                    db.execSQL(
+                        HYDRATION_ENTRY_LEGACY_INSERT_SQL,
+                        arrayOf<Any?>(
+                            cursor.getString(0),
+                            cursor.getString(1),
+                            day,
+                            cursor.getInt(3),
+                            loggedAt,
+                        ),
+                    )
+                }
+            }
+        }
+
+        internal val MIGRATION_48_49 = object : Migration(48, 49) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in HYDRATION_ENTRY_MIGRATION_SQL) db.execSQL(statement)
+                migrateLegacyHydrationEntries(db, ZoneId.systemDefault())
+            }
+        }
+
+        /**
+         * v49 -> v50: partition managed-document mutations by the account that was active when the
+         * mutation occurred. Legacy rows have no trustworthy owner, so they remain under one random
+         * quarantine profile and are excluded from every account-scoped upload. Local records are never
+         * deleted. A later mutation invalidates stale upload intent from other accounts before recording
+         * the current account's generation.
+         */
+        internal val MANAGED_LOCAL_PROFILE_MIGRATION_SQL: List<String> = listOf(
+            """
+                CREATE TABLE IF NOT EXISTS `managedLocalProfile` (
+                    `bindingId` INTEGER NOT NULL,
+                    `localProfileId` TEXT NOT NULL,
+                    `accountScopeHash` TEXT,
+                    `updatedAtMs` INTEGER NOT NULL,
+                    PRIMARY KEY(`bindingId`)
+                )
+            """.trimIndent(),
+            """
+                INSERT OR IGNORE INTO `managedLocalProfile` (
+                    `bindingId`, `localProfileId`, `accountScopeHash`, `updatedAtMs`
+                )
+                SELECT
+                    1,
+                    lower(hex(randomblob(16))),
+                    NULL,
+                    CAST(strftime('%s', 'now') AS INTEGER) * 1000
+            """.trimIndent(),
+            "ALTER TABLE `managedDocumentDirty` RENAME TO `managedDocumentDirtyLegacy`",
+            """
+                CREATE TABLE IF NOT EXISTS `managedDocumentDirty` (
+                    `localProfileId` TEXT NOT NULL,
+                    `tableName` TEXT NOT NULL,
+                    `localKey` TEXT NOT NULL,
+                    `documentKind` TEXT NOT NULL,
+                    `generation` INTEGER NOT NULL,
+                    `operation` TEXT NOT NULL,
+                    `updatedAtMs` INTEGER NOT NULL,
+                    `payloadJSON` TEXT,
+                    PRIMARY KEY(`localProfileId`, `tableName`, `localKey`)
+                )
+            """.trimIndent(),
+            """
+                INSERT INTO `managedDocumentDirty` (
+                    `localProfileId`, `tableName`, `localKey`, `documentKind`,
+                    `generation`, `operation`, `updatedAtMs`, `payloadJSON`
+                )
+                SELECT profile.`localProfileId`, legacy.`tableName`, legacy.`localKey`,
+                       legacy.`documentKind`, legacy.`generation`, legacy.`operation`,
+                       legacy.`updatedAtMs`, legacy.`payloadJSON`
+                FROM `managedDocumentDirtyLegacy` AS legacy
+                JOIN `managedLocalProfile` AS profile ON profile.`bindingId` = 1
+            """.trimIndent(),
+            "DROP TABLE `managedDocumentDirtyLegacy`",
+            """
+                CREATE INDEX IF NOT EXISTS `idx_managedDocumentDirty_order`
+                ON `managedDocumentDirty` (
+                    `localProfileId`, `updatedAtMs`, `tableName`, `localKey`
+                )
+            """.trimIndent(),
+        )
+
+        internal val MIGRATION_49_50 = object : Migration(49, 50) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                dropManagedDocumentTriggers(db)
+                for (statement in MANAGED_LOCAL_PROFILE_MIGRATION_SQL) db.execSQL(statement)
+                installManagedDocumentTriggers(db)
+            }
+        }
+
+        internal val MANAGED_CHANGE_FEED_CAPABILITY_MIGRATION_SQL = listOf(
+            "ALTER TABLE `managedChangeCursor` ADD COLUMN " +
+                "`changeFeedCapabilityVersion` INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE `managedSnapshotRestore` ADD COLUMN " +
+                "`changeFeedCapabilityVersion` INTEGER NOT NULL DEFAULT 0",
+        )
+
+        internal val MIGRATION_50_51 = object : Migration(50, 51) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in MANAGED_CHANGE_FEED_CAPABILITY_MIGRATION_SQL) {
+                    db.execSQL(statement)
+                }
             }
         }
 
@@ -1194,7 +1559,7 @@ abstract class WhoopDatabase : RoomDatabase() {
             ManagedDocumentTriggerSpec("dayOwnership", "day_ownership", listOf("day")),
         )
 
-        internal fun installManagedDocumentTriggers(
+        private fun installLegacyManagedDocumentTriggers(
             db: SupportSQLiteDatabase,
             seedExisting: Boolean = false,
         ) {
@@ -1212,7 +1577,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                         CREATE TRIGGER IF NOT EXISTS `managed_document_${table}_insert`
                         AFTER INSERT ON `$table`
                         BEGIN
-                            ${managedDocumentDirtySQL(
+                            ${legacyManagedDocumentDirtySQL(
                                 spec,
                                 newKey,
                                 "upsert",
@@ -1227,7 +1592,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                         CREATE TRIGGER IF NOT EXISTS `managed_document_${table}_delete`
                         AFTER DELETE ON `$table`
                         BEGIN
-                            ${managedDocumentDirtySQL(
+                            ${legacyManagedDocumentDirtySQL(
                                 spec,
                                 oldKey,
                                 "delete",
@@ -1242,7 +1607,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                         CREATE TRIGGER IF NOT EXISTS `managed_document_${table}_update`
                         AFTER UPDATE ON `$table`
                         BEGIN
-                            ${managedDocumentDirtySQL(
+                            ${legacyManagedDocumentDirtySQL(
                                 spec,
                                 oldKey,
                                 "delete",
@@ -1250,7 +1615,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                                     "(NOT ($newEligible) OR $oldKey != $newKey)",
                                 now,
                             )};
-                            ${managedDocumentDirtySQL(
+                            ${legacyManagedDocumentDirtySQL(
                                 spec,
                                 newKey,
                                 "upsert",
@@ -1279,7 +1644,7 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
-        private fun managedDocumentDirtySQL(
+        private fun legacyManagedDocumentDirtySQL(
             spec: ManagedDocumentTriggerSpec,
             localKey: String,
             operation: String,
@@ -1301,6 +1666,183 @@ abstract class WhoopDatabase : RoomDatabase() {
                     updatedAtMs = excluded.updatedAtMs,
                     payloadJSON = NULL
             """.trimIndent()
+
+        internal fun installManagedDocumentTriggers(db: SupportSQLiteDatabase) {
+            val now = "CAST(strftime('%s', 'now') AS INTEGER) * 1000"
+            val guardAbsent =
+                "NOT EXISTS (SELECT 1 FROM managedDocumentApplyGuard WHERE guardId = 1)"
+            for (spec in MANAGED_DOCUMENT_TRIGGER_SPECS) {
+                val table = spec.table
+                val newKey = spec.localKey("NEW")
+                val oldKey = spec.localKey("OLD")
+                val newEligible = spec.eligibility("NEW")
+                val oldEligible = spec.eligibility("OLD")
+                db.execSQL(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `managed_document_${table}_insert`
+                        AFTER INSERT ON `$table`
+                        BEGIN
+                            ${managedDocumentMutationSQL(
+                                spec,
+                                newKey,
+                                "upsert",
+                                newEligible,
+                                guardAbsent,
+                                now,
+                            )};
+                        END
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `managed_document_${table}_delete`
+                        AFTER DELETE ON `$table`
+                        BEGIN
+                            ${managedDocumentMutationSQL(
+                                spec,
+                                oldKey,
+                                "delete",
+                                oldEligible,
+                                guardAbsent,
+                                now,
+                            )};
+                        END
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `managed_document_${table}_update`
+                        AFTER UPDATE ON `$table`
+                        BEGIN
+                            ${managedDocumentMutationSQL(
+                                spec,
+                                oldKey,
+                                "delete",
+                                "($oldEligible) AND (NOT ($newEligible) OR $oldKey != $newKey)",
+                                guardAbsent,
+                                now,
+                            )};
+                            ${managedDocumentMutationSQL(
+                                spec,
+                                newKey,
+                                "upsert",
+                                newEligible,
+                                guardAbsent,
+                                now,
+                            )};
+                        END
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        private fun managedDocumentMutationSQL(
+            spec: ManagedDocumentTriggerSpec,
+            localKey: String,
+            operation: String,
+            mutationCondition: String,
+            guardAbsent: String,
+            now: String,
+        ): String =
+            """
+                DELETE FROM managedDocumentDirty
+                WHERE tableName = '${spec.table}'
+                  AND localKey = $localKey
+                  AND ($mutationCondition)
+                  AND (
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM managedLocalProfile AS active
+                        WHERE active.bindingId = 1
+                          AND active.accountScopeHash IS NOT NULL
+                          AND active.localProfileId = active.accountScopeHash
+                    )
+                    OR localProfileId != (
+                        SELECT active.localProfileId
+                        FROM managedLocalProfile AS active
+                        WHERE active.bindingId = 1
+                          AND active.accountScopeHash IS NOT NULL
+                          AND active.localProfileId = active.accountScopeHash
+                    )
+                  );
+                INSERT INTO managedDocumentDirty (
+                    localProfileId, tableName, localKey, documentKind, generation,
+                    operation, updatedAtMs, payloadJSON
+                )
+                SELECT profile.localProfileId, '${spec.table}', $localKey,
+                       '${spec.documentKind}', 1, '$operation', $now, NULL
+                FROM managedLocalProfile AS profile
+                WHERE ($mutationCondition)
+                  AND $guardAbsent
+                  AND profile.bindingId = 1
+                  AND profile.accountScopeHash IS NOT NULL
+                  AND profile.localProfileId = profile.accountScopeHash
+                ON CONFLICT(localProfileId, tableName, localKey) DO UPDATE SET
+                    documentKind = excluded.documentKind,
+                    generation = managedDocumentDirty.generation + 1,
+                    operation = excluded.operation,
+                    updatedAtMs = excluded.updatedAtMs,
+                    payloadJSON = NULL
+            """.trimIndent()
+
+        internal fun dropManagedDocumentTriggers(db: SupportSQLiteDatabase) {
+            for (spec in MANAGED_DOCUMENT_TRIGGER_SPECS) {
+                for (operation in listOf("insert", "delete", "update")) {
+                    db.execSQL(
+                        "DROP TRIGGER IF EXISTS `managed_document_${spec.table}_$operation`",
+                    )
+                }
+            }
+        }
+
+        internal fun ensureManagedLocalProfile(
+            db: SupportSQLiteDatabase,
+            nowMs: Long = System.currentTimeMillis(),
+        ) {
+            db.execSQL(
+                """
+                    INSERT OR IGNORE INTO managedLocalProfile (
+                        bindingId, localProfileId, accountScopeHash, updatedAtMs
+                    ) VALUES (1, ?, NULL, ?)
+                """.trimIndent(),
+                arrayOf(java.util.UUID.randomUUID().toString().lowercase(), nowMs),
+            )
+        }
+
+        internal fun activateManagedLocalProfile(
+            db: SupportSQLiteDatabase,
+            accountScopeHash: String,
+            nowMs: Long = System.currentTimeMillis(),
+        ) {
+            require(accountScopeHash.matches(Regex("^[0-9a-f]{64}$")))
+            ensureManagedLocalProfile(db, nowMs)
+            db.execSQL(
+                """
+                    UPDATE managedLocalProfile
+                    SET localProfileId = ?, accountScopeHash = ?, updatedAtMs = ?
+                    WHERE bindingId = 1
+                """.trimIndent(),
+                arrayOf<Any?>(accountScopeHash, accountScopeHash, nowMs),
+            )
+        }
+
+        internal fun releaseManagedLocalProfile(
+            db: SupportSQLiteDatabase,
+            nowMs: Long = System.currentTimeMillis(),
+        ) {
+            ensureManagedLocalProfile(db, nowMs)
+            db.execSQL(
+                """
+                    UPDATE managedLocalProfile
+                    SET localProfileId = ?, accountScopeHash = NULL, updatedAtMs = ?
+                    WHERE bindingId = 1
+                """.trimIndent(),
+                arrayOf<Any?>(
+                    java.util.UUID.randomUUID().toString().lowercase(),
+                    nowMs,
+                ),
+            )
+        }
 
         private data class ManagedDirtyTriggerSpec(
             val table: String,
@@ -1501,7 +2043,8 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37,
                     MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40,
                     MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44,
-                    MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47,
+                    MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48,
+                    MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,
@@ -1527,8 +2070,10 @@ abstract class WhoopDatabase : RoomDatabase() {
                                 "'${WhoopLiveCapabilities.encoded("WHOOP")}', 'active', $now, $now)",
                         )
                         for (statement in strengthBuiltInInsertSQL()) db.execSQL(statement)
+                        ensureManagedLocalProfile(db, now * 1000)
                         installManagedDirtyWindowTriggers(db)
                         installManagedDocumentTriggers(db)
+                        installAnalysisDirtySourceTriggers(db)
                     }
                 })
                 .build()

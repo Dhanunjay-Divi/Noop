@@ -26,17 +26,6 @@ final class IntelligenceForcedRescoreRearmTests: XCTestCase {
     /// Every overlapping call must be dropped, while their shared latch creates exactly one follow-up pass.
     @MainActor
     func testProductionForcedCallsDuringActivePassCollapseToOneRuntimeRerun() async throws {
-        let defaults = UserDefaults.standard
-        let watermarkKey = "noop.analyzeWatermark"
-        let priorWatermark = defaults.object(forKey: watermarkKey)
-        defer {
-            if let priorWatermark {
-                defaults.set(priorWatermark, forKey: watermarkKey)
-            } else {
-                defaults.removeObject(forKey: watermarkKey)
-            }
-        }
-
         let store = try await WhoopStore.inMemory()
         let repo = Repository(deviceId: "my-whoop")
         repo.setStoreForTesting(store)

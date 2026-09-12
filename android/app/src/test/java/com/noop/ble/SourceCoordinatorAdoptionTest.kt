@@ -4,6 +4,7 @@ import com.noop.data.DayOwnershipRow
 import com.noop.data.DeviceRegistry
 import com.noop.data.DeviceRegistryDao
 import com.noop.data.DeviceStatus
+import com.noop.data.AnalysisAffectedRange
 import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
 import kotlinx.coroutines.CoroutineScope
@@ -96,6 +97,19 @@ class SourceCoordinatorAdoptionTest {
         override suspend fun deleteLiveSessionsFor(deviceId: String) {}
         override suspend fun deleteDismissedWorkoutsFor(deviceId: String) {}
         override suspend fun deleteDismissedSleepsFor(deviceId: String) {}
+        override suspend fun deleteAnalysisDirtyFor(deviceId: String) {}
+        override suspend fun ownershipAnalysisInputRange() =
+            AnalysisAffectedRange(null, null)
+        override suspend fun advanceAnalysisInvalidation(
+            sourceId: String,
+            earliestAffectedTs: Long?,
+            latestAffectedTs: Long?,
+        ): Int = 0
+        override suspend fun insertAnalysisInvalidationIfAbsent(
+            sourceId: String,
+            earliestAffectedTs: Long?,
+            latestAffectedTs: Long?,
+        ): Long = 1L
         override suspend fun deleteDayOwnershipFor(deviceId: String) {
             owners.entries.removeIf { it.value.deviceId == deviceId }
         }

@@ -58,7 +58,7 @@ class ManagedSyncStateMigrationTest {
         assertTrue(statements[3].contains("`objectCRC32C` TEXT"))
         assertEquals(41, WhoopDatabase.MIGRATION_41_42.startVersion)
         assertEquals(42, WhoopDatabase.MIGRATION_41_42.endVersion)
-        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(51, NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     @Test
@@ -77,7 +77,7 @@ class ManagedSyncStateMigrationTest {
         )
         assertEquals(42, WhoopDatabase.MIGRATION_42_43.startVersion)
         assertEquals(43, WhoopDatabase.MIGRATION_42_43.endVersion)
-        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(51, NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     @Test
@@ -92,7 +92,7 @@ class ManagedSyncStateMigrationTest {
         assertFalse(statement.contains("ALTER TABLE"))
         assertEquals(43, WhoopDatabase.MIGRATION_43_44.startVersion)
         assertEquals(44, WhoopDatabase.MIGRATION_43_44.endVersion)
-        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(51, NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     @Test
@@ -109,6 +109,46 @@ class ManagedSyncStateMigrationTest {
         assertFalse(statements.any { it.uppercase().contains("DELETE ") })
         assertEquals(44, WhoopDatabase.MIGRATION_44_45.startVersion)
         assertEquals(45, WhoopDatabase.MIGRATION_44_45.endVersion)
-        assertEquals(47, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(51, NOOP_DATABASE_SCHEMA_VERSION)
+    }
+
+    @Test
+    fun localProfileMigrationQuarantinesLegacyRowsWithoutBlockingNewAccounts() {
+        val statements = WhoopDatabase.MANAGED_LOCAL_PROFILE_MIGRATION_SQL
+        val sql = statements.joinToString("\n")
+
+        assertEquals(7, statements.size)
+        assertTrue(sql.contains("`managedLocalProfile`"))
+        assertTrue(sql.contains("`localProfileId` TEXT NOT NULL"))
+        assertTrue(sql.contains("`accountScopeHash` TEXT"))
+        assertTrue(
+            sql.contains(
+                "PRIMARY KEY(`localProfileId`, `tableName`, `localKey`)",
+            ),
+        )
+        assertFalse(sql.contains("COUNT(DISTINCT state.`accountScopeHash`)"))
+        assertFalse(sql.contains("legacyDirtyBlocked"))
+        assertTrue(sql.contains("FROM `managedDocumentDirtyLegacy` AS legacy"))
+        assertEquals(49, WhoopDatabase.MIGRATION_49_50.startVersion)
+        assertEquals(50, WhoopDatabase.MIGRATION_49_50.endVersion)
+        assertEquals(51, NOOP_DATABASE_SCHEMA_VERSION)
+    }
+
+    @Test
+    fun changeFeedCapabilityMigrationIsAdditiveAndAdvances50To51() {
+        val statements = WhoopDatabase.MANAGED_CHANGE_FEED_CAPABILITY_MIGRATION_SQL
+        assertEquals(2, statements.size)
+        assertTrue(
+            statements[0].contains(
+                "`changeFeedCapabilityVersion` INTEGER NOT NULL DEFAULT 0",
+            ),
+        )
+        assertTrue(statements[0].contains("`managedChangeCursor`"))
+        assertTrue(statements[1].contains("`managedSnapshotRestore`"))
+        assertFalse(statements.any { it.uppercase().contains("DROP ") })
+        assertFalse(statements.any { it.uppercase().contains("DELETE ") })
+        assertEquals(50, WhoopDatabase.MIGRATION_50_51.startVersion)
+        assertEquals(51, WhoopDatabase.MIGRATION_50_51.endVersion)
+        assertEquals(51, NOOP_DATABASE_SCHEMA_VERSION)
     }
 }

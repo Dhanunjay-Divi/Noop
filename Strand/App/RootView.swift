@@ -309,7 +309,15 @@ struct RootView: View {
             .background(StrandPalette.surfaceBase.ignoresSafeArea())
         }
         .task {
-            await repo.refresh()
+            // AppModel owns the one cold-launch repository refresh. Wait briefly for its published cache,
+            // but never start a second independent 4,000-day read from the macOS shell: on larger histories
+            // that duplicate work competes with the first Today render and scroll.
+            if !repo.loaded {
+                for _ in 0..<200 {
+                    if repo.loaded { break }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+            }
             // Backup & Sync: on-launch catch-up. Gated on the auto toggle being ON (default OFF). A
             // whole-DB ZIP can be 100MB+, so it must never block startup: fire it in a DETACHED,
             // utility-priority task AFTER the launch-critical refresh, fully off the main actor (the

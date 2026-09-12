@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">Hora de relajarte</string>
-    <string name="wind_down_notification_body">Se acerca tu hora de dormir planificada. Empieza a relajarte cuando te venga bien.</string>
+    <string name="wind_down_notification_body">Plan: relajarte a las %1$s; acostarte a las %2$s, si te viene bien.</string>
     <string name="wind_down_channel_name">Recordatorio para relajarte</string>
     <string name="wind_down_channel_description">Recordatorio nocturno opcional antes de tu hora de dormir planificada.</string>
     <string name="sleep_planner_title">Planificador del sueño</string>

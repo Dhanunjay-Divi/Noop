@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.testing.MigrationTestHelper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.noop.ingest.HealthConnectBmiProjectionFingerprint
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -28,7 +29,7 @@ class SleepGravityBmiCleanupMigrationInstrumentedTest {
     }
 
     @Test
-    fun migrate45To46AddsUnknownGravityEvidenceAndRemovesOnlyHealthConnectBmi() {
+    fun migrate45To47AddsUnknownGravityEvidenceAndRemovesOnlyHealthConnectBmiAndWeightCursor() {
         migrationHelper.createDatabase(DATABASE_NAME, 45).use { database ->
             database.execSQL(
                 "INSERT INTO `sleepSession` " +
@@ -61,6 +62,15 @@ class SleepGravityBmiCleanupMigrationInstrumentedTest {
                 arrayOf<Any?>(
                     "androidx.health.connect.client.records.WeightRecord",
                     "weight-token",
+                    1_800_000_000_000L,
+                ),
+            )
+            database.execSQL(
+                "INSERT INTO `healthConnectSyncState` (`recordType`, `changesToken`, `updatedAt`) " +
+                    "VALUES (?, ?, ?)",
+                arrayOf<Any?>(
+                    HealthConnectBmiProjectionFingerprint.STATE_RECORD_TYPE,
+                    "existing-projection-fingerprint",
                     1_800_000_000_000L,
                 ),
             )
@@ -115,6 +125,13 @@ class SleepGravityBmiCleanupMigrationInstrumentedTest {
             ).use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals("steps-token", cursor.getString(0))
+            }
+            database.query(
+                "SELECT `changesToken` FROM `healthConnectSyncState` WHERE `recordType` = ?",
+                arrayOf(HealthConnectBmiProjectionFingerprint.STATE_RECORD_TYPE),
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("existing-projection-fingerprint", cursor.getString(0))
             }
         }
     }

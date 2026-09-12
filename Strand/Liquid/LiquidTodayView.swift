@@ -103,9 +103,8 @@ struct LiquidTodayView: View {
     @State private var showLiveSession = false
     @State private var showNotificationPermissionAlert = false
 
-    /// Live Sessions (silent guardian) beta gate — the SAME key the Settings toggle writes. Default ON
-    /// (the entry is BETA-labelled in-UI); off removes the Start-session control entirely.
-    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = true
+    /// Live Sessions (silent guardian) beta gate — opt-in until physical-band validation is complete.
+    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = false
     // #today-layout (parity with Android): the user-chosen section order, persisted under the byte-identical
     // "today.sectionOrder" key the Android TodayLayoutPrefs uses. Reordered via the Arrange sheet (native
     // drag-to-reorder rows); every section always renders (decode inserts a missing one at its default spot).
@@ -114,10 +113,17 @@ struct LiquidTodayView: View {
     private var sectionOrder: [TodaySection] {
         let saved = TodayLayoutPrefs.decodeOrder(sectionOrderRaw)
         #if DEBUG
+        // Daily Plan screenshot QA must materialise the very tall target before asking ScrollViewReader
+        // to frame it. In the production order, LazyVStack can estimate the off-screen accessibility
+        // frame from the preceding hero/why cards and stop one section early at the largest text sizes.
+        // This launch-only order changes no persisted preference and keeps every production section.
+        if CommandLine.arguments.contains("--demo-daily-plan") {
+            return [.target] + saved.filter { $0 != .target }
+        }
         // Screenshot QA can bring the otherwise off-screen metrics grid into the first lazy-stack batch.
         // Reordering the same production sections is more deterministic than synthesizing swipe coordinates.
         if CommandLine.arguments.contains("--demo-key-metrics") {
-            return [.keyMetrics] + saved.filter { $0 != .keyMetrics }
+            return [.hero, .keyMetrics] + saved.filter { $0 != .hero && $0 != .keyMetrics }
         }
         #endif
         return saved
@@ -553,7 +559,20 @@ struct LiquidTodayView: View {
             // applied, leaving a deterministic "bottom" screenshot one bar-height short on cold launch.
             try? await Task.sleep(nanoseconds: 250_000_000)
             if CommandLine.arguments.contains("--demo-daily-plan") {
-                proxy.scrollTo(Self.dailyPlanAnchorID, anchor: .top)
+                // The debug order materialises the target first. Re-assert its zero-height marker after
+                // large accessibility text finishes layout, framing it below the status area instead of
+                // capturing a clipped line from the preceding card.
+                let framingAnchor = UnitPoint(
+                    x: 0.5,
+                    y: dynamicTypeSize.isAccessibilitySize ? 0.12 : 0.08
+                )
+                for delay in [0, 300_000_000, 600_000_000] as [UInt64] {
+                    if delay > 0 {
+                        try? await Task.sleep(nanoseconds: delay)
+                    }
+                    guard !Task.isCancelled else { return }
+                    proxy.scrollTo(Self.dailyPlanAnchorID, anchor: framingAnchor)
+                }
             } else if CommandLine.arguments.contains("--demo-key-metrics") {
                 proxy.scrollTo(Self.keyMetricsAnchorID, anchor: .top)
             } else if CommandLine.arguments.contains("--demo-patterns") {
@@ -976,7 +995,13 @@ struct LiquidTodayView: View {
             whySection
         case .target:
             if selectedDayOffset == 0 {
-                targetSection.id(Self.dailyPlanAnchorID)
+                VStack(spacing: 0) {
+                    // Keep the programmatic target independent from the very tall Dynamic Type card.
+                    // SwiftUI can otherwise use an approximate LazyVStack frame and land midway through
+                    // the preceding signal row while the target is still being materialised.
+                    Color.clear.frame(height: 0).id(Self.dailyPlanAnchorID)
+                    targetSection
+                }
             }
         case .watch:
             watchSection
@@ -998,25 +1023,40 @@ struct LiquidTodayView: View {
     }
 
     private var todayDetailsDisclosure: some View {
-        Button {
+        let evidenceLabels = dailyPlanSummaryEvidenceLabels
+        return Button {
             withAnimation(StrandMotion.interactive) {
                 todayDetailsExpanded.toggle()
             }
         } label: {
-            HStack(spacing: NoopMetrics.space3) {
-                Image(systemName: "info.circle")
+            HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                Image(systemName: dailyPlanSummarySymbol)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(StrandPalette.accent)
+                    .foregroundStyle(dailyPlanSummaryTint)
+                    .padding(.top, 2)
                     .accessibilityHidden(true)
-                Text(todayDetailsExpanded
-                     ? "daily_plan.details.hide"
-                     : "daily_plan.details.show")
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textPrimary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(dailyPlanActionLabel(dailyActionPlan.action))
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !evidenceLabels.isEmpty {
+                        Text(evidenceLabels.joined(separator: " / "))
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(todayDetailsExpanded
+                         ? "daily_plan.details.hide"
+                         : "daily_plan.details.show")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
                 Spacer(minLength: NoopMetrics.space2)
                 Image(systemName: todayDetailsExpanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(StrandPalette.textSecondary)
+                    .padding(.top, 4)
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 16)
@@ -1045,7 +1085,7 @@ struct LiquidTodayView: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(StrandPalette.metricCyan)
                                 .padding(.top, 3)
-                            Text("appwide.live_session.start")
+                            LiveSessionEntryCopy(live: ble.state, kind: .title)
                                 .font(StrandFont.subhead)
                                 .foregroundStyle(StrandPalette.onDarkPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1062,7 +1102,7 @@ struct LiquidTodayView: View {
                             .background(Capsule().fill(.white.opacity(0.05))
                                 .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
                             .fixedSize()
-                        Text("appwide.live_session.start_detail")
+                        LiveSessionEntryCopy(live: ble.state, kind: .detail)
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.onDarkSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1075,7 +1115,7 @@ struct LiquidTodayView: View {
 
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 8) {
-                                Text("appwide.live_session.start")
+                                LiveSessionEntryCopy(live: ble.state, kind: .title)
                                     .font(StrandFont.subhead)
                                     .foregroundStyle(StrandPalette.onDarkPrimary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -1087,7 +1127,7 @@ struct LiquidTodayView: View {
                                     .background(Capsule().fill(.white.opacity(0.05))
                                         .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
                             }
-                            Text("appwide.live_session.start_detail")
+                            LiveSessionEntryCopy(live: ble.state, kind: .detail)
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.onDarkSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1129,7 +1169,7 @@ struct LiquidTodayView: View {
             )
         }
         .buttonStyle(LiquidPressStyle())
-        .accessibilityLabel("appwide.live_session.start_accessibility")
+        .accessibilityElement(children: .combine)
     }
 
     private var heroCard: some View {
@@ -1432,7 +1472,7 @@ struct LiquidTodayView: View {
                      value: sleepText, symbol: card.icon,
                      tint: StrandPalette.restColor, frac: fracOver(displayDay?.totalSleepMin, 480))
         case .hydration:
-            cardLink(.hydration, title: card.title, sub: card.subtitle,
+            cardLink(.hydration(day: selectedDayKey), title: card.title, sub: card.subtitle,
                      value: hydrationGoalML.map {
                          HydrationStore.cardValue(totalML: hydrationTotalML, goalML: $0)
                      } ?? "-",
@@ -1719,6 +1759,34 @@ struct LiquidTodayView: View {
 
     private var dailyPlanWatchSignals: [ReadinessEngine.Signal] {
         readiness.signals.filter { $0.flag == .watch || $0.flag == .bad }
+    }
+
+    private var dailyPlanSummaryEvidenceLabels: [String] {
+        var sources: [DailyActionPlanner.EvidenceSource] = []
+        for evidence in dailyActionPlan.evidence where !sources.contains(evidence.source) {
+            sources.append(evidence.source)
+            if sources.count == 2 { break }
+        }
+        return sources.map { dailyPlanEvidenceLabel($0) }
+    }
+
+    private var dailyPlanSummarySymbol: String {
+        switch dailyActionPlan.availability {
+        case .ready: return "checkmark.circle.fill"
+        case .checkInNeeded: return "questionmark.circle.fill"
+        case .calibrating: return "chart.line.uptrend.xyaxis"
+        case .recoveryShift: return "figure.walk"
+        case .stop: return "pause.circle.fill"
+        }
+    }
+
+    private var dailyPlanSummaryTint: Color {
+        switch dailyActionPlan.availability {
+        case .ready: return StrandPalette.statusPositive
+        case .checkInNeeded: return StrandPalette.textTertiary
+        case .calibrating, .recoveryShift: return StrandPalette.statusWarning
+        case .stop: return StrandPalette.statusCritical
+        }
     }
 
     private var whySection: some View {
@@ -3130,12 +3198,20 @@ struct LiquidTodayView: View {
         if hydrationEnabled {
             do {
                 hydrationTotalML = try await repo.hydrationTotal(
-                    day: Repository.localDayKey(Date())
+                    day: requestedDayKey
                 )
             } catch {
                 // Preserve the last confirmed value. The focused Hydration screen owns retry UI.
             }
-            hydrationGoalML = repo.hydrationGoalML(profileSex: profile.sex)
+            hydrationGoalML = repo.hydrationGoalML(
+                profileAge: profile.age,
+                ageConfirmed: profile.ageInputConfirmed,
+                profileSex: profile.sex,
+                sexConfirmed: profile.sexInputConfirmed,
+                weightKg: profile.weightKg,
+                weightConfirmed: profile.weightInputConfirmed,
+                day: requestedDayKey
+            )
         } else {
             hydrationTotalML = nil
             hydrationGoalML = nil
@@ -3278,19 +3354,28 @@ struct LiquidTodayView: View {
             ? Int(Date().timeIntervalSince1970)
             : selectedCalendarWindow.upperBound
 
-        async let restA = repo.exploreSeries(key: "sleep_performance", source: "my-whoop")
-        async let fitA = repo.exploreSeries(key: "fitness_age", source: "my-whoop")
-        async let vitA = repo.exploreSeries(key: "vitality", source: "my-whoop")
+        // The default Explore/Apple helpers intentionally cover ~11 years for history screens. Today needs
+        // only the selected day plus its compact trailing trend window. Historical navigation grows this
+        // bound just enough to include the requested day; the ordinary Today mount reads 30/90 days.
+        let historyLookbackDays = max(30, requestedOffset + 15)
+        let ageMetricLookbackDays = max(90, requestedOffset + 15)
+        async let restA = repo.exploreSeries(
+            key: "sleep_performance", source: "my-whoop", days: historyLookbackDays)
+        async let fitA = repo.exploreSeries(
+            key: "fitness_age", source: "my-whoop", days: ageMetricLookbackDays)
+        async let vitA = repo.exploreSeries(
+            key: "vitality", source: "my-whoop", days: ageMetricLookbackDays)
         async let fitProfileA = repo.exploreSeries(
-            key: AgeMetricProfile.fitnessAgeKey, source: "my-whoop")
+            key: AgeMetricProfile.fitnessAgeKey, source: "my-whoop", days: ageMetricLookbackDays)
         async let vitProfileA = repo.exploreSeries(
-            key: AgeMetricProfile.vitalityKey, source: "my-whoop")
-        async let stepsA = repo.exploreSeries(key: "steps_est", source: "my-whoop")
+            key: AgeMetricProfile.vitalityKey, source: "my-whoop", days: ageMetricLookbackDays)
+        async let stepsA = repo.exploreSeries(
+            key: "steps_est", source: "my-whoop", days: historyLookbackDays)
         async let spo2A = repo.resolvedSeries(
             key: "spo2",
             source: Repository.whoopSource,
             days: max(30, requestedOffset + 15))
-        async let appleA = repo.appleDailyRows()
+        async let appleA = repo.appleDailyRows(days: historyLookbackDays)
         async let hrA = repo.hrBuckets(from: from, to: to, bucketSeconds: 300)
         async let wkA = repo.workoutRows(overlappingFrom: selectedCalendarWindow.lowerBound,
                                          to: selectedCalendarWindow.upperBound)
@@ -3432,7 +3517,19 @@ struct LiquidTodayView: View {
             "hr_bucket_count": String(hrValuesLocal.count),
             "workout_count": String(workoutsLocal.count),
             "trend_metric_count": String(keyMetricTrendsLocal.count),
+            "history_row_bucket": Self.diagnosticCountBucket(
+                max(restSeries.count, stepsSeries.count)),
+            "apple_row_bucket": Self.diagnosticCountBucket(appleRows.count),
         ]
+    }
+
+    private static func diagnosticCountBucket(_ count: Int) -> String {
+        switch count {
+        case ...0: return "empty"
+        case 1...30: return "up_to_30"
+        case 31...90: return "31_to_90"
+        default: return "over_90"
+        }
     }
 
     private func updateAdaptiveHydrationContext() {
@@ -5249,9 +5346,12 @@ private struct TodayArrangeSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        let order = TodayLayoutPrefs.decodeOrder(orderRaw)
+        let order = TodayLayoutPrefs.decodeOrder(orderRaw).filter { $0 != .hero }
         NavigationStack {
             List {
+                Label(TodaySection.hero.title, systemImage: "pin.fill")
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textSecondary)
                 ForEach(order) { section in
                     Text(section.title)
                         .font(StrandFont.body)
@@ -5260,7 +5360,7 @@ private struct TodayArrangeSheet: View {
                 .onMove { from, to in
                     var next = order
                     next.move(fromOffsets: from, toOffset: to)
-                    orderRaw = TodayLayoutPrefs.encode(next)
+                    orderRaw = TodayLayoutPrefs.encode([.hero] + next)
                 }
             }
             .navigationTitle("Arrange Today")
@@ -5282,6 +5382,34 @@ private struct TodayArrangeSheet: View {
         #if os(macOS)
         .frame(minWidth: 340, minHeight: 420)
         #endif
+    }
+}
+
+private struct LiveSessionEntryCopy: View {
+    enum Kind {
+        case title
+        case detail
+    }
+
+    @ObservedObject var live: LiveState
+    let kind: Kind
+
+    @ViewBuilder
+    var body: some View {
+        switch kind {
+        case .title:
+            if liveSessionBandReady(live) {
+                Text("appwide.live_session.start")
+            } else {
+                Text("appwide.live_session.connect_band")
+            }
+        case .detail:
+            if liveSessionBandReady(live) {
+                Text("appwide.live_session.start_detail")
+            } else {
+                Text("appwide.live_session.band_required")
+            }
+        }
     }
 }
 

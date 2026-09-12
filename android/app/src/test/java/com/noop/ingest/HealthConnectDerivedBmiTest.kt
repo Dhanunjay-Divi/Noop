@@ -1,8 +1,10 @@
 package com.noop.ingest
 
 import com.noop.analytics.FitnessAgeEngine
+import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 /**
@@ -25,15 +27,37 @@ class HealthConnectDerivedBmiTest {
     @Test fun noWeightSkipsBmi() {
         // A scale that reported body-fat but no weight that day: no BMI is invented.
         assertNull(HealthConnectImporter.derivedBmi(null, 178.0))
+        assertNull(HealthConnectImporter.derivedBmi(Double.NaN, 178.0))
+        assertNull(HealthConnectImporter.derivedBmi(Double.POSITIVE_INFINITY, 178.0))
+        assertNull(HealthConnectImporter.derivedBmi(-1.0, 178.0))
     }
 
     @Test fun noHeightSkipsBmi() {
         // A caller that passes no profile height (0.0) must not fabricate a BMI from weight alone.
         assertNull(HealthConnectImporter.derivedBmi(80.0, 0.0))
         assertNull(HealthConnectImporter.derivedBmi(80.0, -1.0))
+        assertNull(HealthConnectImporter.derivedBmi(80.0, Double.NaN))
+        assertNull(HealthConnectImporter.derivedBmi(80.0, Double.POSITIVE_INFINITY))
     }
 
     @Test fun bothMissingSkipsBmi() {
         assertNull(HealthConnectImporter.derivedBmi(null, 0.0))
+    }
+
+    @Test
+    fun importerFailurePolicyRethrowsCancellationUnchanged() {
+        val cancellation = CancellationException("synthetic cancellation")
+        try {
+            HealthConnectImporter.rethrowCancellation(cancellation)
+        } catch (caught: CancellationException) {
+            assertSame(cancellation, caught)
+            return
+        }
+        throw AssertionError("expected cancellation")
+    }
+
+    @Test
+    fun importerFailurePolicyLeavesOrdinaryFailureRecoverable() {
+        HealthConnectImporter.rethrowCancellation(IllegalStateException("synthetic failure"))
     }
 }

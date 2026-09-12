@@ -33,6 +33,8 @@ enum HydrationMutationResult: Equatable, Sendable {
 }
 
 private enum HydrationPersistenceError: Error {
+    case invalidDayKey
+    case invalidStoredEntry
     case storeUnavailable
     case writeRejected
 }
@@ -79,9 +81,103 @@ enum HydrationStore {
         guard let totalML = confirmedTotal(totalML) else { return missingText }
         return HydrationGoal.cardValueString(totalML: totalML, goalML: goalML)
     }
+
+    /// Strict `yyyy-MM-dd` validation and calendar-safe day arithmetic for explicit hydration routes.
+    /// UTC is deliberate: these are already local calendar labels, so advancing their date components
+    /// must not inherit a daylight-saving transition or silently resolve an invalid route to today.
+    private static var dayCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    static func isValidDayKey(_ value: String) -> Bool {
+        date(fromDayKey: value) != nil
+    }
+
+    static func trailingDayKeys(
+        throughDay dayKey: String,
+        days: Int
+    ) -> [String]? {
+        guard let end = date(fromDayKey: dayKey) else { return nil }
+        let count = max(1, days)
+        return (0..<count).compactMap { index in
+            let offset = index - (count - 1)
+            guard let date = dayCalendar.date(byAdding: .day, value: offset, to: end) else {
+                return nil
+            }
+            return key(from: date)
+        }
+    }
+
+    private static func date(fromDayKey value: String) -> Date? {
+        guard value.count == 10 else { return nil }
+        let pieces = value.split(separator: "-", omittingEmptySubsequences: false)
+        guard pieces.count == 3,
+              let year = Int(pieces[0]),
+              let month = Int(pieces[1]),
+              let day = Int(pieces[2]) else { return nil }
+        let components = DateComponents(
+            calendar: dayCalendar,
+            timeZone: dayCalendar.timeZone,
+            year: year,
+            month: month,
+            day: day
+        )
+        guard let date = dayCalendar.date(from: components),
+              key(from: date) == value else { return nil }
+        return date
+    }
+
+    private static func key(from date: Date) -> String {
+        let components = dayCalendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            locale: Locale(identifier: "en_US_POSIX"),
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
+
+    /// Stable timestamp for converting one legacy scalar-only day into an editable entry.
+    ///
+    /// Noon in the represented local day stays inside the managed hydration contract for every real
+    /// timezone (UTC-12 through UTC+14). Using `Date()` here made old days appear newly logged and could
+    /// leave the generated document permanently unsyncable.
+    static func legacyEntryDate(
+        forDayKey value: String,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> Date? {
+        guard value.count == 10 else { return nil }
+        let pieces = value.split(separator: "-", omittingEmptySubsequences: false)
+        guard pieces.count == 3,
+              let year = Int(pieces[0]),
+              let month = Int(pieces[1]),
+              let day = Int(pieces[2]) else {
+            return nil
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let components = DateComponents(
+            calendar: calendar,
+            timeZone: timeZone,
+            year: year,
+            month: month,
+            day: day,
+            hour: 12
+        )
+        guard let date = calendar.date(from: components),
+              calendar.component(.year, from: date) == year,
+              calendar.component(.month, from: date) == month,
+              calendar.component(.day, from: date) == day else {
+            return nil
+        }
+        return date
+    }
 }
 
-enum HydrationReadingSource: Equatable, Sendable {
+enum HydrationReadingSource: Equatable, Hashable, Sendable {
     case noop
     case appleHealth
     case both
@@ -92,6 +188,56 @@ struct HydrationReading: Equatable, Sendable {
     let source: HydrationReadingSource
     let noopML: Double
     let appleHealthML: Double
+}
+
+struct HydrationProvenanceStrings: Equatable, Sendable {
+    let noopOnlyLabel: String
+    let externalOnlyLabel: String
+    let bothLabel: String
+    let bothExplanation: String
+}
+
+struct HydrationSourceTotal: Equatable, Sendable {
+    let source: HydrationReadingSource
+    let valueML: Double
+}
+
+struct HydrationProvenancePresentation: Equatable, Sendable {
+    let sourceLabel: String
+    let explanation: String?
+    let sourceTotals: [HydrationSourceTotal]
+}
+
+extension HydrationReading {
+    /// Pure provenance model for the detail UI. The displayed value remains the observed maximum; when
+    /// both source totals exist, the detail keeps them separate and explains why they are not summed.
+    func provenance(
+        strings: HydrationProvenanceStrings
+    ) -> HydrationProvenancePresentation {
+        switch source {
+        case .noop:
+            return HydrationProvenancePresentation(
+                sourceLabel: strings.noopOnlyLabel,
+                explanation: nil,
+                sourceTotals: []
+            )
+        case .appleHealth:
+            return HydrationProvenancePresentation(
+                sourceLabel: strings.externalOnlyLabel,
+                explanation: nil,
+                sourceTotals: []
+            )
+        case .both:
+            return HydrationProvenancePresentation(
+                sourceLabel: strings.bothLabel,
+                explanation: strings.bothExplanation,
+                sourceTotals: [
+                    HydrationSourceTotal(source: .noop, valueML: noopML),
+                    HydrationSourceTotal(source: .appleHealth, valueML: appleHealthML),
+                ]
+            )
+        }
+    }
 }
 
 // MARK: - Per-entry model (#798) - individual logged drinks for edit/delete
@@ -297,7 +443,7 @@ extension Repository {
             day: dayKey
         )
         if !stored.isEmpty {
-            return Self.hydrationEntries(stored)
+            return try Self.hydrationEntries(stored)
         }
 
         let legacy = Self.legacyHydrationEntries(day: dayKey)
@@ -318,10 +464,15 @@ extension Repository {
         // the next delete/edit cannot accidentally discard that confirmed amount.
         let existingTotal = try await noopHydrationTotal(day: dayKey, store: store)
         guard existingTotal > 0 else { return [] }
+        guard let representedDay = HydrationStore.legacyEntryDate(
+            forDayKey: dayKey
+        ) else {
+            throw HydrationPersistenceError.invalidDayKey
+        }
         let migrated = [
             HydrationEntry(
                 amountMl: max(1, Int(existingTotal.rounded())),
-                loggedAt: Date()
+                loggedAt: representedDay
             ),
         ]
         _ = try await store.replaceHydrationLogEntries(
@@ -469,13 +620,22 @@ extension Repository {
 
     fileprivate static func hydrationEntries(
         _ stored: [HydrationLogEntry]
-    ) -> [HydrationEntry] {
-        stored.compactMap { entry in
-            guard let id = UUID(uuidString: entry.id) else { return nil }
+    ) throws -> [HydrationEntry] {
+        try stored.map { entry in
+            guard let id = UUID(uuidString: entry.id),
+                  HydrationStore.isValidDayKey(entry.day),
+                  entry.amountML > 0,
+                  entry.loggedAt > 0 else {
+                throw HydrationPersistenceError.invalidStoredEntry
+            }
+            let loggedAt = Date(timeIntervalSince1970: TimeInterval(entry.loggedAt))
+            guard loggedAt.timeIntervalSince1970.isFinite else {
+                throw HydrationPersistenceError.invalidStoredEntry
+            }
             return HydrationEntry(
                 id: id,
                 amountMl: entry.amountML,
-                loggedAt: Date(timeIntervalSince1970: TimeInterval(entry.loggedAt))
+                loggedAt: loggedAt
             )
         }
     }
@@ -494,19 +654,38 @@ extension Repository {
         }
     }
 
-    /// The last `days` local-day totals up to and including today, OLDEST first, as (day, ml) pairs — one
-    /// entry per calendar day with nil for days that have no confirmed log. Backs the 7-day mini bar
-    /// history. `days`
-    /// is clamped ≥ 1. Mirrors Android `HydrationStore.history` (a single ranged read projected onto the
-    /// full day grid so unlogged days remain explicit missing values rather than vanishing or becoming zero).
+    /// The last `days` local-day totals up to and including `now`, oldest first. Existing callers retain
+    /// their calendar-today default; an explicitly routed detail uses the strict overload below.
     func hydrationHistory(
         days: Int = 7,
         now: Date = Date()
     ) async throws -> [(day: String, value: Double?)] {
+        try await hydrationHistory(
+            days: days,
+            throughDay: Repository.localDayKey(now)
+        )
+    }
+
+    /// Trailing local-day totals ending on one exact displayed day, oldest first. An invalid explicit day
+    /// fails closed rather than falling back to today.
+    func hydrationHistory(
+        days: Int = 7,
+        throughDay: String
+    ) async throws -> [(day: String, value: Double?)] {
         let n = max(1, days)
-        let from = now.addingTimeInterval(-Double(n - 1) * 86_400)
-        let fromKey = Repository.localDayKey(from)
-        let toKey = Repository.localDayKey(now)
+        guard let dayKeys = HydrationStore.trailingDayKeys(
+            throughDay: throughDay,
+            days: n
+        ),
+        let fromKey = dayKeys.first,
+        let toKey = dayKeys.last else {
+            recordHydrationPersistence(
+                operation: "history",
+                outcome: "failed",
+                failureKind: "invalid_day"
+            )
+            throw HydrationPersistenceError.invalidDayKey
+        }
         let byDay: [String: Double]
         #if DEBUG
         if hydrationReadFailureForTesting {
@@ -561,21 +740,36 @@ extension Repository {
             )
             throw error
         }
-        return (0..<n).map { i in
-            let key = Repository.localDayKey(now.addingTimeInterval(-Double(n - 1 - i) * 86_400))
-            return (key, byDay[key])
-        }
+        return dayKeys.map { ($0, byDay[$0]) }
     }
 
-    /// Today's hydration goal (ml). R3: metric-aware — body weight personalises the baseline (~35 ml/kg)
-    /// and an elevated skin temperature adds a modest heat bump, on top of the existing Effort bump. Pure
-    /// math in `HydrationGoal`; this just feeds it the live inputs (today's `strain` is NOOP's 0–100
-    /// Effort, `skinTempDevC` is today's skin-temp deviation from baseline). `weightKg == nil` falls back
-    /// to the sex baseline, so a profile without a weight behaves exactly as before.
-    func hydrationGoalML(profileSex: String, weightKg: Double? = nil) -> Int {
-        HydrationGoal.dailyGoalML(sex: profileSex,
-                                  weightKg: weightKg,
-                                  effort: localCalendarToday?.strain,
-                                  skinTempDevC: localCalendarToday?.skinTempDevC)
+    /// Hydration goal for `day`, or calendar today when omitted. An explicit historical day with no
+    /// DailyMetric receives no live Effort input; it never borrows today's context.
+    func hydrationGoalML(
+        profileAge: Int,
+        ageConfirmed: Bool,
+        profileSex: String,
+        sexConfirmed: Bool,
+        weightKg: Double? = nil,
+        weightConfirmed: Bool,
+        day: String? = nil
+    ) -> Int? {
+        let context: DailyMetric?
+        if let day {
+            context = localCalendarToday?.day == day
+                ? localCalendarToday
+                : days.last(where: { $0.day == day })
+        } else {
+            context = localCalendarToday
+        }
+        return HydrationGoal.personalizedDailyGoalML(
+            age: profileAge,
+            ageConfirmed: ageConfirmed,
+            sex: profileSex,
+            sexConfirmed: sexConfirmed,
+            weightKg: weightKg,
+            weightConfirmed: weightConfirmed,
+            effort: context?.strain
+        )
     }
 }

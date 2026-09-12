@@ -1569,7 +1569,8 @@ class PostgresManagedSafetyRepository:
                 )
                 if replay is not None:
                     if (
-                        int(replay["duration_hours"]) != request.duration_hours
+                        replay["trigger"] != request.trigger
+                        or int(replay["duration_hours"]) != request.duration_hours
                         or bool(replay["share_location"]) != request.share_location
                     ):
                         raise ManagedConflictError(
@@ -1761,13 +1762,14 @@ class PostgresManagedSafetyRepository:
                         expires_at,
                         purge_after
                     ) VALUES (
-                        $1, $2, $3, 'manual_sos', 'open', $4, $5,
-                        $6, $7, $7::timestamptz + interval '30 days'
+                        $1, $2, $3, $4, 'open', $5, $6,
+                        $7, $8, $8::timestamptz + interval '30 days'
                     )
                     """,
                     incident_id,
                     owner["profile_id"],
                     request.request_id,
+                    request.trigger,
                     request.duration_hours,
                     request.share_location,
                     now,
@@ -1779,18 +1781,20 @@ class PostgresManagedSafetyRepository:
                         owner_account_id,
                         client_request_id,
                         incident_id,
+                        trigger,
                         duration_hours,
                         share_location,
                         created_at,
                         purge_after
                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6,
-                        $7::timestamptz + interval '30 days'
+                        $1, $2, $3, $4, $5, $6, $7,
+                        $8::timestamptz + interval '30 days'
                     )
                     """,
                     owner["account_id"],
                     request.request_id,
                     incident_id,
+                    request.trigger,
                     request.duration_hours,
                     request.share_location,
                     now,

@@ -199,7 +199,7 @@ object ContextualVitalNotifier {
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .protectPrivateContent(context, CHANNEL_ID)
                 .build()
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context,

@@ -2197,10 +2197,10 @@ class WhoopBleClient(
         processRevision = { revision -> runPostBackfillAnalysisPass(revision.deviceId) },
         markDurablyDirty = ::markPostBackfillSourceDirty,
         clearDurablyDirty = ::clearPostBackfillSourceDirty,
-        onFailure = { sourceId, failure ->
+        onFailure = { _, failure ->
             log(
-                "Backfill: post-sync worker for $sourceId failed " +
-                    "(${failure.javaClass.simpleName}: ${failure.message}); kept pending for retry.",
+                "Backfill: post-sync worker failed " +
+                    "(${failure.javaClass.simpleName}); kept pending for retry.",
             )
         },
     )
@@ -2305,7 +2305,8 @@ class WhoopBleClient(
     /**
      * Background-process backstop for rows committed before cancellation or process restart. Sources whose
      * worker did not finish are persisted separately from the in-memory latch. Reconcile them first and the
-     * current source last, so the shared fingerprint watermark finishes on the source the UI currently reads.
+     * current source last, preserving deterministic active-source ordering while each source uses its own
+     * durable generation acknowledgement.
      */
     fun reconcilePersistedHistory() {
         val activeSourceId = deviceId
@@ -2326,7 +2327,7 @@ class WhoopBleClient(
         } catch (failure: Throwable) {
             log(
                 "Backfill: could not read pending post-sync sources " +
-                    "(${failure.javaClass.simpleName}: ${failure.message})",
+                    "(${failure.javaClass.simpleName})",
             )
             emptySet()
         }
@@ -2351,20 +2352,34 @@ class WhoopBleClient(
         ) { "could not clear pending post-sync source" }
     }
 
-    /** One fingerprint-gated scoring pass. The revision worker reruns this if another chunk lands mid-pass. */
-    private suspend fun runPostBackfillAnalysisPass(sourceId: String) =
-        runFingerprintGatedBackfillAnalysis(
-            // Any exception escapes only to BackfillAnalysisWorker, which retains this immutable source
-            // revision and retries without an uncaught root coroutine.
-            readFingerprint = { repository.analysisFingerprint(sourceId) },
-            readWatermark = { NoopPrefs.analyzeWatermark(context) },
-            onUpToDate = {
-                log("re-score: trigger=post-offload newData=no - skipping (empty/duplicate offload)")
-            },
-            analyze = {
-                val profileStore = ProfileStore.from(context)
-                IntelligenceEngine.analyzeRecent(
-                    repo = repository,
+    /**
+     * One generation-snapshotted scoring pass. The revision worker retains its immutable source revision
+     * until this whole analysis/notification/writeback sequence succeeds and the exact generation is
+     * acknowledged.
+     */
+    private suspend fun runPostBackfillAnalysisPass(sourceId: String) {
+        val analysisLease = repository.claimAnalysisInput(
+            sourceIds = listOf(sourceId),
+            force = false,
+        )
+        if (analysisLease == null) {
+            log("re-score: trigger=post-offload newData=no - skipping (empty/duplicate offload)")
+            return
+        }
+
+        // Any exception escapes only to BackfillAnalysisWorker, which retains this immutable source
+        // revision and retries without an uncaught root coroutine. The repository leaves every claimed
+        // generation unacknowledged when this pass fails, is cancelled, or dies.
+        repository.runClaimedAnalysis(analysisLease) { analysisConsumption ->
+            val profileStore = ProfileStore.from(context)
+            val analysisNowSeconds = System.currentTimeMillis() / 1_000L
+            val analysisPlan = IntelligenceEngine.analysisScoringPlan(
+                requestedMaxDays = 21,
+                claims = analysisLease.claims,
+                nowSeconds = analysisNowSeconds,
+            )
+            IntelligenceEngine.analyzeRecent(
+                repo = repository,
                     // Resolve after IntelligenceEngine owns its serialization gate. A queued profile
                     // reconciliation must not be overwritten by an older age/sex snapshot.
                     profileProvider = {
@@ -2382,9 +2397,13 @@ class WhoopBleClient(
                             vitalityProvenanceRequired = profileStore.vitalityProvenanceRequired,
                         )
                     },
+                    maxDays = analysisPlan.maxDays,
+                    nowSeconds = analysisPlan.anchorNowSeconds,
+                    analysisTimezoneOffsetSeconds = analysisPlan.timezoneOffsetSeconds,
+                    historicalCatchUp = analysisPlan.isHistoricalCatchUp,
                     importedDeviceId = sourceId,
                     maxHROverride = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble(),
-                    ownerSource = dayOwnerSource,
+                    ownerSource = IntelligenceEngine.boundDayOwnerSource(sourceId, dayOwnerSource),
                     manualStepCoefficient = profileStore.stepsManualOverride,
                     persistStepsCalibration = { calibration ->
                         profileStore.stepsCalibrationCoefficient = calibration.coefficient
@@ -2418,9 +2437,18 @@ class WhoopBleClient(
                         } else {
                             null
                         },
+                    sourceConsumed = analysisConsumption::markSourceConsumed,
+                    sourcesEvaluatedForOwnership =
+                        analysisConsumption::markSourcesEvaluatedForOwnership,
                 )
-            },
-            afterAnalysis = {
+
+                if (analysisPlan.isHistoricalCatchUp) {
+                    // Historical catch-up updates only its bounded score range. Current-day notifications,
+                    // profile projections, and external writeback belong to the next normal recent pass.
+                    log("Backfill: bounded historical scoring batch done")
+                    return@runClaimedAnalysis
+                }
+
                 val notificationBudget = PostSyncRoutineNotificationBudget()
                 try {
                     AutoWorkoutCandidateNotifier.afterReanalysis(
@@ -2438,7 +2466,10 @@ class WhoopBleClient(
                 } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
-                    log("Backfill: post-sync workout suggestion failed: ${failure.message}")
+                    log(
+                        "Backfill: post-sync workout suggestion failed " +
+                            "(${failure.javaClass.simpleName})",
+                    )
                 }
 
                 try {
@@ -2451,19 +2482,18 @@ class WhoopBleClient(
                 } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
-                    log("Backfill: adaptive day guidance failed: ${failure.message}")
+                    log(
+                        "Backfill: adaptive day guidance failed " +
+                            "(${failure.javaClass.simpleName})",
+                    )
                 }
 
                 // These actions are structurally unreachable until IntelligenceEngine succeeds.
                 try {
                     val merged = repository.daysMerged(sourceId)
-                    val newest = merged.maxByOrNull { it.day }?.day ?: "-"
                     val todayKey = com.noop.ui.logicalDayKeyNow()
-                    val present = if (merged.any { it.day == todayKey }) "present" else "MISSING"
-                    log(
-                        "Backfill: ${merged.size} day(s) banked; newest=$newest, " +
-                            "dashboard-today=$todayKey ($present)",
-                    )
+                    val present = if (merged.any { it.day == todayKey }) "present" else "missing"
+                    log("Backfill: daily cache refreshed; rows=${merged.size}, today=$present")
                     val localKey = java.time.LocalDate.now().toString()
                     val todayRow = com.noop.ui.resolveTodayRow(merged, todayKey, localKey)
                     if (!notificationBudget.isClaimed) {
@@ -2488,7 +2518,10 @@ class WhoopBleClient(
                 } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
-                    log("Backfill: post-sync report refresh failed: ${failure.message}")
+                    log(
+                        "Backfill: post-sync report refresh failed " +
+                            "(${failure.javaClass.simpleName})",
+                    )
                 }
 
                 notificationBudget.claimedLane?.let { lane ->
@@ -2507,21 +2540,21 @@ class WhoopBleClient(
                         val result = HealthConnectWriter.write(context, repository, sourceId)
                         log(
                             "HC writeback: ${result.written} record(s)" +
-                                if (result.ok) "" else " (failed: ${result.failures.joinToString()})",
+                                if (result.ok) "" else " (failed)",
                         )
                     } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                         throw cancelled
                     } catch (failure: Throwable) {
-                        log("HC writeback failed after post-sync scoring: ${failure.message}")
+                        log(
+                            "HC writeback failed after post-sync scoring " +
+                                "(${failure.javaClass.simpleName})",
+                        )
                     }
                 }
-            },
-            // The watermark is the commit record for the whole pass and therefore remains last.
-            persistWatermark = { analyzeFp ->
-                NoopPrefs.setAnalyzeWatermark(context, analyzeFp)
-                log("Backfill: post-sync scoring pass done")
-            },
-        )
+
+            log("Backfill: post-sync scoring pass done")
+        }
+    }
 
     /** True while a historical offload is in progress (offload frames route to the Backfiller). */
     @Volatile

@@ -109,6 +109,8 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+private const val SLEEP_MISSING_VALUE = "\u2014"
+
 /**
  * Sleep — Whoop-sleep clarity on the locked Noop component system. Mirrors the macOS
  * SleepView (Strand/Screens/SleepView.swift) section-for-section:
@@ -746,25 +748,6 @@ fun SleepScreen(
                 )
             }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-            // SLEEP MARKS - tap to log "going to sleep" / "I'm awake" (#461, Phase 1). LOGGING ONLY:
-            // a mark is persisted to the `sleep_mark` series + the shareable strap log; it never
-            // changes the detected sleep. Mirrors macOS SleepView.sleepMarkCard.
-            item {
-            SleepMarkCard(
-                onMark = { type ->
-                    val mark = SleepMark.now(type)
-                    // The shareable strap log is the human-readable surface in a debug export.
-                    vm.ble.externalLog(mark.logLine())
-                    scope.launch {
-                        runCatching {
-                            vm.repo.upsertMetricSeries(listOf(mark.metricPoint("my-whoop")))
-                        }
-                    }
-                    Toast.makeText(context, mark.confirmation(), Toast.LENGTH_SHORT).show()
-                },
-            )
-            }
-            item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
             item {
             Hero(
                 display = display,
@@ -902,6 +885,28 @@ fun SleepScreen(
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
                 item { MetricGrid(m, onMetricClick = { detailMetricKey = it }) }
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                // Logging stays easy to reach, but follows the selected night's actual metrics.
+                item {
+                    SleepMarkCard(
+                        onMark = { type ->
+                            val mark = SleepMark.now(type)
+                            vm.ble.externalLog(mark.logLine())
+                            scope.launch {
+                                runCatching {
+                                    vm.repo.upsertMetricSeries(
+                                        listOf(mark.metricPoint("my-whoop")),
+                                    )
+                                }
+                            }
+                            Toast.makeText(
+                                context,
+                                mark.confirmation(),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        },
+                    )
+                }
+                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
                 item { SleepDebtLedgerCard(m.sleepDebtLedger) }
                 // StagesVsTypical describes ONE specific night's deep/REM/light minutes under the
                 // "Selected night" header, so it must read the SELECTED day's model, never the
@@ -937,7 +942,10 @@ fun SleepScreen(
 @Composable
 private fun SleepMarkCard(onMark: (SleepMarkType) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader(title = uiString(R.string.l10n_sleep_screen_sleep_marks_8e9b86f0), overline = "Tap to log", trailing = "Phase 1")
+        SectionHeader(
+            title = uiString(R.string.l10n_sleep_screen_sleep_marks_8e9b86f0),
+            overline = "Tap to log",
+        )
         NoopCard(tint = Palette.restColor) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -3296,8 +3304,16 @@ private fun DurationTrend(m: SleepModel) {
             footer = {
                 ChartFooter(
                     listOf(
-                        "Avg" to (m.trendDebtHours.sleepAverageOrNull()?.let { durationText(it * 60.0) } ?: "â€”"),
-                        "Max" to (m.trendDebtHours.maxOrNull()?.let { durationText(it * 60.0) } ?: "â€”"),
+                        "Avg" to (
+                            m.trendDebtHours.sleepAverageOrNull()
+                                ?.let { durationText(it * 60.0) }
+                                ?: SLEEP_MISSING_VALUE
+                            ),
+                        "Max" to (
+                            m.trendDebtHours.maxOrNull()
+                                ?.let { durationText(it * 60.0) }
+                                ?: SLEEP_MISSING_VALUE
+                            ),
                         "Days" to "${m.trendDebtHours.size}",
                     ),
                 )

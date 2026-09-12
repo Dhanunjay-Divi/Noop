@@ -987,6 +987,7 @@ struct DataSourcesView: View {
 /// never take over the live HR/WHOOP source coordinator.
 private struct WeightScaleDataSourceCard: View {
     @ObservedObject var source: WeightScaleSource
+    @EnvironmentObject private var profile: ProfileStore
     @State private var confirmForget = false
 
     private var statusPill: StatePill {
@@ -1097,7 +1098,15 @@ private struct WeightScaleDataSourceCard: View {
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
                         }
-                        if let bmi = capture.measurement.bmi {
+                        if let bmi = capture.measurement.bmi,
+                           BodyProfilePolicy.canPresentAdultBMI(
+                               age: profile.age,
+                               currentWeightKg: capture.measurement.weightKg,
+                               heightCm: profile.heightCm,
+                               ageConfirmed: profile.ageInputConfirmed,
+                               heightConfirmed: profile.heightInputConfirmed,
+                               currentWeightConfirmed: true
+                           ) {
                             Text(String(format: "BMI %.1f", bmi))
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textSecondary)

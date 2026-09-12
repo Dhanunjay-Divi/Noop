@@ -11,11 +11,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.noop.R
-import com.noop.ble.WhoopConnectionService
+import com.noop.managed.ManagedCloudService
+import com.noop.managed.ManagedSafetyBandSosOutcome
 import com.noop.notif.NotificationLifecycleCategory
 import com.noop.notif.NotificationLifecycleId
 import com.noop.notif.NotificationLifecycleLedger
 import com.noop.notif.NotificationPlatformIdentity
+import com.noop.notif.protectPrivateContent
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotificationRouteBridge
 
@@ -69,6 +71,7 @@ object SafetySosGesturePrefs {
     private const val FILE = "noop_safety_sos_gesture"
     private const val ENABLED = "enabled"
     private const val REQUIRED_EVENTS = "required_events"
+    private const val SHARE_LOCATION = "share_location"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -93,6 +96,13 @@ object SafetySosGesturePrefs {
                 SafetySosGestureAccumulator.MAXIMUM_EVENTS,
             ),
         ).apply()
+    }
+
+    fun sharesLocation(context: Context): Boolean =
+        prefs(context).getBoolean(SHARE_LOCATION, false)
+
+    fun setSharesLocation(context: Context, sharesLocation: Boolean) {
+        prefs(context).edit().putBoolean(SHARE_LOCATION, sharesLocation).apply()
     }
 }
 
@@ -141,38 +151,47 @@ object SafetySosDispatcher {
 
     suspend fun trigger(context: Context): Outcome {
         val appContext = context.applicationContext
-        val controller = SafetyPagingController(appContext)
-        controller.refresh()
-        val active = controller.activeIncident
-        val outcome = when {
-            active != null -> {
-                val expiresAtUnix = active.expiresAt?.let(::parseIsoInstantUnix)
-                SafetyLiveLocationSession.start(
-                    appContext,
-                    active.dispatchId,
-                    expiresAtUnix = expiresAtUnix,
-                    startingSequence = active.latestLocation?.sequence ?: 0L,
-                )
-                SafetyIncidentStatusMonitor.start(
-                    appContext,
-                    active.dispatchId,
-                    expiresAtUnix,
-                )
-                WhoopConnectionService.start(appContext)
-                Outcome.AlreadyActive
-            }
-            !controller.canPage -> Outcome.Unavailable(
-                controller.errorMessage
-                    ?: "Finish Safety setup and add two accepted contacts.",
+        val shareLocation = shouldShareLocation(
+            preferenceEnabled = SafetySosGesturePrefs.sharesLocation(appContext),
+            backgroundLocationAvailable = backgroundLocationAvailable(appContext),
+        )
+        val outcome = when (
+            val managed = ManagedCloudService.get(appContext).triggerBandSos(
+                durationHours = SafetyPagingPrefs.shareDurationHours(appContext),
+                shareLocation = shareLocation,
             )
-            controller.pageAcceptedContacts(trigger = SafetyPageTrigger.BAND_SOS) ->
-                Outcome.Opened
-            else -> Outcome.Unavailable(
-                controller.errorMessage ?: "The paging server did not accept the request.",
-            )
+        ) {
+            ManagedSafetyBandSosOutcome.Opened -> Outcome.Opened
+            ManagedSafetyBandSosOutcome.AlreadyActive -> Outcome.AlreadyActive
+            is ManagedSafetyBandSosOutcome.Unavailable ->
+                Outcome.Unavailable(managed.reason)
         }
         SafetyStatusNotifications.postOutcome(appContext, outcome)
         return outcome
+    }
+
+    internal fun shouldShareLocation(
+        preferenceEnabled: Boolean,
+        backgroundLocationAvailable: Boolean,
+    ): Boolean = preferenceEnabled && backgroundLocationAvailable
+
+    private fun backgroundLocationAvailable(context: Context): Boolean {
+        val foreground =
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ) == PackageManager.PERMISSION_GRANTED
+        val background =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+                ) == PackageManager.PERMISSION_GRANTED
+        return foreground && background
     }
 }
 
@@ -288,6 +307,7 @@ internal object SafetyStatusNotifications {
                     .setAutoCancel(true)
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .setCategory(NotificationCompat.CATEGORY_STATUS)
+                    .protectPrivateContent(context, CHANNEL_ID)
                     .build(),
             )
         }

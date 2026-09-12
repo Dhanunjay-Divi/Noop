@@ -524,7 +524,9 @@ final class ProfileStore: ObservableObject {
         let vo2 = vo2maxProfileToken.map { String($0) } ?? "nil"
         return [fitness, vo2, String(vitalityProfileToken),
                 String(fitnessAgeProvenanceRequired), String(vo2maxProvenanceRequired),
-                String(vitalityProvenanceRequired)].joined(separator: "|")
+                String(vitalityProvenanceRequired),
+                String(ageInputConfirmed), String(sexInputConfirmed),
+                String(weightKg), String(weightInputConfirmed)].joined(separator: "|")
     }
 
     func acceptsFitnessAge(provenance: Double?) -> Bool {

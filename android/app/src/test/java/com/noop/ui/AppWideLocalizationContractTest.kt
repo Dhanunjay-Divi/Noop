@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import java.io.File
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -23,6 +24,13 @@ class AppWideLocalizationContractTest {
         }
     }
 
+    private fun canonicalKeys(file: File): Set<String> =
+        JSONObject(file.readText())
+            .keys()
+            .asSequence()
+            .map { it.replace('.', '_') }
+            .toSet()
+
     @Test
     fun appWideResourcesHaveExactNineLocaleParity() {
         val folders = listOf(
@@ -39,7 +47,37 @@ class AppWideLocalizationContractTest {
         assumeTrue("App-wide locale resources unavailable", files.values.all { it != null })
         val values = files.mapValues { appWideStrings(it.value!!) }
         val base = values.getValue("values")
-        assertEquals(653, base.size)
+        val canonical = first(
+            "Tools/AppWideLocalization/appwide_strings.json",
+            "../Tools/AppWideLocalization/appwide_strings.json",
+            "../../Tools/AppWideLocalization/appwide_strings.json",
+        )
+        assertTrue("Canonical app-wide localization source unavailable", canonical != null)
+        assertEquals("Android base keys match the canonical source", canonicalKeys(canonical!!), base.keys)
+        assertEquals(
+            "Confirm your adult profile details to see a personalized goal.",
+            base["appwide_hydration_target_unavailable"],
+        )
+        assertEquals("Clear %1\$s", base["appwide_hydration_clear_day"])
+        assertEquals("Logged %1\$s", base["appwide_hydration_logged_day"])
+        assertEquals(
+            "NOOP and Apple Health records may overlap and cannot be matched reliably. " +
+                "The displayed total uses the larger source total instead of adding them.",
+            base["appwide_hydration_source_merge_apple_health"],
+        )
+        assertEquals(
+            "NOOP and Health Connect records may overlap and cannot be matched reliably. " +
+                "The displayed total uses the larger source total instead of adding them.",
+            base["appwide_hydration_source_merge_health_connect"],
+        )
+        assertEquals(
+            "Available recorded intake from NOOP and Apple Health · %1\$s.",
+            base["appwide_hydration_subtitle_apple_health_format"],
+        )
+        assertEquals(
+            "Available recorded intake from NOOP and Health Connect · %1\$s.",
+            base["appwide_hydration_subtitle_health_connect_format"],
+        )
         assertEquals("NOOP Band is coming", base["appwide_terms_title"])
         assertTrue(
             base.getValue("appwide_terms_subtitle")

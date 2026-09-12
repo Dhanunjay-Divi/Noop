@@ -11,7 +11,8 @@
     <string name="managed_safety_cannot_respond">Non posso rispondere</string>
     <string name="managed_safety_channel_description">Avvisi privati urgenti dai contatti NOOP Safety accettati.</string>
     <string name="managed_safety_channel_name">Contatti NOOP Safety</string>
-    <string name="managed_safety_confirm_body">NOOP tenterà di inviare un avviso nell’app a ogni contatto Safety accettato. Non contatta i servizi di emergenza e non garantisce che qualcuno veda l’avviso o intervenga.</string>
+    <string name="managed_safety_confirm_body">NOOP tenterà di inviare un avviso nell’app a ogni contatto Safety accettato. Non verrà condivisa alcuna posizione. NOOP non contatta i servizi di emergenza e non garantisce che qualcuno veda l’avviso o intervenga.</string>
+    <string name="managed_safety_confirm_location_body">NOOP tenterà di inviare un avviso nell’app a ogni contatto Safety accettato e condividerà solo la posizione approvata più recente per un massimo di %1$d ore. L’accesso termina quando l’allerta finisce o scade. NOOP non contatta i servizi di emergenza e non garantisce una risposta.</string>
     <string name="managed_safety_confirm_send">Avvia allerta Safety</string>
     <string name="managed_safety_confirm_title">Avvisare ora i tuoi contatti NOOP Safety?</string>
     <string name="managed_safety_contact_count_format">%1$d contatti accettati su %2$d</string>

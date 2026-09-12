@@ -38,6 +38,8 @@ enum HydrationReminders {
     private static let quietEndMinutesKey = "notif.quietEndMinutes"
     private static let minimumIntervalMinutes = 60
     private static let maximumIntervalMinutes = 240
+    private static var scheduleGeneration: UInt64 = 0
+    private static var missedResponseGeneration: UInt64 = 0
 
     enum EnableOutcome: Equatable, Sendable {
         case scheduled
@@ -190,6 +192,8 @@ enum HydrationReminders {
         _ on: Bool,
         completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
     ) {
+        scheduleGeneration &+= 1
+        let generation = scheduleGeneration
         guard on else {
             UserDefaults.standard.set(false, forKey: enabledKey)
             removeScheduledRequests()
@@ -203,21 +207,27 @@ enum HydrationReminders {
             let settings = await center.notificationSettings()
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                UserDefaults.standard.set(true, forKey: enabledKey)
-                schedule()
-                completion?(.scheduled)
+                await enableAndSchedule(
+                    generation: generation,
+                    center: center,
+                    completion: completion
+                )
             case .notDetermined:
                 let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
                 if granted {
-                    UserDefaults.standard.set(true, forKey: enabledKey)
-                    schedule()
-                    completion?(.scheduled)
+                    await enableAndSchedule(
+                        generation: generation,
+                        center: center,
+                        completion: completion
+                    )
                 } else {
+                    guard generation == scheduleGeneration else { return }
                     UserDefaults.standard.set(false, forKey: enabledKey)
                     recordSuppressedRequests()
                     completion?(.denied)
                 }
             default:
+                guard generation == scheduleGeneration else { return }
                 UserDefaults.standard.set(false, forKey: enabledKey)
                 recordSuppressedRequests()
                 completion?(.denied)
@@ -231,7 +241,7 @@ enum HydrationReminders {
             UserDefaults.standard.set(clampedInterval(minutes), forKey: adaptiveIntervalKey)
             UserDefaults.standard.removeObject(forKey: adaptiveReasonKey)
         }
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func setAdaptiveEnabled(_ on: Bool) {
@@ -241,7 +251,7 @@ enum HydrationReminders {
             UserDefaults.standard.removeObject(forKey: adaptiveReasonKey)
             UserDefaults.standard.removeObject(forKey: adaptiveDayKey)
         }
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func updateAdaptiveContext(
@@ -274,7 +284,9 @@ enum HydrationReminders {
         defaults.set(plan.intervalMinutes, forKey: adaptiveIntervalKey)
         defaults.set(plan.reasons.joined(separator: " + "), forKey: adaptiveReasonKey)
         defaults.set(dayKey, forKey: adaptiveDayKey)
-        if isEnabled, previousDay != dayKey || previous != plan.intervalMinutes { schedule() }
+        if isEnabled, previousDay != dayKey || previous != plan.intervalMinutes {
+            requestReschedule()
+        }
     }
 
     static func adaptivePlan(
@@ -333,12 +345,12 @@ enum HydrationReminders {
 
     static func setActiveStartMinutes(_ minutes: Int) {
         UserDefaults.standard.set(DailyReviewNotifications.clampMinute(minutes), forKey: activeStartMinutesKey)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func setActiveEndMinutes(_ minutes: Int) {
         UserDefaults.standard.set(DailyReviewNotifications.clampMinute(minutes), forKey: activeEndMinutesKey)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func setStrapBuzzEnabled(_ on: Bool) {
@@ -348,7 +360,7 @@ enum HydrationReminders {
             UserDefaults.standard.set(false, forKey: bandFirstEnabledKey)
             TapAutomationStore.clear(kind: .hydrationConfirm)
             cancelMissedResponse()
-            if isEnabled { schedule() }
+            if isEnabled { requestReschedule() }
         }
     }
 
@@ -358,7 +370,7 @@ enum HydrationReminders {
             UserDefaults.standard.set(false, forKey: bandFirstEnabledKey)
             TapAutomationStore.clear(kind: .hydrationConfirm)
             cancelMissedResponse()
-            if isEnabled { schedule() }
+            if isEnabled { requestReschedule() }
         }
     }
 
@@ -374,7 +386,7 @@ enum HydrationReminders {
         let enabled = on && strapBuzzEnabled && doubleTapConfirmEnabled
         UserDefaults.standard.set(enabled, forKey: bandFirstEnabledKey)
         if !enabled { cancelMissedResponse() }
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     /// Rebuild pending requests after an upgrade without ever prompting for permission on launch.
@@ -387,7 +399,7 @@ enum HydrationReminders {
             let settings = await UNUserNotificationCenter.current().notificationSettings()
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                schedule()
+                requestReschedule()
             default:
                 recordSuppressedRequests()
                 break
@@ -542,17 +554,61 @@ enum HydrationReminders {
         UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
     }
 
-    private static func schedule() {
-        let center = UNUserNotificationCenter.current()
-        let oldIDs = storedRequestIDs
-        if !oldIDs.isEmpty {
-            LocalNotificationLifecycle.cancel(
-                identifiers: oldIDs,
-                on: center
-            )
-        }
+    private static func enableAndSchedule(
+        generation: UInt64,
+        center: UNUserNotificationCenter,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)?
+    ) async {
+        guard generation == scheduleGeneration else { return }
         DailyReviewNotifications.registerPrivacyCategory(on: center)
+        let result = await reconcileSchedule(
+            expectedGeneration: generation,
+            client: .system(center: center)
+        )
+        guard generation == scheduleGeneration else { return }
+        if bandFirstEnabled || (result?.activeCount ?? 0) > 0 {
+            UserDefaults.standard.set(true, forKey: enabledKey)
+            completion?(.scheduled)
+        } else {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            completion?(.off)
+        }
+    }
 
+    private static func requestReschedule(now: Date = Date()) {
+        scheduleGeneration &+= 1
+        let generation = scheduleGeneration
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            DailyReviewNotifications.registerPrivacyCategory(on: center)
+            let result = await reconcileSchedule(
+                now: now,
+                expectedGeneration: generation,
+                client: .system(center: center)
+            )
+            guard generation == scheduleGeneration else { return }
+            applyRescheduleResult(result)
+        }
+    }
+
+    static func applyRescheduleResult(
+        _ result: LocalNotificationReconciliationResult?
+    ) {
+        guard !bandFirstEnabled,
+              let result,
+              result.activeCount == 0 else { return }
+        UserDefaults.standard.set(false, forKey: enabledKey)
+    }
+
+    @discardableResult
+    static func reconcileSchedule(
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        expectedGeneration: UInt64? = nil,
+        coordinator: LocalNotificationCapacityCoordinator? = nil,
+        client: LocalNotificationCenterClient
+    ) async -> LocalNotificationReconciliationResult? {
+        let oldIDs = storedRequestIDs
         let specs = reminderSpecs(
             start: activeStartMinutes,
             end: activeEndMinutes,
@@ -568,13 +624,60 @@ enum HydrationReminders {
                     categoryIdentifier: DailyReviewNotifications.privacyCategoryID
                 )
             }
+            let result = await LocalNotificationLifecycle.reconcile(
+                candidateRequests: [],
+                replacingIdentifiers: Set(oldIDs),
+                now: now,
+                calendar: calendar,
+                coordinator: coordinator,
+                isStillCurrent: {
+                    expectedGeneration.map { $0 == scheduleGeneration } ?? true
+                },
+                client: client
+            )
+            if let expectedGeneration,
+               expectedGeneration != scheduleGeneration {
+                return nil
+            }
             UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
-            return
+            return result
         }
-        UserDefaults.standard.set(specs.map(\.identifier), forKey: scheduledRequestIDsKey)
 
-        for spec in specs {
+        let requests = notificationRequests(specs: specs)
+        let result = await LocalNotificationLifecycle.reconcile(
+            candidateRequests: requests,
+            replacingIdentifiers: Set(
+                oldIDs + requests.map(\.identifier)
+            ),
+            now: now,
+            calendar: calendar,
+            coordinator: coordinator,
+            isStillCurrent: {
+                expectedGeneration.map { $0 == scheduleGeneration } ?? true
+            },
+            client: client
+        )
+        if let expectedGeneration,
+           expectedGeneration != scheduleGeneration {
+            return nil
+        }
+        if result.activeIdentifiers.isEmpty {
+            UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
+        } else {
+            UserDefaults.standard.set(
+                result.activeIdentifiers,
+                forKey: scheduledRequestIDsKey
+            )
+        }
+        return result
+    }
+
+    static func notificationRequests(
+        specs: [ReminderSpec]
+    ) -> [UNNotificationRequest] {
+        specs.map { spec -> UNNotificationRequest in
             let content = UNMutableNotificationContent()
+            content.applyProminence(.ambient)
             content.title = spec.title
             content.body = spec.body
             content.sound = .default
@@ -585,13 +688,13 @@ enum HydrationReminders {
             var components = DateComponents()
             components.hour = spec.minuteOfDay / 60
             components.minute = spec.minuteOfDay % 60
-            LocalNotificationLifecycle.schedule(
-                UNNotificationRequest(
-                    identifier: spec.identifier,
-                    content: content,
-                    trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-                ),
-                on: center
+            return UNNotificationRequest(
+                identifier: spec.identifier,
+                content: content,
+                trigger: UNCalendarNotificationTrigger(
+                    dateMatching: components,
+                    repeats: true
+                )
             )
         }
     }
@@ -599,7 +702,8 @@ enum HydrationReminders {
     private static func scheduleMissedResponse(for slot: DueSlot) {
         let defaults = UserDefaults.standard
         guard defaults.string(forKey: lastConfirmedStrapSlotKey) != slot.token else { return }
-        defaults.set(slot.token, forKey: pendingEscalationSlotKey)
+        missedResponseGeneration &+= 1
+        let generation = missedResponseGeneration
 
         let center = UNUserNotificationCenter.current()
         LocalNotificationLifecycle.cancel(
@@ -609,6 +713,7 @@ enum HydrationReminders {
         DailyReviewNotifications.registerPrivacyCategory(on: center)
 
         let content = UNMutableNotificationContent()
+        content.applyProminence(.standard)
         content.title = String(localized: "Hydration check-in")
         content.body = String(localized: "No water was logged from the band cue. Open Hydration if you drank.")
         content.sound = .default
@@ -616,20 +721,38 @@ enum HydrationReminders {
         content.threadIdentifier = "noop.hydration"
         content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.hydration.rawValue]
 
-        LocalNotificationLifecycle.schedule(
-            UNNotificationRequest(
+        let request = UNNotificationRequest(
                 identifier: missedResponseRequestID,
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(
                     timeInterval: TimeInterval(doubleTapWindowMinutes * 60),
                     repeats: false
                 )
-            ),
-            on: center
-        )
+            )
+        Task { @MainActor in
+            let result = await LocalNotificationLifecycle.reconcile(
+                candidateRequests: [request],
+                replacingIdentifiers: [missedResponseRequestID],
+                on: center
+            )
+            guard generation == missedResponseGeneration,
+                  defaults.string(forKey: lastConfirmedStrapSlotKey)
+                    != slot.token,
+                  result.accepted(missedResponseRequestID) else {
+                if result.accepted(missedResponseRequestID) {
+                    LocalNotificationLifecycle.cancel(
+                        identifiers: [missedResponseRequestID],
+                        on: center
+                    )
+                }
+                return
+            }
+            defaults.set(slot.token, forKey: pendingEscalationSlotKey)
+        }
     }
 
     private static func cancelMissedResponse() {
+        missedResponseGeneration &+= 1
         LocalNotificationLifecycle.cancel(
             identifiers: [missedResponseRequestID]
         )

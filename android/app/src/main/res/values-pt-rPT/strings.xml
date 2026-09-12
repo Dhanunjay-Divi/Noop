@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">Hora de relaxar</string>
-    <string name="wind_down_notification_body">A hora de deitar planeada está a aproximar-se. Começa a relaxar quando for melhor para ti.</string>
+    <string name="wind_down_notification_body">Plano: relaxar às %1$s; deitar às %2$s, se for adequado para ti.</string>
     <string name="wind_down_channel_name">Lembrete para relaxar</string>
     <string name="wind_down_channel_description">Lembrete noturno opcional antes da hora de deitar planeada.</string>
     <string name="sleep_planner_title">Planeador de sono</string>

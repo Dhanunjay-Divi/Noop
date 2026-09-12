@@ -103,10 +103,23 @@ class ProfileStoreAgeMigrationTest {
     @Test
     fun bodyConfirmationAcceptsVisibleOnboardingValues() {
         val profile = ProfileStore(FakeSharedPreferences())
+        val revisionBefore = ProfileStore.ageMetricProfileChanges.value
         profile.confirmAgeInput()
         profile.confirmBodyInputs()
         assertTrue(profile.bodyInputsConfirmed)
         assertEquals(23.671, profile.adultBmi!!, 0.001)
+        assertTrue(ProfileStore.ageMetricProfileChanges.value > revisionBefore)
+    }
+
+    @Test
+    fun confirmedHeightEditPublishesAProfileRevisionForLocalBmiReconciliation() {
+        val profile = ProfileStore(FakeSharedPreferences())
+        val revisionBefore = ProfileStore.ageMetricProfileChanges.value
+
+        profile.heightCm = 170.0
+
+        assertEquals(170.0, profile.bodyCompositionImportHeightCm, 0.001)
+        assertEquals(revisionBefore + 1L, ProfileStore.ageMetricProfileChanges.value)
     }
 
     @Test

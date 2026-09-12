@@ -487,6 +487,7 @@ object HydrationReminderNotifier {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .protectPrivateContent(context, CHANNEL_ID)
             .build()
         val posted = NotificationLifecycleLedger.posted(
             context,

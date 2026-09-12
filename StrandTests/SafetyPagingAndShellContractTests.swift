@@ -345,6 +345,98 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertFalse(SafetySOSRuntime.isActive(.expired))
     }
 
+    func testManagedBandSOSDispatchesWhenPermissionsAreDenied() async {
+        var requestedLocationSharing: [Bool] = []
+        let denied = await SafetySOSRuntime.dispatchManagedSOS(
+            notificationDeliveryAvailable: false,
+            locationSharingConsented: false
+        ) { shareLocation in
+            requestedLocationSharing.append(shareLocation)
+            return .opened
+        }
+
+        XCTAssertEqual(denied, .opened)
+        XCTAssertEqual(requestedLocationSharing, [false])
+
+        let notificationsDeniedOnly = await SafetySOSRuntime.dispatchManagedSOS(
+            notificationDeliveryAvailable: false,
+            locationSharingConsented: true
+        ) { shareLocation in
+            requestedLocationSharing.append(shareLocation)
+            return .alreadyActive
+        }
+
+        XCTAssertEqual(notificationsDeniedOnly, .alreadyActive)
+        XCTAssertEqual(requestedLocationSharing, [false, true])
+    }
+
+    func testManagedBandSOSBypassesUnrelatedSafetyBusyGateAndCoalescesDuplicates() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let triggerStart = try XCTUnwrap(
+            service.range(of: "func triggerBandSOS(")
+        )
+        let performStart = try XCTUnwrap(
+            service.range(
+                of: "private func performBandSOS(",
+                range: triggerStart.upperBound..<service.endIndex
+            )
+        )
+        let recordStart = try XCTUnwrap(
+            service.range(
+                of: "private func recordBandSOSOutcome(",
+                range: performStart.upperBound..<service.endIndex
+            )
+        )
+        let trigger = String(
+            service[triggerStart.lowerBound..<performStart.lowerBound]
+        )
+        let perform = String(
+            service[performStart.lowerBound..<recordStart.lowerBound]
+        )
+
+        XCTAssertTrue(trigger.contains("if let bandSOSRequestTask"))
+        XCTAssertTrue(trigger.contains("bandSOSRequestTask = task"))
+        XCTAssertTrue(trigger.contains("await task.value"))
+        XCTAssertFalse(trigger.contains("beginSafetyAction()"))
+        XCTAssertFalse(trigger.contains("refreshSafety()"))
+
+        XCTAssertTrue(perform.contains("guard phase == .enrolled"))
+        XCTAssertTrue(perform.contains("createSafetyIncidentRequest("))
+        XCTAssertTrue(perform.contains("scheduleBandSOSRefresh()"))
+        XCTAssertFalse(perform.contains("beginSafetyAction()"))
+        XCTAssertFalse(perform.contains("guard !isBusy"))
+        XCTAssertFalse(perform.contains("guard !safetyRunning"))
+    }
+
+    func testManagedBandSOSLocationRequiresConsentAndBackgroundAuthorization() {
+        XCTAssertFalse(
+            SafetySOSRuntime.bandSOSLocationSharingAllowed(
+                consented: false,
+                backgroundAuthorized: false
+            )
+        )
+        XCTAssertFalse(
+            SafetySOSRuntime.bandSOSLocationSharingAllowed(
+                consented: false,
+                backgroundAuthorized: true
+            )
+        )
+        XCTAssertFalse(
+            SafetySOSRuntime.bandSOSLocationSharingAllowed(
+                consented: true,
+                backgroundAuthorized: false
+            )
+        )
+        XCTAssertTrue(
+            SafetySOSRuntime.bandSOSLocationSharingAllowed(
+                consented: true,
+                backgroundAuthorized: true
+            )
+        )
+    }
+
     func testTerminalNotificationMarkerAdvancesOnlyAfterSuccessfulPost() {
         let previous = SafetySOSRuntime.StatusNotificationMarker(
             dispatchId: "old",
@@ -593,6 +685,180 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ))
     }
 
+    func testManagedSafetyLocationConsentDefaultsOffAndConfirmationIsExplicit() throws {
+        let view = try source(
+            "StrandiOS/System/ManagedSafetyView.swift"
+        )
+        let catalogData = Data(
+            try source("Tools/SafetyLocalization/safety_strings.json").utf8
+        )
+        let catalog = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: catalogData)
+                as? [String: [String: String]]
+        )
+        let noLocation = try XCTUnwrap(
+            catalog["managed.safety.confirm.body"]
+        )
+        let withLocation = try XCTUnwrap(
+            catalog["managed.safety.confirm.location.body"]
+        )
+
+        XCTAssertTrue(view.contains(
+            "@State private var shareLocation = false"
+        ))
+        XCTAssertFalse(view.contains(
+            "@State private var shareLocation = true"
+        ))
+        XCTAssertTrue(view.contains(
+            #""managed.safety.confirm.location.body""#
+        ))
+        XCTAssertTrue(view.contains(
+            #"Int64(durationHours == 12 ? 12 : 8)"#
+        ))
+        XCTAssertTrue(view.contains(
+            #"String(localized: "managed.safety.confirm.body")"#
+        ))
+        XCTAssertTrue(view.contains(
+            "shareLocation: shareLocation"
+        ))
+        XCTAssertTrue(view.contains(
+            "if shareLocation {"
+        ))
+
+        XCTAssertEqual(Set(noLocation.keys), Set(withLocation.keys))
+        XCTAssertEqual(noLocation.count, 9)
+        XCTAssertTrue(noLocation.values.allSatisfy {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !$0.contains("%1$")
+        })
+        XCTAssertTrue(withLocation.values.allSatisfy {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && $0.contains("%1$d")
+        })
+        XCTAssertTrue(
+            noLocation["en"]?.contains("No location will be shared.") == true
+        )
+        XCTAssertTrue(
+            withLocation["en"]?.contains("up to %1$d hours") == true
+        )
+        XCTAssertTrue(
+            withLocation["en"]?.contains(
+                "Location access ends when the page ends or expires."
+            ) == true
+        )
+    }
+
+    func testManagedSafetyKeepsUrgentPageActionAheadOfContactAdministration() throws {
+        let view = try source(
+            "StrandiOS/System/ManagedSafetyView.swift"
+        )
+        let branchStart = try XCTUnwrap(
+            view.range(of: "if service.phase == .enrolled {")
+        )
+        let branchEnd = try XCTUnwrap(
+            view.range(
+                of: "} else {",
+                range: branchStart.upperBound..<view.endIndex
+            )
+        )
+        let enrolledBranch = view[
+            branchStart.upperBound..<branchEnd.lowerBound
+        ]
+        let page = try XCTUnwrap(enrolledBranch.range(of: "pageCard"))
+        let administration = try XCTUnwrap(
+            enrolledBranch.range(of: "setupCard")
+        )
+
+        XCTAssertLessThan(
+            page.lowerBound,
+            administration.lowerBound,
+            "An enrolled user must reach paging and active-incident status before contact administration."
+        )
+    }
+
+    func testManagedSafetyLocationPersistenceIsOpaqueAndClearedOnStop() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let reconcileStart = try XCTUnwrap(
+            service.range(
+                of: "private func reconcileManagedSafetyLocationSharing("
+            )
+        )
+        let restoreStart = try XCTUnwrap(
+            service.range(
+                of: "private func restoreManagedSafetyLocationSharingIfNeeded(",
+                range: reconcileStart.upperBound..<service.endIndex
+            )
+        )
+        let reconcile = String(
+            service[reconcileStart.lowerBound..<restoreStart.lowerBound]
+        )
+        XCTAssertTrue(reconcile.contains("$0.shareLocation"))
+        XCTAssertTrue(reconcile.contains(
+            #"["open", "acknowledged"].contains($0.status)"#
+        ))
+        XCTAssertTrue(reconcile.contains(
+            #"stopManagedSafetyLocationSharing(reason: "inactive")"#
+        ))
+
+        let persistStart = try XCTUnwrap(
+            service.range(
+                of: "private func persistManagedSafetyLocationSession("
+            )
+        )
+        let clearStart = try XCTUnwrap(
+            service.range(
+                of: "private func clearPersistedManagedSafetyLocationSession()",
+                range: persistStart.upperBound..<service.endIndex
+            )
+        )
+        let submitStart = try XCTUnwrap(
+            service.range(
+                of: "private func submitManagedSafetyLocation(",
+                range: clearStart.upperBound..<service.endIndex
+            )
+        )
+        let persistence = String(
+            service[persistStart.lowerBound..<clearStart.lowerBound]
+        )
+        let clearing = String(
+            service[clearStart.lowerBound..<submitStart.lowerBound]
+        )
+
+        XCTAssertEqual(
+            persistence.components(separatedBy: "defaults.set(").count - 1,
+            2
+        )
+        XCTAssertTrue(persistence.contains(
+            "forKey: Key.safetyLocationIncidentID"
+        ))
+        XCTAssertTrue(persistence.contains(
+            "forKey: Key.safetyLocationExpiresAt"
+        ))
+        XCTAssertFalse(persistence.lowercased().contains("latitude"))
+        XCTAssertFalse(persistence.lowercased().contains("longitude"))
+        XCTAssertFalse(persistence.lowercased().contains("accuracy"))
+        XCTAssertTrue(clearing.contains(
+            "defaults.removeObject(forKey: Key.safetyLocationIncidentID)"
+        ))
+        XCTAssertTrue(clearing.contains(
+            "defaults.removeObject(forKey: Key.safetyLocationExpiresAt)"
+        ))
+        XCTAssertTrue(service.contains(
+            #"stopManagedSafetyLocationSharing(reason: "expired")"#
+        ))
+        XCTAssertTrue(service.contains(
+            #"stopManagedSafetyLocationSharing(reason: "server_terminal")"#
+        ))
+        XCTAssertTrue(service.contains(
+            #"stopManagedSafetyLocationSharing(reason: "signed_out")"#
+        ))
+        XCTAssertTrue(service.contains(
+            #"stopManagedSafetyLocationSharing(reason: "presentation_cleared")"#
+        ))
+    }
+
     func testManagedSafetyColdPushRestoresPersistedEnrollmentBeforeGuard() throws {
         let service = try source(
             "StrandiOS/System/ManagedCloudService.swift"
@@ -787,7 +1053,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(application.contains(
             """
             model.startOperationalWorkAfterLaunchAccess()
-                    ManagedCloudService.shared.bootstrap()
+                    ManagedCloudService.shared.bootstrap(repo: model.repo)
             """
         ))
         XCTAssertTrue(presenter.contains(
@@ -952,10 +1218,17 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         let appleWait = try XCTUnwrap(
             appleDisconnect.range(of: "await waitForManagedPushRegistrations()")
         )
+        let appleSyncWait = try XCTUnwrap(
+            appleDisconnect.range(of: "await waitForManagedSyncCompletion()")
+        )
         let appleRevoke = try XCTUnwrap(
             appleDisconnect.range(of: "client().revokePushInstallation(")
         )
+        XCTAssertLessThan(appleSyncWait.lowerBound, appleWait.lowerBound)
         XCTAssertLessThan(appleWait.lowerBound, appleRevoke.lowerBound)
+        XCTAssertTrue(appleDisconnect.contains(
+            "\"managed_sync.disconnect_serialization\""
+        ))
         XCTAssertTrue(apple.contains(
             "guard beginManagedPushRegistration() else { return }"
         ))
@@ -987,9 +1260,21 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             androidDisconnect.range(of: "managedDisconnecting = true")
         )
         let serialization = try XCTUnwrap(
-            androidDisconnect.range(of: "managedPushRegistrationMutex.withLock")
+            androidDisconnect.range(of: "syncMutex.withLock")
         )
         XCTAssertLessThan(disconnecting.lowerBound, serialization.lowerBound)
+        let bindingCancellation = try XCTUnwrap(
+            androidDisconnect.range(
+                of: "managedDocumentProfileBindingJob?.cancelAndJoin()"
+            )
+        )
+        let pushSerialization = try XCTUnwrap(
+            androidDisconnect.range(of: "managedPushRegistrationMutex.withLock")
+        )
+        XCTAssertLessThan(bindingCancellation.lowerBound, pushSerialization.lowerBound)
+        XCTAssertTrue(androidDisconnect.contains(
+            "\"managed_sync.disconnect_serialization\""
+        ))
     }
 
     func testManagedInviteRedemptionExplainsWhoMustAccept() throws {
@@ -1010,8 +1295,138 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertFalse(catalog.contains(reversed))
     }
 
-    func testAutomaticFallBoundaryRemainsVisibleAndRuntimeInert() throws {
+    func testManagedBandSOSObservabilityIsBoundedAndContainsNoSensitiveFields() throws {
+        let sources = try [
+            source("StrandiOS/System/ManagedCloudService.swift"),
+            source(
+                "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+            ),
+        ]
+
+        for text in sources {
+            XCTAssertTrue(text.contains("\"managed_safety.band_sos\""))
+            for outcome in [
+                "setup_unavailable", "already_active", "opened", "rejected",
+            ] {
+                XCTAssertTrue(text.contains("\"\(outcome)\""), outcome)
+            }
+
+            let start = try XCTUnwrap(
+                text.range(of: "private func recordBandSOSOutcome")
+                    ?? text.range(of: "private fun recordBandSosOutcome")
+            )
+            let tail = String(text[start.lowerBound...].prefix(500))
+            XCTAssertTrue(tail.contains("\"outcome\""))
+            for forbidden in [
+                "incident_id", "profile_id", "contact", "latitude",
+                "longitude", "location", "heart", "health",
+            ] {
+                XCTAssertFalse(tail.lowercased().contains(forbidden), forbidden)
+            }
+        }
+    }
+
+    func testManagedDocumentProfileBindingFollowsAccountLifecycle() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+
+        XCTAssertTrue(service.contains("func bootstrap(repo: Repository? = nil)"))
+        XCTAssertTrue(service.contains("managedRepository = repo"))
+        XCTAssertTrue(service.contains(
+            "scheduleManagedDocumentProfileBinding(accountScopeHash: nil)"
+        ))
+        XCTAssertTrue(service.contains(
+            "scheduleManagedDocumentProfileBinding(accountScopeHash: scope)"
+        ))
+        XCTAssertTrue(service.contains(
+            "try await store.activateManagedDocumentProfile("
+        ))
+        XCTAssertTrue(service.contains(
+            "try await store.releaseManagedDocumentProfile("
+        ))
+        XCTAssertTrue(service.contains(
+            "\"managed_sync.profile_binding\""
+        ))
+        XCTAssertTrue(service.contains(
+            "guard accountScopeHash == nil || !disconnecting else { return }"
+        ))
+        XCTAssertTrue(service.contains(
+            "accountScopeHash == nil || !self.disconnecting"
+        ))
+        XCTAssertTrue(service.contains(
+            "scheduleManagedDocumentProfileBinding(\n            accountScopeHash: try? accountScopeHash()"
+        ))
+
+        let disconnectStart = try XCTUnwrap(
+            service.range(of: "func disconnect() async")
+        )
+        let unregisterStart = try XCTUnwrap(
+            service.range(
+                of: "private func unregisterManagedMessagingInstallation()",
+                range: disconnectStart.upperBound..<service.endIndex
+            )
+        )
+        let disconnect = String(
+            service[disconnectStart.lowerBound..<unregisterStart.lowerBound]
+        )
+        let release = try XCTUnwrap(
+            disconnect.range(
+                of: "updateManagedDocumentProfileBinding(\n                    accountScopeHash: nil"
+            )
+        )
+        let syncWait = try XCTUnwrap(
+            disconnect.range(of: "await waitForManagedSyncCompletion()")
+        )
+        let signOut = try XCTUnwrap(
+            disconnect.range(of: "try Auth.auth().signOut()")
+        )
+        XCTAssertLessThan(syncWait.lowerBound, release.lowerBound)
+        XCTAssertLessThan(release.lowerBound, signOut.lowerBound)
+
+        let android = try source(
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+        )
+        XCTAssertTrue(android.contains(
+            "if (accountScopeHash != null && managedDisconnecting) return"
+        ))
+        XCTAssertTrue(android.contains(
+            "if (accountScopeHash != null && managedDisconnecting) return@launch"
+        ))
+        let androidDisconnectStart = try XCTUnwrap(
+            android.range(of: "suspend fun disconnect()")
+        )
+        let androidDisconnectEnd = try XCTUnwrap(
+            android.range(
+                of: "suspend fun sendDeletionCode(",
+                range: androidDisconnectStart.upperBound..<android.endIndex
+            )
+        )
+        let androidDisconnect = String(
+            android[
+                androidDisconnectStart.lowerBound..<androidDisconnectEnd.lowerBound
+            ]
+        )
+        let androidCancel = try XCTUnwrap(
+            androidDisconnect.range(
+                of: "managedDocumentProfileBindingJob?.cancelAndJoin()"
+            )
+        )
+        let androidRelease = try XCTUnwrap(
+            androidDisconnect.range(of: "releaseManagedDocumentProfile()")
+        )
+        let androidSignOut = try XCTUnwrap(
+            androidDisconnect.range(of: "runtime().auth.signOut()")
+        )
+        XCTAssertLessThan(androidCancel.lowerBound, androidRelease.lowerBound)
+        XCTAssertLessThan(androidRelease.lowerBound, androidSignOut.lowerBound)
+    }
+
+    func testAutomaticFallBoundaryRemainsRuntimeInertAndUnadvertised() throws {
         let center = try source("Strand/Screens/SafetyCenterView.swift")
+        let androidCenter = try source(
+            "android/app/src/main/java/com/noop/ui/SafetyCenterScreen.kt"
+        )
         let appModel = try source("Strand/App/AppModel.swift")
         let androidService = try source(
             "android/app/src/main/java/com/noop/ble/WhoopConnectionService.kt"
@@ -1020,8 +1435,13 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             "android/app/src/main/java/com/noop/ui/AppViewModel.kt"
         )
 
-        XCTAssertTrue(center.contains("safety.fall.status"))
-        XCTAssertTrue(center.contains("safety.fall.requirements"))
+        XCTAssertFalse(center.contains("fallResponseReadiness"))
+        XCTAssertFalse(center.contains("safety.fall.status"))
+        XCTAssertFalse(center.contains("safety.fall.requirements"))
+        XCTAssertFalse(androidCenter.contains("R.string.safety_fall_status"))
+        XCTAssertFalse(
+            androidCenter.contains("R.string.safety_fall_requirements")
+        )
         XCTAssertFalse(appModel.contains("FallResponseStateMachine("))
         XCTAssertFalse(androidService.contains("FallResponseStateMachine("))
         XCTAssertFalse(androidViewModel.contains("FallResponseStateMachine("))

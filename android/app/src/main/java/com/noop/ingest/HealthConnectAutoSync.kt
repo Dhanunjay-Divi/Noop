@@ -134,22 +134,42 @@ class HealthConnectSyncWorker(appContext: Context, params: WorkerParameters) :
         val granted = try {
             HealthConnectImporter.client(applicationContext)
                 .permissionController.getGrantedPermissions()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Throwable) {
             return Result.retry()
         }
+        val repository = WhoopRepository.from(applicationContext)
         if (!HealthConnectBackgroundPolicy.runtimeCanRunInBackground(granted)) {
-            // Permission was never granted or was revoked. Foreground/on-open sync remains available;
-            // a background worker must not keep retrying a user decision.
-            return Result.success()
+            // Provider reads are not allowed, but a confirmed profile-height correction still has to
+            // rebuild or remove locally derived BMI from already stored Health Connect weight.
+            return try {
+                when (
+                    HealthConnectReconciler.reconcileLocalBmiProjection(
+                        repository = repository,
+                        currentHeightCm = {
+                            ProfileStore.from(applicationContext).bodyCompositionImportHeightCm
+                        },
+                    )
+                ) {
+                    is HealthConnectReconcileResult.Success -> Result.success()
+                    is HealthConnectReconcileResult.RetryableFailure -> Result.retry()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                Result.retry()
+            }
         }
 
         return try {
-            val repository = WhoopRepository.from(applicationContext)
             val outcome = HealthConnectReconciler.reconcile(
                 context = applicationContext,
                 repository = repository,
                 grantedPermissions = granted,
-                heightCm = ProfileStore.from(applicationContext).bodyCompositionImportHeightCm,
+                currentHeightCm = {
+                    ProfileStore.from(applicationContext).bodyCompositionImportHeightCm
+                },
             )
             if (outcome is HealthConnectReconcileResult.Success) {
                 NoopPrefs.setHcLastSync(applicationContext, System.currentTimeMillis())

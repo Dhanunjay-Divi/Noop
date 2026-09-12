@@ -6,6 +6,34 @@ import org.junit.Test
 
 class BodyProfilePolicyTest {
     @Test
+    fun adultBmiPresentation_requiresConfirmedAdultProfile() {
+        assertEquals(
+            false,
+            BodyProfilePolicy.canPresentAdultBmi(30, 75.0, 178.0, false, true, true),
+        )
+        assertEquals(
+            false,
+            BodyProfilePolicy.canPresentAdultBmi(19, 75.0, 178.0, true, true, true),
+        )
+        assertEquals(
+            true,
+            BodyProfilePolicy.canPresentAdultBmi(20, 75.0, 178.0, true, true, true),
+        )
+        assertEquals(
+            false,
+            BodyProfilePolicy.canPresentAdultBmi(30, 75.0, 178.0, true, false, true),
+        )
+        assertEquals(
+            false,
+            BodyProfilePolicy.canPresentAdultBmi(30, 75.0, 178.0, true, true, false),
+        )
+        assertEquals(
+            true,
+            BodyProfilePolicy.canPresentAdultBmi(30, 75.0, 178.0, true, true, true),
+        )
+    }
+
+    @Test
     fun adultBmi_requiresConfirmedAdultInputs() {
         assertNull(BodyProfilePolicy.adultBmi(30, 75.0, 178.0, false))
         assertNull(BodyProfilePolicy.adultBmi(19, 75.0, 178.0, true))

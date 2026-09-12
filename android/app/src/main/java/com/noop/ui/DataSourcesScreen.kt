@@ -66,6 +66,7 @@ import com.noop.data.SourceKind
 import com.noop.ingest.AppleHealthImporter
 import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.HealthConnectBackgroundPolicy
+import com.noop.ingest.HealthConnectReconciler
 import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.ActivityFileImporter
 import com.noop.ingest.LiftingImporter
@@ -299,11 +300,12 @@ fun DataSourcesScreen(vm: AppViewModel) {
             hcMissingTemperaturePermissions = HealthConnectImporter.TEMPERATURE_PERMISSIONS - allGranted
             if (allGranted.any { it in HealthConnectImporter.PERMISSIONS }) {
                 runImport {
-                    val profile = ProfileStore.from(context)
-                    HealthConnectImporter.import(
-                        context,
-                        vm.repo,
-                        profile.bodyCompositionImportHeightCm,
+                    HealthConnectReconciler.importNow(
+                        context = context,
+                        repository = vm.repo,
+                        currentHeightCm = {
+                            ProfileStore.from(context).bodyCompositionImportHeightCm
+                        },
                     )
                 }
             } else {
@@ -348,11 +350,12 @@ fun DataSourcesScreen(vm: AppViewModel) {
             }
             if (missing.isEmpty()) {
                 runImport {
-                    val profile = ProfileStore.from(context)
-                    HealthConnectImporter.import(
-                        context,
-                        vm.repo,
-                        profile.bodyCompositionImportHeightCm,
+                    HealthConnectReconciler.importNow(
+                        context = context,
+                        repository = vm.repo,
+                        currentHeightCm = {
+                            ProfileStore.from(context).bodyCompositionImportHeightCm
+                        },
                     )
                 }
             } else {

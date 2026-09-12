@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">È ora di rilassarsi</string>
-    <string name="wind_down_notification_body">L’orario di sonno pianificato si avvicina. Inizia a rilassarti quando preferisci.</string>
+    <string name="wind_down_notification_body">Piano: rilassarti alle %1$s; andare a letto alle %2$s, se per te va bene.</string>
     <string name="wind_down_channel_name">Promemoria per rilassarsi</string>
     <string name="wind_down_channel_description">Promemoria serale facoltativo prima dell’orario di sonno pianificato.</string>
     <string name="sleep_planner_title">Pianificatore del sonno</string>

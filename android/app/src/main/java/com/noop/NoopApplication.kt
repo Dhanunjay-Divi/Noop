@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.res.Configuration
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
+import com.noop.alarm.WindDownForegroundReconciler
+import com.noop.alarm.WindDownScheduler
+import com.noop.alarm.WindDownStore
 import com.noop.analytics.RegistryDayOwnerSource
 import com.noop.ble.SourceCoordinator
 import com.noop.ble.WhoopBleClient
@@ -69,6 +72,46 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
     private val activeDeviceLock = Any()
     private var activeDeviceRevision = 0L
     private val operationalRuntime = AtomicBoolean(false)
+    private val windDownForegroundHookRegistered = AtomicBoolean(false)
+    private val windDownForegroundReconciler by lazy {
+        val store = WindDownStore.from(this)
+        WindDownForegroundReconciler(
+            store = store,
+            availability = { WindDownScheduler.deliveryAvailability(this) },
+            schedule = { WindDownScheduler.schedule(this, store) },
+            cancel = { WindDownScheduler.cancel(this) },
+        )
+    }
+    private val windDownForegroundLifecycleCallbacks =
+        object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: android.app.Activity) {
+                if (!operationalRuntimeStarted) return
+                when (windDownForegroundReconciler.onAppResumed()) {
+                    WindDownScheduler.ReconcileResult.RETRY_NOTIFICATIONS_OFF ->
+                        recordWindDownForegroundRetry("notifications_off")
+                    WindDownScheduler.ReconcileResult.RETRY_CHANNEL_OFF ->
+                        recordWindDownForegroundRetry("channel_off")
+                    WindDownScheduler.ReconcileResult.RETRY_DELIVERY_CHECK_FAILURE ->
+                        recordWindDownForegroundRetry("delivery_check_failed")
+                    WindDownScheduler.ReconcileResult.RETRY_SCHEDULE_FAILURE ->
+                        recordWindDownForegroundRetry("schedule_failed")
+                    else -> Unit
+                }
+            }
+
+            override fun onActivityCreated(
+                activity: android.app.Activity,
+                savedInstanceState: android.os.Bundle?,
+            ) = Unit
+            override fun onActivityStarted(activity: android.app.Activity) = Unit
+            override fun onActivityPaused(activity: android.app.Activity) = Unit
+            override fun onActivityStopped(activity: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(
+                activity: android.app.Activity,
+                outState: android.os.Bundle,
+            ) = Unit
+            override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+        }
 
     /** True after the consent-gated Room/BLE/cloud/worker runtime has started for this process. */
     val operationalRuntimeStarted: Boolean get() = operationalRuntime.get()
@@ -170,6 +213,7 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
         }
         if (!operationalRuntime.compareAndSet(false, true)) return
         AppDiagnosticsRecorder.record("runtime.operational_started")
+        registerWindDownForegroundReconciliation()
         resolveActiveDeviceId()
         // Canonicalize the stress-check-in choices against this build's evidence capability before
         // BLE/background readers observe them. The live path still fails closed per event.
@@ -186,6 +230,21 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
         // opt-in and is scheduled later from the activity after the user saves a destination.
         RemoteSyncService.initialize(this)
         deferProcessMaintenance()
+    }
+
+    private fun registerWindDownForegroundReconciliation() {
+        if (!windDownForegroundHookRegistered.compareAndSet(false, true)) return
+        registerActivityLifecycleCallbacks(windDownForegroundLifecycleCallbacks)
+    }
+
+    private fun recordWindDownForegroundRetry(reason: String) {
+        AppDiagnosticsRecorder.record(
+            "wind_down.foreground_reconcile",
+            fields = mapOf(
+                "outcome" to "retry_pending",
+                "reason" to reason,
+            ),
+        )
     }
 
     private fun hasAcceptedCurrentTerms(): Boolean =

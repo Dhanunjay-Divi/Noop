@@ -182,7 +182,9 @@ class IntelligenceSleepHealScopeTest {
         )
         assertTrue(
             "post-offload analyzeRecent must forward the registry-backed source",
-            bleText.contains("ownerSource = dayOwnerSource"),
+            bleText.contains(
+                "ownerSource = IntelligenceEngine.boundDayOwnerSource(sourceId, dayOwnerSource)",
+            ),
         )
         assertFalse(
             "the production composition must not pass a null owner source",

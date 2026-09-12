@@ -44,6 +44,7 @@ data class ManagedUploadCheckpoint(
 data class ManagedSnapshotRestoreCheckpoint(
     val requestId: UUID,
     val dataClasses: List<String>,
+    val changeFeedCapabilityVersion: Int = 0,
     val restoreJobId: UUID? = null,
     val snapshotAt: String? = null,
     val changeSequence: Long? = null,
@@ -179,6 +180,7 @@ interface ManagedSyncStateStoring {
     ): ManagedPruneResult
 
     suspend fun changeSequence(): Long
+    suspend fun changeFeedCapabilityVersion(): Int
     suspend fun saveChangeSequence(sequence: Long)
     suspend fun isChangeApplied(change: ManagedChange): Boolean
     suspend fun recordAppliedChange(change: ManagedChange)
@@ -190,10 +192,10 @@ interface ManagedSyncStateStoring {
         throw ManagedStorageException.InvalidResponse()
     }
     suspend fun clearSnapshotRestoreCheckpoint() = Unit
-    suspend fun finishSnapshotRestore(changeSequence: Long) {
-        saveChangeSequence(changeSequence)
-        clearSnapshotRestoreCheckpoint()
-    }
+    suspend fun finishSnapshotRestore(
+        changeSequence: Long,
+        changeFeedCapabilityVersion: Int,
+    )
 }
 
 interface ManagedRestoreApplying {
@@ -841,15 +843,26 @@ class ManagedSyncCoordinator(
         var hasMore = false
 
         var checkpoint = state.snapshotRestoreCheckpoint()
-        if (checkpoint != null) {
-            if (checkpoint.dataClasses != dataClasses) {
+        val storedCapabilityVersion = state.changeFeedCapabilityVersion()
+        if (storedCapabilityVersion != CHANGE_FEED_CAPABILITY_VERSION) {
+            if (checkpoint?.changeFeedCapabilityVersion != CHANGE_FEED_CAPABILITY_VERSION ||
+                checkpoint?.dataClasses != dataClasses
+            ) {
                 state.clearSnapshotRestoreCheckpoint()
                 checkpoint = ManagedSnapshotRestoreCheckpoint(
                     UUID.randomUUID(),
                     dataClasses,
+                    CHANGE_FEED_CAPABILITY_VERSION,
                 )
                 state.saveSnapshotRestoreCheckpoint(checkpoint)
             }
+        } else if (checkpoint?.changeFeedCapabilityVersion != CHANGE_FEED_CAPABILITY_VERSION ||
+            checkpoint?.dataClasses != dataClasses
+        ) {
+            if (checkpoint != null) state.clearSnapshotRestoreCheckpoint()
+            checkpoint = null
+        }
+        if (checkpoint != null) {
             val snapshot = resumeSnapshotRestoreRecoveringInvalidation(
                 checkpoint,
                 authorization,
@@ -870,6 +883,7 @@ class ManagedSyncCoordinator(
                 val initial = ManagedSnapshotRestoreCheckpoint(
                     UUID.randomUUID(),
                     dataClasses,
+                    CHANGE_FEED_CAPABILITY_VERSION,
                 )
                 state.saveSnapshotRestoreCheckpoint(initial)
                 val snapshot = resumeSnapshotRestoreRecoveringInvalidation(
@@ -881,6 +895,23 @@ class ManagedSyncCoordinator(
                     maxSnapshotBytes,
                 )
                 return applied + snapshot.first to true
+            }
+            if (feed.minimumSequence <= 0L ||
+                feed.highWatermark < sequence ||
+                feed.nextSequence !in sequence..feed.highWatermark ||
+                feed.changes.any {
+                    it.sequence <= sequence || it.sequence > feed.nextSequence
+                } ||
+                (
+                    feed.hasMore &&
+                        (
+                            feed.changes.isEmpty() ||
+                                feed.nextSequence != feed.changes.last().sequence
+                            )
+                    ) ||
+                (!feed.hasMore && feed.nextSequence != feed.highWatermark)
+            ) {
+                throw ManagedStorageException.InvalidResponse()
             }
             for (change in feed.changes) {
                 if (change.sequence <= sequence) throw ManagedStorageException.InvalidResponse()
@@ -927,6 +958,10 @@ class ManagedSyncCoordinator(
                 state.saveChangeSequence(sequence)
                 applied += 1
             }
+            if (feed.nextSequence > sequence) {
+                sequence = feed.nextSequence
+                state.saveChangeSequence(sequence)
+            }
             hasMore = feed.hasMore
             if (!hasMore) return applied to false
         }
@@ -962,6 +997,7 @@ class ManagedSyncCoordinator(
             ManagedSnapshotRestoreCheckpoint(
                 UUID.randomUUID(),
                 checkpoint.dataClasses,
+                CHANGE_FEED_CAPABILITY_VERSION,
             ),
         )
         0 to false
@@ -1164,7 +1200,10 @@ class ManagedSyncCoordinator(
         ) {
             throw ManagedStorageException.InvalidResponse()
         }
-        state.finishSnapshotRestore(changeSequence)
+        state.finishSnapshotRestore(
+            changeSequence,
+            checkpoint.changeFeedCapabilityVersion,
+        )
         return applied to true
     }
 
@@ -1269,6 +1308,7 @@ class ManagedSyncCoordinator(
     )
 
     companion object {
+        const val CHANGE_FEED_CAPABILITY_VERSION = 1
         val DATA_CLASSES = listOf(
             "essential_timeseries",
             "raw_auxiliary",

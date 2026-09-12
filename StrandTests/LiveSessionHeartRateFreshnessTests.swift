@@ -5,6 +5,21 @@ import XCTest
 @MainActor
 final class LiveSessionHeartRateFreshnessTests: XCTestCase {
 
+    func testBandReadinessRequiresConnectedBondedEncryptedAndWorn() {
+        let live = LiveState()
+        live.connected = true
+        live.bonded = true
+        live.encryptedBond = true
+        live.worn = true
+        XCTAssertTrue(liveSessionBandReady(live))
+
+        live.encryptedBond = false
+        XCTAssertFalse(liveSessionBandReady(live))
+        live.encryptedBond = true
+        live.worn = false
+        XCTAssertFalse(liveSessionBandReady(live))
+    }
+
     func testSilentTransportDoesNotConsumeCachedPreSessionHeartRate() {
         let live = LiveState()
         live.setHeartRate(140)

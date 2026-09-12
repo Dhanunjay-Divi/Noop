@@ -74,6 +74,34 @@ class SafetySosGestureTest {
     }
 
     @Test
+    fun bandSosLocationRequiresPreferenceAndBackgroundPermission() {
+        assertFalse(
+            SafetySosDispatcher.shouldShareLocation(
+                preferenceEnabled = false,
+                backgroundLocationAvailable = false,
+            ),
+        )
+        assertFalse(
+            SafetySosDispatcher.shouldShareLocation(
+                preferenceEnabled = false,
+                backgroundLocationAvailable = true,
+            ),
+        )
+        assertFalse(
+            SafetySosDispatcher.shouldShareLocation(
+                preferenceEnabled = true,
+                backgroundLocationAvailable = false,
+            ),
+        )
+        assertTrue(
+            SafetySosDispatcher.shouldShareLocation(
+                preferenceEnabled = true,
+                backgroundLocationAvailable = true,
+            ),
+        )
+    }
+
+    @Test
     fun liveLocationStateStopsAtItsBoundedExpiry() {
         val state = SafetyLiveLocationSession.State(
             dispatchId = "dispatch",

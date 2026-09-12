@@ -11,7 +11,8 @@
     <string name="managed_safety_cannot_respond">无法响应</string>
     <string name="managed_safety_channel_description">来自已接受的 NOOP Safety 联系人的紧急私密提醒。</string>
     <string name="managed_safety_channel_name">NOOP Safety 联系人</string>
-    <string name="managed_safety_confirm_body">NOOP 会尽力向每位已接受的 Safety 联系人发送 App 提醒。它不会联系紧急服务，也不保证有人会看到提醒或采取行动。</string>
+    <string name="managed_safety_confirm_body">NOOP 会尽力向每位已接受的 Safety 联系人发送 App 提醒。不会共享位置。NOOP 不会联系紧急服务，也不保证有人会看到提醒或采取行动。</string>
+    <string name="managed_safety_confirm_location_body">NOOP 会尽力向每位已接受的 Safety 联系人发送 App 提醒，并在最多 %1$d 小时内仅共享最新获准位置。求助通知结束或到期后，位置访问会停止。NOOP 不会联系紧急服务，也不保证有人响应。</string>
     <string name="managed_safety_confirm_send">启动 Safety 求助通知</string>
     <string name="managed_safety_confirm_title">现在通知你的 NOOP Safety 联系人？</string>
     <string name="managed_safety_contact_count_format">已接受 %1$d/%2$d 位联系人</string>

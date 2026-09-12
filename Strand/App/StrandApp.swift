@@ -57,6 +57,10 @@ struct StrandApp: App {
                     model.setRealtimeForeground(
                         acceptedTermsVersion == Terms.currentVersion && scenePhase == .active
                     )
+                    if acceptedTermsVersion == Terms.currentVersion,
+                       scenePhase == .active {
+                        WindDownNudge.restoreScheduleIfAuthorized()
+                    }
                 }
                 .onChange(of: acceptedTermsVersion) { version in
                     model.setRealtimeForeground(
@@ -82,6 +86,7 @@ struct StrandApp: App {
                     }
                     model.setRealtimeForeground(phase == .active)
                     if phase == .active {
+                        WindDownNudge.restoreScheduleIfAuthorized()
                         model.refreshAgeMetricsIfProfileChanged()
                         model.reevaluateContextualInterventions()
                         model.ble.requestSync(.foreground)

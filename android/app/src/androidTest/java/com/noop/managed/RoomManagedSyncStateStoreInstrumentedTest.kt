@@ -247,6 +247,7 @@ class RoomManagedSyncStateStoreInstrumentedTest {
         val checkpoint = ManagedSnapshotRestoreCheckpoint(
             requestId = UUID.fromString("11111111-1111-5111-8111-111111111111"),
             dataClasses = listOf("essential_timeseries", "raw_ppg"),
+            changeFeedCapabilityVersion = 1,
             restoreJobId = UUID.fromString("22222222-2222-5222-8222-222222222222"),
             snapshotAt = "2026-09-01T00:00:00Z",
             changeSequence = 42,
@@ -269,13 +270,16 @@ class RoomManagedSyncStateStoreInstrumentedTest {
         state.saveSnapshotRestoreCheckpoint(checkpoint)
         assertEquals(checkpoint, state.snapshotRestoreCheckpoint())
 
-        state.finishSnapshotRestore(42)
+        state.finishSnapshotRestore(42, 1)
         assertEquals(42L, state.changeSequence())
+        assertEquals(1, state.changeFeedCapabilityVersion())
         assertNull(state.snapshotRestoreCheckpoint())
 
+        state.saveChangeSequence(50)
         state.saveSnapshotRestoreCheckpoint(checkpoint)
-        state.finishSnapshotRestore(7)
-        assertEquals(42L, state.changeSequence())
+        state.finishSnapshotRestore(7, 2)
+        assertEquals(50L, state.changeSequence())
+        assertEquals(1, state.changeFeedCapabilityVersion())
         assertNull(state.snapshotRestoreCheckpoint())
     }
 

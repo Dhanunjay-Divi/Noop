@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">Zeit zum Runterkommen</string>
-    <string name="wind_down_notification_body">Deine geplante Schlafenszeit rückt näher. Komm zur Ruhe, wenn es für dich passt.</string>
+    <string name="wind_down_notification_body">Plan: um %1$s zur Ruhe kommen; um %2$s schlafen gehen, wenn das für dich passt.</string>
     <string name="wind_down_channel_name">Abendlicher Ruhehinweis</string>
     <string name="wind_down_channel_description">Optionale abendliche Erinnerung vor deiner geplanten Schlafenszeit.</string>
     <string name="sleep_planner_title">Schlafplaner</string>

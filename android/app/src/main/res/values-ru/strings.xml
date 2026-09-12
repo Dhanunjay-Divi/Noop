@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">Пора готовиться ко сну</string>
-    <string name="wind_down_notification_body">Запланированное время сна приближается. Начните расслабляться, когда вам удобно.</string>
+    <string name="wind_down_notification_body">План: начать подготовку ко сну в %1$s; лечь в %2$s, если вам удобно.</string>
     <string name="wind_down_channel_name">Напоминание о подготовке ко сну</string>
     <string name="wind_down_channel_description">Необязательное вечернее напоминание перед запланированным временем сна.</string>
     <string name="sleep_planner_title">Планировщик сна</string>

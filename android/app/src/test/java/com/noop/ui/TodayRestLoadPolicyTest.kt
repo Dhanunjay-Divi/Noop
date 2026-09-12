@@ -1,10 +1,17 @@
 package com.noop.ui
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.fail
 import org.junit.Test
+import java.util.Locale
 
 class TodayRestLoadPolicyTest {
     @Test
@@ -65,14 +72,158 @@ class TodayRestLoadPolicyTest {
     }
 
     @Test
-    fun bestEffortStateRetainsThePreviousValueOnlyOnReadFailure() = runBlocking {
+    fun hydrationRetentionRequiresTheExactDisplayedDay() = runBlocking {
         val failed = loadTodayBestEffortResult<Double?> { error("transient") }
         val confirmedMissing = loadTodayBestEffortResult<Double?> { null }
         val refreshed = loadTodayBestEffortResult<Double?> { 500.0 }
+        val previous = TodayHydrationReadState(
+            dayKey = "2026-09-10",
+            totalMl = 237.0,
+            status = TodayHydrationReadStatus.CONFIRMED,
+        )
 
-        assertEquals(237.0, failed.retainingPreviousOnFailure(237.0))
-        assertEquals(null, confirmedMissing.retainingPreviousOnFailure(237.0))
-        assertEquals(500.0, refreshed.retainingPreviousOnFailure(237.0))
+        assertEquals(
+            TodayHydrationReadState(
+                "2026-09-10",
+                237.0,
+                TodayHydrationReadStatus.CONFIRMED,
+            ),
+            failed.retainingHydrationForDay("2026-09-10", previous),
+        )
+        assertEquals(
+            TodayHydrationReadState(
+                "2026-09-11",
+                null,
+                TodayHydrationReadStatus.UNAVAILABLE,
+            ),
+            failed.retainingHydrationForDay("2026-09-11", previous),
+        )
+        assertEquals(
+            TodayHydrationReadState(
+                "2026-09-10",
+                null,
+                TodayHydrationReadStatus.MISSING,
+            ),
+            confirmedMissing.retainingHydrationForDay("2026-09-10", previous),
+        )
+        assertEquals(
+            TodayHydrationReadState(
+                "2026-09-10",
+                500.0,
+                TodayHydrationReadStatus.CONFIRMED,
+            ),
+            refreshed.retainingHydrationForDay("2026-09-10", previous),
+        )
+    }
+
+    @Test
+    fun hydrationFirstFailureIsUnavailableAndConfirmedMissingIsNotLogged() = runBlocking {
+        val failed = loadTodayBestEffortResult<Double?> { error("storage unavailable") }
+        val missing = loadTodayBestEffortResult<Double?> { null }
+
+        val unavailable = failed.retainingHydrationForDay("2026-09-11", previous = null)
+        val unlogged = missing.retainingHydrationForDay("2026-09-11", previous = unavailable)
+
+        assertEquals(TodayHydrationReadStatus.UNAVAILABLE, unavailable.status)
+        assertEquals("Unavailable", hydrationDashboardCardValue(unavailable, 2_500, "Not logged", "Unavailable"))
+        assertEquals(TodayHydrationReadStatus.MISSING, unlogged.status)
+        assertEquals("Not logged", hydrationDashboardCardValue(unlogged, 2_500, "Not logged", "Unavailable"))
+    }
+
+    @Test
+    fun hydrationConfirmedIntakeStillShowsWithoutAnEligibleTarget() {
+        val confirmed = TodayHydrationReadState(
+            "2026-09-11",
+            1_250.0,
+            TodayHydrationReadStatus.CONFIRMED,
+        )
+
+        assertEquals(
+            "1.3 L",
+            hydrationDashboardCardValue(confirmed, null, "Not logged", "Unavailable"),
+        )
+    }
+
+    @Test
+    fun hydrationDashboardUsesTheActiveLocaleAndLocalizedUnitTemplate() {
+        val confirmed = TodayHydrationReadState(
+            "2026-09-11",
+            1_250.0,
+            TodayHydrationReadStatus.CONFIRMED,
+        )
+
+        assertEquals(
+            "1,3 l / 3,2 l",
+            hydrationDashboardCardValue(
+                state = confirmed,
+                goalMl = 3_200,
+                notLoggedText = "Nicht protokolliert",
+                unavailableText = "Nicht verfügbar",
+                locale = Locale.GERMANY,
+                litresFormat = "%1\$s l",
+            ),
+        )
+    }
+
+    @Test
+    fun hydrationTransientFailureRetainsOnlyAConfirmedSameDayState() = runBlocking {
+        val failed = loadTodayBestEffortResult<Double?> { error("transient") }
+        val confirmed = TodayHydrationReadState(
+            "2026-09-11",
+            500.0,
+            TodayHydrationReadStatus.CONFIRMED,
+        )
+        val unavailable = TodayHydrationReadState(
+            "2026-09-11",
+            null,
+            TodayHydrationReadStatus.UNAVAILABLE,
+        )
+        val previouslyMissing = TodayHydrationReadState(
+            "2026-09-11",
+            null,
+            TodayHydrationReadStatus.MISSING,
+        )
+
+        assertEquals(confirmed, failed.retainingHydrationForDay("2026-09-11", confirmed))
+        assertEquals(
+            TodayHydrationReadStatus.UNAVAILABLE,
+            failed.retainingHydrationForDay("2026-09-11", unavailable).status,
+        )
+        val failedAfterMissing = failed.retainingHydrationForDay("2026-09-11", previouslyMissing)
+        assertEquals(TodayHydrationReadStatus.UNAVAILABLE, failedAfterMissing.status)
+        assertEquals(
+            "Unavailable",
+            hydrationDashboardCardValue(
+                failedAfterMissing,
+                2_500,
+                "Not logged",
+                "Unavailable",
+            ),
+        )
+    }
+
+    @Test
+    fun bestEffortReadRechecksCancellationBeforePublishingSuccessfulLoad() = runTest {
+        val loadStarted = CompletableDeferred<Unit>()
+        val allowLoadToReturn = CompletableDeferred<Unit>()
+        var published = false
+        val job = launch {
+            loadTodayBestEffortResult {
+                withContext(NonCancellable) {
+                    loadStarted.complete(Unit)
+                    allowLoadToReturn.await()
+                    500.0
+                }
+            }
+            published = true
+        }
+
+        loadStarted.await()
+        job.cancel()
+        allowLoadToReturn.complete(Unit)
+        job.join()
+
+        assertFalse("a cancelled read must not publish its late result", published)
     }
 
     @Test

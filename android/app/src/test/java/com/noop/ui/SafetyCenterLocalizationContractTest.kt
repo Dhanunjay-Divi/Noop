@@ -25,6 +25,14 @@ class SafetyCenterLocalizationContractTest {
         }
     }
 
+    private fun stringValue(file: File, key: String): String? {
+        val pattern = Regex(
+            """<string\s+name="${Regex.escape(key)}"[^>]*>(.*?)</string>""",
+            setOf(RegexOption.DOT_MATCHES_ALL),
+        )
+        return pattern.find(file.readText())?.groupValues?.get(1)?.trim()
+    }
+
     @Test
     fun safetyResourcesHaveExactNineLocaleParity() {
         val folders = listOf(
@@ -175,6 +183,114 @@ class SafetyCenterLocalizationContractTest {
     }
 
     @Test
+    fun managedSafetyLocationConsentDefaultsOffAndConfirmationIsExplicit() {
+        val managed = first(
+            "src/main/java/com/noop/ui/ManagedSafetySection.kt",
+            "app/src/main/java/com/noop/ui/ManagedSafetySection.kt",
+            "android/app/src/main/java/com/noop/ui/ManagedSafetySection.kt",
+        )
+        assumeTrue("Managed Safety source unavailable", managed != null)
+        val source = managed!!.readText()
+
+        assertTrue(
+            source.contains(
+                "var shareLocation by rememberSaveable { mutableStateOf(false) }",
+            ),
+        )
+        assertFalse(
+            source.contains(
+                "var shareLocation by rememberSaveable { mutableStateOf(true) }",
+            ),
+        )
+        assertTrue(source.contains("R.string.managed_safety_confirm_location_body"))
+        assertTrue(source.contains("R.string.managed_safety_confirm_body"))
+        assertTrue(source.contains("durationHours,"))
+        assertTrue(source.contains("shareLocation = shareLocation"))
+        assertTrue(
+            source.contains(
+                "if (shareLocation && incident != null && fix != null)",
+            ),
+        )
+        assertTrue(source.contains("items = listOf(8, 12)"))
+
+        val folders = listOf(
+            "values", "values-de", "values-es", "values-fr", "values-it",
+            "values-pt-rPT", "values-ru", "values-zh", "values-zh-rTW",
+        )
+        val files = folders.associateWith { folder ->
+            first(
+                "src/main/res/$folder/safety.xml",
+                "app/src/main/res/$folder/safety.xml",
+                "android/app/src/main/res/$folder/safety.xml",
+            )
+        }
+        assumeTrue(
+            "Managed Safety locale resources unavailable",
+            files.values.all { it != null },
+        )
+        for ((folder, file) in files) {
+            val noLocation = stringValue(
+                file!!,
+                "managed_safety_confirm_body",
+            )
+            val withLocation = stringValue(
+                file,
+                "managed_safety_confirm_location_body",
+            )
+            assertTrue(
+                "$folder no-location confirmation is blank",
+                !noLocation.isNullOrBlank(),
+            )
+            assertTrue(
+                "$folder timed-location confirmation is blank",
+                !withLocation.isNullOrBlank(),
+            )
+            assertFalse(
+                "$folder no-location copy takes a duration",
+                noLocation!!.contains("%1\$d"),
+            )
+            assertTrue(
+                "$folder timed-location copy is missing duration",
+                withLocation!!.contains("%1\$d"),
+            )
+        }
+
+        val base = files.getValue("values")!!
+        assertTrue(
+            stringValue(base, "managed_safety_confirm_body")
+                ?.contains("No location will be shared.") == true,
+        )
+        assertTrue(
+            stringValue(base, "managed_safety_confirm_location_body")
+                ?.contains("up to %1\$d hours") == true,
+        )
+        assertTrue(
+            stringValue(base, "managed_safety_confirm_location_body")
+                ?.contains("Location access ends when the page ends or expires.") == true,
+        )
+    }
+
+    @Test
+    fun managedSafetyKeepsUrgentPageActionAheadOfContactAdministration() {
+        val managed = first(
+            "src/main/java/com/noop/ui/ManagedSafetySection.kt",
+            "app/src/main/java/com/noop/ui/ManagedSafetySection.kt",
+            "android/app/src/main/java/com/noop/ui/ManagedSafetySection.kt",
+        )
+        assumeTrue("Managed Safety source unavailable", managed != null)
+        val source = managed!!.readText()
+        val pageIndex = source.indexOf("NoopCard(tint = Palette.statusCritical)")
+        val administrationIndex = source.indexOf("ManagedSafetyLead()")
+
+        assertTrue("Managed page card is missing", pageIndex >= 0)
+        assertTrue("Managed contact administration is missing", administrationIndex >= 0)
+        assertTrue(
+            "Paging and active-incident status must precede contact administration",
+            pageIndex < administrationIndex,
+        )
+    }
+
+    @Test
     fun managedPushEntryPointsFailClosedUntilCurrentTermsAreAccepted() {
         val gate = first(
             "src/main/java/com/noop/managed/ManagedRuntimeGate.kt",
@@ -211,7 +327,7 @@ class SafetyCenterLocalizationContractTest {
     }
 
     @Test
-    fun sosPermissionMonitoringAndFallBoundaryRemainExplicit() {
+    fun sosPermissionMonitoringAndAutomaticFallBoundaryRemainExplicit() {
         val screen = first(
             "src/main/java/com/noop/ui/SafetyCenterScreen.kt",
             "app/src/main/java/com/noop/ui/SafetyCenterScreen.kt",
@@ -241,8 +357,15 @@ class SafetyCenterLocalizationContractTest {
         val gestureSource = gesture!!.readText()
         assertTrue(screenSource.contains("sosNotificationPermissionLauncher.launch"))
         assertTrue(screenSource.contains("SafetyStatusNotifications.deliveryAvailable"))
-        assertTrue(gestureSource.contains("SafetyIncidentStatusMonitor.start"))
-        assertTrue(gestureSource.contains("WhoopConnectionService.start"))
+        assertTrue(screenSource.contains("WhoopConnectionService.start"))
+        assertTrue(
+            gestureSource.contains(
+                "ManagedCloudService.get(appContext).triggerBandSos",
+            ),
+        )
+        assertFalse(gestureSource.contains("SafetyIncidentStatusMonitor.start"))
+        assertFalse(screenSource.contains("R.string.safety_fall_status"))
+        assertFalse(screenSource.contains("R.string.safety_fall_requirements"))
         val serviceSource = service!!.readText()
         assertTrue(serviceSource.contains("SafetyIncidentStatusMonitor.reconcile(this)"))
         assertFalse(serviceSource.contains("FallResponseStateMachine("))

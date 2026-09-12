@@ -5,7 +5,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools"
     tools:ignore="MissingTranslation">
     <string name="wind_down_notification_title">Time to wind down</string>
-    <string name="wind_down_notification_body">Your planned bedtime is coming up. Start settling down when it works for you.</string>
+    <string name="wind_down_notification_body">Plan: wind down at %1$s; bedtime at %2$s, if that works for you.</string>
     <string name="wind_down_channel_name">Wind-down nudge</string>
     <string name="wind_down_channel_description">An optional evening reminder before your planned bedtime.</string>
     <string name="sleep_planner_title">Sleep Planner</string>

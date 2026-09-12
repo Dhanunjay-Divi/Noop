@@ -373,7 +373,7 @@ struct StrandiOSApp: App {
             model?.requestManagedSocialPokeHaptic() ?? false
         }
         if operationallyAllowed {
-            ManagedCloudService.shared.bootstrap()
+            ManagedCloudService.shared.bootstrap(repo: model.repo)
         }
         let bridge = HealthKitBridge(
             repo: model.repo,
@@ -956,7 +956,7 @@ struct StrandiOSApp: App {
         guard launchAccess.isUnlocked,
               acceptedTermsVersion == Terms.currentVersion else { return }
         model.startOperationalWorkAfterLaunchAccess()
-        ManagedCloudService.shared.bootstrap()
+        ManagedCloudService.shared.bootstrap(repo: model.repo)
         ScheduledDebugExport.activateIfEnabled()
         health.registerObserversAtLaunchIfPreviouslyRequested()
         configureWatchHandlers()

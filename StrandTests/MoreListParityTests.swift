@@ -132,9 +132,9 @@ final class MoreListParityTests: XCTestCase {
     }
 
     /// The iPhone shell owns one custom bar outside the native TabView. Its clearance must come from
-    /// that bar's rendered height and be applied once as an inherited scroll-content margin. This keeps
-    /// final rows reachable and fully opaque without shrinking the full-bleed page backdrop.
-    func testCustomiPhoneTabBarHasOneMeasuredFullScreenReservation() throws {
+    /// that bar's rendered height and be applied once as a real safe-area inset. Unlike a scroll-content
+    /// margin, the inset keeps large Dynamic Type rows from rendering behind persistent navigation.
+    func testCustomiPhoneTabBarHasOneMeasuredSafeAreaReservation() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
         let scaffold = try sourceText("Strand/Screens/ScreenScaffold.swift")
         let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
@@ -143,16 +143,19 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(shell.contains("FloatingTabBarHeightPreferenceKey"))
         XCTAssertTrue(shell.contains("value: geometry.size.height"))
         XCTAssertEqual(
-            shell.components(separatedBy:
-                ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
-            ).count - 1,
+            shell.components(separatedBy: ".safeAreaInset(edge: .bottom, spacing: 0)").count - 1,
             1,
-            "The measured custom-bar clearance must be reserved once as a scroll-content margin."
+            "The measured custom-bar clearance must be reserved exactly once as a safe-area inset."
         )
+        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight)"))
+        XCTAssertFalse(shell.contains(
+            ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
+        ), "A scroll-content margin still permits large text to render under the floating controls.")
         XCTAssertFalse(shell.contains(".padding(.bottom, visibleTabBarHeight)"),
                        "Outer padding creates an opaque band behind the floating controls.")
-        XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"),
-                       "A nested safe-area inset can leave pushed-screen footers beneath the custom bar.")
+        XCTAssertTrue(shell.contains("if !keyboardVisible, dynamicTypeSize.isAccessibilitySize"))
+        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight + 28)"),
+                      "Accessibility text sizes need an opaque reading boundary above the glass rail.")
         XCTAssertFalse(shell.contains(".mask(alignment: .bottom)"),
                        "A shell mask washes out the final visible row before it reaches the reserved strip.")
         XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.94 : 0.90"),

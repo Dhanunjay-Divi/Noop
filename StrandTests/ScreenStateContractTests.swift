@@ -129,7 +129,16 @@ final class RootDynamicTypeContractTests: XCTestCase {
             #"CommandLine.arguments.contains("--demo-daily-plan")"#
         ))
         XCTAssertTrue(today.contains(
-            "targetSection.id(Self.dailyPlanAnchorID)"
+            "return [.target] + saved.filter { $0 != .target }"
+        ))
+        XCTAssertTrue(today.contains(
+            "Color.clear.frame(height: 0).id(Self.dailyPlanAnchorID)"
+        ))
+        XCTAssertTrue(today.contains(
+            "dynamicTypeSize.isAccessibilitySize ? 0.12 : 0.08"
+        ))
+        XCTAssertTrue(today.contains(
+            "proxy.scrollTo(Self.dailyPlanAnchorID, anchor: framingAnchor)"
         ))
     }
 
@@ -289,11 +298,13 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
         XCTAssertFalse(android.contains("NutritionMixedSourceCard"))
 
         XCTAssertTrue(shell.contains("expandedReservedHeight: CGFloat = 76"))
+        XCTAssertTrue(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
+        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight)"))
         XCTAssertTrue(shell.contains(
-            ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
+            "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize"
         ))
+        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight + 28)"))
         XCTAssertFalse(shell.contains(".padding(.bottom, visibleTabBarHeight)"))
-        XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         XCTAssertFalse(shell.contains("floatingTabBarClearance"))
     }
 }
@@ -397,7 +408,7 @@ final class SafetyCenterLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 313)
+        XCTAssertEqual(source.count, 314)
         for (key, translations) in source {
             XCTAssertTrue(
                 key.hasPrefix("safety.") || key.hasPrefix("managed.safety."),
@@ -605,7 +616,19 @@ final class LiveSessionPreflightContractTests: XCTestCase {
         XCTAssertTrue(androidScreen.contains(
             "if (runner == null) {\n        LiveSessionPreflight("))
         XCTAssertTrue(androidScreen.contains(
-            "onStart = { startOrResumeLiveSession(vm, context) }"))
+            "if (liveSessionBandReady(vm.live.value)) {\n" +
+            "                    startOrResumeLiveSession(vm, context)"))
+        XCTAssertTrue(androidScreen.contains("enabled = bandReady"))
+        XCTAssertTrue(androidScreen.contains(
+            "live.connected && live.bonded && live.encryptedBond && live.worn"))
+        XCTAssertTrue(apple.contains(".disabled(!canStart)"))
+        XCTAssertTrue(apple.contains(
+            "internal func liveSessionBandReady(_ live: LiveState) -> Bool"))
+        XCTAssertTrue(apple.contains(
+            "guard !hasStarted,\n" +
+            "              liveSessionBandReady(model.live)"))
+        XCTAssertTrue(androidToday.contains("appwide_live_session_connect_band"))
+        XCTAssertTrue(androidToday.contains("appwide_live_session_band_required"))
         XCTAssertFalse(androidToday.contains(
             "if (LiveSessionRunner.active.value == null) {\n" +
             "                                    startOrResumeLiveSession"))
@@ -645,7 +668,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 653)
+        XCTAssertEqual(source.count, 685)
         XCTAssertEqual(
             source["appwide.terms.title"]?["en"],
             "NOOP Band is coming"

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.automirrored.filled.MergeType
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
@@ -104,6 +105,7 @@ import com.noop.analytics.WorkoutSport
 import com.noop.analytics.HeartRateRecovery
 import com.noop.analytics.ActiveZoneMinutes
 import com.noop.analytics.ActiveZoneMinutesCalculator
+import com.noop.analytics.BodyProfilePolicy
 import com.noop.analytics.RestScorer
 import com.noop.data.DailyMetric
 import com.noop.data.JournalEntry
@@ -111,6 +113,8 @@ import com.noop.data.MetricSeriesRow
 import com.noop.data.SleepEfficiencyUnits
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
+import com.noop.ingest.ActivityFileImporter
+import com.noop.ingest.LiftingImporter
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -140,33 +144,67 @@ import kotlin.math.roundToInt
  *   - an "All Sessions" NoopCard of fixed-height rows (date · sport · dur · HR · kcal ·
  *     dist · source).
  *
- * Sessions are loaded by the ViewModel from EVERY cached source - strap ("my-whoop": imported +
+ * Sessions are loaded from EVERY cached source - strap ("my-whoop": imported +
  * manual), Apple Health / Health Connect, and the on-device DETECTED bouts under "my-whoop-noop" -
  * merged newest first, with dismissed detected bouts filtered out (#107). Each row carries a source
  * badge (Whoop / Apple / HC / Detected / Manual) and an overflow menu to edit, re-label, dismiss or
- * delete. The windowing is anchored to the LATEST session (not "now"), so an old log still resolves;
- * an empty window auto-widens to the next larger range, exactly like the macOS screen.
+ * delete. First paint is bounded to recent history; exact Custom and explicit All requests replace the
+ * applied snapshot only after a successful read.
  */
 @Composable
 fun WorkoutsScreen(vm: AppViewModel) {
-    // The ViewModel owns the loaded rows now (ALL sources incl. detected, dismissed-filtered) so a
-    // mutation (add / edit / relabel / dismiss / delete) republishes the list and the screen updates.
-    // Lifecycle-aware collection stops a hidden/backgrounded destination from rebuilding a deep imported
-    // history after every repository mutation.
-    val allRows by vm.workouts.collectAsStateWithLifecycle()
+    val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
     val lastHistorySyncAt by vm.lastHistorySyncAt.collectAsStateWithLifecycle()
     val workoutDataVersion by vm.workoutDataVersion.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val workoutProfile = remember(context) { ProfileStore.from(context) }
+    val workoutProfileRevision by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val workoutHrMax = workoutProfile.hrMax
+    val workoutSex = workoutProfile.sex
+    val workoutProjectionContext = remember(
+        activeDeviceId,
+        workoutProfileRevision,
+        workoutHrMax,
+        workoutSex,
+    ) {
+        WorkoutProjectionContext(
+            activeStrapId = activeDeviceId,
+            hrMax = workoutHrMax,
+            sex = workoutSex,
+            profileRevision = workoutProfileRevision,
+        )
+    }
     // Cached daily metrics — the Charge side of the post-log activity-cost note (#439).
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
-    var loaded by remember { mutableStateOf(false) }
-    var range by remember { mutableStateOf(WorkoutRange.All) }
-    var customStartDate by remember { mutableStateOf(LocalDate.now().minusDays(29)) }
-    var customEndDate by remember { mutableStateOf(LocalDate.now()) }
+    // PERF: first paint reads a bounded window. A requested range is separate from the last successfully
+    // applied snapshot, so a failed All/Custom expansion can never relabel bounded rows.
+    val initialCustomEndDate = remember(activeDeviceId) { LocalDate.now() }
+    val initialCustomStartDate = remember(activeDeviceId) {
+        initialCustomEndDate.minusDays(29)
+    }
+    var historyRequest by remember(activeDeviceId) {
+        mutableStateOf(
+            WorkoutFirstPaintPolicy.initialRequest(
+                nowEpochSeconds = System.currentTimeMillis() / 1_000L,
+                today = initialCustomEndDate,
+            ),
+        )
+    }
+    var appliedHistory by remember(activeDeviceId) {
+        mutableStateOf<WorkoutHistorySnapshot?>(null)
+    }
+    var historyLoadStatus by remember(activeDeviceId) {
+        mutableStateOf(WorkoutHistoryLoadStatus.LOADING)
+    }
+    var historyRetryGeneration by remember(activeDeviceId) { mutableStateOf(0L) }
+    val allRows = appliedHistory?.rows.orEmpty()
+    val range = appliedHistory?.range ?: WorkoutRange.Year
+    val appliedCustomStartDate =
+        appliedHistory?.customStartDate ?: initialCustomStartDate
+    val appliedCustomEndDate =
+        appliedHistory?.customEndDate ?: initialCustomEndDate
     var showStrengthTrainer by remember { mutableStateOf(false) }
     var selectedOverviewDay by remember { mutableStateOf<LocalDate?>(null) }
-    // Pick the default range ONCE on first non-empty load; later mutations must not fight a range the
-    // user chose. Mirrors macOS, which sets the default only in `.task` / first onAppear.
-    var didPickDefaultRange by remember { mutableStateOf(false) }
 
     // The manual add/edit dialog target: Some(null) = add, Some(row) = edit, null = closed.
     var dialog by remember { mutableStateOf<DialogTarget?>(null) }
@@ -229,33 +267,147 @@ fun WorkoutsScreen(vm: AppViewModel) {
     // mode, dialogs, note banners) so a years-deep workout history is not re-filtered/grouped on each
     // unrelated recomposition.
     val resolvedRange = range
-    val windowRows = remember(allRows, range, customStartDate, customEndDate, filter) {
+    val windowRows = remember(
+        allRows,
+        range,
+        appliedCustomStartDate,
+        appliedCustomEndDate,
+        filter,
+    ) {
         filter.apply(
             sessions(
                 all = allRows,
                 range = range,
-                customStartDate = customStartDate,
-                customEndDate = customEndDate,
+                customStartDate = appliedCustomStartDate,
+                customEndDate = appliedCustomEndDate,
             ),
         )
     }
+    // This owner stays above LazyScreenScaffold: disposing the Sessions item must never recreate the
+    // projection budget, retry generation, or projected-row map for the same applied data snapshot.
+    val sessionProjectionBudgetKey = remember(appliedHistory) {
+        appliedHistory?.let { snapshot ->
+            WorkoutSessionProjectionBudgetKey(
+                window = snapshot.window,
+                rows = snapshot.rows,
+            )
+        }
+    }
+    val sessionProjectionBudget = remember(sessionProjectionBudgetKey) {
+        WorkoutVisibleProjectionBudget()
+    }
+    var sessionProjectionState by remember(sessionProjectionBudgetKey) {
+        mutableStateOf(WorkoutVisibleProjectionState())
+    }
+    val activeSessionProjectionState = remember(
+        sessionProjectionState,
+        workoutProjectionContext,
+    ) {
+        sessionProjectionState.forContext(workoutProjectionContext)
+    }
+    var sessionShownCount by remember(sessionProjectionBudgetKey) {
+        mutableStateOf(SESSIONS_PAGE_SIZE)
+    }
+    val visibleSessionBase = if (windowRows.size <= sessionShownCount) {
+        windowRows
+    } else {
+        windowRows.take(sessionShownCount)
+    }
+    val eligibleSessionHrProjection = remember(
+        visibleSessionBase,
+        activeSessionProjectionState.completedRows,
+    ) {
+        WorkoutFirstPaintPolicy.hrProjectionCandidates(
+            rows = visibleSessionBase,
+            completedRows = activeSessionProjectionState.completedRows,
+            limit = WorkoutFirstPaintPolicy.VISIBLE_SESSION_PROJECTION_CAP,
+        )
+    }
+    val sessionProjectionAttemptKey = remember(
+        sessionProjectionBudgetKey,
+        eligibleSessionHrProjection,
+        workoutProjectionContext,
+        activeSessionProjectionState.retryGeneration,
+    ) {
+        if (sessionProjectionBudgetKey == null) {
+            null
+        } else {
+            WorkoutProjectionAttemptKey(
+                candidates = eligibleSessionHrProjection,
+                context = workoutProjectionContext,
+                retryGeneration = activeSessionProjectionState.retryGeneration,
+            )
+        }
+    }
+    LaunchedEffect(sessionProjectionAttemptKey) {
+        val attempt = sessionProjectionAttemptKey ?: return@LaunchedEffect
+        if (activeSessionProjectionState.failed) return@LaunchedEffect
+        val pendingHrProjection = sessionProjectionBudget.reserve(attempt.candidates)
+        if (pendingHrProjection.isEmpty()) return@LaunchedEffect
+        sessionProjectionState = activeSessionProjectionState.beginAttempt()
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "workouts.visible_session_projection",
+        )
+        var outcome = "completed"
+        val fields = workoutVisibleProjectionDiagnosticFields(pendingHrProjection.size)
+        try {
+            val projected = vm.repo.fillWorkoutHrFromStrap(
+                rows = pendingHrProjection,
+                strapDeviceId = workoutProjectionContext.activeStrapId,
+                cap = pendingHrProjection.size,
+                strainMaxHR = workoutProjectionContext.hrMax.toDouble(),
+                strainSex = workoutProjectionContext.sex,
+            )
+            currentCoroutineContext().ensureActive()
+            if (projected.size != pendingHrProjection.size) {
+                outcome = "failed"
+                sessionProjectionState = sessionProjectionState
+                    .forContext(workoutProjectionContext)
+                    .markFailed()
+                return@LaunchedEffect
+            }
+            sessionProjectionState = sessionProjectionState
+                .forContext(workoutProjectionContext)
+                .applySuccess(
+                    candidates = pendingHrProjection,
+                    projected = projected,
+                )
+        } catch (cancelled: CancellationException) {
+            outcome = "superseded"
+            throw cancelled
+        } catch (_: Exception) {
+            outcome = "failed"
+            sessionProjectionState = sessionProjectionState
+                .forContext(workoutProjectionContext)
+                .markFailed()
+        } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = outcome,
+                fields = fields,
+            )
+        }
+    }
+    val projectedVisibleSessionRows = visibleSessionBase.map {
+        activeSessionProjectionState.projections[it] ?: it
+    }
+    val remainingSessionRows = windowRows.size - visibleSessionBase.size
     val windowGroups = remember(windowRows) { sportGroups(windowRows) }
 
     val recoveryRows = remember(windowRows) {
         latestWorkoutRows(windowRows, maximumDays = 90).sortedBy { it.startTs }
     }
-    val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
     val recoveryInputKey = remember(
         range,
-        customStartDate,
-        customEndDate,
+        appliedCustomStartDate,
+        appliedCustomEndDate,
         recoveryRows,
         activeDeviceId,
         lastHistorySyncAt,
     ) {
         buildString {
             append(range.name)
-            append('|').append(customStartDate).append('|').append(customEndDate)
+            append('|').append(appliedCustomStartDate).append('|').append(appliedCustomEndDate)
             append('|').append(activeDeviceId).append('|').append(lastHistorySyncAt ?: 0L)
             recoveryRows.forEach { append('|').append(it.startTs).append(':').append(it.endTs) }
         }
@@ -286,14 +438,72 @@ fun WorkoutsScreen(vm: AppViewModel) {
         }
     }
 
-    LaunchedEffect(activeDeviceId, workoutDataVersion) {
-        vm.loadWorkouts()
-        loaded = true
+    LaunchedEffect(
+        activeDeviceId,
+        workoutDataVersion,
+        historyRequest,
+        historyRetryGeneration,
+        workoutProjectionContext,
+    ) {
+        val request = WorkoutFirstPaintPolicy.refreshRequest(
+            request = historyRequest,
+            nowEpochSeconds = System.currentTimeMillis() / 1_000L,
+        )
+        historyLoadStatus = WorkoutHistoryLoadStatus.LOADING
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "workouts.history_window_load",
+        )
+        var outcome = "completed"
+        var fields = mapOf(
+            "scope" to request.diagnosticScope,
+            "result_bucket" to "unavailable",
+        )
+        try {
+            val rows = loadWorkoutScreenRows(
+                repository = vm.repo,
+                deviceId = activeDeviceId,
+                window = request.window,
+                projectionContext = workoutProjectionContext,
+            )
+            currentCoroutineContext().ensureActive()
+            appliedHistory = WorkoutFirstPaintPolicy.applyResult(
+                previous = appliedHistory,
+                request = request,
+                loadedRows = rows,
+            )
+            historyLoadStatus = WorkoutHistoryLoadStatus.READY
+            fields = fields + ("result_bucket" to workoutRowCountBucket(rows.size))
+        } catch (cancelled: CancellationException) {
+            outcome = "superseded"
+            throw cancelled
+        } catch (_: Exception) {
+            outcome = "failed"
+            historyLoadStatus = WorkoutHistoryLoadStatus.FAILED
+        } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = outcome,
+                fields = fields,
+            )
+        }
     }
-    LaunchedEffect(allRows) {
-        if (!didPickDefaultRange && allRows.isNotEmpty()) {
-            range = defaultRange(allRows)
-            didPickDefaultRange = true
+
+    fun requestRange(
+        requestedRange: WorkoutRange,
+        requestedCustomStart: LocalDate = appliedCustomStartDate,
+        requestedCustomEnd: LocalDate = appliedCustomEndDate,
+    ) {
+        val next = WorkoutFirstPaintPolicy.request(
+            range = requestedRange,
+            customStartDate = requestedCustomStart,
+            customEndDate = requestedCustomEnd,
+            nowEpochSeconds = System.currentTimeMillis() / 1_000L,
+        )
+        historyLoadStatus = WorkoutHistoryLoadStatus.LOADING
+        if (next == historyRequest) {
+            historyRetryGeneration += 1L
+        } else {
+            historyRequest = next
         }
     }
 
@@ -323,6 +533,14 @@ fun WorkoutsScreen(vm: AppViewModel) {
         // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
+        if (historyLoadStatus == WorkoutHistoryLoadStatus.FAILED) {
+            item {
+                WorkoutHistoryRetryCard {
+                    historyLoadStatus = WorkoutHistoryLoadStatus.LOADING
+                    historyRetryGeneration += 1L
+                }
+            }
+        }
         // Start (or stop) a workout right here, not only on Live — mirrors the Live control (#115).
         item {
         WorkoutStartSection(vm)
@@ -335,9 +553,37 @@ fun WorkoutsScreen(vm: AppViewModel) {
                 fullWidth = true,
             ) { showStrengthTrainer = true }
         }
-        if (allRows.isEmpty()) {
+        if (!WorkoutFirstPaintPolicy.shouldShowRangeControl(appliedHistory)) {
+            if (historyLoadStatus != WorkoutHistoryLoadStatus.FAILED) {
+                item {
+                    EmptyWorkouts(loaded = false, onAdd = { dialog = DialogTarget(null) })
+                }
+            }
+        } else if (allRows.isEmpty()) {
             item {
-            EmptyWorkouts(loaded, onAdd = { dialog = DialogTarget(null) })
+                RangeBar(
+                    range = range,
+                    rowCount = 0,
+                    filterActive = false,
+                    onSelect = { requestRange(it) },
+                    onAdd = { dialog = DialogTarget(null) },
+                    customStartDate = appliedCustomStartDate,
+                    customEndDate = appliedCustomEndDate,
+                    onCustomStartDate = {
+                        val nextStart = minOf(it, appliedCustomEndDate)
+                        requestRange(WorkoutRange.Custom, nextStart, appliedCustomEndDate)
+                    },
+                    onCustomEndDate = {
+                        val nextEnd = maxOf(
+                            appliedCustomStartDate,
+                            minOf(it, LocalDate.now()),
+                        )
+                        requestRange(WorkoutRange.Custom, appliedCustomStartDate, nextEnd)
+                    },
+                )
+            }
+            item {
+                EmptyWorkouts(loaded = true, onAdd = { dialog = DialogTarget(null) })
             }
             item {
                 ActivityCalendarSection(
@@ -352,15 +598,20 @@ fun WorkoutsScreen(vm: AppViewModel) {
                 range = range,
                 rowCount = windowRows.size,
                 filterActive = filter.isActive,
-                onSelect = { range = it },
+                onSelect = { requestRange(it) },
                 onAdd = { dialog = DialogTarget(null) },
-                customStartDate = customStartDate,
-                customEndDate = customEndDate,
+                customStartDate = appliedCustomStartDate,
+                customEndDate = appliedCustomEndDate,
                 onCustomStartDate = {
-                    customStartDate = minOf(it, customEndDate)
+                    val nextStart = minOf(it, appliedCustomEndDate)
+                    requestRange(WorkoutRange.Custom, nextStart, appliedCustomEndDate)
                 },
                 onCustomEndDate = {
-                    customEndDate = maxOf(customStartDate, minOf(it, LocalDate.now()))
+                    val nextEnd = maxOf(
+                        appliedCustomStartDate,
+                        minOf(it, LocalDate.now()),
+                    )
+                    requestRange(WorkoutRange.Custom, appliedCustomStartDate, nextEnd)
                 },
             )
             }
@@ -391,7 +642,11 @@ fun WorkoutsScreen(vm: AppViewModel) {
                     inputKey = recoveryInputKey,
                     loadedKey = recoveryTrendLoadedKey,
                     points = recoveryTrend,
-                    rangeCaption = recoveryRangeCaption(range, customStartDate, customEndDate),
+                    rangeCaption = recoveryRangeCaption(
+                        range,
+                        appliedCustomStartDate,
+                        appliedCustomEndDate,
+                    ),
                     onLoadRequested = { requestedKey ->
                         if (
                             requestedKey == recoveryInputKey &&
@@ -465,6 +720,16 @@ fun WorkoutsScreen(vm: AppViewModel) {
             SessionsSection(
                 vm = vm,
                 rows = windowRows,
+                visibleRows = projectedVisibleSessionRows,
+                remainingRows = remainingSessionRows,
+                projectionFailed = activeSessionProjectionState.failed,
+                projectionRetryAvailable = sessionProjectionBudget.remainingRows > 0,
+                onRetryProjection = {
+                    if (sessionProjectionBudget.remainingRows > 0) {
+                        sessionProjectionState = activeSessionProjectionState.retry()
+                    }
+                },
+                onShowMore = { sessionShownCount += SESSIONS_PAGE_SIZE },
                 selectionMode = selectionMode,
                 selectedKeys = selectedKeys,
                 onToggleSelectMode = {
@@ -884,6 +1149,18 @@ internal fun WorkoutDayOverviewSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
+    val profile = remember(context) { ProfileStore.from(context) }
+    val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val canPresentBmi = remember(profileVersion) {
+        BodyProfilePolicy.canPresentAdultBmi(
+            age = profile.age,
+            currentWeightKg = profile.weightKg,
+            heightCm = profile.heightCm,
+            ageConfirmed = profile.ageInputConfirmed,
+            heightConfirmed = profile.heightInputConfirmed,
+            currentWeightConfirmed = profile.weightInputConfirmed,
+        )
+    }
     val unitSystem = remember { UnitPrefs.system(context) }
     val temperatureUnit = remember { UnitPrefs.temperature(context) }
     val effortScale = remember { UnitPrefs.effortScale(context) }
@@ -1080,6 +1357,7 @@ internal fun WorkoutDayOverviewSheet(
             temperatureUnit,
             locale,
             scope,
+            canPresentBmi,
         )
     } else {
         emptyList()
@@ -1329,9 +1607,11 @@ private fun dayOverviewSupplementalMetrics(
     temperatureUnit: TemperatureUnit,
     locale: Locale,
     scope: DayOverviewScope,
+    canPresentBmi: Boolean,
 ): List<DayOverviewMetric> {
     val grouped = rows.asSequence()
         .filter { it.value.isFinite() }
+        .filter { canPresentBmi || dayOverviewCanonicalKey(it.key) != "bmi" }
         .filterNot { dayOverviewHiddenMetric(it.deviceId, it.key) }
         .filter { scope.includesSupplementalMetric(dayOverviewCanonicalKey(it.key)) }
         .groupBy { dayOverviewCanonicalKey(it.key) }
@@ -1839,6 +2119,17 @@ private fun EmptyWorkouts(loaded: Boolean, onAdd: () -> Unit) {
             body = uiString(R.string.state_workouts_loading_body),
         )
     }
+}
+
+@Composable
+private fun WorkoutHistoryRetryCard(onRetry: () -> Unit) {
+    ScreenStateCard(
+        kind = ScreenStateKind.Error,
+        title = uiString(R.string.l10n_settings_screen_couldn_t_check_try_again_b3c885d9),
+        body = uiString(R.string.state_workouts_loading_body),
+        actionLabel = uiString(R.string.strength_try_again),
+        onAction = onRetry,
+    )
 }
 
 /**
@@ -2555,6 +2846,12 @@ private fun ZoneStat(zone: Int, minutes: Double, total: Double, modifier: Modifi
 private fun SessionsSection(
     vm: AppViewModel,
     rows: List<WorkoutRow>,
+    visibleRows: List<WorkoutRow>,
+    remainingRows: Int,
+    projectionFailed: Boolean,
+    projectionRetryAvailable: Boolean,
+    onRetryProjection: () -> Unit,
+    onShowMore: () -> Unit,
     selectionMode: Boolean,
     selectedKeys: Set<String>,
     onToggleSelectMode: () -> Unit,
@@ -2569,15 +2866,6 @@ private fun SessionsSection(
 ) {
     var selectedRow by remember { mutableStateOf<WorkoutRow?>(null) }
 
-    // #797: paginate the All-Sessions list. This card lives inside ONE LazyColumn item, so every session
-    // row composes eagerly: a years-deep WHOOP/Apple import (hundreds to thousands of bouts) built the
-    // whole table in one pass, a real jank/OOM contributor. Render a bounded page and grow it on demand,
-    // so a heavy history opens fast and the user pages in the rest. Reset when the windowed range changes
-    // (the row set changes identity), so switching range never leaves a stale "shown" count.
-    var shownCount by remember(rows) { mutableStateOf(SESSIONS_PAGE_SIZE) }
-    val visible = if (rows.size <= shownCount) rows else rows.take(shownCount)
-    val remaining = rows.size - visible.size
-
     // #64: only MANUAL / DETECTED rows are selectable — a pure-imported list has nothing to merge/delete.
     val anySelectable = rows.any { WorkoutMerge.isMergeable(it) }
     val chosen = rows.filter { sessionSelectionKey(it) in selectedKeys }
@@ -2589,12 +2877,27 @@ private fun SessionsSection(
             }
             if (anySelectable) SelectPill(selectionMode, onToggleSelectMode)
         }
+        if (projectionFailed) {
+            TextButton(
+                onClick = onRetryProjection,
+                enabled = projectionRetryAvailable,
+                modifier = Modifier.semantics { role = Role.Button },
+            ) {
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(uiString(R.string.strength_try_again))
+            }
+        }
         if (selectionMode) SelectionToolbar(chosen, onMerge, onBulkDelete, onCancelSelect)
         NoopCard(padding = 0.dp) {
             Column {
                 SessionHeaderRow(selectionMode)
                 FullDivider()
-                visible.forEachIndexed { idx, row ->
+                visibleRows.forEachIndexed { idx, row ->
                     SessionRow(
                         row = row,
                         background = if (idx % 2 == 1) Palette.surfaceInset.copy(alpha = 0.4f) else Color.Transparent,
@@ -2607,22 +2910,22 @@ private fun SessionsSection(
                         onDelete = onDelete,
                         onClick = { selectedRow = it },
                     )
-                    if (idx != visible.lastIndex) FullDivider(alpha = 0.5f)
+                    if (idx != visibleRows.lastIndex) FullDivider(alpha = 0.5f)
                 }
                 // "Show more" pages in the next [SESSIONS_PAGE_SIZE] bouts. Hidden once everything is shown.
-                if (remaining > 0) {
+                if (remainingRows > 0) {
                     FullDivider(alpha = 0.5f)
-                    val more = minOf(remaining, SESSIONS_PAGE_SIZE)
+                    val more = minOf(remainingRows, SESSIONS_PAGE_SIZE)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { shownCount += SESSIONS_PAGE_SIZE }
+                            .clickable(onClick = onShowMore)
                             .semantics { contentDescription = uiString(R.string.l10n_workouts_screen_show_more_more_sessions_25bce755, more) }
                             .padding(vertical = 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            uiString(R.string.l10n_workouts_screen_show_more_more_remaining_remaining_d1662e67, more, remaining),
+                            uiString(R.string.l10n_workouts_screen_show_more_more_remaining_remaining_d1662e67, more, remainingRows),
                             style = NoopType.subhead,
                             color = Palette.accent,
                         )
@@ -2716,7 +3019,8 @@ private fun ToolbarAction(label: String, icon: ImageVector, tint: Color, enabled
 
 /** #797: the All-Sessions list renders in pages of this size and grows on "Show more", so a years-deep
  *  workout history doesn't compose every row in one pass inside the single enclosing card. */
-private const val SESSIONS_PAGE_SIZE = 50
+private const val SESSIONS_PAGE_SIZE =
+    WorkoutFirstPaintPolicy.VISIBLE_SESSION_PROJECTION_CAP
 
 @Composable
 private fun SessionHeaderRow(selectionMode: Boolean = false) {
@@ -2865,19 +3169,110 @@ private fun SessionRow(
 @Composable
 private fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
+    val profile = remember(context) { ProfileStore.from(context) }
+    val activeStrapId by vm.selectedDeviceId.collectAsStateWithLifecycle()
+    val profileRevision by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val projectionHrMax = profile.hrMax
+    val projectionSex = profile.sex
+    val projectionContext = remember(
+        activeStrapId,
+        profileRevision,
+        projectionHrMax,
+        projectionSex,
+    ) {
+        WorkoutProjectionContext(
+            activeStrapId = activeStrapId,
+            hrMax = projectionHrMax,
+            sex = projectionSex,
+            profileRevision = profileRevision,
+        )
+    }
+    val detailProjectionKey = remember(row, projectionContext) {
+        WorkoutDetailProjectionKey(row = row, context = projectionContext)
+    }
+    var displayedRow by remember(detailProjectionKey) { mutableStateOf(row) }
+    var detailProjectionFailed by remember(detailProjectionKey) { mutableStateOf(false) }
+    var detailProjectionRetryGeneration by remember(detailProjectionKey) { mutableStateOf(0L) }
+    val detailProjectionAttemptKey = remember(
+        detailProjectionKey,
+        detailProjectionRetryGeneration,
+    ) {
+        WorkoutDetailProjectionAttemptKey(
+            detail = detailProjectionKey,
+            retryGeneration = detailProjectionRetryGeneration,
+        )
+    }
 
     // Per-window reads (#410): the HR curve (downsampled bucket means) and the HR-zone split. Zones
     // prefer the imported per-workout percentages (a WHOOP-computed split); only when the row carries
     // none do we derive zone-minutes from the strap's own raw HR — so we never overwrite a real
     // imported split with an on-device approximation.
-    var hrCurve by remember(row.startTs) { mutableStateOf<List<Double>>(emptyList()) }
-    var zoneMinutes by remember(row.startTs) { mutableStateOf<List<Double>?>(null) }
-    var zonesFromImport by remember(row.startTs) { mutableStateOf(false) }
-    var heartRateRecovery by remember(row.startTs) { mutableStateOf<HeartRateRecovery.Result?>(null) }
+    var hrCurve by remember(detailProjectionKey) { mutableStateOf<List<Double>>(emptyList()) }
+    var zoneMinutes by remember(detailProjectionKey) { mutableStateOf<List<Double>?>(null) }
+    var zonesFromImport by remember(detailProjectionKey) { mutableStateOf(false) }
+    var heartRateRecovery by remember(detailProjectionKey) {
+        mutableStateOf<HeartRateRecovery.Result?>(null)
+    }
     // Steps for an on-foot sport (#398): the strap's own counter over the window, computed at display time
     // so it "fills in after sync". null for non-foot sports or when no strap counter covers the window.
-    var steps by remember(row.startTs) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(row.startTs, row.endTs) {
+    var steps by remember(detailProjectionKey) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(detailProjectionAttemptKey) {
+        val candidate = WorkoutFirstPaintPolicy.hrProjectionCandidates(
+            rows = listOf(row),
+            completedRows = emptySet(),
+            limit = 1,
+        )
+        if (candidate.isEmpty()) {
+            displayedRow = row
+            detailProjectionFailed = false
+            return@LaunchedEffect
+        }
+        detailProjectionFailed = false
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "workouts.detail_projection",
+        )
+        var outcome = "completed"
+        var fields = mapOf(
+            "scope" to "single_row",
+            "result_bucket" to "available",
+        )
+        try {
+            val projected = vm.repo.fillWorkoutHrFromStrap(
+                rows = candidate,
+                strapDeviceId = projectionContext.activeStrapId,
+                cap = 1,
+                strainMaxHR = projectionContext.hrMax.toDouble(),
+                strainSex = projectionContext.sex,
+            )
+            currentCoroutineContext().ensureActive()
+            val result = WorkoutFirstPaintPolicy.detailProjectionResult(
+                original = row,
+                projected = projected,
+            )
+            displayedRow = result.row
+            detailProjectionFailed = result.failed
+            if (result.failed) {
+                outcome = "failed"
+                fields = fields + ("result_bucket" to "invalid_result")
+            }
+        } catch (cancelled: CancellationException) {
+            outcome = "superseded"
+            throw cancelled
+        } catch (_: Exception) {
+            outcome = "failed"
+            fields = fields + ("result_bucket" to "unavailable")
+            displayedRow = row
+            detailProjectionFailed = true
+        } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = outcome,
+                fields = fields,
+            )
+        }
+    }
+    LaunchedEffect(detailProjectionKey) {
         hrCurve = vm.workoutHrBuckets(row.startTs, row.endTs).map { it.avgBpm }
         steps = if (WorkoutSport.isOnFoot(row.sport)) vm.workoutSteps(row.startTs, row.endTs) else null
         val imported = parseZonePercents(row.zonesJSON)
@@ -2923,18 +3318,39 @@ private fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: () 
                 val (srcLabel, srcTint) = row.sourceBadge
                 SourceBadge(srcLabel, tint = srcTint)
             }
+            if (detailProjectionFailed) {
+                TextButton(
+                    onClick = { detailProjectionRetryGeneration += 1L },
+                    modifier = Modifier.semantics { role = Role.Button },
+                ) {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(uiString(R.string.strength_try_again))
+                }
+            }
             CardDivider()
-            DetailRow("Time", timeRangeLabel(row.startTs, row.endTs))
-            DetailRow("Duration", durationLabel(row.durationS))
-            if (row.avgHr != null) DetailRow("Avg HR", "${row.avgHr} bpm")
-            if (row.maxHr != null) DetailRow("Max HR", "${row.maxHr} bpm")
-            if (row.energyKcal != null) DetailRow("Calories", "${grouped(row.energyKcal)} kcal")
-            if (row.distanceM != null) {
-                val unitSystem = UnitPrefs.system(LocalContext.current)
-                DetailRow("Distance", UnitFormatter.distanceFromKilometers(row.distanceM / 1000.0, unitSystem))
+            DetailRow("Time", timeRangeLabel(displayedRow.startTs, displayedRow.endTs))
+            DetailRow("Duration", durationLabel(displayedRow.durationS))
+            if (displayedRow.avgHr != null) DetailRow("Avg HR", "${displayedRow.avgHr} bpm")
+            if (displayedRow.maxHr != null) DetailRow("Max HR", "${displayedRow.maxHr} bpm")
+            displayedRow.energyKcal?.let { energyKcal ->
+                DetailRow("Calories", "${grouped(energyKcal)} kcal")
+            }
+            displayedRow.distanceM?.let { distanceM ->
+                val unitSystem = UnitPrefs.system(context)
+                DetailRow(
+                    "Distance",
+                    UnitFormatter.distanceFromKilometers(distanceM / 1000.0, unitSystem),
+                )
             }
             steps?.let { DetailRow("Steps", "${grouped(it.toDouble())} steps") }  // #398, on-foot sports
-            if (!row.notes.isNullOrBlank()) DetailRow("Notes", row.notes)
+            displayedRow.notes
+                ?.takeIf { it.isNotBlank() }
+                ?.let { notes -> DetailRow("Notes", notes) }
 
             // #796 - per-session Effort contribution. The session's captured strain re-homed from a plain
             // value row into a prominent Effort-amber card (the big count-up value + the "This session"
@@ -2942,8 +3358,8 @@ private fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: () 
             // strain - an imported session with none simply omits the card. The display honours the Effort
             // scale toggle (#268), so a WHOOP-axis user sees the rescaled 0–21 value; the stored value is
             // unchanged. Presentation only - no new data is computed here.
-            row.strain?.let { strain ->
-                val effortScale = UnitPrefs.effortScale(LocalContext.current)
+            displayedRow.strain?.let { strain ->
+                val effortScale = UnitPrefs.effortScale(context)
                 CardDivider()
                 SessionEffortCard(strain = strain, effortScale = effortScale)
             }
@@ -2961,8 +3377,8 @@ private fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: () 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     val lo = hrCurve.minOrNull()?.roundToInt() ?: 0
                     val hi = hrCurve.maxOrNull()?.roundToInt() ?: 0
-                    MiniStat("Avg", row.avgHr?.let { "$it bpm" } ?: "–", Modifier.weight(1f))
-                    MiniStat("Peak", (row.maxHr ?: hi).let { "$it bpm" }, Modifier.weight(1f))
+                    MiniStat("Avg", displayedRow.avgHr?.let { "$it bpm" } ?: "–", Modifier.weight(1f))
+                    MiniStat("Peak", (displayedRow.maxHr ?: hi).let { "$it bpm" }, Modifier.weight(1f))
                     MiniStat("Low", "$lo bpm", Modifier.weight(1f))
                 }
                 // #18: the Avg HR shown above can be EDITED on the manual sheet while the graph, zones and
@@ -2971,8 +3387,12 @@ private fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: () 
                 // that captured strain/zones, say so plainly. We do NOT re-score from the typed number.
                 // Parity with macOS WorkoutDetailView.avgHrEditedDisclosure.
                 val traceMean = hrCurve.sum() / hrCurve.size
-                val captured = row.strain != null || !row.zonesJSON.isNullOrEmpty()
-                if (captured && row.avgHr != null && kotlin.math.abs(row.avgHr - traceMean) > 3.0) {
+                val captured = displayedRow.strain != null || !displayedRow.zonesJSON.isNullOrEmpty()
+                if (
+                    captured &&
+                    displayedRow.avgHr != null &&
+                    kotlin.math.abs(displayedRow.avgHr!! - traceMean) > 3.0
+                ) {
                     Text(
                         uiString(R.string.l10n_workouts_screen_the_average_above_was_edited_the_0a7881f0),
                         style = NoopType.footnote,
@@ -3651,9 +4071,553 @@ private fun FullDivider(alpha: Float = 1f) {
     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Palette.hairline.copy(alpha = alpha)))
 }
 
+private suspend fun loadWorkoutScreenRows(
+    repository: WhoopRepository,
+    deviceId: String,
+    window: WorkoutHistoryWindow,
+    projectionContext: WorkoutProjectionContext,
+): List<WorkoutRow> {
+    val overlappingRows = repository.workoutsOverlappingAllSources(
+        from = window.fromEpochSeconds,
+        to = window.toEpochSeconds,
+        limit = WorkoutFirstPaintPolicy.HISTORY_OVERLAP_ROW_LIMIT + 1,
+    )
+    check(WorkoutFirstPaintPolicy.overlapQueryIsComplete(overlappingRows.size)) {
+        "Workout overlap query exceeded its bounded row limit"
+    }
+    val sourceRows = workoutHistoryRowsForSources(
+        overlappingRows = overlappingRows,
+        importedSourceIds = repository.importedSourceIds(deviceId),
+        computedSourceIds = repository.computedSourceIds(deviceId),
+    )
+    val dismissed = repository.dismissedDetected(deviceId)
+    val exactRows = window.filterExact(sourceRows)
+    val visibleRows = WorkoutEditing.dropDetectedShadows(
+        WorkoutEditing.filterDismissed(exactRows, dismissed),
+    )
+    val resolvedRows = WorkoutFirstPaintPolicy.resolveDedupWithBoundedProjection(
+        rows = visibleRows,
+    ) { batch ->
+        repository.fillWorkoutHrFromStrap(
+            rows = batch,
+            strapDeviceId = projectionContext.activeStrapId,
+            cap = batch.size,
+            strainMaxHR = projectionContext.hrMax.toDouble(),
+            strainSex = projectionContext.sex,
+        )
+    }
+    currentCoroutineContext().ensureActive()
+    return resolvedRows.sortedByDescending { it.startTs }
+}
+
+internal fun workoutHistoryRowsForSources(
+    overlappingRows: List<WorkoutRow>,
+    importedSourceIds: List<String>,
+    computedSourceIds: List<String>,
+): List<WorkoutRow> {
+    val rowsByDevice = overlappingRows.groupBy { it.deviceId }
+
+    fun unionRows(sourceIds: List<String>): List<WorkoutRow> {
+        val seen = HashSet<Pair<Long, String>>()
+        return sourceIds.flatMap { sourceId ->
+            rowsByDevice[sourceId].orEmpty()
+        }.filter { seen.add(it.startTs to it.sport) }
+    }
+
+    return unionRows(importedSourceIds) +
+        rowsByDevice[WhoopRepository.APPLE_HEALTH_SOURCE].orEmpty() +
+        rowsByDevice[WhoopRepository.HEALTH_CONNECT_SOURCE].orEmpty() +
+        unionRows(computedSourceIds) +
+        rowsByDevice[LiftingImporter.SOURCE_ID].orEmpty() +
+        rowsByDevice[ActivityFileImporter.SOURCE_ID].orEmpty()
+}
+
+private fun workoutRowCountBucket(count: Int): String = when (count) {
+    0 -> "none"
+    in 1..9 -> "under_10"
+    in 10..49 -> "under_50"
+    in 50..199 -> "under_200"
+    else -> "200_plus"
+}
+
+internal fun workoutVisibleProjectionDiagnosticFields(
+    attemptedRows: Int,
+): Map<String, String> = mapOf(
+    "scope" to "visible_page",
+    "result_bucket" to workoutRowCountBucket(attemptedRows),
+)
+
 // MARK: - Range model
 
-private enum class WorkoutRange(val label: String, val caption: String, val days: Int?, val heroWord: String) {
+internal data class WorkoutHistoryWindow(
+    val fromEpochSeconds: Long,
+    val toEpochSeconds: Long,
+) {
+    fun intersectsExact(row: WorkoutRow): Boolean {
+        val effectiveEnd = if (row.endTs > row.startTs) {
+            row.endTs
+        } else {
+            (row.startTs + 1L).coerceAtLeast(row.startTs)
+        }
+        return row.startTs <= toEpochSeconds && effectiveEnd > fromEpochSeconds
+    }
+
+    fun filterExact(rows: List<WorkoutRow>): List<WorkoutRow> = rows.filter(::intersectsExact)
+}
+
+private enum class WorkoutHistoryLoadStatus {
+    LOADING,
+    READY,
+    FAILED,
+}
+
+internal data class WorkoutHistoryRequest(
+    val range: WorkoutRange?,
+    val customStartDate: LocalDate,
+    val customEndDate: LocalDate,
+    val window: WorkoutHistoryWindow,
+) {
+    val diagnosticScope: String
+        get() = if (range == WorkoutRange.All) "full" else "bounded"
+}
+
+internal data class WorkoutHistorySnapshot(
+    val rows: List<WorkoutRow>,
+    val range: WorkoutRange,
+    val customStartDate: LocalDate,
+    val customEndDate: LocalDate,
+    val window: WorkoutHistoryWindow,
+)
+
+internal data class WorkoutProjectionContext(
+    val activeStrapId: String,
+    val hrMax: Int,
+    val sex: String,
+    val profileRevision: Long,
+)
+
+internal data class WorkoutSessionProjectionBudgetKey(
+    val window: WorkoutHistoryWindow,
+    val rows: List<WorkoutRow>,
+)
+
+internal data class WorkoutVisibleProjectionState(
+    val context: WorkoutProjectionContext? = null,
+    val projections: Map<WorkoutRow, WorkoutRow> = emptyMap(),
+    val completedRows: Set<WorkoutRow> = emptySet(),
+    val failed: Boolean = false,
+    val retryGeneration: Long = 0L,
+) {
+    fun forContext(nextContext: WorkoutProjectionContext): WorkoutVisibleProjectionState =
+        if (context == nextContext) {
+            this
+        } else {
+            copy(
+                context = nextContext,
+                projections = emptyMap(),
+                completedRows = emptySet(),
+                failed = false,
+            )
+        }
+
+    fun beginAttempt(): WorkoutVisibleProjectionState =
+        if (failed) copy(failed = false) else this
+
+    fun markFailed(): WorkoutVisibleProjectionState =
+        if (failed) this else copy(failed = true)
+
+    fun retry(): WorkoutVisibleProjectionState = copy(
+        failed = false,
+        retryGeneration = retryGeneration + 1L,
+    )
+
+    fun applySuccess(
+        candidates: List<WorkoutRow>,
+        projected: List<WorkoutRow>,
+    ): WorkoutVisibleProjectionState {
+        require(candidates.size == projected.size)
+        return copy(
+            projections = projections + candidates.zip(projected),
+            completedRows = completedRows + candidates,
+            failed = false,
+        )
+    }
+}
+
+internal data class WorkoutProjectionAttemptKey(
+    val candidates: List<WorkoutRow>,
+    val context: WorkoutProjectionContext,
+    val retryGeneration: Long,
+)
+
+internal data class WorkoutDetailProjectionKey(
+    val row: WorkoutRow,
+    val context: WorkoutProjectionContext,
+)
+
+internal data class WorkoutDetailProjectionAttemptKey(
+    val detail: WorkoutDetailProjectionKey,
+    val retryGeneration: Long,
+)
+
+internal data class WorkoutDetailProjectionResult(
+    val row: WorkoutRow,
+    val failed: Boolean,
+)
+
+internal class WorkoutVisibleProjectionBudget(
+    totalRows: Int = WorkoutFirstPaintPolicy.VISIBLE_SESSION_PROJECTION_CAP,
+) {
+    private val hardCap = totalRows.coerceIn(
+        minimumValue = 0,
+        maximumValue = WorkoutFirstPaintPolicy.VISIBLE_SESSION_PROJECTION_CAP,
+    )
+
+    var consumedRows: Int = 0
+        private set
+
+    val remainingRows: Int
+        get() = (hardCap - consumedRows).coerceAtLeast(0)
+
+    /**
+     * A reservation is charged before repository work begins, so cancellation and failure cannot
+     * reopen the lifetime budget. The per-attempt ceiling allows a deterministic retry after an
+     * initial failed attempt without letting pagination exceed the screen snapshot's hard cap.
+     */
+    fun reserve(candidates: List<WorkoutRow>): List<WorkoutRow> {
+        val reservedCount = minOf(
+            candidates.size,
+            remainingRows,
+            WorkoutFirstPaintPolicy.VISIBLE_SESSION_PROJECTION_ATTEMPT_CAP,
+        )
+        if (reservedCount <= 0) return emptyList()
+        consumedRows += reservedCount
+        return candidates.take(reservedCount)
+    }
+}
+
+internal object WorkoutFirstPaintPolicy {
+    const val FIRST_PAINT_DAYS = 400
+    const val HR_PROJECTION_QUERY_CAP = 300
+    const val FIRST_PAINT_TOTAL_HR_PROJECTION_CAP = 300
+    const val VISIBLE_SESSION_PROJECTION_CAP = 50
+    const val VISIBLE_SESSION_PROJECTION_ATTEMPT_CAP =
+        VISIBLE_SESSION_PROJECTION_CAP / 2
+    const val DEDUP_PROJECTION_TOTAL_CAP =
+        FIRST_PAINT_TOTAL_HR_PROJECTION_CAP - VISIBLE_SESSION_PROJECTION_CAP
+    const val HISTORY_OVERLAP_ROW_LIMIT = 100_000
+
+    fun overlapQueryIsComplete(rowCount: Int): Boolean =
+        rowCount in 0..HISTORY_OVERLAP_ROW_LIMIT
+
+    fun initialRequest(
+        nowEpochSeconds: Long,
+        today: LocalDate = LocalDate.now(),
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): WorkoutHistoryRequest = WorkoutHistoryRequest(
+        range = null,
+        customStartDate = today.minusDays(29),
+        customEndDate = today,
+        window = queryWindow(
+            dateWindow = WorkoutDateWindow.trailingCalendarDays(
+                FIRST_PAINT_DAYS,
+                today,
+                zoneId,
+            ),
+            nowEpochSeconds = nowEpochSeconds,
+        ),
+    )
+
+    fun request(
+        range: WorkoutRange,
+        customStartDate: LocalDate,
+        customEndDate: LocalDate,
+        nowEpochSeconds: Long,
+        today: LocalDate = LocalDate.now(),
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): WorkoutHistoryRequest {
+        val start = minOf(customStartDate, customEndDate)
+        val end = maxOf(customStartDate, customEndDate)
+        val window = when (range) {
+            WorkoutRange.All -> WorkoutHistoryWindow(
+                fromEpochSeconds = 0L,
+                toEpochSeconds = nowEpochSeconds.coerceAtLeast(0L),
+            )
+            WorkoutRange.Custom -> queryWindow(
+                dateWindow = WorkoutDateWindow.custom(start, end, zoneId),
+                nowEpochSeconds = nowEpochSeconds,
+            )
+            else -> queryWindow(
+                dateWindow = WorkoutDateWindow.trailingCalendarDays(
+                    range.days ?: error("Only All and Custom have no fixed day count"),
+                    today,
+                    zoneId,
+                ),
+                nowEpochSeconds = nowEpochSeconds,
+            )
+        }
+        return WorkoutHistoryRequest(
+            range = range,
+            customStartDate = start,
+            customEndDate = end,
+            window = window,
+        )
+    }
+
+    fun refreshRequest(
+        request: WorkoutHistoryRequest,
+        nowEpochSeconds: Long,
+        today: LocalDate = LocalDate.now(),
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): WorkoutHistoryRequest = request.range?.let { range ->
+        request(
+            range = range,
+            customStartDate = request.customStartDate,
+            customEndDate = request.customEndDate,
+            nowEpochSeconds = nowEpochSeconds,
+            today = today,
+            zoneId = zoneId,
+        )
+    } ?: initialRequest(
+        nowEpochSeconds = nowEpochSeconds,
+        today = today,
+        zoneId = zoneId,
+    )
+
+    fun applyResult(
+        previous: WorkoutHistorySnapshot?,
+        request: WorkoutHistoryRequest,
+        loadedRows: List<WorkoutRow>?,
+    ): WorkoutHistorySnapshot? {
+        if (loadedRows == null) return previous
+        return WorkoutHistorySnapshot(
+            rows = loadedRows,
+            range = request.range ?: boundedInitialRange(defaultRange(loadedRows)),
+            customStartDate = request.customStartDate,
+            customEndDate = request.customEndDate,
+            window = request.window,
+        )
+    }
+
+    fun shouldShowRangeControl(snapshot: WorkoutHistorySnapshot?): Boolean = snapshot != null
+
+    fun boundedInitialRange(candidate: WorkoutRange): WorkoutRange =
+        if (candidate == WorkoutRange.All || candidate == WorkoutRange.Custom) {
+            WorkoutRange.Year
+        } else {
+            candidate
+        }
+
+    fun hrProjectionCandidates(
+        rows: List<WorkoutRow>,
+        completedRows: Set<WorkoutRow>,
+        limit: Int,
+    ): List<WorkoutRow> =
+        rows.asSequence()
+            .filter { it !in completedRows }
+            .filter(::isHrProjectionEligible)
+            .take(limit.coerceAtLeast(0))
+            .toList()
+
+    fun completedProjectionRows(
+        previous: Set<WorkoutRow>,
+        candidates: List<WorkoutRow>,
+        succeeded: Boolean,
+    ): Set<WorkoutRow> = if (succeeded) previous + candidates else previous
+
+    fun detailProjectionResult(
+        original: WorkoutRow,
+        projected: List<WorkoutRow>?,
+    ): WorkoutDetailProjectionResult {
+        val projectedRow = projected?.singleOrNull()
+        return if (projectedRow == null) {
+            WorkoutDetailProjectionResult(row = original, failed = true)
+        } else {
+            WorkoutDetailProjectionResult(row = projectedRow, failed = false)
+        }
+    }
+
+    /**
+     * Resolve duplicate components newest-first under a hard TOTAL projection budget. A component
+     * is projected only when every row whose missing HR/strain could change its richness winner fits
+     * in the remaining budget. Components beyond the budget are deliberately left uncollapsed so an
+     * unprojected row can never be discarded as the wrong duplicate.
+     */
+    suspend fun resolveDedupWithBoundedProjection(
+        rows: List<WorkoutRow>,
+        totalProjectionCap: Int = DEDUP_PROJECTION_TOTAL_CAP,
+        project: suspend (List<WorkoutRow>) -> List<WorkoutRow>,
+    ): List<WorkoutRow> {
+        if (rows.size < 2) return rows
+        val (componentByIndex, components) = dedupComponents(rows)
+        if (components.isEmpty()) return rows
+
+        val remainingCap = totalProjectionCap.coerceIn(0, DEDUP_PROJECTION_TOTAL_CAP)
+        var remaining = remainingCap
+        val projectionIndices = ArrayList<Int>(remainingCap)
+        val resolvedComponents = HashSet<Int>()
+        val orderedComponents = components.sortedWith(
+            compareByDescending<List<Int>> { component ->
+                component.maxOf { rows[it].startTs }
+            }.thenBy { component -> component.minOrNull() ?: Int.MAX_VALUE },
+        )
+        for (component in orderedComponents) {
+            val root = componentByIndex[component.first()]
+            val ambiguous = component.filter { canProjectionChangeDedupRichness(rows[it]) }
+            if (ambiguous.isEmpty()) {
+                resolvedComponents.add(root)
+            } else if (ambiguous.size <= remaining) {
+                projectionIndices.addAll(ambiguous.sorted())
+                remaining -= ambiguous.size
+                resolvedComponents.add(root)
+            }
+        }
+
+        val projectedRows = rows.toMutableList()
+        if (projectionIndices.isNotEmpty()) {
+            currentCoroutineContext().ensureActive()
+            val input = projectionIndices.map { rows[it] }
+            val projected = project(input)
+            currentCoroutineContext().ensureActive()
+            check(projected.size == input.size) {
+                "Workout HR projection returned an unexpected row count"
+            }
+            projectionIndices.forEachIndexed { offset, rowIndex ->
+                projectedRows[rowIndex] = projected[offset]
+            }
+        }
+
+        val kept = ArrayList<WorkoutRow>(rows.size)
+        val keptComponents = ArrayList<Int>(rows.size)
+        val bySport = HashMap<String, ArrayList<Int>>()
+        for (index in rows.indices) {
+            val row = projectedRows[index]
+            val component = componentByIndex[index]
+            val bucket = bySport.getOrPut(WorkoutEditing.sportKey(row.sport)) { ArrayList() }
+            if (component < 0 || component !in resolvedComponents) {
+                bucket.add(kept.size)
+                kept.add(row)
+                keptComponents.add(component)
+                continue
+            }
+            var merged = false
+            for (keptIndex in bucket) {
+                if (
+                    keptComponents[keptIndex] == component &&
+                    WorkoutEditing.sameActivity(kept[keptIndex], row)
+                ) {
+                    kept[keptIndex] = WorkoutEditing.preferred(kept[keptIndex], row)
+                    merged = true
+                    break
+                }
+            }
+            if (!merged) {
+                bucket.add(kept.size)
+                kept.add(row)
+                keptComponents.add(component)
+            }
+        }
+        return kept
+    }
+
+    private fun dedupComponents(rows: List<WorkoutRow>): Pair<IntArray, List<List<Int>>> {
+        val parent = IntArray(rows.size) { it }
+        val hasEdge = BooleanArray(rows.size)
+
+        fun root(index: Int): Int {
+            var current = index
+            while (parent[current] != current) {
+                parent[current] = parent[parent[current]]
+                current = parent[current]
+            }
+            return current
+        }
+
+        fun union(first: Int, second: Int) {
+            val firstRoot = root(first)
+            val secondRoot = root(second)
+            if (firstRoot != secondRoot) parent[secondRoot] = firstRoot
+        }
+
+        val bySport = HashMap<String, ArrayList<Int>>()
+        rows.indices.forEach { index ->
+            bySport.getOrPut(WorkoutEditing.sportKey(rows[index].sport)) { ArrayList() }
+                .add(index)
+        }
+        for (indices in bySport.values) {
+            indices.sortWith(compareBy<Int>({ rows[it].startTs }, { it }))
+            val active = ArrayList<Int>()
+            for (index in indices) {
+                val row = rows[index]
+                var writeIndex = 0
+                for (activeIndex in active) {
+                    if (rows[activeIndex].endTs > row.startTs) {
+                        active[writeIndex] = activeIndex
+                        writeIndex += 1
+                    }
+                }
+                if (writeIndex < active.size) {
+                    active.subList(writeIndex, active.size).clear()
+                }
+                for (activeIndex in active) {
+                    if (WorkoutEditing.sameActivity(rows[activeIndex], row)) {
+                        hasEdge[activeIndex] = true
+                        hasEdge[index] = true
+                        union(activeIndex, index)
+                    }
+                }
+                if (row.endTs > row.startTs) active.add(index)
+            }
+        }
+        val componentByIndex = IntArray(rows.size) { index ->
+            if (hasEdge[index]) root(index) else -1
+        }
+        val componentsByRoot = LinkedHashMap<Int, MutableList<Int>>()
+        componentByIndex.forEachIndexed { index, component ->
+            if (component >= 0) {
+                componentsByRoot.getOrPut(component) { ArrayList() }.add(index)
+            }
+        }
+        return componentByIndex to componentsByRoot.values.map { it.toList() }
+    }
+
+    private fun canProjectionChangeDedupRichness(row: WorkoutRow): Boolean {
+        if (row.endTs <= row.startTs) return false
+        return when (WorkoutEditing.classify(row.source)) {
+            WorkoutSource.LIFTING -> false
+            WorkoutSource.MANUAL, WorkoutSource.DETECTED ->
+                row.avgHr == null || row.maxHr == null || row.strain == null
+            else -> row.avgHr == null
+        }
+    }
+
+    private fun queryWindow(
+        dateWindow: WorkoutDateWindow,
+        nowEpochSeconds: Long,
+    ): WorkoutHistoryWindow {
+        // Repository workout reads use inclusive SQL bounds. Convert the calendar window's exclusive
+        // upper edge to the final included second so Custom never leaks into the following day.
+        val upperInclusive = minOf(
+            nowEpochSeconds.coerceAtLeast(0L),
+            (dateWindow.upperBound - 1L).coerceAtLeast(0L),
+        )
+        return WorkoutHistoryWindow(
+            fromEpochSeconds = dateWindow.lowerBound.coerceAtLeast(0L),
+            toEpochSeconds = upperInclusive,
+        )
+    }
+
+    private fun isHrProjectionEligible(row: WorkoutRow): Boolean {
+        if (row.endTs <= row.startTs) return false
+        return when (WorkoutEditing.classify(row.source)) {
+            WorkoutSource.LIFTING -> false
+            WorkoutSource.MANUAL, WorkoutSource.DETECTED -> true
+            else -> row.avgHr == null
+        }
+    }
+}
+
+internal enum class WorkoutRange(val label: String, val caption: String, val days: Int?, val heroWord: String) {
     Week("7D", "last 7 days", 7, "week"),
     Month("30D", "last 30 days", 30, "month"),
     Quarter("90D", "last 90 days", 90, "quarter"),

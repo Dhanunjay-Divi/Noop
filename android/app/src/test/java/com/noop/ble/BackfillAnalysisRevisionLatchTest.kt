@@ -247,55 +247,6 @@ class BackfillAnalysisRevisionLatchTest {
         assertEquals("band-a", latch.nextRevisionOrRelease(replacement)?.deviceId)
     }
 
-    @Test
-    fun failedAnalysisCannotRunDependentsOrAdvanceWatermark() = runTest {
-        var watermark: String? = "old"
-        var dependents = 0
-        var writes = 0
-
-        try {
-            runFingerprintGatedBackfillAnalysis(
-                readFingerprint = { "new" },
-                readWatermark = { watermark },
-                analyze = { error("scoring failed") },
-                afterAnalysis = { dependents += 1 },
-                persistWatermark = {
-                    writes += 1
-                    watermark = it
-                },
-            )
-            fail("analysis failure must propagate to the retry worker")
-        } catch (expected: IllegalStateException) {
-            assertEquals("scoring failed", expected.message)
-        }
-
-        assertEquals(0, dependents)
-        assertEquals(0, writes)
-        assertEquals("old", watermark)
-    }
-
-    @Test
-    fun fingerprintFailureCannotRunAnalysisOrAdvanceWatermark() = runTest {
-        var analyses = 0
-        var writes = 0
-
-        try {
-            runFingerprintGatedBackfillAnalysis(
-                readFingerprint = { error("fingerprint unavailable") },
-                readWatermark = { "old" },
-                analyze = { analyses += 1 },
-                afterAnalysis = { fail("dependents must not run") },
-                persistWatermark = { writes += 1 },
-            )
-            fail("fingerprint failure must propagate to the retry worker")
-        } catch (expected: IllegalStateException) {
-            assertEquals("fingerprint unavailable", expected.message)
-        }
-
-        assertEquals(0, analyses)
-        assertEquals(0, writes)
-    }
-
     private fun assertCommitReleaseOrdering(commitFirst: Boolean) {
         val latch = BackfillAnalysisRevisionLatch()
         val initial = latch.noteCommitAndClaimWorker("band-a")

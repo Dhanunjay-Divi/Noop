@@ -106,6 +106,8 @@ data class ManagedChangeCursorEntity(
     val accountScopeHash: String,
     val sequence: Long,
     val updatedAtMs: Long,
+    @ColumnInfo(defaultValue = "0")
+    val changeFeedCapabilityVersion: Int = 0,
 )
 
 @Entity(tableName = "managedAppliedChange", primaryKeys = ["accountScopeHash", "sequence"])
@@ -120,15 +122,16 @@ data class ManagedAppliedChangeEntity(
 
 @Entity(
     tableName = "managedDocumentDirty",
-    primaryKeys = ["tableName", "localKey"],
+    primaryKeys = ["localProfileId", "tableName", "localKey"],
     indices = [
         Index(
             name = "idx_managedDocumentDirty_order",
-            value = ["updatedAtMs", "tableName", "localKey"],
+            value = ["localProfileId", "updatedAtMs", "tableName", "localKey"],
         ),
     ],
 )
 data class ManagedDocumentDirtyEntity(
+    val localProfileId: String,
     val tableName: String,
     val localKey: String,
     val documentKind: String,
@@ -136,6 +139,15 @@ data class ManagedDocumentDirtyEntity(
     val operation: String,
     val updatedAtMs: Long,
     val payloadJSON: String?,
+)
+
+@Entity(tableName = "managedLocalProfile")
+data class ManagedLocalProfileEntity(
+    @PrimaryKey
+    val bindingId: Int,
+    val localProfileId: String,
+    val accountScopeHash: String?,
+    val updatedAtMs: Long,
 )
 
 @Entity(
@@ -189,4 +201,6 @@ data class ManagedSnapshotRestoreEntity(
     val afterDocumentId: String?,
     @ColumnInfo(defaultValue = "0")
     val documentsComplete: Boolean,
+    @ColumnInfo(defaultValue = "0")
+    val changeFeedCapabilityVersion: Int = 0,
 )

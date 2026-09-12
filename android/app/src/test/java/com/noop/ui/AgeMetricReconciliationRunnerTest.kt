@@ -71,10 +71,16 @@ class AgeMetricReconciliationRunnerTest {
                 postBackfill.contains("age = profileStore.age.toDouble()"),
         )
         assertTrue(
-            "one committed source snapshot must drive fingerprinting, scoring, and writeback",
-            postBackfill.contains("analysisFingerprint(sourceId)") &&
+            "one committed source snapshot must drive generation claim, scoring, and writeback",
+            postBackfill.contains("sourceIds = listOf(sourceId)") &&
+                postBackfill.contains("repository.runClaimedAnalysis(analysisLease)") &&
                 postBackfill.contains("importedDeviceId = sourceId") &&
                 postBackfill.contains("HealthConnectWriter.write(context, repository, sourceId)"),
+        )
+        assertTrue(
+            "post-offload scoring must not use the legacy history fingerprint or watermark",
+            !postBackfill.contains("analysisFingerprint(") &&
+                !postBackfill.contains("setAnalyzeWatermark("),
         )
         assertTrue(
             "post-offload scoring must not capture a UserProfile before queueing",

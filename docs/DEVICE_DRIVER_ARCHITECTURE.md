@@ -1,5 +1,12 @@
 # Device-driver architecture — pluggable live sources
 
+> **First-party band note (2026-09-12):** this document describes the existing
+> compatible/legacy live-source architecture. The owner-supplied candidate
+> NOOP Band SDK must enter through the same single-active-source boundary and a
+> quarantined neutral adapter; it must not be copied from the demo into screens
+> or analytics. See
+> [`NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`](NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md).
+
 **Status:** Phase 1 implemented on `feat/multi-device-foundations` (`LiveHRSource`/`LiveHrSource`
 protocol + coordinator collapse, both platforms; macOS app compiles, Android awaits a local/CI compile).
 Companion to

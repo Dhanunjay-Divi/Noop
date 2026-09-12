@@ -113,6 +113,16 @@ class TodayExplainabilityTest {
     }
 
     @Test
+    fun historicalMissingRecovery_isNotFabricatedAsZeroOrLive() {
+        assertEquals(ScoreState.Scored(64.0), scoreStateForHistorical(64.0))
+
+        val missing = scoreStateForHistorical(null)
+        assertEquals(ScoreState.MissingForDay, missing)
+        assertEquals("No Recovery score", missing.title)
+        assertEquals("No Recovery score was recorded for this date.", missing.detail)
+    }
+
+    @Test
     fun scoreState_calibratingBeatsCarried_whenBothPresent() {
         // Calibration owns its own copy — it must win over a prior carried day.
         val prior = day("2026-01-14", recovery = 65.0)

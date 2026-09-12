@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">该放松了</string>
-    <string name="wind_down_notification_body">计划的就寝时间快到了。请在适合你的时候开始放松。</string>
+    <string name="wind_down_notification_body">计划：%1$s 开始放松；%2$s 就寝，如适合你。</string>
     <string name="wind_down_channel_name">睡前放松提醒</string>
     <string name="wind_down_channel_description">在计划就寝时间前发送的可选晚间提醒。</string>
     <string name="sleep_planner_title">睡眠规划</string>

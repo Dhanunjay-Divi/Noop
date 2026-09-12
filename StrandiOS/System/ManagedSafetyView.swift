@@ -10,7 +10,7 @@ struct ManagedSafetyView: View {
     @Binding var durationHours: Int
 
     @State private var noopID = ""
-    @State private var shareLocation = true
+    @State private var shareLocation = false
     @State private var confirmPage = false
     @State private var contactToRemove: ManagedSafetyContact?
 
@@ -21,8 +21,8 @@ struct ManagedSafetyView: View {
                 overline: "managed.safety.section.overline"
             )
             if service.phase == .enrolled {
-                setupCard
                 pageCard
+                setupCard
             } else {
                 unavailableCard
             }
@@ -56,7 +56,14 @@ struct ManagedSafetyView: View {
             }
             Button("safety.cancel", role: .cancel) {}
         } message: {
-            Text("managed.safety.confirm.body")
+            Text(
+                shareLocation
+                    ? localizedFormat(
+                        "managed.safety.confirm.location.body",
+                        Int64(durationHours == 12 ? 12 : 8)
+                    )
+                    : String(localized: "managed.safety.confirm.body")
+            )
         }
         .confirmationDialog(
             "managed.safety.remove.contact",

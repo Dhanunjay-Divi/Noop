@@ -109,6 +109,7 @@ enum DailyReviewNotifications {
     static let eveningMinutesKey = "dailyReview.eveningMinutes"
     static let completedJournalDaysKey = "dailyReview.completedJournalDays"
     static let scheduledEveningIDsKey = "dailyReview.scheduledEveningIDs"
+    private static var scheduleGeneration: UInt64 = 0
 
     private static let morningRequestID = "daily-review-morning"
     /// Removed after the completion-aware one-shot schedule shipped. Keep cancelling it on upgrades.
@@ -158,6 +159,8 @@ enum DailyReviewNotifications {
         _ on: Bool,
         completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
     ) {
+        scheduleGeneration &+= 1
+        let generation = scheduleGeneration
         guard on else {
             UserDefaults.standard.set(false, forKey: enabledKey)
             LocalNotificationLifecycle.cancel(identifiers: requestIDs)
@@ -171,21 +174,27 @@ enum DailyReviewNotifications {
             let settings = await center.notificationSettings()
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                UserDefaults.standard.set(true, forKey: enabledKey)
-                schedule()
-                completion?(.scheduled)
+                await enableAndSchedule(
+                    generation: generation,
+                    center: center,
+                    completion: completion
+                )
             case .notDetermined:
                 let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
                 if granted {
-                    UserDefaults.standard.set(true, forKey: enabledKey)
-                    schedule()
-                    completion?(.scheduled)
+                    await enableAndSchedule(
+                        generation: generation,
+                        center: center,
+                        completion: completion
+                    )
                 } else {
+                    guard generation == scheduleGeneration else { return }
                     UserDefaults.standard.set(false, forKey: enabledKey)
                     recordSuppressedRequests()
                     completion?(.denied)
                 }
             default:
+                guard generation == scheduleGeneration else { return }
                 UserDefaults.standard.set(false, forKey: enabledKey)
                 recordSuppressedRequests()
                 completion?(.denied)
@@ -195,12 +204,12 @@ enum DailyReviewNotifications {
 
     static func setMorningMinutes(_ minutes: Int) {
         UserDefaults.standard.set(clampMinute(minutes), forKey: morningMinutesKey)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func setEveningMinutes(_ minutes: Int) {
         UserDefaults.standard.set(clampMinute(minutes), forKey: eveningMinutesKey)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     /// Keep the evening journal prompt honest. Logging any answer completes that local day; clearing
@@ -215,7 +224,7 @@ enum DailyReviewNotifications {
             days.remove(day)
         }
         persistCompletedJournalDays(days)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     /// Repository reconciliation after launch/restore. Only the bounded schedule window is supplied,
@@ -225,7 +234,7 @@ enum DailyReviewNotifications {
         let reconciled = days.intersection(eligible)
         guard reconciled != completedJournalDays else { return }
         persistCompletedJournalDays(reconciled)
-        if isEnabled { schedule(now: now) }
+        if isEnabled { requestReschedule(now: now) }
     }
 
     static func journalHorizonDayKeys(
@@ -250,7 +259,7 @@ enum DailyReviewNotifications {
             let settings = await UNUserNotificationCenter.current().notificationSettings()
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                schedule()
+                requestReschedule()
             default:
                 recordSuppressedRequests()
                 break
@@ -327,54 +336,142 @@ enum DailyReviewNotifications {
         UserDefaults.standard.set(days.sorted(), forKey: completedJournalDaysKey)
     }
 
-    private static func schedule(now: Date = Date()) {
-        let center = UNUserNotificationCenter.current()
-        LocalNotificationLifecycle.cancel(identifiers: requestIDs, on: center)
+    private static func enableAndSchedule(
+        generation: UInt64,
+        center: UNUserNotificationCenter,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)?
+    ) async {
+        guard generation == scheduleGeneration else { return }
         registerPrivacyCategory(on: center)
+        let result = await reconcileSchedule(
+            expectedGeneration: generation,
+            client: .system(center: center)
+        )
+        guard generation == scheduleGeneration else { return }
+        if result?.activeCount ?? 0 > 0 {
+            UserDefaults.standard.set(true, forKey: enabledKey)
+            completion?(.scheduled)
+        } else {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            completion?(.off)
+        }
+    }
 
+    private static func requestReschedule(now: Date = Date()) {
+        scheduleGeneration &+= 1
+        let generation = scheduleGeneration
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            registerPrivacyCategory(on: center)
+            let result = await reconcileSchedule(
+                now: now,
+                expectedGeneration: generation,
+                client: .system(center: center)
+            )
+            guard generation == scheduleGeneration else { return }
+            applyRescheduleResult(result)
+        }
+    }
+
+    static func applyRescheduleResult(
+        _ result: LocalNotificationReconciliationResult?
+    ) {
+        guard let result, result.activeCount == 0 else { return }
+        UserDefaults.standard.set(false, forKey: enabledKey)
+    }
+
+    @discardableResult
+    static func reconcileSchedule(
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        expectedGeneration: UInt64? = nil,
+        coordinator: LocalNotificationCapacityCoordinator? = nil,
+        client: LocalNotificationCenterClient
+    ) async -> LocalNotificationReconciliationResult? {
+        let priorIDs = requestIDs
+        let requests = notificationRequests(
+            now: now,
+            calendar: calendar
+        )
+        let result = await LocalNotificationLifecycle.reconcile(
+            candidateRequests: requests,
+            replacingIdentifiers: Set(
+                priorIDs + requests.map(\.identifier)
+            ),
+            now: now,
+            calendar: calendar,
+            coordinator: coordinator,
+            isStillCurrent: {
+                expectedGeneration.map { $0 == scheduleGeneration } ?? true
+            },
+            client: client
+        )
+        if let expectedGeneration,
+           expectedGeneration != scheduleGeneration {
+            return nil
+        }
+        let active = Set(result.activeIdentifiers)
+        let acceptedEveningIDs = requests.map(\.identifier).filter {
+            $0.hasPrefix("\(eveningRequestID)-")
+                && active.contains($0)
+        }
+        if acceptedEveningIDs.isEmpty {
+            UserDefaults.standard.removeObject(
+                forKey: scheduledEveningIDsKey
+            )
+        } else {
+            UserDefaults.standard.set(
+                acceptedEveningIDs,
+                forKey: scheduledEveningIDsKey
+            )
+        }
+        return result
+    }
+
+    static func notificationRequests(
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [UNNotificationRequest] {
         let morning = reminderSpecs(morning: morningMinutes, evening: eveningMinutes)[0]
         var morningComponents = DateComponents()
         morningComponents.hour = morning.minuteOfDay / 60
         morningComponents.minute = morning.minuteOfDay % 60
-        schedule(
+        var requests = [
+            notificationRequest(
             morning,
             trigger: UNCalendarNotificationTrigger(
                 dateMatching: morningComponents,
                 repeats: true
-            ),
-            on: center
-        )
+            )
+            )
+        ]
 
         let eveningSpecs = eveningReminderSpecs(
             now: now,
             minuteOfDay: eveningMinutes,
-            completedDays: completedJournalDays
-        )
-        UserDefaults.standard.set(
-            eveningSpecs.map(\.reminder.identifier),
-            forKey: scheduledEveningIDsKey
+            completedDays: completedJournalDays,
+            calendar: calendar
         )
         for dated in eveningSpecs {
-            let components = Calendar.current.dateComponents(
+            let components = calendar.dateComponents(
                 [.year, .month, .day, .hour, .minute],
                 from: dated.fireDate
             )
-            schedule(
+            requests.append(notificationRequest(
                 dated.reminder,
                 trigger: UNCalendarNotificationTrigger(
                     dateMatching: components,
                     repeats: false
-                ),
-                on: center
-            )
+                )
+            ))
         }
+        return requests
     }
 
-    private static func schedule(
+    private static func notificationRequest(
         _ spec: ReminderSpec,
-        trigger: UNNotificationTrigger,
-        on center: UNUserNotificationCenter
-    ) {
+        trigger: UNNotificationTrigger
+    ) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.applyProminence(.ambient)
         content.title = spec.title
@@ -385,13 +482,10 @@ enum DailyReviewNotifications {
         content.categoryIdentifier = privacyCategoryID
         content.threadIdentifier = "noop.daily-review"
         content.userInfo = [NotificationRouteBridge.userInfoKey: spec.route.rawValue]
-        LocalNotificationLifecycle.schedule(
-            UNNotificationRequest(
-                identifier: spec.identifier,
-                content: content,
-                trigger: trigger
-            ),
-            on: center
+        return UNNotificationRequest(
+            identifier: spec.identifier,
+            content: content,
+            trigger: trigger
         )
     }
 

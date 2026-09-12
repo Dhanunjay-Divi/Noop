@@ -2,6 +2,57 @@ import XCTest
 @testable import StrandAnalytics
 
 final class BodyProfilePolicyTests: XCTestCase {
+    func testAdultBmiPresentationRequiresConfirmedAdultProfile() {
+        XCTAssertFalse(BodyProfilePolicy.canPresentAdultBMI(
+            age: 30,
+            currentWeightKg: 75,
+            heightCm: 178,
+            ageConfirmed: false,
+            heightConfirmed: true,
+            currentWeightConfirmed: true
+        ))
+        XCTAssertFalse(BodyProfilePolicy.canPresentAdultBMI(
+            age: 19,
+            currentWeightKg: 75,
+            heightCm: 178,
+            ageConfirmed: true,
+            heightConfirmed: true,
+            currentWeightConfirmed: true
+        ))
+        XCTAssertTrue(BodyProfilePolicy.canPresentAdultBMI(
+            age: 20,
+            currentWeightKg: 75,
+            heightCm: 178,
+            ageConfirmed: true,
+            heightConfirmed: true,
+            currentWeightConfirmed: true
+        ))
+        XCTAssertFalse(BodyProfilePolicy.canPresentAdultBMI(
+            age: 30,
+            currentWeightKg: 75,
+            heightCm: 178,
+            ageConfirmed: true,
+            heightConfirmed: false,
+            currentWeightConfirmed: true
+        ))
+        XCTAssertFalse(BodyProfilePolicy.canPresentAdultBMI(
+            age: 30,
+            currentWeightKg: 75,
+            heightCm: 178,
+            ageConfirmed: true,
+            heightConfirmed: true,
+            currentWeightConfirmed: false
+        ))
+        XCTAssertTrue(BodyProfilePolicy.canPresentAdultBMI(
+            age: 30,
+            currentWeightKg: 75,
+            heightCm: 178,
+            ageConfirmed: true,
+            heightConfirmed: true,
+            currentWeightConfirmed: true
+        ))
+    }
+
     func testAdultBmiRequiresConfirmedAdultInputs() throws {
         XCTAssertNil(BodyProfilePolicy.adultBMI(
             age: 30, weightKg: 75, heightCm: 178, measurementsConfirmed: false

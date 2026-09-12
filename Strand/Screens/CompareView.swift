@@ -117,6 +117,7 @@ private struct CompareSeries: Identifiable {
 
 struct CompareView: View {
     @EnvironmentObject var repo: Repository
+    @EnvironmentObject private var profile: ProfileStore
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
     @EnvironmentObject var intelligence: IntelligenceEngine
@@ -157,7 +158,8 @@ struct CompareView: View {
 
     /// Ordered selection (max 4). Pre-populated from the persisted ids (else the defaults) at creation,
     /// so it renders the saved selection immediately. Drives both the legend order and color mapping.
-    @State private var selected: [MetricDescriptor] = CompareView.initialSelection()
+    @State private var selected: [MetricDescriptor] = CompareView.initialSelection(allowsBMI: false)
+    @State private var restoredInitialSelection = false
     /// Full-history series per selected metric id (ascending by day).
     @State private var fullSeries: [String: [(day: String, value: Double)]] = [:]
     @State private var loadedOnce = false
@@ -184,6 +186,16 @@ struct CompareView: View {
 
     private let maxSelection = 4
     private let minSelection = 2
+    private var canPresentBMI: Bool {
+        BodyProfilePolicy.canPresentAdultBMI(
+            age: profile.age,
+            currentWeightKg: profile.weightKg,
+            heightCm: profile.heightCm,
+            ageConfirmed: profile.ageInputConfirmed,
+            heightConfirmed: profile.heightInputConfirmed,
+            currentWeightConfirmed: profile.weightInputConfirmed
+        )
+    }
     private var loadTaskID: String {
         "\(selectionKey)|\(repo.refreshSeq)|\(repo.ageMetricsSeq)"
     }
@@ -228,6 +240,16 @@ struct CompareView: View {
         }
         .task(id: "\(referenceMetric.rawValue)|\(WhoopImporter.importerVersion)") {
             await loadOfficialReference()
+        }
+        .onAppear {
+            guard !restoredInitialSelection else { return }
+            selected = Self.initialSelection(allowsBMI: canPresentBMI)
+            restoredInitialSelection = true
+        }
+        .onChangeCompat(of: canPresentBMI) { allowed in
+            guard !allowed else { return }
+            selected.removeAll { $0.key == "bmi" }
+            fullSeries.removeValue(forKey: "apple-health:bmi")
         }
         .sheet(isPresented: $showingReferenceExport) {
             if let report = referenceReport, let statistics = report.statistics {
@@ -674,18 +696,27 @@ struct CompareView: View {
     /// defaults. Evaluated at view creation (the `selected` initial value) so Compare renders the saved
     /// selection on the first frame. Twin of the Android `ComparePrefs.readSelection`. The literals
     /// mirror `minSelection` / `maxSelection` below (a static initial value can't read instance members).
-    static func initialSelection() -> [MetricDescriptor] {
+    static func initialSelection(allowsBMI: Bool) -> [MetricDescriptor] {
         let raw = UserDefaults.standard.string(forKey: "compare.selectedIds") ?? ""
-        return restoreSelection(raw, minSelection: 2, maxSelection: 4) ?? defaultSelection()
+        return restoreSelection(
+            raw,
+            minSelection: 2,
+            maxSelection: 4,
+            allowsBMI: allowsBMI
+        ) ?? defaultSelection(allowsBMI: allowsBMI)
     }
 
     /// The default starter selection from `defaultKeys` (graceful when a key is missing).
-    static func defaultSelection() -> [MetricDescriptor] {
+    static func defaultSelection(allowsBMI: Bool) -> [MetricDescriptor] {
         var picks: [MetricDescriptor] = []
         for key in defaultKeys {
-            if let m = MetricCatalog.all.first(where: { $0.key == key }) { picks.append(m) }
+            if let m = MetricCatalog.metric(key: key, allowsBMI: allowsBMI) {
+                picks.append(m)
+            }
         }
-        if picks.isEmpty { picks = Array(MetricCatalog.all.prefix(2)) }
+        if picks.isEmpty {
+            picks = Array(MetricCatalog.visible(allowsBMI: allowsBMI).prefix(2))
+        }
         return Array(picks.prefix(4))   // maxSelection
     }
 
@@ -694,14 +725,19 @@ struct CompareView: View {
     /// dedupe, cap at `maxSelection`; restore when EVERY saved id still resolves (so a deliberate
     /// sub-minimum selection is honored) OR at least `minSelection` survive — nil only when a catalog
     /// change dropped the saved ids below the minimum (the stale-selection case). Pure for testability.
-    static func restoreSelection(_ raw: String, minSelection: Int, maxSelection: Int) -> [MetricDescriptor]? {
+    static func restoreSelection(
+        _ raw: String,
+        minSelection: Int,
+        maxSelection: Int,
+        allowsBMI: Bool = true
+    ) -> [MetricDescriptor]? {
         let tokens = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         guard !tokens.isEmpty else { return nil }
         var seen = Set<String>()
         var parsed: [MetricDescriptor] = []
         for id in tokens {
             guard seen.insert(id).inserted else { continue }   // first occurrence only (dedupe)
-            if let m = MetricCatalog.all.first(where: { $0.id == id }) {
+            if let m = MetricCatalog.visible(allowsBMI: allowsBMI).first(where: { $0.id == id }) {
                 parsed.append(m)
                 if parsed.count == maxSelection { break }
             }
@@ -776,7 +812,7 @@ struct CompareView: View {
     private var addMenu: some View {
         Menu {
             ForEach(MetricCatalog.categories, id: \.self) { category in
-                let metrics = MetricCatalog.inCategory(category)
+                let metrics = MetricCatalog.inCategory(category, allowsBMI: canPresentBMI)
                 if !metrics.isEmpty {
                     // Section title localized at the render site only; `category` stays the
                     // raw English identifier that `inCategory` filters on.

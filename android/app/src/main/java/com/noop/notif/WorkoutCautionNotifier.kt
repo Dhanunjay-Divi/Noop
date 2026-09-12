@@ -68,7 +68,7 @@ object WorkoutCautionNotifier {
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .protectPrivateContent(context, CHANNEL_ID)
                 .build()
             val manager = NotificationManagerCompat.from(context)
             if (!NotificationLifecycleLedger.posted(

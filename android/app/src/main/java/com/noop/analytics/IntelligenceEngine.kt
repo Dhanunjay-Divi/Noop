@@ -6,6 +6,7 @@ import com.noop.data.MetricSeriesRow
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
+import com.noop.data.affectedTimeRange
 import com.noop.protocol.DeviceFamily
 import com.noop.protocol.Whoop4SkinTemp
 import kotlinx.coroutines.Dispatchers
@@ -80,8 +81,176 @@ object IntelligenceEngine {
         suspend fun skinTempFamily(deviceId: String): DeviceFamily = DeviceFamily.WHOOP5
     }
 
+    /** Bind a claimed post-backfill generation to the exact source that pass is allowed to consume. */
+    internal fun boundDayOwnerSource(
+        deviceId: String,
+        delegate: DayOwnerSource?,
+    ): DayOwnerSource = object : DayOwnerSource {
+        override suspend fun candidatePriorities(): List<Pair<String, Int>> =
+            listOf(deviceId to 0)
+
+        override suspend fun lockedOwner(day: String): String = deviceId
+
+        override suspend fun activeWriteId(): String = deviceId
+
+        override suspend fun skinTempFamily(deviceId: String): DeviceFamily =
+            delegate?.skinTempFamily(deviceId) ?: DeviceFamily.WHOOP5
+    }
+
     /** Minimum HR samples in a day's window before it is worth scoring. */
     const val MIN_HR_SAMPLES: Int = 200
+
+    /** Claim-driven analysis never enumerates more than this many calendar days in one pass. */
+    internal const val ANALYSIS_INVALIDATION_BATCH_DAYS: Int = 21
+
+    internal enum class AnalysisPassKind {
+        RECENT,
+        HISTORICAL,
+    }
+
+    internal data class AnalysisScanCoverage(
+        val startTs: Long,
+        val endTs: Long,
+    ) {
+        fun covers(claim: com.noop.data.AnalysisInputGenerationClaim): Boolean {
+            val affected = claim.affectedTimeRange() ?: return false
+            return startTs <= endTs &&
+                affected.first >= startTs &&
+                affected.last <= endTs
+        }
+    }
+
+    internal data class AnalysisScoringPlan(
+        val maxDays: Int,
+        val anchorNowSeconds: Long,
+        val timezoneOffsetSeconds: Long,
+        val passKind: AnalysisPassKind,
+        val scanCoverage: AnalysisScanCoverage,
+        /** True only when this pass also fulfills the caller's explicit formula/repair window. */
+        val requestedWindowSatisfied: Boolean,
+    ) {
+        val isHistoricalCatchUp: Boolean
+            get() = passKind == AnalysisPassKind.HISTORICAL
+    }
+
+    /**
+     * Plan one bounded invalidation pass. A dirty range touching the normal recent window keeps the current
+     * recent behavior; an older range anchors at its newest unprocessed local day. The durable ledger moves
+     * that newest edge backward after success, so the next pass cannot repeat the same historical tail.
+     *
+     * A caller-requested formula/repair pass with no dirty claim preserves its explicit window. Once claims
+     * exist, their work is always capped and [AnalysisScoringPlan.requestedWindowSatisfied] prevents a
+     * multi-year formula marker from being completed by only one bounded claim batch.
+     */
+    internal fun analysisScoringPlan(
+        requestedMaxDays: Int,
+        claims: Collection<com.noop.data.AnalysisInputGenerationClaim>,
+        nowSeconds: Long,
+        timezoneOffsetSeconds: Long? = null,
+    ): AnalysisScoringPlan {
+        val requested = requestedMaxDays.coerceAtLeast(1)
+        val zone = java.util.TimeZone.getDefault()
+        val recentOffset = timezoneOffsetSeconds
+            ?: (zone.getOffset(nowSeconds * 1_000L) / 1_000L)
+
+        if (claims.isEmpty()) {
+            val coverage = analysisScanCoverage(
+                maxDays = requested,
+                nowSeconds = nowSeconds,
+                timezoneOffsetSeconds = recentOffset,
+                historicalCatchUp = false,
+            )
+            return AnalysisScoringPlan(
+                maxDays = requested,
+                anchorNowSeconds = nowSeconds,
+                timezoneOffsetSeconds = recentOffset,
+                passKind = AnalysisPassKind.RECENT,
+                scanCoverage = coverage,
+                requestedWindowSatisfied = true,
+            )
+        }
+
+        val batchDays = minOf(requested, ANALYSIS_INVALIDATION_BATCH_DAYS)
+        val recentCoverage = analysisScanCoverage(
+            maxDays = batchDays,
+            nowSeconds = nowSeconds,
+            timezoneOffsetSeconds = recentOffset,
+            historicalCatchUp = false,
+        )
+        val validRanges = claims.mapNotNull { it.affectedTimeRange() }
+        val intersectsRecent = validRanges.any { affected ->
+            affected.first <= recentCoverage.endTs &&
+                affected.last >= recentCoverage.startTs
+        }
+        val newestHistoricalTs = validRanges
+            .asSequence()
+            .filter { it.last < recentCoverage.startTs }
+            .maxOfOrNull(LongRange::last)
+
+        if (intersectsRecent || newestHistoricalTs == null) {
+            return AnalysisScoringPlan(
+                maxDays = batchDays,
+                anchorNowSeconds = nowSeconds,
+                timezoneOffsetSeconds = recentOffset,
+                passKind = AnalysisPassKind.RECENT,
+                scanCoverage = recentCoverage,
+                requestedWindowSatisfied = requested <= batchDays,
+            )
+        }
+
+        val historicalOffset = timezoneOffsetSeconds
+            ?: (zone.getOffset(newestHistoricalTs * 1_000L) / 1_000L)
+        val historicalAnchor = midnightLocal(newestHistoricalTs, historicalOffset)
+        val historicalCoverage = analysisScanCoverage(
+            maxDays = batchDays,
+            nowSeconds = historicalAnchor,
+            timezoneOffsetSeconds = historicalOffset,
+            historicalCatchUp = true,
+        )
+        return AnalysisScoringPlan(
+            maxDays = batchDays,
+            anchorNowSeconds = historicalAnchor,
+            timezoneOffsetSeconds = historicalOffset,
+            passKind = AnalysisPassKind.HISTORICAL,
+            scanCoverage = historicalCoverage,
+            requestedWindowSatisfied = false,
+        )
+    }
+
+    /** Compatibility helper for source/tests that only need the bounded day count. */
+    internal fun analysisScoringMaxDays(
+        requestedMaxDays: Int,
+        claims: Collection<com.noop.data.AnalysisInputGenerationClaim>,
+        nowSeconds: Long,
+        timezoneOffsetSeconds: Long =
+            java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L,
+    ): Int = analysisScoringPlan(
+        requestedMaxDays = requestedMaxDays,
+        claims = claims,
+        nowSeconds = nowSeconds,
+        timezoneOffsetSeconds = timezoneOffsetSeconds,
+    ).maxDays
+
+    internal fun analysisScanCoverage(
+        maxDays: Int,
+        nowSeconds: Long,
+        timezoneOffsetSeconds: Long,
+        historicalCatchUp: Boolean = false,
+    ): AnalysisScanCoverage {
+        val boundedDays = maxDays.coerceAtLeast(1)
+        val localMidnight = midnightLocal(nowSeconds, timezoneOffsetSeconds)
+        return AnalysisScanCoverage(
+            // The 30-hour read look-back is context for the oldest enumerated day; it does not mean the
+            // preceding calendar day was itself recomputed, so it is deliberately outside claim coverage.
+            startTs = localMidnight - (boundedDays - 1).toLong() * SECONDS_PER_DAY,
+            endTs =
+                if (historicalCatchUp) {
+                    localMidnight + SECONDS_PER_DAY - 1L
+                } else {
+                    minOf(nowSeconds, localMidnight + 18L * 3_600L)
+                },
+        )
+    }
 
     /** Read cap per stream read , matches the Swift 200_000 bound. */
     const val STREAM_LIMIT: Int = 200_000
@@ -344,6 +513,8 @@ object IntelligenceEngine {
         importedDeviceId: String = "my-whoop",
         maxHROverride: Double? = null,
         nowSeconds: Long = System.currentTimeMillis() / 1000L,
+        analysisTimezoneOffsetSeconds: Long? = null,
+        historicalCatchUp: Boolean = false,
         ownerSource: DayOwnerSource? = null,
         // Steps-estimate calibration I/O (kept pure-JVM, mirroring the Effort-rescore flagGet/flagSet):
         // [manualStepCoefficient] is the user's persisted manual override (null/0 = auto-fit), fed into
@@ -420,6 +591,12 @@ object IntelligenceEngine {
         // #141: nightly HRV over DEEP-sleep windows only (WHOOP-style) when true; whole-night mean (the
         // historical default) when false. The Context-aware caller reads UnitPrefs.hrvWindow and passes it.
         deepHrvWindow: Boolean = false,
+        // Exact raw-source consumption evidence for generation acknowledgement. Called only after owner
+        // resolution has selected the source whose score-bearing streams this pass reads.
+        sourceConsumed: (String) -> Unit = {},
+        // Published only after the complete scored window and all persistence succeed. This distinguishes
+        // non-selected candidates that were fully considered from claimed sources outside the snapshot.
+        sourcesEvaluatedForOwnership: (Collection<String>, Long, Long) -> Unit = { _, _, _ -> },
     ): List<Computed> = withContext(Dispatchers.Default) {
         // Serialise the whole pass so overlapping callers never run two rescores in parallel (see
         // [analyzeGate]). The heavy scoring already ran off the caller's thread via withContext above; the
@@ -430,9 +607,11 @@ object IntelligenceEngine {
             // A profile edit after this read queues reconciliation behind this same gate, preserving order.
             val resolvedProfile = profileProvider?.invoke() ?: profile
             val (out, healed) = analyzeRecentOnCpu(repo, resolvedProfile, maxDays, importedDeviceId, maxHROverride,
-                nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
+                nowSeconds, analysisTimezoneOffsetSeconds, historicalCatchUp, ownerSource,
+                manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
-                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow)
+                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, sourceConsumed,
+                sourcesEvaluatedForOwnership)
             if (healed == 0) out
             // #899 heal re-pass: the pass above deleted overlapping duplicate sleep sessions AFTER its days
             // were scored, and the read-side dedup those days consumed had no bank-recency witness (the fresh
@@ -440,9 +619,11 @@ object IntelligenceEngine {
             // re-scores the window against the cleaned store; its own heal then finds nothing (the duplicates
             // are gone), so this can never loop. Mirrors the Swift pendingForcedRescore re-arm.
             else analyzeRecentOnCpu(repo, resolvedProfile, maxDays, importedDeviceId, maxHROverride,
-                nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
+                nowSeconds, analysisTimezoneOffsetSeconds, historicalCatchUp, ownerSource,
+                manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
-                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow).first
+                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, sourceConsumed,
+                sourcesEvaluatedForOwnership).first
         }
     }
 
@@ -497,6 +678,8 @@ object IntelligenceEngine {
         importedDeviceId: String = "my-whoop",
         maxHROverride: Double? = null,
         nowSeconds: Long = System.currentTimeMillis() / 1000L,
+        analysisTimezoneOffsetSeconds: Long? = null,
+        historicalCatchUp: Boolean = false,
         ownerSource: DayOwnerSource? = null,
         manualStepCoefficient: Double? = null,
         persistStepsCalibration: (StepsEstimateEngine.Calibration) -> Unit = {},
@@ -534,15 +717,19 @@ object IntelligenceEngine {
         // #141: nightly HRV over DEEP-sleep windows only (WHOOP-style) when true; whole-night default when
         // false. Threaded into analyzeDay per scored night.
         deepHrvWindow: Boolean = false,
+        sourceConsumed: (String) -> Unit = {},
+        sourcesEvaluatedForOwnership: (Collection<String>, Long, Long) -> Unit = { _, _, _ -> },
         // #899 heal re-pass: the second component of the return is how many overlapping duplicate sleep
         // sessions the heal below deleted this pass. The public wrapper re-runs ONCE when it is non-zero
         // so the affected days re-score against the cleaned store.
     ): Pair<List<Computed>, Int> {
-        val hrvCfg = Baselines.metricCfg["hrv"] ?: return emptyList<Computed>() to 0
-        val rhrCfg = Baselines.metricCfg["resting_hr"] ?: return emptyList<Computed>() to 0
-        val skinCfg = Baselines.metricCfg["skin_temp"] ?: return emptyList<Computed>() to 0
-        val respCfg = Baselines.metricCfg["resp"] ?: return emptyList<Computed>() to 0
-        val restCfg = Baselines.metricCfg["rest_quality"] ?: return emptyList<Computed>() to 0
+        // Missing built-in scoring configuration is an incomplete pass, not a successful empty result:
+        // fail before publishing ownership evidence so every exact-generation claim remains pending.
+        val hrvCfg = checkNotNull(Baselines.metricCfg["hrv"])
+        val rhrCfg = checkNotNull(Baselines.metricCfg["resting_hr"])
+        val skinCfg = checkNotNull(Baselines.metricCfg["skin_temp"])
+        val respCfg = checkNotNull(Baselines.metricCfg["resp"])
+        val restCfg = checkNotNull(Baselines.metricCfg["rest_quality"])
 
         val computedId = importedDeviceId + "-noop"
 
@@ -551,8 +738,8 @@ object IntelligenceEngine {
         // only genuinely-daytime windows face the stricter nap bar. getOffset(nowMillis) folds in
         // the current DST state (a DST boundary inside a single window is a negligible edge case
         // for an hour-of-day band). Computed once per run.
-        val tzOffsetSeconds =
-            java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L
+        val tzOffsetSeconds = analysisTimezoneOffsetSeconds
+            ?: (java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L)
 
         // Device-registry snapshot for per-day owner resolution (invariant I2 , a day's scores come from
         // exactly ONE source). Read ONCE before the loop: the paired-device list is stable for the run.
@@ -628,6 +815,8 @@ object IntelligenceEngine {
         // west-of-UTC user's evening crosses midnight UTC; bucketing by UTC put it in the next UTC day,
         // which the local read never found (Toronto/UTC-4 report).
         val nowLocalMidnight = midnightLocal(nowSeconds, tzOffsetSeconds)
+        val analysisWindowEnd =
+            if (historicalCatchUp) nowLocalMidnight + SECONDS_PER_DAY - 1L else nowSeconds
 
         // ── Learned habitual midsleep (#547) ──────────────────────────────────
         // Compute the user's habitual midsleep ONCE per run from the trailing sleep history so the
@@ -640,7 +829,9 @@ object IntelligenceEngine {
         // the Sleep tab resolve to the identical block. Mirrors Swift. (#547)
         val habitualMidsleepSec = computeHabitualMidsleep(
             repo, importedDeviceId, computedId,
-            nowLocalMidnight - maxDays * SECONDS_PER_DAY - 30 * 3_600L, nowSeconds, tzOffsetSeconds,
+            nowLocalMidnight - maxDays * SECONDS_PER_DAY - 30 * 3_600L,
+            analysisWindowEnd,
+            tzOffsetSeconds,
         )
 
         // #970 read efficiency, skin-temp leg: [RegistryDayOwnerSource.skinTempFamily] resolves the family
@@ -672,7 +863,12 @@ object IntelligenceEngine {
             // clamps to now anyway, and an in-progress nap shouldn't be read as a finished night).
             // Matches the Swift window.
             val nextMidnight = dayStart + SECONDS_PER_DAY
-            val to = if (dayStart < nowLocalMidnight) nextMidnight else dayStart + 18 * 3_600L
+            val to =
+                if (historicalCatchUp || dayStart < nowLocalMidnight) {
+                    nextMidnight
+                } else {
+                    dayStart + 18 * 3_600L
+                }
 
             // I2: pick the single device that OWNS this day, and read ITS streams below. With one device
             // this resolves to [importedDeviceId] (active strap, has data → priority 0), so nothing
@@ -680,6 +876,7 @@ object IntelligenceEngine {
             // live straps > imports, or a locked override). Falls back to [importedDeviceId] when no
             // owner source is supplied or the registry yields no owner.
             val owner = resolveDayOwner(repo, ownerSource, candidatePriorities, day, from, to, importedDeviceId)
+            sourceConsumed(owner)
 
             val hr = repo.hrSamples(owner, from, to, STREAM_LIMIT)
             // Active Minutes belongs to the calendar day, not the sleep score. Load and summarize the
@@ -961,7 +1158,8 @@ object IntelligenceEngine {
         // Pass 2 folds these maps only through days STRICTLY BEFORE each scored day. Keeping future
         // values in the maps is safe because the causal fold excludes both the current and later days.
 
-        val windowStart = nowSeconds - maxDays.toLong() * SECONDS_PER_DAY - 30 * 3_600L
+        val windowStart =
+            nowLocalMidnight - (maxDays - 1).toLong() * SECONDS_PER_DAY - 30L * 3_600L
 
         // ── Pass 2: re-score every offloaded night against the now-seeded baseline. Only the
         // recovery composite is recomputed (cheap, baseline-dependent); every other field was
@@ -997,7 +1195,7 @@ object IntelligenceEngine {
             computedDeviceId = computedId,
             strapDeviceId = importedDeviceId,
             windowStart = windowStart,
-            windowEnd = nowSeconds,
+            windowEnd = analysisWindowEnd,
             useExperimentalSleepV2 = useExperimentalSleepV2,
             useMotionAwareWake = useMotionAwareWake,
         )
@@ -1313,14 +1511,6 @@ object IntelligenceEngine {
             }
         }
 
-        // Snapshot the persisted/merged daily history BEFORE the atomic reconciliation below rewrites the
-        // computed window. This is the accumulated view the readiness card + dashboard read ("N of 7
-        // nights"); captured here so the Fitness Age gate (further down) can't be undercut by this pass's
-        // OWN pruning , a recompute only re-scores nights whose raw HR still lives in the store, so reading
-        // after the rewrite would see only the freshly scorable subset. Windowed to the recompute range so
-        // it stays bounded (daysMerged is full-history) and can't drag in stale nights older than the window.
-        val faPriorDaily = repo.daysMerged(importedDeviceId).filter { it.day in oldestDay..newestDay }
-
         // #1196: a transient empty scoring pass is not an instruction to erase the persisted window.
         // This can occur while an offload/reconnect is incomplete or the active source briefly resolves
         // empty. Keep the last complete scores until a non-empty pass can replace them.
@@ -1347,6 +1537,15 @@ object IntelligenceEngine {
                 rows = activeZoneRows,
             )
         }
+
+        // A historical anchor is intentionally not "now". Publishing weekly age/vitality rows, replacing
+        // the user's current step calibration, or emitting current-profile invalidations from that old date
+        // would make global state stale. The next normal recent pass owns those current-time projections.
+        if (!historicalCatchUp) {
+        // Snapshot the persisted/merged daily history after the bounded score reconciliation. This is the
+        // accumulated view the readiness card + dashboard read ("N of 7 nights"), windowed to the current
+        // recompute range so it cannot pull unrelated deep history into profile-dependent projections.
+        val faPriorDaily = repo.daysMerged(importedDeviceId).filter { it.day in oldestDay..newestDay }
 
         // ── Fitness Age (Phase 2) , weekly, keyed to the week's Saturday ──
         // Gate + compute Fitness Age on the UNION of the pre-rewrite persisted history and THIS pass's
@@ -1493,6 +1692,7 @@ object IntelligenceEngine {
             val dayEnd = dayMid + SECONDS_PER_DAY - 1
             val dayKey = AnalyticsEngine.dayString(dayMid, tzOffsetSeconds)
             val owner = resolveDayOwner(repo, ownerSource, candidatePriorities, dayKey, dayMid, dayEnd, importedDeviceId)
+            sourceConsumed(owner)
             val grav = repo.gravitySamples(owner, dayMid, dayEnd, STREAM_LIMIT)
             val m = StepsEstimateEngine.dayMotionIntensity(grav)
             if (m > 0) motionByDay[dayKey] = m
@@ -1534,6 +1734,7 @@ object IntelligenceEngine {
                     )
                 }
             }
+        }
         }
         // DURABILITY GUARD (iOS PR #395 cachedSleepKept): drop any freshly-detected session that
         // time-overlaps a night the user has already hand-corrected. A detected onset can drift
@@ -1601,7 +1802,7 @@ object IntelligenceEngine {
             repo = repo,
             deviceIds = healIds,
             windowStart = windowStart,
-            windowEnd = nowSeconds,
+            windowEnd = analysisWindowEnd,
             oldestDay = oldestDay,
             newestDay = newestDay,
             timezoneOffsetSeconds = tzOffsetSeconds,
@@ -1622,12 +1823,15 @@ object IntelligenceEngine {
         }
         // Migration/repair: clear rows silently inferred by older builds. Confirmed manual/imported rows
         // use different sources and are not touched; no inference is re-inserted here.
-        repo.deleteComputedWorkouts(computedId, "detected", windowStart, nowSeconds)
+        repo.deleteComputedWorkouts(computedId, "detected", windowStart, analysisWindowEnd)
 
         // #137: a manually-started workout is scored from sparse live HR at save time , near-zero
         // calories/strain on a 5/MG. Now that offloaded HR may cover the window, re-score the
         // under-sampled ones from that denser data.
-        rescoreManualWorkouts(repo, profile, importedDeviceId, maxHROverride, nowSeconds)
+        if (!historicalCatchUp) {
+            sourceConsumed(importedDeviceId)
+            rescoreManualWorkouts(repo, profile, importedDeviceId, maxHROverride, nowSeconds)
+        }
 
         val persistedOut = out.map { computed ->
             if (computed.rawStrapEvidence && computed.day !in persistedScoreDays) {
@@ -1636,6 +1840,19 @@ object IntelligenceEngine {
                 computed
             }
         }
+        // This is deliberately terminal: every ownership/read/persistence boundary above must succeed
+        // before a non-selected candidate can satisfy its exact-generation claim.
+        val scanCoverage = analysisScanCoverage(
+            maxDays = maxDays,
+            nowSeconds = nowSeconds,
+            timezoneOffsetSeconds = tzOffsetSeconds,
+            historicalCatchUp = historicalCatchUp,
+        )
+        sourcesEvaluatedForOwnership(
+            (candidatePriorities.map { it.first } + importedDeviceId).distinct(),
+            scanCoverage.startTs,
+            scanCoverage.endTs,
+        )
         return persistedOut to healDropped.size
     }
 
@@ -1682,7 +1899,7 @@ object IntelligenceEngine {
      * window is a genuine improvement , so a well-scored 4.0 workout is never touched and a still-sparse
      * window is a no-op. Manual workouts + live/offloaded HR both live under [deviceId] ("my-whoop").
      */
-    private suspend fun rescoreManualWorkouts(
+    internal suspend fun rescoreManualWorkouts(
         repo: WhoopRepository,
         profile: UserProfile,
         deviceId: String,
@@ -1690,7 +1907,7 @@ object IntelligenceEngine {
         nowSeconds: Long,
     ) {
         val since = nowSeconds - 14L * 86_400L
-        val rows = runCatching { repo.workouts(deviceId, since, nowSeconds) }.getOrNull() ?: return
+        val rows = repo.workouts(deviceId, since, nowSeconds)
         val hrMax = maxHROverride ?: (208.0 - 0.7 * profile.age)   // Tanaka, matching endWorkout
         val updated = ArrayList<WorkoutRow>()
         for (row in rows) {
@@ -1699,8 +1916,7 @@ object IntelligenceEngine {
             // merged-workout case, where kcal is the SUM of inputs so it never looks under-scored yet
             // Effort stays blank forever). improves() then accepts a strain-only gain for the latter.
             if (!ManualWorkoutRescore.looksUnderScored(row.energyKcal) && row.strain != null) continue
-            val samples = runCatching { repo.hrSamples(deviceId, row.startTs, row.endTs, 20_000) }
-                .getOrNull() ?: continue
+            val samples = repo.hrSamples(deviceId, row.startTs, row.endTs, 20_000)
             val s = ManualWorkoutRescore.scored(samples, profile, hrMax) ?: continue
             if (!ManualWorkoutRescore.improves(s, row.energyKcal, row.strain, allowStrainOnlyFill = true)) continue
             // Never lower a summed kcal: only take the recomputed kcal when it genuinely beats the stored

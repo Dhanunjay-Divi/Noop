@@ -43,6 +43,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +61,12 @@ enum class ManagedCloudPhase {
     CONSENT_REQUIRED,
     ENROLLED,
     DELETION_SCHEDULED,
+}
+
+sealed interface ManagedSafetyBandSosOutcome {
+    data object Opened : ManagedSafetyBandSosOutcome
+    data object AlreadyActive : ManagedSafetyBandSosOutcome
+    data class Unavailable(val reason: String) : ManagedSafetyBandSosOutcome
 }
 
 data class ManagedCloudState(
@@ -134,6 +141,7 @@ class ManagedCloudService private constructor(context: Context) {
     @Volatile
     private var managedDisconnecting = false
     private var safetyBootstrapJob: Job? = null
+    private var managedDocumentProfileBindingJob: Job? = null
 
     private val mutableState = MutableStateFlow(
         ManagedCloudState(
@@ -175,6 +183,7 @@ class ManagedCloudService private constructor(context: Context) {
     /** Initializes persisted Firebase auth only for a configured build; it performs no upload. */
     fun bootstrap() {
         if (configuration == null) {
+            scheduleManagedDocumentProfileBinding(null)
             stopManagedSafetyLocationSession("unavailable")
             replaceState { it.copy(phase = ManagedCloudPhase.UNAVAILABLE, busy = false) }
             return
@@ -211,6 +220,34 @@ class ManagedCloudService private constructor(context: Context) {
         preferences.optimizePhoneStorage =
             enabled && state.value.phase == ManagedCloudPhase.ENROLLED
         replaceState { it.copy() }
+    }
+
+    fun bandSosSetupReady(): Boolean {
+        val snapshot = state.value
+        val contacts = snapshot.safetyContacts ?: return false
+        return snapshot.phase == ManagedCloudPhase.ENROLLED &&
+            contacts.contacts.count { it.role == "contact" } >= contacts.minimumRequired
+    }
+
+    fun bandSosSetupMessage(): String {
+        val snapshot = state.value
+        if (snapshot.phase != ManagedCloudPhase.ENROLLED) {
+            return text(R.string.appwide_managed_safety_band_sos_sign_in)
+        }
+        val contacts = snapshot.safetyContacts
+            ?: return text(R.string.appwide_managed_safety_band_sos_load_contacts)
+        val remaining = (
+            contacts.minimumRequired -
+                contacts.contacts.count { it.role == "contact" }
+            ).coerceAtLeast(0)
+        return if (remaining == 0) {
+            ""
+        } else {
+            text(
+                R.string.appwide_managed_safety_band_sos_contacts_remaining,
+                remaining,
+            )
+        }
     }
 
     suspend fun sendCode(activity: Activity, rawPhoneNumber: String) {
@@ -264,6 +301,7 @@ class ManagedCloudService private constructor(context: Context) {
                 normalizedCode(rawCode),
             )
             runtime().auth.signInWithCredential(credential).awaitManaged()
+            bindManagedDocumentProfile(accountScopeHash())
             preferences.verificationId = null
             reconcileAuthenticatedState()
             if (state.value.phase == ManagedCloudPhase.CONSENT_REQUIRED) {
@@ -714,6 +752,53 @@ class ManagedCloudService private constructor(context: Context) {
             refreshSafetyData()
         }
 
+    suspend fun triggerBandSos(
+        durationHours: Int,
+        shareLocation: Boolean,
+    ): ManagedSafetyBandSosOutcome {
+        bootstrap()
+        refreshSafety()
+        if (!bandSosSetupReady()) {
+            recordBandSosOutcome("setup_unavailable")
+            return ManagedSafetyBandSosOutcome.Unavailable(bandSosSetupMessage())
+        }
+        if (state.value.safetyIncidents.any {
+                it.role == "owner" && it.status in setOf("open", "acknowledged")
+            }
+        ) {
+            recordBandSosOutcome("already_active")
+            return ManagedSafetyBandSosOutcome.AlreadyActive
+        }
+        val incident = createSafetyIncident(
+            trigger = "band_sos",
+            durationHours = if (durationHours == 12) 12 else 8,
+            shareLocation = shareLocation,
+        ) ?: run {
+            recordBandSosOutcome("rejected")
+            return ManagedSafetyBandSosOutcome.Unavailable(
+                state.value.safetyStatus.ifBlank {
+                    text(R.string.appwide_managed_safety_band_sos_request_rejected)
+                },
+            )
+        }
+        return if (incident.status in setOf("open", "acknowledged")) {
+            recordBandSosOutcome("opened")
+            ManagedSafetyBandSosOutcome.Opened
+        } else {
+            recordBandSosOutcome("rejected")
+            ManagedSafetyBandSosOutcome.Unavailable(
+                text(R.string.appwide_managed_safety_band_sos_request_rejected),
+            )
+        }
+    }
+
+    private fun recordBandSosOutcome(outcome: String) {
+        com.noop.AppDiagnosticsRecorder.record(
+            "managed_safety.band_sos",
+            fields = mapOf("outcome" to outcome),
+        )
+    }
+
     suspend fun createSafetyInvite() =
         safetyAction("invite_create") {
             registerCurrentManagedPushToken()
@@ -862,13 +947,23 @@ class ManagedCloudService private constructor(context: Context) {
         }
 
     suspend fun createSafetyIncident(
+        trigger: String = "manual_sos",
         durationHours: Int,
         shareLocation: Boolean,
     ): ManagedSafetyIncident? {
+        if (!ManagedSafetyLocationAuthorization.isAuthorized(appContext, shareLocation)) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_safety.location_authorization",
+                fields = mapOf("outcome" to "incident_rejected"),
+            )
+            setSafetyStatus(text(R.string.managed_safety_location_background_body))
+            return null
+        }
         var created: ManagedSafetyIncident? = null
         safetyAction("incident_create") {
             val request = preferences.safetyIncidentRequest(
                 accountScopeHash = accountScopeHash(),
+                trigger = trigger,
                 durationHours = durationHours,
                 shareLocation = shareLocation,
             )
@@ -876,6 +971,7 @@ class ManagedCloudService private constructor(context: Context) {
                 client().createSafetyIncident(
                     authorization = authorization(forceRefresh = true),
                     requestId = request.requestId,
+                    trigger = trigger,
                     durationHours = durationHours,
                     shareLocation = shareLocation,
                 )
@@ -1359,98 +1455,125 @@ class ManagedCloudService private constructor(context: Context) {
         safetyBootstrapJob = null
         safetyBootstrapRunning = false
         stopManagedSafetyLocationSession("disconnect")
+        val serializationDiagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "managed_sync.disconnect_serialization",
+            fields = mapOf("sync_in_flight" to syncMutex.isLocked.toString()),
+        )
+        var serializationOutcome = "completed"
         try {
-            val requiresPushRevocation =
-                state.value.phase == ManagedCloudPhase.ENROLLED ||
-                    state.value.phase == ManagedCloudPhase.DELETION_SCHEDULED
-            var serverRevoked = false
-            var providerTokenDeleted = false
-            if (requiresPushRevocation) {
-                managedPushRegistrationMutex.withLock {
-                    val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
-                        "managed_safety.push_revocation",
-                    )
-                    try {
-                        client().revokePushInstallation(
-                            authorization = authorization(forceRefresh = true),
-                        )
-                        serverRevoked = true
-                    } catch (error: CancellationException) {
-                        com.noop.AppDiagnosticsRecorder.endOperation(
-                            diagnostic,
-                            outcome = "canceled",
-                        )
-                        throw error
-                    } catch (error: Throwable) {
-                        com.noop.AppDiagnosticsRecorder.record(
+            syncMutex.withLock {
+                managedDocumentProfileBindingJob?.cancelAndJoin()
+                managedDocumentProfileBindingJob = null
+                val requiresPushRevocation =
+                    state.value.phase == ManagedCloudPhase.ENROLLED ||
+                        state.value.phase == ManagedCloudPhase.DELETION_SCHEDULED
+                var serverRevoked = false
+                var providerTokenDeleted = false
+                if (requiresPushRevocation) {
+                    managedPushRegistrationMutex.withLock {
+                        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
                             "managed_safety.push_revocation",
-                            fields = mapOf(
-                                "outcome" to "server_failed",
-                                "failure_kind" to diagnosticSyncFailureKind(error),
-                            ),
                         )
-                    }
-                    try {
-                        val messaging = runtime().messaging
-                        messaging.isAutoInitEnabled = false
-                        messaging.deleteToken().awaitManaged()
-                        providerTokenDeleted = true
-                    } catch (error: CancellationException) {
+                        try {
+                            client().revokePushInstallation(
+                                authorization = authorization(forceRefresh = true),
+                            )
+                            serverRevoked = true
+                        } catch (error: CancellationException) {
+                            com.noop.AppDiagnosticsRecorder.endOperation(
+                                diagnostic,
+                                outcome = "canceled",
+                            )
+                            throw error
+                        } catch (error: Throwable) {
+                            com.noop.AppDiagnosticsRecorder.record(
+                                "managed_safety.push_revocation",
+                                fields = mapOf(
+                                    "outcome" to "server_failed",
+                                    "failure_kind" to diagnosticSyncFailureKind(error),
+                                ),
+                            )
+                        }
+                        try {
+                            val messaging = runtime().messaging
+                            messaging.isAutoInitEnabled = false
+                            messaging.deleteToken().awaitManaged()
+                            providerTokenDeleted = true
+                        } catch (error: CancellationException) {
+                            com.noop.AppDiagnosticsRecorder.endOperation(
+                                diagnostic,
+                                outcome = "canceled",
+                                fields = mapOf(
+                                    "server" to if (serverRevoked) "revoked" else "failed",
+                                ),
+                            )
+                            throw error
+                        } catch (error: Throwable) {
+                            com.noop.AppDiagnosticsRecorder.record(
+                                "managed_safety.push_revocation",
+                                fields = mapOf(
+                                    "outcome" to "provider_failed",
+                                    "failure_kind" to diagnosticSyncFailureKind(error),
+                                ),
+                            )
+                        }
                         com.noop.AppDiagnosticsRecorder.endOperation(
                             diagnostic,
-                            outcome = "canceled",
+                            outcome = if (serverRevoked || providerTokenDeleted) {
+                                "completed"
+                            } else {
+                                "failed"
+                            },
                             fields = mapOf(
                                 "server" to if (serverRevoked) "revoked" else "failed",
-                            ),
-                        )
-                        throw error
-                    } catch (error: Throwable) {
-                        com.noop.AppDiagnosticsRecorder.record(
-                            "managed_safety.push_revocation",
-                            fields = mapOf(
-                                "outcome" to "provider_failed",
-                                "failure_kind" to diagnosticSyncFailureKind(error),
+                                "provider" to if (providerTokenDeleted) "deleted" else "failed",
                             ),
                         )
                     }
-                    com.noop.AppDiagnosticsRecorder.endOperation(
-                        diagnostic,
-                        outcome = if (serverRevoked || providerTokenDeleted) {
-                            "completed"
-                        } else {
-                            "failed"
-                        },
-                        fields = mapOf(
-                            "server" to if (serverRevoked) "revoked" else "failed",
-                            "provider" to if (providerTokenDeleted) "deleted" else "failed",
-                        ),
-                    )
                 }
-            }
-            if (
-                !ManagedPushRevocationPolicy.canFinalizeDisconnect(
-                    requiresRevocation = requiresPushRevocation,
-                    serverRevoked = serverRevoked,
-                    providerTokenDeleted = providerTokenDeleted,
-                )
-            ) {
-                setStatus(text(R.string.managed_cloud_error_generic))
-                return
-            }
-            runCatching { runtime().auth.signOut() }
-                .onFailure {
-                    setStatus(userMessage(it))
+                if (
+                    !ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                        requiresRevocation = requiresPushRevocation,
+                        serverRevoked = serverRevoked,
+                        providerTokenDeleted = providerTokenDeleted,
+                    )
+                ) {
+                    setStatus(text(R.string.managed_cloud_error_generic))
                     return
                 }
-            preferences.disconnect()
-            preferences.clearSocialState()
-            preferences.clearSafetyState()
-            clearSocialPresentation()
-            clearSafetyPresentation()
-            setPhase(ManagedCloudPhase.SIGNED_OUT)
-            setStatus(text(R.string.managed_cloud_status_disconnected))
-            ManagedCloudScheduler.reconcile(appContext)
+                try {
+                    releaseManagedDocumentProfile()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    setStatus(userMessage(error))
+                    return
+                }
+                runCatching { runtime().auth.signOut() }
+                    .onFailure {
+                        setStatus(userMessage(it))
+                        return
+                    }
+                preferences.disconnect()
+                preferences.clearSocialState()
+                preferences.clearSafetyState()
+                clearSocialPresentation()
+                clearSafetyPresentation()
+                setPhase(ManagedCloudPhase.SIGNED_OUT)
+                setStatus(text(R.string.managed_cloud_status_disconnected))
+                ManagedCloudScheduler.reconcile(appContext)
+            }
+        } catch (error: CancellationException) {
+            serializationOutcome = "canceled"
+            throw error
+        } catch (error: Throwable) {
+            serializationOutcome = "failed"
+            throw error
         } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                serializationDiagnostic,
+                outcome = serializationOutcome,
+            )
             managedDisconnecting = false
             if (state.value.phase == ManagedCloudPhase.ENROLLED) {
                 reconcileManagedSafetyLocationSession()
@@ -2265,6 +2388,9 @@ class ManagedCloudService private constructor(context: Context) {
 
     private suspend fun performSync(mode: SyncMode): ManagedCloudSyncSummary =
         syncMutex.withLock {
+            if (managedDisconnecting) throw CancellationException(
+                "managed account disconnect is in progress",
+            )
             withContext(Dispatchers.IO) {
                 val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
                     "managed_sync",
@@ -2620,11 +2746,13 @@ class ManagedCloudService private constructor(context: Context) {
             return
         }
         val user = runtime().auth.currentUser ?: run {
+            scheduleManagedDocumentProfileBinding(null)
             clearSocialPresentation()
             clearSafetyPresentation()
             setPhase(ManagedCloudPhase.SIGNED_OUT)
             return
         }
+        scheduleManagedDocumentProfileBinding(accountScopeHash(user))
         val enrolled = preferences.isEnrolled(
             accountScopeHash(user),
             config.storage.policyVersion,
@@ -2651,6 +2779,7 @@ class ManagedCloudService private constructor(context: Context) {
         safetyBootstrapRunning = false
         disableManagedMessagingLocally()
         runCatching { runtime().auth.signOut() }
+        scheduleManagedDocumentProfileBinding(null)
         preferences.clearEnrollment()
         replaceState {
             it.copy(
@@ -2686,6 +2815,7 @@ class ManagedCloudService private constructor(context: Context) {
         safetyBootstrapRunning = false
         disableManagedMessagingLocally()
         runCatching { runtime().auth.signOut() }
+        scheduleManagedDocumentProfileBinding(null)
         preferences.clearEnrollment()
         replaceState {
             it.copy(
@@ -2839,6 +2969,76 @@ class ManagedCloudService private constructor(context: Context) {
             "noop-managed-account-v1\u0000${user.uid}".toByteArray(StandardCharsets.UTF_8),
         )
 
+    private suspend fun bindManagedDocumentProfile(accountScopeHash: String) {
+        updateManagedDocumentProfileBinding(accountScopeHash)
+    }
+
+    private suspend fun releaseManagedDocumentProfile() {
+        updateManagedDocumentProfileBinding(null)
+    }
+
+    private fun scheduleManagedDocumentProfileBinding(accountScopeHash: String?) {
+        if (accountScopeHash != null && managedDisconnecting) return
+        managedDocumentProfileBindingJob?.cancel()
+        managedDocumentProfileBindingJob = scope.launch {
+            if (accountScopeHash != null && managedDisconnecting) return@launch
+            runCatching {
+                updateManagedDocumentProfileBinding(accountScopeHash)
+            }.onFailure { error ->
+                com.noop.AppDiagnosticsRecorder.record(
+                    "managed_sync.profile_binding",
+                    fields = mapOf(
+                        "state" to if (accountScopeHash == null) "unbound" else "bound",
+                        "outcome" to "failed",
+                        "failure_kind" to diagnosticSyncFailureKind(error),
+                    ),
+                )
+            }
+        }
+    }
+
+    private suspend fun updateManagedDocumentProfileBinding(accountScopeHash: String?) {
+        val state = if (accountScopeHash == null) "unbound" else "bound"
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "managed_sync.profile_binding",
+            fields = mapOf("state" to state),
+        )
+        try {
+            if (accountScopeHash != null && managedDisconnecting) {
+                throw CancellationException(
+                    "managed account disconnect is in progress",
+                )
+            }
+            withContext(Dispatchers.IO) {
+                database.runInTransaction {
+                    val db = database.openHelper.writableDatabase
+                    if (accountScopeHash == null) {
+                        WhoopDatabase.releaseManagedLocalProfile(db)
+                    } else {
+                        WhoopDatabase.activateManagedLocalProfile(db, accountScopeHash)
+                    }
+                }
+            }
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "completed",
+            )
+        } catch (error: CancellationException) {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "canceled",
+            )
+            throw error
+        } catch (error: Throwable) {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "failed",
+                fields = mapOf("failure_kind" to diagnosticSyncFailureKind(error)),
+            )
+            throw error
+        }
+    }
+
     private fun managedSafetyNotificationPermissionGranted(): Boolean =
         ManagedSafetyNotificationPermission.canRegister(appContext)
 
@@ -2940,6 +3140,7 @@ class ManagedCloudService private constructor(context: Context) {
                             currentUser().reauthenticate(credential).awaitManaged()
                         } else {
                             auth.signInWithCredential(credential).awaitManaged()
+                            bindManagedDocumentProfile(accountScopeHash())
                             preferences.verificationId = null
                             reconcileAuthenticatedState()
                             setStatus(
@@ -3244,6 +3445,45 @@ internal object ManagedSafetyNotificationPermission {
                     channelImportance != NotificationManager.IMPORTANCE_NONE
             )
     }
+}
+
+internal object ManagedSafetyLocationAuthorization {
+    fun isAuthorized(
+        context: Context,
+        shareLocation: Boolean,
+    ): Boolean = canStartIncident(
+        shareLocation = shareLocation,
+        sdkInt = Build.VERSION.SDK_INT,
+        foregroundGranted =
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ) == PackageManager.PERMISSION_GRANTED,
+        backgroundGranted =
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED,
+    )
+
+    fun canStartIncident(
+        shareLocation: Boolean,
+        sdkInt: Int,
+        foregroundGranted: Boolean,
+        backgroundGranted: Boolean,
+    ): Boolean =
+        !shareLocation ||
+            (
+                foregroundGranted &&
+                    (
+                        sdkInt < Build.VERSION_CODES.Q ||
+                            backgroundGranted
+                        )
+                )
 }
 
 internal fun managedDeletionDeadlinePassed(

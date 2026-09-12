@@ -253,7 +253,8 @@ class ProfileStore(private val prefs: SharedPreferences) {
     val vitalityProfileToken: Double get() = AgeMetricProfile.vitalityToken(age.toDouble())
     val ageMetricStateToken: String
         get() = "$fitnessAgeProfileToken|$vo2maxProfileToken|$vitalityProfileToken|" +
-            "$fitnessAgeProvenanceRequired|$vo2maxProvenanceRequired|$vitalityProvenanceRequired"
+            "$fitnessAgeProvenanceRequired|$vo2maxProvenanceRequired|$vitalityProvenanceRequired|" +
+            "$ageInputConfirmed|$sexInputConfirmed|$weightKg|$weightInputConfirmed"
 
     fun acceptsFitnessAge(provenance: Double?): Boolean =
         AgeMetricProfile.acceptsFitnessAge(provenance, fitnessAgeProfileToken)
@@ -297,14 +298,18 @@ class ProfileStore(private val prefs: SharedPreferences) {
             .putBoolean(KEY_WEIGHT_CONFIRMED, true)
             .putBoolean(KEY_HEIGHT_CONFIRMED, true)
             .apply()
+        signalAgeMetricProfileChange()
     }
 
     var weightKg: Double
         get() = prefs.getFloat(KEY_WEIGHT, 75f).toDouble().coerceIn(WEIGHT_MIN, WEIGHT_MAX)
-        set(v) = prefs.edit()
-            .putFloat(KEY_WEIGHT, v.coerceIn(WEIGHT_MIN, WEIGHT_MAX).toFloat())
-            .putBoolean(KEY_WEIGHT_CONFIRMED, true)
-            .apply()
+        set(v) {
+            prefs.edit()
+                .putFloat(KEY_WEIGHT, v.coerceIn(WEIGHT_MIN, WEIGHT_MAX).toFloat())
+                .putBoolean(KEY_WEIGHT_CONFIRMED, true)
+                .apply()
+            signalAgeMetricProfileChange()
+        }
 
     /**
      * Optional target selected by the user. It is stored canonically in kilograms and is never
@@ -326,10 +331,13 @@ class ProfileStore(private val prefs: SharedPreferences) {
 
     var heightCm: Double
         get() = prefs.getFloat(KEY_HEIGHT, 178f).toDouble().coerceIn(HEIGHT_MIN, HEIGHT_MAX)
-        set(v) = prefs.edit()
-            .putFloat(KEY_HEIGHT, v.coerceIn(HEIGHT_MIN, HEIGHT_MAX).toFloat())
-            .putBoolean(KEY_HEIGHT_CONFIRMED, true)
-            .apply()
+        set(v) {
+            prefs.edit()
+                .putFloat(KEY_HEIGHT, v.coerceIn(HEIGHT_MIN, HEIGHT_MAX).toFloat())
+                .putBoolean(KEY_HEIGHT_CONFIRMED, true)
+                .apply()
+            signalAgeMetricProfileChange()
+        }
 
     val weightInputConfirmed: Boolean
         get() = prefs.getBoolean(KEY_WEIGHT_CONFIRMED, false) || prefs.contains(KEY_WEIGHT)
@@ -784,8 +792,8 @@ fun SettingsScreen(
     var workoutKeepScreenOn by remember {
         mutableStateOf(NoopPrefs.of(context).getBoolean("workoutKeepScreenOn", false))
     }
-    // Live Sessions (beta) - gates the Today "Start session" entry. Unlike its section-mates this is a
-    // BETA feature flag, default ON (`live_sessions_beta`, see LiveSessionPrefs); off hides the entry.
+    // Live Sessions (beta) - gates the Today "Start session" entry. It defaults off until the user
+    // explicitly opts into live coaching with a supported connected band.
     var liveSessionsBeta by remember { mutableStateOf(LiveSessionPrefs.enabled(context)) }
 
     // Independent display preferences. Profile/imported values remain SI; weight and height are migrated
@@ -2828,11 +2836,10 @@ fun SettingsScreen(
                     },
                 )
                 RowDivider()
-                // BETA + default ON (the one exception to this section's off-by-default rule): the flag
-                // gates the Today entry so anyone can wave the beta away here with one flip.
+                // The beta defaults off and gates the Today entry until the user opts in.
                 ToggleRow(
                     title = uiString(R.string.l10n_settings_screen_live_sessions_beta_2ca3a97f),
-                    detail = "Silence-first Noop Band coaching during workouts.",
+                    detail = "Screen-first live heart-rate coaching. Wrist cues require a connected, bonded, worn band and enabled wrist alerts.",
                     checked = liveSessionsBeta,
                     onCheckedChange = {
                         liveSessionsBeta = it
