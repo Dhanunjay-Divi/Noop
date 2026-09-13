@@ -91,27 +91,27 @@ final class NOOPiOSUITests: XCTestCase {
 
     func testPrimaryTabsNavigateAndExposeSelection() {
         let app = launchApp()
-        let today = app.buttons["noop.tab.0"]
-        let trends = app.buttons["noop.tab.1"]
-        let workouts = app.buttons["noop.tab.2"]
-        let sleep = app.buttons["noop.tab.3"]
-        let more = app.buttons["noop.tab.4"]
+        let identifiers = (0...4).map { "noop.tab.\($0)" }
 
-        XCTAssertTrue(today.waitForExistence(timeout: 20))
-        XCTAssertTrue(trends.exists)
-        XCTAssertTrue(workouts.exists)
-        XCTAssertTrue(sleep.exists)
-        XCTAssertTrue(more.exists)
-        XCTAssertTrue(today.isSelected)
+        XCTAssertTrue(app.buttons[identifiers[0]].waitForExistence(timeout: 20))
+        for identifier in identifiers {
+            XCTAssertTrue(app.buttons[identifier].exists)
+        }
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            app.buttons[identifiers[0]].isSelected
+        })
 
-        trends.tap()
-        XCTAssertTrue(trends.isSelected)
-        workouts.tap()
-        XCTAssertTrue(workouts.isSelected)
-        sleep.tap()
-        XCTAssertTrue(sleep.isSelected)
-        more.tap()
-        XCTAssertTrue(more.isSelected)
+        for identifier in identifiers.dropFirst() {
+            let tab = app.buttons[identifier]
+            XCTAssertTrue(tab.waitForExistence(timeout: 5))
+            tab.tap()
+            XCTAssertTrue(
+                waitUntil(timeout: 5) {
+                    app.buttons[identifier].isSelected
+                },
+                "\(identifier) did not expose its selected accessibility state."
+            )
+        }
     }
 
     func testPrivateNativePilotEnrollmentAndIdempotentSync() throws {
