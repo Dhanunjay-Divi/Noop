@@ -23,19 +23,21 @@ Last updated: **2026-09-13**
 
 ### PR 15 server and infrastructure review fixes
 
-A narrow local correction now restores published migration `038` exactly to
-SHA-256 `da26324b...` and adds forward-only migration `041` for
-migration-first deployment and application rollback while the prior Safety
-writer omits the quota-event trigger. The expand state leaves the column
-nullable, and its provenance trigger derives an omitted value from the
-referenced incident while continuing to reject owner or explicit-trigger
-mismatches. Fresh 001-through-041 and already-applied-original-038 upgrade paths
-pass against a disposable PostgreSQL database. The feedback bucket lifecycle is
-one day later than the exact application retention window, leaving exact
-`retained_until` deletion with the lifecycle worker. Focused PostgreSQL,
-repository, backup/restore, OpenTofu, formatting, and all 41 manifest checks
-pass against synthetic local state. No service was deployed, no cloud plan was
-applied, no real data was touched, and the local correction is tracked in
+A narrow local correction preserves published migration `038` exactly at
+SHA-256 `da26324b...` and finalizes unpublished migration `041` at SHA-256
+`227809fe...`. The migration runner validates all applied checksums first, then
+commits `038` and `041` as one explicit compatibility bundle before independent
+`039` and `040`; the prior Safety writer cannot observe a committed `038`-only
+schema. The quota trigger locks its incident while deriving provenance, and
+incident owner/trigger provenance is immutable, including under concurrent
+writes. Readiness retains exact migration-set equality: rollback requires a
+reviewed code revert rebuilt with the current immutable manifest or a kill
+switch, not an exact prior image. The final focused matrix passed 8
+migration/readiness/concurrency tests, 3 direct Safety migration tests, 4
+feedback migration tests, and 26 backup/deployment contract tests, plus Ruff,
+Python compilation, and all 41 manifest checks against disposable synthetic
+local state. No service was deployed, no cloud plan was applied, no real data
+was touched, and the local correction is tracked in
 [`rounds/2026-09-13-pr15-server-infra-review-fixes.md`](rounds/2026-09-13-pr15-server-infra-review-fixes.md).
 
 ### Android analysis and Trends cancellation closeout

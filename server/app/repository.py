@@ -67,6 +67,11 @@ FRIEND_DAILY_METRICS = frozenset(
     metric for aliases in FRIEND_METRIC_ALIASES.values() for metric in aliases
 )
 
+SAFETY_WRITER_COMPATIBILITY_BUNDLE = (
+    "038_managed_safety_band_sos.sql",
+    "041_managed_safety_writer_compatibility.sql",
+)
+
 
 def _friend_pair(first: str, second: str) -> tuple[str, str]:
     return tuple(sorted((first, second)))  # type: ignore[return-value]
@@ -1759,7 +1764,7 @@ class PostgresRepository:
             raise
 
     async def _run_migrations(self, connection: Any) -> None:
-        """Apply immutable SQL migrations once, in lexical version order."""
+        """Apply immutable SQL migrations once with explicit compatibility bundles."""
 
         await connection.execute(
             """
@@ -1777,34 +1782,48 @@ class PostgresRepository:
             migrations = self._migration_files()
             if not migrations:
                 raise RuntimeError("no database migrations were found")
+            rows = await connection.fetch(
+                "SELECT version, checksum FROM noop_schema_migrations"
+            )
+            applied = {
+                str(row["version"]): str(row["checksum"]).strip() for row in rows
+            }
             for path in migrations:
-                body = path.read_text(encoding="utf-8")
-                checksum = hashlib.sha256(body.encode("utf-8")).hexdigest()
-                applied = await connection.fetchrow(
-                    """
-                    SELECT checksum
-                    FROM noop_schema_migrations
-                    WHERE version = $1
-                    """,
-                    path.name,
-                )
-                if applied is not None:
-                    if applied["checksum"].strip() != checksum:
-                        raise RuntimeError(
-                            f"applied migration {path.name} has changed; "
-                            "create a new migration instead"
-                        )
+                if path.name not in applied:
                     continue
-                async with connection.transaction():
-                    await connection.execute(body)
-                    await connection.execute(
-                        """
-                        INSERT INTO noop_schema_migrations (version, checksum)
-                        VALUES ($1, $2)
-                        """,
-                        path.name,
-                        checksum,
+                checksum = hashlib.sha256(path.read_bytes()).hexdigest()
+                if applied[path.name] != checksum:
+                    raise RuntimeError(
+                        f"applied migration {path.name} has changed; "
+                        "create a new migration instead"
                     )
+
+            for batch in self._migration_batches(migrations, set(applied)):
+                async with connection.transaction():
+                    if any(
+                        path.name in SAFETY_WRITER_COMPATIBILITY_BUNDLE
+                        for path in batch
+                    ):
+                        # Prevent a prior writer from observing 038's NOT NULL
+                        # contract before 041's compatibility trigger is active.
+                        await connection.execute(
+                            """
+                            LOCK TABLE managed_safety_page_quota_events
+                            IN ACCESS EXCLUSIVE MODE
+                            """
+                        )
+                    for path in batch:
+                        body = path.read_text(encoding="utf-8")
+                        checksum = hashlib.sha256(body.encode("utf-8")).hexdigest()
+                        await connection.execute(body)
+                        await connection.execute(
+                            """
+                            INSERT INTO noop_schema_migrations (version, checksum)
+                            VALUES ($1, $2)
+                            """,
+                            path.name,
+                            checksum,
+                        )
         finally:
             await connection.execute(
                 "SELECT pg_advisory_unlock(hashtext('noop_schema_migrations'))"
@@ -1831,9 +1850,57 @@ class PostgresRepository:
             applied = {
                 str(row["version"]): str(row["checksum"]).strip() for row in rows
             }
+            # Exact equality is intentional. A rollback artifact must retain the
+            # current immutable migration set; an older image is not accepted
+            # merely because its SQL writer remains schema-compatible.
             return applied == expected
         except Exception:
             return False
+
+    @staticmethod
+    def _migration_batches(
+        migrations: list[Path],
+        applied_versions: set[str],
+    ) -> list[tuple[Path, ...]]:
+        by_name = {path.name: path for path in migrations}
+        missing_bundle_files = [
+            name for name in SAFETY_WRITER_COMPATIBILITY_BUNDLE if name not in by_name
+        ]
+        if missing_bundle_files:
+            raise RuntimeError(
+                "Safety writer compatibility migration bundle is incomplete: "
+                + ", ".join(missing_bundle_files)
+            )
+        if (
+            SAFETY_WRITER_COMPATIBILITY_BUNDLE[1] in applied_versions
+            and SAFETY_WRITER_COMPATIBILITY_BUNDLE[0] not in applied_versions
+        ):
+            raise RuntimeError(
+                "Safety writer compatibility migration was applied before its "
+                "band-SOS prerequisite"
+            )
+
+        bundle_floor = SAFETY_WRITER_COMPATIBILITY_BUNDLE[0]
+        batches = [
+            (path,)
+            for path in migrations
+            if path.name < bundle_floor and path.name not in applied_versions
+        ]
+        pending_bundle = tuple(
+            by_name[name]
+            for name in SAFETY_WRITER_COMPATIBILITY_BUNDLE
+            if name not in applied_versions
+        )
+        if pending_bundle:
+            batches.append(pending_bundle)
+        batches.extend(
+            (path,)
+            for path in migrations
+            if path.name >= bundle_floor
+            and path.name not in SAFETY_WRITER_COMPATIBILITY_BUNDLE
+            and path.name not in applied_versions
+        )
+        return batches
 
     def _migration_files(self) -> list[Path]:
         migration_dir = Path(__file__).resolve().parent.parent / "migrations"

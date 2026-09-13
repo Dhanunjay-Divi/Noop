@@ -12,11 +12,12 @@
 
 ## Objective
 
-Close two exact-head review findings without deploying or touching real data:
-preserve migration-first and rollback compatibility for the prior Safety writer
-without mutating migration `038`, and make the feedback bucket lifecycle rule a
-later safety ceiling than the exact `retained_until` deletion owned by the
-lifecycle worker.
+Close the exact-head review findings without deploying or touching real data:
+preserve migration-first compatibility for the prior Safety writer without
+mutating migration `038`, define rollback honestly around the exact-manifest
+readiness contract, make incident/quota provenance concurrency-safe, and make
+the feedback bucket lifecycle rule a later safety ceiling than the exact
+`retained_until` deletion owned by the lifecycle worker.
 
 An exact-tree review subsequently found that the first implementation rewrote
 already-published migration `038`. This resumed correction restores `038`
@@ -49,6 +50,10 @@ behavior into the next forward-only migration.
 - The first local correction rewrote `038` from checksum `da26324b...` to
   `017556a7...`; the repository migration runner rejects any such applied
   checksum change.
+- A final read-only review found that the first forward-only correction still
+  committed `038` before `041`, tested only raw legacy SQL rather than runtime
+  readiness, left incident/quota provenance vulnerable to a concurrent incident
+  reassignment, and did not pin finalized `041` to a fixed checksum.
 - The feedback bucket lifecycle currently uses the exact configured retention
   day count rather than a later backstop.
 - Physical devices, deployed services, provider behavior, and real data are
@@ -62,8 +67,22 @@ behavior into the next forward-only migration.
   `041_managed_safety_writer_compatibility.sql`, the next available version
   after `040`. It drops the quota trigger column's `NOT NULL` contract for the
   expand window and derives an omitted trigger from the referenced incident.
-  This supports the pre-038 writer after migration-first rollout or application
-  rollback without inventing a default.
+  This supports the pre-038 writer after migration-first rollout without
+  inventing a default.
+- Finalized unpublished migration `041` at SHA-256
+  `227809febdd3369ef530cab71deb08553a45a1d5e62ea070c86547b8d9ae3f9f`
+  and pinned that fixed value in the focused migration test.
+- Added an explicit migration-runner compatibility bundle that validates all
+  existing checksums first, then applies `038` and `041` in one transaction
+  before the independent `039` and `040` migrations. A prior writer cannot
+  observe a committed `038`-only schema.
+- The `041` quota trigger now locks the referenced incident while deriving
+  provenance, and the incident provenance trigger unconditionally rejects every
+  later owner-profile or trigger change. The database no longer depends on
+  seeing a concurrently inserted quota row before protecting ownership.
+- Kept exact migration-set equality at readiness and documented the consequence:
+  rollback uses a forward-built code revert retaining the current immutable
+  migration set. An exact older image is not claimed as supported.
 - Retained explicit owner and trigger consistency checks, historical-row
   backfill, orphan classification, incident immutability, and the validated
   two-value trigger constraint.
@@ -85,9 +104,11 @@ behavior into the next forward-only migration.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: migration `038` is unchanged. Migration `041`
-  relaxes the quota trigger column to nullable during the expand window while
-  normal and legacy inserts are populated and validated by a `BEFORE` trigger.
+- Schema or migration impact: migration `038` remains byte-identical. Finalized
+  migration `041` relaxes the quota trigger column to nullable during the expand
+  window while normal and legacy inserts are populated and validated by a
+  `BEFORE` trigger; it also strengthens immutable incident provenance. The
+  runner applies `038` and `041` under one transaction boundary.
 - Existing-data retention impact: existing quota rows retain their backfilled
   trigger. Feedback exact deletion remains unchanged; only the independent
   bucket fallback moves one day later.
@@ -115,12 +136,12 @@ behavior into the next forward-only migration.
 
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
-| Immutable and forward migration tests | 4 passed | Original `038` bytes and manifest hash are fixed; `041` is manifested; a fresh complete chain accepts the prior writer; and a database with original `038` already recorded upgrades through `041` | A production rollout or concurrent live-service deployment |
-| Direct migration and repository tests | 5 passed | Original `038` rejects the omitted field, `041` enables the compatibility insert, provenance mismatch/orphan behavior remains enforced, and the current repository persists explicit `band_sos` provenance | Provider delivery, physical-band input, or public traffic |
-| Backup and restore contracts | 7 passed, plus direct read-only restore smoke | The manifest, required migration set, nullable expand state, constraints, triggers, and restored application contract remain coherent | An encrypted TimescaleDB restore drill |
-| OpenTofu | `fmt -check`, `validate`, and 8 lifecycle plan tests passed | Default-off feedback infrastructure plans a 29-day bucket backstop for the 28-day exact worker retention and retains all admission/drain gates | Apply behavior or Cloud Storage deletion timing |
-| Formatting and integrity | Ruff format/check passed for 3 touched Python files; all 41 migration checksums passed; scoped `git diff --check` passed | Touched source is formatted and immutable/forward migrations are correctly manifested | Hosted CI |
-| Corrected test invocations | The first new PostgreSQL fixture reused an uncast timestamp parameter in interval arithmetic; asyncpg rejected the ambiguous type. Explicit `timestamptz` casts fixed only the fixture, and the unchanged 8-case matrix then passed. Earlier OpenTofu and manifest invocation corrections remain recorded. | Failed setup attempts remain visible rather than being rewritten as product failures | Deployment evidence |
+| Migration, readiness, and concurrency tests | 8 passed | Original `038` remains byte-identical; finalized `041` has a fixed SHA; the explicit compatibility bundle precedes `039`/`040`; readiness rejects an exact prior image; a prior writer cannot observe a committed `038`-only state; and concurrent quota/incident provenance cannot diverge | A production rollout or concurrent live-service deployment |
+| Direct Safety migration tests | 3 passed | Original `038` rejects the omitted field, finalized `041` enables the compatibility insert, and provenance mismatch/orphan behavior remains enforced | Provider delivery, physical-band input, or public traffic |
+| Feedback migration tests | 4 passed | The adjacent feedback schema remains compatible with the non-lexical Safety compatibility bundle | Public feedback ingestion or real-data retention |
+| Backup and deployment contracts | 26 passed | The immutable manifest, backup contract, and deployment/readiness controls remain coherent with the current-manifest rollback rule | An encrypted TimescaleDB restore drill or deployed rollback |
+| Formatting and integrity | Ruff format/check passed for the 2 touched Python files; Python compilation passed; all 41 migration checksums passed; scoped `git diff --check` passed | Touched source is formatted and immutable/forward migrations are correctly manifested | Hosted CI |
+| Corrected test invocations | The first new PostgreSQL fixture reused an uncast timestamp parameter in interval arithmetic; asyncpg rejected the ambiguous type. Explicit `timestamptz` casts fixed only the fixture, and the unchanged 8-case matrix then passed. A final direct-integration invocation initially set only `NOOP_TEST_POSTGRESQL_DATABASE_URL`, so its 3 cases skipped; rerunning with that file's required `NOOP_TEST_DATABASE_URL` produced 3 passes. Earlier OpenTofu and manifest invocation corrections remain recorded. | Failed setup attempts remain visible rather than being rewritten as product failures | Deployment evidence |
 
 ## Physical device and deployment
 
@@ -132,10 +153,11 @@ behavior into the next forward-only migration.
 
 ## Git and release state
 
-- Changed paths: restored migration `038`; new migration `041`; migration
-  manifest; restore smoke; migration, repository, and backup tests; feedback GCP
-  lifecycle source/tests and retention docs from the prior slice; this
-  operations record, index, and active handoff
+- Changed paths: finalized unpublished migration `041`; migration runner and
+  manifest; focused migration/readiness/concurrency tests; server deployment
+  and release-control runbooks; this operations record, index, active handoff,
+  and decision log. Migration `038` has no diff and was verified at its
+  published checksum.
 - Commits: commit containing this record
 - Branch and remote state: local PR branch; push prohibited for this round
 - Repository visibility verified: not changed
@@ -145,17 +167,21 @@ behavior into the next forward-only migration.
 ## Decisions
 
 - Durable decision added or changed: published migrations are immutable.
-  Schema expansion must remain compatible with the prior writer through a new
-  forward migration until a separate contract migration is safe; exact feedback
-  deletion belongs to the lifecycle worker and bucket lifecycle is a later
-  safety ceiling.
-- Decision-log entry: none expected.
+  Compatibility migrations may form an explicit dependency-ordered atomic
+  bundle when numeric adjacency cannot prevent a committed incompatible state.
+  Database-backed rollback uses a current-manifest code revert unless an older
+  image is separately proven compatible. Exact feedback deletion belongs to the
+  lifecycle worker and bucket lifecycle is a later safety ceiling.
+- Decision-log entry: `D-058`.
 
 ## Open risks and honest limitations
 
 - No shared or production database was inspected or migrated. The upgrade proof
   used an extension-free disposable PostgreSQL 14 cluster, not the hosted
   TimescaleDB/PostgreSQL image.
+- The maintenance contract requires API admission and in-flight writes to be
+  drained before migration. No live orchestrator or load-balancer drain was
+  exercised.
 - Cloud lifecycle execution is asynchronous and was not applied or observed.
 - Hosted CI and protected PR integration remain outside this no-push round.
 

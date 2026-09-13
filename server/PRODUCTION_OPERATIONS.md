@@ -107,13 +107,22 @@ their production roles. Code cannot prove cloud IAM or managed-database grants.
 ### Deployment ordering
 
 Runtime processes refuse a database whose immutable migration manifest differs
-from the image. Drain old Safety workers before the migration job so an older
-worker cannot bypass a newly introduced runtime control. Apply migrations once,
-deploy matching workers, then deploy matching API replicas and wait for
-`/readyz` plus a fresh worker heartbeat. This strict contract favors a short
-maintenance window over unsafe mixed-version paging. A future zero-downtime
-rollout requires an explicitly backward-compatible expand/contract migration,
-not bypassing readiness.
+from the image. Before the migration job, stop admission of new API requests,
+drain in-flight API transactions, and drain old Safety workers so no prior
+process can bypass a newly introduced runtime control. The migration runner
+commits the `038`/`041` Safety writer compatibility bundle atomically before
+applying the independent `039` and `040` migrations. A prior writer therefore
+sees either the pre-`038` schema or the complete compatibility schema, never the
+committed `038`-only state.
+
+After the migration job succeeds, deploy matching workers, then matching API
+replicas, and wait for `/readyz` plus a fresh worker heartbeat before reopening
+admission. This contract deliberately uses a bounded maintenance window.
+Rollback means deploying a reviewed code revert rebuilt with the current
+immutable migration directory and manifest, or disabling the new path through
+its kill switch. An exact older image is rejected by readiness and is not a
+supported rollback artifact. A future zero-downtime rollout requires a proven
+mixed-version compatibility matrix, not bypassing readiness or the drain gate.
 
 ## Capacity model and acceptance gate
 

@@ -513,15 +513,23 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The production repository applies immutable SQL files in lexical order, records
-each checksum in `noop_schema_migrations`, and refuses to start if an
-already-applied migration was edited. `NOOP_DATABASE_ENGINE=timescaledb` uses
-`migrations/` and makes the metric-sample table a hypertable.
+The production repository validates every applied checksum before changing the
+database, applies ordinary immutable SQL files in lexical order, and records
+each checksum in `noop_schema_migrations`. The explicit Safety writer
+compatibility bundle applies migrations `038` and `041` in one transaction
+before the independent `039` and `040` migrations. A prior writer therefore
+cannot observe `038`'s trigger `NOT NULL` contract without `041`'s derivation
+trigger. `NOOP_DATABASE_ENGINE=timescaledb` uses `migrations/` and makes the
+metric-sample table a hypertable.
 `NOOP_DATABASE_ENGINE=postgresql` substitutes only
 `migrations-postgresql/001_init.sql`, which removes the Timescale extension and
 hypertable calls; all later migrations remain canonical. The two initial
 migrations intentionally have different checksums, so changing engines under an
 existing database fails rather than silently changing its storage contract.
+Readiness requires the database migration set to exactly equal the running
+image's set. A code rollback must therefore be rebuilt with the current
+immutable migration directory and manifest; redeploying an exact older image is
+not a supported database rollback.
 
 Migration `002_row_provenance.sql` preserves `sync_batch_id`,
 `source_platform`, and the full `source_metadata` object on each metric, event,
