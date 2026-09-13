@@ -1236,15 +1236,19 @@ class AdaptiveDayNotifierTest {
 
         assertTrue(onCreate.contains("AdaptiveDayTimeZoneStore.markOperationalAccessBlocked(this)"))
         val rebase = start.indexOf("AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(")
-        val failedClosed = start.indexOf("AdaptiveDayOperationalResumeResult.FAILED", rebase)
-        val runtimeClaim = start.indexOf("operationalRuntime.compareAndSet(false, true)", failedClosed)
+        val failedResume = start.indexOf("AdaptiveDayOperationalResumeResult.FAILED", rebase)
+        val rebasedResume = start.indexOf("AdaptiveDayOperationalResumeResult.REBASED", failedResume)
+        val failedBranch = start.substring(failedResume, rebasedResume)
+        val runtimeClaim = start.indexOf("operationalRuntime.compareAndSet(false, true)", rebasedResume)
         val runtimeEvent = start.indexOf("AppDiagnosticsRecorder.record(\"runtime.operational_started\")")
         assertTrue(rebase >= 0)
-        assertTrue(failedClosed > rebase)
-        assertTrue(runtimeClaim > failedClosed)
+        assertTrue(failedResume > rebase)
+        assertTrue(runtimeClaim > rebasedResume)
         assertTrue(runtimeEvent > rebase)
+        assertFalse(failedBranch.contains("return"))
+        assertTrue(failedBranch.contains("\"adaptive_guidance_retry_pending\""))
+        assertTrue(failedBranch.contains("\"runtime_action\" to \"continue\""))
         assertTrue(start.contains("\"rebased_after_operational_block\""))
-        assertTrue(start.contains("\"operational_resume_failed_closed\""))
     }
 
     @Test fun termsAcceptancePersistsTheBlockedMarkerBeforeClickwrapAndRuntimeStartup() {

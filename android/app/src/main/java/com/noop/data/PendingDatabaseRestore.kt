@@ -117,21 +117,30 @@ object PendingDatabaseRestore {
         val marker = readMarker(files.marker) ?: return
         if (marker.phase != Phase.APPLIED) return
         val appContext = context.applicationContext
-        val restoredPreferences = restorePreferencesAfterConfirmedOpen(
-            hasSettings = marker.hasSettings,
-            settingsExists = files.settings.exists(),
-            applySettings = {
-                BackupSettingsBridge.apply(appContext, files.settings.readText())
-            },
-            clearDerivedPlannerState = {
-                BackupSettingsBridge.clearDerivedPlannerState(appContext)
-            },
-        )
-        if (restoredPreferences) {
-            // Preference mirrors and OS schedulers may already have been initialized earlier in this
-            // launch. Reconcile only after Room accepted the replacement and settings were committed.
-            BackupSettingsBridge.reconcileAfterRestore(appContext)
+        try {
+            restorePreferencesAfterConfirmedOpen(
+                hasSettings = marker.hasSettings,
+                settingsExists = files.settings.exists(),
+                applySettings = {
+                    BackupSettingsBridge.apply(appContext, files.settings.readText())
+                },
+                clearDerivedPlannerState = {
+                    BackupSettingsBridge.clearDerivedPlannerState(appContext)
+                },
+            )
+        } catch (error: Exception) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "database.restore_settings",
+                fields = mapOf(
+                    "outcome" to "failed",
+                    "failure_kind" to error.javaClass.simpleName,
+                ),
+            )
+            throw error
         }
+        // Preference mirrors and OS schedulers may already have been initialized earlier in this
+        // launch. Reconcile only after Room accepted the replacement and settings were committed.
+        BackupSettingsBridge.reconcileAfterRestore(appContext)
         cleanupStaging(files, keepRollback = false)
         runCatching {
             com.noop.ui.NoopPrefs.of(appContext).edit()
@@ -144,13 +153,12 @@ object PendingDatabaseRestore {
         settingsExists: Boolean,
         applySettings: () -> Unit,
         clearDerivedPlannerState: () -> Unit,
-    ): Boolean {
-        val clearedDerivedPlannerState = runCatching(clearDerivedPlannerState).isSuccess
-        if (!clearedDerivedPlannerState) return false
-        if (hasSettings && settingsExists) {
-            runCatching(applySettings)
+    ) {
+        if (hasSettings && !settingsExists) {
+            throw IOException("Staged restore settings are missing.")
         }
-        return true
+        clearDerivedPlannerState()
+        if (hasSettings) applySettings()
     }
 
     fun stillSameAppliedFile(context: Context, preparation: Preparation): Boolean {

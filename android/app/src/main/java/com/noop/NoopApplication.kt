@@ -202,9 +202,13 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             AdaptiveDayOperationalResumeResult.FAILED -> {
                 AppDiagnosticsRecorder.record(
                     "adaptive_day.time_zone_baseline",
-                    fields = mapOf("outcome" to "operational_resume_failed_closed"),
+                    fields = mapOf(
+                        "outcome" to "adaptive_guidance_retry_pending",
+                        "runtime_action" to "continue",
+                    ),
                 )
-                return
+                // A failed baseline commit keeps adaptive guidance pending for the next process retry.
+                // It must not block Room, BLE, or the accepted operational UI for this process.
             }
             AdaptiveDayOperationalResumeResult.REBASED -> {
                 AppDiagnosticsRecorder.record(

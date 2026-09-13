@@ -3,8 +3,11 @@ package com.noop.data
 import com.noop.testing.FakeSharedPreferences
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 class PendingDatabaseRestoreTest {
     @Test fun pendingRequiresCandidate() {
@@ -47,7 +50,7 @@ class PendingDatabaseRestoreTest {
             .commit()
         var settingsApplied = false
 
-        val restored = PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
+        PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
             hasSettings = false,
             settingsExists = false,
             applySettings = { settingsApplied = true },
@@ -56,7 +59,6 @@ class PendingDatabaseRestoreTest {
             },
         )
 
-        assertTrue(restored)
         assertFalse(settingsApplied)
         assertFalse(prefs.contains(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY))
     }
@@ -69,7 +71,7 @@ class PendingDatabaseRestoreTest {
         val decoded = BackupSettingsCodec.decode("""{"unknown.setting":true}""")
         var settingsApplied = false
 
-        val restored = PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
+        PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
             hasSettings = true,
             settingsExists = true,
             applySettings = {
@@ -82,8 +84,58 @@ class PendingDatabaseRestoreTest {
             },
         )
 
-        assertTrue(restored)
         assertTrue(settingsApplied)
         assertFalse(prefs.contains(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY))
+    }
+
+    @Test fun declaredSettingsRestoreFailsBeforeChangingPreferencesWhenPayloadIsMissing() {
+        var clearedDerivedState = false
+        var settingsApplied = false
+
+        assertThrows(IOException::class.java) {
+            PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
+                hasSettings = true,
+                settingsExists = false,
+                applySettings = { settingsApplied = true },
+                clearDerivedPlannerState = { clearedDerivedState = true },
+            )
+        }
+
+        assertFalse(clearedDerivedState)
+        assertFalse(settingsApplied)
+    }
+
+    @Test fun derivedStateClearFailurePropagatesBeforeSettingsApply() {
+        val expected = IllegalStateException("clear failed")
+        var settingsApplied = false
+
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
+                hasSettings = true,
+                settingsExists = true,
+                applySettings = { settingsApplied = true },
+                clearDerivedPlannerState = { throw expected },
+            )
+        }
+
+        assertSame(expected, thrown)
+        assertFalse(settingsApplied)
+    }
+
+    @Test fun settingsApplyFailurePropagatesAfterDerivedStateClear() {
+        val expected = IllegalStateException("apply failed")
+        var clearedDerivedState = false
+
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
+                hasSettings = true,
+                settingsExists = true,
+                applySettings = { throw expected },
+                clearDerivedPlannerState = { clearedDerivedState = true },
+            )
+        }
+
+        assertSame(expected, thrown)
+        assertTrue(clearedDerivedState)
     }
 }
