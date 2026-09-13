@@ -2,7 +2,9 @@ package com.noop.ui
 
 import com.noop.data.DailyMetric
 import java.io.File
+import kotlin.system.measureTimeMillis
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -139,6 +141,30 @@ class TrendsHistoryLoadTest {
     }
 
     @Test
+    fun timedPreparationCancelsCpuLoopFromWorkerContext() = runBlocking {
+        var checks = 0
+        val elapsedMillis = measureTimeMillis {
+            try {
+                runTimedTrendsPreparation(timeoutMillis = 25L) { cancellationCheck ->
+                    while (true) {
+                        cancellationCheck()
+                        checks += 1
+                    }
+                }
+                fail("Expected timed preparation cancellation")
+            } catch (_: TimeoutCancellationException) {
+                // Expected: the worker's own timed child became inactive.
+            }
+        }
+
+        assertTrue(checks > 0)
+        assertTrue(
+            "Timed CPU preparation took ${elapsedMillis}ms instead of observing its child timeout",
+            elapsedMillis < 1_000L,
+        )
+    }
+
+    @Test
     fun snapshotVisitsEachSourceRowOnce() {
         var visits = 0
         val history = List(4_000) { index ->
@@ -195,7 +221,15 @@ class TrendsHistoryLoadTest {
         val source = trendsSource()
 
         assertTrue(source.contains("val result = withContext(Dispatchers.Default)"))
-        assertTrue(source.contains("withContext(Dispatchers.Default) {\n                    buildTrendsSnapshot("))
+        assertTrue(source.contains("val workerContext = currentCoroutineContext()"))
+        assertTrue(source.contains("prepare { workerContext.ensureActive() }"))
+        assertEquals(
+            2,
+            source.split("runTimedTrendsPreparation { cancellationCheck ->").size - 1,
+        )
+        assertTrue(source.contains("buildTrendsSnapshot("))
+        assertTrue(source.contains("buildWeeklyDigest("))
+        assertFalse(source.contains("val loadContext = currentCoroutineContext()"))
         assertTrue(source.contains("TrendsSnapshotCache()"))
         assertTrue(source.contains("\"cache_status\""))
         assertTrue(source.contains("\"day_count_bucket\""))

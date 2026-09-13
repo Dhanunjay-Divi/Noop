@@ -1214,11 +1214,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     activeSourceId = analysisSourceId,
                     registeredDevices = registeredAnalysisSources,
                 )
+                val forceAnalysis =
+                    chargeUpgradePending || activeZoneUpgradePending || explicitRescorePending
                 val analysisLease = repository.claimAnalysisInput(
                     sourceIds = analysisSourceIds,
-                    force = chargeUpgradePending ||
-                        activeZoneUpgradePending ||
-                        explicitRescorePending,
+                    force = forceAnalysis,
                 )
                 if (analysisLease != null) {
                     val analysisNowSeconds = System.currentTimeMillis() / 1_000L
@@ -1231,7 +1231,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         requestedMaxDays = requestedAnalysisDays,
                         claims = analysisLease.claims,
                         nowSeconds = analysisNowSeconds,
+                        force = forceAnalysis,
                     )
+                    if (!analysisPlan.shouldAnalyze) {
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "analysis.recent",
+                            fields = mapOf(
+                                "outcome" to "deferred",
+                                "reason" to "late_evening",
+                                "change_gate_ok" to analysisLease.dirtyGateSucceeded.toString(),
+                                "pass_kind" to analysisPlan.passKind.name.lowercase(),
+                                "scan_days" to "0",
+                            ),
+                        )
+                    } else {
                     val analysisDiagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
                         "analysis.recent",
                         fields = mapOf(
@@ -1416,6 +1429,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             includeResourceSnapshot = true,
                         )
                         if (it is kotlin.coroutines.cancellation.CancellationException) throw it
+                    }
                     }
                 }
                 // Opt-in writeback: push the freshly computed nights into Health Connect so other

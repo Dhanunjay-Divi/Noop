@@ -135,6 +135,16 @@ private sealed interface TrendsHistoryUiState {
 
 internal const val TRENDS_LOAD_TIMEOUT_MILLIS = 12_000L
 
+internal suspend fun <T> runTimedTrendsPreparation(
+    timeoutMillis: Long = TRENDS_LOAD_TIMEOUT_MILLIS,
+    prepare: (() -> Unit) -> T,
+): T = withTimeout(timeoutMillis) {
+    withContext(Dispatchers.Default) {
+        val workerContext = currentCoroutineContext()
+        prepare { workerContext.ensureActive() }
+    }
+}
+
 internal suspend fun loadTrendsHistory(
     loadFullHistory: suspend () -> List<DailyMetric>,
     loadRecentHistory: suspend () -> List<DailyMetric>,
@@ -467,17 +477,14 @@ fun TrendsScreen(vm: AppViewModel) {
             // Let Compose commit the static skeleton before any multi-year filtering starts.
             yield()
             currentCoroutineContext().ensureActive()
-            val loadContext = currentCoroutineContext()
-            val prepared = withTimeout(TRENDS_LOAD_TIMEOUT_MILLIS) {
-                withContext(Dispatchers.Default) {
-                    buildTrendsSnapshot(
-                        days = payload.days,
-                        selected = range,
-                        sleepPerfByDay = payload.resolvedSleep,
-                        today = LocalDate.parse(cacheKey.todayKey),
-                        cancellationCheck = { loadContext.ensureActive() },
-                    )
-                }
+            val prepared = runTimedTrendsPreparation { cancellationCheck ->
+                buildTrendsSnapshot(
+                    days = payload.days,
+                    selected = range,
+                    sleepPerfByDay = payload.resolvedSleep,
+                    today = LocalDate.parse(cacheKey.todayKey),
+                    cancellationCheck = cancellationCheck,
+                )
             }
             currentCoroutineContext().ensureActive()
             trendsSnapshotCache.put(cacheKey, prepared)
@@ -525,16 +532,13 @@ fun TrendsScreen(vm: AppViewModel) {
         var outcome = "completed"
         try {
             val factor = effortDisplayFactor(effortScale)
-            val loadContext = currentCoroutineContext()
-            val prepared = withTimeout(TRENDS_LOAD_TIMEOUT_MILLIS) {
-                withContext(Dispatchers.Default) {
-                    buildWeeklyDigest(
-                        days,
-                        weeklyAnchorDay,
-                        effortDisplayFactor = factor,
-                        cancellationCheck = { loadContext.ensureActive() },
-                    )
-                }
+            val prepared = runTimedTrendsPreparation { cancellationCheck ->
+                buildWeeklyDigest(
+                    days,
+                    weeklyAnchorDay,
+                    effortDisplayFactor = factor,
+                    cancellationCheck = cancellationCheck,
+                )
             }
             currentCoroutineContext().ensureActive()
             weeklyDigest = prepared

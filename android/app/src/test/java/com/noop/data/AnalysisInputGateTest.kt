@@ -600,6 +600,118 @@ class AnalysisInputGateTest {
     }
 
     @Test
+    fun lateEveningOnlyClaimDefersUntilNextLocalDayWithoutClaimingCoverage() {
+        val base = IntelligenceEngine.midnightLocal(1_780_000_000L, 0L)
+        val now = base + 21L * 3_600L
+        val lateEvening = claim(
+            deviceId = "band-a",
+            generation = 1L,
+            earliest = base + 20L * 3_600L,
+        )
+
+        val plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 21,
+            claims = listOf(lateEvening),
+            nowSeconds = now,
+            timezoneOffsetSeconds = 0L,
+        )
+
+        assertEquals(IntelligenceEngine.AnalysisPassKind.DEFERRED, plan.passKind)
+        assertFalse(plan.shouldAnalyze)
+        assertEquals(base + 86_400L, plan.deferUntilSeconds)
+        assertFalse(plan.scanCoverage.covers(lateEvening))
+        assertFalse(plan.requestedWindowSatisfied)
+    }
+
+    @Test
+    fun deferredLateEveningClaimBecomesEvaluableAfterLocalMidnight() {
+        val base = IntelligenceEngine.midnightLocal(1_780_000_000L, 0L)
+        val lateEvening = claim(
+            deviceId = "band-a",
+            generation = 1L,
+            earliest = base + 20L * 3_600L,
+        )
+
+        val plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 21,
+            claims = listOf(lateEvening),
+            nowSeconds = base + 86_400L + 60L,
+            timezoneOffsetSeconds = 0L,
+        )
+
+        assertEquals(IntelligenceEngine.AnalysisPassKind.RECENT, plan.passKind)
+        assertTrue(plan.shouldAnalyze)
+        assertTrue(plan.scanCoverage.covers(lateEvening))
+    }
+
+    @Test
+    fun explicitRepairWorkOverridesLateEveningDeferralWithoutFalseAcknowledgement() = runBlocking {
+        val base = IntelligenceEngine.midnightLocal(1_780_000_000L, 0L)
+        val lateEveningTs = base + 20L * 3_600L
+        val fixture = GateFixture(
+            initialGenerations = mapOf("band-a" to 1L),
+            initialBounds = mapOf("band-a" to (lateEveningTs to lateEveningTs)),
+        )
+        val repository = fixture.repository()
+        val lease = repository.claimAnalysisInput(listOf("band-a"), force = true)!!
+        val lateEvening = lease.claims.single()
+
+        val plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 90,
+            claims = lease.claims,
+            nowSeconds = base + 21L * 3_600L,
+            timezoneOffsetSeconds = 0L,
+            force = true,
+        )
+
+        assertEquals(IntelligenceEngine.AnalysisPassKind.RECENT, plan.passKind)
+        assertTrue(plan.shouldAnalyze)
+        assertEquals(90, plan.maxDays)
+        assertTrue(plan.requestedWindowSatisfied)
+        assertFalse(plan.scanCoverage.covers(lateEvening))
+
+        repository.runClaimedAnalysis(lease) { consumption ->
+            consumption.markSourceConsumed("band-a")
+            consumption.completeCoverage(
+                listOf("band-a"),
+                plan.scanCoverage.startTs,
+                plan.scanCoverage.endTs,
+            )
+        }
+
+        assertEquals(0L, fixture.acknowledged["band-a"] ?: 0L)
+        assertEquals(lateEveningTs, fixture.latestAffected["band-a"])
+
+        val followUp = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 90,
+            claims = lease.claims,
+            nowSeconds = base + 21L * 3_600L + 900L,
+            timezoneOffsetSeconds = 0L,
+        )
+        assertEquals(IntelligenceEngine.AnalysisPassKind.DEFERRED, followUp.passKind)
+        assertFalse(followUp.shouldAnalyze)
+    }
+
+    @Test
+    fun evaluableClaimStillRunsWhileAnotherSourceWaitsForMidnight() {
+        val base = IntelligenceEngine.midnightLocal(1_780_000_000L, 0L)
+        val evaluable = claim("band-a", 1L, base + 17L * 3_600L)
+        val lateEvening = claim("band-b", 2L, base + 20L * 3_600L)
+
+        val plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 21,
+            claims = listOf(evaluable, lateEvening),
+            nowSeconds = base + 21L * 3_600L,
+            timezoneOffsetSeconds = 0L,
+        )
+
+        assertEquals(IntelligenceEngine.AnalysisPassKind.RECENT, plan.passKind)
+        assertTrue(plan.shouldAnalyze)
+        assertTrue(plan.scanCoverage.covers(evaluable))
+        assertFalse(plan.scanCoverage.covers(lateEvening))
+    }
+
+    @Test
     fun multiYearHistoricalClaimPlansOnlyOneBoundedAnchoredBatch() {
         val now = 1_780_000_000L
         val oldTs = now - 5L * 365L * 86_400L

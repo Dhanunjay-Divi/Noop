@@ -61,8 +61,9 @@ class AgeMetricReconciliationRunnerTest {
             Regex("""profileProvider = ::currentProfile""").findAll(app).count() >= 5,
         )
         val ble = bleFile!!.readText()
-        val postBackfillStart = ble.indexOf("private suspend fun runPostBackfillAnalysisPass(")
-        val postBackfillEnd = ble.indexOf("\n    private ", postBackfillStart + 1)
+        val postBackfillStart =
+            ble.indexOf("private suspend fun awaitEvaluablePostBackfillAnalysis(")
+        val postBackfillEnd = ble.indexOf("\n    private var backfilling", postBackfillStart)
             .takeIf { it > postBackfillStart } ?: ble.length
         val postBackfill = ble.substring(postBackfillStart, postBackfillEnd)
         assertTrue(

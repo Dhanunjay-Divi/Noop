@@ -27,6 +27,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.noop.AppDiagnosticsRecorder
 import com.noop.brand.CustomerFacingBrand
+import com.noop.data.AnalysisInputLease
 import com.noop.data.HrRow
 import com.noop.data.RrRow
 import com.noop.data.StreamBatch
@@ -2357,27 +2358,53 @@ class WhoopBleClient(
      * until this whole analysis/notification/writeback sequence succeeds and the exact generation is
      * acknowledged.
      */
-    private suspend fun runPostBackfillAnalysisPass(sourceId: String) {
-        val analysisLease = repository.claimAnalysisInput(
-            sourceIds = listOf(sourceId),
-            force = false,
-        )
-        if (analysisLease == null) {
-            log("re-score: trigger=post-offload newData=no - skipping (empty/duplicate offload)")
-            return
-        }
-
-        // Any exception escapes only to BackfillAnalysisWorker, which retains this immutable source
-        // revision and retries without an uncaught root coroutine. The repository leaves every claimed
-        // generation unacknowledged when this pass fails, is cancelled, or dies.
-        repository.runClaimedAnalysis(analysisLease) { analysisConsumption ->
-            val profileStore = ProfileStore.from(context)
+    private suspend fun awaitEvaluablePostBackfillAnalysis(
+        sourceId: String,
+    ): Pair<AnalysisInputLease, IntelligenceEngine.AnalysisScoringPlan>? {
+        while (true) {
+            val analysisLease = repository.claimAnalysisInput(
+                sourceIds = listOf(sourceId),
+                force = false,
+            )
+            if (analysisLease == null) {
+                log("re-score: trigger=post-offload newData=no - skipping (empty/duplicate offload)")
+                return null
+            }
             val analysisNowSeconds = System.currentTimeMillis() / 1_000L
             val analysisPlan = IntelligenceEngine.analysisScoringPlan(
                 requestedMaxDays = 21,
                 claims = analysisLease.claims,
                 nowSeconds = analysisNowSeconds,
             )
+            if (analysisPlan.shouldAnalyze) {
+                return analysisLease to analysisPlan
+            }
+
+            AppDiagnosticsRecorder.record(
+                "analysis.post_backfill",
+                fields = mapOf(
+                    "outcome" to "deferred",
+                    "reason" to "late_evening",
+                    "pass_kind" to analysisPlan.passKind.name.lowercase(),
+                    "scan_days" to "0",
+                ),
+            )
+            log("Backfill: post-sync scoring deferred until the next local-day window")
+            val deferUntil = analysisPlan.deferUntilSeconds ?: (analysisNowSeconds + 900L)
+            val waitSeconds = (deferUntil - analysisNowSeconds).coerceIn(1L, 86_400L)
+            delay(waitSeconds * 1_000L)
+        }
+    }
+
+    private suspend fun runPostBackfillAnalysisPass(sourceId: String) {
+        val (analysisLease, analysisPlan) =
+            awaitEvaluablePostBackfillAnalysis(sourceId) ?: return
+
+        // Any exception escapes only to BackfillAnalysisWorker, which retains this immutable source
+        // revision and retries without an uncaught root coroutine. The repository leaves every claimed
+        // generation unacknowledged when this pass fails, is cancelled, or dies.
+        repository.runClaimedAnalysis(analysisLease) { analysisConsumption ->
+            val profileStore = ProfileStore.from(context)
             IntelligenceEngine.analyzeRecent(
                 repo = repository,
                     // Resolve after IntelligenceEngine owns its serialization gate. A queued profile

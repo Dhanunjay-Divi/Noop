@@ -36,6 +36,20 @@ No service was deployed, no cloud plan was applied, no real data was touched,
 and the local correction is tracked in
 [`rounds/2026-09-13-pr15-server-infra-review-fixes.md`](rounds/2026-09-13-pr15-server-infra-review-fixes.md).
 
+### Android analysis and Trends cancellation closeout
+
+A local-only follow-up based exactly on PR `#15` head `0aa7c86c` has completed
+two Android performance corrections. Late-evening dirty claims now remain
+durable but defer without repeating a full bounded analysis before their next
+evaluable local-day window; independent forced work completes once without
+claiming that late input. Trends snapshot and weekly-digest CPU cancellation now
+observe the `withTimeout` worker. Fifty-seven focused tests, all 4,586 Full unit
+tests, Full lint, and instrumentation Kotlin compilation pass. The scoped record
+is
+[`rounds/2026-09-13-android-analysis-trends-cancellation.md`](rounds/2026-09-13-android-analysis-trends-cancellation.md).
+Review/integration remains pending, and no push is authorized for this
+follow-up.
+
 ### Trends loading handoff
 
 UI audit P1-4 has a completed local handoff from branch

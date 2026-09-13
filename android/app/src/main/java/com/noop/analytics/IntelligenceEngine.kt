@@ -106,6 +106,7 @@ object IntelligenceEngine {
     internal enum class AnalysisPassKind {
         RECENT,
         HISTORICAL,
+        DEFERRED,
     }
 
     internal data class AnalysisScanCoverage(
@@ -128,9 +129,14 @@ object IntelligenceEngine {
         val scanCoverage: AnalysisScanCoverage,
         /** True only when this pass also fulfills the caller's explicit formula/repair window. */
         val requestedWindowSatisfied: Boolean,
+        /** Next local-day boundary when a late-evening range becomes fully evaluable. */
+        val deferUntilSeconds: Long? = null,
     ) {
         val isHistoricalCatchUp: Boolean
             get() = passKind == AnalysisPassKind.HISTORICAL
+
+        val shouldAnalyze: Boolean
+            get() = passKind != AnalysisPassKind.DEFERRED
     }
 
     /**
@@ -147,6 +153,7 @@ object IntelligenceEngine {
         claims: Collection<com.noop.data.AnalysisInputGenerationClaim>,
         nowSeconds: Long,
         timezoneOffsetSeconds: Long? = null,
+        force: Boolean = false,
     ): AnalysisScoringPlan {
         val requested = requestedMaxDays.coerceAtLeast(1)
         val zone = java.util.TimeZone.getDefault()
@@ -178,6 +185,43 @@ object IntelligenceEngine {
             historicalCatchUp = false,
         )
         val validRanges = claims.mapNotNull { it.affectedTimeRange() }
+        // Today's sleep-bearing reads stop at 18:00. A generation whose newest edge is later than that
+        // cannot advance yet: pretending the whole current day was evaluated would lose R-R/respiration/
+        // skin/event work that only becomes part of a complete past-day window after local midnight.
+        //
+        // Keep the exact claim durable and skip the claim-driven CPU pass until then. Other claims that can
+        // advance still run normally. Explicit formula/repair work may run its independent requested window
+        // once; it is marked satisfied without pretending that unsupported late input was covered, so the
+        // next ordinary tick defers instead of repeating a capped 21-day force pass.
+        if (validRanges.isNotEmpty() &&
+            validRanges.none { it.last <= recentCoverage.endTs }
+        ) {
+            if (force) {
+                return AnalysisScoringPlan(
+                    maxDays = requested,
+                    anchorNowSeconds = nowSeconds,
+                    timezoneOffsetSeconds = recentOffset,
+                    passKind = AnalysisPassKind.RECENT,
+                    scanCoverage = analysisScanCoverage(
+                        maxDays = requested,
+                        nowSeconds = nowSeconds,
+                        timezoneOffsetSeconds = recentOffset,
+                        historicalCatchUp = false,
+                    ),
+                    requestedWindowSatisfied = true,
+                )
+            }
+            return AnalysisScoringPlan(
+                maxDays = 1,
+                anchorNowSeconds = nowSeconds,
+                timezoneOffsetSeconds = recentOffset,
+                passKind = AnalysisPassKind.DEFERRED,
+                scanCoverage = recentCoverage,
+                requestedWindowSatisfied = false,
+                deferUntilSeconds =
+                    midnightLocal(nowSeconds, recentOffset) + SECONDS_PER_DAY,
+            )
+        }
         val intersectsRecent = validRanges.any { affected ->
             affected.first <= recentCoverage.endTs &&
                 affected.last >= recentCoverage.startTs
