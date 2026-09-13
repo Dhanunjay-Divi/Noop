@@ -4861,6 +4861,9 @@ class PostgresManagedRepository:
                     "data_classes": request.data_classes,
                     "document_kinds": request.document_kinds,
                     "include_documents": request.include_documents,
+                    "include_deleted_documents": (
+                        request.include_deleted_documents
+                    ),
                     "start": (
                         request.start.isoformat() if request.start is not None else None
                     ),
@@ -4936,11 +4939,12 @@ class PostgresManagedRepository:
                                      document_id,
                                      document_revision DESC
                         ) snapshot
-                        WHERE snapshot.deleted_at IS NULL
+                        WHERE ($4::boolean OR snapshot.deleted_at IS NULL)
                         """,
                         principal.account_id,
                         snapshot_at,
                         request.document_kinds,
+                        request.include_deleted_documents,
                     )
                 selected_objects = int(chunk_totals["objects"]) + int(document_total)
                 row = await connection.fetchrow(

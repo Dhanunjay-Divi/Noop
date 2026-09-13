@@ -167,6 +167,7 @@ class ManagedHistoryExporter(
                 authorization = credential,
                 requestId = UUID.randomUUID(),
                 dataClasses = classes,
+                includeDeletedDocuments = false,
             )
         }
         if (restore.status != "running" ||
@@ -299,6 +300,7 @@ class ManagedHistoryExporter(
                     snapshotAt = restore.snapshotAt,
                     after = pageCursor,
                     limit = pageSize,
+                    includeDeleted = false,
                 )
             }
             if (page.documents.isEmpty() && page.nextCursor != null) {

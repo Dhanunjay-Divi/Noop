@@ -1224,6 +1224,7 @@ class ManagedStorageClient(
         authorization: ManagedAuthorization,
         requestId: UUID,
         dataClasses: List<String>,
+        includeDeletedDocuments: Boolean,
     ): ManagedRestoreJob = withContext(Dispatchers.IO) {
         val classes = dataClasses.distinct().sorted()
         if (classes.isEmpty() ||
@@ -1240,6 +1241,7 @@ class ManagedStorageClient(
                 JSONArray(listOf(ManagedDocumentKind.DAY_OWNERSHIP.wireValue)),
             )
             .put("include_documents", true)
+            .put("include_deleted_documents", includeDeletedDocuments)
         parseRestore(
             executeJson(
                 apiRequest("v1/managed/restores", authorization)
@@ -1386,13 +1388,14 @@ class ManagedStorageClient(
         snapshotAt: String,
         after: ManagedDocumentCursor?,
         limit: Int,
+        includeDeleted: Boolean,
     ): ManagedDocumentPage = withContext(Dispatchers.IO) {
         if (runCatching { Instant.parse(snapshotAt) }.isFailure || limit !in 1..200) {
             throw IllegalArgumentException("Invalid managed document snapshot request")
         }
         val query = buildList {
             add("document_kind=${ManagedDocumentKind.DAY_OWNERSHIP.wireValue}")
-            add("include_deleted=false")
+            add("include_deleted=$includeDeleted")
             add("snapshot_at=${queryValue(snapshotAt)}")
             add("limit=$limit")
             after?.let { cursor ->
@@ -1415,7 +1418,7 @@ class ManagedStorageClient(
                     rows.optJSONObject(index)
                         ?: throw ManagedStorageException.InvalidResponse(),
                 )
-                if (document.deletedAt != null) {
+                if (!includeDeleted && document.deletedAt != null) {
                     throw ManagedStorageException.InvalidResponse()
                 }
                 if (document.documentKind != ManagedDocumentKind.DAY_OWNERSHIP) {

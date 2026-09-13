@@ -21,6 +21,18 @@ Last updated: **2026-09-13**
 
 ## Active work
 
+### PR 15 late data-integrity review
+
+Replacement head `6766b30c` passed all 35 executed hosted checks with three
+intentional skips. Before protected integration, three later review findings
+identified an unchecked merged hydration-day total, a feedback anonymous
+identity whose remaining provider lifetime can be shorter than a newly
+reserved report, and capability-upgrade snapshots that omit deletion
+tombstones before cursor advancement. These Apple/Android parity corrections
+are now isolated in
+[`rounds/2026-09-13-pr15-late-data-integrity-review.md`](rounds/2026-09-13-pr15-late-data-integrity-review.md).
+No public traffic, deployment, or real data is involved.
+
 ### Android database restore crash consistency
 
 The local PR follow-up now models restore acceptance and rollback as explicit

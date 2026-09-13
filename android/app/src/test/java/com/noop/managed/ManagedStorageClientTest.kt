@@ -264,6 +264,7 @@ class ManagedStorageClientTest {
                 authorization,
                 UUID.randomUUID(),
                 listOf("raw_ppg", "essential_timeseries"),
+                includeDeletedDocuments = true,
             )
             fail("Expected stale restore replay")
         } catch (_: ManagedStorageException.Conflict) {
@@ -273,6 +274,7 @@ class ManagedStorageClientTest {
             okio.Buffer().also { captured!!.body!!.writeTo(it) }.readUtf8(),
         )
         assertEquals(true, body.getBoolean("include_documents"))
+        assertEquals(true, body.getBoolean("include_deleted_documents"))
         assertEquals(
             listOf("day_ownership"),
             List(body.getJSONArray("document_kinds").length()) {
@@ -397,6 +399,7 @@ class ManagedStorageClientTest {
             snapshotAt = "2026-09-04T13:00:00Z",
             after = null,
             limit = 25,
+            includeDeleted = false,
         )
 
         assertEquals(
@@ -480,6 +483,7 @@ class ManagedStorageClientTest {
                 snapshotAt = "2026-09-04T13:00:00Z",
                 after = null,
                 limit = 25,
+                includeDeleted = false,
             )
             null
         } catch (error: Throwable) {
@@ -548,6 +552,7 @@ class ManagedStorageClientTest {
                     snapshotAt = "2026-09-11T16:00:00Z",
                     after = null,
                     limit = 25,
+                    includeDeleted = false,
                 )
                 null
             } catch (error: Throwable) {
@@ -556,6 +561,66 @@ class ManagedStorageClientTest {
 
             assertTrue(failure is ManagedStorageException.InvalidResponse)
         }
+    }
+
+    @Test
+    fun snapshotListRequestsAndAcceptsDeletionTombstones() = runTest {
+        val documentId = UUID.fromString("33333333-3333-5333-8333-333333333333")
+        val revision = 2L
+        val digest = ManagedDigest.sha256(
+            (
+                "deleted:day_ownership:" +
+                    "${documentId.toString().lowercase()}:$revision"
+                ).toByteArray(),
+        )
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                assertEquals("true", request.url.queryParameter("include_deleted"))
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "documents",
+                            org.json.JSONArray().put(
+                                JSONObject()
+                                    .put("document_kind", "day_ownership")
+                                    .put("document_id", documentId.toString())
+                                    .put("revision", revision)
+                                    .put(
+                                        "origin_installation_id",
+                                        authorization.installationId,
+                                    )
+                                    .put("content_mode", "server_readable")
+                                    .put("client_key_id", JSONObject.NULL)
+                                    .put("content_sha256", digest)
+                                    .put("payload_json", JSONObject.NULL)
+                                    .put(
+                                        "payload_ciphertext_base64",
+                                        JSONObject.NULL,
+                                    )
+                                    .put("updated_at", "2026-09-11T15:00:00Z")
+                                    .put("deleted_at", "2026-09-11T15:00:00Z")
+                                    .put("duplicate", false),
+                            ),
+                        )
+                        .put("next_cursor", JSONObject.NULL)
+                        .toString(),
+                )
+            },
+        )
+
+        val page = client.documents(
+            authorization,
+            snapshotAt = "2026-09-11T16:00:00Z",
+            after = null,
+            limit = 25,
+            includeDeleted = true,
+        )
+
+        assertEquals(listOf(documentId), page.documents.map(ManagedDocument::documentId))
+        assertEquals("2026-09-11T15:00:00Z", page.documents.single().deletedAt)
     }
 
     @Test

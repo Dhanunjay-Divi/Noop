@@ -1997,7 +1997,9 @@ extension WhoopStore {
                 """,
             arguments: [projection.deviceId, projection.day]
         ) ?? 0
-        guard total.isFinite, total >= 0 else {
+        guard total.isFinite,
+              total >= 0,
+              total <= Double(managedHydrationMaximumAmountML) else {
             throw ManagedDocumentStoreError.invalidState
         }
         try db.execute(

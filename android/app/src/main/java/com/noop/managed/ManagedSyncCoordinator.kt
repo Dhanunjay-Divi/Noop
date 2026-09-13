@@ -241,6 +241,7 @@ interface ManagedStorageTransport {
         authorization: ManagedAuthorization,
         requestId: UUID,
         dataClasses: List<String>,
+        includeDeletedDocuments: Boolean,
     ): ManagedRestoreJob = throw ManagedStorageException.InvalidResponse()
 
     suspend fun availableChunks(
@@ -275,6 +276,7 @@ interface ManagedStorageTransport {
         snapshotAt: String,
         after: ManagedDocumentCursor?,
         limit: Int,
+        includeDeleted: Boolean,
     ): ManagedDocumentPage = throw ManagedStorageException.InvalidResponse()
 
     suspend fun downloadCapability(
@@ -1017,6 +1019,7 @@ class ManagedSyncCoordinator(
                 authorization,
                 checkpoint.requestId,
                 checkpoint.dataClasses,
+                includeDeletedDocuments = true,
             )
             if (restoreJob.status != "running") {
                 throw ManagedStorageException.InvalidResponse()
@@ -1146,6 +1149,7 @@ class ManagedSyncCoordinator(
                 snapshotAt = snapshotAt,
                 after = checkpoint.documentCursor,
                 limit = minOf(pageSize, maxObjects - processedObjects),
+                includeDeleted = true,
             )
             if (page.documents.isEmpty() && page.nextCursor != null) {
                 throw ManagedStorageException.InvalidResponse()

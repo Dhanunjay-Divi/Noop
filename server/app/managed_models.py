@@ -428,6 +428,7 @@ class ManagedRestoreRequest(StrictModel):
         max_length=16,
     )
     include_documents: bool = True
+    include_deleted_documents: bool = False
     start: datetime | None = None
     end: datetime | None = None
 
@@ -444,6 +445,10 @@ class ManagedRestoreRequest(StrictModel):
             raise ValueError("data_classes contains an invalid identifier")
         if len(set(self.document_kinds)) != len(self.document_kinds):
             raise ValueError("document_kinds cannot contain duplicates")
+        if self.include_deleted_documents and not self.include_documents:
+            raise ValueError(
+                "include_deleted_documents requires include_documents"
+            )
         if self.start is not None:
             self.start = _utc(self.start)
         if self.end is not None:

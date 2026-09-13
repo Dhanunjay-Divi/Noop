@@ -1266,6 +1266,7 @@ public actor ManagedStorageClient {
     public func createRestore(
         requestID: UUID,
         dataClasses: [String],
+        includeDeletedDocuments: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
         let classes = dataClasses.sorted()
@@ -1286,7 +1287,8 @@ public actor ManagedStorageClient {
                 requestID: requestID,
                 dataClasses: classes,
                 documentKinds: [.dayOwnership],
-                includeDocuments: true
+                includeDocuments: true,
+                includeDeletedDocuments: includeDeletedDocuments
             ),
             authorization: authorization
         )
@@ -1474,6 +1476,7 @@ public actor ManagedStorageClient {
         snapshotAt: String,
         after cursor: ManagedDocumentPage.Cursor? = nil,
         limit: Int = 100,
+        includeDeleted: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedDocumentPage {
         guard ManagedTimestamp.milliseconds(iso8601: snapshotAt) != nil,
@@ -1482,7 +1485,7 @@ public actor ManagedStorageClient {
         }
         var query = [
             "document_kind=\(ManagedDocumentKind.dayOwnership.rawValue)",
-            "include_deleted=false",
+            "include_deleted=\(includeDeleted)",
             "snapshot_at=\(Self.queryValue(snapshotAt))",
             "limit=\(limit)",
         ]
@@ -1510,7 +1513,7 @@ public actor ManagedStorageClient {
         for document in page.documents {
             try Self.validateManagedDocument(document)
             guard document.documentKind == .dayOwnership,
-                  document.deletedAt == nil else {
+                  includeDeleted || document.deletedAt == nil else {
                 throw ManagedStorageError.invalidResponse
             }
         }

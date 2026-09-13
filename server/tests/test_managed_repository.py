@@ -834,6 +834,31 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
         )
         assert encrypted_tombstone["revision"] == 2
         assert encrypted_tombstone["deleted_at"] is not None
+        tombstone_snapshot_at = await repository.coordination_now()
+        live_document_restore = await repository.create_restore(
+            principal=first_principal,
+            installation_id=first_installation,
+            request=ManagedRestoreRequest(
+                request_id=uuid4(),
+                snapshot_at=tombstone_snapshot_at,
+                data_classes=[],
+                document_kinds=["journal"],
+            ),
+        )
+        tombstone_document_restore = await repository.create_restore(
+            principal=first_principal,
+            installation_id=first_installation,
+            request=ManagedRestoreRequest(
+                request_id=uuid4(),
+                snapshot_at=tombstone_snapshot_at,
+                data_classes=[],
+                document_kinds=["journal"],
+                include_deleted_documents=True,
+            ),
+        )
+        assert tombstone_document_restore["selected_objects"] == (
+            live_document_restore["selected_objects"] + 1
+        )
         encrypted_revision = await repository.get_document(
             principal=first_principal,
             document_kind="journal",

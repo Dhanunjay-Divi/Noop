@@ -871,6 +871,115 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         XCTAssertEqual(dirtyWindows, 0)
     }
 
+    func testRemoteHydrationMergedDayLimitIsAtomic() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-11"
+        let firstDocumentID = "99999999-8888-5777-8666-555555555555"
+        let secondDocumentID = "88888888-7777-5666-8555-444444444444"
+        let rejectedDocumentID = "77777777-6666-5555-8444-333333333333"
+        let firstEntry = HydrationLogEntry(
+            id: "11111111-2222-4333-8444-555555555555",
+            day: day,
+            amountML: 6_000,
+            loggedAt: 1_789_142_400
+        )
+        let secondEntry = HydrationLogEntry(
+            id: "22222222-3333-4444-8555-666666666666",
+            day: day,
+            amountML: 4_000,
+            loggedAt: 1_789_142_460
+        )
+
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: firstDocumentID,
+            revision: 1,
+            contentSHA256: String(repeating: "1", count: 64),
+            payloadJSON: hydrationPayload(
+                id: firstEntry.id,
+                day: day,
+                amountML: String(firstEntry.amountML),
+                loggedAt: String(firstEntry.loggedAt)
+            ),
+            deleted: false,
+            appliedAtMs: 1_000
+        )
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: secondDocumentID,
+            revision: 1,
+            contentSHA256: String(repeating: "2", count: 64),
+            payloadJSON: hydrationPayload(
+                id: secondEntry.id,
+                day: day,
+                amountML: String(secondEntry.amountML),
+                loggedAt: String(secondEntry.loggedAt)
+            ),
+            deleted: false,
+            appliedAtMs: 2_000
+        )
+
+        let firstStateBefore = try await hydrationState(
+            in: store,
+            documentID: firstDocumentID
+        )
+        let secondStateBefore = try await hydrationState(
+            in: store,
+            documentID: secondDocumentID
+        )
+        let boundaryMetric = try await hydrationMetric(in: store, day: day)
+        XCTAssertEqual(boundaryMetric, 10_000)
+
+        do {
+            _ = try await store.applyManagedDocument(
+                accountScopeHash: scope,
+                documentKind: "hydration",
+                documentID: rejectedDocumentID,
+                revision: 1,
+                contentSHA256: String(repeating: "3", count: 64),
+                payloadJSON: hydrationPayload(
+                    id: "33333333-4444-4555-8666-777777777777",
+                    day: day,
+                    amountML: "1",
+                    loggedAt: "1789142520"
+                ),
+                deleted: false,
+                appliedAtMs: 3_000
+            )
+            XCTFail("Expected the merged hydration day to exceed its limit")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedDocumentStoreError,
+                .invalidState
+            )
+        }
+
+        let retainedEntries = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let retainedMetric = try await hydrationMetric(in: store, day: day)
+        let firstStateAfter = try await hydrationState(
+            in: store,
+            documentID: firstDocumentID
+        )
+        let secondStateAfter = try await hydrationState(
+            in: store,
+            documentID: secondDocumentID
+        )
+        let rejectedState = try await hydrationState(
+            in: store,
+            documentID: rejectedDocumentID
+        )
+        XCTAssertEqual(retainedEntries, [firstEntry, secondEntry])
+        XCTAssertEqual(retainedMetric, 10_000)
+        XCTAssertEqual(firstStateAfter, firstStateBefore)
+        XCTAssertEqual(secondStateAfter, secondStateBefore)
+        XCTAssertNil(rejectedState)
+    }
+
     func testRemoteHydrationUpsertPreservesUnacknowledgedLocalGeneration() async throws {
         let store = try await managedStore()
         let documentID = "99999999-8888-5777-8666-555555555555"

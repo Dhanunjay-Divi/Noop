@@ -67,12 +67,18 @@ final class ManagedHistoryExportTests: XCTestCase {
         let completion = await transport.completedValues()
         let chunkPageStarts = await transport.chunkPageStarts()
         let documentPageStarts = await transport.documentPageStarts()
+        let documentIncludeDeletedValues =
+            await transport.documentIncludeDeletedValues()
+        let restoreIncludeDeletedValues =
+            await transport.restoreIncludeDeletedValues()
         let refreshRequests = await authorizations.refreshRequests()
         let reportedProgress = await progress.values()
         XCTAssertEqual(recordedEntries.count, 4)
         XCTAssertEqual(completion, .init(objects: 4, bytes: 23))
         XCTAssertEqual(chunkPageStarts, [nil, nil, first.chunkID])
         XCTAssertEqual(documentPageStarts, [nil, firstDocument.documentID])
+        XCTAssertEqual(documentIncludeDeletedValues, [false, false])
+        XCTAssertEqual(restoreIncludeDeletedValues, [false])
         XCTAssertEqual(
             refreshRequests,
             [false, false, true, false, false, false, false, false, false]
@@ -274,6 +280,8 @@ private actor ExportTransport: ManagedStorageTransport {
     private var failFirstChunkPageAuthentication: Bool
     private var chunkStarts: [UUID?] = []
     private var documentStarts: [UUID?] = []
+    private var documentDeletionSelections: [Bool] = []
+    private var restoreDeletionSelections: [Bool] = []
     private var completion: Completion?
     private let restoreID = UUID(uuidString: "50000000-0000-5000-8000-000000000001")!
     private let snapshot = "2026-09-04T12:00:00Z"
@@ -334,9 +342,11 @@ private actor ExportTransport: ManagedStorageTransport {
     func createRestore(
         requestID: UUID,
         dataClasses: [String],
+        includeDeletedDocuments: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
-        restore(
+        restoreDeletionSelections.append(includeDeletedDocuments)
+        return restore(
             status: "running",
             deliveredObjects: 0,
             deliveredBytes: 0
@@ -435,8 +445,10 @@ private actor ExportTransport: ManagedStorageTransport {
         snapshotAt: String,
         after cursor: ManagedDocumentPage.Cursor?,
         limit: Int,
+        includeDeleted: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedDocumentPage {
+        documentDeletionSelections.append(includeDeleted)
         documentStarts.append(cursor?.afterDocumentID)
         let start = cursor.flatMap { cursor in
             documentValues.firstIndex { $0.documentID == cursor.afterDocumentID }
@@ -461,6 +473,14 @@ private actor ExportTransport: ManagedStorageTransport {
 
     func documentPageStarts() -> [UUID?] {
         documentStarts
+    }
+
+    func documentIncludeDeletedValues() -> [Bool] {
+        documentDeletionSelections
+    }
+
+    func restoreIncludeDeletedValues() -> [Bool] {
+        restoreDeletionSelections
     }
 
     private func restore(

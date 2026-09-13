@@ -1231,6 +1231,7 @@ public actor ManagedSyncCoordinator {
             let restoreJob = try await transport.createRestore(
                 requestID: checkpoint.requestID,
                 dataClasses: checkpoint.dataClasses,
+                includeDeletedDocuments: true,
                 authorization: authorization
             )
             guard restoreJob.status == "running" else {
@@ -1358,6 +1359,7 @@ public actor ManagedSyncCoordinator {
                 snapshotAt: snapshotAt,
                 after: checkpoint.documentCursor,
                 limit: min(pageSize, maxObjects - processedObjects),
+                includeDeleted: true,
                 authorization: authorization
             )
             guard !page.documents.isEmpty || page.nextCursor == nil else {

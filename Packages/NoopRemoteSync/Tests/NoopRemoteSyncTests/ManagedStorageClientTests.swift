@@ -449,6 +449,9 @@ final class ManagedStorageClientTests: XCTestCase {
                     "document_kind=day_ownership"
                 ) == true
             )
+            XCTAssertTrue(
+                request.url?.query?.contains("include_deleted=false") == true
+            )
             return (
                 HTTPURLResponse(
                     url: request.url!,
@@ -468,6 +471,7 @@ final class ManagedStorageClientTests: XCTestCase {
         let page = try await client.documents(
             snapshotAt: "2026-09-11T16:00:00Z",
             limit: 25,
+            includeDeleted: false,
             authorization: authorization
         )
 
@@ -510,6 +514,7 @@ final class ManagedStorageClientTests: XCTestCase {
             _ = try await client.documents(
                 snapshotAt: "2026-09-11T16:00:00Z",
                 limit: 25,
+                includeDeleted: false,
                 authorization: authorization
             )
             XCTFail("Expected plaintext journal snapshot to fail closed")
@@ -582,6 +587,7 @@ final class ManagedStorageClientTests: XCTestCase {
                 _ = try await client.documents(
                     snapshotAt: "2026-09-11T16:00:00Z",
                     limit: 25,
+                    includeDeleted: false,
                     authorization: authorization
                 )
                 XCTFail("Expected malformed encrypted snapshot to fail closed")
@@ -589,6 +595,63 @@ final class ManagedStorageClientTests: XCTestCase {
                 XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
             }
         }
+    }
+
+    func testSnapshotDocumentListRequestsAndAcceptsDeletionTombstones() async throws {
+        let (client, authorization) = try makeClient()
+        let documentID = UUID(
+            uuidString: "33333333-3333-5333-8333-333333333333"
+        )!
+        let digest = ManagedDigest.sha256(
+            Data(
+                (
+                    "deleted:day_ownership:"
+                        + "\(documentID.uuidString.lowercased()):2"
+                ).utf8
+            )
+        )
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertTrue(
+                request.url?.query?.contains("include_deleted=true") == true
+            )
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                try JSONSerialization.data(
+                    withJSONObject: [
+                        "documents": [[
+                            "document_kind": "day_ownership",
+                            "document_id": documentID.uuidString.lowercased(),
+                            "revision": 2,
+                            "origin_installation_id": "ios-installation",
+                            "content_mode": "server_readable",
+                            "client_key_id": NSNull(),
+                            "content_sha256": digest,
+                            "payload_json": NSNull(),
+                            "payload_ciphertext_base64": NSNull(),
+                            "updated_at": "2026-09-11T15:00:00Z",
+                            "deleted_at": "2026-09-11T15:00:00Z",
+                            "duplicate": false,
+                        ]],
+                        "next_cursor": NSNull(),
+                    ]
+                )
+            )
+        }
+
+        let page = try await client.documents(
+            snapshotAt: "2026-09-11T16:00:00Z",
+            limit: 25,
+            includeDeleted: true,
+            authorization: authorization
+        )
+
+        XCTAssertEqual(page.documents.map(\.documentID), [documentID])
+        XCTAssertEqual(page.documents.first?.deletedAt, "2026-09-11T15:00:00Z")
     }
 
     func testManagedResponseModelsDecodeAcronymWireKeys() throws {
@@ -1001,6 +1064,10 @@ final class ManagedStorageClientTests: XCTestCase {
                 body["data_classes"] as? [String],
                 ["essential_timeseries", "raw_ppg"]
             )
+            XCTAssertEqual(
+                body["include_deleted_documents"] as? Bool,
+                true
+            )
             return (
                 HTTPURLResponse(
                     url: request.url!,
@@ -1031,6 +1098,7 @@ final class ManagedStorageClientTests: XCTestCase {
             _ = try await client.createRestore(
                 requestID: requestID,
                 dataClasses: ["raw_ppg", "essential_timeseries"],
+                includeDeletedDocuments: true,
                 authorization: authorization
             )
             XCTFail("Expected stale restore replay")
