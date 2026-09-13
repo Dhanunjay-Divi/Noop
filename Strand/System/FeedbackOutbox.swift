@@ -287,6 +287,97 @@ enum FeedbackIdentityContinuityPolicy {
     }
 }
 
+enum FeedbackReservationIdentityAction: Equatable {
+    case reuse
+    case replace
+    case deferReservation
+}
+
+enum FeedbackAnonymousIdentityLifetimePolicy {
+    static let identityPlatformCleanupAge: TimeInterval =
+        30 * 24 * 60 * 60
+    static let maximumReportRetention: TimeInterval =
+        28 * 24 * 60 * 60
+    static let replacementSafetyMargin: TimeInterval =
+        24 * 60 * 60
+    static let maximumExistingIdentityAge: TimeInterval =
+        identityPlatformCleanupAge
+            - maximumReportRetention
+            - replacementSafetyMargin
+
+    static func reservationAction(
+        identityCreatedAt: Date?,
+        now: Date,
+        hasActiveBoundReports: Bool
+    ) -> FeedbackReservationIdentityAction {
+        let age = identityCreatedAt.map {
+            now.timeIntervalSince($0)
+        }
+        let canCoverRetention =
+            age.map {
+                $0 >= 0 && $0 <= maximumExistingIdentityAge
+            } ?? false
+        if canCoverRetention {
+            return .reuse
+        }
+        return hasActiveBoundReports ? .deferReservation : .replace
+    }
+}
+
+enum FeedbackAnonymousIdentityProviderPolicy {
+    static func reservationAction(
+        enforceLifetime: Bool,
+        identityCreatedAt: Date?,
+        now: Date,
+        identitySubjectSHA256: String,
+        reservationContinuityIdentitySubjectSHA256s: Set<String>
+    ) -> FeedbackReservationIdentityAction {
+        guard enforceLifetime else { return .reuse }
+        return FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+            identityCreatedAt: identityCreatedAt,
+            now: now,
+            hasActiveBoundReports:
+                reservationContinuityIdentitySubjectSHA256s.contains(
+                    identitySubjectSHA256
+                )
+        )
+    }
+
+    static func permitsStaleIdentityReplacement(
+        identitySubjectSHA256: String,
+        reservationContinuityIdentitySubjectSHA256s: Set<String>
+    ) -> Bool {
+        !reservationContinuityIdentitySubjectSHA256s.contains(
+            identitySubjectSHA256
+        )
+    }
+}
+
+enum FeedbackReservationContinuityPolicy {
+    // A nonterminal local binding may own an accepted reservation whose
+    // response was lost, even when no server report ID has been persisted.
+    static func identitySubjectSHA256sRequiringContinuity(
+        in records: [FeedbackOutboxRecord]
+    ) -> Set<String> {
+        Set(
+            records.compactMap { record in
+                switch record.state {
+                case .sent, .cancelled:
+                    return nil
+                default:
+                    return record.identitySubjectSHA256
+                }
+            }
+        )
+    }
+
+    static func requiresIdentityLifetimeCheck(
+        _ record: FeedbackOutboxRecord
+    ) -> Bool {
+        record.identitySubjectSHA256 == nil
+    }
+}
+
 enum FeedbackRemoteAbsenceAction: Equatable {
     case retryReservation
     case confirmDeletion
@@ -553,6 +644,15 @@ actor FeedbackOutbox {
         try ensureRoot()
         try cleanup(now: now)
         return try loadRecords().sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func reservationContinuityIdentitySubjectSHA256s(
+        now: Date = Date()
+    ) throws -> Set<String> {
+        FeedbackReservationContinuityPolicy
+            .identitySubjectSHA256sRequiringContinuity(
+                in: try records(now: now)
+            )
     }
 
     func latestActionable(now: Date = Date()) throws -> FeedbackOutboxRecord? {

@@ -568,7 +568,12 @@ class FeedbackUploadWorker(
             )
             val configuration = FeedbackConfiguration.load()
                 ?: throw FeedbackProtocolException.Configuration()
-            val client = feedbackClient(uploading, configuration)
+            val client = feedbackClient(
+                record = uploading,
+                configuration = configuration,
+                reservationContinuityIdentitySubjectSha256s =
+                    outbox.reservationContinuityIdentitySubjectSha256s(),
+            )
             val reservationRequest = FeedbackReservationRequestFactory.from(uploading)
             val idempotencyKey = UUID.fromString(uploading.requestId)
 
@@ -805,7 +810,11 @@ class FeedbackUploadWorker(
         return try {
             var client = existingClient
             if (FeedbackCancellationPolicy.requiresReservationReconciliation(canceling)) {
-                client = client ?: feedbackClient(canceling)
+                client = client ?: feedbackClient(
+                    record = canceling,
+                    reservationContinuityIdentitySubjectSha256s =
+                        outbox.reservationContinuityIdentitySubjectSha256s(),
+                )
                 canceling = FeedbackCancellationReconciler.reconcile(
                     outbox = outbox,
                     record = canceling,
@@ -815,7 +824,11 @@ class FeedbackUploadWorker(
             val reportId = canceling.serverReportId
             val reportToken = canceling.serverReportToken
             if (reportId != null && reportToken != null) {
-                client = client ?: feedbackClient(canceling)
+                client = client ?: feedbackClient(
+                    record = canceling,
+                    reservationContinuityIdentitySubjectSha256s =
+                        outbox.reservationContinuityIdentitySubjectSha256s(),
+                )
                 bindIdentity(outbox, canceling, client)
                 val current = client.status(
                     reportId = reportId,
@@ -958,6 +971,7 @@ class FeedbackUploadWorker(
     private fun feedbackClient(
         record: FeedbackRecord,
         configuration: FeedbackConfiguration? = null,
+        reservationContinuityIdentitySubjectSha256s: Set<String>,
     ): FeedbackAttemptClient {
         if (!FeedbackIdentityContinuityPolicy.canContactRemote(record)) {
             throw FeedbackProtocolException.Identity()
@@ -970,6 +984,11 @@ class FeedbackUploadWorker(
                 context = applicationContext,
                 allowIdentityReplacement =
                     record.identitySubjectSha256 == null && record.serverReportId == null,
+                enforceReservationIdentityLifetime =
+                    FeedbackReservationContinuityPolicy
+                        .requiresIdentityLifetimeCheck(record),
+                reservationContinuityIdentitySubjectSha256s =
+                    reservationContinuityIdentitySubjectSha256s,
             ),
             transport = FeedbackApiClient(resolvedConfiguration),
             expectedIdentitySubjectSha256 = record.identitySubjectSha256,

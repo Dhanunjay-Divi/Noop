@@ -2,6 +2,7 @@ package com.noop.feedback
 
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.test.runTest
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -143,6 +144,113 @@ class FeedbackUploadPolicyTest {
             FeedbackRetryPolicy.nextCancellationAttempt(
                 persistedAttempt = FeedbackOutbox.MAX_ATTEMPTS,
             ),
+        )
+    }
+
+    @Test
+    fun anonymousIdentityLifetimePolicyRequiresFullRetentionCoverage() {
+        val now = 1_789_000_000_000L
+        val maximumAge =
+            FeedbackAnonymousIdentityLifetimePolicy.maximumExistingIdentityAgeMillis
+
+        assertEquals(
+            FeedbackReservationIdentityAction.REUSE,
+            FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+                identityCreatedAtMillis = now - maximumAge,
+                nowMillis = now,
+                hasActiveBoundReports = true,
+            ),
+        )
+        assertEquals(
+            FeedbackReservationIdentityAction.REPLACE,
+            FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+                identityCreatedAtMillis = now - maximumAge - 1L,
+                nowMillis = now,
+                hasActiveBoundReports = false,
+            ),
+        )
+        assertEquals(
+            FeedbackReservationIdentityAction.DEFER,
+            FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+                identityCreatedAtMillis = now - maximumAge - 1L,
+                nowMillis = now,
+                hasActiveBoundReports = true,
+            ),
+        )
+        assertEquals(
+            FeedbackReservationIdentityAction.REPLACE,
+            FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+                identityCreatedAtMillis = null,
+                nowMillis = now,
+                hasActiveBoundReports = false,
+            ),
+        )
+        assertEquals(
+            TimeUnit.DAYS.toMillis(1),
+            maximumAge,
+        )
+    }
+
+    @Test
+    fun providerPolicyPreservesAmbiguousBindingAndDefersNewReport() {
+        val now = 1_789_000_000_000L
+        val currentIdentity =
+            feedbackIdentitySubjectSha256("stable-feedback-owner")
+        val unrelatedIdentity =
+            feedbackIdentitySubjectSha256("unrelated-feedback-owner")
+        val oldCreation =
+            now -
+                FeedbackAnonymousIdentityLifetimePolicy.maximumExistingIdentityAgeMillis -
+                1L
+
+        assertEquals(
+            FeedbackReservationIdentityAction.REUSE,
+            FeedbackAnonymousIdentityProviderPolicy.reservationAction(
+                enforceLifetime = false,
+                identityCreatedAtMillis = oldCreation,
+                nowMillis = now,
+                identitySubjectSha256 = currentIdentity,
+                reservationContinuityIdentitySubjectSha256s =
+                    setOf(currentIdentity),
+            ),
+        )
+        assertEquals(
+            FeedbackReservationIdentityAction.DEFER,
+            FeedbackAnonymousIdentityProviderPolicy.reservationAction(
+                enforceLifetime = true,
+                identityCreatedAtMillis = oldCreation,
+                nowMillis = now,
+                identitySubjectSha256 = currentIdentity,
+                reservationContinuityIdentitySubjectSha256s =
+                    setOf(currentIdentity),
+            ),
+        )
+        assertFalse(
+            FeedbackAnonymousIdentityProviderPolicy
+                .permitsStaleIdentityReplacement(
+                    identitySubjectSha256 = currentIdentity,
+                    reservationContinuityIdentitySubjectSha256s =
+                        setOf(currentIdentity),
+                ),
+        )
+        assertEquals(
+            FeedbackReservationIdentityAction.REPLACE,
+            FeedbackAnonymousIdentityProviderPolicy.reservationAction(
+                enforceLifetime = true,
+                identityCreatedAtMillis = oldCreation,
+                nowMillis = now,
+                identitySubjectSha256 = currentIdentity,
+                reservationContinuityIdentitySubjectSha256s =
+                    setOf(unrelatedIdentity),
+            ),
+        )
+        assertTrue(
+            FeedbackAnonymousIdentityProviderPolicy
+                .permitsStaleIdentityReplacement(
+                    identitySubjectSha256 = currentIdentity,
+                    reservationContinuityIdentitySubjectSha256s =
+                        setOf(unrelatedIdentity),
+                ),
         )
     }
 

@@ -151,6 +151,22 @@ internal object FeedbackStateMachine {
         }
 }
 
+internal object FeedbackReservationContinuityPolicy {
+    // A nonterminal local binding may own an accepted reservation whose
+    // response was lost, even when no server report ID has been persisted.
+    fun identitySubjectSha256sRequiringContinuity(
+        records: List<FeedbackRecord>,
+    ): Set<String> =
+        records
+            .asSequence()
+            .filterNot { it.state.terminal }
+            .mapNotNull(FeedbackRecord::identitySubjectSha256)
+            .toSet()
+
+    fun requiresIdentityLifetimeCheck(record: FeedbackRecord): Boolean =
+        record.identitySubjectSha256 == null
+}
+
 /**
  * App-private durable feedback queue. Each report owns a sealed `archive.zip` and a small atomic
  * `state.json`; the state document contains only the fields explicitly allowed by the feedback
@@ -265,6 +281,17 @@ internal class FeedbackOutbox(
         canonicalUuid(localId) ?: return@synchronized null
         loadRecordLocked(reportDirectory(localId))?.record
     }
+
+    fun reservationContinuityIdentitySubjectSha256s(): Set<String> =
+        synchronized(lock) {
+            ensureRoot()
+            recoverLocked()
+            pruneTerminalLocked()
+            FeedbackReservationContinuityPolicy
+                .identitySubjectSha256sRequiringContinuity(
+                    loadRecordsLocked().map(StoredRecord::record),
+                )
+        }
 
     fun archive(record: FeedbackRecord): File = File(reportDirectory(record.localId), ARCHIVE_FILE)
 

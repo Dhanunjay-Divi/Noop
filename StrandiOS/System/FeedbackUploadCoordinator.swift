@@ -167,14 +167,20 @@ private enum FeedbackFirebaseAuthorizationProvider {
     static func authorization(
         forceRefresh: Bool,
         allowIdentityReplacement: Bool,
-        expectedIdentitySubjectSHA256: String?
+        expectedIdentitySubjectSHA256: String?,
+        enforceReservationIdentityLifetime: Bool,
+        reservationContinuityIdentitySubjectSHA256s: Set<String>
     ) async throws -> FeedbackFirebaseAuthorization {
         let runtime = try runtime()
         let identity = try await identityAuthorization(
             runtime.auth,
             forceRefresh: forceRefresh,
             allowReplacement: allowIdentityReplacement,
-            expectedSubjectSHA256: expectedIdentitySubjectSHA256
+            expectedSubjectSHA256: expectedIdentitySubjectSHA256,
+            enforceReservationIdentityLifetime:
+                enforceReservationIdentityLifetime,
+            reservationContinuityIdentitySubjectSHA256s:
+                reservationContinuityIdentitySubjectSHA256s
         )
         let appCheckToken = try await appCheckToken(
             runtime.appCheck,
@@ -209,16 +215,47 @@ private enum FeedbackFirebaseAuthorizationProvider {
         _ auth: Auth,
         forceRefresh: Bool,
         allowReplacement: Bool,
-        expectedSubjectSHA256: String?
+        expectedSubjectSHA256: String?,
+        enforceReservationIdentityLifetime: Bool,
+        reservationContinuityIdentitySubjectSHA256s: Set<String>
     ) async throws -> IdentityAuthorization {
-        let user = try await identityUser(
+        var (user, createdNow) = try await identityUser(
             auth,
             allowCreation: allowReplacement && expectedSubjectSHA256 == nil
         )
-        let subjectSHA256 = try validatedSubjectSHA256(
+        var subjectSHA256 = try validatedSubjectSHA256(
             user,
             expected: expectedSubjectSHA256
         )
+        let now = Date()
+        let action =
+            FeedbackAnonymousIdentityProviderPolicy.reservationAction(
+                enforceLifetime: enforceReservationIdentityLifetime,
+                identityCreatedAt:
+                    createdNow ? now : user.metadata.creationDate,
+                now: now,
+                identitySubjectSHA256: subjectSHA256,
+                reservationContinuityIdentitySubjectSHA256s:
+                    reservationContinuityIdentitySubjectSHA256s
+            )
+        if enforceReservationIdentityLifetime {
+            switch action {
+            case .reuse:
+                break
+            case .replace:
+                guard allowReplacement,
+                      expectedSubjectSHA256 == nil else {
+                    throw FeedbackFirebaseError.identity
+                }
+                user = try await replaceIdentity(auth)
+                subjectSHA256 = try validatedSubjectSHA256(
+                    user,
+                    expected: nil
+                )
+            case .deferReservation:
+                throw FeedbackFirebaseError.identity
+            }
+        }
         do {
             let token = try await user.getIDToken(forcingRefresh: forceRefresh)
             guard !token.isEmpty, token.utf8.count <= 16_384 else {
@@ -231,24 +268,27 @@ private enum FeedbackFirebaseAuthorizationProvider {
         } catch {
             guard allowReplacement,
                   expectedSubjectSHA256 == nil,
-                  permitsAnonymousIdentityReplacement(after: error) else {
+                  permitsAnonymousIdentityReplacement(after: error),
+                  FeedbackAnonymousIdentityProviderPolicy
+                    .permitsStaleIdentityReplacement(
+                        identitySubjectSHA256: subjectSHA256,
+                        reservationContinuityIdentitySubjectSHA256s:
+                            reservationContinuityIdentitySubjectSHA256s
+                    ) else {
                 throw FeedbackFirebaseError.identity
             }
 
             // Identity Platform can remove an inactive anonymous user. Replace only
             // an explicitly stale identity before a report has a server binding.
+            let replacement = try await replaceIdentity(auth)
+            let replacementSubjectSHA256 = try validatedSubjectSHA256(
+                replacement,
+                expected: nil
+            )
             do {
-                try auth.signOut()
-            } catch {
-                throw FeedbackFirebaseError.identity
-            }
-            do {
-                let replacement = try await auth.signInAnonymously().user
-                let replacementSubjectSHA256 = try validatedSubjectSHA256(
-                    replacement,
-                    expected: nil
+                let token = try await replacement.getIDToken(
+                    forcingRefresh: true
                 )
-                let token = try await replacement.getIDToken(forcingRefresh: true)
                 guard !token.isEmpty, token.utf8.count <= 16_384 else {
                     throw FeedbackFirebaseError.identity
                 }
@@ -259,6 +299,17 @@ private enum FeedbackFirebaseAuthorizationProvider {
             } catch {
                 throw FeedbackFirebaseError.identity
             }
+        }
+    }
+
+    private static func replaceIdentity(
+        _ auth: Auth
+    ) async throws -> User {
+        do {
+            try auth.signOut()
+            return try await auth.signInAnonymously().user
+        } catch {
+            throw FeedbackFirebaseError.identity
         }
     }
 
@@ -274,13 +325,13 @@ private enum FeedbackFirebaseAuthorizationProvider {
     private static func identityUser(
         _ auth: Auth,
         allowCreation: Bool
-    ) async throws -> User {
-        if let current = auth.currentUser { return current }
+    ) async throws -> (User, Bool) {
+        if let current = auth.currentUser { return (current, false) }
         guard allowCreation else {
             throw FeedbackFirebaseError.identityContinuity
         }
         do {
-            return try await auth.signInAnonymously().user
+            return (try await auth.signInAnonymously().user, true)
         } catch {
             throw FeedbackFirebaseError.identity
         }
@@ -1772,7 +1823,13 @@ actor FeedbackUploadCoordinator {
             allowIdentityReplacement:
                 FeedbackIdentityContinuityPolicy
                     .permitsAnonymousIdentityReplacement(record),
-            expectedIdentitySubjectSHA256: record.identitySubjectSHA256
+            expectedIdentitySubjectSHA256: record.identitySubjectSHA256,
+            enforceReservationIdentityLifetime:
+                FeedbackReservationContinuityPolicy
+                    .requiresIdentityLifetimeCheck(record),
+            reservationContinuityIdentitySubjectSHA256s:
+                try await outbox
+                    .reservationContinuityIdentitySubjectSHA256s()
         )
         guard FeedbackIdentityContinuityPolicy.accepts(
             identitySubjectSHA256: authorization.identitySubjectSHA256,
@@ -1822,7 +1879,9 @@ actor FeedbackUploadCoordinator {
         let authorization = try await firebaseAuthorization(
             forceRefresh: false,
             allowIdentityReplacement: false,
-            expectedIdentitySubjectSHA256: expectedIdentitySubjectSHA256
+            expectedIdentitySubjectSHA256: expectedIdentitySubjectSHA256,
+            enforceReservationIdentityLifetime: false,
+            reservationContinuityIdentitySubjectSHA256s: []
         )
         guard authorization.identitySubjectSHA256
                 == expectedIdentitySubjectSHA256 else {
@@ -1837,14 +1896,20 @@ actor FeedbackUploadCoordinator {
     private func firebaseAuthorization(
         forceRefresh: Bool,
         allowIdentityReplacement: Bool,
-        expectedIdentitySubjectSHA256: String?
+        expectedIdentitySubjectSHA256: String?,
+        enforceReservationIdentityLifetime: Bool = false,
+        reservationContinuityIdentitySubjectSHA256s: Set<String> = []
     ) async throws -> FeedbackFirebaseAuthorization {
         do {
             return try await FeedbackFirebaseAuthorizationProvider.authorization(
                 forceRefresh: forceRefresh,
                 allowIdentityReplacement: allowIdentityReplacement,
                 expectedIdentitySubjectSHA256:
-                    expectedIdentitySubjectSHA256
+                    expectedIdentitySubjectSHA256,
+                enforceReservationIdentityLifetime:
+                    enforceReservationIdentityLifetime,
+                reservationContinuityIdentitySubjectSHA256s:
+                    reservationContinuityIdentitySubjectSHA256s
             )
         } catch FeedbackFirebaseError.configuration {
             throw FeedbackTransportFailure(

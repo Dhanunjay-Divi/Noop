@@ -21,7 +21,6 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Authenticator
 import okhttp3.Call
@@ -108,6 +107,67 @@ internal fun feedbackIdentitySubjectSha256(subject: String): String =
         .digest(subject.toByteArray(Charsets.UTF_8))
         .joinToString(separator = "") { byte -> "%02x".format(Locale.US, byte.toInt() and 0xff) }
 
+internal enum class FeedbackReservationIdentityAction {
+    REUSE,
+    REPLACE,
+    DEFER,
+}
+
+internal object FeedbackAnonymousIdentityLifetimePolicy {
+    val identityPlatformCleanupAgeMillis =
+        TimeUnit.DAYS.toMillis(30)
+    val maximumReportRetentionMillis =
+        TimeUnit.DAYS.toMillis(28)
+    val replacementSafetyMarginMillis =
+        TimeUnit.DAYS.toMillis(1)
+    val maximumExistingIdentityAgeMillis =
+        identityPlatformCleanupAgeMillis -
+            maximumReportRetentionMillis -
+            replacementSafetyMarginMillis
+
+    fun reservationAction(
+        identityCreatedAtMillis: Long?,
+        nowMillis: Long,
+        hasActiveBoundReports: Boolean,
+    ): FeedbackReservationIdentityAction {
+        val age = identityCreatedAtMillis?.let { nowMillis - it }
+        val canCoverRetention =
+            age != null && age >= 0L && age <= maximumExistingIdentityAgeMillis
+        if (canCoverRetention) return FeedbackReservationIdentityAction.REUSE
+        return if (hasActiveBoundReports) {
+            FeedbackReservationIdentityAction.DEFER
+        } else {
+            FeedbackReservationIdentityAction.REPLACE
+        }
+    }
+}
+
+internal object FeedbackAnonymousIdentityProviderPolicy {
+    fun reservationAction(
+        enforceLifetime: Boolean,
+        identityCreatedAtMillis: Long?,
+        nowMillis: Long,
+        identitySubjectSha256: String,
+        reservationContinuityIdentitySubjectSha256s: Set<String>,
+    ): FeedbackReservationIdentityAction {
+        if (!enforceLifetime) return FeedbackReservationIdentityAction.REUSE
+        return FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+            identityCreatedAtMillis = identityCreatedAtMillis,
+            nowMillis = nowMillis,
+            hasActiveBoundReports =
+                identitySubjectSha256 in
+                    reservationContinuityIdentitySubjectSha256s,
+        )
+    }
+
+    fun permitsStaleIdentityReplacement(
+        identitySubjectSha256: String,
+        reservationContinuityIdentitySubjectSha256s: Set<String>,
+    ): Boolean =
+        identitySubjectSha256 !in
+            reservationContinuityIdentitySubjectSha256s
+}
+
 internal sealed class FeedbackProtocolException(
     message: String,
     cause: Throwable? = null,
@@ -139,6 +199,10 @@ internal interface FeedbackAuthorizationProvider {
 internal class FirebaseFeedbackAuthorizationProvider(
     context: Context,
     private val allowIdentityReplacement: Boolean = false,
+    private val enforceReservationIdentityLifetime: Boolean = false,
+    private val reservationContinuityIdentitySubjectSha256s: Set<String> =
+        emptySet(),
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) : FeedbackAuthorizationProvider {
     private val appContext = context.applicationContext
 
@@ -163,41 +227,94 @@ internal class FirebaseFeedbackAuthorizationProvider(
         )
     }
 
-    private suspend fun identityUser(auth: FirebaseAuth): FirebaseUser =
-        identityLock.withLock {
-            auth.currentUser ?: try {
-                auth.signInAnonymously().awaitManaged().user
-                    ?: throw FeedbackProtocolException.Identity()
-            } catch (error: FeedbackProtocolException) {
-                throw error
-            } catch (error: Exception) {
-                throw FeedbackProtocolException.Identity(error)
-            }
+    private suspend fun identityUser(
+        auth: FirebaseAuth,
+    ): Pair<FirebaseUser, Boolean> =
+        auth.currentUser?.let { it to false } ?: try {
+            val user = auth.signInAnonymously().awaitManaged().user
+                ?: throw FeedbackProtocolException.Identity()
+            user to true
+        } catch (error: FeedbackProtocolException) {
+            throw error
+        } catch (error: Exception) {
+            throw FeedbackProtocolException.Identity(error)
         }
 
     private suspend fun identity(
         auth: FirebaseAuth,
         forceRefresh: Boolean,
     ): Pair<FirebaseUser, String> {
-        val user = identityUser(auth)
-        return try {
-            user to identityToken(user, forceRefresh)
-        } catch (error: FeedbackProtocolException.Identity) {
-            val cause = error.cause
-            if (!allowIdentityReplacement || !permitsIdentityReplacement(cause)) {
-                throw error
+        identityLock.lock()
+        try {
+            var (user, createdNow) = identityUser(auth)
+            var subjectSha256 = validatedIdentitySubjectSha256(user)
+            if (enforceReservationIdentityLifetime) {
+                val now = nowMillis()
+                when (
+                    FeedbackAnonymousIdentityProviderPolicy.reservationAction(
+                        enforceLifetime =
+                            enforceReservationIdentityLifetime,
+                        identityCreatedAtMillis = if (createdNow) {
+                            now
+                        } else {
+                            user.metadata?.creationTimestamp
+                        },
+                        nowMillis = now,
+                        identitySubjectSha256 = subjectSha256,
+                        reservationContinuityIdentitySubjectSha256s =
+                            reservationContinuityIdentitySubjectSha256s,
+                    )
+                ) {
+                    FeedbackReservationIdentityAction.REUSE -> Unit
+                    FeedbackReservationIdentityAction.REPLACE -> {
+                        if (!allowIdentityReplacement) {
+                            throw FeedbackProtocolException.Identity()
+                        }
+                        user = replaceIdentity(auth)
+                        subjectSha256 = validatedIdentitySubjectSha256(user)
+                    }
+                    FeedbackReservationIdentityAction.DEFER ->
+                        throw FeedbackProtocolException.Identity()
+                }
             }
-            try {
-                auth.signOut()
-                val replacement = auth.signInAnonymously().awaitManaged().user
-                    ?: throw FeedbackProtocolException.Identity()
+            return try {
+                user to identityToken(user, forceRefresh)
+            } catch (error: FeedbackProtocolException.Identity) {
+                val cause = error.cause
+                if (!allowIdentityReplacement ||
+                    !permitsIdentityReplacement(cause) ||
+                    !FeedbackAnonymousIdentityProviderPolicy
+                        .permitsStaleIdentityReplacement(
+                            identitySubjectSha256 = subjectSha256,
+                            reservationContinuityIdentitySubjectSha256s =
+                                reservationContinuityIdentitySubjectSha256s,
+                        )
+                ) {
+                    throw error
+                }
+                val replacement = replaceIdentity(auth)
                 replacement to identityToken(replacement, forceRefresh = true)
-            } catch (replacementError: FeedbackProtocolException) {
-                throw replacementError
-            } catch (replacementError: Exception) {
-                throw FeedbackProtocolException.Identity(replacementError)
             }
+        } finally {
+            identityLock.unlock()
         }
+    }
+
+    private suspend fun replaceIdentity(auth: FirebaseAuth): FirebaseUser = try {
+        auth.signOut()
+        auth.signInAnonymously().awaitManaged().user
+            ?: throw FeedbackProtocolException.Identity()
+    } catch (error: FeedbackProtocolException) {
+        throw error
+    } catch (error: Exception) {
+        throw FeedbackProtocolException.Identity(error)
+    }
+
+    private fun validatedIdentitySubjectSha256(user: FirebaseUser): String {
+        val subject = user.uid.takeIf {
+            it.isNotBlank() && it.length <= MAX_FEEDBACK_IDENTITY_SUBJECT_LENGTH
+        } ?: throw FeedbackProtocolException.Identity()
+        return feedbackIdentitySubjectSha256(subject)
     }
 
     private suspend fun identityToken(

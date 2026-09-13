@@ -449,6 +449,185 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
         )
     }
 
+    func testAnonymousIdentityLifetimePolicyRequiresFullRetentionCoverage() {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let maximumAge =
+            FeedbackAnonymousIdentityLifetimePolicy
+                .maximumExistingIdentityAge
+
+        XCTAssertEqual(
+            FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+                identityCreatedAt:
+                    now.addingTimeInterval(-maximumAge),
+                now: now,
+                hasActiveBoundReports: true
+            ),
+            .reuse
+        )
+        XCTAssertEqual(
+            FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+                identityCreatedAt:
+                    now.addingTimeInterval(-maximumAge - 1),
+                now: now,
+                hasActiveBoundReports: false
+            ),
+            .replace
+        )
+        XCTAssertEqual(
+            FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+                identityCreatedAt:
+                    now.addingTimeInterval(-maximumAge - 1),
+                now: now,
+                hasActiveBoundReports: true
+            ),
+            .deferReservation
+        )
+        XCTAssertEqual(
+            FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+                identityCreatedAt: nil,
+                now: now,
+                hasActiveBoundReports: false
+            ),
+            .replace
+        )
+        XCTAssertEqual(
+            FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
+                identityCreatedAt: now.addingTimeInterval(1),
+                now: now,
+                hasActiveBoundReports: true
+            ),
+            .deferReservation
+        )
+    }
+
+    func testProviderPolicyPreservesAmbiguousBindingAndDefersNewReport()
+        throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let oldCreation = now.addingTimeInterval(
+            -FeedbackAnonymousIdentityLifetimePolicy
+                .maximumExistingIdentityAge
+            - 1
+        )
+        let unrelatedIdentity = try XCTUnwrap(
+            FeedbackIdentitySubject.sha256("unrelated-feedback-owner")
+        )
+
+        XCTAssertEqual(
+            FeedbackAnonymousIdentityProviderPolicy.reservationAction(
+                enforceLifetime: false,
+                identityCreatedAt: oldCreation,
+                now: now,
+                identitySubjectSHA256: stableIdentitySubjectSHA256,
+                reservationContinuityIdentitySubjectSHA256s: [
+                    stableIdentitySubjectSHA256
+                ]
+            ),
+            .reuse,
+            "An already-bound ambiguous reservation must keep its exact identity."
+        )
+        XCTAssertEqual(
+            FeedbackAnonymousIdentityProviderPolicy.reservationAction(
+                enforceLifetime: true,
+                identityCreatedAt: oldCreation,
+                now: now,
+                identitySubjectSHA256: stableIdentitySubjectSHA256,
+                reservationContinuityIdentitySubjectSHA256s: [
+                    stableIdentitySubjectSHA256
+                ]
+            ),
+            .deferReservation
+        )
+        XCTAssertFalse(
+            FeedbackAnonymousIdentityProviderPolicy
+                .permitsStaleIdentityReplacement(
+                    identitySubjectSHA256: stableIdentitySubjectSHA256,
+                    reservationContinuityIdentitySubjectSHA256s: [
+                        stableIdentitySubjectSHA256
+                    ]
+                )
+        )
+        XCTAssertEqual(
+            FeedbackAnonymousIdentityProviderPolicy.reservationAction(
+                enforceLifetime: true,
+                identityCreatedAt: oldCreation,
+                now: now,
+                identitySubjectSHA256: stableIdentitySubjectSHA256,
+                reservationContinuityIdentitySubjectSHA256s: [
+                    unrelatedIdentity
+                ]
+            ),
+            .replace
+        )
+        XCTAssertTrue(
+            FeedbackAnonymousIdentityProviderPolicy
+                .permitsStaleIdentityReplacement(
+                    identitySubjectSHA256: stableIdentitySubjectSHA256,
+                    reservationContinuityIdentitySubjectSHA256s: [
+                        unrelatedIdentity
+                    ]
+                )
+        )
+    }
+
+    func testCoordinatorTracksReservationContinuityBindings() async throws {
+        let root = temporaryDirectory("feedback-identity-coordinator")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let outbox = FeedbackOutbox(rootURL: root)
+        let active = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1"
+        )
+        let bound = try await outbox.bindIdentity(
+            id: active.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256
+        )
+        XCTAssertFalse(
+            FeedbackReservationContinuityPolicy
+                .requiresIdentityLifetimeCheck(bound)
+        )
+        XCTAssertTrue(
+            FeedbackIdentityContinuityPolicy.accepts(
+                identitySubjectSHA256: stableIdentitySubjectSHA256,
+                for: bound
+            )
+        )
+
+        let terminalIdentity = try XCTUnwrap(
+            FeedbackIdentitySubject.sha256("terminal-feedback-owner")
+        )
+        let terminal = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1"
+        )
+        XCTAssertTrue(
+            FeedbackReservationContinuityPolicy
+                .requiresIdentityLifetimeCheck(terminal)
+        )
+        _ = try await outbox.bindIdentity(
+            id: terminal.id,
+            identitySubjectSHA256: terminalIdentity
+        )
+        _ = try await outbox.storeReservation(
+            id: terminal.id,
+            reportID: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            reportToken: String(repeating: "a", count: 40),
+            upload: nil,
+            retainedUntil: Date(timeIntervalSince1970: 1_791_419_200)
+        )
+        _ = try await outbox.markSent(
+            id: terminal.id,
+            receipt: "NF-ABCDEFGHIJKLMNOP",
+            retainedUntil: Date(timeIntervalSince1970: 1_791_419_200)
+        )
+
+        let continuitySubjects = try await outbox
+            .reservationContinuityIdentitySubjectSHA256s()
+        XCTAssertEqual(
+            continuitySubjects,
+            [stableIdentitySubjectSHA256]
+        )
+    }
+
     func testLegacyServerBindingWithoutIdentityFailsClosedButIsPreserved() async throws {
         let root = temporaryDirectory("feedback-legacy-remote")
         defer { try? FileManager.default.removeItem(at: root) }

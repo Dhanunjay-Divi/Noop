@@ -810,6 +810,52 @@ class FeedbackOutboxTest {
     }
 
     @Test
+    fun coordinatorTracksReservationContinuityBindings() {
+        val filesDir = temporary.newFolder("identity-coordinator")
+        val outbox = deterministicOutbox(filesDir)
+        val active = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val bound = outbox.bindIdentity(active.localId, identitySubjectSha256)
+        assertFalse(
+            FeedbackReservationContinuityPolicy
+                .requiresIdentityLifetimeCheck(bound),
+        )
+
+        val terminalIdentity =
+            feedbackIdentitySubjectSha256("terminal-feedback-owner")
+        val terminal = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        assertTrue(
+            FeedbackReservationContinuityPolicy
+                .requiresIdentityLifetimeCheck(terminal),
+        )
+        outbox.bindIdentity(terminal.localId, terminalIdentity)
+        outbox.saveReservation(
+            localId = terminal.localId,
+            serverReportId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            serverReportToken = reportToken,
+        )
+        outbox.beginUpload(terminal.localId, attempt = 1)
+        commitSent(
+            outbox = outbox,
+            localId = terminal.localId,
+            receipt = receipt,
+            retainedUntil = "2026-10-12T00:00:00Z",
+        )
+
+        assertEquals(
+            setOf(identitySubjectSha256),
+            outbox.reservationContinuityIdentitySubjectSha256s(),
+        )
+    }
+
+    @Test
     fun persistedServerCredentialsFailClosedToExactProtocolGrammar() {
         val filesDir = temporary.newFolder("credential-validation")
         val outbox = deterministicOutbox(filesDir)
