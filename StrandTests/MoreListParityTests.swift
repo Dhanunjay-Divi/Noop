@@ -326,8 +326,12 @@ final class MoreListParityTests: XCTestCase {
                       "The glass island needs an opaque accessibility fallback.")
         XCTAssertTrue(shell.contains("compact && !dynamicTypeSize.isAccessibilitySize"),
                       "Accessibility Dynamic Type must retain visible labels.")
-        XCTAssertTrue(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxxLarge)"),
-                      "Tab labels must scale through the largest stable five-tab size.")
+        XCTAssertTrue(shell.contains("@ScaledMetric(relativeTo: .caption2)"),
+                      "Tab labels must use a scaled semantic metric through accessibility sizes.")
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ? 2 : 1"),
+                      "Accessibility sizes must receive a second bounded label line.")
+        XCTAssertFalse(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxxLarge)"),
+                       "The custom tab bar must not clamp the user's accessibility text size.")
         XCTAssertTrue(shell.contains(".font(StrandFont.footnote.weight("),
                       "Tab labels must use semantic Dynamic Type rather than a fixed point size.")
         XCTAssertFalse(shell.contains(".font(.system(size: 11,"),
@@ -338,8 +342,14 @@ final class MoreListParityTests: XCTestCase {
         // absence of the bare literal so the untranslated shortening cannot quietly return.
         XCTAssertTrue(shell.contains("Text(visualTitle(for: item))"),
                       "The rail label must go through visualTitle(for:).")
-        XCTAssertTrue(shell.contains(".minimumScaleFactor(0.8)"),
-                      "Long localized titles must scale down rather than be replaced by English shorthand.")
+        XCTAssertTrue(shell.contains(".truncationMode(.tail)"),
+                      "Long localized titles must truncate cleanly rather than overlap adjacent tabs.")
+        XCTAssertTrue(shell.contains("accessibilityShowsLargeContentViewer"),
+                      "Truncated visual labels must expose their full title through Large Content Viewer.")
+        XCTAssertTrue(shell.contains(".accessibilityAddTraits(active ? .isSelected : [])"),
+                      "The active tab must add its selected trait on the persistent accessibility node.")
+        XCTAssertTrue(shell.contains(".accessibilityRemoveTraits(active ? [] : .isSelected)"),
+                      "Inactive tabs must explicitly clear stale selected traits after repeated navigation.")
         XCTAssertFalse(shell.contains(#"? "Train" : item.title"#),
                        "An untranslated English tab label must not be reintroduced; add a catalog key instead.")
         XCTAssertTrue(shell.contains(".accessibilityLabel(item.title)"),

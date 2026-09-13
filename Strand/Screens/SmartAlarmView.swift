@@ -560,14 +560,9 @@ struct SmartAlarmView: View {
                         .accessibilityLabel("Remind me to wind down")
                         .onChangeCompat(of: windDownOn) { on in
                             WindDownNudge.setEnabled(on) { outcome in
-                                switch outcome {
-                                case .scheduled:
-                                    windDownOn = true
-                                case .denied:
-                                    windDownOn = false
+                                windDownOn = outcome.keepsToggleEnabled
+                                if outcome.needsAuthorizationAlert {
                                     showNotifDeniedAlert = true
-                                case .failed, .off:
-                                    windDownOn = false
                                 }
                             }
                         }

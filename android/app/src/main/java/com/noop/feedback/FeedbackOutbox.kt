@@ -14,6 +14,8 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.time.Instant
 import java.util.Locale
 import java.util.UUID
+import java.util.zip.ZipException
+import java.util.zip.ZipFile
 import org.json.JSONObject
 
 internal enum class FeedbackState(
@@ -50,6 +52,7 @@ internal enum class FeedbackFailureCategory(val wireValue: String) {
 internal data class FeedbackRecord(
     val localId: String,
     val requestId: String,
+    val appVersion: String?,
     val serverReportId: String?,
     val serverReportToken: String?,
     val identitySubjectSha256: String?,
@@ -162,6 +165,7 @@ internal class FeedbackOutbox(
     private val stateMetadataReader: (File) -> FeedbackStateFileMetadata? =
         ::readFeedbackStateFileMetadata,
     private val stateReader: (File) -> String = { it.readText(Charsets.UTF_8) },
+    private val archiveAppVersionReader: ((File) -> String?)? = null,
     private val archiveDeleter: (File) -> Boolean = File::delete,
 ) {
     private val root = File(filesDir, "feedback/outbox")
@@ -190,12 +194,17 @@ internal class FeedbackOutbox(
             throw FeedbackOutboxException(FeedbackOutboxException.Reason.WRITE_FAILED)
         }
         try {
+            val archive = File(directory, ARCHIVE_FILE)
             val descriptor = FeedbackArchive.writeImmutable(
-                destination = File(directory, ARCHIVE_FILE),
+                destination = archive,
                 entries = entries,
                 includesUserNote = includesUserNote,
                 includesScreenshot = includesScreenshot,
             )
+            val appVersion = archiveAppVersion(archive)
+                ?: throw FeedbackOutboxException(
+                    FeedbackOutboxException.Reason.INVALID_RECORD,
+                )
             val projectedBytes =
                 loadRecordsLocked()
                     .filter { !it.record.state.terminal }
@@ -206,6 +215,7 @@ internal class FeedbackOutbox(
             val record = FeedbackRecord(
                 localId = localId,
                 requestId = requestId,
+                appVersion = appVersion,
                 serverReportId = null,
                 serverReportToken = null,
                 identitySubjectSha256 = null,
@@ -462,6 +472,7 @@ internal class FeedbackOutbox(
         validateRecord(updated)
         if (updated.localId != current.localId ||
             updated.requestId != current.requestId ||
+            updated.appVersion != current.appVersion ||
             updated.archiveSha256 != current.archiveSha256 ||
             updated.archiveBytes != current.archiveBytes ||
             updated.includesUserNote != current.includesUserNote ||
@@ -522,6 +533,9 @@ internal class FeedbackOutbox(
 
         loaded.forEach { stored ->
             var record = stored.record
+            if (stored.needsAppVersionMigration) {
+                writeRecordLocked(record)
+            }
             if (record.state.terminal) {
                 record = persistArchiveCleanupOutcome(record)
                 if (record.localArchiveRemoved &&
@@ -606,6 +620,7 @@ internal class FeedbackOutbox(
             .mapNotNull(::loadRecordLocked)
 
     private fun loadRecordLocked(directory: File): StoredRecord? {
+        var needsAppVersionMigration = false
         val stateFile = File(directory, STATE_FILE)
         val metadata = try {
             stateMetadataReader(stateFile)
@@ -624,16 +639,32 @@ internal class FeedbackOutbox(
             val json = JSONObject(serialized)
             val keys = json.keys().asSequence().toSet()
             val legacy = keys == legacyPersistedKeys
-            if (!legacy && keys != persistedKeys) {
+            val preAppVersion = keys == preAppVersionPersistedKeys
+            if (!legacy && !preAppVersion && keys != persistedKeys) {
                 throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
             }
             val storedAttempt = json.getInt("attempt")
             val state = FeedbackState.entries.first {
                 it.wireValue == json.getString("state")
             }
+            val storedAppVersion = if (keys == persistedKeys) {
+                json.nullableString("app_version")
+            } else {
+                null
+            }
+            val archiveAppVersion = archiveAppVersion(
+                File(directory, ARCHIVE_FILE),
+            )
+            if (storedAppVersion != null &&
+                archiveAppVersion != null &&
+                storedAppVersion != archiveAppVersion
+            ) {
+                throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+            }
             FeedbackRecord(
                 localId = json.getString("local_id"),
                 requestId = json.getString("request_id"),
+                appVersion = storedAppVersion ?: archiveAppVersion,
                 serverReportId = json.nullableString("server_report_id"),
                 serverReportToken = json.nullableString("server_report_token"),
                 identitySubjectSha256 = if (legacy) {
@@ -664,7 +695,11 @@ internal class FeedbackOutbox(
                 } else {
                     json.getBoolean("local_archive_removed")
                 },
-            ).also(::validateRecord)
+            ).also { record ->
+                validateRecord(record)
+                needsAppVersionMigration =
+                    keys != persistedKeys && record.appVersion != null
+            }
         } catch (error: FeedbackOutboxException) {
             throw error
         } catch (_: Exception) {
@@ -673,7 +708,11 @@ internal class FeedbackOutbox(
         if (record.localId != directory.name) {
             throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
         }
-        return StoredRecord(directory, record)
+        return StoredRecord(
+            directory = directory,
+            record = record,
+            needsAppVersionMigration = needsAppVersionMigration,
+        )
     }
 
     private fun writeRecordLocked(record: FeedbackRecord) {
@@ -687,6 +726,7 @@ internal class FeedbackOutbox(
         val json = JSONObject()
             .put("local_id", record.localId)
             .put("request_id", record.requestId)
+            .put("app_version", record.appVersion ?: JSONObject.NULL)
             .put("server_report_id", record.serverReportId ?: JSONObject.NULL)
             .put("server_report_token", record.serverReportToken ?: JSONObject.NULL)
             .put("identity_subject_sha256", record.identitySubjectSha256 ?: JSONObject.NULL)
@@ -721,6 +761,10 @@ internal class FeedbackOutbox(
     private fun validateRecord(record: FeedbackRecord) {
         if (canonicalUuid(record.localId) != record.localId ||
             canonicalUuid(record.requestId) != record.requestId ||
+            record.appVersion?.matches(APP_VERSION) == false ||
+            (record.appVersion == null &&
+                !record.state.terminal &&
+                record.state !in cancellationStates) ||
             !record.archiveSha256.matches(SHA256) ||
             record.archiveBytes !in 1..FeedbackArchive.MAX_ARCHIVE_BYTES ||
             record.attempt !in 0..MAX_ATTEMPTS ||
@@ -854,6 +898,7 @@ internal class FeedbackOutbox(
     private data class StoredRecord(
         val directory: File,
         val record: FeedbackRecord,
+        val needsAppVersionMigration: Boolean,
     )
 
     companion object {
@@ -866,7 +911,9 @@ internal class FeedbackOutbox(
         private const val TERMINAL_RETENTION_MILLIS = 24L * 60L * 60L * 1_000L
         private const val ARCHIVE_FILE = "archive.zip"
         private const val STATE_FILE = "state.json"
+        private const val MAX_META_BYTES = 1024 * 1024
         private val SHA256 = Regex("^[0-9a-f]{64}$")
+        private val APP_VERSION = Regex("^[A-Za-z0-9][A-Za-z0-9.+_-]{0,31}$")
         private val SERVER_TOKEN = Regex("^(?:v[0-9]{1,4}\\.)?[A-Za-z0-9_-]{43}$")
         private val RECEIPT = Regex("^NF-[A-Z2-7]{16}$")
         private val legacyPersistedKeys = setOf(
@@ -886,7 +933,7 @@ internal class FeedbackOutbox(
             "retained_until",
             "receipt",
         )
-        private val persistedKeys = setOf(
+        private val preAppVersionPersistedKeys = setOf(
             "local_id",
             "request_id",
             "server_report_id",
@@ -906,6 +953,7 @@ internal class FeedbackOutbox(
             "receipt",
             "local_archive_removed",
         )
+        private val persistedKeys = preAppVersionPersistedKeys + "app_version"
         private val cancellationStates = setOf(
             FeedbackState.CANCELING,
             FeedbackState.CANCEL_RETRY_SCHEDULED,
@@ -935,7 +983,81 @@ internal class FeedbackOutbox(
 
     private fun validInstant(value: String): Boolean =
         value.length <= 64 && runCatching { Instant.parse(value) }.isSuccess
+
+    private fun archiveAppVersion(archive: File): String? =
+        archiveAppVersionReader?.invoke(archive) ?: appVersionFromArchive(archive)
+
+    private fun appVersionFromArchive(archive: File): String? {
+        if (!archive.isFile) return null
+        try {
+            ZipFile(archive).use { zip ->
+                val metaEntries = zip.entries().asSequence()
+                    .filter { !it.isDirectory && it.name == "meta.json" }
+                    .toList()
+                if (metaEntries.size != 1) {
+                    throw FeedbackOutboxException(
+                        FeedbackOutboxException.Reason.INVALID_RECORD,
+                    )
+                }
+                val entry = metaEntries.single()
+                if (entry.size !in 1..MAX_META_BYTES.toLong()) {
+                    throw FeedbackOutboxException(
+                        FeedbackOutboxException.Reason.INVALID_RECORD,
+                    )
+                }
+                val bytes = zip.getInputStream(entry).use { input ->
+                    val output = java.io.ByteArrayOutputStream(entry.size.toInt())
+                    val buffer = ByteArray(16 * 1024)
+                    var total = 0
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > MAX_META_BYTES) {
+                            throw FeedbackOutboxException(
+                                FeedbackOutboxException.Reason.INVALID_RECORD,
+                            )
+                        }
+                        output.write(buffer, 0, read)
+                    }
+                    output.toByteArray()
+                }
+                return appVersionFromMeta(bytes)
+            }
+        } catch (error: FeedbackOutboxException) {
+            throw error
+        } catch (_: ZipException) {
+            throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+        } catch (error: IOException) {
+            throw FeedbackOutboxException(feedbackArchiveReadFailureReason(error))
+        } catch (_: SecurityException) {
+            throw FeedbackOutboxException(FeedbackOutboxException.Reason.STATE_UNAVAILABLE)
+        } catch (_: Exception) {
+            throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+        }
+    }
+
+    private fun appVersionFromMeta(bytes: ByteArray): String {
+        val appVersion = try {
+            JSONObject(bytes.toString(Charsets.UTF_8)).getString("app_version")
+        } catch (_: Exception) {
+            throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+        }
+        if (!appVersion.matches(APP_VERSION)) {
+            throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+        }
+        return appVersion
+    }
 }
+
+internal fun feedbackArchiveReadFailureReason(
+    error: IOException,
+): FeedbackOutboxException.Reason =
+    if (error is ZipException) {
+        FeedbackOutboxException.Reason.INVALID_RECORD
+    } else {
+        FeedbackOutboxException.Reason.STATE_UNAVAILABLE
+    }
 
 private fun JSONObject.nullableString(name: String): String? =
     if (isNull(name)) null else getString(name)

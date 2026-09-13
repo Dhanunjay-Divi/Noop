@@ -19,48 +19,37 @@ class PrimaryNavigationContractTest {
     }
 
     @Test
-    fun largeTextAndNarrowLocalizedSlotsKeepVisibleWrappedLabels() {
+    fun largeTextKeepsStableSingleLineEllipsizedLabels() {
         assertEquals(
             BottomBarLabelLayout(maxLines = 1, barHeightDp = 56),
-            bottomBarLabelLayout(
-                fontScale = 1.0f,
-                availableSlotWidthPx = 96,
-                widestLabelWidthPx = 84,
-                horizontalSafetyPaddingPx = 6,
-            ),
+            bottomBarLabelLayout(fontScale = 1.0f),
         )
-        val narrow = bottomBarLabelLayout(
-            fontScale = 1.0f,
-            availableSlotWidthPx = 42,
-            widestLabelWidthPx = 100,
-            horizontalSafetyPaddingPx = 6,
-        )
-        assertEquals(3, narrow.maxLines)
-        assertTrue(narrow.barHeightDp > 56)
-
-        val largeText = bottomBarLabelLayout(
-            fontScale = 2.0f,
-            availableSlotWidthPx = 54,
-            widestLabelWidthPx = 90,
-            horizontalSafetyPaddingPx = 6,
-        )
-        assertEquals(2, largeText.maxLines)
-        assertTrue(largeText.barHeightDp >= 81)
+        val largeText = bottomBarLabelLayout(fontScale = 2.0f)
+        assertEquals(1, largeText.maxLines)
+        assertTrue(largeText.barHeightDp > 56)
 
         val source = appRootSource()
         assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
         val text = source!!
-        assertTrue(text.contains("rememberBottomBarLabelLayout("))
-        assertTrue(text.contains("rememberTextMeasurer("))
+        assertTrue(text.contains("rememberBottomBarLabelLayout()"))
         val barSlot = text
             .substringAfter("private fun BarSlot(")
             .substringBefore("\n}\n\nprivate enum class QuickActionKind")
 
         assertTrue(barSlot.contains("contentDescription = label"))
+        assertTrue(barSlot.contains(".selectable("))
+        assertTrue(barSlot.contains("selected = active"))
+        assertTrue(barSlot.contains("role = Role.Tab"))
         assertTrue(barSlot.contains("maxLines = labelMaxLines"))
+        assertTrue(barSlot.contains("softWrap = false"))
         assertTrue(barSlot.contains("overflow = TextOverflow.Ellipsis"))
         assertFalse(barSlot.contains("overflow = TextOverflow.Clip"))
         assertFalse(barSlot.contains("if (showLabel)"))
+
+        val bottomBar = text
+            .substringAfter("private fun GlassBottomBar(")
+            .substringBefore("\n@Composable\nprivate fun FloatingQuickAddButton")
+        assertTrue(bottomBar.contains(".selectableGroup()"))
     }
 
     @Test

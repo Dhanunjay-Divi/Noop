@@ -1336,17 +1336,17 @@ struct LiquidTodayView: View {
     }
 
     private var recoveryHeroColors: (base: Color, tip: Color) {
-        switch chargeDisplay {
-        case .scored(let score), .carried(let score, _):
+        switch chargeDisplay.heroTone {
+        case .recovery(let score):
             return StrandPalette.recoveryGaugeColors(score)
         case .baselineReady:
             return (StrandPalette.chargeColor, StrandPalette.chargeBright)
-        case .calibrating:
+        case .learning:
             return (
                 StrandPalette.onDarkSecondary.opacity(0.64),
                 StrandPalette.onDarkSecondary.opacity(0.88)
             )
-        case .noData:
+        case .unavailable:
             return (
                 StrandPalette.onDarkSecondary.opacity(0.42),
                 StrandPalette.onDarkSecondary.opacity(0.64)
@@ -5551,6 +5551,17 @@ private struct TodayArrangeSheet: View {
     }
 }
 
+enum LiveSessionEntryState: Equatable {
+    case bandRequired
+    case recoveryUnavailable
+    case ready
+
+    static func resolve(bandReady: Bool, hasCurrentRecovery: Bool) -> Self {
+        guard bandReady else { return .bandRequired }
+        return hasCurrentRecovery ? .ready : .recoveryUnavailable
+    }
+}
+
 private struct LiveSessionEntryCopy: View {
     enum Kind {
         case title
@@ -5561,24 +5572,30 @@ private struct LiveSessionEntryCopy: View {
     let hasCurrentRecovery: Bool
     let kind: Kind
 
+    private var state: LiveSessionEntryState {
+        .resolve(
+            bandReady: liveSessionBandReady(live),
+            hasCurrentRecovery: hasCurrentRecovery
+        )
+    }
+
     @ViewBuilder
     var body: some View {
         switch kind {
         case .title:
-            if liveSessionBandReady(live) {
-                Text("appwide.live_session.start")
-            } else {
+            if state == .bandRequired {
                 Text("appwide.live_session.connect_band")
+            } else {
+                Text("appwide.live_session.start")
             }
         case .detail:
-            if liveSessionBandReady(live) {
-                if hasCurrentRecovery {
-                    Text("appwide.live_session.start_detail")
-                } else {
-                    Text("appwide.live_session.start_detail_unavailable")
-                }
-            } else {
+            switch state {
+            case .bandRequired:
                 Text("appwide.live_session.band_required")
+            case .recoveryUnavailable:
+                Text("appwide.live_session.start_detail_unavailable")
+            case .ready:
+                Text("appwide.live_session.start_detail")
             }
         }
     }
@@ -5793,13 +5810,26 @@ extension LiquidTodayView {
             return false
         }
 
-        /// Learning progress is evidence collection, not a positive health result. Only a completed
-        /// baseline may use the positive Recovery accent before an actual score exists.
-        var usesPositiveUnscoredTone: Bool {
-            if case .baselineReady = self {
-                return true
+        enum HeroTone: Equatable {
+            case recovery(Double)
+            case baselineReady
+            case learning
+            case unavailable
+        }
+
+        /// Learning progress is evidence collection, not a positive health result. This contract keeps
+        /// every unscored Today surface neutral except the explicitly completed baseline state.
+        var heroTone: HeroTone {
+            switch self {
+            case .scored(let pct), .carried(let pct, _):
+                return .recovery(pct)
+            case .baselineReady:
+                return .baselineReady
+            case .calibrating:
+                return .learning
+            case .noData:
+                return .unavailable
             }
-            return false
         }
 
         /// The short Charge-state pill beside the greeting. It shares a row with the greeting under a

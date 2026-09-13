@@ -300,6 +300,9 @@ struct AutomationsView: View {
                         dailyReviewEnabled = true
                         notificationPermissionDenied = false
                         refreshNotificationPermissionState()
+                    case .deferred:
+                        dailyReviewEnabled = true
+                        notificationPermissionDenied = false
                     case .denied:
                         dailyReviewEnabled = false
                         notificationPermissionDenied = true
@@ -571,6 +574,9 @@ struct AutomationsView: View {
                         hydrationReminderEnabled = true
                         notificationPermissionDenied = false
                         refreshNotificationPermissionState()
+                    case .deferred:
+                        hydrationReminderEnabled = true
+                        notificationPermissionDenied = false
                     case .denied:
                         hydrationReminderEnabled = false
                         notificationPermissionDenied = true

@@ -276,6 +276,243 @@ final class HydrationEntriesTests: XCTestCase {
         )
     }
 
+    func testLegacyScalarConversionIsBoundedBeforeIntegerConversion() throws {
+        XCTAssertEqual(
+            try HydrationStore.legacyScalarAmountML(
+                Double(WhoopStore.hydrationLegacyMaximumML)
+            ),
+            WhoopStore.hydrationLegacyMaximumML
+        )
+        XCTAssertEqual(try HydrationStore.legacyScalarAmountML(0.1), 1)
+        XCTAssertThrowsError(
+            try HydrationStore.legacyScalarAmountML(
+                Double(WhoopStore.hydrationLegacyMaximumML) + 1
+            )
+        )
+        XCTAssertThrowsError(
+            try HydrationStore.legacyScalarAmountML(Double.greatestFiniteMagnitude)
+        )
+        XCTAssertThrowsError(
+            try HydrationStore.legacyScalarAmountML(.infinity)
+        )
+        XCTAssertThrowsError(
+            try HydrationStore.legacyScalarAmountML(.nan)
+        )
+    }
+
+    func testCorruptLegacyScalarDoesNotMaterializeOrTrap() async throws {
+        let day = "2098-01-11"
+        clearEntries(day: day)
+        defer { clearEntries(day: day) }
+        let (repo, store) = try await makeRepository()
+        _ = try await store.upsertMetricSeries(
+            [
+                MetricPoint(
+                    day: day,
+                    key: HydrationStore.key,
+                    value: Double.greatestFiniteMagnitude
+                ),
+            ],
+            deviceId: HydrationStore.sourceId
+        )
+
+        do {
+            _ = try await repo.hydrationEntries(day: day)
+            XCTFail("Expected the corrupt legacy scalar to be rejected")
+        } catch {
+            // Expected.
+        }
+        let persistedEntries = try await store.hydrationLogEntries(
+            deviceId: HydrationStore.sourceId,
+            day: day
+        )
+        XCTAssertTrue(persistedEntries.isEmpty)
+    }
+
+    func testCorruptLegacyTimestampDoesNotMaterializeOrTrap() async throws {
+        let day = "2098-01-12"
+        clearEntries(day: day)
+        defer { clearEntries(day: day) }
+        let legacy = [
+            HydrationEntry(
+                amountMl: 237,
+                loggedAt: Date(
+                    timeIntervalSinceReferenceDate: Double.greatestFiniteMagnitude
+                )
+            ),
+        ]
+        UserDefaults.standard.set(
+            try JSONEncoder().encode(legacy),
+            forKey: HydrationStore.entriesKey(forDay: day)
+        )
+        let (repo, store) = try await makeRepository()
+
+        do {
+            _ = try await repo.hydrationEntries(day: day)
+            XCTFail("Expected the corrupt legacy timestamp to be rejected")
+        } catch {
+            // Expected.
+        }
+
+        let persistedEntries = try await store.hydrationLogEntries(
+            deviceId: HydrationStore.sourceId,
+            day: day
+        )
+        XCTAssertTrue(persistedEntries.isEmpty)
+        XCTAssertNotNil(
+            UserDefaults.standard.object(
+                forKey: HydrationStore.entriesKey(forDay: day)
+            )
+        )
+    }
+
+    func testCorruptPersistedTimestampBeyondCompatibilityWindowFailsClosed() async throws {
+        let day = "2098-01-13"
+        clearEntries(day: day)
+        defer { clearEntries(day: day) }
+        let (repo, store) = try await makeRepository()
+        let invalid = HydrationLogEntry(
+            id: UUID().uuidString,
+            day: day,
+            amountML: 237,
+            loggedAt: Int.max
+        )
+        try await store.seedHydrationPersistenceForTesting(
+            [invalid],
+            deviceId: HydrationStore.sourceId,
+            day: day,
+            metricKey: HydrationStore.key,
+            totalML: 237
+        )
+
+        do {
+            _ = try await repo.hydrationEntries(day: day)
+            XCTFail("Expected an implausible persisted timestamp to be rejected")
+        } catch {
+            // Expected.
+        }
+
+        let persistedEntries = try await store.hydrationLogEntries(
+            deviceId: HydrationStore.sourceId,
+            day: day
+        )
+        XCTAssertEqual(persistedEntries, [invalid])
+    }
+
+    func testOversizedLegacyUserDefaultsDayRemainsReadableEditableAndClearable() async throws {
+        let day = "2098-01-07"
+        clearEntries(day: day)
+        defer { clearEntries(day: day) }
+        let legacy = [
+            HydrationEntry(
+                amountMl: 3_000,
+                loggedAt: Date(timeIntervalSince1970: 4_039_891_200)
+            ),
+            HydrationEntry(
+                amountMl: 3_000,
+                loggedAt: Date(timeIntervalSince1970: 4_039_891_260)
+            ),
+            HydrationEntry(
+                amountMl: 3_000,
+                loggedAt: Date(timeIntervalSince1970: 4_039_891_320)
+            ),
+            HydrationEntry(
+                amountMl: 3_000,
+                loggedAt: Date(timeIntervalSince1970: 4_039_891_380)
+            ),
+        ]
+        UserDefaults.standard.set(
+            try JSONEncoder().encode(legacy),
+            forKey: HydrationStore.entriesKey(forDay: day)
+        )
+        let (repo, store) = try await makeRepository()
+        _ = try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: HydrationStore.key, value: 12_000)],
+            deviceId: HydrationStore.sourceId
+        )
+
+        let migratedEntries = try await repo.hydrationEntries(day: day)
+        XCTAssertEqual(migratedEntries, legacy)
+        XCTAssertNil(
+            UserDefaults.standard.object(
+                forKey: HydrationStore.entriesKey(forDay: day)
+            )
+        )
+        let persistedLegacyEntries = try await store.hydrationLogEntries(
+            deviceId: HydrationStore.sourceId,
+            day: day
+        )
+        XCTAssertEqual(
+            persistedLegacyEntries.map(\.amountML),
+            [3_000, 3_000, 3_000, 3_000]
+        )
+
+        let rejectedAdd = await repo.logHydration(amountMl: 30, day: day)
+        XCTAssertFalse(rejectedAdd.succeeded)
+        let totalAfterRejectedAdd = try await repo.hydrationTotal(day: day)
+        XCTAssertEqual(totalAfterRejectedAdd, 12_000)
+
+        let reduced = await repo.updateHydrationEntry(
+            id: legacy[0].id,
+            amountMl: 2_500,
+            day: day
+        )
+        XCTAssertEqual(reduced, .saved(totalML: 11_500))
+        let entriesAfterReduction = try await repo.hydrationEntries(day: day)
+        XCTAssertEqual(
+            entriesAfterReduction.map(\.amountMl),
+            [2_500, 3_000, 3_000, 3_000]
+        )
+
+        let rejectedIncrease = await repo.updateHydrationEntry(
+            id: legacy[0].id,
+            amountMl: 2_600,
+            day: day
+        )
+        XCTAssertFalse(rejectedIncrease.succeeded)
+        let totalAfterRejectedIncrease = try await repo.hydrationTotal(day: day)
+        XCTAssertEqual(totalAfterRejectedIncrease, 11_500)
+
+        for entry in legacy {
+            let deletion = await repo.deleteHydrationEntry(id: entry.id, day: day)
+            XCTAssertTrue(deletion.succeeded)
+        }
+        let clearedEntries = try await repo.hydrationEntries(day: day)
+        let clearedTotal = try await repo.hydrationTotal(day: day)
+        XCTAssertTrue(clearedEntries.isEmpty)
+        XCTAssertNil(clearedTotal)
+        let persistedMetric = try await store.metricSeries(
+            deviceId: HydrationStore.sourceId,
+            key: HydrationStore.key,
+            from: day,
+            to: day
+        )
+        XCTAssertEqual(persistedMetric.first?.value, 0)
+    }
+
+    func testOversizedLegacyScalarOnlyDayMaterializesAndCanBeCleared() async throws {
+        let day = "2098-01-08"
+        clearEntries(day: day)
+        defer { clearEntries(day: day) }
+        let (repo, store) = try await makeRepository()
+        _ = try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: HydrationStore.key, value: 12_000)],
+            deviceId: HydrationStore.sourceId
+        )
+
+        let entries = try await repo.hydrationEntries(day: day)
+        let entry = try XCTUnwrap(entries.first)
+        XCTAssertEqual(entries.map(\.amountMl), [12_000])
+
+        let cleared = await repo.deleteHydrationEntry(id: entry.id, day: day)
+
+        XCTAssertEqual(cleared, .saved(totalML: nil))
+        let clearedEntries = try await repo.hydrationEntries(day: day)
+        let clearedTotal = try await repo.hydrationTotal(day: day)
+        XCTAssertTrue(clearedEntries.isEmpty)
+        XCTAssertNil(clearedTotal)
+    }
+
     func testHistoricalQuickLogPersistsTimestampInsideSelectedCivilDay() async throws {
         let day = "2026-09-01"
         clearEntries(day: day)

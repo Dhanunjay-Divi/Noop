@@ -136,8 +136,15 @@ enum DailyReviewNotifications {
 
     enum EnableOutcome: Equatable, Sendable {
         case scheduled
+        case deferred
         case denied
         case off
+    }
+
+    enum RestoreAuthorizationDisposition: Equatable, Sendable {
+        case reschedule
+        case retainOptIn
+        case disable
     }
 
     struct ReminderSpec: Equatable, Sendable {
@@ -257,13 +264,32 @@ enum DailyReviewNotifications {
         }
         Task { @MainActor in
             let settings = await UNUserNotificationCenter.current().notificationSettings()
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
+            switch restoreAuthorizationDisposition(settings.authorizationStatus) {
+            case .reschedule:
                 requestReschedule()
-            default:
+            case .retainOptIn:
                 recordSuppressedRequests()
-                break
+            case .disable:
+                UserDefaults.standard.set(false, forKey: enabledKey)
+                LocalNotificationLifecycle.cancel(identifiers: requestIDs)
+                UserDefaults.standard.removeObject(forKey: scheduledEveningIDsKey)
+                recordSuppressedRequests()
             }
+        }
+    }
+
+    static func restoreAuthorizationDisposition(
+        _ status: UNAuthorizationStatus
+    ) -> RestoreAuthorizationDisposition {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            return .reschedule
+        case .notDetermined:
+            return .retainOptIn
+        case .denied:
+            return .disable
+        @unknown default:
+            return .disable
         }
     }
 
@@ -348,13 +374,14 @@ enum DailyReviewNotifications {
             client: .system(center: center)
         )
         guard generation == scheduleGeneration else { return }
-        if result?.activeCount ?? 0 > 0 {
-            UserDefaults.standard.set(true, forKey: enabledKey)
-            completion?(.scheduled)
-        } else {
-            UserDefaults.standard.set(false, forKey: enabledKey)
-            completion?(.off)
-        }
+        let settings = await center.notificationSettings()
+        guard generation == scheduleGeneration else { return }
+        completion?(
+            applyScheduleResult(
+                result,
+                authorizationStatus: settings.authorizationStatus
+            )
+        )
     }
 
     private static func requestReschedule(now: Date = Date()) {
@@ -362,6 +389,22 @@ enum DailyReviewNotifications {
         let generation = scheduleGeneration
         Task { @MainActor in
             let center = UNUserNotificationCenter.current()
+            let initialSettings = await center.notificationSettings()
+            guard generation == scheduleGeneration else { return }
+            switch restoreAuthorizationDisposition(initialSettings.authorizationStatus) {
+            case .retainOptIn:
+                UserDefaults.standard.set(true, forKey: enabledKey)
+                recordSuppressedRequests()
+                return
+            case .disable:
+                _ = applyScheduleResult(
+                    nil,
+                    authorizationStatus: initialSettings.authorizationStatus
+                )
+                return
+            case .reschedule:
+                break
+            }
             registerPrivacyCategory(on: center)
             let result = await reconcileSchedule(
                 now: now,
@@ -369,15 +412,45 @@ enum DailyReviewNotifications {
                 client: .system(center: center)
             )
             guard generation == scheduleGeneration else { return }
-            applyRescheduleResult(result)
+            let finalSettings = await center.notificationSettings()
+            guard generation == scheduleGeneration else { return }
+            _ = applyScheduleResult(
+                result,
+                authorizationStatus: finalSettings.authorizationStatus
+            )
         }
     }
 
-    static func applyRescheduleResult(
+    @discardableResult
+    static func applyScheduleResult(
+        _ result: LocalNotificationReconciliationResult?,
+        authorizationStatus: UNAuthorizationStatus
+    ) -> EnableOutcome {
+        switch restoreAuthorizationDisposition(authorizationStatus) {
+        case .reschedule:
+            return applyAuthorizedScheduleResult(result)
+        case .retainOptIn:
+            UserDefaults.standard.set(true, forKey: enabledKey)
+            recordSuppressedRequests()
+            return .deferred
+        case .disable:
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            LocalNotificationLifecycle.cancel(identifiers: requestIDs)
+            UserDefaults.standard.removeObject(forKey: scheduledEveningIDsKey)
+            recordSuppressedRequests()
+            return .denied
+        }
+    }
+
+    /// Authorization and user intent are separate from Notification Center capacity. Once the user has
+    /// explicitly opted in and authorization is available, a transient rejection or capacity deferral
+    /// must remain retryable rather than silently becoming an opt-out.
+    @discardableResult
+    static func applyAuthorizedScheduleResult(
         _ result: LocalNotificationReconciliationResult?
-    ) {
-        guard let result, result.activeCount == 0 else { return }
-        UserDefaults.standard.set(false, forKey: enabledKey)
+    ) -> EnableOutcome {
+        UserDefaults.standard.set(true, forKey: enabledKey)
+        return (result?.activeCount ?? 0) > 0 ? .scheduled : .deferred
     }
 
     @discardableResult

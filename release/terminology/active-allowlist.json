@@ -1064,12 +1064,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 3,
+      "occurrenceCount": 9,
       "owner": "project team",
       "path": "Strand/Data/HydrationStore.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "506bf47156ae7a5170a837115d55b1a9ab67e692f0d1544a3b933343af3e61f2"
+      "sha256": "6be6989272f1b3ffdfe89d94a57d597905daab126be171d8de8dbac30e231b0e"
     },
     {
       "category": "core",

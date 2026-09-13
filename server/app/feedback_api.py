@@ -231,6 +231,78 @@ def feedback_router(
             )
         return report
 
+    def idempotency_hash(
+        *,
+        principal: FeedbackPrincipal,
+        idempotency_key: str,
+    ) -> str:
+        return hashlib.sha256(
+            (
+                f"{principal.app_check.app_id}\0"
+                f"{principal.principal_hash_version}\0"
+                f"{principal.principal_hash}\0"
+                f"{idempotency_key.lower()}"
+            ).encode("utf-8")
+        ).hexdigest()
+
+    def reservation_reference(report: FeedbackReport) -> FeedbackReservationResponse:
+        return FeedbackReservationResponse(
+            report_id=report.report_id,
+            report_token=capability_codec.issue(
+                report_id=report.report_id,
+                app_id=report.client_app_id,
+            ),
+            status=report.status,  # type: ignore[arg-type]
+            upload=None,
+            retained_until=report.retained_until,
+        )
+
+    @router.get(
+        "/reports/reservations/{idempotency_key}",
+        response_model=FeedbackReservationResponse,
+    )
+    async def recover_reservation(
+        idempotency_key: str,
+        principal: FeedbackPrincipal = Depends(require_identity),
+    ) -> FeedbackReservationResponse:
+        if _IDEMPOTENCY_RE.fullmatch(idempotency_key) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="reservation idempotency key must be a UUID",
+            )
+        try:
+            report = await repository.get_by_idempotency(
+                client_app_id=principal.app_check.app_id,
+                principal_hash_version=principal.principal_hash_version,
+                principal_hash=principal.principal_hash,
+                idempotency_hash=idempotency_hash(
+                    principal=principal,
+                    idempotency_key=idempotency_key,
+                ),
+            )
+        except FeedbackNotFoundError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="feedback reservation was not found",
+            ) from None
+        if not feedback_principal_matches(
+            stored_version=report.principal_hash_version,
+            stored_hash=report.principal_hash,
+            claims=principal.identity,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="feedback reservation was not found",
+            )
+        emit_operational_event(
+            "feedback.reservation_recovery",
+            service="noop-managed-api",
+            outcome="found",
+            platform=report.platform,
+            status=report.status,
+        )
+        return reservation_reference(report)
+
     @router.post(
         "/reports/reservations",
         response_model=FeedbackReservationResponse,
@@ -280,14 +352,10 @@ def feedback_router(
         now = datetime.now(UTC)
         report_id = uuid4()
         subject_hash = principal.identity.subject_hash
-        idempotency_hash = hashlib.sha256(
-            (
-                f"{principal.app_check.app_id}\0"
-                f"{principal.principal_hash_version}\0"
-                f"{principal.principal_hash}\0"
-                f"{idempotency_key.lower()}"
-            ).encode("utf-8")
-        ).hexdigest()
+        idempotency_hash_value = idempotency_hash(
+            principal=principal,
+            idempotency_key=idempotency_key,
+        )
         request_hash = hashlib.sha256(
             json.dumps(
                 payload.model_dump(mode="json"),
@@ -315,7 +383,7 @@ def feedback_router(
             subject_hash=subject_hash,
             principal_hash_version=principal.principal_hash_version,
             principal_hash=principal.principal_hash,
-            idempotency_hash=idempotency_hash,
+            idempotency_hash=idempotency_hash_value,
             request_hash=request_hash,
             platform=payload.platform,
             app_version=payload.app_version,

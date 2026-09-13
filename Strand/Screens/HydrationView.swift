@@ -864,6 +864,8 @@ struct HydrationView: View {
                     switch outcome {
                     case .scheduled:
                         reminderEnabled = true
+                    case .deferred:
+                        reminderEnabled = true
                     case .denied:
                         reminderEnabled = false
                         showNotificationPermissionAlert = true

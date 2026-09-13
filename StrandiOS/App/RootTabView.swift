@@ -38,6 +38,7 @@ struct RootTabView: View {
     @EnvironmentObject private var updateStore: UpdateStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption2) private var scaledTabLabelLineHeight: CGFloat = 13
     @ObservedObject private var contextualActions = ContextualActionCenter.shared
 
     /// Which quick-action screen the centre FAB is presenting (nil = sheet closed).
@@ -275,7 +276,6 @@ struct RootTabView: View {
                         withAnimation(Self.sheetEase) { quickAction = .menu }
                     }
                 }
-                .frame(height: 48)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
                 .background {
@@ -472,7 +472,14 @@ struct RootTabView: View {
     }
 
     private var visibleTabBarHeight: CGFloat {
-        keyboardVisible ? 0 : measuredTabBarHeight
+        guard !keyboardVisible else { return 0 }
+        return max(
+            measuredTabBarHeight,
+            FloatingTabBar.expandedBodyHeight(
+                labelLineHeight: scaledTabLabelLineHeight,
+                labelLineCount: dynamicTypeSize.isAccessibilitySize ? 2 : 1
+            ) + 8
+        )
     }
 
     private static func diagnosticTabName(_ rawValue: Int) -> String {
@@ -1768,6 +1775,7 @@ private struct FloatingTabBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.noopAppearanceMode) private var appearanceMode
+    @ScaledMetric(relativeTo: .caption2) private var scaledLabelLineHeight: CGFloat = 13
     @Namespace private var navigationMorph
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
@@ -1781,10 +1789,25 @@ private struct FloatingTabBar: View {
 
     /// Compaction is suppressed at accessibility text sizes. A sighted low-vision user who asked for larger
     /// text is exactly the person who cannot afford an icon-only rail: they lose the one persistent cue for
-    /// which section they are in. This is complementary to the `.dynamicTypeSize(...xxxLarge)` cap below,
-    /// not replaced by it - the cap makes expanded labels FIT, this keeps them PRESENT. VoiceOver is
-    /// unaffected either way, since every control keeps `.accessibilityLabel(item.title)`.
+    /// which section they are in. The expanded rail grows with the semantic caption metric and gives labels
+    /// two lines at accessibility sizes; Large Content Viewer still exposes every full localized title.
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
+    private var labelLineCount: Int { dynamicTypeSize.isAccessibilitySize ? 2 : 1 }
+    private var expandedHeight: CGFloat {
+        Self.expandedBodyHeight(
+            labelLineHeight: scaledLabelLineHeight,
+            labelLineCount: labelLineCount
+        )
+    }
+
+    static func expandedBodyHeight(
+        labelLineHeight: CGFloat,
+        labelLineCount: Int
+    ) -> CGFloat {
+        let labelHeight = max(1, labelLineHeight) * CGFloat(max(1, labelLineCount))
+        return max(48, 12 + 18 + 3 + labelHeight)
+    }
+
     private var currentItem: Item {
         nav.first(where: { $0.tag == selection }) ?? nav[0]
     }
@@ -1860,7 +1883,7 @@ private struct FloatingTabBar: View {
             }
         }
         .frame(width: visuallyCompact ? IPhonePrimaryTab.compactControlDimension : nil,
-               height: 48,
+               height: visuallyCompact ? IPhonePrimaryTab.compactControlDimension : expandedHeight,
                alignment: .leading)
         .background {
             if visuallyCompact {
@@ -1905,10 +1928,6 @@ private struct FloatingTabBar: View {
                                      ? (appearanceMode == .black ? 0.18 : 0.26)
                                      : 0.075),
                 radius: visuallyCompact ? 8 : 11, x: 0, y: visuallyCompact ? 3 : 5)
-        // Keep the five destinations stable while still honoring the user's Larger Text setting.
-        // The semantic caption style scales through the largest non-accessibility size; accessibility
-        // sizes retain all labels and can use the Large Content Viewer attached to each control.
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .animation(reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28),
                    value: visuallyCompact)
     }
@@ -1920,7 +1939,7 @@ private struct FloatingTabBar: View {
             ForEach(nav) { item in tabButton(item) }
         }
         .padding(.horizontal, 6)
-        .frame(height: 48)
+        .frame(height: expandedHeight)
         .animation(
             reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.26),
             value: selection
@@ -1980,11 +1999,13 @@ private struct FloatingTabBar: View {
                     .offset(y: active ? -1 : 0)
                 Text(visualTitle(for: item))
                     // The visible label is the localized destination title. A semantic caption style
-                    // follows Dynamic Type, while lineLimit + minimumScaleFactor keeps the five-item
-                    // rail intact without introducing untranslated shorthand.
+                    // follows Dynamic Type through accessibility sizes. Two bounded lines avoid vertical
+                    // overlap; truncation and Large Content Viewer handle titles wider than one tab slot.
                     .font(StrandFont.footnote.weight(active ? .semibold : .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .lineLimit(labelLineCount)
+                    .truncationMode(.tail)
+                    .multilineTextAlignment(.center)
+                    .frame(minHeight: scaledLabelLineHeight * CGFloat(labelLineCount))
             }
             .foregroundStyle(navigationInk(active: active))
             .frame(maxWidth: .infinity)
@@ -2014,7 +2035,9 @@ private struct FloatingTabBar: View {
             Label(item.title, systemImage: item.icon)
         }
         .accessibilityIdentifier("noop.tab.\(item.tag)")
-        .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(active ? .isSelected : [])
+        .accessibilityRemoveTraits(active ? [] : .isSelected)
     }
 
 }

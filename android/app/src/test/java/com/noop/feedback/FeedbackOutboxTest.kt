@@ -6,6 +6,7 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.zip.ZipException
 import kotlin.concurrent.thread
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -46,6 +47,7 @@ class FeedbackOutboxTest {
             setOf(
                 "local_id",
                 "request_id",
+                "app_version",
                 "server_report_id",
                 "server_report_token",
                 "identity_subject_sha256",
@@ -77,6 +79,7 @@ class FeedbackOutboxTest {
         }
         assertTrue(json.isNull("receipt"))
         assertTrue(json.isNull("retained_until"))
+        assertEquals("9.2.1", json.getString("app_version"))
         FeedbackArchive.validate(
             archive = outbox.archive(record),
             expectedBytes = record.archiveBytes,
@@ -84,6 +87,72 @@ class FeedbackOutboxTest {
             includesUserNote = true,
             includesScreenshot = false,
         )
+    }
+
+    @Test
+    fun stagedAppVersionSurvivesRecoveryForRetriesAfterAnUpgrade() {
+        val filesDir = temporary.newFolder("app-version-recovery")
+        val outbox = deterministicOutbox(filesDir)
+        val staged = outbox.stage(
+            entries = baseEntries(appVersion = "8.4.1"),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+
+        val recovered = FeedbackOutbox(filesDir).recover().single()
+
+        assertEquals("8.4.1", staged.appVersion)
+        assertEquals("8.4.1", recovered.appVersion)
+        assertEquals(
+            "8.4.1",
+            JSONObject(stateFile(filesDir, staged.localId).readText())
+                .getString("app_version"),
+        )
+    }
+
+    @Test
+    fun preFixStateHydratesOriginalAppVersionFromTheImmutableArchive() {
+        val filesDir = temporary.newFolder("app-version-migration")
+        val outbox = deterministicOutbox(filesDir)
+        val staged = outbox.stage(
+            entries = baseEntries(appVersion = "8.4.1"),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val state = stateFile(filesDir, staged.localId)
+        state.writeText(
+            JSONObject(state.readText())
+                .apply { remove("app_version") }
+                .toString(),
+        )
+
+        val recovered = FeedbackOutbox(filesDir).recover().single()
+
+        assertEquals("8.4.1", recovered.appVersion)
+        val persisted = JSONObject(state.readText())
+        assertEquals("8.4.1", persisted.getString("app_version"))
+    }
+
+    @Test
+    fun persistedAppVersionMustMatchTheImmutableArchive() {
+        val filesDir = temporary.newFolder("app-version-integrity")
+        val outbox = deterministicOutbox(filesDir)
+        val staged = outbox.stage(
+            entries = baseEntries(appVersion = "8.4.1"),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val state = stateFile(filesDir, staged.localId)
+        state.writeText(
+            JSONObject(state.readText())
+                .put("app_version", "9.0.0")
+                .toString(),
+        )
+
+        val recovered = outbox.recover()
+
+        assertTrue(recovered.isEmpty())
+        assertFalse(state.parentFile!!.exists())
     }
 
     @Test
@@ -562,6 +631,50 @@ class FeedbackOutboxTest {
     }
 
     @Test
+    fun archiveReadFailureClassificationSeparatesCorruptionFromTransientIo() {
+        assertEquals(
+            FeedbackOutboxException.Reason.INVALID_RECORD,
+            feedbackArchiveReadFailureReason(ZipException("synthetic corrupt zip")),
+        )
+        assertEquals(
+            FeedbackOutboxException.Reason.STATE_UNAVAILABLE,
+            feedbackArchiveReadFailureReason(IOException("synthetic transient read")),
+        )
+    }
+
+    @Test
+    fun transientArchiveReadFailurePreservesTheConsentedReportForRecovery() {
+        val filesDir = temporary.newFolder("transient-archive-read")
+        val outbox = deterministicOutbox(filesDir)
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val state = stateFile(filesDir, staged.localId)
+        val archive = outbox.archive(staged)
+        val unavailable = FeedbackOutbox(
+            filesDir = filesDir,
+            archiveAppVersionReader = {
+                throw FeedbackOutboxException(
+                    FeedbackOutboxException.Reason.STATE_UNAVAILABLE,
+                )
+            },
+        )
+
+        try {
+            unavailable.recover()
+            fail("A transient archive read must be deferred, not treated as invalid")
+        } catch (error: FeedbackOutboxException) {
+            assertEquals(FeedbackOutboxException.Reason.STATE_UNAVAILABLE, error.reason)
+        }
+
+        assertTrue(state.isFile)
+        assertTrue(archive.isFile)
+        assertEquals(staged.localId, FeedbackOutbox(filesDir).recover().single().localId)
+    }
+
+    @Test
     fun terminalArchiveCleanupFailureIsPersistedAndRetried() {
         val filesDir = temporary.newFolder("terminal-cleanup-retry")
         var allowDeletion = false
@@ -661,6 +774,7 @@ class FeedbackOutboxTest {
         )
         val state = stateFile(filesDir, staged.localId)
         val legacy = JSONObject(state.readText())
+        legacy.remove("app_version")
         legacy.remove("identity_subject_sha256")
         legacy.remove("cancellation_attempt")
         legacy.remove("local_archive_removed")
@@ -726,9 +840,12 @@ class FeedbackOutboxTest {
         )
     }
 
-    private fun baseEntries(): List<Pair<String, ByteArray>> = listOf(
+    private fun baseEntries(
+        appVersion: String = "9.2.1",
+    ): List<Pair<String, ByteArray>> = listOf(
         "report.txt" to "NOOP app runtime report\n".toByteArray(),
-        "meta.json" to "{\"schema\":1}".toByteArray(),
+        "meta.json" to
+            """{"schema":1,"app_version":"$appVersion"}""".toByteArray(),
     )
 
     private fun stateFile(filesDir: File, localId: String): File =

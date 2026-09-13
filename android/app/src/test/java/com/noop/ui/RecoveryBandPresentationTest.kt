@@ -19,4 +19,27 @@ class RecoveryBandPresentationTest {
         assertEquals(R.string.today_trend_direction_steady, RecoveryBandPresentation.labelRes(41.0))
         assertEquals(R.string.appwide_calendar_legend_strong, RecoveryBandPresentation.labelRes(82.0))
     }
+
+    @Test
+    fun unscoredRecoveryUsesNeutralVisualStates() {
+        assertEquals(
+            TodayRecoveryHeroTone.LEARNING,
+            todayRecoveryHeroTone(recovery = null, calibrationNights = 0),
+        )
+        assertEquals(
+            TodayRecoveryHeroTone.UNAVAILABLE,
+            todayRecoveryHeroTone(recovery = null, calibrationNights = null),
+        )
+        assertEquals(
+            TodayRecoveryHeroTone.BASELINE_READY,
+            todayRecoveryHeroTone(
+                recovery = null,
+                calibrationNights = com.noop.analytics.Baselines.minNightsSeed,
+            ),
+        )
+        assertEquals(
+            TodayRecoveryHeroTone.RECOVERY,
+            todayRecoveryHeroTone(recovery = 72.0, calibrationNights = null),
+        )
+    }
 }

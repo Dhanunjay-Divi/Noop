@@ -94,9 +94,11 @@ struct CalendarMonthView: View {
             switch valence {
             case .higherIsBetter:
                 if self == .recovery {
-                    return [String(localized: "Low"),
-                            String(localized: "Steady"),
-                            String(localized: "Strong")]
+                    return [
+                        0,
+                        RecoveryScorer.bandRedMax,
+                        RecoveryScorer.bandYellowMax,
+                    ].map { RecoveryBandPresentation.label(for: $0) }
                 }
                 return [String(localized: "appwide.calendar.legend.low"),
                         String(localized: "appwide.calendar.legend.middling"),

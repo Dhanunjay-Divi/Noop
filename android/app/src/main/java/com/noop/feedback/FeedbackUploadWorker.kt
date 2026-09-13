@@ -11,7 +11,6 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.noop.AppDiagnosticsRecorder
-import com.noop.BuildConfig
 import java.util.LinkedHashMap
 import java.util.Locale
 import java.util.UUID
@@ -106,6 +105,8 @@ internal object FeedbackRetryPolicy {
             FeedbackRetryDecision(FeedbackFailureCategory.ATTESTATION, true)
         is FeedbackProtocolException.Identity ->
             FeedbackRetryDecision(FeedbackFailureCategory.IDENTITY, true)
+        is FeedbackProtocolException.ReservationPending ->
+            FeedbackRetryDecision(FeedbackFailureCategory.DELETION_PENDING, true)
         is FeedbackProtocolException.Configuration ->
             FeedbackRetryDecision(FeedbackFailureCategory.CONFIGURATION, false)
         is FeedbackProtocolException.InvalidResponse ->
@@ -252,6 +253,12 @@ internal class FeedbackAttemptClient(
         transport.reserve(it, idempotencyKey, request)
     }
 
+    suspend fun recoverReservation(
+        idempotencyKey: UUID,
+    ): FeedbackReservation? = authorization.request {
+        transport.recoverReservation(it, idempotencyKey)
+    }
+
     suspend fun complete(
         reportId: String,
         reportToken: String,
@@ -374,29 +381,33 @@ internal object FeedbackCancellationReconciler {
         outbox: FeedbackOutbox,
         record: FeedbackRecord,
         client: FeedbackAttemptClient,
-        appVersion: String,
     ): FeedbackRecord {
         if (!FeedbackCancellationPolicy.requiresReservationReconciliation(record)) return record
         val identityBound = outbox.bindIdentity(
             localId = record.localId,
             identitySubjectSha256 = client.identitySubjectSha256(),
         )
-        val reservation = client.reserve(
+        val reservation = client.recoverReservation(
             idempotencyKey = UUID.fromString(identityBound.requestId),
-            request = FeedbackReservationRequest(
-                appVersion = appVersion,
-                archiveBytes = identityBound.archiveBytes,
-                archiveSha256 = identityBound.archiveSha256,
-                includesUserNote = identityBound.includesUserNote,
-                includesScreenshot = identityBound.includesScreenshot,
-            ),
-        )
+        ) ?: throw FeedbackProtocolException.ReservationPending()
         return outbox.saveReservation(
             localId = identityBound.localId,
             serverReportId = reservation.reportId,
             serverReportToken = reservation.reportToken,
         )
     }
+}
+
+internal object FeedbackReservationRequestFactory {
+    fun from(record: FeedbackRecord): FeedbackReservationRequest =
+        FeedbackReservationRequest(
+            appVersion = record.appVersion
+                ?: throw FeedbackProtocolException.InvalidResponse(),
+            archiveBytes = record.archiveBytes,
+            archiveSha256 = record.archiveSha256,
+            includesUserNote = record.includesUserNote,
+            includesScreenshot = record.includesScreenshot,
+        )
 }
 
 internal object FeedbackScheduler {
@@ -558,7 +569,7 @@ class FeedbackUploadWorker(
             val configuration = FeedbackConfiguration.load()
                 ?: throw FeedbackProtocolException.Configuration()
             val client = feedbackClient(uploading, configuration)
-            val reservationRequest = reservationRequest(uploading)
+            val reservationRequest = FeedbackReservationRequestFactory.from(uploading)
             val idempotencyKey = UUID.fromString(uploading.requestId)
 
             if (uploading.serverReportId != null) {
@@ -799,7 +810,6 @@ class FeedbackUploadWorker(
                     outbox = outbox,
                     record = canceling,
                     client = client,
-                    appVersion = BuildConfig.VERSION_NAME,
                 )
             }
             val reportId = canceling.serverReportId
@@ -975,14 +985,6 @@ class FeedbackUploadWorker(
         return outbox.bindIdentity(record.localId, identitySubjectSha256)
     }
 
-    private fun reservationRequest(record: FeedbackRecord): FeedbackReservationRequest =
-        FeedbackReservationRequest(
-            appVersion = BuildConfig.VERSION_NAME,
-            archiveBytes = record.archiveBytes,
-            archiveSha256 = record.archiveSha256,
-            includesUserNote = record.includesUserNote,
-            includesScreenshot = record.includesScreenshot,
-        )
 }
 
 private fun FeedbackState.isCancellationState(): Boolean =

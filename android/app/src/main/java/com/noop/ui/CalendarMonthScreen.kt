@@ -731,8 +731,8 @@ private fun CalendarLegend(metric: CalendarMetric) {
     val labels = when {
         metric == CalendarMetric.RECOVERY -> listOf(
             recoveryBandLabel(0.0),
-            recoveryBandLabel(50.0),
-            recoveryBandLabel(100.0),
+            recoveryBandLabel(RecoveryScorer.bandRedMax),
+            recoveryBandLabel(RecoveryScorer.bandYellowMax),
         )
         metric.valence == CalendarMetricValence.HIGHER_IS_BETTER -> listOf(
             stringResource(R.string.appwide_calendar_legend_low),

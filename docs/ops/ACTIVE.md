@@ -94,6 +94,27 @@ Evidence is tracked in
 
 ### Current audited state
 
+A final replacement-head closeout is locally green on
+`codex/product-safety-quality-audit-20260911`. Fresh independent review found
+and closed four additional defects: transient Android report-archive reads no
+longer delete a queue item, Apple wind-down intent survives undetermined
+notification authorization, legacy hydration timestamps have a bounded
+compatibility ceiling, and Android bottom navigation exposes actual tab
+semantics. The exact current tree passes 497 storage-package tests; 1,947
+macOS tests with one expected external-fixture skip; the complete Full/Demo
+Android unit, lint, APK, and instrumentation-compilation wall in 137 tasks; the
+complete PostgreSQL-backed server suite with one provider/environment skip;
+12 OpenTofu tests; an unsigned complete iOS app graph; and all 39 iPhone UI
+tests with one intentional private-pilot skip. The iPhone Today-scroll sample
+averaged 4.709 seconds, 0.138 seconds CPU, and about 67.8 MB peak physical
+memory. The complete localization, health-claims, release-control, required-CI,
+calibration, terminology, legal/distribution, private-data, operations, and
+diff wall also passes. Fresh September 13 window-only evidence separately
+covers scored and unavailable Recovery; the supplied September 9 desktop image
+remains historical evidence. Exact-SHA hosted checks, review-thread resolution,
+protected integration, repository privacy restoration, and round-owned cleanup
+remain pending.
+
 An isolated Android-only parity fork based exactly on
 `f7baaddc0818b238b86962e60c5664eb6b746d34` is complete on
 `codex/android-ui-audit-parity-20260913`. It verifies P1-1 through P1-3 and

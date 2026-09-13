@@ -4006,16 +4006,9 @@ private struct SleepPlannerShortcutCard: View {
                     return
                 }
                 WindDownNudge.setEnabled(true) { outcome in
-                    switch outcome {
-                    case .scheduled:
-                        windDownEnabled = true
-                    case .denied:
-                        windDownEnabled = false
+                    windDownEnabled = outcome.keepsToggleEnabled
+                    if outcome.needsAuthorizationAlert {
                         showNotificationPermissionAlert = true
-                    case .failed:
-                        windDownEnabled = false
-                    case .off:
-                        windDownEnabled = false
                     }
                 }
             }

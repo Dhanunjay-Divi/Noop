@@ -50,6 +50,25 @@ final class WindDownPerDayOverrideTests: XCTestCase {
         }
     }
 
+    func testEnableOutcomePresentationTracksAuthorizationTruth() {
+        XCTAssertTrue(WindDownNudge.EnableOutcome.scheduled.keepsToggleEnabled)
+        XCTAssertFalse(WindDownNudge.EnableOutcome.scheduled.needsAuthorizationAlert)
+
+        XCTAssertFalse(WindDownNudge.EnableOutcome.denied.keepsToggleEnabled)
+        XCTAssertTrue(WindDownNudge.EnableOutcome.denied.needsAuthorizationAlert)
+
+        let revoked = WindDownNudge.EnableOutcome.failed(.authorizationRevoked)
+        XCTAssertFalse(revoked.keepsToggleEnabled)
+        XCTAssertTrue(revoked.needsAuthorizationAlert)
+
+        let retryable = WindDownNudge.EnableOutcome.failed(.notificationCenterRejected)
+        XCTAssertTrue(retryable.keepsToggleEnabled)
+        XCTAssertFalse(retryable.needsAuthorizationAlert)
+
+        XCTAssertFalse(WindDownNudge.EnableOutcome.off.keepsToggleEnabled)
+        XCTAssertFalse(WindDownNudge.EnableOutcome.off.needsAuthorizationAlert)
+    }
+
     func testSetOverride_appliesToThatDayOnly() {
         WindDownNudge.setWakeMinutes(7 * 60)
         WindDownNudge.setWakeOverride(weekday: 7, minutes: 9 * 60)   // Saturday lie-in to 09:00
@@ -551,7 +570,23 @@ final class WindDownPerDayOverrideTests: XCTestCase {
         XCTAssertEqual(client.addAttempts, 0)
     }
 
-    func testNotificationCenterFailureRetriesTwiceThenFailsClosed() async throws {
+    func testUndecidedAuthorizationRetainsRestoredOptInWithoutScheduling() async {
+        UserDefaults.standard.set(true, forKey: enabledKey)
+        let client = FakeWindDownNotificationClient(authorization: .notDetermined)
+
+        let result = await WindDownNudge.reconcileScheduleIfAuthorized(
+            client: client,
+            retryPolicy: .init(maximumAttempts: 2, delayNanoseconds: 0)
+        )
+
+        XCTAssertNil(result)
+        XCTAssertTrue(WindDownNudge.isEnabled)
+        XCTAssertTrue(client.cancelledIdentifierBatches.isEmpty)
+        XCTAssertEqual(client.addAttempts, 0)
+        XCTAssertEqual(client.authorizationChecks, 1)
+    }
+
+    func testNotificationCenterFailureRetriesTwiceThenRetainsOptInForRetry() async throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
         let now = try XCTUnwrap(calendar.date(from: DateComponents(
@@ -575,9 +610,65 @@ final class WindDownPerDayOverrideTests: XCTestCase {
 
         XCTAssertEqual(outcome, .failed(.notificationCenterRejected))
         XCTAssertEqual(client.addAttempts, 2)
-        XCTAssertFalse(WindDownNudge.isEnabled)
+        XCTAssertTrue(WindDownNudge.isEnabled)
         XCTAssertTrue(client.enabledSnapshots.allSatisfy { !$0 })
-        XCTAssertGreaterThanOrEqual(client.cancelledIdentifierBatches.count, 3)
+        XCTAssertNil(UserDefaults.standard.data(forKey: scheduledRemindersKey))
+    }
+
+    func testNotificationCenterFailureThatCoincidesWithRevocationDisablesOptIn() async throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 13,
+            hour: 12
+        )))
+        let client = FakeWindDownNotificationClient(
+            authorization: .authorized,
+            failuresBeforeSuccess: Int.max,
+            revokeAfterAddAttempts: 1
+        )
+
+        let outcome = await WindDownNudge.applyEnabledState(
+            true,
+            client: client,
+            retryPolicy: .init(maximumAttempts: 1, delayNanoseconds: 0),
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(outcome, .failed(.authorizationRevoked))
+        XCTAssertFalse(WindDownNudge.isEnabled)
+        XCTAssertEqual(client.addAttempts, 1)
+        XCTAssertFalse(client.cancelledIdentifierBatches.isEmpty)
+    }
+
+    func testCapacityDeferredInitialScheduleRetainsOptInForRetry() async throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 13,
+            hour: 12
+        )))
+        let client = FakeWindDownNotificationClient(
+            authorization: .authorized,
+            capacityLimitAfter: 0
+        )
+
+        let outcome = await WindDownNudge.applyEnabledState(
+            true,
+            client: client,
+            retryPolicy: .init(maximumAttempts: 1, delayNanoseconds: 0),
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(outcome, .failed(.capacityLimited))
+        XCTAssertTrue(WindDownNudge.isEnabled)
+        XCTAssertEqual(client.addAttempts, 0)
         XCTAssertNil(UserDefaults.standard.data(forKey: scheduledRemindersKey))
     }
 

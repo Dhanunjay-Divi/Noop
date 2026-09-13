@@ -343,6 +343,10 @@ final class ScreenStateContractTests: XCTestCase {
         let sleep = try sourceText("Strand/Screens/SleepView.swift")
         XCTAssertTrue(sleep.contains(#"SectionHeader("Sleep Score""#))
         XCTAssertTrue(sleep.contains("appwide.sleep.imported_confidence_note"))
+        let coupled = try sourceText("Strand/Screens/CoupledView.swift")
+        XCTAssertTrue(coupled.contains(#"SectionHeader("Sleep Score", overline: "Last night")"#))
+        XCTAssertFalse(coupled.contains(#"SectionHeader("Sleep performance""#))
+        XCTAssertTrue(coupled.contains(#"String(localized: "Sleep Score not available")"#))
         let managed = try sourceText("StrandiOS/System/ManagedCloudViews.swift")
         XCTAssertTrue(managed.contains("managedBenefit("))
         XCTAssertTrue(managed.contains(#"title: "Stays local-first""#))
@@ -379,8 +383,11 @@ final class ScreenStateContractTests: XCTestCase {
     func testWorkoutCoachEntryBranchesOnBandAndCurrentRecovery() throws {
         let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
 
-        XCTAssertTrue(liquidToday.contains("if liveSessionBandReady(live)"))
-        XCTAssertTrue(liquidToday.contains("if hasCurrentRecovery"))
+        XCTAssertTrue(liquidToday.contains("private var state: LiveSessionEntryState"))
+        XCTAssertTrue(liquidToday.contains(
+            "bandReady: liveSessionBandReady(live)"
+        ))
+        XCTAssertTrue(liquidToday.contains("switch state"))
         XCTAssertTrue(liquidToday.contains(
             #"Text("appwide.live_session.start_detail_unavailable")"#
         ))
@@ -422,9 +429,10 @@ final class RootDynamicTypeContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(
             "compact && !dynamicTypeSize.isAccessibilitySize"
         ))
-        XCTAssertTrue(shell.contains(
-            ".dynamicTypeSize(...DynamicTypeSize.xxxLarge)"
-        ))
+        XCTAssertTrue(shell.contains("@ScaledMetric(relativeTo: .caption2)"))
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ? 2 : 1"))
+        XCTAssertTrue(shell.contains("FloatingTabBar.expandedBodyHeight("))
+        XCTAssertFalse(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxxLarge)"))
         XCTAssertTrue(shell.contains("accessibilityShowsLargeContentViewer"))
     }
 
@@ -933,7 +941,10 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(classic.contains("StrandPalette.recoveryGaugeColors(s).base"))
         XCTAssertTrue(liquid.contains("StrandPalette.recoveryGaugeColors(score)"))
         XCTAssertTrue(recoveryRing.contains("StrandPalette.recoveryGaugeStops(score)"))
-        XCTAssertTrue(androidToday.contains("Palette.recoveryGaugeColors(it).first"))
+        XCTAssertTrue(androidToday.contains(
+            "TodayRecoveryHeroTone.RECOVERY -> Palette.recoveryGaugeColors"
+        ))
+        XCTAssertTrue(androidToday.contains("tint = todayRecoveryHeroColors("))
         XCTAssertTrue(androidRing.contains("Palette.recoveryGaugeStops(score)"))
     }
 }

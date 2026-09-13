@@ -398,7 +398,7 @@ public struct OnboardingWizard: View {
                 return
             }
             DailyReviewNotifications.setEnabled(true) { outcome in
-                dailyReviewOptIn = outcome == .scheduled
+                dailyReviewOptIn = outcome == .scheduled || outcome == .deferred
                 advanceStep()
             }
             return

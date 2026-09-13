@@ -119,6 +119,8 @@ internal sealed class FeedbackProtocolException(
         FeedbackProtocolException("App attestation is unavailable.", cause)
     class Identity(cause: Throwable? = null) :
         FeedbackProtocolException("Feedback identity is unavailable.", cause)
+    class ReservationPending :
+        FeedbackProtocolException("Feedback reservation state is still pending.")
     class Http(val statusCode: Int) :
         FeedbackProtocolException("Feedback request was rejected.")
     class InvalidResponse :
@@ -271,6 +273,11 @@ internal interface FeedbackTransport {
         request: FeedbackReservationRequest,
     ): FeedbackReservation
 
+    suspend fun recoverReservation(
+        authorization: FeedbackAuthorization,
+        idempotencyKey: UUID,
+    ): FeedbackReservation?
+
     suspend fun upload(
         archive: File,
         expectedBytes: Long,
@@ -338,6 +345,38 @@ internal class FeedbackApiClient(
             expectedBytes = request.archiveBytes,
             expectedSha256 = request.archiveSha256,
         )
+    }
+
+    override suspend fun recoverReservation(
+        authorization: FeedbackAuthorization,
+        idempotencyKey: UUID,
+    ): FeedbackReservation? {
+        val request = apiRequest(
+            method = "GET",
+            authorization = authorization,
+            path = listOf(
+                "v1",
+                "feedback",
+                "reports",
+                "reservations",
+                idempotencyKey.toString().lowercase(Locale.US),
+            ),
+            body = null,
+        )
+        execute(request).use { response ->
+            if (response.code == 404) return null
+            if (!response.isSuccessful) {
+                throw FeedbackProtocolException.Http(response.code)
+            }
+            val json = runCatching { JSONObject(response.readBoundedBody()) }
+                .getOrElse { throw FeedbackProtocolException.InvalidResponse() }
+            return parseReservation(
+                json = json,
+                expectedBytes = null,
+                expectedSha256 = null,
+                requireUploadForReserved = false,
+            )
+        }
     }
 
     override suspend fun upload(
@@ -513,14 +552,15 @@ internal class FeedbackApiClient(
 
     private fun parseReservation(
         json: JSONObject,
-        expectedBytes: Long,
-        expectedSha256: String,
+        expectedBytes: Long?,
+        expectedSha256: String?,
+        requireUploadForReserved: Boolean = true,
     ): FeedbackReservation {
         val reportId = json.requiredOpaque("report_id", SERVER_ID)
         val reportToken = json.requiredOpaque("report_token", SERVER_TOKEN)
         val status = json.requiredStatus()
         val retainedUntil = json.requiredInstant("retained_until")
-        val upload = if (status == "reserved") {
+        val upload = if (status == "reserved" && requireUploadForReserved) {
             json.optJSONObject("upload")
                 ?: throw FeedbackProtocolException.InvalidResponse()
         } else {
@@ -530,10 +570,14 @@ internal class FeedbackApiClient(
             null
         }
         val capability = upload?.let {
+            val bytes = expectedBytes
+                ?: throw FeedbackProtocolException.InvalidResponse()
+            val sha256 = expectedSha256
+                ?: throw FeedbackProtocolException.InvalidResponse()
             parseUploadCapability(
                 upload = it,
-                expectedBytes = expectedBytes,
-                expectedSha256 = expectedSha256,
+                expectedBytes = bytes,
+                expectedSha256 = sha256,
             )
         }
         return FeedbackReservation(

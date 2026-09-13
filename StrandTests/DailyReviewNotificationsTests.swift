@@ -879,6 +879,31 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertEqual(DailyReviewNotifications.eveningMinutes, 19 * 60)
     }
 
+    func testRestoreAuthorizationPolicyRetainsUnpromptedIntentAndFailsClosedOnRevocation() {
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.authorized),
+            .reschedule
+        )
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.provisional),
+            .reschedule
+        )
+        #if os(iOS)
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.ephemeral),
+            .reschedule
+        )
+        #endif
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.notDetermined),
+            .retainOptIn
+        )
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.denied),
+            .disable
+        )
+    }
+
     func testMinuteInputsAreClampedBeforePersistence() {
         DailyReviewNotifications.setMorningMinutes(-20)
         DailyReviewNotifications.setEveningMinutes(9_000)
@@ -948,8 +973,9 @@ final class DailyReviewNotificationsTests: XCTestCase {
             ),
             client: center.client
         )
-        DailyReviewNotifications.applyRescheduleResult(result)
+        let outcome = DailyReviewNotifications.applyAuthorizedScheduleResult(result)
 
+        XCTAssertEqual(outcome, .scheduled)
         XCTAssertTrue(result?.acceptedIdentifiers.isEmpty ?? false)
         XCTAssertEqual(
             Set(result?.retainedIdentifiers ?? []),
@@ -964,6 +990,76 @@ final class DailyReviewNotificationsTests: XCTestCase {
             ),
             Set(eveningIDs)
         )
+    }
+
+    func testTransientDailyReviewScheduleFailureRetainsOptInForRetry() async {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 13,
+            hour: 12
+        ))!
+        let requests = DailyReviewNotifications.notificationRequests(
+            now: now,
+            calendar: calendar
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            failingIdentifiers: Set(requests.map(\.identifier))
+        )
+
+        let result = await DailyReviewNotifications.reconcileSchedule(
+            now: now,
+            calendar: calendar,
+            coordinator: LocalNotificationCapacityCoordinator(
+                capacity: 32,
+                reservedPrioritySlots: 0
+            ),
+            client: center.client
+        )
+        let outcome = DailyReviewNotifications.applyAuthorizedScheduleResult(result)
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertEqual(result?.activeCount, 0)
+        XCTAssertEqual(
+            Set(result?.failedIdentifiers ?? []),
+            Set(requests.map(\.identifier))
+        )
+        XCTAssertTrue(DailyReviewNotifications.isEnabled)
+    }
+
+    func testDailyReviewScheduleResultDisablesOptInWhenAuthorizationWasRevoked() {
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
+        UserDefaults.standard.set(
+            ["daily-review-evening-legacy"],
+            forKey: DailyReviewNotifications.scheduledEveningIDsKey
+        )
+
+        let outcome = DailyReviewNotifications.applyScheduleResult(
+            nil,
+            authorizationStatus: .denied
+        )
+
+        XCTAssertEqual(outcome, .denied)
+        XCTAssertFalse(DailyReviewNotifications.isEnabled)
+        XCTAssertNil(
+            UserDefaults.standard.object(
+                forKey: DailyReviewNotifications.scheduledEveningIDsKey
+            )
+        )
+    }
+
+    func testDailyReviewUndeterminedAuthorizationRetainsIntentWithoutPrompting() {
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
+
+        let outcome = DailyReviewNotifications.applyScheduleResult(
+            nil,
+            authorizationStatus: .notDetermined
+        )
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertTrue(DailyReviewNotifications.isEnabled)
     }
 
     func testFailedStableReplacementKeepsHydrationEnabledAndTracked() async {
@@ -1001,8 +1097,9 @@ final class DailyReviewNotificationsTests: XCTestCase {
             ),
             client: center.client
         )
-        HydrationReminders.applyRescheduleResult(result)
+        let outcome = HydrationReminders.applyAuthorizedScheduleResult(result)
 
+        XCTAssertEqual(outcome, .scheduled)
         XCTAssertTrue(result?.acceptedIdentifiers.isEmpty ?? false)
         XCTAssertEqual(
             Set(result?.retainedIdentifiers ?? []),
@@ -1028,6 +1125,68 @@ final class DailyReviewNotificationsTests: XCTestCase {
             forKey: HydrationReminders.intervalMinutesKey
         )
         UserDefaults.standard.removeObject(forKey: scheduledIDsKey)
+    }
+
+    func testCapacityDeferredHydrationScheduleRetainsOptInForRetry() async {
+        let content = UNMutableNotificationContent()
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        let protected = UNNotificationRequest(
+            identifier: "noop.safety.capacity-guard",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(
+                timeInterval: 3_600,
+                repeats: false
+            )
+        )
+        let center = LocalNotificationCenterCapacitySpy(existing: [protected])
+
+        let result = await HydrationReminders.reconcileSchedule(
+            coordinator: LocalNotificationCapacityCoordinator(
+                capacity: 1,
+                reservedPrioritySlots: 0
+            ),
+            client: center.client
+        )
+        let outcome = HydrationReminders.applyAuthorizedScheduleResult(result)
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertEqual(result?.activeCount, 0)
+        XCTAssertFalse(result?.capacityLimitedIdentifiers.isEmpty ?? true)
+        XCTAssertTrue(HydrationReminders.isEnabled)
+        XCTAssertNotNil(center.requests[protected.identifier])
+    }
+
+    func testHydrationScheduleResultDisablesOptInWhenAuthorizationWasRevoked() {
+        UserDefaults.standard.set(true, forKey: HydrationReminders.enabledKey)
+        UserDefaults.standard.set(
+            ["hydration-reminder-legacy"],
+            forKey: "hydrationReminders.scheduledRequestIDs"
+        )
+
+        let outcome = HydrationReminders.applyScheduleResult(
+            nil,
+            authorizationStatus: .denied
+        )
+
+        XCTAssertEqual(outcome, .denied)
+        XCTAssertFalse(HydrationReminders.isEnabled)
+        XCTAssertNil(
+            UserDefaults.standard.object(
+                forKey: "hydrationReminders.scheduledRequestIDs"
+            )
+        )
+    }
+
+    func testHydrationUndeterminedAuthorizationRetainsIntentWithoutPrompting() {
+        UserDefaults.standard.set(true, forKey: HydrationReminders.enabledKey)
+
+        let outcome = HydrationReminders.applyScheduleResult(
+            nil,
+            authorizationStatus: .notDetermined
+        )
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertTrue(HydrationReminders.isEnabled)
     }
 
     func testPendingNotificationRouteIsConsumedOnce() {

@@ -43,6 +43,7 @@ enum HydrationReminders {
 
     enum EnableOutcome: Equatable, Sendable {
         case scheduled
+        case deferred
         case denied
         case off
     }
@@ -397,12 +398,18 @@ enum HydrationReminders {
         }
         Task { @MainActor in
             let settings = await UNUserNotificationCenter.current().notificationSettings()
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
+            switch DailyReviewNotifications.restoreAuthorizationDisposition(
+                settings.authorizationStatus
+            ) {
+            case .reschedule:
                 requestReschedule()
-            default:
+            case .retainOptIn:
                 recordSuppressedRequests()
-                break
+            case .disable:
+                UserDefaults.standard.set(false, forKey: enabledKey)
+                removeScheduledRequests()
+                cancelMissedResponse()
+                recordSuppressedRequests()
             }
         }
     }
@@ -566,13 +573,14 @@ enum HydrationReminders {
             client: .system(center: center)
         )
         guard generation == scheduleGeneration else { return }
-        if bandFirstEnabled || (result?.activeCount ?? 0) > 0 {
-            UserDefaults.standard.set(true, forKey: enabledKey)
-            completion?(.scheduled)
-        } else {
-            UserDefaults.standard.set(false, forKey: enabledKey)
-            completion?(.off)
-        }
+        let settings = await center.notificationSettings()
+        guard generation == scheduleGeneration else { return }
+        completion?(
+            applyScheduleResult(
+                result,
+                authorizationStatus: settings.authorizationStatus
+            )
+        )
     }
 
     private static func requestReschedule(now: Date = Date()) {
@@ -580,6 +588,24 @@ enum HydrationReminders {
         let generation = scheduleGeneration
         Task { @MainActor in
             let center = UNUserNotificationCenter.current()
+            let initialSettings = await center.notificationSettings()
+            guard generation == scheduleGeneration else { return }
+            switch DailyReviewNotifications.restoreAuthorizationDisposition(
+                initialSettings.authorizationStatus
+            ) {
+            case .retainOptIn:
+                UserDefaults.standard.set(true, forKey: enabledKey)
+                recordSuppressedRequests()
+                return
+            case .disable:
+                _ = applyScheduleResult(
+                    nil,
+                    authorizationStatus: initialSettings.authorizationStatus
+                )
+                return
+            case .reschedule:
+                break
+            }
             DailyReviewNotifications.registerPrivacyCategory(on: center)
             let result = await reconcileSchedule(
                 now: now,
@@ -587,17 +613,49 @@ enum HydrationReminders {
                 client: .system(center: center)
             )
             guard generation == scheduleGeneration else { return }
-            applyRescheduleResult(result)
+            let finalSettings = await center.notificationSettings()
+            guard generation == scheduleGeneration else { return }
+            _ = applyScheduleResult(
+                result,
+                authorizationStatus: finalSettings.authorizationStatus
+            )
         }
     }
 
-    static func applyRescheduleResult(
+    @discardableResult
+    static func applyScheduleResult(
+        _ result: LocalNotificationReconciliationResult?,
+        authorizationStatus: UNAuthorizationStatus
+    ) -> EnableOutcome {
+        switch DailyReviewNotifications.restoreAuthorizationDisposition(
+            authorizationStatus
+        ) {
+        case .reschedule:
+            return applyAuthorizedScheduleResult(result)
+        case .retainOptIn:
+            UserDefaults.standard.set(true, forKey: enabledKey)
+            recordSuppressedRequests()
+            return .deferred
+        case .disable:
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            removeScheduledRequests()
+            cancelMissedResponse()
+            recordSuppressedRequests()
+            return .denied
+        }
+    }
+
+    /// Keep the explicit phone-reminder opt-in across transient Notification Center rejection or
+    /// capacity deferral. Authorization denial and an explicit OFF action remain the only paths that
+    /// clear this preference.
+    @discardableResult
+    static func applyAuthorizedScheduleResult(
         _ result: LocalNotificationReconciliationResult?
-    ) {
-        guard !bandFirstEnabled,
-              let result,
-              result.activeCount == 0 else { return }
-        UserDefaults.standard.set(false, forKey: enabledKey)
+    ) -> EnableOutcome {
+        UserDefaults.standard.set(true, forKey: enabledKey)
+        return bandFirstEnabled || (result?.activeCount ?? 0) > 0
+            ? .scheduled
+            : .deferred
     }
 
     @discardableResult

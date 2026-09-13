@@ -13,7 +13,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +28,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
@@ -123,12 +124,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -1161,67 +1161,26 @@ internal data class BottomBarLabelLayout(
 
 internal fun bottomBarLabelLayout(
     fontScale: Float,
-    availableSlotWidthPx: Int = Int.MAX_VALUE,
-    widestLabelWidthPx: Int = 0,
-    horizontalSafetyPaddingPx: Int = 0,
 ): BottomBarLabelLayout {
-    val slotWidth = availableSlotWidthPx.coerceAtLeast(1)
-    val requiredWidth = (widestLabelWidthPx + horizontalSafetyPaddingPx).coerceAtLeast(1)
-    val maxLines = kotlin.math.ceil(requiredWidth.toDouble() / slotWidth.toDouble())
-        .toInt()
-        .coerceIn(1, 3)
     val scaledLineHeightDp = kotlin.math.ceil(12f * fontScale.coerceAtLeast(1f))
         .toInt()
-    val contentHeightDp = 6 + 18 + 3 + (scaledLineHeightDp * maxLines) + 6
+    val contentHeightDp = 6 + 18 + 3 + scaledLineHeightDp + 6
     return BottomBarLabelLayout(
-        maxLines = maxLines,
+        maxLines = 1,
         barHeightDp = maxOf(56, contentHeightDp),
     )
 }
 
 @Composable
 internal fun rememberBottomBarLabelLayout(
-    labels: List<String>,
-    availableWidth: Dp,
-    horizontalContentPadding: Dp = 0.dp,
-    interItemSpacing: Dp = 0.dp,
-    labelHorizontalSafetyPadding: Dp = 6.dp,
-    labelFontSize: TextUnit = 10.sp,
-): BottomBarLabelLayout {
-    if (labels.isEmpty()) {
-        return bottomBarLabelLayout(fontScale = LocalDensity.current.fontScale)
-    }
-
-    val density = LocalDensity.current
-    val textMeasurer = rememberTextMeasurer(cacheSize = labels.size * 2)
-    val labelStyle = NoopType.footnote.copy(
-        fontSize = labelFontSize,
-        fontWeight = FontWeight.SemiBold,
-    )
-    val usableWidth = (availableWidth - horizontalContentPadding - interItemSpacing)
-        .coerceAtLeast(0.dp)
-    val availableSlotWidthPx = with(density) {
-        (usableWidth.value / labels.size).dp.roundToPx()
-    }
-    val widestLabelWidthPx = labels.maxOf { label ->
-        textMeasurer.measure(
-            text = label,
-            style = labelStyle,
-            softWrap = false,
-            maxLines = 1,
-        ).size.width
-    }
-    val horizontalSafetyPaddingPx = with(density) {
-        labelHorizontalSafetyPadding.roundToPx()
-    }
-
-    return bottomBarLabelLayout(
-        fontScale = density.fontScale,
-        availableSlotWidthPx = availableSlotWidthPx,
-        widestLabelWidthPx = widestLabelWidthPx,
-        horizontalSafetyPaddingPx = horizontalSafetyPaddingPx,
-    )
-}
+    @Suppress("UNUSED_PARAMETER") labels: List<String> = emptyList(),
+    @Suppress("UNUSED_PARAMETER") availableWidth: Dp = 0.dp,
+    @Suppress("UNUSED_PARAMETER") horizontalContentPadding: Dp = 0.dp,
+    @Suppress("UNUSED_PARAMETER") interItemSpacing: Dp = 0.dp,
+    @Suppress("UNUSED_PARAMETER") labelHorizontalSafetyPadding: Dp = 6.dp,
+    @Suppress("UNUSED_PARAMETER") labelFontSize: TextUnit = 10.sp,
+): BottomBarLabelLayout =
+    bottomBarLabelLayout(fontScale = LocalDensity.current.fontScale)
 
 @Composable
 private fun GlassBottomBar(
@@ -1245,27 +1204,18 @@ private fun GlassBottomBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BoxWithConstraints(
+            Box(
                 modifier = Modifier
                     .weight(1f),
             ) {
-                val tabLabels = buildList {
-                    barLeadingTabs.forEach { add(stringResource(it.labelRes)) }
-                    barTrailingTabs.forEach { add(stringResource(it.labelRes)) }
-                    add(stringResource(R.string.nav_more))
-                }
-                val labelLayout = rememberBottomBarLabelLayout(
-                    labels = tabLabels,
-                    availableWidth = maxWidth,
-                    horizontalContentPadding = 12.dp,
-                    interItemSpacing = 4.dp,
-                )
+                val labelLayout = rememberBottomBarLabelLayout()
                 Row(
                     modifier = Modifier
                         .height(labelLayout.barHeightDp.dp)
                         .fillMaxSize()
                         .navigationGlassSurface(barShape)
-                        .padding(horizontal = 6.dp),
+                        .padding(horizontal = 6.dp)
+                        .selectableGroup(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
@@ -1474,15 +1424,16 @@ private fun BarSlot(
                     Modifier
                 },
             )
-            .clickable(
+            .selectable(
+                selected = active,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                role = Role.Tab,
                 onClick = onClick,
             )
             .padding(vertical = 3.dp)
             .semantics {
                 contentDescription = label
-                selected = active
             },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
@@ -1508,6 +1459,7 @@ private fun BarSlot(
             ),
             color = tint,
             maxLines = labelMaxLines,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             modifier = Modifier

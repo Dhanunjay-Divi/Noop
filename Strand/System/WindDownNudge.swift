@@ -572,6 +572,26 @@ enum WindDownNudge {
         case denied
         case failed(WindDownScheduleFailure)
         case off
+
+        var keepsToggleEnabled: Bool {
+            switch self {
+            case .scheduled:
+                true
+            case .failed(let failure):
+                failure != .authorizationRevoked
+            case .denied, .off:
+                false
+            }
+        }
+
+        var needsAuthorizationAlert: Bool {
+            switch self {
+            case .denied, .failed(.authorizationRevoked):
+                true
+            case .scheduled, .failed, .off:
+                false
+            }
+        }
     }
 
     /// Enable/disable and (re)schedule. Enabling gates on notification authorization FIRST — mirroring the
@@ -675,30 +695,27 @@ enum WindDownNudge {
         guard let result,
               isSchedulingOwner(ownerGeneration),
               isCurrentStateMutation(expectedMutation) else { return .off }
-        switch result {
-        case .scheduled:
-            guard await client.authorization() == .authorized else {
-                guard isSchedulingOwner(ownerGeneration),
-                      isCurrentStateMutation(expectedMutation) else { return .off }
-                persistEnabled(false)
-                cancelAllScheduledReminders(using: client)
-                LocalNotificationLifecycle.suppressed(
-                    identifier: requestId,
-                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
-                )
-                return .failed(.authorizationRevoked)
-            }
+        guard await client.authorization() == .authorized else {
             guard isSchedulingOwner(ownerGeneration),
                   isCurrentStateMutation(expectedMutation) else { return .off }
+            persistEnabled(false)
+            cancelAllScheduledReminders(using: client)
+            LocalNotificationLifecycle.suppressed(
+                identifier: requestId,
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+            return .failed(.authorizationRevoked)
+        }
+        guard isSchedulingOwner(ownerGeneration),
+              isCurrentStateMutation(expectedMutation) else { return .off }
+        switch result {
+        case .scheduled:
             persistEnabled(true)
             return .scheduled
         case .failed(let failure):
-            if storedScheduledReminders.isEmpty {
-                persistEnabled(false)
-                cancelAllScheduledReminders(using: client)
-            } else {
-                persistEnabled(true)
-            }
+            // Authorization succeeded and the user explicitly opted in. Notification Center capacity
+            // or a transient add failure is retryable, even when no older accepted schedule exists.
+            persistEnabled(true)
             return .failed(failure)
         }
     }
@@ -836,8 +853,18 @@ enum WindDownNudge {
             cancelAllScheduledReminders(using: client)
             return nil
         }
-        guard await client.authorization() == .authorized else {
-            guard isSchedulingOwner(ownerGeneration) else { return nil }
+        let authorization = await client.authorization()
+        guard isSchedulingOwner(ownerGeneration) else { return nil }
+        switch authorization {
+        case .authorized:
+            break
+        case .notDetermined:
+            LocalNotificationLifecycle.suppressed(
+                identifier: requestId,
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+            return nil
+        case .denied:
             persistEnabled(false)
             cancelAllScheduledReminders(using: client)
             LocalNotificationLifecycle.suppressed(
@@ -858,8 +885,7 @@ enum WindDownNudge {
               isSchedulingOwner(ownerGeneration),
               isLatestSchedulingIntent(ownerGeneration),
               isEnabled else { return nil }
-        if case .scheduled = result,
-           await client.authorization() != .authorized {
+        if await client.authorization() != .authorized {
             guard isSchedulingOwner(ownerGeneration),
                   isLatestSchedulingIntent(ownerGeneration) else { return nil }
             persistEnabled(false)
@@ -869,10 +895,6 @@ enum WindDownNudge {
                 categoryIdentifier: DailyReviewNotifications.privacyCategoryID
             )
             return .failed(.authorizationRevoked)
-        }
-        if case .failed = result, storedScheduledReminders.isEmpty {
-            persistEnabled(false)
-            cancelAllScheduledReminders(using: client)
         }
         return result
     }

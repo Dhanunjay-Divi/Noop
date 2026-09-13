@@ -103,6 +103,15 @@ class FeedbackRepository(Protocol):
         client_app_id: str,
     ) -> FeedbackReport: ...
 
+    async def get_by_idempotency(
+        self,
+        *,
+        client_app_id: str,
+        principal_hash_version: int,
+        principal_hash: str,
+        idempotency_hash: str,
+    ) -> FeedbackReport: ...
+
     async def mark_sent(
         self,
         *,
@@ -362,6 +371,29 @@ class MemoryFeedbackRepository:
     ) -> FeedbackReport:
         async with self._lock:
             return self._get(report_id, client_app_id)
+
+    async def get_by_idempotency(
+        self,
+        *,
+        client_app_id: str,
+        principal_hash_version: int,
+        principal_hash: str,
+        idempotency_hash: str,
+    ) -> FeedbackReport:
+        async with self._lock:
+            report_id = self._idempotency.get(
+                (
+                    client_app_id,
+                    principal_hash_version,
+                    principal_hash,
+                    idempotency_hash,
+                )
+            )
+            if report_id is None:
+                raise FeedbackNotFoundError("feedback report was not found")
+            report = self._get(report_id, client_app_id)
+            _require_authorizable_principal(report)
+            return report
 
     async def mark_sent(
         self,
@@ -1058,6 +1090,35 @@ class PostgresFeedbackRepository:
         if row is None:
             raise FeedbackNotFoundError("feedback report was not found")
         return self._row(row)
+
+    async def get_by_idempotency(
+        self,
+        *,
+        client_app_id: str,
+        principal_hash_version: int,
+        principal_hash: str,
+        idempotency_hash: str,
+    ) -> FeedbackReport:
+        pool = self.primary._require_pool()
+        row = await pool.fetchrow(
+            """
+            SELECT *
+            FROM feedback_reports
+            WHERE client_app_id = $1
+              AND COALESCE(principal_hash_version, 0) = $2
+              AND COALESCE(principal_hash, subject_hash) = $3
+              AND idempotency_hash = $4
+            """,
+            client_app_id,
+            principal_hash_version,
+            principal_hash,
+            idempotency_hash,
+        )
+        if row is None:
+            raise FeedbackNotFoundError("feedback report was not found")
+        report = self._row(row)
+        _require_authorizable_principal(report)
+        return report
 
     async def mark_sent(
         self,

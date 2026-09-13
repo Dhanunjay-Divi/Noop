@@ -519,7 +519,57 @@ def test_feedback_reserve_complete_status_and_delete_are_capability_bound() -> N
         assert deleted.status_code == 202
         assert deleted.json()["status"] == "deleting"
         assert deleted.json()["receipt"] is None
-        assert store.deleted is True
+    assert store.deleted is True
+
+
+def test_feedback_reservation_recovery_is_identity_bound_and_read_only() -> None:
+    archive = _archive()
+    client, store, _ = _client()
+    idempotency_key = str(uuid4())
+    owner_headers = {
+        **_headers(),
+        "Idempotency-Key": idempotency_key,
+    }
+    with client:
+        reserved = client.post(
+            "/v1/feedback/reports/reservations",
+            headers=owner_headers,
+            json=_reservation_payload(archive),
+        )
+        assert reserved.status_code == 201
+        reservation = reserved.json()
+        capability_calls = store.upload_capability_calls
+
+        recovered = client.get(
+            f"/v1/feedback/reports/reservations/{idempotency_key}",
+            headers={
+                "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+                "Authorization": f"Bearer {IDENTITY_TOKEN}",
+            },
+        )
+        wrong_identity = client.get(
+            f"/v1/feedback/reports/reservations/{idempotency_key}",
+            headers={
+                "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+                "Authorization": f"Bearer {OTHER_IDENTITY_TOKEN}",
+            },
+        )
+        missing = client.get(
+            f"/v1/feedback/reports/reservations/{uuid4()}",
+            headers={
+                "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+                "Authorization": f"Bearer {IDENTITY_TOKEN}",
+            },
+        )
+
+    assert recovered.status_code == 200
+    assert recovered.json()["report_id"] == reservation["report_id"]
+    assert recovered.json()["report_token"] == reservation["report_token"]
+    assert recovered.json()["status"] == "reserved"
+    assert recovered.json()["upload"] is None
+    assert store.upload_capability_calls == capability_calls
+    assert wrong_identity.status_code == 404
+    assert missing.status_code == 404
 
 
 def test_feedback_cancel_succeeds_before_an_object_exists() -> None:
@@ -1027,9 +1077,13 @@ def test_feedback_drain_mode_rejects_new_reservations_but_keeps_control() -> Non
     active_client, store, repository = _client()
     headers = _headers()
     with active_client:
+        idempotency_key = str(uuid4())
         reserved = active_client.post(
             "/v1/feedback/reports/reservations",
-            headers=headers,
+            headers={
+                **headers,
+                "Idempotency-Key": idempotency_key,
+            },
             json=_reservation_payload(archive),
         )
         assert reserved.status_code == 201
@@ -1055,6 +1109,13 @@ def test_feedback_drain_mode_rejects_new_reservations_but_keeps_control() -> Non
             f"/v1/feedback/reports/{body['report_id']}",
             headers=capability_headers,
         )
+        recovered = drain_client.get(
+            f"/v1/feedback/reports/reservations/{idempotency_key}",
+            headers={
+                "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+                "Authorization": f"Bearer {IDENTITY_TOKEN}",
+            },
+        )
         deleted = drain_client.delete(
             f"/v1/feedback/reports/{body['report_id']}",
             headers=capability_headers,
@@ -1064,6 +1125,9 @@ def test_feedback_drain_mode_rejects_new_reservations_but_keeps_control() -> Non
     assert rejected.headers["Retry-After"] == "300"
     assert current.status_code == 200
     assert current.json()["status"] == "reserved"
+    assert recovered.status_code == 200
+    assert recovered.json()["report_id"] == body["report_id"]
+    assert recovered.json()["upload"] is None
     assert deleted.status_code == 202
     assert deleted.json()["status"] == "deleting"
 

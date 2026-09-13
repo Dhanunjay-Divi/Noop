@@ -39,6 +39,11 @@ private enum HydrationPersistenceError: Error {
     case writeRejected
 }
 
+private enum HydrationEntryWriteIntent {
+    case currentWrite
+    case legacyCorrection
+}
+
 enum HydrationStore {
     /// Source/device id the hydration total is written under — its own local-only source so it is never
     /// confused with strap-imported or computed metrics. MUST match the Android `SOURCE_ID`.
@@ -67,6 +72,21 @@ enum HydrationStore {
     static func confirmedTotal(_ value: Double?) -> Double? {
         guard let value, value.isFinite, value > 0 else { return nil }
         return value
+    }
+
+    static func legacyScalarAmountML(_ value: Double) throws -> Int {
+        let maximum = Double(WhoopStore.hydrationLegacyMaximumML)
+        guard value.isFinite,
+              value > 0,
+              value <= maximum else {
+            throw HydrationPersistenceError.invalidStoredEntry
+        }
+        let rounded = max(1, value.rounded())
+        guard rounded <= maximum,
+              let amountML = Int(exactly: rounded) else {
+            throw HydrationPersistenceError.invalidStoredEntry
+        }
+        return amountML
     }
 
     static func observedTotal(_ noopML: Double?, _ appleHealthML: Double?) -> Double? {
@@ -433,7 +453,7 @@ extension Repository {
                     at: loggedAt
                 )
                 let next = try await store.replaceHydrationLogEntries(
-                    Self.storedHydrationEntries(entries, day: dayKey),
+                    try Self.storedHydrationEntries(entries, day: dayKey),
                     deviceId: HydrationStore.sourceId,
                     day: dayKey,
                     metricKey: HydrationStore.key
@@ -485,11 +505,10 @@ extension Repository {
 
         let legacy = Self.legacyHydrationEntries(day: dayKey)
         if !legacy.isEmpty {
-            _ = try await store.replaceHydrationLogEntries(
-                Self.storedHydrationEntries(legacy, day: dayKey),
-                deviceId: HydrationStore.sourceId,
+            try await migrateLegacyHydrationEntries(
+                legacy,
                 day: dayKey,
-                metricKey: HydrationStore.key
+                store: store
             )
             UserDefaults.standard.removeObject(
                 forKey: HydrationStore.entriesKey(forDay: dayKey)
@@ -508,17 +527,42 @@ extension Repository {
         }
         let migrated = [
             HydrationEntry(
-                amountMl: max(1, Int(existingTotal.rounded())),
+                amountMl: try HydrationStore.legacyScalarAmountML(existingTotal),
                 loggedAt: representedDay
             ),
         ]
-        _ = try await store.replaceHydrationLogEntries(
-            Self.storedHydrationEntries(migrated, day: dayKey),
-            deviceId: HydrationStore.sourceId,
+        try await migrateLegacyHydrationEntries(
+            migrated,
             day: dayKey,
-            metricKey: HydrationStore.key
+            store: store
         )
         return migrated
+    }
+
+    private func migrateLegacyHydrationEntries(
+        _ entries: [HydrationEntry],
+        day dayKey: String,
+        store: WhoopStore
+    ) async throws {
+        do {
+            _ = try await store.migrateLegacyHydrationLogEntries(
+                try Self.storedHydrationEntries(entries, day: dayKey),
+                deviceId: HydrationStore.sourceId,
+                day: dayKey,
+                metricKey: HydrationStore.key
+            )
+            recordHydrationPersistence(
+                operation: "legacy_migration",
+                outcome: "saved"
+            )
+        } catch {
+            recordHydrationPersistence(
+                operation: "legacy_migration",
+                outcome: "failed",
+                failureKind: AppDiagnosticsRecorder.failureKind(error)
+            )
+            throw error
+        }
     }
 
     /// Delete one logged entry by id, then re-derive the day total from the surviving entries and re-bank it
@@ -539,7 +583,8 @@ extension Repository {
                 return await persistHydrationEntries(
                     next,
                     day: dayKey,
-                    operation: "delete"
+                    operation: "delete",
+                    intent: .legacyCorrection
                 )
             } catch {
                 recordHydrationPersistence(
@@ -571,7 +616,8 @@ extension Repository {
                 return await persistHydrationEntries(
                     next,
                     day: dayKey,
-                    operation: "update"
+                    operation: "update",
+                    intent: .legacyCorrection
                 )
             } catch {
                 recordHydrationPersistence(
@@ -589,7 +635,8 @@ extension Repository {
     private func persistHydrationEntries(
         _ entries: [HydrationEntry],
         day dayKey: String,
-        operation: String
+        operation: String,
+        intent: HydrationEntryWriteIntent = .currentWrite
     ) async -> HydrationMutationResult {
         #if DEBUG
         if hydrationWriteFailureForTesting {
@@ -610,12 +657,24 @@ extension Repository {
             return .failed
         }
         do {
-            let total = try await store.replaceHydrationLogEntries(
-                Self.storedHydrationEntries(entries, day: dayKey),
-                deviceId: HydrationStore.sourceId,
-                day: dayKey,
-                metricKey: HydrationStore.key
-            )
+            let storedEntries = try Self.storedHydrationEntries(entries, day: dayKey)
+            let total: Double?
+            switch intent {
+            case .currentWrite:
+                total = try await store.replaceHydrationLogEntries(
+                    storedEntries,
+                    deviceId: HydrationStore.sourceId,
+                    day: dayKey,
+                    metricKey: HydrationStore.key
+                )
+            case .legacyCorrection:
+                total = try await store.replaceHydrationLogEntriesAllowingLegacyReduction(
+                    storedEntries,
+                    deviceId: HydrationStore.sourceId,
+                    day: dayKey,
+                    metricKey: HydrationStore.key
+                )
+            }
             noteHydrationChanged()
             recordHydrationPersistence(operation: operation, outcome: "saved")
             return .saved(totalML: total)
@@ -659,10 +718,14 @@ extension Repository {
         _ stored: [HydrationLogEntry]
     ) throws -> [HydrationEntry] {
         try stored.map { entry in
+            // Current limits are write-time policy. Older valid rows may exceed them and must remain
+            // visible so the user can reduce or clear the day through the guarded correction path.
             guard let id = UUID(uuidString: entry.id),
                   HydrationStore.isValidDayKey(entry.day),
                   entry.amountML > 0,
-                  entry.loggedAt > 0 else {
+                  entry.amountML <= WhoopStore.hydrationLegacyMaximumML,
+                  entry.loggedAt > 0,
+                  entry.loggedAt <= WhoopStore.hydrationLatestCompatibleUnixSecond else {
                 throw HydrationPersistenceError.invalidStoredEntry
             }
             let loggedAt = Date(timeIntervalSince1970: TimeInterval(entry.loggedAt))
@@ -680,13 +743,23 @@ extension Repository {
     fileprivate static func storedHydrationEntries(
         _ entries: [HydrationEntry],
         day dayKey: String
-    ) -> [HydrationLogEntry] {
-        entries.map {
-            HydrationLogEntry(
-                id: $0.id.uuidString.lowercased(),
+    ) throws -> [HydrationLogEntry] {
+        try entries.map { entry in
+            let seconds = entry.loggedAt.timeIntervalSince1970
+            let wholeSeconds = seconds.rounded(.towardZero)
+            guard seconds.isFinite,
+                  seconds > 0,
+                  seconds <= Double(WhoopStore.hydrationLatestCompatibleUnixSecond),
+                  let loggedAt = Int(exactly: wholeSeconds),
+                  loggedAt > 0,
+                  loggedAt <= WhoopStore.hydrationLatestCompatibleUnixSecond else {
+                throw HydrationPersistenceError.invalidStoredEntry
+            }
+            return HydrationLogEntry(
+                id: entry.id.uuidString.lowercased(),
                 day: dayKey,
-                amountML: $0.amountMl,
-                loggedAt: max(1, Int($0.loggedAt.timeIntervalSince1970))
+                amountML: entry.amountMl,
+                loggedAt: loggedAt
             )
         }
     }

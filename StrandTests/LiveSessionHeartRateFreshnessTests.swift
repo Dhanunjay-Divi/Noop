@@ -20,6 +20,30 @@ final class LiveSessionHeartRateFreshnessTests: XCTestCase {
         XCTAssertFalse(liveSessionBandReady(live))
     }
 
+    func testCoachEntryPrioritizesBandReadinessThenCurrentRecovery() {
+        XCTAssertEqual(
+            LiveSessionEntryState.resolve(
+                bandReady: false,
+                hasCurrentRecovery: true
+            ),
+            .bandRequired
+        )
+        XCTAssertEqual(
+            LiveSessionEntryState.resolve(
+                bandReady: true,
+                hasCurrentRecovery: false
+            ),
+            .recoveryUnavailable
+        )
+        XCTAssertEqual(
+            LiveSessionEntryState.resolve(
+                bandReady: true,
+                hasCurrentRecovery: true
+            ),
+            .ready
+        )
+    }
+
     func testSilentTransportDoesNotConsumeCachedPreSessionHeartRate() {
         let live = LiveState()
         live.setHeartRate(140)

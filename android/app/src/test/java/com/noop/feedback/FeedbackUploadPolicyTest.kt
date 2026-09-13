@@ -102,6 +102,19 @@ class FeedbackUploadPolicyTest {
             ),
         )
         assertTrue(FeedbackRetryPolicy.shouldRetryCancellation(retryable, attempt = 1))
+        val reservationPending = FeedbackRetryPolicy.classify(
+            FeedbackProtocolException.ReservationPending(),
+        )
+        assertEquals(
+            FeedbackFailureCategory.DELETION_PENDING,
+            reservationPending.category,
+        )
+        assertTrue(
+            FeedbackRetryPolicy.shouldRetryCancellation(
+                reservationPending,
+                attempt = 1,
+            ),
+        )
         assertFalse(
             FeedbackRetryPolicy.shouldRetryCancellation(
                 retryable,
@@ -441,16 +454,22 @@ class FeedbackUploadPolicyTest {
         val staged = outbox.stage(
             entries = listOf(
                 "report.txt" to "NOOP app runtime report\n".toByteArray(),
-                "meta.json" to "{\"schema\":1}".toByteArray(),
+                "meta.json" to
+                    """{"schema":1,"app_version":"1.0.0"}""".toByteArray(),
             ),
             includesUserNote = false,
             includesScreenshot = false,
         )
         outbox.beginUpload(staged.localId, attempt = 1)
+        val restartedOutbox = FeedbackOutbox(
+            filesDir = filesDir,
+            nowMillis = { 1_789_000_000_000L },
+        )
 
         val remoteReportId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
         val remoteReportToken = "v2." + "a".repeat(43)
         var reservationReplays = 0
+        var reservationRecoveries = 0
         var deletionRequests = 0
         val client = FeedbackAttemptClient(
             provider = stableAuthorizationProvider(),
@@ -461,6 +480,22 @@ class FeedbackUploadPolicyTest {
                     request: FeedbackReservationRequest,
                 ): FeedbackReservation {
                     reservationReplays += 1
+                    assertEquals(UUID.fromString(staged.requestId), idempotencyKey)
+                    assertEquals("1.0.0", request.appVersion)
+                    return FeedbackReservation(
+                        reportId = remoteReportId,
+                        reportToken = remoteReportToken,
+                        status = "reserved",
+                        upload = null,
+                        retainedUntil = "2026-10-12T00:00:00Z",
+                    )
+                }
+
+                override suspend fun recoverReservation(
+                    authorization: FeedbackAuthorization,
+                    idempotencyKey: UUID,
+                ): FeedbackReservation {
+                    reservationRecoveries += 1
                     assertEquals(UUID.fromString(staged.requestId), idempotencyKey)
                     return FeedbackReservation(
                         reportId = remoteReportId,
@@ -505,22 +540,212 @@ class FeedbackUploadPolicyTest {
         )
 
         // The first remote reservation succeeded, but the process stopped before state.json was updated.
-        val canceling = outbox.requestCancel(staged.localId)
+        val canceling = restartedOutbox.requestCancel(staged.localId)
         val reconciled = FeedbackCancellationReconciler.reconcile(
-            outbox = outbox,
+            outbox = restartedOutbox,
             record = canceling,
             client = client,
-            appVersion = "1.0.0",
         )
         val deletion = client.cancel(
             reportId = reconciled.serverReportId!!,
             reportToken = reconciled.serverReportToken!!,
         )
 
-        assertEquals(1, reservationReplays)
+        assertEquals(0, reservationReplays)
+        assertEquals(1, reservationRecoveries)
         assertEquals(remoteReportId, reconciled.serverReportId)
         assertEquals("deleted", deletion.status)
         assertEquals(1, deletionRequests)
+    }
+
+    @Test
+    fun cancellationKeepsAmbiguousReservationPendingWhenRecoveryReturnsMissing() = runTest {
+        val filesDir = temporary.newFolder("missing-ambiguous-reservation")
+        var next = 1L
+        val outbox = FeedbackOutbox(
+            filesDir = filesDir,
+            idFactory = { UUID(0L, next++) },
+            nowMillis = { 1_789_000_000_000L },
+        )
+        val staged = outbox.stage(
+            entries = listOf(
+                "report.txt" to "NOOP app runtime report\n".toByteArray(),
+                "meta.json" to
+                    """{"schema":1,"app_version":"1.0.0"}""".toByteArray(),
+            ),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        val canceling = outbox.requestCancel(staged.localId)
+        val client = FeedbackAttemptClient(
+            provider = stableAuthorizationProvider(),
+            transport = object : FeedbackTransport {
+                override suspend fun reserve(
+                    authorization: FeedbackAuthorization,
+                    idempotencyKey: UUID,
+                    request: FeedbackReservationRequest,
+                ): FeedbackReservation =
+                    throw AssertionError("Cancellation must not replay a payload")
+
+                override suspend fun recoverReservation(
+                    authorization: FeedbackAuthorization,
+                    idempotencyKey: UUID,
+                ): FeedbackReservation? = null
+
+                override suspend fun upload(
+                    archive: File,
+                    expectedBytes: Long,
+                    expectedSha256: String,
+                    capability: FeedbackUploadCapability,
+                    progress: (uploadedBytes: Long, totalBytes: Long) -> Unit,
+                ) = Unit
+
+                override suspend fun complete(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ) = FeedbackRemoteStatus("sent", receipt = null, retainedUntil = null)
+
+                override suspend fun status(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ) = FeedbackRemoteStatus("reserved", receipt = null, retainedUntil = null)
+
+                override suspend fun cancel(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ) = FeedbackRemoteStatus("deleted", receipt = null, retainedUntil = null)
+            },
+        )
+
+        try {
+            FeedbackCancellationReconciler.reconcile(
+                outbox = outbox,
+                record = canceling,
+                client = client,
+            )
+            fail("An ambiguous reservation must remain retryable")
+        } catch (_: FeedbackProtocolException.ReservationPending) {
+            // Expected: a late reservation may still commit after the missing recovery response.
+        }
+
+        val retained = outbox.load(staged.localId)!!
+        assertEquals(FeedbackState.CANCELING, retained.state)
+        assertEquals(null, retained.serverReportId)
+        assertEquals(null, retained.serverReportToken)
+        assertTrue(retained.localArchiveRemoved)
+    }
+
+    @Test
+    fun archiveFreeLegacyCancellationRecoversByIdempotencyWithoutAppVersion() = runTest {
+        val filesDir = temporary.newFolder("legacy-archive-free-cancellation")
+        var next = 1L
+        val outbox = FeedbackOutbox(
+            filesDir = filesDir,
+            idFactory = { UUID(0L, next++) },
+            nowMillis = { 1_789_000_000_000L },
+        )
+        val staged = outbox.stage(
+            entries = listOf(
+                "report.txt" to "NOOP app runtime report\n".toByteArray(),
+                "meta.json" to
+                    """{"schema":1,"app_version":"1.0.0"}""".toByteArray(),
+            ),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        outbox.requestCancel(staged.localId)
+        val stateFile = File(
+            filesDir,
+            "feedback/outbox/${staged.localId}/state.json",
+        )
+        val legacyState = org.json.JSONObject(stateFile.readText())
+            .apply { remove("app_version") }
+        stateFile.writeText(legacyState.toString())
+        val restarted = FeedbackOutbox(
+            filesDir = filesDir,
+            nowMillis = { 1_789_000_000_000L },
+        )
+        val canceling = restarted.load(staged.localId)!!
+        assertEquals(null, canceling.appVersion)
+        assertTrue(canceling.localArchiveRemoved)
+
+        val remoteReportId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        val remoteReportToken = "v2." + "a".repeat(43)
+        val client = FeedbackAttemptClient(
+            provider = stableAuthorizationProvider(),
+            transport = object : FeedbackTransport {
+                override suspend fun reserve(
+                    authorization: FeedbackAuthorization,
+                    idempotencyKey: UUID,
+                    request: FeedbackReservationRequest,
+                ): FeedbackReservation =
+                    throw AssertionError("Cancellation must not replay a payload")
+
+                override suspend fun recoverReservation(
+                    authorization: FeedbackAuthorization,
+                    idempotencyKey: UUID,
+                ) = FeedbackReservation(
+                    reportId = remoteReportId,
+                    reportToken = remoteReportToken,
+                    status = "reserved",
+                    upload = null,
+                    retainedUntil = "2026-10-12T00:00:00Z",
+                )
+
+                override suspend fun upload(
+                    archive: File,
+                    expectedBytes: Long,
+                    expectedSha256: String,
+                    capability: FeedbackUploadCapability,
+                    progress: (uploadedBytes: Long, totalBytes: Long) -> Unit,
+                ) = Unit
+
+                override suspend fun complete(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ) = FeedbackRemoteStatus("sent", receipt = null, retainedUntil = null)
+
+                override suspend fun status(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ) = FeedbackRemoteStatus("reserved", receipt = null, retainedUntil = null)
+
+                override suspend fun cancel(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ) = FeedbackRemoteStatus("deleted", receipt = null, retainedUntil = null)
+            },
+        )
+
+        val recovered = FeedbackCancellationReconciler.reconcile(
+            outbox = restarted,
+            record = canceling,
+            client = client,
+        )
+
+        assertEquals(remoteReportId, recovered.serverReportId)
+        assertEquals(remoteReportToken, recovered.serverReportToken)
+        assertEquals(null, recovered.appVersion)
+    }
+
+    @Test
+    fun reservationRequestUsesTheStagedVersionInsteadOfTheInstalledVersion() {
+        val request = FeedbackReservationRequestFactory.from(
+            feedbackRecord(
+                state = FeedbackState.UPLOADING,
+                appVersion = "8.4.1",
+            ),
+        )
+
+        assertEquals("8.4.1", request.appVersion)
     }
 
     @Test
@@ -614,9 +839,11 @@ class FeedbackUploadPolicyTest {
         attempt: Int = 0,
         serverReportId: String? = null,
         updatedAtMillis: Long = 1_000L,
+        appVersion: String? = "1.0.0",
     ) = FeedbackRecord(
         localId = "11111111-1111-4111-8111-111111111111",
         requestId = "22222222-2222-4222-8222-222222222222",
+        appVersion = appVersion,
         serverReportId = serverReportId,
         serverReportToken = serverReportId?.let { "v2." + "a".repeat(43) },
         identitySubjectSha256 = feedbackIdentitySubjectSha256("stable-feedback-owner"),

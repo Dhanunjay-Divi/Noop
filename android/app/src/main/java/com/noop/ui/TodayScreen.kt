@@ -3805,6 +3805,37 @@ private fun WorkoutInProgressCard(
     }
 }
 
+internal enum class LiveSessionEntryState {
+    BAND_REQUIRED,
+    RECOVERY_UNAVAILABLE,
+    READY,
+}
+
+internal fun liveSessionEntryState(
+    bandReady: Boolean,
+    hasCurrentRecovery: Boolean,
+): LiveSessionEntryState = when {
+    !bandReady -> LiveSessionEntryState.BAND_REQUIRED
+    !hasCurrentRecovery -> LiveSessionEntryState.RECOVERY_UNAVAILABLE
+    else -> LiveSessionEntryState.READY
+}
+
+@StringRes
+internal fun liveSessionEntryTitleRes(state: LiveSessionEntryState): Int = when (state) {
+    LiveSessionEntryState.BAND_REQUIRED -> R.string.appwide_live_session_connect_band
+    LiveSessionEntryState.RECOVERY_UNAVAILABLE,
+    LiveSessionEntryState.READY,
+    -> R.string.appwide_live_session_start
+}
+
+@StringRes
+internal fun liveSessionEntryDetailRes(state: LiveSessionEntryState): Int = when (state) {
+    LiveSessionEntryState.BAND_REQUIRED -> R.string.appwide_live_session_band_required
+    LiveSessionEntryState.RECOVERY_UNAVAILABLE ->
+        R.string.appwide_live_session_start_detail_unavailable
+    LiveSessionEntryState.READY -> R.string.appwide_live_session_start_detail
+}
+
 /**
  * The compact Silent Guardian entry under the hero. Three honest states off the
  * process-wide [LiveSessionRunner.active]: no session → start affordance; session running → the way back
@@ -3832,17 +3863,9 @@ private fun LiveSessionEntryCard(
     }
     val teal = Palette.metricCyan
     val bandReady = live.connected && live.bonded && live.encryptedBond && live.worn
-    val startTitle = stringResource(
-        if (bandReady) R.string.appwide_live_session_start
-        else R.string.appwide_live_session_connect_band,
-    )
-    val startDetail = stringResource(
-        when {
-            !bandReady -> R.string.appwide_live_session_band_required
-            !hasCurrentRecovery -> R.string.appwide_live_session_start_detail_unavailable
-            else -> R.string.appwide_live_session_start_detail
-        },
-    )
+    val entryState = liveSessionEntryState(bandReady, hasCurrentRecovery)
+    val startTitle = stringResource(liveSessionEntryTitleRes(entryState))
+    val startDetail = stringResource(liveSessionEntryDetailRes(entryState))
     val title = when {
         running -> "Silent Guardian running"
         summaryWaiting -> "Silent Guardian ended"
@@ -5473,16 +5496,33 @@ private fun ScoreHeroRow(
 internal fun todayRecoveryHeroColors(
     recovery: Double?,
     calibrationNights: Int?,
-): Pair<Color, Color> = when {
-    recovery != null -> Palette.recoveryGaugeColors(recovery)
-    calibrationNights != null && calibrationNights >= Baselines.minNightsSeed ->
-        Palette.chargeColor to Palette.chargeBright
-    calibrationNights != null ->
+): Pair<Color, Color> = when (todayRecoveryHeroTone(recovery, calibrationNights)) {
+    TodayRecoveryHeroTone.RECOVERY -> Palette.recoveryGaugeColors(requireNotNull(recovery))
+    TodayRecoveryHeroTone.BASELINE_READY -> Palette.chargeColor to Palette.chargeBright
+    TodayRecoveryHeroTone.LEARNING ->
         Palette.onDarkSecondary.copy(alpha = 0.64f) to
             Palette.onDarkSecondary.copy(alpha = 0.88f)
-    else ->
+    TodayRecoveryHeroTone.UNAVAILABLE ->
         Palette.onDarkSecondary.copy(alpha = 0.42f) to
             Palette.onDarkSecondary.copy(alpha = 0.64f)
+}
+
+internal enum class TodayRecoveryHeroTone {
+    RECOVERY,
+    BASELINE_READY,
+    LEARNING,
+    UNAVAILABLE,
+}
+
+internal fun todayRecoveryHeroTone(
+    recovery: Double?,
+    calibrationNights: Int?,
+): TodayRecoveryHeroTone = when {
+    recovery != null -> TodayRecoveryHeroTone.RECOVERY
+    calibrationNights != null && calibrationNights >= Baselines.minNightsSeed ->
+        TodayRecoveryHeroTone.BASELINE_READY
+    calibrationNights != null -> TodayRecoveryHeroTone.LEARNING
+    else -> TodayRecoveryHeroTone.UNAVAILABLE
 }
 
 @Composable
@@ -5896,8 +5936,10 @@ private fun LegacyScoreHeroRow(
                             HeroScoreVessel(
                                 fraction = recoveryProgress,
                                 value = recovery ?: 0.0,
-                                tint = recovery?.let { Palette.recoveryGaugeColors(it).first }
-                                    ?: Palette.chargeColor,
+                                tint = todayRecoveryHeroColors(
+                                    recovery,
+                                    recoveryCalibration,
+                                ).first,
                                 diameter = ring,
                                 animated = animated,
                                 showsValue = recovery != null,
@@ -7844,7 +7886,10 @@ private fun MetricGrid(
                     ?: recoveryCalibration?.let { "$it/${Baselines.minNightsSeed}" }
                     ?: lastScoredCharge?.let { "${it.value.roundToInt()}" } ?: NO_DATA,
                 unit = if (d?.recovery != null || lastScoredCharge != null) "%" else "",
-                tint = v?.let { Palette.recoveryGaugeColors(it).first } ?: Palette.chargeColor,
+                tint = todayRecoveryHeroColors(
+                    recovery = v,
+                    calibrationNights = recoveryCalibration,
+                ).first,
                 frac = progress?.coerceIn(0.0, 1.0),
                 spark = w.recovery,
             )

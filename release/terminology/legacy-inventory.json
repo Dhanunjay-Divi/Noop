@@ -1,11 +1,11 @@
 {
   "categoryCounts": {
-    "compatibility": 1706,
-    "core": 4977,
+    "compatibility": 1709,
+    "core": 4983,
     "customer": 815,
-    "fixture": 5496,
+    "fixture": 5505,
     "generated": 20,
-    "historical": 3057,
+    "historical": 3062,
     "import": 870,
     "persisted": 667
   },
@@ -7175,13 +7175,16 @@
       "lineNumbers": [
         0,
         0,
-        29
+        25,
+        40,
+        59,
+        169
       ],
-      "occurrenceCount": 3,
+      "occurrenceCount": 6,
       "path": "Packages/WhoopStore/Sources/WhoopStore/HydrationEntryStore.swift",
-      "sha256": "9e2d27fb2f39619fd2cb4a6bac3fdcc9eb98ccba91b6d834761ef87b6892e299",
+      "sha256": "fe88030df59f5cb374efa7e810325c402e2d8afa9313bf5dc6cd2aa4a55272ae",
       "tokenCounts": {
-        "whoopstore": 3
+        "whoopstore": 6
       }
     },
     {
@@ -8292,13 +8295,22 @@
         87,
         113,
         146,
-        182
+        182,
+        226,
+        282,
+        287,
+        298,
+        302,
+        308,
+        315,
+        348,
+        377
       ],
-      "occurrenceCount": 9,
+      "occurrenceCount": 18,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/HydrationEntryStoreTests.swift",
-      "sha256": "44617e409b3d8d5a6663c93caa2afbb8c9e6b3c41253750ba94d4440434b6a91",
+      "sha256": "32ffba16e3f0ec43d355e4147f1e52645ae9c1179c6c4f6a94aac21765ea0c34",
       "tokenCounts": {
-        "whoopstore": 8,
+        "whoopstore": 17,
         "whoopstoretests": 1
       }
     },
@@ -11276,15 +11288,21 @@
       "category": "core",
       "lineNumbers": [
         2,
-        385,
-        397
+        78,
+        405,
+        417,
+        545,
+        726,
+        728,
+        752,
+        755
       ],
-      "occurrenceCount": 3,
+      "occurrenceCount": 9,
       "path": "Strand/Data/HydrationStore.swift",
-      "sha256": "506bf47156ae7a5170a837115d55b1a9ab67e692f0d1544a3b933343af3e61f2",
+      "sha256": "6be6989272f1b3ffdfe89d94a57d597905daab126be171d8de8dbac30e231b0e",
       "tokenCounts": {
         "whoop": 1,
-        "whoopstore": 2
+        "whoopstore": 8
       }
     },
     {
@@ -12601,7 +12619,7 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        661
+        663
       ],
       "occurrenceCount": 1,
       "path": "Strand/Screens/CalendarMonthView.swift",
@@ -14330,7 +14348,7 @@
       "category": "core",
       "lineNumbers": [
         7,
-        512
+        519
       ],
       "occurrenceCount": 2,
       "path": "Strand/System/HydrationReminders.swift",
@@ -14481,7 +14499,7 @@
       "category": "core",
       "lineNumbers": [
         4,
-        756
+        773
       ],
       "occurrenceCount": 2,
       "path": "Strand/System/WindDownNudge.swift",
@@ -15235,14 +15253,17 @@
       "category": "historical",
       "lineNumbers": [
         2,
-        674,
-        675
+        282,
+        284,
+        289,
+        911,
+        912
       ],
-      "occurrenceCount": 3,
+      "occurrenceCount": 6,
       "path": "StrandTests/HydrationEntriesTests.swift",
-      "sha256": "8ecc2a61e1749e844adfdd83e3e736f80d5b5782a57f2bf25db9e0cf20e63851",
+      "sha256": "6965e41a88b592cc9d9079d05ea73ae3853c583e7bac2e7090275133d687dd23",
       "tokenCounts": {
-        "whoopstore": 3
+        "whoopstore": 6
       }
     },
     {
@@ -15449,7 +15470,7 @@
     {
       "category": "historical",
       "lineNumbers": [
-        78
+        102
       ],
       "occurrenceCount": 1,
       "path": "StrandTests/LiveSessionHeartRateFreshnessTests.swift",
@@ -15868,12 +15889,12 @@
       "category": "historical",
       "lineNumbers": [
         3,
-        500,
-        500,
-        503,
-        503,
-        1056,
-        1165
+        508,
+        508,
+        511,
+        511,
+        1067,
+        1176
       ],
       "occurrenceCount": 7,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -15886,8 +15907,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        824,
-        1400
+        832,
+        1411
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -25845,40 +25866,40 @@
         1943,
         2478,
         2664,
-        4686,
-        5391,
-        5456,
-        5827,
-        5829,
-        5853,
-        5980,
-        6345,
-        6428,
-        6430,
-        6500,
-        6533,
-        6562,
-        6563,
-        6565,
-        6597,
-        6611,
-        6620,
-        6621,
-        6695,
-        6739,
-        6822,
-        6849,
-        7612,
-        7807,
-        7855,
-        8188,
-        8189,
-        8199,
-        8695,
-        9105,
-        9105,
-        9174,
-        9214
+        4709,
+        5414,
+        5479,
+        5867,
+        5869,
+        5893,
+        6022,
+        6387,
+        6470,
+        6472,
+        6542,
+        6575,
+        6604,
+        6605,
+        6607,
+        6639,
+        6653,
+        6662,
+        6663,
+        6737,
+        6781,
+        6864,
+        6891,
+        7654,
+        7849,
+        7900,
+        8233,
+        8234,
+        8244,
+        8740,
+        9150,
+        9150,
+        9219,
+        9259
       ],
       "occurrenceCount": 58,
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -25904,9 +25925,9 @@
       "lineNumbers": [
         1884,
         1884,
-        5922,
-        9222,
-        9222
+        5964,
+        9267,
+        9267
       ],
       "occurrenceCount": 5,
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -25942,8 +25963,8 @@
         1636,
         1637,
         1773,
-        8188,
-        8189
+        8233,
+        8234
       ],
       "occurrenceCount": 22,
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -35585,8 +35606,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        162,
-        250
+        183,
+        271
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/ACTIVE.md",
@@ -35837,9 +35858,22 @@
     {
       "category": "historical",
       "lineNumbers": [
-        18,
-        54,
-        54
+        210,
+        212
+      ],
+      "occurrenceCount": 2,
+      "path": "docs/ops/rounds/2026-09-13-pr15-final-review-closeout.md",
+      "sha256": "3120adf25c0d1cf32d81595f01807937792560699f3a3639649610515898e80f",
+      "tokenCounts": {
+        "whoopstore": 2
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        19,
+        55,
+        55
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/rounds/INDEX.md",
@@ -38062,7 +38096,7 @@
       }
     }
   ],
-  "occurrenceCount": 17608,
+  "occurrenceCount": 17631,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

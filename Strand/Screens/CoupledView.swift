@@ -431,7 +431,7 @@ struct CoupledView: View {
         } label: {
             card {
                 VStack(alignment: .leading, spacing: 14) {
-                    SectionHeader("Sleep performance", overline: "Last night", trailing: String(localized: "Sleep Score"))
+                    SectionHeader("Sleep Score", overline: "Last night")
                     HStack(alignment: .center, spacing: 16) {
                         // Left: the SLEEP PERFORMANCE % as the liquid vessel (Rest world), with the score
                         // counting up over the fluid. Empty vessel when there's no scored performance.
@@ -487,11 +487,11 @@ struct CoupledView: View {
     }
 
     private var sleepAccessibilityLabel: String {
-        guard let p = sleepPerformance else { return String(localized: "Sleep performance not available") }
+        guard let p = sleepPerformance else { return String(localized: "Sleep Score not available") }
         if let asleep = day?.totalSleepMin, asleep > 0 {
-            return String(localized: "Sleep performance \(Int(p.rounded())) percent. \(Self.hoursMinutes(asleep)) slept, \(Self.hoursMinutes(sleepNeedForDay)) needed")
+            return String(localized: "Sleep Score \(Int(p.rounded())) percent. \(Self.hoursMinutes(asleep)) slept, \(Self.hoursMinutes(sleepNeedForDay)) needed")
         }
-        return String(localized: "Sleep performance \(Int(p.rounded())) percent")
+        return String(localized: "Sleep Score \(Int(p.rounded())) percent")
     }
 
     /// The night's need (minutes) for the slept-vs-needed read: the imported per-day figure when the
