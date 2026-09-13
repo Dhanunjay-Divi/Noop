@@ -32,7 +32,7 @@ class SleepGravityBmiCleanupMigrationTest {
         assertEquals(46, WhoopDatabase.MIGRATION_45_46.endVersion)
         assertEquals(46, WhoopDatabase.MIGRATION_46_47.startVersion)
         assertEquals(47, WhoopDatabase.MIGRATION_46_47.endVersion)
-        assertEquals(51, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(52, NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     @Test

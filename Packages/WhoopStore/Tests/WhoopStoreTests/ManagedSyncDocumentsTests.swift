@@ -385,6 +385,186 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         XCTAssertTrue(profiles.contains(scope))
     }
 
+    func testV61RecreatesDirtyGenerationAboveRetainedAcknowledgement() throws {
+        let accountA = scope
+        let accountB = String(repeating: "b", count: 64)
+        let day = "2026-09-12"
+        let digest = String(repeating: "c", count: 64)
+        let queue = try DatabaseQueue()
+        let migrator = WhoopStore.makeMigrator()
+        try migrator.migrate(
+            queue,
+            upTo: "v60-managed-change-feed-capability"
+        )
+
+        let localKey = try queue.write { db -> String in
+            try db.execute(
+                sql: """
+                    UPDATE managedLocalProfile
+                    SET localProfileId = ?,
+                        accountScopeHash = ?,
+                        updatedAtMs = 1
+                    WHERE bindingId = 1
+                    """,
+                arguments: [accountA, accountA]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO dayOwnership (day, deviceId, locked)
+                    VALUES (?, 'band-a', 0)
+                    """,
+                arguments: [day]
+            )
+            let key = try XCTUnwrap(
+                String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT localKey
+                        FROM managedDocumentDirty
+                        WHERE localProfileId = ?
+                          AND tableName = 'dayOwnership'
+                        """,
+                    arguments: [accountA]
+                )
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO managedDocumentState (
+                        accountScopeHash, tableName, localKey, documentKind,
+                        documentId, keyJSON, acknowledgedGeneration, remoteRevision,
+                        remoteContentSHA256, updatedAtMs
+                    ) VALUES (
+                        ?, 'dayOwnership', ?, 'day_ownership',
+                        '11111111-1111-5111-8111-111111111111',
+                        '{"day":"2026-09-12"}', 7, 11, ?, 13
+                    )
+                    """,
+                arguments: [accountA, key, digest]
+            )
+            try db.execute(
+                sql: """
+                    UPDATE managedLocalProfile
+                    SET localProfileId = ?,
+                        accountScopeHash = ?,
+                        updatedAtMs = 2
+                    WHERE bindingId = 1
+                    """,
+                arguments: [accountB, accountB]
+            )
+            try db.execute(
+                sql: """
+                    UPDATE dayOwnership
+                    SET deviceId = 'band-b'
+                    WHERE day = ?
+                    """,
+                arguments: [day]
+            )
+            return key
+        }
+
+        let quarantined = try queue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT localProfileId, generation
+                    FROM managedDocumentDirty
+                    WHERE tableName = 'dayOwnership'
+                      AND localKey = ?
+                    """,
+                arguments: [localKey]
+            )
+        }
+        XCTAssertEqual(quarantined?["localProfileId"] as String?, accountB)
+        XCTAssertEqual(quarantined?["generation"] as Int64?, 1)
+
+        try migrator.migrate(queue)
+        try queue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE managedLocalProfile
+                    SET localProfileId = ?,
+                        accountScopeHash = ?,
+                        updatedAtMs = 3
+                    WHERE bindingId = 1
+                    """,
+                arguments: [accountA, accountA]
+            )
+            try db.execute(
+                sql: """
+                    UPDATE dayOwnership
+                    SET deviceId = 'band-a-edited'
+                    WHERE day = ?
+                    """,
+                arguments: [day]
+            )
+        }
+
+        let result = try queue.read { db -> (
+            dirty: Row?,
+            eligible: Int,
+            count: Int
+        ) in
+            let dirty = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT dirty.localProfileId, dirty.generation,
+                           state.acknowledgedGeneration, state.remoteRevision,
+                           state.remoteContentSHA256, state.updatedAtMs
+                    FROM managedDocumentDirty AS dirty
+                    JOIN managedDocumentState AS state
+                      ON state.accountScopeHash = ?
+                     AND state.tableName = dirty.tableName
+                     AND state.localKey = dirty.localKey
+                    WHERE dirty.tableName = 'dayOwnership'
+                      AND dirty.localKey = ?
+                    """,
+                arguments: [accountA, localKey]
+            )
+            let eligible = try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM managedDocumentDirty AS dirty
+                    LEFT JOIN managedDocumentState AS state
+                      ON state.accountScopeHash = ?
+                     AND state.tableName = dirty.tableName
+                     AND state.localKey = dirty.localKey
+                    WHERE dirty.localProfileId = ?
+                      AND dirty.tableName = 'dayOwnership'
+                      AND dirty.localKey = ?
+                      AND dirty.generation >
+                          COALESCE(state.acknowledgedGeneration, 0)
+                    """,
+                arguments: [accountA, accountA, localKey]
+            ) ?? -1
+            let count = try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM managedDocumentDirty
+                    WHERE tableName = 'dayOwnership'
+                      AND localKey = ?
+                    """,
+                arguments: [localKey]
+            ) ?? -1
+            return (dirty, eligible, count)
+        }
+        XCTAssertEqual(result.dirty?["localProfileId"] as String?, accountA)
+        XCTAssertEqual(result.dirty?["generation"] as Int64?, 8)
+        XCTAssertEqual(
+            result.dirty?["acknowledgedGeneration"] as Int64?,
+            7
+        )
+        XCTAssertEqual(result.dirty?["remoteRevision"] as Int64?, 11)
+        XCTAssertEqual(
+            result.dirty?["remoteContentSHA256"] as String?,
+            digest
+        )
+        XCTAssertEqual(result.dirty?["updatedAtMs"] as Int64?, 13)
+        XCTAssertEqual(result.eligible, 1)
+        XCTAssertEqual(result.count, 1)
+    }
+
     func testAccountSwitchInvalidatesOnlyChangedPriorUploadIntent() async throws {
         let accountA = String(repeating: "a", count: 64)
         let accountB = String(repeating: "b", count: 64)

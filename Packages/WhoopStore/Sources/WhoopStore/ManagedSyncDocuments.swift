@@ -494,6 +494,19 @@ extension WhoopStore {
         }
     }
 
+    static func reinstallAccountScopedManagedDocumentTriggers(
+        _ db: Database
+    ) throws {
+        try dropManagedDocumentTriggers(
+            db,
+            specs: managedDocumentTableSpecs
+        )
+        try installAccountScopedManagedDocumentTriggers(
+            db,
+            specs: managedDocumentTableSpecs
+        )
+    }
+
     private static func dropManagedDocumentTriggers(
         _ db: Database,
         specs: [ManagedDocumentTableSpec]
@@ -545,7 +558,18 @@ extension WhoopStore {
             operation, updatedAtMs, payloadJSON
         )
         SELECT profile.localProfileId, '\(tableName)', \(localKeySQL),
-               '\(documentKind)', 1, '\(operation)', \(nowSQL), NULL
+               '\(documentKind)',
+               MAX(
+                   1,
+                   COALESCE((
+                       SELECT state.acknowledgedGeneration
+                       FROM managedDocumentState AS state
+                       WHERE state.accountScopeHash = profile.accountScopeHash
+                         AND state.tableName = '\(tableName)'
+                         AND state.localKey = \(localKeySQL)
+                   ), 0) + 1
+               ),
+               '\(operation)', \(nowSQL), NULL
         FROM managedLocalProfile AS profile
         WHERE (\(mutationCondition))
           AND \(guardAbsent)
@@ -554,7 +578,10 @@ extension WhoopStore {
           AND profile.localProfileId = profile.accountScopeHash
         ON CONFLICT(localProfileId, tableName, localKey) DO UPDATE SET
             documentKind = excluded.documentKind,
-            generation = managedDocumentDirty.generation + 1,
+            generation = MAX(
+                managedDocumentDirty.generation + 1,
+                excluded.generation
+            ),
             operation = excluded.operation,
             updatedAtMs = excluded.updatedAtMs,
             payloadJSON = NULL

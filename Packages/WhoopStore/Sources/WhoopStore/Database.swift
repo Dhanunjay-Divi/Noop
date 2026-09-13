@@ -1401,6 +1401,12 @@ extension WhoopStore {
                 ).notNull().defaults(to: 0)
             }
         }
+        // v61: replace the account-scoped document triggers without rewriting any source, outbox,
+        // or acknowledgement rows. A later local edit can then advance above retained account state
+        // after a quarantined or different-account dirty row is discarded.
+        migrator.registerMigration("v61-managed-document-generation-floor") { db in
+            try reinstallAccountScopedManagedDocumentTriggers(db)
+        }
         return migrator
     }
 

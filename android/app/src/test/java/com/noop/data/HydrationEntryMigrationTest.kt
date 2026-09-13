@@ -16,7 +16,7 @@ class HydrationEntryMigrationTest {
     fun migrationIsAdditiveLocalOnlyAndFailClosedForLegacyEdges() {
         assertEquals(48, WhoopDatabase.MIGRATION_48_49.startVersion)
         assertEquals(49, WhoopDatabase.MIGRATION_48_49.endVersion)
-        assertEquals(51, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(52, NOOP_DATABASE_SCHEMA_VERSION)
 
         val schemaSql = WhoopDatabase.HYDRATION_ENTRY_MIGRATION_SQL.joinToString("\n")
         val selectSql = WhoopDatabase.HYDRATION_ENTRY_LEGACY_SELECT_SQL

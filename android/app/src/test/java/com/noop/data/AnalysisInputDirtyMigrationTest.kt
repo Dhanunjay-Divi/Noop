@@ -10,7 +10,7 @@ class AnalysisDirtySourceMigrationTest {
     fun migrationDeclaresGenerationLedgerForEveryScoreBearingTable() {
         assertEquals(47, WhoopDatabase.MIGRATION_47_48.startVersion)
         assertEquals(48, WhoopDatabase.MIGRATION_47_48.endVersion)
-        assertEquals(51, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(52, NOOP_DATABASE_SCHEMA_VERSION)
         assertTrue(
             WhoopDatabase.CREATE_ANALYSIS_DIRTY_SOURCE_SQL.contains(
                 "`generation` INTEGER NOT NULL",

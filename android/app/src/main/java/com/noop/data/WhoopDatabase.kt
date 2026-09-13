@@ -10,7 +10,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 51
+const val NOOP_DATABASE_SCHEMA_VERSION = 52
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -1513,6 +1513,18 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v51 -> v52: replace account-scoped managed-document triggers so a dirty row recreated
+         * after quarantine/account isolation advances past that account's retained acknowledgement.
+         * No source, dirty, or state rows are rewritten.
+         */
+        internal val MIGRATION_51_52 = object : Migration(51, 52) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                dropManagedDocumentTriggers(db)
+                installManagedDocumentTriggers(db)
+            }
+        }
+
         private data class ManagedDocumentTriggerSpec(
             val table: String,
             val documentKind: String,
@@ -1770,7 +1782,18 @@ abstract class WhoopDatabase : RoomDatabase() {
                     operation, updatedAtMs, payloadJSON
                 )
                 SELECT profile.localProfileId, '${spec.table}', $localKey,
-                       '${spec.documentKind}', 1, '$operation', $now, NULL
+                       '${spec.documentKind}',
+                       MAX(
+                           1,
+                           COALESCE((
+                               SELECT state.acknowledgedGeneration
+                               FROM managedDocumentState AS state
+                               WHERE state.accountScopeHash = profile.accountScopeHash
+                                 AND state.tableName = '${spec.table}'
+                                 AND state.localKey = $localKey
+                           ), 0) + 1
+                       ),
+                       '$operation', $now, NULL
                 FROM managedLocalProfile AS profile
                 WHERE ($mutationCondition)
                   AND $guardAbsent
@@ -1779,7 +1802,10 @@ abstract class WhoopDatabase : RoomDatabase() {
                   AND profile.localProfileId = profile.accountScopeHash
                 ON CONFLICT(localProfileId, tableName, localKey) DO UPDATE SET
                     documentKind = excluded.documentKind,
-                    generation = managedDocumentDirty.generation + 1,
+                    generation = MAX(
+                        managedDocumentDirty.generation + 1,
+                        excluded.generation
+                    ),
                     operation = excluded.operation,
                     updatedAtMs = excluded.updatedAtMs,
                     payloadJSON = NULL
@@ -2044,7 +2070,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40,
                     MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44,
                     MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48,
-                    MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51,
+                    MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

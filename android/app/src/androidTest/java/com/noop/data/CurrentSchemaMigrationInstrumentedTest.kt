@@ -30,11 +30,12 @@ class CurrentSchemaMigrationInstrumentedTest {
         context.deleteDatabase(MIGRATION_DATABASE)
         context.deleteDatabase(FULL_MIGRATION_DATABASE)
         context.deleteDatabase(CAPABILITY_MIGRATION_DATABASE)
+        context.deleteDatabase(GENERATION_MIGRATION_DATABASE)
         context.deleteDatabase(FRESH_DATABASE)
     }
 
     @Test
-    fun complete47To51UpgradeKeepsLegacyDirtyRowsUnclaimedAndInstallsCurrentTriggers() {
+    fun complete47To52UpgradeKeepsLegacyDirtyRowsUnclaimedAndInstallsCurrentTriggers() {
         migrationHelper.createDatabase(MIGRATION_DATABASE, 47).use { database ->
             database.execSQL(
                 """
@@ -60,14 +61,15 @@ class CurrentSchemaMigrationInstrumentedTest {
 
         migrationHelper.runMigrationsAndValidate(
             MIGRATION_DATABASE,
-            51,
+            52,
             true,
             WhoopDatabase.MIGRATION_47_48,
             WhoopDatabase.MIGRATION_48_49,
             WhoopDatabase.MIGRATION_49_50,
             WhoopDatabase.MIGRATION_50_51,
+            WhoopDatabase.MIGRATION_51_52,
         ).use { database ->
-            assertEquals(51, database.version)
+            assertEquals(52, database.version)
             database.query(
                 """
                     SELECT localProfileId, accountScopeHash
@@ -90,6 +92,127 @@ class CurrentSchemaMigrationInstrumentedTest {
             assertEquals(30, triggerCount(database, "analysis_dirty_%"))
             assertEquals(36, triggerCount(database, "managed_document_%"))
             assertEquals(1L, tableCount(database, "hydrationEntry"))
+        }
+    }
+
+    @Test
+    fun migration51To52RecreatesDirtyGenerationAboveRetainedAcknowledgement() {
+        val day = "2026-09-12"
+        val digest = "c".repeat(64)
+        migrationHelper.createDatabase(GENERATION_MIGRATION_DATABASE, 51).use { database ->
+            database.execSQL(
+                """
+                    INSERT OR REPLACE INTO managedLocalProfile (
+                        bindingId, localProfileId, accountScopeHash, updatedAtMs
+                    ) VALUES (1, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any?>(ACCOUNT_A, ACCOUNT_A, NOW_MS),
+            )
+            database.execSQL(
+                """
+                    INSERT INTO dayOwnership (day, deviceId, locked)
+                    VALUES (?, 'band-a', 0)
+                """.trimIndent(),
+                arrayOf<Any?>(day),
+            )
+            database.execSQL(
+                """
+                    INSERT INTO managedDocumentState (
+                        accountScopeHash, tableName, localKey, documentKind,
+                        documentId, keyJSON, acknowledgedGeneration, remoteRevision,
+                        remoteContentSHA256, updatedAtMs
+                    )
+                    SELECT ?, 'dayOwnership', hex(CAST(? AS BLOB)), 'day_ownership',
+                           '11111111-1111-5111-8111-111111111111',
+                           '{"day":"2026-09-12"}', 7, 11, ?, ?
+                """.trimIndent(),
+                arrayOf<Any?>(ACCOUNT_A, day, digest, NOW_MS),
+            )
+            database.execSQL(
+                """
+                    INSERT INTO managedDocumentDirty (
+                        localProfileId, tableName, localKey, documentKind, generation,
+                        operation, updatedAtMs, payloadJSON
+                    )
+                    SELECT 'legacy-quarantine', 'dayOwnership', hex(CAST(? AS BLOB)),
+                           'day_ownership', 3, 'upsert', ?, NULL
+                """.trimIndent(),
+                arrayOf<Any?>(day, NOW_MS),
+            )
+        }
+
+        migrationHelper.runMigrationsAndValidate(
+            GENERATION_MIGRATION_DATABASE,
+            52,
+            true,
+            WhoopDatabase.MIGRATION_51_52,
+        ).use { database ->
+            database.execSQL(
+                "UPDATE dayOwnership SET deviceId = 'band-a-edited' WHERE day = ?",
+                arrayOf<Any?>(day),
+            )
+
+            database.query(
+                """
+                    SELECT dirty.localProfileId, dirty.generation,
+                           state.acknowledgedGeneration, state.remoteRevision,
+                           state.remoteContentSHA256, state.updatedAtMs
+                    FROM managedDocumentDirty AS dirty
+                    JOIN managedDocumentState AS state
+                      ON state.accountScopeHash = ?
+                     AND state.tableName = dirty.tableName
+                     AND state.localKey = dirty.localKey
+                    WHERE dirty.tableName = 'dayOwnership'
+                      AND dirty.localKey = hex(CAST(? AS BLOB))
+                """.trimIndent(),
+                arrayOf<Any?>(ACCOUNT_A, day),
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(ACCOUNT_A, cursor.getString(0))
+                assertEquals(8L, cursor.getLong(1))
+                assertEquals(7L, cursor.getLong(2))
+                assertEquals(11L, cursor.getLong(3))
+                assertEquals(digest, cursor.getString(4))
+                assertEquals(NOW_MS, cursor.getLong(5))
+                assertFalse(cursor.moveToNext())
+            }
+            assertEquals(
+                1L,
+                database.query(
+                    """
+                        SELECT COUNT(*)
+                        FROM managedDocumentDirty
+                        WHERE tableName = 'dayOwnership'
+                          AND localKey = hex(CAST(? AS BLOB))
+                    """.trimIndent(),
+                    arrayOf(day),
+                ).use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    cursor.getLong(0)
+                },
+            )
+            assertEquals(
+                1L,
+                database.query(
+                    """
+                        SELECT COUNT(*)
+                        FROM managedDocumentDirty AS dirty
+                        LEFT JOIN managedDocumentState AS state
+                          ON state.accountScopeHash = ?
+                         AND state.tableName = dirty.tableName
+                         AND state.localKey = dirty.localKey
+                        WHERE dirty.localProfileId = ?
+                          AND dirty.tableName = 'dayOwnership'
+                          AND dirty.localKey = hex(CAST(? AS BLOB))
+                          AND dirty.generation >
+                              COALESCE(state.acknowledgedGeneration, 0)
+                    """.trimIndent(),
+                    arrayOf<Any?>(ACCOUNT_A, ACCOUNT_A, day),
+                ).use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    cursor.getLong(0)
+                },
+            )
         }
     }
 
@@ -171,7 +294,7 @@ class CurrentSchemaMigrationInstrumentedTest {
     }
 
     @Test
-    fun fresh51InitializationCreatesBindingAndBothTriggerFamilies() {
+    fun fresh52InitializationCreatesBindingAndBothTriggerFamilies() {
         val database = Room.databaseBuilder(
             context,
             WhoopDatabase::class.java,
@@ -187,7 +310,7 @@ class CurrentSchemaMigrationInstrumentedTest {
         ).build()
         val sql = database.openHelper.writableDatabase
 
-        assertEquals(51, sql.version)
+        assertEquals(52, sql.version)
         assertEquals(1L, tableCount(sql, "managedLocalProfile"))
         sql.query(
             "SELECT localProfileId, accountScopeHash FROM managedLocalProfile WHERE bindingId = 1",
@@ -202,7 +325,7 @@ class CurrentSchemaMigrationInstrumentedTest {
     }
 
     @Test
-    fun complete44To51UpgradeUsesLegacyTriggersUntilAccountPartitionExists() {
+    fun complete44To52UpgradeUsesLegacyTriggersUntilAccountPartitionExists() {
         migrationHelper.createDatabase(FULL_MIGRATION_DATABASE, 44).use { database ->
             database.execSQL(
                 """
@@ -214,7 +337,7 @@ class CurrentSchemaMigrationInstrumentedTest {
 
         migrationHelper.runMigrationsAndValidate(
             FULL_MIGRATION_DATABASE,
-            51,
+            52,
             true,
             WhoopDatabase.MIGRATION_44_45,
             WhoopDatabase.MIGRATION_45_46,
@@ -223,8 +346,9 @@ class CurrentSchemaMigrationInstrumentedTest {
             WhoopDatabase.MIGRATION_48_49,
             WhoopDatabase.MIGRATION_49_50,
             WhoopDatabase.MIGRATION_50_51,
+            WhoopDatabase.MIGRATION_51_52,
         ).use { database ->
-            assertEquals(51, database.version)
+            assertEquals(52, database.version)
             assertEquals(36, triggerCount(database, "managed_document_%"))
             assertEquals(
                 1L,
@@ -281,6 +405,10 @@ class CurrentSchemaMigrationInstrumentedTest {
         const val MIGRATION_DATABASE = "current-schema-migration"
         const val FULL_MIGRATION_DATABASE = "current-schema-full-migration"
         const val CAPABILITY_MIGRATION_DATABASE = "current-schema-capability-migration"
+        const val GENERATION_MIGRATION_DATABASE = "current-schema-generation-migration"
         const val FRESH_DATABASE = "current-schema-fresh"
+        const val NOW_MS = 1_789_200_000_000L
+        const val ACCOUNT_A =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
 }
