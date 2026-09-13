@@ -1,10 +1,12 @@
 package com.noop.ui
 
 import com.noop.data.DailyMetric
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.fail
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -134,5 +136,89 @@ class TrendsHistoryLoadTest {
         } catch (_: CancellationException) {
             assertEquals(4, checks)
         }
+    }
+
+    @Test
+    fun snapshotVisitsEachSourceRowOnce() {
+        var visits = 0
+        val history = List(4_000) { index ->
+            day.copy(
+                avgHrv = (30 + index % 40).toDouble(),
+                restingHr = 48 + index % 8,
+                recovery = (index % 100).toDouble(),
+                strain = (index % 80).toDouble(),
+            )
+        }
+
+        val snapshot = buildTrendsSnapshot(
+            days = history,
+            selected = TrendsRange.All,
+            sleepPerfByDay = mapOf(day.day to 82.0),
+            today = java.time.LocalDate.parse(day.day),
+            onSourceRow = { visits += 1 },
+        )
+
+        assertEquals(history.size, visits)
+        assertEquals(history.size, snapshot.recovery.values.size)
+        assertEquals(history.size, snapshot.hrv.values.size)
+        assertEquals(history.size, snapshot.rhr.values.size)
+        assertEquals(history.size, snapshot.strain.values.size)
+        assertEquals(history.size, snapshot.rest.values.size)
+    }
+
+    @Test
+    fun snapshotCacheIsBoundedAndUsesLruOrder() {
+        val snapshot = buildTrendsSnapshot(
+            days = listOf(day.copy(recovery = 55.0)),
+            selected = TrendsRange.All,
+            sleepPerfByDay = emptyMap(),
+            today = java.time.LocalDate.parse(day.day),
+        )
+        val week = cacheKey(TrendsRange.Week)
+        val month = cacheKey(TrendsRange.Month)
+        val quarter = cacheKey(TrendsRange.Quarter)
+        val cache = TrendsSnapshotCache(capacity = 2)
+
+        cache.put(week, snapshot)
+        cache.put(month, snapshot)
+        assertTrue(cache[week] != null)
+        cache.put(quarter, snapshot)
+
+        assertEquals(2, cache.size)
+        assertTrue(cache[week] != null)
+        assertTrue(cache[month] == null)
+        assertTrue(cache[quarter] != null)
+    }
+
+    @Test
+    fun trendsSourceKeepsLongHistoryPreparationOffMainAndDiagnosticsBounded() {
+        val source = trendsSource()
+
+        assertTrue(source.contains("val result = withContext(Dispatchers.Default)"))
+        assertTrue(source.contains("withContext(Dispatchers.Default) {\n                    buildTrendsSnapshot("))
+        assertTrue(source.contains("TrendsSnapshotCache()"))
+        assertTrue(source.contains("\"cache_status\""))
+        assertTrue(source.contains("\"day_count_bucket\""))
+        assertTrue(source.contains("TrendsLoadingSkeleton()"))
+        assertFalse(source.contains("\"health_value\""))
+        assertFalse(source.contains("\"device_id\""))
+    }
+
+    private fun cacheKey(range: TrendsRange) = TrendsSnapshotCacheKey(
+        historyGeneration = 1,
+        todayKey = day.day,
+        range = range,
+    )
+
+    private fun trendsSource(): String {
+        val root = File(System.getProperty("user.dir") ?: ".")
+        val candidates = listOf(
+            File(root, "src/main/java/com/noop/ui/TrendsScreen.kt"),
+            File(root, "app/src/main/java/com/noop/ui/TrendsScreen.kt"),
+            File(root, "android/app/src/main/java/com/noop/ui/TrendsScreen.kt"),
+        )
+        return requireNotNull(candidates.firstOrNull(File::isFile)) {
+            "Missing TrendsScreen.kt"
+        }.readText()
     }
 }

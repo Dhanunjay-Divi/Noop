@@ -23,6 +23,21 @@ private final class TrendsCancellationProbe: @unchecked Sendable {
     }
 }
 
+private final class TrendsSourceRowProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var visitCount = 0
+
+    var visits: Int {
+        lock.withLock { visitCount }
+    }
+
+    func visit() {
+        lock.withLock {
+            visitCount += 1
+        }
+    }
+}
+
 @MainActor
 final class LiquidKeyMetricTrendTests: XCTestCase {
     func testTrendWindowIsChronologicalAndAnchoredToSelectedDay() {
@@ -187,6 +202,69 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
 
         XCTAssertNil(snapshot)
         XCTAssertEqual(probe.checks, 2)
+    }
+
+    func testTrendsSnapshotVisitsEachSourceRowOnce() throws {
+        let days = (0..<4_000).map { index in
+            metric(
+                "2026-09-12",
+                hrv: Double(30 + index % 40),
+                rhr: 48 + index % 8,
+                recovery: Double(index % 100),
+                strain: Double(index % 80)
+            )
+        }
+        let probe = TrendsSourceRowProbe()
+
+        let snapshot = try XCTUnwrap(TrendsView.buildSnapshot(
+            days: days,
+            range: .all,
+            sleepPerfByDay: ["2026-09-12": 82],
+            todayKey: "2026-09-12",
+            onSourceRow: { probe.visit() }
+        ))
+
+        XCTAssertEqual(probe.visits, days.count)
+        XCTAssertEqual(snapshot.recovery.points.count, days.count)
+        XCTAssertEqual(snapshot.hrv.points.count, days.count)
+        XCTAssertEqual(snapshot.rhr.points.count, days.count)
+        XCTAssertEqual(snapshot.strain.points.count, days.count)
+        XCTAssertEqual(snapshot.rest.points.count, days.count)
+    }
+
+    func testTrendsSnapshotCacheIsBoundedAndUsesLRUOrder() throws {
+        let snapshot = try XCTUnwrap(TrendsView.buildSnapshot(
+            days: [metric("2026-09-12", recovery: 55)],
+            range: .all,
+            sleepPerfByDay: [:],
+            todayKey: "2026-09-12"
+        ))
+        let week = cacheKey(.week)
+        let month = cacheKey(.month)
+        let quarter = cacheKey(.quarter)
+        var cache = TrendsView.SnapshotCache(capacity: 2)
+
+        cache.insert(snapshot, for: week)
+        cache.insert(snapshot, for: month)
+        XCTAssertNotNil(cache.value(for: week))
+        cache.insert(snapshot, for: quarter)
+
+        XCTAssertEqual(cache.count, 2)
+        XCTAssertNotNil(cache.value(for: week))
+        XCTAssertNil(cache.value(for: month))
+        XCTAssertNotNil(cache.value(for: quarter))
+    }
+
+    private func cacheKey(_ range: TrendsView.Range) -> TrendsView.SnapshotCacheKey {
+        TrendsView.SnapshotCacheKey(
+            historyRevision: 1,
+            dayCount: 1,
+            firstDay: "2026-09-12",
+            lastDay: "2026-09-12",
+            sleepRevision: 1,
+            todayKey: "2026-09-12",
+            range: range
+        )
     }
 
     private func metric(

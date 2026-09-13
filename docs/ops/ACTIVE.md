@@ -21,6 +21,17 @@ Last updated: **2026-09-13**
 
 ## Active work
 
+### Trends loading handoff
+
+UI audit P1-4 has a completed local handoff from branch
+`codex/trends-loading-p1-4-20260913`, pinned to
+`f7baaddc0818b238b86962e60c5664eb6b746d34`. It adds honest Trends loading
+plus bounded, memoized, cancelable, off-main history preparation on
+Apple/macOS and Android. Focused Apple and Android verification is green; the
+integrating release branch must rerun its combined matrix before any push.
+Evidence is tracked in
+[`rounds/2026-09-13-trends-loading-p1-4.md`](rounds/2026-09-13-trends-loading-p1-4.md).
+
 ### Current audited state
 
 An isolated Android-only parity fork based exactly on

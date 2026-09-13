@@ -224,6 +224,45 @@ private fun trendsDayCountBucket(count: Int): String = when (count) {
     else -> "366_plus"
 }
 
+internal data class TrendsSnapshotCacheKey(
+    val historyGeneration: Int,
+    val todayKey: String,
+    val range: TrendsRange,
+)
+
+internal class TrendsSnapshotCache(capacity: Int = TrendsRange.entries.size) {
+    private val maxEntries = capacity.coerceAtLeast(1)
+    private val values = LinkedHashMap<TrendsSnapshotCacheKey, TrendsSnapshot>(
+        maxEntries,
+        0.75f,
+        true,
+    )
+
+    val size: Int get() = values.size
+    val capacity: Int get() = maxEntries
+
+    operator fun get(key: TrendsSnapshotCacheKey): TrendsSnapshot? = values[key]
+
+    fun put(key: TrendsSnapshotCacheKey, value: TrendsSnapshot) {
+        values[key] = value
+        while (values.size > maxEntries) {
+            val oldest = values.entries.iterator()
+            if (!oldest.hasNext()) break
+            oldest.next()
+            oldest.remove()
+        }
+    }
+}
+
+private fun trendsRangeDiagnostic(range: TrendsRange): String = when (range) {
+    TrendsRange.Week -> "week"
+    TrendsRange.Month -> "month"
+    TrendsRange.Quarter -> "quarter"
+    TrendsRange.Half -> "half"
+    TrendsRange.Year -> "year"
+    TrendsRange.All -> "all"
+}
+
 @Composable
 fun TrendsScreen(vm: AppViewModel) {
     val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
@@ -246,6 +285,7 @@ fun TrendsScreen(vm: AppViewModel) {
     var historyState by remember(activeDeviceId) {
         mutableStateOf<TrendsHistoryUiState>(TrendsHistoryUiState.Loading())
     }
+    var historyGeneration by remember(activeDeviceId) { mutableIntStateOf(0) }
     LaunchedEffect(historyRequest) {
         val previous = when (val state = historyState) {
             is TrendsHistoryUiState.Content -> state.payload
@@ -264,34 +304,37 @@ fun TrendsScreen(vm: AppViewModel) {
             "issue_count" to "0",
         )
         try {
-            val result = loadTrendsHistory(
-                loadFullHistory = { vm.repo.daysMerged(historyRequest.deviceId) },
-                loadRecentHistory = {
-                    vm.repo.recentDaysMergedFlow(historyRequest.deviceId).first()
-                },
-                loadResolvedSleep = {
-                    vm.repo.resolvedSeries(
-                        "sleep_performance",
-                        "my-whoop",
-                        "0000-00-00",
-                        "9999-99-99",
-                        strapDeviceId = historyRequest.deviceId,
-                    ).values.associate { it.first to it.second }
-                },
-                loadImportedSleep = {
-                    vm.repo.metricSeries(
-                        "my-whoop",
-                        "sleep_performance",
-                        "0000-00-00",
-                        "9999-99-99",
-                    ).associate { it.day to it.value }
-                },
-            )
+            val result = withContext(Dispatchers.Default) {
+                loadTrendsHistory(
+                    loadFullHistory = { vm.repo.daysMerged(historyRequest.deviceId) },
+                    loadRecentHistory = {
+                        vm.repo.recentDaysMergedFlow(historyRequest.deviceId).first()
+                    },
+                    loadResolvedSleep = {
+                        vm.repo.resolvedSeries(
+                            "sleep_performance",
+                            "my-whoop",
+                            "0000-00-00",
+                            "9999-99-99",
+                            strapDeviceId = historyRequest.deviceId,
+                        ).values.associate { it.first to it.second }
+                    },
+                    loadImportedSleep = {
+                        vm.repo.metricSeries(
+                            "my-whoop",
+                            "sleep_performance",
+                            "0000-00-00",
+                            "9999-99-99",
+                        ).associate { it.day to it.value }
+                    },
+                )
+            }
             currentCoroutineContext().ensureActive()
             when (result) {
                 is TrendsHistoryLoadResult.Content -> {
                     val payload = result.payload
                     historyState = TrendsHistoryUiState.Content(payload)
+                    historyGeneration += 1
                     outcome = if (payload.issues.isEmpty()) "completed" else "partial"
                     diagnosticFields = mapOf(
                         "history_mode" to when (payload.mode) {
@@ -366,51 +409,97 @@ fun TrendsScreen(vm: AppViewModel) {
     // background import or survive a selected-band switch.
 
     var trendsSnapshot by remember(activeDeviceId) { mutableStateOf<TrendsSnapshot?>(null) }
+    var trendsSnapshotKey by remember(activeDeviceId) {
+        mutableStateOf<TrendsSnapshotCacheKey?>(null)
+    }
+    var trendsSnapshotFailureKey by remember(activeDeviceId) {
+        mutableStateOf<TrendsSnapshotCacheKey?>(null)
+    }
     var trendsSnapshotLoading by remember(activeDeviceId) { mutableStateOf(false) }
-    var trendsSnapshotFailed by remember(activeDeviceId) { mutableStateOf(false) }
-    LaunchedEffect(historyRequest, historyPayload, range) {
-        trendsSnapshot = null
-        trendsSnapshotFailed = false
-        if (historyPayload == null || days.isEmpty()) {
+    val trendsSnapshotCache = remember(activeDeviceId) { TrendsSnapshotCache() }
+    val snapshotTodayKey = logicalDayKeyNow()
+    val currentSnapshotKey = if (historyPayload != null && days.isNotEmpty()) {
+        TrendsSnapshotCacheKey(
+            historyGeneration = historyGeneration,
+            todayKey = snapshotTodayKey,
+            range = range,
+        )
+    } else {
+        null
+    }
+    LaunchedEffect(historyGeneration, range, snapshotTodayKey) {
+        val payload = historyPayload
+        val cacheKey = currentSnapshotKey
+        if (payload == null || payload.days.isEmpty() || cacheKey == null) {
             trendsSnapshotLoading = false
             return@LaunchedEffect
         }
-        trendsSnapshotLoading = true
 
-        // Let Compose commit the static skeleton before any multi-year filtering starts.
-        yield()
-        currentCoroutineContext().ensureActive()
-        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("trends.aggregate_prepare")
+        val diagnosticFields = mutableMapOf(
+            "range" to trendsRangeDiagnostic(cacheKey.range),
+            "day_count_bucket" to trendsDayCountBucket(payload.days.size),
+            "cache_capacity" to trendsSnapshotCache.capacity.toString(),
+        )
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "trends.aggregate_prepare",
+            fields = diagnosticFields,
+        )
         var outcome = "completed"
         try {
-            val inputDays = days.toList()
-            val inputSleep = sleepPerfByDay.toMap()
+            val cached = trendsSnapshotCache[cacheKey]
+            if (cached != null) {
+                trendsSnapshot = cached
+                trendsSnapshotKey = cacheKey
+                trendsSnapshotFailureKey = null
+                trendsSnapshotLoading = false
+                diagnosticFields["cache_status"] = "hit"
+                diagnosticFields["cache_entries"] = trendsSnapshotCache.size.toString()
+                outcome = "cache_hit"
+                return@LaunchedEffect
+            }
+
+            trendsSnapshot = null
+            trendsSnapshotKey = null
+            trendsSnapshotFailureKey = null
+            trendsSnapshotLoading = true
+            diagnosticFields["cache_status"] = "miss"
+
+            // Let Compose commit the static skeleton before any multi-year filtering starts.
+            yield()
+            currentCoroutineContext().ensureActive()
             val loadContext = currentCoroutineContext()
             val prepared = withTimeout(TRENDS_LOAD_TIMEOUT_MILLIS) {
                 withContext(Dispatchers.Default) {
                     buildTrendsSnapshot(
-                        days = inputDays,
+                        days = payload.days,
                         selected = range,
-                        sleepPerfByDay = inputSleep,
-                        today = LocalDate.now(),
+                        sleepPerfByDay = payload.resolvedSleep,
+                        today = LocalDate.parse(cacheKey.todayKey),
                         cancellationCheck = { loadContext.ensureActive() },
                     )
                 }
             }
             currentCoroutineContext().ensureActive()
+            trendsSnapshotCache.put(cacheKey, prepared)
             trendsSnapshot = prepared
+            trendsSnapshotKey = cacheKey
+            diagnosticFields["cache_entries"] = trendsSnapshotCache.size.toString()
         } catch (_: TimeoutCancellationException) {
             outcome = "timed_out"
-            trendsSnapshotFailed = true
+            trendsSnapshotFailureKey = cacheKey
         } catch (cancelled: CancellationException) {
             outcome = "canceled"
             throw cancelled
         } catch (_: Exception) {
             outcome = "failed"
-            trendsSnapshotFailed = true
+            trendsSnapshotFailureKey = cacheKey
         } finally {
             trendsSnapshotLoading = false
-            com.noop.AppDiagnosticsRecorder.endOperation(diagnostic, outcome = outcome)
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = outcome,
+                fields = diagnosticFields,
+            )
         }
     }
 
@@ -418,10 +507,10 @@ fun TrendsScreen(vm: AppViewModel) {
     var weeklyDigestLoading by remember(activeDeviceId) { mutableStateOf(false) }
     var weeklyDigestFailed by remember(activeDeviceId) { mutableStateOf(false) }
     val weeklyAnchorDay = WeeklyDigestEngine.addDays(logicalDayKeyNow(), weekOffset * 7)
-    val selectedWeekHasImportedRest = remember(importedSleepPerfByDay, weeklyAnchorDay) {
+    val selectedWeekHasImportedRest = remember(historyGeneration, weeklyAnchorDay) {
         hasImportedRestScore(importedSleepPerfByDay, weeklyAnchorDay)
     }
-    LaunchedEffect(historyRequest, historyPayload, weeklyAnchorDay, effortScale) {
+    LaunchedEffect(historyGeneration, weeklyAnchorDay, effortScale) {
         weeklyDigest = null
         weeklyDigestFailed = false
         if (historyPayload == null || days.isEmpty()) {
@@ -435,13 +524,12 @@ fun TrendsScreen(vm: AppViewModel) {
         val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("trends.weekly_digest_prepare")
         var outcome = "completed"
         try {
-            val inputDays = days.toList()
             val factor = effortDisplayFactor(effortScale)
             val loadContext = currentCoroutineContext()
             val prepared = withTimeout(TRENDS_LOAD_TIMEOUT_MILLIS) {
                 withContext(Dispatchers.Default) {
                     buildWeeklyDigest(
-                        inputDays,
+                        days,
                         weeklyAnchorDay,
                         effortDisplayFactor = factor,
                         cancellationCheck = { loadContext.ensureActive() },
@@ -465,7 +553,12 @@ fun TrendsScreen(vm: AppViewModel) {
         }
     }
 
-    val prepared = trendsSnapshot
+    val prepared = trendsSnapshot?.takeIf { trendsSnapshotKey == currentSnapshotKey }
+    val trendsSnapshotFailed = currentSnapshotKey != null &&
+        trendsSnapshotFailureKey == currentSnapshotKey
+    val trendsSnapshotPending = currentSnapshotKey != null &&
+        prepared == null &&
+        !trendsSnapshotFailed
     val minWeekOffset = prepared?.minWeekOffset ?: 0
     LaunchedEffect(minWeekOffset) { weekOffset = weekOffset.coerceIn(minWeekOffset, 0) }
 
@@ -513,7 +606,7 @@ fun TrendsScreen(vm: AppViewModel) {
             }
             return@LazyScreenScaffold
         }
-        if (prepared == null && trendsSnapshotLoading) {
+        if (prepared == null && (trendsSnapshotLoading || trendsSnapshotPending)) {
             item { TrendsLoadingSkeleton() }
             return@LazyScreenScaffold
         }
@@ -1042,29 +1135,54 @@ internal data class TrendsSnapshot(
     val minWeekOffset: Int,
 )
 
+private data class TrendSeriesPoint(
+    val day: String,
+    val value: Double,
+)
+
 internal fun buildTrendsSnapshot(
     days: List<DailyMetric>,
     selected: TrendsRange,
     sleepPerfByDay: Map<String, Double>,
     today: LocalDate,
     cancellationCheck: () -> Unit = {},
+    onSourceRow: (() -> Unit)? = null,
 ): TrendsSnapshot {
     cancellationCheck()
+    val recoveryPoints = ArrayList<TrendSeriesPoint>(days.size)
+    val hrvPoints = ArrayList<TrendSeriesPoint>(days.size)
+    val rhrPoints = ArrayList<TrendSeriesPoint>(days.size)
+    val strainPoints = ArrayList<TrendSeriesPoint>(days.size)
+    val restPoints = ArrayList<TrendSeriesPoint>(days.size)
+
+    days.forEachIndexed { index, day ->
+        if (index % 256 == 0) {
+            cancellationCheck()
+        }
+        onSourceRow?.invoke()
+        day.recovery?.let { recoveryPoints += TrendSeriesPoint(day.day, it) }
+        day.avgHrv?.let { hrvPoints += TrendSeriesPoint(day.day, it) }
+        day.restingHr?.let { rhrPoints += TrendSeriesPoint(day.day, it.toDouble()) }
+        day.strain?.let { strainPoints += TrendSeriesPoint(day.day, it) }
+        sleepPerfByDay[day.day]?.let { restPoints += TrendSeriesPoint(day.day, it) }
+    }
+    cancellationCheck()
+
     val todayKey = today.toString()
     return TrendsSnapshot(
-        recovery = resolveMetric(days, selected, today, cancellationCheck) { it.recovery },
-        hrv = resolveMetric(days, selected, today, cancellationCheck) { it.avgHrv },
-        rhr = resolveMetric(days, selected, today, cancellationCheck) { it.restingHr?.toDouble() },
-        strain = resolveMetric(days, selected, today, cancellationCheck) { it.strain },
-        rest = resolveMetric(days, selected, today, cancellationCheck) { sleepPerfByDay[it.day] },
+        recovery = resolveMetricPoints(recoveryPoints, selected, today, cancellationCheck),
+        hrv = resolveMetricPoints(hrvPoints, selected, today, cancellationCheck),
+        rhr = resolveMetricPoints(rhrPoints, selected, today, cancellationCheck),
+        strain = resolveMetricPoints(strainPoints, selected, today, cancellationCheck),
+        rest = resolveMetricPoints(restPoints, selected, today, cancellationCheck),
         minWeekOffset = minWeekOffset(days, todayKey, cancellationCheck),
     )
 }
 
 /**
  * Walk the widening order once: take the smallest range ≥ selected whose window holds
- * ≥1 non-null point for [value]; if none do, fall back to ALL. Windows are taken
- * relative to the LATEST recorded day, exactly like the macOS `days(for:)`.
+ * ≥1 non-null point for [value]; if none do, fall back to ALL. Windows end on
+ * the phone's current local day, matching the Apple implementation.
  */
 internal fun resolveMetric(
     days: List<DailyMetric>,
@@ -1073,9 +1191,27 @@ internal fun resolveMetric(
     cancellationCheck: () -> Unit = {},
     value: (DailyMetric) -> Double?,
 ): ResolvedMetric {
+    cancellationCheck()
+    val points = ArrayList<TrendSeriesPoint>(days.size)
+    days.forEachIndexed { index, day ->
+        if (index % 256 == 0) {
+            cancellationCheck()
+        }
+        value(day)?.let { points += TrendSeriesPoint(day.day, it) }
+    }
+    cancellationCheck()
+    return resolveMetricPoints(points, selected, today, cancellationCheck)
+}
+
+private fun resolveMetricPoints(
+    points: List<TrendSeriesPoint>,
+    selected: TrendsRange,
+    today: LocalDate,
+    cancellationCheck: () -> Unit,
+): ResolvedMetric {
     for (r in selected.widening) {
         cancellationCheck()
-        val pts = windowPoints(days, r, today, cancellationCheck, value)
+        val pts = windowPoints(points, r, today, cancellationCheck)
         if (pts.isNotEmpty()) {
             return ResolvedMetric(
                 values = pts.map { it.second },
@@ -1086,7 +1222,7 @@ internal fun resolveMetric(
         }
     }
     cancellationCheck()
-    val pts = windowPoints(days, TrendsRange.All, today, cancellationCheck, value)
+    val pts = windowPoints(points, TrendsRange.All, today, cancellationCheck)
     return ResolvedMetric(
         values = pts.map { it.second },
         dates = pts.map { it.first },
@@ -1102,28 +1238,44 @@ internal fun resolveMetric(
  * value so the chart can draw a real date X-axis.
  */
 private fun windowPoints(
-    days: List<DailyMetric>,
+    points: List<TrendSeriesPoint>,
     range: TrendsRange,
     today: LocalDate,
     cancellationCheck: () -> Unit,
-    value: (DailyMetric) -> Double?,
 ): List<Pair<String, Double>> {
-    if (days.isEmpty()) return emptyList()
+    if (points.isEmpty()) return emptyList()
     val cutoff = range.days?.let { n ->
         // Trailing N calendar days ending today, anchored to the phone's date rather than the last N rows.
         today.minusDays((n - 1).toLong()).toString()
     }
-    val points = ArrayList<Pair<String, Double>>(days.size)
-    days.forEachIndexed { index, day ->
-        if (index % 256 == 0) {
+    val startIndex = cutoff?.let { lowerBound(points, it) } ?: 0
+    if (startIndex >= points.size) return emptyList()
+
+    val window = ArrayList<Pair<String, Double>>(points.size - startIndex)
+    for (index in startIndex until points.size) {
+        if ((index - startIndex) % 256 == 0) {
             cancellationCheck()
         }
-        if (cutoff == null || day.day >= cutoff) {
-            value(day)?.let { points += day.day to it }
-        }
+        val point = points[index]
+        window += point.day to point.value
     }
     cancellationCheck()
-    return points
+    return window
+}
+
+private fun lowerBound(points: List<TrendSeriesPoint>, day: String): Int {
+    // Repository history is oldest-first; ISO day keys preserve chronological ordering.
+    var lower = 0
+    var upper = points.size
+    while (lower < upper) {
+        val middle = lower + (upper - lower) / 2
+        if (points[middle].day < day) {
+            lower = middle + 1
+        } else {
+            upper = middle
+        }
+    }
+    return lower
 }
 
 @Composable

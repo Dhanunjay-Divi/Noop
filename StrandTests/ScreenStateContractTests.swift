@@ -73,6 +73,21 @@ final class ScreenStateContractTests: XCTestCase {
         XCTAssertTrue(trends.contains("noop.trends.failure"))
         XCTAssertTrue(trends.contains("action: retryTrends"))
         XCTAssertTrue(trends.contains("outcome = \"timed_out\""))
+        XCTAssertTrue(trends.contains("Task.detached(priority: .userInitiated)"))
+        XCTAssertTrue(trends.contains("@State private var trendsSnapshotCache = SnapshotCache(capacity: 6)"))
+        XCTAssertTrue(trends.contains("outcome = \"cache_hit\""))
+        XCTAssertTrue(trends.contains("\"day_count_bucket\""))
+        XCTAssertTrue(
+            trends.contains(
+                """
+                guard let cacheKey = currentSnapshotCacheKey else {
+                            trendsSnapshot = nil
+                            trendsSnapshotKey = nil
+                """
+            )
+        )
+        XCTAssertFalse(trends.contains("\"health_value\""))
+        XCTAssertFalse(trends.contains("\"device_id\""))
     }
 
     func testExternalHealthProjectionReconcilesOptInRoutineNotifications() throws {

@@ -89,6 +89,8 @@ struct TrendsView: View {
     /// separate from SwiftUI's body guarantees the header can paint before a
     /// multi-year history is filtered and converted into chart points.
     @State private var trendsSnapshot: TrendsSnapshot?
+    @State private var trendsSnapshotKey: SnapshotCacheKey?
+    @State private var trendsSnapshotCache = SnapshotCache(capacity: 6)
     @State private var weeklyDigestPresentation: WeeklyDigestPresentation?
     @State private var loadFailure: LoadFailure?
     @State private var retryGeneration = 0
@@ -167,6 +169,49 @@ struct TrendsView: View {
         let minWeekOffset: Int
     }
 
+    struct SnapshotCacheKey: Hashable, Sendable {
+        let historyRevision: Int
+        let dayCount: Int
+        let firstDay: String?
+        let lastDay: String?
+        let sleepRevision: Int
+        let todayKey: String
+        let range: Range
+    }
+
+    struct SnapshotCache {
+        let capacity: Int
+        private var values: [SnapshotCacheKey: TrendsSnapshot] = [:]
+        private var recency: [SnapshotCacheKey] = []
+
+        init(capacity: Int) {
+            self.capacity = max(1, capacity)
+        }
+
+        var count: Int { values.count }
+
+        mutating func value(for key: SnapshotCacheKey) -> TrendsSnapshot? {
+            guard let value = values[key] else { return nil }
+            recency.removeAll { $0 == key }
+            recency.append(key)
+            return value
+        }
+
+        mutating func insert(_ value: TrendsSnapshot, for key: SnapshotCacheKey) {
+            values[key] = value
+            recency.removeAll { $0 == key }
+            recency.append(key)
+            while recency.count > capacity {
+                values.removeValue(forKey: recency.removeFirst())
+            }
+        }
+    }
+
+    private struct DatedTrendPoint: Sendable {
+        let day: String
+        let point: TrendPoint
+    }
+
     private struct WeeklyDigestPresentation: Sendable {
         let sourceKey: String
         let weekOffset: Int
@@ -178,43 +223,111 @@ struct TrendsView: View {
         range: Range,
         sleepPerfByDay: [String: Double],
         todayKey: String,
-        shouldCancel: @Sendable () -> Bool = { false }
+        shouldCancel: @Sendable () -> Bool = { false },
+        onSourceRow: (@Sendable () -> Void)? = nil
     ) -> TrendsSnapshot? {
+        guard !shouldCancel() else { return nil }
+
+        var recoveryPoints: [DatedTrendPoint] = []
+        var hrvPoints: [DatedTrendPoint] = []
+        var rhrPoints: [DatedTrendPoint] = []
+        var strainPoints: [DatedTrendPoint] = []
+        var restPoints: [DatedTrendPoint] = []
+        recoveryPoints.reserveCapacity(days.count)
+        hrvPoints.reserveCapacity(days.count)
+        rhrPoints.reserveCapacity(days.count)
+        strainPoints.reserveCapacity(days.count)
+        restPoints.reserveCapacity(days.count)
+
+        for (index, day) in days.enumerated() {
+            if index.isMultiple(of: 256), shouldCancel() {
+                return nil
+            }
+            onSourceRow?()
+
+            let recovery = day.recovery
+            let hrv = day.avgHrv
+            let rhr = day.restingHr.map(Double.init)
+            let strain = day.strain
+            let rest = sleepPerfByDay[day.day]
+            guard recovery != nil || hrv != nil || rhr != nil || strain != nil || rest != nil,
+                  let metricDate = date(day.day) else {
+                continue
+            }
+
+            if let recovery {
+                recoveryPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: recovery)
+                    )
+                )
+            }
+            if let hrv {
+                hrvPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: hrv)
+                    )
+                )
+            }
+            if let rhr {
+                rhrPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: rhr)
+                    )
+                )
+            }
+            if let strain {
+                strainPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: strain)
+                    )
+                )
+            }
+            if let rest {
+                restPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: rest)
+                    )
+                )
+            }
+        }
+        guard !shouldCancel() else { return nil }
+
         guard
             let recovery = resolve(
-                days: days,
+                points: recoveryPoints,
                 selected: range,
                 todayKey: todayKey,
-                shouldCancel: shouldCancel,
-                value: { $0.recovery }
+                shouldCancel: shouldCancel
             ),
             let hrv = resolve(
-                days: days,
+                points: hrvPoints,
                 selected: range,
                 todayKey: todayKey,
-                shouldCancel: shouldCancel,
-                value: { $0.avgHrv }
+                shouldCancel: shouldCancel
             ),
             let rhr = resolve(
-                days: days,
+                points: rhrPoints,
                 selected: range,
                 todayKey: todayKey,
-                shouldCancel: shouldCancel,
-                value: { $0.restingHr.map(Double.init) }
+                shouldCancel: shouldCancel
             ),
             let strain = resolve(
-                days: days,
+                points: strainPoints,
                 selected: range,
                 todayKey: todayKey,
-                shouldCancel: shouldCancel,
-                value: { $0.strain }
+                shouldCancel: shouldCancel
             ),
             let rest = resolve(
-                days: days,
+                points: restPoints,
                 selected: range,
                 todayKey: todayKey,
-                shouldCancel: shouldCancel,
-                value: { sleepPerfByDay[$0.day] }
+                shouldCancel: shouldCancel
             ),
             let minimumOffset = minWeekOffset(
                 days: days,
@@ -235,74 +348,89 @@ struct TrendsView: View {
     }
 
     private nonisolated static func resolve(
-        days: [DailyMetric],
+        points: [DatedTrendPoint],
         selected: Range,
         todayKey: String,
-        shouldCancel: @Sendable () -> Bool,
-        value: @Sendable (DailyMetric) -> Double?
+        shouldCancel: @Sendable () -> Bool
     ) -> ResolvedMetric? {
         // Find the smallest range ≥ selected whose window has ≥1 point, keeping
-        // that window's points so we don't re-filter to read them back.
+        // that window's points so we don't re-filter the source history.
         for range in selected.widening {
-            guard let pts = points(
-                days: days,
+            guard let window = windowPoints(
+                points: points,
                 range: range,
                 todayKey: todayKey,
-                shouldCancel: shouldCancel,
-                value: value
+                shouldCancel: shouldCancel
             ) else {
                 return nil
             }
-            if !pts.isEmpty {
+            if !window.isEmpty {
                 return ResolvedMetric(
-                    points: pts,
+                    points: window,
                     effective: range,
                     widened: range != selected
                 )
             }
         }
         // No range held data: fall back to ALL (matches effectiveRange()).
-        guard let pts = points(
-            days: days,
+        guard let window = windowPoints(
+            points: points,
             range: .all,
             todayKey: todayKey,
-            shouldCancel: shouldCancel,
-            value: value
+            shouldCancel: shouldCancel
         ) else {
             return nil
         }
         return ResolvedMetric(
-            points: pts,
+            points: window,
             effective: .all,
             widened: .all != selected
         )
     }
 
-    private nonisolated static func points(
-        days: [DailyMetric],
+    private nonisolated static func windowPoints(
+        points: [DatedTrendPoint],
         range: Range,
         todayKey: String,
-        shouldCancel: @Sendable () -> Bool,
-        value: @Sendable (DailyMetric) -> Double?
+        shouldCancel: @Sendable () -> Bool
     ) -> [TrendPoint]? {
         guard !shouldCancel() else { return nil }
-        let cutoff = range.days.map {
-            WeeklyDigestEngine.addDays(todayKey, -($0 - 1))
+        let startIndex: Int
+        if let dayCount = range.days {
+            let cutoff = WeeklyDigestEngine.addDays(todayKey, -(dayCount - 1))
+            startIndex = lowerBound(points, day: cutoff)
+        } else {
+            startIndex = 0
         }
+        guard startIndex < points.count else { return [] }
+
         var result: [TrendPoint] = []
-        result.reserveCapacity(days.count)
-        for (index, day) in days.enumerated() {
-            if index.isMultiple(of: 256), shouldCancel() {
+        result.reserveCapacity(points.count - startIndex)
+        for (offset, item) in points[startIndex...].enumerated() {
+            if offset.isMultiple(of: 256), shouldCancel() {
                 return nil
             }
-            guard cutoff.map({ day.day >= $0 }) ?? true,
-                  let metricValue = value(day),
-                  let metricDate = date(day.day) else {
-                continue
-            }
-            result.append(TrendPoint(date: metricDate, value: metricValue))
+            result.append(item.point)
         }
         return shouldCancel() ? nil : result
+    }
+
+    private nonisolated static func lowerBound(
+        _ points: [DatedTrendPoint],
+        day: String
+    ) -> Int {
+        // Repository history is oldest-first; ISO day keys preserve chronological ordering.
+        var lower = 0
+        var upper = points.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if points[middle].day < day {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        return lower
     }
 
     private nonisolated static func minWeekOffset(
@@ -475,6 +603,41 @@ struct TrendsView: View {
         ].joined(separator: "|")
     }
 
+    private var currentSnapshotCacheKey: SnapshotCacheKey? {
+        guard !repo.days.isEmpty, sleepPerfLoaded else { return nil }
+        return SnapshotCacheKey(
+            historyRevision: repo.refreshSeq,
+            dayCount: repo.days.count,
+            firstDay: repo.days.first?.day,
+            lastDay: repo.days.last?.day,
+            sleepRevision: sleepPerfRevision,
+            todayKey: Repository.localDayKey(Date()),
+            range: range
+        )
+    }
+
+    private nonisolated static func diagnosticRange(_ range: Range) -> String {
+        switch range {
+        case .week: return "week"
+        case .month: return "month"
+        case .quarter: return "quarter"
+        case .half: return "half"
+        case .year: return "year"
+        case .all: return "all"
+        }
+    }
+
+    private nonisolated static func diagnosticDayCountBucket(_ count: Int) -> String {
+        switch count {
+        case 0: return "0"
+        case 1...7: return "1_7"
+        case 8...30: return "8_30"
+        case 31...90: return "31_90"
+        case 91...365: return "91_365"
+        default: return "366_plus"
+        }
+    }
+
     private var weeklyDigestTaskIdentity: String {
         [
             historyTaskIdentity,
@@ -519,7 +682,8 @@ struct TrendsView: View {
                     : "Loading your history…")
             } else if loadFailure == .trends {
                 trendsFailureCard
-            } else if let snapshot = trendsSnapshot {
+            } else if let snapshot = trendsSnapshot,
+                      trendsSnapshotKey == currentSnapshotCacheKey {
                 VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
                     // The main card list ripples in once on appear (Reduce-Motion safe).
                     Group {
@@ -580,28 +744,60 @@ struct TrendsView: View {
     }
 
     private func loadTrendsSnapshot() async {
+        guard let cacheKey = currentSnapshotCacheKey else {
+            trendsSnapshot = nil
+            trendsSnapshotKey = nil
+            return
+        }
+
+        var diagnosticFields = [
+            "range": Self.diagnosticRange(cacheKey.range),
+            "day_count_bucket": Self.diagnosticDayCountBucket(cacheKey.dayCount),
+            "cache_capacity": String(trendsSnapshotCache.capacity),
+        ]
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "trends.aggregate_prepare",
+            fields: diagnosticFields
+        )
+        var outcome = "completed"
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: outcome,
+                fields: diagnosticFields
+            )
+        }
+
+        if let cached = trendsSnapshotCache.value(for: cacheKey) {
+            trendsSnapshot = cached
+            trendsSnapshotKey = cacheKey
+            diagnosticFields["cache_status"] = "hit"
+            diagnosticFields["cache_entries"] = String(trendsSnapshotCache.count)
+            outcome = "cache_hit"
+            return
+        }
+
         trendsSnapshot = nil
-        guard !repo.days.isEmpty, sleepPerfLoaded else { return }
+        trendsSnapshotKey = nil
+        diagnosticFields["cache_status"] = "miss"
 
         // Give SwiftUI one turn to paint the static skeleton before starting CPU work.
         await Task.yield()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+            outcome = "canceled"
+            return
+        }
 
         let requestIdentity = trendsTaskIdentity
         let inputDays = repo.days
-        let inputRange = range
+        let inputRange = cacheKey.range
         let inputSleep = sleepPerfByDay
-        let todayKey = Repository.localDayKey(Date())
+        let todayKey = cacheKey.todayKey
         let timeoutNanoseconds = LoadPolicy.timeoutNanoseconds(
             retryGeneration: retryGeneration
         )
         let forceDemoTimeout = CommandLine.arguments.contains("--demo-trends-timeout")
             && retryGeneration == 0
-        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("trends.aggregate_prepare")
-        var outcome = "completed"
-        defer {
-            AppDiagnosticsRecorder.shared.endOperation(diagnostic, outcome: outcome)
-        }
 
         let worker = Task.detached(priority: .userInitiated) {
             if forceDemoTimeout {
@@ -645,7 +841,10 @@ struct TrendsView: View {
             outcome = "canceled"
             return
         }
+        trendsSnapshotCache.insert(prepared, for: cacheKey)
         trendsSnapshot = prepared
+        trendsSnapshotKey = cacheKey
+        diagnosticFields["cache_entries"] = String(trendsSnapshotCache.count)
     }
 
     private func loadWeeklyDigest() async {
@@ -764,6 +963,7 @@ struct TrendsView: View {
     private func retryTrends() {
         loadFailure = nil
         trendsSnapshot = nil
+        trendsSnapshotKey = nil
         weeklyDigestPresentation = nil
         retryGeneration &+= 1
     }
