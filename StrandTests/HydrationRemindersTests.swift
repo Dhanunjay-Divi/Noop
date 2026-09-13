@@ -1,4 +1,5 @@
 import XCTest
+import UserNotifications
 @testable import Strand
 
 @MainActor
@@ -328,5 +329,122 @@ final class HydrationRemindersTests: XCTestCase {
         XCTAssertEqual(action?.kind, .hydrationConfirm)
         XCTAssertEqual(action?.value, 275)
         XCTAssertEqual(action?.contextKey, slot.token)
+    }
+
+    func testBandFirstKeepsExactPhoneFallbacksScheduled() throws {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: HydrationReminders.enabledKey)
+        defaults.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.doubleTapConfirmEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.bandFirstEnabledKey)
+        defaults.set(8 * 60, forKey: HydrationReminders.activeStartMinutesKey)
+        defaults.set(10 * 60, forKey: HydrationReminders.activeEndMinutesKey)
+        defaults.set(60, forKey: HydrationReminders.intervalMinutesKey)
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 13, hour: 7, minute: 59
+        )))
+
+        let requests = HydrationReminders.bandFirstNotificationRequests(
+            now: now,
+            calendar: calendar,
+            occurrenceCount: 3
+        )
+
+        XCTAssertEqual(requests.count, 3)
+        XCTAssertEqual(
+            requests.map(\.identifier),
+            [
+                HydrationReminders.phoneFallbackRequestID(
+                    contextKey: "2026-09-13-480"
+                ),
+                HydrationReminders.phoneFallbackRequestID(
+                    contextKey: "2026-09-13-540"
+                ),
+                HydrationReminders.phoneFallbackRequestID(
+                    contextKey: "2026-09-14-480"
+                ),
+            ]
+        )
+        let firstTrigger = try XCTUnwrap(
+            requests.first?.trigger as? UNCalendarNotificationTrigger
+        )
+        XCTAssertFalse(firstTrigger.repeats)
+        XCTAssertEqual(firstTrigger.dateComponents.hour, 8)
+        XCTAssertEqual(firstTrigger.dateComponents.minute, 6)
+    }
+
+    func testAcceptedBandCueSuppressesOnlyItsExactPhoneFallback() throws {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: HydrationReminders.enabledKey)
+        defaults.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.doubleTapConfirmEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.bandFirstEnabledKey)
+        defaults.set(8 * 60, forKey: HydrationReminders.activeStartMinutesKey)
+        defaults.set(10 * 60, forKey: HydrationReminders.activeEndMinutesKey)
+        defaults.set(60, forKey: HydrationReminders.intervalMinutesKey)
+        defaults.set("2026-09-13-480", forKey: "hydrationReminders.pendingEscalationSlot")
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 13, hour: 7, minute: 59
+        )))
+
+        let identifiers = HydrationReminders.bandFirstNotificationRequests(
+            now: now,
+            calendar: calendar,
+            occurrenceCount: 3
+        ).map(\.identifier)
+
+        XCTAssertFalse(identifiers.contains(
+            HydrationReminders.phoneFallbackRequestID(
+                contextKey: "2026-09-13-480"
+            )
+        ))
+        XCTAssertTrue(identifiers.contains(
+            HydrationReminders.phoneFallbackRequestID(
+                contextKey: "2026-09-13-540"
+            )
+        ))
+        XCTAssertTrue(identifiers.contains(
+            HydrationReminders.phoneFallbackRequestID(
+                contextKey: "2026-09-14-480"
+            )
+        ))
+    }
+
+    func testMissedTapFallbackUsesOneBoundedWindow() throws {
+        let slot = HydrationReminders.DueSlot(
+            minuteOfDay: 8 * 60,
+            localDay: "2026-09-13"
+        )
+        let request = HydrationReminders.missedResponseRequest(
+            for: slot,
+            windowMinutes: 10
+        )
+        let trigger = try XCTUnwrap(
+            request.trigger as? UNTimeIntervalNotificationTrigger
+        )
+
+        XCTAssertFalse(trigger.repeats)
+        XCTAssertEqual(trigger.timeInterval, 10 * 60)
+    }
+
+    func testBandFirstIsDeferredWhenNotificationCenterAcceptsNoFallback() {
+        UserDefaults.standard.set(true, forKey: HydrationReminders.enabledKey)
+        UserDefaults.standard.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
+        UserDefaults.standard.set(
+            true,
+            forKey: HydrationReminders.doubleTapConfirmEnabledKey
+        )
+        UserDefaults.standard.set(true, forKey: HydrationReminders.bandFirstEnabledKey)
+
+        XCTAssertEqual(
+            HydrationReminders.applyAuthorizedScheduleResult(nil),
+            .deferred
+        )
     }
 }

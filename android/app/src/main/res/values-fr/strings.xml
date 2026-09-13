@@ -2150,8 +2150,8 @@
     <string name="hydration_tap_amount_help">La quantité exacte enregistrée par un toucher valide.</string>
     <string name="hydration_tap_window_label">Délai de toucher</string>
     <string name="hydration_tap_window_help">Après ce délai, le geste reprend son action habituelle.</string>
-    <string name="hydration_tap_band_first_label">Notifier uniquement après un toucher manqué</string>
-    <string name="hydration_tap_band_first_help">Après le signal du bracelet émis par NOOP, attendez pendant le délai de toucher. Sans confirmation, une notification est envoyée au téléphone. Les alarmes et alertes de sécurité n’attendent jamais.</string>
+    <string name="hydration_tap_band_first_label">Utiliser d’abord le bracelet quand il est disponible</string>
+    <string name="hydration_tap_band_first_help">Le rappel du téléphone reste planifié. Seul un signal direct du bracelet envoyé avec succès lance le délai de toucher ; sinon, le rappel du téléphone est maintenu. Les alarmes et alertes de sécurité n’attendent jamais.</string>
     <string name="smart_alarm_tap_response_label">Touchez deux fois le bracelet pour répondre</string>
     <string name="smart_alarm_tap_response_help">Utilise un double toucher en direct pendant que l’alarme est active. Cela ne modifie jamais les alertes de sécurité ou de médicaments.</string>
     <string name="smart_alarm_tap_window_label">Délai de toucher actif</string>

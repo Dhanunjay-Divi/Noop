@@ -20,6 +20,8 @@ Success requires:
 
 - managed hydration document application to reject or roll back a merged day
   above the shared 10,000 ml current-day limit on Apple and Android;
+- hydration band-first reminders to retain a durable phone occurrence unless a
+  live cue and its bounded tap-window fallback were both accepted;
 - a newly reserved feedback report to retain an authorization identity for its
   full 28-day lifecycle without breaking operations for reports already bound
   to another identity;
@@ -34,6 +36,8 @@ Success requires:
 ### In scope
 
 - Apple and Android managed hydration document aggregation and rollback tests.
+- Apple and Android hydration band-first phone-fallback policy, direct tests,
+  and honest setting copy.
 - Apple and Android feedback anonymous-identity lifetime policy and tests.
 - Apple and Android managed snapshot transport/coordinator tombstone handling
   and tests.
@@ -44,8 +48,9 @@ Success requires:
 
 - Enabling feedback ingestion, public traffic, real health-data transfer, or
   production deployment.
-- Changing hydration goals, recommendation formulas, notification behavior,
-  UI presentation, or health claims.
+- Changing hydration goals, recommendation formulas, notification behavior
+  outside the bounded hydration phone-fallback repair, unrelated UI
+  presentation, or health claims.
 - Claiming physical-device, BLE, background, notification, haptic, battery, or
   sensor behavior from simulator or unit-test evidence.
 
@@ -69,12 +74,28 @@ Success requires:
 
 ## Delivered
 
-Pending.
+### Hydration phone-fallback follow-up
+
+- Apple band-first mode now schedules a bounded horizon of 24 exact,
+  non-repeating phone occurrences. A live cue replaces only its matching phone
+  occurrence after Notification Center accepts the delayed tap-window request;
+  a failed replacement leaves the original phone occurrence available.
+- Apple confirmation cancels only the matching exact occurrence and matching
+  tap-window request. A stale confirmation cannot remove a newer reminder.
+- Android now serializes the worker and live-band paths per process. Worker
+  first posts once and prevents a later buzz; cue first owns one tap window;
+  buzz, tap-arm, or escalation-scheduling failure leaves the phone worker
+  eligible.
+- Android reads durable worker/cue state inside the serialized decision instead
+  of passing potentially stale values into it.
+- Apple and Android settings now say that the phone fallback stays scheduled
+  and that only a successful live cue starts the tap window. Alarms and Safety
+  behavior is unchanged.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: pending review; no migration is currently
-  expected.
+- Schema or migration impact: no schema or migration change; the repair adds
+  bounded local reminder-state keys only.
 - Existing-data retention impact: fixes must preserve valid hydration entries,
   report lifecycle access, and remote deletion semantics without fabricating
   records or silently normalizing health data.
@@ -90,10 +111,13 @@ Pending.
   managed-document transaction failures, bounded feedback queue stages, and
   snapshot checkpoint/cursor state.
 - Why existing evidence is sufficient, or why new evidence is required:
-  pending implementation review.
+  existing notification lifecycle ledgers already record bounded
+  scheduled/post/suppressed/cancelled outcomes under the stable hydration
+  category. The occurrence coordinator persists only local categorical state,
+  so no new high-frequency event was added.
 - Existing evidence reused: `AppDiagnosticsRecorder`, durable feedback outbox
   state, managed snapshot checkpoints, and typed sync/storage errors.
-- New bounded events or operation spans: pending review.
+- New bounded events or operation spans: none.
 - Redaction, retention, and high-frequency controls: no health values, user
   text, credentials, tokens, URLs, object payloads, or persistent identifiers
   may enter diagnostics.
@@ -107,6 +131,12 @@ Pending.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Exact-SHA hosted matrix for `6766b30c` | 35 successful, three intentional skips, zero failures | The pre-follow-up source passed every protected hosted job | The three later review findings |
+| `ANDROID_HOME="$HOME/Library/Android/sdk" ./gradlew :app:testFullDebugUnitTest --tests 'com.noop.notif.HydrationReminderPolicyTest'` | Passed, `BUILD SUCCESSFUL` | Full variant worker-first, cue-first, trust-gate, dedupe, and buzz-failure policy | Physical WorkManager/OEM timing or band vibration |
+| `ANDROID_HOME="$HOME/Library/Android/sdk" ./gradlew :app:testDemoDebugUnitTest --tests 'com.noop.notif.HydrationReminderPolicyTest'` | Passed, `BUILD SUCCESSFUL` | Demo variant compiles and passes the same focused policy/integration tests | Physical device behavior |
+| `xcrun swiftc -frontend -parse Strand/System/HydrationReminders.swift StrandTests/HydrationRemindersTests.swift Strand/Screens/HydrationView.swift Strand/Screens/AutomationsView.swift` | Passed | Modified Apple source and tests parse | XCTest execution |
+| `xcodebuild -project Strand.xcodeproj -scheme Strand -destination 'platform=macOS' -derivedDataPath /private/tmp/noop-hydration-phone-fallback-apple-dd CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO -jobs 2 -only-testing:StrandTests/HydrationRemindersTests test` | Blocked before tests: third-party `MarkdownUI` compile could not create a temporary directory because the host volume had no free space | The focused Apple test command and infrastructure limitation were reproduced | No Apple XCTest assertion result |
+| `python3 Tools/i18n_audit.py --platform all --full` | Passed | Modified localized strings have no catalog gap | Rendering on every locale/device |
+| `python3 -m json.tool Strand/Resources/Localizable.xcstrings` and `git diff --check` | Passed | Catalog JSON and patch whitespace are valid | Runtime behavior |
 
 ## Physical device and deployment
 
@@ -121,10 +151,11 @@ Pending.
 
 ## Git and release state
 
-- Changed paths: operations record only at round start
-- Commits: pending
-- Branch and remote state: local and remote PR head are `6766b30c`; repository
-  is temporarily public for protected hosted checks
+- Changed paths: hydration reminder source, focused tests, setting copy and
+  localization on Apple and Android, plus this existing round record
+- Commits: local detached hydration follow-up commit is this commit
+- Branch and remote state: isolated detached worktree based on `e96c414b`; no
+  push performed
 - Repository visibility verified: public at round start; must return to private
   immediately after protected integration
 - Version/build impact: no product version or build-number change
@@ -142,6 +173,15 @@ Pending.
 - A second replacement push is necessary because these findings were created
   only after the first exact-SHA matrix had completed.
 - All physical-device and external launch gates remain unchanged.
+- iOS can keep accepted local notifications available while the app is
+  suspended or terminated, but cannot guarantee that app code will run to issue
+  a BLE haptic in those states. The 24 exact occurrences are refreshed on app
+  launch/settings changes and cover at least 24 hours at the minimum interval.
+- Android WorkManager timing remains subject to OS/OEM scheduling, and neither
+  platform's physical band vibration was verified in this round.
+- Focused Apple XCTest execution remains unproven on this host because the
+  volume exhausted its free space while compiling `MarkdownUI`; Swift parsing
+  passed and the failure occurred before the hydration test bundle ran.
 
 ## Next round
 

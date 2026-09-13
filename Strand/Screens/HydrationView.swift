@@ -815,10 +815,10 @@ struct HydrationView: View {
                         }
                         Toggle(isOn: bandFirstToggle) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Notify only after a missed tap")
+                                Text("Use band first when available")
                                     .font(StrandFont.body)
                                     .foregroundStyle(StrandPalette.textPrimary)
-                                Text("After NOOP issues a band cue, wait \(doubleTapWindowMinutes) minutes. One phone notification follows only if you do not confirm.")
+                                Text("Upcoming phone fallbacks stay scheduled. If NOOP is active with a fresh band connection and queues a cue first, the phone waits \(doubleTapWindowMinutes) minutes for your tap.")
                                     .font(StrandFont.footnote)
                                     .foregroundStyle(StrandPalette.textTertiary)
                             }

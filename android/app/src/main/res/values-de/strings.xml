@@ -2166,8 +2166,8 @@
     <string name="hydration_tap_amount_help">Die genaue Menge, die ein gültiges Tippen protokolliert.</string>
     <string name="hydration_tap_window_label">Tipp-Zeitfenster</string>
     <string name="hydration_tap_window_help">Nach dieser Zeit kehrt die Geste zu ihrer normalen Aktion zurück.</string>
-    <string name="hydration_tap_band_first_label">Erst nach einem verpassten Tippen benachrichtigen</string>
-    <string name="hydration_tap_band_first_help">Nachdem NOOP ein Bandsignal ausgegeben hat, wartet es auf das Tipp-Zeitfenster. Wenn du nicht bestätigst, wird eine Benachrichtigung an das Smartphone gesendet. Alarme und Sicherheitswarnungen warten nie.</string>
+    <string name="hydration_tap_band_first_label">Band zuerst verwenden, wenn verfügbar</string>
+    <string name="hydration_tap_band_first_help">Die Smartphone-Erinnerung bleibt geplant. Nur ein erfolgreiches Live-Bandsignal startet das Tipp-Zeitfenster; andernfalls bleibt die Smartphone-Erinnerung bestehen. Alarme und Sicherheitswarnungen warten nie.</string>
     <string name="smart_alarm_tap_response_label">Zum Reagieren doppelt auf das Band tippen</string>
     <string name="smart_alarm_tap_response_help">Verbraucht ein Live-Doppeltippen, während der Alarm aktiv ist. Sicherheits- oder Medikamentenwarnungen werden dadurch nie geändert.</string>
     <string name="smart_alarm_tap_window_label">Aktives Tipp-Zeitfenster</string>

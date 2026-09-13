@@ -136,12 +136,20 @@ class HydrationReminderPolicyTest {
             inQuietHours = false,
             currentSlotKey = "10:480",
             lastBuzzedSlotKey = null,
+            lastNotifiedSlotKey = null,
         )
         assertTrue(allowed)
         assertFalse(
             HydrationReminderPolicy.shouldBuzzStrap(
                 true, true, true, true, true, true, true, true, false,
-                "10:480", "10:480",
+                "10:480", "10:480", null,
+            ),
+        )
+        assertFalse(
+            "A worker that already posted the phone occurrence must prevent a later cue",
+            HydrationReminderPolicy.shouldBuzzStrap(
+                true, true, true, true, true, true, true, true, false,
+                "10:480", null, "10:480",
             ),
         )
     }
@@ -182,15 +190,155 @@ class HydrationReminderPolicyTest {
                     enabled = gates[0], strapBuzzEnabled = gates[1], wristAlertsMasterOn = gates[2],
                     connected = gates[3], bonded = gates[4], encryptedBond = gates[5], worn = gates[6],
                     freshLiveSample = gates[7], inQuietHours = gates[8], currentSlotKey = "10:480",
-                    lastBuzzedSlotKey = null,
+                    lastBuzzedSlotKey = null, lastNotifiedSlotKey = null,
                 ),
             )
         }
         assertFalse(
             HydrationReminderPolicy.shouldBuzzStrap(
-                true, true, true, true, true, true, true, true, true, "10:480", null,
+                true, true, true, true, true, true, true, true, true,
+                "10:480", null, null,
             ),
         )
+    }
+
+    @Test fun workerBeforeCuePostsOnceAndPreventsTheLaterBandOccurrence() {
+        var lastPhone: String? = null
+        var lastBuzz: String? = null
+        var lastCue: String? = null
+        var phonePosts = 0
+        var buzzes = 0
+
+        val phone = HydrationReminderOccurrenceCoordinator.deliverPhoneOccurrence(
+            enabled = true,
+            currentSlotKey = "10:480",
+            lastNotifiedSlotKey = { lastPhone },
+            lastBandFirstCueSlotKey = { lastCue },
+            post = {
+                phonePosts += 1
+                true
+            },
+            markPosted = { lastPhone = it },
+        )
+        val cue = HydrationReminderOccurrenceCoordinator.issueBandCue(
+            enabled = true,
+            strapBuzzEnabled = true,
+            wristAlertsMasterOn = true,
+            connected = true,
+            bonded = true,
+            encryptedBond = true,
+            worn = true,
+            freshLiveSample = true,
+            inQuietHours = false,
+            currentSlotKey = "10:480",
+            lastBuzzedSlotKey = { lastBuzz },
+            lastNotifiedSlotKey = { lastPhone },
+            bandFirst = true,
+            buzz = { buzzes += 1 },
+            prepareTapWindow = { true },
+            markBuzzed = { lastBuzz = it },
+            markBandFirstCue = { lastCue = it },
+        )
+
+        assertEquals(HydrationPhoneOccurrenceResult.POSTED, phone)
+        assertFalse(cue)
+        assertEquals(1, phonePosts)
+        assertEquals(0, buzzes)
+        assertNull(lastBuzz)
+        assertNull(lastCue)
+    }
+
+    @Test fun cueBeforeWorkerOwnsOneTapWindowAndDefersThePhoneOccurrence() {
+        var lastPhone: String? = null
+        var lastBuzz: String? = null
+        var lastCue: String? = null
+        var preparedWindows = 0
+        var phonePosts = 0
+
+        val cue = HydrationReminderOccurrenceCoordinator.issueBandCue(
+            enabled = true,
+            strapBuzzEnabled = true,
+            wristAlertsMasterOn = true,
+            connected = true,
+            bonded = true,
+            encryptedBond = true,
+            worn = true,
+            freshLiveSample = true,
+            inQuietHours = false,
+            currentSlotKey = "10:480",
+            lastBuzzedSlotKey = { lastBuzz },
+            lastNotifiedSlotKey = { lastPhone },
+            bandFirst = true,
+            buzz = {},
+            prepareTapWindow = {
+                preparedWindows += 1
+                true
+            },
+            markBuzzed = { lastBuzz = it },
+            markBandFirstCue = { lastCue = it },
+        )
+        val phone = HydrationReminderOccurrenceCoordinator.deliverPhoneOccurrence(
+            enabled = true,
+            currentSlotKey = "10:480",
+            lastNotifiedSlotKey = { lastPhone },
+            lastBandFirstCueSlotKey = { lastCue },
+            post = {
+                phonePosts += 1
+                true
+            },
+            markPosted = { lastPhone = it },
+        )
+
+        assertTrue(cue)
+        assertEquals("10:480", lastBuzz)
+        assertEquals("10:480", lastCue)
+        assertEquals(1, preparedWindows)
+        assertEquals(HydrationPhoneOccurrenceResult.WAITING_FOR_TAP, phone)
+        assertEquals(0, phonePosts)
+    }
+
+    @Test fun buzzFailureLeavesThePhoneWorkerEligible() {
+        var lastPhone: String? = null
+        var lastBuzz: String? = null
+        var lastCue: String? = null
+        var phonePosts = 0
+
+        val cue = HydrationReminderOccurrenceCoordinator.issueBandCue(
+            enabled = true,
+            strapBuzzEnabled = true,
+            wristAlertsMasterOn = true,
+            connected = true,
+            bonded = true,
+            encryptedBond = true,
+            worn = true,
+            freshLiveSample = true,
+            inQuietHours = false,
+            currentSlotKey = "10:480",
+            lastBuzzedSlotKey = { lastBuzz },
+            lastNotifiedSlotKey = { lastPhone },
+            bandFirst = true,
+            buzz = { error("synthetic buzz failure") },
+            prepareTapWindow = { true },
+            markBuzzed = { lastBuzz = it },
+            markBandFirstCue = { lastCue = it },
+        )
+        val phone = HydrationReminderOccurrenceCoordinator.deliverPhoneOccurrence(
+            enabled = true,
+            currentSlotKey = "10:480",
+            lastNotifiedSlotKey = { lastPhone },
+            lastBandFirstCueSlotKey = { lastCue },
+            post = {
+                phonePosts += 1
+                true
+            },
+            markPosted = { lastPhone = it },
+        )
+
+        assertFalse(cue)
+        assertNull(lastBuzz)
+        assertNull(lastCue)
+        assertEquals(HydrationPhoneOccurrenceResult.POSTED, phone)
+        assertEquals(1, phonePosts)
     }
 
     @Test fun lockScreenCopyIsGenericAndContainsNoHealthValues() {

@@ -2144,8 +2144,8 @@
     <string name="hydration_tap_amount_help">一次有效双击会记录的准确饮水量。</string>
     <string name="hydration_tap_window_label">双击时限</string>
     <string name="hydration_tap_window_help">超过此时间后，手势将恢复其常规操作。</string>
-    <string name="hydration_tap_band_first_label">仅在未双击后发送通知</string>
-    <string name="hydration_tap_band_first_help">NOOP 发出手环提示后，会等待至双击时限结束。若你未确认，手机会收到一条通知。闹钟和安全警示绝不会等待。</string>
+    <string name="hydration_tap_band_first_label">可用时优先使用手环</string>
+    <string name="hydration_tap_band_first_help">手机提醒会保持排程。只有成功发出的实时手环提示才会启动双击时限；否则手机提醒仍会保留。闹钟和安全警示绝不会等待。</string>
     <string name="smart_alarm_tap_response_label">双击手环进行响应</string>
     <string name="smart_alarm_tap_response_help">闹钟响起时会使用一次实时双击。此操作绝不会更改安全或用药警示。</string>
     <string name="smart_alarm_tap_window_label">有效双击时限</string>

@@ -2180,8 +2180,8 @@
     <string name="hydration_tap_amount_help">The exact amount one valid tap records.</string>
     <string name="hydration_tap_window_label">Tap window</string>
     <string name="hydration_tap_window_help">After this time the gesture returns to its normal action.</string>
-    <string name="hydration_tap_band_first_label">Notify only after a missed tap</string>
-    <string name="hydration_tap_band_first_help">After NOOP issues a band cue, wait for the tap window. If you do not confirm, send one phone notification. Alarms and safety alerts never wait.</string>
+    <string name="hydration_tap_band_first_label">Use band first when available</string>
+    <string name="hydration_tap_band_first_help">The phone fallback stays scheduled. Only a successful live band cue starts the tap window; otherwise the phone reminder remains. Alarms and Safety never wait.</string>
     <string name="hydration_adaptive_timing_label">Adaptive timing</string>
     <string name="hydration_adaptive_timing_help">Adjusts today\'s interval using Effort and confirmed intake. Missing data is never estimated.</string>
     <string name="hydration_adaptive_timing_status">Currently every %1$d min. Timing changes only when today\'s data supports it.</string>

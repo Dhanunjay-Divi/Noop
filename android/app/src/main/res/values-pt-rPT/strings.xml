@@ -2144,8 +2144,8 @@
     <string name="hydration_tap_amount_help">A quantidade exata que um toque válido regista.</string>
     <string name="hydration_tap_window_label">Janela de toque</string>
     <string name="hydration_tap_window_help">Após este período, o gesto volta à sua ação normal.</string>
-    <string name="hydration_tap_band_first_label">Notificar apenas após um toque em falta</string>
-    <string name="hydration_tap_band_first_help">Depois de o NOOP emitir um sinal na pulseira, aguarda pela janela de toque. Se não confirmares, envia uma notificação para o telemóvel. Os alarmes e alertas de segurança nunca esperam.</string>
+    <string name="hydration_tap_band_first_label">Usar primeiro a pulseira quando disponível</string>
+    <string name="hydration_tap_band_first_help">O lembrete do telemóvel continua agendado. Só um sinal em direto da pulseira enviado com sucesso inicia a janela de toque; caso contrário, o lembrete do telemóvel mantém-se. Os alarmes e alertas de segurança nunca esperam.</string>
     <string name="smart_alarm_tap_response_label">Tocar duas vezes na pulseira para responder</string>
     <string name="smart_alarm_tap_response_help">Usa um toque duplo em direto enquanto o alarme está ativo. Nunca altera alertas de segurança ou de medicação.</string>
     <string name="smart_alarm_tap_window_label">Janela de toque ativa</string>

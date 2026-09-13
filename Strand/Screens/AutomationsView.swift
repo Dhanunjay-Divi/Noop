@@ -537,8 +537,8 @@ struct AutomationsView: View {
                         )
                         rowDivider
                         ToggleRow(
-                            label: String(localized: "Notify only after a missed tap"),
-                            help: String(localized: "After NOOP issues a band cue, wait for the tap window. If you do not confirm, send one phone notification. Alarms and safety alerts never wait."),
+                            label: String(localized: "Use band first when available"),
+                            help: String(localized: "Upcoming phone fallbacks stay scheduled. Only a live band cue queues the tap window; otherwise the phone reminder remains. Alarms and Safety never wait."),
                             isOn: hydrationBandFirstToggle
                         )
                         .disabled(!hydrationReminderEnabled)

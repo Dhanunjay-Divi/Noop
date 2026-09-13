@@ -2150,8 +2150,8 @@
     <string name="hydration_tap_amount_help">La cantidad exacta que registra un toque válido.</string>
     <string name="hydration_tap_window_label">Intervalo para tocar</string>
     <string name="hydration_tap_window_help">Pasado este tiempo, el gesto vuelve a su acción normal.</string>
-    <string name="hydration_tap_band_first_label">Notificar solo si falta el toque</string>
-    <string name="hydration_tap_band_first_help">Después de que NOOP emita una señal en la pulsera, espera durante el intervalo para tocar. Si no confirmas, envía una notificación al teléfono. Las alarmas y las alertas de seguridad nunca esperan.</string>
+    <string name="hydration_tap_band_first_label">Usar primero la pulsera cuando esté disponible</string>
+    <string name="hydration_tap_band_first_help">El aviso del teléfono sigue programado. Solo una señal en directo enviada correctamente por la pulsera inicia el intervalo de toque; de lo contrario, se mantiene el aviso del teléfono. Las alarmas y las alertas de seguridad nunca esperan.</string>
     <string name="smart_alarm_tap_response_label">Toca dos veces la pulsera para responder</string>
     <string name="smart_alarm_tap_response_help">Usa un doble toque en directo mientras la alarma está activa. Nunca cambia las alertas de seguridad o medicación.</string>
     <string name="smart_alarm_tap_window_label">Intervalo de toque activo</string>
