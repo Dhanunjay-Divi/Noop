@@ -102,8 +102,9 @@ enum AppleDemoSeeder {
             // DEBUG fixture's additive/versioned data when an older demo dataset is already present,
             // so new surfaces remain testable without resetting or duplicating the seeded history.
             do {
-                _ = try await repairAgeMetricProfileMarkers(
+                _ = try await repairAgeMetricFixtures(
                     in: store,
+                    existingDays: existing,
                     profileAge: profileAge,
                     profileSex: profileSex
                 )
@@ -124,6 +125,75 @@ enum AppleDemoSeeder {
             )
         }
         catch { NSLog("AppleDemoSeeder: seed failed - \(error)") }
+    }
+
+    /// Completes age-series rows when a UI-test process was terminated after the daily fixture committed
+    /// but before the later metric-series transaction. Values are deterministic, bounded demo data and
+    /// only fill missing natural keys; persisted values from a completed seed are never overwritten.
+    @discardableResult
+    static func repairAgeMetricFixtures(
+        in store: WhoopStore,
+        existingDays: [DailyMetric],
+        profileAge: Int,
+        profileSex: String,
+        timeZone: TimeZone = .current
+    ) async throws -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        let targetDays = Set(existingDays.map(\.day)).sorted().filter { day in
+            guard let date = formatter.date(from: day) else { return false }
+            return calendar.component(.weekday, from: date) == 7
+        }
+        guard !targetDays.isEmpty else {
+            return try await repairAgeMetricProfileMarkers(
+                in: store,
+                profileAge: profileAge,
+                profileSex: profileSex
+            )
+        }
+
+        let keys = ["fitness_age", "vo2max_est", "vitality", "body_age"]
+        var existingByKey: [String: Set<String>] = [:]
+        for key in keys {
+            let rows = try await store.metricSeries(
+                deviceId: whoop,
+                key: key,
+                from: targetDays[0],
+                to: targetDays[targetDays.count - 1]
+            )
+            existingByKey[key] = Set(rows.map(\.day))
+        }
+
+        let denominator = Double(max(1, targetDays.count - 1))
+        var repairs: [MetricPoint] = []
+        for (index, day) in targetDays.enumerated() {
+            let progress = Double(index) / denominator
+            let values: [(String, Double)] = [
+                ("fitness_age", round1(42 - 8 * progress)),
+                ("vo2max_est", round1(44 + 8 * progress)),
+                ("vitality", round1(55 + 25 * progress)),
+                ("body_age", round1(40 - 10 * progress)),
+            ]
+            for (key, value) in values where existingByKey[key]?.contains(day) != true {
+                repairs.append(MetricPoint(day: day, key: key, value: value))
+            }
+        }
+
+        let seriesWritten = repairs.isEmpty
+            ? 0
+            : try await store.upsertMetricSeries(repairs, deviceId: whoop)
+        let markersWritten = try await repairAgeMetricProfileMarkers(
+            in: store,
+            profileAge: profileAge,
+            profileSex: profileSex
+        )
+        return seriesWritten + markersWritten
     }
 
     /// Keep the DEBUG workout walkthrough populated with a scheduled plan. Stable IDs make this an

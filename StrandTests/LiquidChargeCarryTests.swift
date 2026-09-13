@@ -125,6 +125,13 @@ final class LiquidChargeCarryTests: XCTestCase {
         XCTAssertFalse(Display.noData.hasCurrentRecovery)
     }
 
+    func testCalibrationDoesNotUsePositiveRecoveryTone() {
+        XCTAssertFalse(Display.calibrating(nights: 0).usesPositiveUnscoredTone)
+        XCTAssertFalse(Display.calibrating(nights: 3).usesPositiveUnscoredTone)
+        XCTAssertFalse(Display.noData.usesPositiveUnscoredTone)
+        XCTAssertTrue(Display.baselineReady.usesPositiveUnscoredTone)
+    }
+
     /// Calibrating and no-data draw nothing — the honest empty vessel. Never a fabricated 0.
     func testStatesWithNoHonestNumberDrawNothing() {
         XCTAssertNil(Display.calibrating(nights: 2).pct)

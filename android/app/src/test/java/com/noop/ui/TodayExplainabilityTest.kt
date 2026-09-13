@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.analytics.FusionSource
+import com.noop.analytics.Baselines
 import com.noop.data.DailyMetric
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -66,6 +67,25 @@ class TodayExplainabilityTest {
         assertEquals(
             "4 of 4 valid HRV nights complete. The next qualifying night can produce your first Recovery.",
             state.detail,
+        )
+    }
+
+    @Test
+    fun recoveryHeroTone_isNeutralUntilBaselineIsReady() {
+        assertEquals(
+            Palette.onDarkSecondary.copy(alpha = 0.64f),
+            todayRecoveryHeroColors(recovery = null, calibrationNights = 0).first,
+        )
+        assertEquals(
+            Palette.chargeColor,
+            todayRecoveryHeroColors(
+                recovery = null,
+                calibrationNights = Baselines.minNightsSeed,
+            ).first,
+        )
+        assertEquals(
+            Palette.recoveryGaugeColors(72.0),
+            todayRecoveryHeroColors(recovery = 72.0, calibrationNights = null),
         )
     }
 

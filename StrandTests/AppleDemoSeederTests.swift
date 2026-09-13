@@ -94,6 +94,71 @@ final class AppleDemoSeederTests: XCTestCase {
         XCTAssertEqual(secondRepair, 0)
     }
 
+    func testExistingDailyFixtureRepairsMissingAgeSeriesAndMarkersIdempotently() async throws {
+        let store = try await WhoopStore.inMemory()
+        let days = ["2026-08-01", "2026-08-08"].map { day in
+            DailyMetric(
+                day: day,
+                totalSleepMin: 420,
+                efficiency: 90,
+                deepMin: 80,
+                remMin: 90,
+                lightMin: 250,
+                disturbances: 4,
+                restingHr: 55,
+                avgHrv: 70,
+                recovery: 72,
+                strain: 40,
+                exerciseCount: 1
+            )
+        }
+        try await store.upsertDailyMetrics(days, deviceId: AppleDemoSeeder.whoop)
+        let utc = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+
+        let firstRepair = try await AppleDemoSeeder.repairAgeMetricFixtures(
+            in: store,
+            existingDays: days,
+            profileAge: 30,
+            profileSex: "female",
+            timeZone: utc
+        )
+        XCTAssertEqual(firstRepair, 12)
+
+        for key in ["fitness_age", "vo2max_est", "vitality", "body_age"] {
+            let rows = try await store.metricSeries(
+                deviceId: AppleDemoSeeder.whoop,
+                key: key,
+                from: days[0].day,
+                to: days[1].day
+            )
+            XCTAssertEqual(rows.map(\.day), days.map(\.day), "\(key) did not cover both fixture weeks")
+        }
+
+        let fitnessMarkers = try await store.metricSeries(
+            deviceId: AppleDemoSeeder.whoop,
+            key: AgeMetricProfile.fitnessAgeKey,
+            from: days[0].day,
+            to: days[1].day
+        )
+        XCTAssertEqual(fitnessMarkers.map(\.value), [302, 302])
+        let vitalityMarkers = try await store.metricSeries(
+            deviceId: AppleDemoSeeder.whoop,
+            key: AgeMetricProfile.vitalityKey,
+            from: days[0].day,
+            to: days[1].day
+        )
+        XCTAssertEqual(vitalityMarkers.map(\.value), [30, 30])
+
+        let secondRepair = try await AppleDemoSeeder.repairAgeMetricFixtures(
+            in: store,
+            existingDays: days,
+            profileAge: 30,
+            profileSex: "female",
+            timeZone: utc
+        )
+        XCTAssertEqual(secondRepair, 0)
+    }
+
     func testVitalityRepairDoesNotDependOnFitnessAgeProfileEligibility() async throws {
         let store = try await WhoopStore.inMemory()
         try await store.upsertMetricSeries([

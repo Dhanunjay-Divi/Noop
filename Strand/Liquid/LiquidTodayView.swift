@@ -1336,10 +1336,22 @@ struct LiquidTodayView: View {
     }
 
     private var recoveryHeroColors: (base: Color, tip: Color) {
-        guard let score = chargeDisplay.pct else {
+        switch chargeDisplay {
+        case .scored(let score), .carried(let score, _):
+            return StrandPalette.recoveryGaugeColors(score)
+        case .baselineReady:
             return (StrandPalette.chargeColor, StrandPalette.chargeBright)
+        case .calibrating:
+            return (
+                StrandPalette.onDarkSecondary.opacity(0.64),
+                StrandPalette.onDarkSecondary.opacity(0.88)
+            )
+        case .noData:
+            return (
+                StrandPalette.onDarkSecondary.opacity(0.42),
+                StrandPalette.onDarkSecondary.opacity(0.64)
+            )
         }
-        return StrandPalette.recoveryGaugeColors(score)
     }
 
     private var recoveryHeroTone: Color {
@@ -5776,6 +5788,15 @@ extension LiquidTodayView {
 
         var hasCurrentRecovery: Bool {
             if case .scored = self {
+                return true
+            }
+            return false
+        }
+
+        /// Learning progress is evidence collection, not a positive health result. Only a completed
+        /// baseline may use the positive Recovery accent before an actual score exists.
+        var usesPositiveUnscoredTone: Bool {
+            if case .baselineReady = self {
                 return true
             }
             return false

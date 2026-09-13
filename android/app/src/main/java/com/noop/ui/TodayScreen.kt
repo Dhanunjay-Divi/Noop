@@ -2219,8 +2219,10 @@ fun TodayScreen(
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             val heroRecovery = displayMetric?.recovery ?: lastScoredCharge?.value
-                            val heroTone = heroRecovery?.let(Palette::recoveryGaugeColors)?.first
-                                ?: Palette.chargeColor
+                            val heroTone = todayRecoveryHeroColors(
+                                recovery = heroRecovery,
+                                calibrationNights = recoveryCalibration,
+                            ).first
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -5369,8 +5371,10 @@ private fun ScoreHeroRow(
     val satelliteSize = if (compactLayout) 54.dp else 60.dp
     val ownRecovery = day?.recovery
     val recovery = ownRecovery ?: lastScoredCharge?.value
-    val recoveryColors = recovery?.let(Palette::recoveryGaugeColors)
-        ?: (Palette.chargeColor to Palette.chargeBright)
+    val recoveryColors = todayRecoveryHeroColors(
+        recovery = recovery,
+        calibrationNights = recoveryCalibration,
+    )
     val recoveryCaption = when {
         recovery != null -> Palette.recoveryState(recovery)
             .lowercase(Locale.getDefault())
@@ -5461,6 +5465,21 @@ private fun ScoreHeroRow(
             )
         }
     }
+}
+
+internal fun todayRecoveryHeroColors(
+    recovery: Double?,
+    calibrationNights: Int?,
+): Pair<Color, Color> = when {
+    recovery != null -> Palette.recoveryGaugeColors(recovery)
+    calibrationNights != null && calibrationNights >= Baselines.minNightsSeed ->
+        Palette.chargeColor to Palette.chargeBright
+    calibrationNights != null ->
+        Palette.onDarkSecondary.copy(alpha = 0.64f) to
+            Palette.onDarkSecondary.copy(alpha = 0.88f)
+    else ->
+        Palette.onDarkSecondary.copy(alpha = 0.42f) to
+            Palette.onDarkSecondary.copy(alpha = 0.64f)
 }
 
 @Composable
