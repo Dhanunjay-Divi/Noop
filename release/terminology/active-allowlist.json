@@ -2378,12 +2378,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 50,
+      "occurrenceCount": 51,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/NoopApplication.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "365e3162392cd061dfc2bcbb7e9fb9799b5eeb85db4307bfac09994aa1e2853c"
+      "sha256": "ee3064b910b84d7aeb1cfea4d6964d6f94c7b9ab8631a6f9004e89c50a0852e5"
     },
     {
       "category": "core",
@@ -2956,6 +2956,15 @@
       "category": "core",
       "occurrenceCount": 1,
       "owner": "project team",
+      "path": "android/app/src/main/java/com/noop/ble/PostBackfillAnalysisRetryScheduler.kt",
+      "reason": "Existing active symbol retained behind the additive compatibility migration.",
+      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
+      "sha256": "db6997cb25c5c9c6373273339f682d71775d20758d7025a9a95a4601aaae658d"
+    },
+    {
+      "category": "core",
+      "occurrenceCount": 1,
+      "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ble/PostBondTimeoutLoopDetector.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
@@ -3139,7 +3148,7 @@
       "path": "android/app/src/main/java/com/noop/data/PendingDatabaseRestore.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "75737c01c891e078d62098692c1fa841ef773ad763c83e03650547eccded608d"
+      "sha256": "44c00fd220afe6192484f7099ddac745c2f8c6a774e1d4cff4d95869fbf281c6"
     },
     {
       "category": "core",

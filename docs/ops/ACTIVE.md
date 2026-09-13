@@ -21,23 +21,50 @@ Last updated: **2026-09-13**
 
 ## Active work
 
+### Android database restore crash consistency
+
+The local PR follow-up now models restore acceptance and rollback as explicit
+restartable phases. Restored preferences cannot become durable before the
+database is irreversibly accepted; ambiguous or invalid rollback evidence fails
+closed; and repairable hydration-scheduler failure no longer traps an accepted
+database in a startup loop. Fresh review additionally closes migrated-v1
+finalization and durable hydration-retry gaps. Seventy-two focused restore
+tests pass per variant, four API 35 real-SQLite restore tests pass, and the
+complete Full/Demo unit, lint, APK, and instrumentation-compilation wall is
+green. Exact-head hosted checks and protected integration remain pending.
+Evidence is tracked in
+[`rounds/2026-09-13-android-restore-crash-consistency.md`](rounds/2026-09-13-android-restore-crash-consistency.md).
+
+### Android post-backfill retry hardening
+
+The deferred analysis wake is now one constrained v2 WorkManager boundary.
+Replacement is awaited, partial private metadata self-repairs from the selected
+work, and legacy/incomplete work is rejected before app, Room, or BLE access.
+Fifty-two focused retry tests pass per variant, two API 35 WorkManager tests
+pass, and the complete Full/Demo unit, lint, APK, and
+instrumentation-compilation wall is green. Exact-head hosted checks and
+protected integration remain pending. Evidence is tracked in
+[`rounds/2026-09-13-android-post-backfill-retry-hardening.md`](rounds/2026-09-13-android-post-backfill-retry-hardening.md).
+
 ### PR 15 server and infrastructure review fixes
 
 A narrow local correction preserves published migration `038` exactly at
 SHA-256 `da26324b...` and finalizes unpublished migration `041` at SHA-256
-`227809fe...`. The migration runner validates all applied checksums first, then
-commits `038` and `041` as one explicit compatibility bundle before independent
-`039` and `040`; the prior Safety writer cannot observe a committed `038`-only
-schema. The quota trigger locks its incident while deriving provenance, and
-incident owner/trigger provenance is immutable, including under concurrent
-writes. Readiness retains exact migration-set equality: rollback requires a
-reviewed code revert rebuilt with the current immutable manifest or a kill
-switch, not an exact prior image. The final focused matrix passed 8
-migration/readiness/concurrency tests, 3 direct Safety migration tests, 4
-feedback migration tests, and 26 backup/deployment contract tests, plus Ruff,
-Python compilation, and all 41 manifest checks against disposable synthetic
-local state. No service was deployed, no cloud plan was applied, no real data
-was touched, and the local correction is tracked in
+`227809fe...`. The migration runner rejects unknown/forward ledger rows, hashes
+the exact raw SQL bytes it executes, and commits `038` and `041` as one explicit
+fresh-install compatibility bundle before independent `039` and `040`. An
+existing recorded `038` instead takes the documented drained, locked `041`
+upgrade path. Mutation-capable lifecycle commands and API embedded tasks require
+exact manifest equality before use. The quota trigger locks its incident while
+deriving provenance, and incident owner/trigger provenance is immutable,
+including under concurrent writes. Fresh review also adds engine-specific
+restore manifests, shared migration guards around destructive maintenance, and
+complete lifespan task/pool cleanup. The focused 61-test matrix and complete
+569-pass/one-skip server suite passed against separate clean general and
+PostgreSQL-overlay databases. Ruff, Python compilation, shell syntax, two
+dependency audits, both 41-entry manifests, and 12 OpenTofu tests pass. No
+service was deployed, no cloud plan was applied, no real data was touched, and
+the local correction is tracked in
 [`rounds/2026-09-13-pr15-server-infra-review-fixes.md`](rounds/2026-09-13-pr15-server-infra-review-fixes.md).
 
 ### Android analysis and Trends cancellation closeout
