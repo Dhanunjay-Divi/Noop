@@ -40,6 +40,7 @@
     <string name="appwide_backup_portable_export_body">Exportar datos crea un ZIP portátil con archivos CSV compatibles, JSON legible de NOOP para registros editables de nutrición y entrenamiento de fuerza, y una carpeta de comparación con métricas diarias, sueño, entrenamientos y series separados por fuente. Conserva el ZIP original del proveedor sin modificar y por separado para comparar ambos conjuntos de datos.</string>
     <string name="appwide_backup_portable_export_success">Se guardó %1$s. El ZIP se puede volver a importar en NOOP desde Mac, iPhone o Android. La carpeta de comparación está lista para el análisis paralelo; conserva el ZIP original del proveedor sin modificar y comparte ambos archivos juntos.</string>
     <string name="appwide_breathe_phone_haptics">Vibración del teléfono</string>
+    <string name="appwide_breathe_test_buzz_help">Envía una vibración de prueba a la banda. Se necesita una conexión vinculada.</string>
     <string name="appwide_calendar_a11y_day_no_data_format">Día %1$d, sin datos</string>
     <string name="appwide_calendar_a11y_day_value_format">Día %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_a11y_today_no_data_format">Hoy, día %1$d, sin datos</string>
@@ -725,6 +726,7 @@
     <string name="appwide_workouts_activity_calendar_three_or_more">3 actividades o más</string>
     <string name="appwide_workouts_activity_calendar_title">Calendario de actividad</string>
     <string name="appwide_workouts_band_hr">Desde la frecuencia cardíaca de la pulsera</string>
+    <string name="appwide_workouts_band_hr_zone_split_detail">Tiempo en cada zona de frecuencia cardíaca máxima, estimado a partir de la frecuencia cardíaca de la banda durante este intervalo.</string>
     <string name="appwide_workouts_imported_zone_split">Distribución importada por zonas para esta sesión.</string>
     <string name="appwide_workouts_imported_zones">Zonas importadas</string>
 </resources>

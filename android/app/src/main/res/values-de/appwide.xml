@@ -40,6 +40,7 @@
     <string name="appwide_backup_portable_export_body">„Daten exportieren“ erstellt eine portable ZIP-Datei mit kompatiblen CSV-Dateien, lesbarem NOOP-JSON für bearbeitbare Ernährungs- und Krafttrainingsdaten sowie einem Vergleichsordner mit nach Quelle getrennten Tageswerten, Schlaf-, Trainings- und Messreihendaten. Bewahre die unveränderte Original-ZIP-Datei deines Anbieters separat auf, um beide Datensätze nebeneinander zu vergleichen.</string>
     <string name="appwide_backup_portable_export_success">%1$s wurde gespeichert. Die ZIP-Datei lässt sich auf Mac, iPhone oder Android wieder in NOOP importieren. Der Vergleichsordner ist für die Gegenüberstellung bereit; bewahre die unveränderte Original-ZIP-Datei deines Anbieters separat auf und teile beide Dateien zusammen.</string>
     <string name="appwide_breathe_phone_haptics">Telefonhaptik</string>
+    <string name="appwide_breathe_test_buzz_help">Eine Testvibration an das Band senden. Eine gekoppelte Verbindung ist erforderlich.</string>
     <string name="appwide_calendar_a11y_day_no_data_format">Tag %1$d, keine Daten</string>
     <string name="appwide_calendar_a11y_day_value_format">Tag %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_a11y_today_no_data_format">Heute, Tag %1$d, keine Daten</string>
@@ -725,6 +726,7 @@
     <string name="appwide_workouts_activity_calendar_three_or_more">3 oder mehr Aktivitäten</string>
     <string name="appwide_workouts_activity_calendar_title">Aktivitätskalender</string>
     <string name="appwide_workouts_band_hr">Von der Band-Herzfrequenz</string>
+    <string name="appwide_workouts_band_hr_zone_split_detail">Zeit in jeder Maximalpulszone, geschätzt aus der Herzfrequenz des Bands in diesem Zeitraum.</string>
     <string name="appwide_workouts_imported_zone_split">Importierte Aufteilung nach Herzfrequenzzonen für diese Einheit.</string>
     <string name="appwide_workouts_imported_zones">Importierte Zonen</string>
 </resources>

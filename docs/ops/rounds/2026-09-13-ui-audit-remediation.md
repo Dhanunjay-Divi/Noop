@@ -3,7 +3,8 @@
 ## Status
 
 - State: `implementation and exact-current-tree local verification complete;
-  consolidated push, hosted exact-SHA checks, and protected integration pending`
+  first consolidated head reviewed; local i18n/Ruff correction complete;
+  corrected hosted exact-SHA checks and protected integration pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `ca79cc9c76b194691f93e8f2334ce38200639bde`
@@ -93,6 +94,11 @@ claims.
   built-resource inspection prove the corrected evidence-aware coach copy, and
   the complete exact-tree macOS test suite passes, but this round does not claim
   a fresh macOS Today screenshot.
+- Hosted head `48eec068` found one Apple tooltip and one Android
+  workout-zone explanation outside the shared localization catalog. Both now
+  use generated app-wide keys across all nine supported locales. The same
+  hosted cycle required canonical Ruff formatting in two feedback tests; that
+  formatting-only correction is included with this record.
 
 ## Data, privacy, and medical truth
 
@@ -125,7 +131,7 @@ claims.
 | Complete iPhone UI suite | 39 tests executed, one intentional private-pilot skip, zero failures; Today scroll averaged 5.411 seconds, CPU 0.190 seconds, and peak memory about 63.3 MB | Current simulator navigation, reporting, accessibility, loading, planner, and scrolling paths are responsive and reachable | VoiceOver traversal or physical-device memory pressure |
 | Android exact-source matrix | Full and Demo unit suites, both lint variants, both APK assemblies, and both instrumentation Kotlin compilations passed; Gradle finished 137 tasks successfully | Both Android variants compile and retain the matched UI, accessibility, loading, privacy, and guidance contracts | OEM rendering, TalkBack traversal, background delivery, or signed physical installs |
 | Deterministic iPhone captures | Eleven nonblank states generated; collapsed planned-workout normal and accessibility captures manually reviewed | Current planner states preserve hierarchy, readable text, and stable controls at tested simulator sizes | macOS visual freshness or physical display behavior |
-| Repository policy wall | Feedback localization, strict i18n, 54 operations records, 1,246-file health-claims scan, calibration parity, private-data, terminology, required-CI, release-control, legal, distribution, and diff gates passed before record refresh | The implementation remains localized, claim-bounded, privacy-checked, and release-controlled | Hosted exact-SHA status or legal/clinical approval |
+| Repository policy wall | After the first hosted-head correction, feedback localization, differential and full strict i18n, Ruff check and format, 230 Tools tests, 54 operations records, the 1,246-file health-claims scan, calibration parity, private-data, terminology, required-CI, release-control, legal, distribution, and diff gates pass locally | The implementation remains localized, canonically formatted, claim-bounded, privacy-checked, and release-controlled | Corrected hosted exact-SHA status or legal/clinical approval |
 
 ## Physical device and deployment
 
@@ -141,8 +147,11 @@ claims.
 - Changed paths: shared Apple/Android presentation, Trends lifecycle,
   notification/guidance copy, accessibility, localization, visual-QA tooling,
   focused tests, and these operations records
-- Commits: implementation `156937fc`; record follow-up containing this entry
-- Branch and remote state: isolated PR branch; no new push in this round yet
+- Commits: implementation `156937fc`; first consolidated record head
+  `48eec068`; bounded i18n/Ruff correction containing this entry
+- Branch and remote state: isolated pull request `#15`; hosted head `48eec068`
+  exposed the two deterministic catalog/format findings now closed locally;
+  corrected exact-SHA checks and protected integration remain required
 - Repository visibility verified: not changed by this round
 - Version/build impact: no schema or marketing-version change
 - Release or distribution impact: no artifact released

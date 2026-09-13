@@ -1627,6 +1627,17 @@
     "zh-Hans": "手机触感反馈",
     "zh-Hant": "手機觸覺回饋"
   },
+  "appwide.breathe.test_buzz_help": {
+    "de": "Eine Testvibration an das Band senden. Eine gekoppelte Verbindung ist erforderlich.",
+    "en": "Send one test vibration to the band. A bonded connection is required.",
+    "es": "Envía una vibración de prueba a la banda. Se necesita una conexión vinculada.",
+    "fr": "Envoyer une vibration de test au bracelet. Une connexion associée est requise.",
+    "it": "Invia una vibrazione di prova al bracciale. È richiesta una connessione associata.",
+    "pt-PT": "Enviar uma vibração de teste para a pulseira. É necessária uma ligação emparelhada.",
+    "ru": "Отправить один тестовый вибросигнал на браслет. Требуется сопряжённое подключение.",
+    "zh-Hans": "向手环发送一次测试振动。需要已配对的连接。",
+    "zh-Hant": "向手環傳送一次測試震動。需要已配對的連線。"
+  },
   "appwide.calendar.a11y.day_no_data_format": {
     "de": "Tag %1$d, keine Daten",
     "en": "Day %1$d, no data",
@@ -4761,6 +4772,17 @@
     "ru": "Импортированное распределение по зонам для этой тренировки.",
     "zh-Hans": "此训练的已导入心率区间分布。",
     "zh-Hant": "此訓練的已匯入心率區間分佈。"
+  },
+  "appwide.workouts.band_hr_zone_split_detail": {
+    "de": "Zeit in jeder Maximalpulszone, geschätzt aus der Herzfrequenz des Bands in diesem Zeitraum.",
+    "en": "Time in each max-heart-rate zone, estimated from the band’s heart rate during this window.",
+    "es": "Tiempo en cada zona de frecuencia cardíaca máxima, estimado a partir de la frecuencia cardíaca de la banda durante este intervalo.",
+    "fr": "Temps dans chaque zone de fréquence cardiaque maximale, estimé à partir de la fréquence cardiaque du bracelet pendant cette période.",
+    "it": "Tempo in ogni zona di frequenza cardiaca massima, stimato dalla frequenza cardiaca del bracciale in questo intervallo.",
+    "pt-PT": "Tempo em cada zona de frequência cardíaca máxima, estimado a partir da frequência cardíaca da pulseira durante este período.",
+    "ru": "Время в каждой зоне максимальной частоты пульса, рассчитанное по данным пульса браслета за этот интервал.",
+    "zh-Hans": "各最大心率区间的时长，根据此时间段内手环记录的心率估算。",
+    "zh-Hant": "各最大心率區間的時長，根據此時段內手環記錄的心率估算。"
   },
   "appwide.day_overview.title": {
     "de": "Tagesübersicht",

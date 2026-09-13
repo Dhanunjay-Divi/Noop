@@ -40,6 +40,7 @@
     <string name="appwide_backup_portable_export_body">“导出数据”会创建一个可移植 ZIP，其中包含兼容的 CSV、用于可编辑营养和力量训练记录的可读 NOOP JSON，以及按来源区分每日指标、睡眠、锻炼和指标序列的比较文件夹。请另行保留未经修改的原始提供商 ZIP，以便并行比较两组数据。</string>
     <string name="appwide_backup_portable_export_success">已保存 %1$s。此 ZIP 可在 Mac、iPhone 或 Android 上重新导入 NOOP。比较文件夹已可用于并行分析；请保留未经修改的原始提供商 ZIP，并一起共享这两个文件。</string>
     <string name="appwide_breathe_phone_haptics">手机触感反馈</string>
+    <string name="appwide_breathe_test_buzz_help">向手环发送一次测试振动。需要已配对的连接。</string>
     <string name="appwide_calendar_a11y_day_no_data_format">第 %1$d 天，无数据</string>
     <string name="appwide_calendar_a11y_day_value_format">第 %1$d 天，%2$s %3$s</string>
     <string name="appwide_calendar_a11y_today_no_data_format">今天，第 %1$d 天，无数据</string>
@@ -725,6 +726,7 @@
     <string name="appwide_workouts_activity_calendar_three_or_more">3 项或更多活动</string>
     <string name="appwide_workouts_activity_calendar_title">活动日历</string>
     <string name="appwide_workouts_band_hr">来自手环心率</string>
+    <string name="appwide_workouts_band_hr_zone_split_detail">各最大心率区间的时长，根据此时间段内手环记录的心率估算。</string>
     <string name="appwide_workouts_imported_zone_split">此训练的已导入心率区间分布。</string>
     <string name="appwide_workouts_imported_zones">已导入的心率区间</string>
 </resources>

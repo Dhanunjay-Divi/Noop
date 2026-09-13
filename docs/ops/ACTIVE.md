@@ -26,10 +26,14 @@ Last updated: **2026-09-13**
 The supplier-independent implementation and exact-current-tree local
 verification are complete on
 `codex/product-safety-quality-audit-20260911` at implementation commit
-`156937fc642980286355cb663b9f3840af7e4923`. Pull request `#15` remains the
-protected integration path. The branch has not received its final consolidated
-push, so the old hosted Apple failure/cancellation on the prior head is not
-evidence about the current source.
+`156937fc642980286355cb663b9f3840af7e4923`. Pull request `#15` is the
+protected integration record. Its first consolidated evidence head,
+`48eec068`, exposed only two deterministic repository-hygiene findings:
+i18n run `34735775033` found one Apple and one Android literal outside the
+shared catalog, and server run `34735775028` required Ruff formatting in two
+feedback tests. The bounded local correction uses generated nine-locale
+resources, applies canonical formatting, rebuilds Apple and Android, and reruns
+the local policy wall.
 
 The private 61-file UI audit is closed locally: all four P1 and sixteen P2
 findings have scoped Apple/Android corrections. Recovery presentation and Daily
@@ -77,9 +81,9 @@ TalkBack, BLE, background/force-quit behavior, notification presentation,
 haptics, battery, sensor accuracy, signed background feedback transfer,
 providers/carriers, client encryption/key recovery, public traffic, legal,
 24/7 operations, signing, stores, participants, and media licensing remain
-external gates. After the final bounded commits, the branch must be pushed once,
-pass fresh exact-SHA hosted checks, merge normally, return the repository to
-private visibility, and remove only round-owned temporary resources.
+external gates. The closeout sequence for this record is a single corrected
+push, fresh exact-SHA hosted checks, normal protected merge, return to private
+repository visibility, and removal of only round-owned temporary resources.
 
 ### Superseded 2026-09-12 snapshot
 

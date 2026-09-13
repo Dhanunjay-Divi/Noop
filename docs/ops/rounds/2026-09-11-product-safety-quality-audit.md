@@ -3,17 +3,18 @@
 ## Status
 
 - State: `supplier-independent implementation, exact-current-tree local wall,
-  UI-audit and feedback-ingestion closeout, and independent review complete; one
-  consolidated replacement push, corrected exact-SHA checks, and normal PR #15
-  integration pending`
+  UI-audit and feedback-ingestion closeout, and independent review complete;
+  local correction for the first consolidated head's i18n and Ruff findings
+  complete; corrected exact-SHA checks and normal PR #15 integration pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `2efd5e89999bd54b3fd6e316322b39d7e953ee8f`
 - End implementation commits: first consolidated hosted correction head
   `142eeec5`; latest pushed production-shell correction `66c2b0a9`; the
   exact-current local implementation and closeout are
-  `156937fc642980286355cb663b9f3840af7e4923`; its record follow-up forms the
-  replacement PR head
+  `156937fc642980286355cb663b9f3840af7e4923`; record head `48eec068` received
+  the first consolidated hosted run; the bounded correction carrying this
+  record localizes its two new literals and applies Ruff's canonical formatting
 - Record commit or PR: pull request `#15`
 
 ## Objective
@@ -380,6 +381,13 @@ records. Concurrent development must remain isolated by worktree and branch.
   surfaces were excluded from product evidence; current source, built objects,
   resources, and the complete macOS test suite are the authoritative desktop
   evidence.
+- The first consolidated hosted run on `48eec068` exposed two deterministic
+  repository-hygiene defects, not product-behavior failures: i18n run
+  `34735775033` found one Apple help string and one Android workout-detail
+  string outside the shared catalog, while server run `34735775028` required
+  Ruff formatting in two feedback tests. Both strings now use generated
+  nine-locale app-wide resources, both tests are canonically formatted, and
+  Apple, Android, server, localization, and repository gates pass locally.
 
 ## Data, privacy, and medical truth
 
@@ -512,7 +520,7 @@ records. Concurrent development must remain isolated by worktree and branch.
 | Deterministic visual matrices | The exact final iPhone matrix generated eleven current nonblank states, including normal, check-in, recovery-shift, planned-workout, collapsed planned-workout, dark/high-contrast, stop, and accessibility variants. The normal and accessibility collapsed-planned-workout captures were manually inspected for clipping and overlap. Stale macOS WindowServer surfaces were rejected as evidence. | Required simulator states preserve hierarchy, reachability, text visibility, and a stable navigation footprint on the current source. | VoiceOver focus order, fresh macOS visual proof, haptics, notification presentation, physical display behavior, or hardware |
 | Android navigation accessibility | `PrimaryNavigationContractTest` passed on the exact source; review confirmed `Scaffold` applies its measured bottom-bar inset to the `NavHost`, while `GlassBottomBar` grows with wrapped text and applies system navigation-bar padding. | Android source retains a dynamic, non-overlapping navigation reservation rather than copying the iOS overlay implementation. | Runtime large-text behavior on a physical Android device or OEM font/rendering differences |
 | Complete server suite | A fresh exact-tree run against isolated local PostgreSQL databases passed 433 tests with 106 external/configuration skips and one Starlette deprecation warning. The focused feedback/API slice passed 25 tests with nine external/configuration skips; eight OpenTofu feedback lifecycle tests and configuration validation passed. | The current server, standard-PostgreSQL migrations, memory/PostgreSQL parity, backup/deployment contracts, Safety lifecycle, managed-document readiness, feedback tenant/capability/lifecycle boundaries, and object cleanup pass together under available local dependencies. | Docker image execution, public feedback ingress, attestation, encrypted staging restore, real providers/carriers, or production runtime |
-| Localization and repository policy | Strict i18n and feedback-localization generation, 230 Tools tests plus 34 subtests, the 1,246-file health-claims scan, required-CI, calibration parity across 12 metrics/three revisions/13 thresholds/16 guards, active and legacy terminology inventories with zero forbidden uses, release controls with its high-confidence credential scan, legal inventory for 230 runtime components and three container inputs, distribution provenance, private-data, all 54 operations records, both locked dependency audits, and diff gates pass locally before the final record refresh. | Current source and release-control wiring reject new unlocalized copy, unsupported claims, forbidden vendor mappings, high-confidence secrets, and unreviewed distribution inputs. | Professional translation, hosted exact-SHA checks, or clinical/legal approval |
+| Localization and repository policy | After the hosted `48eec068` i18n/Ruff findings, strict differential and full i18n, feedback-localization generation, Ruff check and format, 230 Tools tests plus 34 subtests, the 1,246-file health-claims scan, required-CI, calibration parity across 12 metrics/three revisions/13 thresholds/16 guards, active and legacy terminology inventories with zero forbidden uses, release controls with its high-confidence credential scan, legal inventory for 230 runtime components and three container inputs, distribution provenance, private-data, all 54 operations records, both locked dependency audits, and diff gates pass locally. | Current source and release-control wiring reject new unlocalized copy, noncanonical Python formatting, unsupported claims, forbidden vendor mappings, high-confidence secrets, and unreviewed distribution inputs. | Professional translation, corrected hosted exact-SHA checks, or clinical/legal approval |
 | Review status | Pull request `#15` previously identified ten actionable lifecycle defects. Replacement exact-tree reviews then closed restore, schema-proof, BLE privacy, Safety cancellation, and backup defects. The private UI audit added four P1 and sixteen P2 findings; all twenty are implemented and covered locally. The feedback path received direct archive, outbox, screenshot, capability, principal, lifecycle, tenant, retention, and cleanup tests. Final independent read-only review found three record-consistency defects, now corrected, and no P0 code defect, high-confidence secret, or tracked private audit screenshot. | Corrective work remains tied to concrete source review and direct regression evidence, including explicit rejection of stale screenshot and stale-tree evidence. | Corrected hosted exact-SHA verdict, physical behavior, or external launch gates |
 | Project agent handoff | Root `AGENTS.md` points to the checked-in skill; `quick_validate.py` reports `Skill is valid!`; `bash -n` passes; the repository-local context snapshot runs against this dirty worktree; project and user-level skill copies are byte-identical by recursive diff and per-file SHA-256; a read-only fresh-agent rehearsal recovered the branch, risks, invariants, verified/open split, and next command | A future agent entering the repository can discover the same stable engineering, medical-truth, privacy, parity, verification, and handoff contract and recover live context without the oversized chat | That any current feature, deployment, physical-device path, or external release gate is complete |
 | Owner-supplied band SDK static assessment | Android protocol AAR and latest iOS static archive were hashed; docs, headers, demo manifests/plists, platform slices, background hooks, license files, and embedded endpoint strings were inspected without executing or importing the binaries | A phone integration path exists in the package; commands must be serialized; model-gated history/backfill, connection confirmation, password rotation, haptics, and other optional APIs are present; the iOS package cannot serve Mac/simulator | Exact NOOP band capability, printed-label mapping, triple-tap possession, runtime egress, redistribution authority, signed app behavior, background reliability, sensor accuracy, or production readiness |
@@ -551,16 +559,16 @@ remain required before this round can be closed.
   wind-down privacy `83ec8598`; durable handoff `6b78df33`; current mobile
   reliability/accessibility `99a51b80`; Safety lifecycle `e35d1d37`; first
   consolidated correction `142eeec5`; latest pushed production-shell
-  correction `66c2b0a9`; final exact-current implementation `156937fc`; this
-  evidence entry in the record follow-up
-- Branch and remote state: protected pull request `#15` previously evaluated
-  pushed head `66c2b0a9`. Its exact-SHA run passed Android, server, Swift-package,
-  repository-control, and macOS jobs but exposed the iOS Today scroll stall and
-  pushed-destination endpoint defect. The replacement commit contains the
-  fully verified local correction, this record, and refreshed generated policy
-  evidence. Fresh hosted corrected-head review, every required exact-SHA check,
-  and normal integration remain pending; the failed hosted head is not reused
-  as proof.
+  correction `66c2b0a9`; final exact-current implementation `156937fc`; first
+  consolidated record head `48eec068`; bounded i18n/Ruff correction containing
+  this refreshed evidence entry
+- Branch and remote state: protected pull request `#15` evaluated pushed head
+  `48eec068`. Hosted i18n run `34735775033` and server run `34735775028`
+  exposed the two deterministic catalog/format defects described above. The
+  local correction contains generated nine-locale resources, canonical Ruff
+  formatting, rebuilt Apple/Android graphs, and the rerun policy wall. Fresh
+  hosted corrected-head review, every required exact-SHA check, and normal
+  integration remain pending; failed hosted heads are not reused as proof.
 - Repository visibility verified: `PUBLIC` before final protected integration;
   the owner-requested return to `PRIVATE` occurs only after the merge is
   verified so required checks are not silently disrupted mid-review

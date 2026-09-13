@@ -902,10 +902,6 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt",
-      "From strap HR"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt",
       "Logged sessions across ${effectiveRange.caption}."
     ],
     [
@@ -923,10 +919,6 @@
     [
       "android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt",
       "Select sessions to merge or delete"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt",
-      "Time in each %HRmax zone, derived from the strap's heart rate over this window (approximate)."
     ],
     [
       "android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt",

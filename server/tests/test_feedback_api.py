@@ -408,11 +408,7 @@ def _seed_legacy_v0_report(
     subject_hash = hashlib.sha256(b"feedback-test-user").hexdigest()
     payload = _reservation_payload(archive)
     idempotency_hash = hashlib.sha256(
-        (
-            f"{APPLE_APP_ID}\0"
-            f"{subject_hash}\0"
-            f"{idempotency_key.lower()}"
-        ).encode("utf-8")
+        (f"{APPLE_APP_ID}\0{subject_hash}\0{idempotency_key.lower()}").encode("utf-8")
     ).hexdigest()
     report = FeedbackReport(
         report_id=report_id,
@@ -450,9 +446,9 @@ def _seed_legacy_v0_report(
         cleanup_phase="delete_pending",
     )
     repository._reports[report_id] = report
-    repository._idempotency[
-        (APPLE_APP_ID, 0, subject_hash, idempotency_hash)
-    ] = report_id
+    repository._idempotency[(APPLE_APP_ID, 0, subject_hash, idempotency_hash)] = (
+        report_id
+    )
     return report
 
 

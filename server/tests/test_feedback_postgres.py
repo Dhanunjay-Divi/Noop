@@ -302,8 +302,7 @@ async def test_postgres_v0_row_is_not_replayed_or_counted_for_v1_principal() -> 
             principal_hash_version=0,
             idempotency_hash=hashlib.sha256(
                 (
-                    "1:123456789012:ios:0123456789abcdef"
-                    f"\0{subject_hash}\0shared-key"
+                    f"1:123456789012:ios:0123456789abcdef\0{subject_hash}\0shared-key"
                 ).encode()
             ).hexdigest(),
         )

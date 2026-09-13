@@ -3428,7 +3428,7 @@ private fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: () 
                     }
                     Text(
                         if (zonesFromImport) uiString(R.string.appwide_workouts_imported_zone_split)
-                        else "Time in each %HRmax zone, derived from the band's heart rate over this window (approximate).",
+                        else uiString(R.string.appwide_workouts_band_hr_zone_split_detail),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )

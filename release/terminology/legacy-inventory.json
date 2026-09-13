@@ -17419,7 +17419,7 @@
       "category": "core",
       "lineNumbers": [
         233,
-        1479
+        1471
       ],
       "occurrenceCount": 2,
       "path": "Tools/i18n_audit_baseline.json",
@@ -35442,8 +35442,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        55,
-        113
+        59,
+        117
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/ACTIVE.md",
@@ -35657,8 +35657,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        504,
-        545
+        512,
+        553
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-11-product-safety-quality-audit.md",

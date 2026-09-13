@@ -73,7 +73,7 @@ RELEASE_SOURCE_DIGESTS = {
         "c04da9970817d1aff853a5f2e9b9385b133138e8ddd875b2e0139a7a91e11203"
     ),
     "release/terminology/legacy-inventory.json": (
-        "9390ee9e76b89d55224f0a5cf6389b624bfa13d2d04bdd88e35cf4d3aa05853a"
+        "a7d31ea2df0a290def79083cf4eb19aac3e9dfa5610ecf9d62539a83a770dd8c"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -112,7 +112,7 @@ RELEASE_SOURCE_DIGESTS = {
         "86e2040fd6ce9f7abc1126e0b16a056ba84a39fa878caa3367f7273d6306e8b4"
     ),
     "Tools/i18n_audit_baseline.json": (
-        "b16e1662d02f7e03875e7b41201001a3da1ede37db891e66228555f334cae087"
+        "d430542f412001424065dba2167af11c814779add37f0d09c34c5b870ab087d0"
     ),
     "Tools/prepare-ios-sideload-app.sh": (
         "d81bf5b8086c21a648a1417afa58cbb5bb9781c1738f2ff9d1cae6950ab2f097"
