@@ -64,6 +64,7 @@ import com.noop.data.NutritionLogContract
 import com.noop.data.MoodStore
 import com.noop.data.WhoopRepository
 import com.noop.analytics.CalibratedMetricEstimate
+import com.noop.analytics.BodyProfilePolicy
 import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.NoopScoreAlgorithmRevision
 import com.noop.analytics.PersonalCalibrationDecision
@@ -235,11 +236,17 @@ private object CompareCatalog {
         CompareMetric("mood", "Mood", "Mind", "/5", MoodStore.MOOD_DEVICE_ID, 0),
     )
 
-    fun inCategory(c: String): List<CompareMetric> = all.filter { it.category == c }
+    fun visible(canPresentBmi: Boolean): List<CompareMetric> =
+        all.filter { canPresentBmi || it.key != "bmi" }
 
-    fun byKey(key: String): CompareMetric? = all.firstOrNull { it.key == key }
+    fun inCategory(c: String, canPresentBmi: Boolean): List<CompareMetric> =
+        visible(canPresentBmi).filter { it.category == c }
 
-    fun byId(id: String): CompareMetric? = all.firstOrNull { it.id == id }
+    fun byKey(key: String, canPresentBmi: Boolean = true): CompareMetric? =
+        visible(canPresentBmi).firstOrNull { it.key == key }
+
+    fun byId(id: String, canPresentBmi: Boolean = true): CompareMetric? =
+        visible(canPresentBmi).firstOrNull { it.id == id }
 
     /** Map a my-whoop metric key to the matching DailyMetric column accessor, if any. */
     fun dailyPick(key: String): ((DailyMetric) -> Double?)? = when (key) {
@@ -284,14 +291,19 @@ private enum class CompareRange(val label: String, val days: Int?, val phrase: S
 
 private val defaultCompareMetricKeys = listOf("recovery", "sleep_performance", "weight")
 
-internal fun parseCompareSelection(raw: String?, minSelection: Int, maxSelection: Int): List<CompareMetric>? {
+internal fun parseCompareSelection(
+    raw: String?,
+    minSelection: Int,
+    maxSelection: Int,
+    canPresentBmi: Boolean = true,
+): List<CompareMetric>? {
     if (raw == null) return null
 
     val tokens = raw.split(",")
         .map { it.trim() }
         .filter { it.isNotEmpty() }
     val parsed = tokens
-        .mapNotNull { CompareCatalog.byId(it) }
+        .mapNotNull { CompareCatalog.byId(it, canPresentBmi) }
         .distinctBy { it.id }
         .take(maxSelection)
 
@@ -315,12 +327,20 @@ private object ComparePrefs {
         NoopPrefs.of(context).edit().putString(KEY_RANGE, range.name).apply()
     }
 
-    fun readSelection(context: Context, minSelection: Int, maxSelection: Int): List<CompareMetric> {
+    fun readSelection(
+        context: Context,
+        minSelection: Int,
+        maxSelection: Int,
+        canPresentBmi: Boolean,
+    ): List<CompareMetric> {
         val raw = NoopPrefs.of(context).getString(KEY_SELECTED, null)
-        parseCompareSelection(raw, minSelection, maxSelection)?.let { return it }
+        parseCompareSelection(raw, minSelection, maxSelection, canPresentBmi)?.let { return it }
 
-        val picks = defaultCompareMetricKeys.mapNotNull { CompareCatalog.byKey(it) }
-        return (if (picks.isEmpty()) CompareCatalog.all.take(2) else picks).take(maxSelection)
+        val picks = defaultCompareMetricKeys.mapNotNull {
+            CompareCatalog.byKey(it, canPresentBmi)
+        }
+        val visible = CompareCatalog.visible(canPresentBmi)
+        return (if (picks.isEmpty()) visible.take(2) else picks).take(maxSelection)
     }
 
     fun writeSelection(context: Context, selected: List<CompareMetric>) {
@@ -469,6 +489,18 @@ fun CompareScreen(vm: AppViewModel) {
     // Liquid finish (pilot pattern): the time-of-day sky settles behind the top of the screen, gated on the
     // same day-cycle-background preference the liquid Today honours. Off = the flat dark canvas path.
     val context = LocalContext.current
+    val profile = remember(context) { ProfileStore.from(context) }
+    val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val canPresentBmi = remember(profileVersion) {
+        BodyProfilePolicy.canPresentAdultBmi(
+            age = profile.age,
+            currentWeightKg = profile.weightKg,
+            heightCm = profile.heightCm,
+            ageConfirmed = profile.ageInputConfirmed,
+            heightConfirmed = profile.heightInputConfirmed,
+            currentWeightConfirmed = profile.weightInputConfirmed,
+        )
+    }
     val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
     val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
 
@@ -477,9 +509,16 @@ fun CompareScreen(vm: AppViewModel) {
 
     var range by remember { mutableStateOf(ComparePrefs.readRange(context)) }
     // Ordered selection (max 4). Drives both the legend order and color mapping.
-    val selected = remember {
+    val selected = remember(canPresentBmi) {
         mutableStateListOf<CompareMetric>().apply {
-            addAll(ComparePrefs.readSelection(context, minSelection, maxSelection))
+            addAll(
+                ComparePrefs.readSelection(
+                    context,
+                    minSelection,
+                    maxSelection,
+                    canPresentBmi,
+                ),
+            )
         }
     }
     // Full-history series per selected metric id (ascending by day).
@@ -660,6 +699,7 @@ fun CompareScreen(vm: AppViewModel) {
                         AddMetricMenu(
                             selectedCount = selected.size,
                             maxSelection = maxSelection,
+                            canPresentBmi = canPresentBmi,
                             isSelected = { m -> selected.any { it.id == m.id } },
                             onToggle = { m ->
                                 val existing = selected.firstOrNull { it.id == m.id }
@@ -1121,6 +1161,7 @@ private fun todayDay(deltaDays: Int): String {
 private fun AddMetricMenu(
     selectedCount: Int,
     maxSelection: Int,
+    canPresentBmi: Boolean,
     isSelected: (CompareMetric) -> Boolean,
     onToggle: (CompareMetric) -> Unit,
 ) {
@@ -1157,7 +1198,7 @@ private fun AddMetricMenu(
             modifier = Modifier.background(Palette.surfaceOverlay),
         ) {
             CompareCatalog.categories.forEach { category ->
-                val metrics = CompareCatalog.inCategory(category)
+                val metrics = CompareCatalog.inCategory(category, canPresentBmi)
                 if (metrics.isNotEmpty()) {
                     Text(
                         categoryDisplayName(category).uppercase(),

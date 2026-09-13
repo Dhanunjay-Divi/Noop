@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">Zeit zum Runterkommen</string>
-    <string name="wind_down_notification_body">Deine geplante Schlafenszeit rückt näher. Komm zur Ruhe, wenn es für dich passt.</string>
+    <string name="wind_down_notification_body">Plan: um %1$s zur Ruhe kommen; um %2$s schlafen gehen, wenn das für dich passt.</string>
     <string name="wind_down_channel_name">Abendlicher Ruhehinweis</string>
     <string name="wind_down_channel_description">Optionale abendliche Erinnerung vor deiner geplanten Schlafenszeit.</string>
     <string name="sleep_planner_title">Schlafplaner</string>
@@ -251,9 +251,9 @@
 
     <!-- Power saving (#477) -->
     <string name="fast_link_phy">Schnellere Bluetooth-Verbindung (experimentell)</string>
-    <string name="fast_link_phy_desc">Fordert einen schnelleren Bluetooth-Funkmodus an, während Ihr Riemen seinen gespeicherten Verlauf überträgt. Dieselben Daten in kürzerer Sendezeit - möglicherweise schnellere Synchronisierung und etwas weniger Akkuverbrauch am Riemen. Ihr Riemen muss dies unterstützen, und es geht etwas Reichweite verloren. Neu und unerprobt: Schalten Sie es aus, wenn die Synchronisierung auf Distanz unzuverlässig wird.</string>
+    <string name="fast_link_phy_desc">Fordert einen schnelleren Bluetooth-Funkmodus an, während dein Band seinen gespeicherten Verlauf überträgt. Dieselben Daten in kürzerer Sendezeit können schneller synchronisieren und etwas weniger Bandakku verbrauchen. Dein Band muss dies unterstützen, und es geht etwas Reichweite verloren. Neu und unerprobt: Schalte es aus, wenn die Synchronisierung auf Distanz unzuverlässig wird.</string>
     <string name="fast_history_sync">Schnellere Verlaufssynchronisierung (experimentell)</string>
-    <string name="fast_history_sync_desc">Fordert eine schnellere Bluetooth-Verbindung an, während Ihr Riemen seinen gespeicherten Verlauf überträgt, damit ein großer Rückstand schneller aufholt. Nur während der Synchronisierung - Ihre Live-Herzfrequenz und der nächtliche Datenstrom bleiben unberührt. Neu und unerprobt: Wenn es nicht hilft oder zu viel Akku kostet, schalten Sie es wieder aus.</string>
+    <string name="fast_history_sync_desc">Fordert eine schnellere Bluetooth-Verbindung an, während dein Band seinen gespeicherten Verlauf überträgt, damit ein großer Rückstand schneller aufholt. Nur während der Synchronisierung; deine Live-Herzfrequenz und der nächtliche Datenstrom bleiben unberührt. Neu und unerprobt: Wenn es nicht hilft oder zu viel Akku kostet, schalte es wieder aus.</string>
     <string name="keep_alive_allowed">Erlaubt - Ihr Telefon stoppt die nächtliche Synchronisierung von NOOP nicht mehr, um Akku zu sparen. Die Berechtigung selbst verbraucht keinen Akku; verbraucht wird er von der nächtlichen Synchronisierung, die Sie oben aktiviert haben.</string>
     <string name="keep_alive_needed_vendor">Ihr Telefon (%1$s) kann Hintergrund-Apps stoppen, um Akku zu sparen - dadurch können NOOP nächtliche Schlaf- und Erholungsdaten entgehen. Aktivieren Sie dies, um NOOP auf die Whitelist zu setzen.\n\nAndroid fragt „Akkuoptimierung beenden?“ und warnt, dass NOOP Ihren Akku entladen könnte - das ist Androids Standardformulierung für jede App, die im Hintergrund laufen darf. Tippen Sie auf Zulassen. Der Akku wird von der nächtlichen Synchronisierung verbraucht, die Sie oben bereits aktiviert haben; dies verhindert nur, dass Android sie vorzeitig beendet.</string>
     <string name="keep_alive_needed_generic">Manche Telefone können Hintergrund-Apps stoppen, um Akku zu sparen - dadurch können NOOP nächtliche Schlaf- und Erholungsdaten entgehen. Aktivieren Sie dies, um NOOP auf die Whitelist zu setzen.\n\nAndroid fragt „Akkuoptimierung beenden?“ und warnt, dass NOOP Ihren Akku entladen könnte - das ist Androids Standardformulierung für jede App, die im Hintergrund laufen darf. Tippen Sie auf Zulassen. Der Akku wird von der nächtlichen Synchronisierung verbraucht, die Sie oben bereits aktiviert haben; dies verhindert nur, dass Android sie vorzeitig beendet.</string>
@@ -2554,7 +2554,7 @@
     <string name="app_report_subtitle">Private Nachweise von diesem Smartphone</string>
     <string name="app_report_close_content_description">App-Bericht schließen</string>
     <string name="app_report_capture_title">Geschehenes erfassen</string>
-    <string name="app_report_capture_detail">NOOP bündelt bereits auf diesem Smartphone vorhandene Nachweise. Nichts wird automatisch hochgeladen.</string>
+    <string name="app_report_capture_detail">NOOP bündelt bereits auf diesem Smartphone vorhandene Nachweise. Nichts wird hochgeladen, bevor du alles geprüft und auf Feedback senden getippt hast.</string>
     <string name="app_report_evidence_performance_title">Leistung</string>
     <string name="app_report_evidence_performance_detail">Ruckler bei der Anzeige, Blockaden des Hauptthreads, Speicherdruck, Speicherplatz und Temperaturzustand</string>
     <string name="app_report_evidence_recent_path_title">Letzter Ablauf</string>
@@ -2564,7 +2564,7 @@
     <string name="app_report_evidence_band_status_title">Bandstatus</string>
     <string name="app_report_evidence_band_status_detail">Das vorhandene, bereinigte Verbindungs- und Verlaufssynchronisierungsprotokoll</string>
     <string name="app_report_evidence_android_title">Android-Diagnose</string>
-    <string name="app_report_evidence_android_detail">Letzter Betriebssystem-Beendigungsgrund und ANR-Ablaufverfolgung, sofern Android sie bereitstellt</string>
+    <string name="app_report_evidence_android_detail">Begrenzte Android-Beendigungsgründe ohne rohe Systemablaufverfolgungen oder Ausnahmemeldungen</string>
     <string name="app_report_user_note_title">Was hat fehlerhaft gewirkt? (optional)</string>
     <string name="app_report_user_note_detail">Beschreibe, worauf du getippt hast, was du erwartet hast und was passiert ist. Vermeide Namen oder Kontaktdaten.</string>
     <string name="app_report_user_note_placeholder">Beispiel: Health wurde angehalten, nachdem ich eine Metrik geöffnet hatte</string>
@@ -2572,16 +2572,17 @@
     <string name="app_report_include_snapshot">Bildschirmaufnahme beifügen</string>
     <string name="app_report_snapshot_available_detail">Zeigt den Bildschirm vor dem Öffnen dieses Berichts. Sie kann Gesundheitswerte enthalten.</string>
     <string name="app_report_snapshot_unavailable_detail">Eine Bildschirmaufnahme ist noch nicht verfügbar.</string>
-    <string name="app_report_privacy_detail">Nie enthalten: deine Gesundheitsdatenbank, der Rohverlauf der Sensoren, Kontozugangsdaten oder API-Schlüssel. Die temporäre Bildschirmaufnahme wird verworfen, wenn dieser Bericht geschlossen wird.</string>
+    <string name="app_report_privacy_detail">Nie enthalten: deine Gesundheitsdatenbank, der Rohverlauf der Sensoren, Kontozugangsdaten, API-Schlüssel oder rohe Android-Ablaufverfolgungen. Eine Notiz oder Bildschirmaufnahme wird nur beigefügt, wenn sie in deiner Prüfung angezeigt wird.</string>
     <string name="app_report_build">Bericht erstellen</string>
     <string name="app_report_cancel">Abbrechen</string>
     <string name="app_report_preparing_title">Private ZIP-Datei wird vorbereitet</string>
     <string name="app_report_preparing_detail">Begrenzte Protokolle, Dateigröße und Zeitstempel der zuletzt gespeicherten Herzfrequenz werden gelesen. Deine Gesundheitsdatenbank bleibt auf diesem Smartphone.</string>
     <string name="app_report_ready_title">Bericht ist bereit</string>
-    <string name="app_report_ready_detail">Prüfe die Liste der Anhänge und wähle dann, wohin die ZIP-Datei gesendet oder gespeichert werden soll.</string>
+    <string name="app_report_ready_detail">Prüfe die genaue Anhangsliste und Vorschau. Sende Feedback nur, wenn du diese Dateien an den NOOP-Support hochladen möchtest.</string>
+    <string name="app_report_snapshot_preview_title">BILDSCHIRMAUFNAHME</string>
+    <string name="app_report_snapshot_preview_content_description">Vorschau der Bildschirmaufnahme, die diesem Feedback-Bericht beigefügt ist</string>
     <string name="app_report_redacted_preview">BEREINIGTE VORSCHAU</string>
     <string name="app_report_preparing_zip">ZIP-Datei wird vorbereitet</string>
-    <string name="app_report_share_zip">ZIP-Datei teilen</string>
     <string name="app_report_remove_snapshot">Bildschirmaufnahme entfernen</string>
     <string name="app_report_not_ready_title">Bericht nicht bereit</string>
     <string name="app_report_prepare_zip_fallback">NOOP konnte die ZIP-Datei nicht vorbereiten.</string>
@@ -2589,8 +2590,6 @@
     <string name="app_report_close">Schließen</string>
     <string name="app_report_error_prepare">NOOP konnte den Bericht nicht vorbereiten. Öffne die App erneut und versuche es noch einmal.</string>
     <string name="app_report_status_snapshot_removed">Bildschirmaufnahme wurde aus diesem Bericht entfernt.</string>
-    <string name="app_report_error_share">Die ZIP-Datei konnte nicht erstellt werden. Es wurde kein Bericht geteilt.</string>
-    <string name="app_report_status_share_opened">Teilen-Menü für %1$s geöffnet</string>
     <string name="app_report_preview_shortened">Vorschau gekürzt. Die vollständigen begrenzten Dateien sind oben aufgeführt.</string>
     <string name="app_report_open_button">App-Problem melden</string>
     <string name="changelog_clearer_updates_and_reports_9_2_1">Klarere Updates und Berichte, die bei der Fehlerbehebung helfen</string>
@@ -2638,9 +2637,9 @@
     <string name="managed_friends_sharing_settings">Freigabeeinstellungen</string>
     <string name="managed_friends_no_shared_details">Geteilte Details erscheinen nur, wenn dieser Freund sie erlaubt.</string>
     <string name="managed_friends_poke_action">Anstupsen</string>
-    <string name="managed_friends_charge">Charge</string>
+    <string name="managed_friends_charge">Erholung</string>
     <string name="managed_friends_effort">Effort</string>
-    <string name="managed_friends_rest">Rest</string>
+    <string name="managed_friends_rest">Schlafwert</string>
     <string name="managed_friends_sleep_duration">Schlafdauer</string>
     <string name="managed_friends_hrv">HRV</string>
     <string name="managed_friends_rhr">Ruheherzfrequenz</string>
@@ -2653,7 +2652,7 @@
     <string name="managed_friends_quiet_start">Ruhezeit beginnt</string>
     <string name="managed_friends_quiet_end">Ruhezeit endet</string>
     <string name="managed_friends_save_settings">Freunde-Einstellungen speichern</string>
-    <string name="managed_friends_data_boundary">Nur Charge, Effort, Rest, Schlafdauer, HRV und Ruheherzfrequenz können geteilt werden. Rohdaten, Standorte, Journale, Routen, Workouts und Schlafphasen sind ausgeschlossen.</string>
+    <string name="managed_friends_data_boundary">Nur Erholung, Effort, Schlafwert, Schlafdauer, HRV und Ruheherzfrequenz können geteilt werden. Rohdaten, Standorte, Journale, Routen, Workouts und Schlafphasen sind ausgeschlossen.</string>
     <string name="managed_friends_directional_sharing">Wähle genau aus, was dieser Freund sehen darf. Seine Auswahl für dich ist davon getrennt.</string>
     <string name="managed_friends_allow_friend_poke">Diesem Freund erlauben, mich anzustupsen</string>
     <string name="managed_friends_save_sharing">Freigabeauswahl speichern</string>
@@ -2873,4 +2872,48 @@
     <string name="compare_reference_export_ready">Die Vergleichs-ZIP ist in der Systemfreigabe verfügbar.</string>
     <string name="compare_reference_export_failed">Die Vergleichs-ZIP konnte nicht erstellt werden.</string>
     <string name="compare_reference_units">Wert von 0 bis 100</string>
+    <string name="app_report_send_feedback">Feedback senden</string>
+    <string name="app_report_error_queue">NOOP konnte diesen Bericht nicht im privaten Postausgang versiegeln. Es wurde nichts hochgeladen.</string>
+    <string name="app_report_status_queued">Sicher auf diesem Smartphone vorgemerkt. Der Upload beginnt, sobald ein Netzwerk verfügbar ist.</string>
+    <string name="app_report_status_queued_reopen">Sicher vorgemerkt. Schließe und öffne NOOP erneut, um den Hintergrundprozess neu zu starten.</string>
+    <string name="app_report_status_uploading">Das geprüfte ZIP wird hochgeladen. Du kannst dieses Fenster schließen, während der Upload weiterläuft.</string>
+    <string name="app_report_status_retry_scheduled">Der letzte Versuch wurde nicht abgeschlossen. NOOP hat einen erneuten Versuch im Hintergrund geplant.</string>
+    <string name="app_report_status_canceling">Der Abbruch und die Entfernung einer möglichen Serverkopie werden angefordert. Ein bereits gestarteter Upload kann abgeschlossen werden, bevor die Löschung bestätigt ist.</string>
+    <string name="app_report_status_cancel_retry_scheduled">NOOP hat die Löschung noch nicht bestätigt. Das geprüfte ZIP könnte den Server bereits erreicht haben; eine weitere Löschprüfung ist geplant.</string>
+    <string name="app_report_status_sent">Feedback gesendet. Das versiegelte lokale ZIP wurde entfernt.</string>
+    <string name="app_report_status_canceled">Feedback abgebrochen und Löschung bestätigt. Das versiegelte lokale ZIP wurde entfernt.</string>
+    <string name="app_report_error_cancel_failed">NOOP konnte den Abbruch nicht bestätigen. Versuche es erneut, damit die Serverkopie entfernt werden kann.</string>
+    <string name="app_report_error_archive_invalid">Der versiegelte Bericht wurde verändert oder konnte nicht geprüft werden. Er wird nicht hochgeladen.</string>
+    <string name="app_report_error_configuration">Feedback ist in diesem Build nicht konfiguriert. Der Bericht bleibt privat auf diesem Smartphone.</string>
+    <string name="app_report_error_rejected">Der NOOP-Support hat diesen Bericht abgelehnt. Brich ihn ab, um eine eventuell gespeicherte Serverkopie zu entfernen.</string>
+    <string name="app_report_error_delivery">Das Feedback hat nach den begrenzten Versuchen keinen Endzustand erreicht. Das geprüfte ZIP könnte den Server bereits erreicht haben; wiederhole den Vorgang oder brich ihn ab.</string>
+    <string name="app_report_queued_title">Vorgemerkt</string>
+    <string name="app_report_uploading_title">Wird hochgeladen</string>
+    <string name="app_report_retry_scheduled_title">Erneuter Versuch geplant</string>
+    <string name="app_report_canceling_title">Wird abgebrochen</string>
+    <string name="app_report_cancel_retry_title">Erneuter Abbruchversuch geplant</string>
+    <string name="app_report_sent_title">Gesendet</string>
+    <string name="app_report_canceled_title">Abgebrochen</string>
+    <string name="app_report_send_failed_title">Feedback erfordert Aufmerksamkeit</string>
+    <string name="app_report_progress_percent">%1$d%%</string>
+    <string name="app_report_receipt">Beleg: %1$s</string>
+    <string name="app_report_receipt_confirmed">Beleg vom NOOP-Support bestätigt</string>
+    <string name="app_report_retry_now">Jetzt erneut versuchen</string>
+    <string name="app_report_cancel_send">Feedback abbrechen</string>
+    <string name="app_report_continue_background">Im Hintergrund fortfahren</string>
+    <string name="app_report_error_action">NOOP konnte diesen Feedback-Bericht nicht aktualisieren. Öffne den Bericht erneut und versuche es noch einmal.</string>
+    <string name="app_report_evidence_apple_title">Apple-Diagnose</string>
+    <string name="app_report_evidence_apple_detail">Verzögerte Systemberichte über Hänger oder Abstürze, sobald iOS sie bereitstellt</string>
+    <string name="app_report_privacy_detail_apple">Nie enthalten: deine Gesundheitsdatenbank, der Rohverlauf der Sensoren, Kontozugangsdaten oder API-Schlüssel. Eine Notiz oder Bildschirmaufnahme wird nur beigefügt, wenn sie in deiner Prüfung angezeigt wird.</string>
+    <string name="app_report_status_securing">Der geprüfte Bericht wird im privaten Feedback-Postausgang gesichert.</string>
+    <string name="app_report_status_cancel_before_queue">Feedback wurde abgebrochen, bevor es vorgemerkt wurde.</string>
+    <string name="app_report_status_cancel_queueing">Abbruch, bevor der Feedback-Bericht vollständig vorgemerkt ist.</string>
+    <string name="app_report_status_confirming">Zustellung wird vom NOOP-Support bestätigt.</string>
+    <string name="app_report_status_sent_cleanup_pending">Feedback gesendet. Die Bereinigung der lokalen ZIP-Datei wird erneut versucht.</string>
+    <string name="app_report_status_canceled_cleanup_pending">Feedback abgebrochen. Die Bereinigung der lokalen ZIP-Datei wird beim nächsten Öffnen von NOOP erneut versucht.</string>
+    <string name="app_report_send_disclosure">Feedback senden lädt genau diese geprüfte ZIP-Datei zum NOOP-Support hoch. Eine Notiz oder Bildschirmaufnahme wird nur beigefügt, wenn sie oben erscheint. Das Schließen dieses Fensters bricht einen vorgemerkten Upload nicht ab.</string>
+    <string name="app_report_upload_progress_label">Fortschritt des Feedback-Uploads</string>
+    <string name="app_report_cancel_progress_label">Feedback-Abbruch läuft</string>
+    <string name="app_report_queued_progress_label">Feedback ist vorgemerkt</string>
+    <string name="app_report_delivery_in_progress">Feedback-Zustellung läuft.</string>
 </resources>

@@ -49,6 +49,60 @@ final class ProfileExternalWeightTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "profile.targetWeightKg"))
     }
 
+    func testBodySeedsRemainUnconfirmedUntilAcceptedOrEdited() throws {
+        let defaults = try freshDefaults()
+        let profile = ProfileStore(defaults: defaults)
+        XCTAssertFalse(profile.weightInputConfirmed)
+        XCTAssertFalse(profile.heightInputConfirmed)
+        XCTAssertFalse(profile.bodyInputsConfirmed)
+        XCTAssertNil(profile.adultBMI)
+
+        profile.confirmAgeInput()
+        profile.weightKg = 75
+        XCTAssertTrue(profile.weightInputConfirmed)
+        XCTAssertFalse(profile.bodyInputsConfirmed)
+        profile.heightCm = 178
+        XCTAssertTrue(profile.bodyInputsConfirmed)
+        XCTAssertEqual(try XCTUnwrap(profile.adultBMI), 23.671, accuracy: 0.001)
+    }
+
+    func testBodyConfirmationCanAcceptVisibleOnboardingValues() throws {
+        let defaults = try freshDefaults()
+        let profile = ProfileStore(defaults: defaults)
+        profile.confirmAgeInput()
+        profile.confirmBodyInputs()
+        XCTAssertTrue(profile.bodyInputsConfirmed)
+        XCTAssertNotNil(profile.adultBMI)
+    }
+
+    func testAdultBmiAndTargetProgressRemainUnavailableBelowAgeTwenty() throws {
+        let defaults = try freshDefaults()
+        let profile = ProfileStore(defaults: defaults)
+        profile.weightKg = 75
+        profile.heightCm = 178
+        profile.dateOfBirth = ProfileStore.dateOfBirth(forAge: 19)
+        XCTAssertNil(profile.adultBMI)
+        XCTAssertEqual(
+            profile.targetWeightAvailability(targetWeightKg: 70),
+            .adultScreeningUnavailable
+        )
+    }
+
+    func testExternalWeightConfirmsOnlyWeightInput() throws {
+        let defaults = try freshDefaults()
+        let profile = ProfileStore(defaults: defaults)
+        let now = Date()
+        XCTAssertTrue(profile.acceptExternalWeight(
+            weightKg: 78,
+            measuredAt: now,
+            source: "apple-health",
+            receivedAt: now
+        ))
+        XCTAssertTrue(profile.weightInputConfirmed)
+        XCTAssertFalse(profile.heightInputConfirmed)
+        XCTAssertNil(profile.adultBMI)
+    }
+
     func testAcceptsOnlyNewerValidExternalWeightAndPersistsProvenance() throws {
         let defaults = try freshDefaults()
         let profile = ProfileStore(defaults: defaults)

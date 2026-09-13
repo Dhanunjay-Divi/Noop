@@ -768,7 +768,7 @@ private fun FriendCard(friend: FriendContact, onClick: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     FriendScoreTile(
-                        label = stringResource(R.string.friends_score_charge),
+                        label = stringResource(R.string.appwide_day_overview_recovery),
                         value = summary.charge,
                         icon = Icons.Filled.Favorite,
                         color = Palette.chargeColor,
@@ -1046,7 +1046,7 @@ private fun FriendSharingDialog(
         }
         Overline(stringResource(R.string.friends_daily_scores), color = Palette.textTertiary)
         FriendVisibilityToggle(
-            stringResource(R.string.friends_score_charge),
+            stringResource(R.string.appwide_day_overview_recovery),
             sharing.charge,
         ) { sharing = sharing.copy(charge = it) }
         FriendVisibilityToggle(
@@ -1077,7 +1077,10 @@ private fun FriendSharingDialog(
         )
         HorizontalDivider(color = Palette.hairline)
         Overline(stringResource(R.string.friends_they_share), color = Palette.textTertiary)
-        FriendReadOnlyVisibility(stringResource(R.string.friends_score_charge), friend.sharedWithMe.charge)
+        FriendReadOnlyVisibility(
+            stringResource(R.string.appwide_day_overview_recovery),
+            friend.sharedWithMe.charge,
+        )
         FriendReadOnlyVisibility(stringResource(R.string.friends_score_effort), friend.sharedWithMe.effort)
         FriendReadOnlyVisibility(stringResource(R.string.friends_score_rest), friend.sharedWithMe.rest)
         FriendReadOnlyVisibility(stringResource(R.string.friends_sleep_duration), friend.sharedWithMe.sleepDuration)

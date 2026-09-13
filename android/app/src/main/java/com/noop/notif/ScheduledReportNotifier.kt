@@ -1,16 +1,68 @@
 package com.noop.notif
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.noop.R
 import com.noop.ui.NoopPrefs
-import com.noop.ui.appLaunchIntent
+import com.noop.ui.NoopNotificationRoute
+import com.noop.ui.NotificationRouteBridge
 import kotlin.math.roundToInt
+
+/**
+ * One completed sync can materialize several routine prompts at once. The first eligible lane owns
+ * this process-local budget; lower lanes keep their persisted frontiers untouched and may retry later.
+ * Safety paging and active-workout cautions deliberately bypass this budget.
+ */
+class PostSyncRoutineNotificationBudget {
+    enum class Lane(val storageKey: String) {
+        AUTO_WORKOUT("auto_workout"),
+        ADAPTIVE_DAY("adaptive_day"),
+        POST_WORKOUT_SUMMARY("post_workout_summary"),
+        MORNING_RECAP("morning_recap"),
+    }
+
+    private var claimed: Lane? = null
+    private var reserved: Lane? = null
+
+    @get:Synchronized
+    val claimedLane: Lane?
+        get() = claimed
+
+    @get:Synchronized
+    val isClaimed: Boolean
+        get() = claimed != null
+
+    @Synchronized
+    fun reserve(lane: Lane): Boolean {
+        if (claimed != null || reserved != null) return false
+        reserved = lane
+        return true
+    }
+
+    @Synchronized
+    fun commit(lane: Lane): Boolean {
+        if (claimed != null || reserved != lane) return false
+        reserved = null
+        claimed = lane
+        return true
+    }
+
+    @Synchronized
+    fun release(lane: Lane) {
+        if (reserved == lane) reserved = null
+    }
+
+    @Synchronized
+    fun claim(lane: Lane): Boolean = reserve(lane) && commit(lane)
+}
 
 // MARK: - Scheduled report notifications (#517)
 //
@@ -18,9 +70,9 @@ import kotlin.math.roundToInt
 //   1. A MORNING RECAP once a fresh night has been processed.
 //   2. A POST-WORKOUT REMINDER when a newly synced workout is first seen.
 //
-// Neither is alarm-precise: NOOP reads the strap over BLE and scores on a ~15-minute analytics pass, so a
+// Neither is alarm-precise: NOOP reads the band over BLE and scores on a ~15-minute analytics pass, so a
 // report lands when the next sync + pass completes — NOT the instant you wake or finish a session. The copy
-// is honest about that timing ("after your strap synced"). Everything is on-device.
+// is honest about that timing ("after your band synced"). Everything is on-device.
 //
 // The pure [ScheduledReportPolicy] + the copy builders are JVM-testable (the CallAlertPolicy idiom); the
 // notifier wires them to a real channel + the persisted dedupe markers in NoopPrefs. Call sites:
@@ -31,6 +83,11 @@ import kotlin.math.roundToInt
 /** Pure, JVM-testable policy + copy for the scheduled reports — no Android types, so the logic is pinned
  *  by ScheduledReportPolicyTest independently of the notification plumbing. */
 object ScheduledReportPolicy {
+    enum class MorningCopyKind {
+        BOTH,
+        RECOVERY,
+        SLEEP,
+    }
 
     /** Fire the morning recap at most once per REPORTED NIGHT: only when enabled, a recap value exists, and
      *  we haven't already posted for [reportDay]. [reportDay] is the day of the banked night the recap is
@@ -43,7 +100,19 @@ object ScheduledReportPolicy {
         chargeOrRestPresent: Boolean,
         lastNotifiedDay: String?,
         reportDay: String,
-    ): Boolean = enabled && materializedAfterSync && chargeOrRestPresent && lastNotifiedDay != reportDay
+    ): Boolean =
+        enabled &&
+            materializedAfterSync &&
+            chargeOrRestPresent &&
+            reportDay.isNotBlank() &&
+            lastNotifiedDay != reportDay
+
+    /** A routine report cannot consume its frontier or shared budget unless the OS can accept it. */
+    fun deliveryAvailable(
+        runtimePermissionGranted: Boolean,
+        appNotificationsEnabled: Boolean,
+        channelDisabled: Boolean,
+    ): Boolean = runtimePermissionGranted && appNotificationsEnabled && !channelDisabled
 
     /** Fire the post-workout summary only for a workout STRICTLY newer than the last one summarised, so a
      *  re-sync of the same backlog never re-notifies. [lastWorkoutTs] is 0 before the first ever. */
@@ -56,10 +125,11 @@ object ScheduledReportPolicy {
     /** Privacy-safe title + body for the morning recap. The score arguments are used only as the honest
      *  availability gate: lock-screen copy never includes biometric values. Returns null when neither
      *  Recovery nor Sleep Score is present. */
-    fun morningCopy(chargePct: Int?, restPct: Int?): Pair<String, String>? {
-        if (chargePct == null && restPct == null) return null
-        return "Your morning recap is ready" to
-            "Open NOOP to review your Recovery and Sleep Score."
+    fun morningCopyKind(chargePct: Int?, restPct: Int?): MorningCopyKind? = when {
+        chargePct != null && restPct != null -> MorningCopyKind.BOTH
+        chargePct != null -> MorningCopyKind.RECOVERY
+        restPct != null -> MorningCopyKind.SLEEP
+        else -> null
     }
 
     /** Privacy-safe title + body for the post-workout summary. Detailed inputs stay available to the
@@ -90,6 +160,30 @@ object ScheduledReportPolicy {
 object ScheduledReportNotifier {
     private const val CHANNEL_ID = "noop_scheduled_reports"
 
+    fun canNotify(context: Context): Boolean {
+        val runtimePermissionGranted =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) == PackageManager.PERMISSION_GRANTED
+        val appNotificationsEnabled =
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+        val channelDisabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.getNotificationChannel(CHANNEL_ID)?.importance ==
+                NotificationManager.IMPORTANCE_NONE
+        } else {
+            false
+        }
+        return ScheduledReportPolicy.deliveryAvailable(
+            runtimePermissionGranted = runtimePermissionGranted,
+            appNotificationsEnabled = appNotificationsEnabled,
+            channelDisabled = channelDisabled,
+        )
+    }
+
     /**
      * Post the morning recap if enabled and not already posted today. [chargePct]/[restPct] are the
      * just-computed Recovery/Sleep Score for the night (either may be null). They gate availability but
@@ -102,7 +196,8 @@ object ScheduledReportNotifier {
         chargePct: Int?,
         restPct: Int?,
         materializedAfterSync: Boolean,
-    ) {
+        budget: PostSyncRoutineNotificationBudget? = null,
+    ): Boolean {
         // reportDay is the banked night's day (the resolved today-row's `day`), NOT LocalDate.now() — the
         // calendar day rolls at midnight while the row still resolves to last night's until a new night is
         // banked, which re-fired the recap at the start of a new day for late-nighters (#567).
@@ -113,37 +208,58 @@ object ScheduledReportNotifier {
                 lastNotifiedDay = NoopPrefs.reportMorningDay(context),
                 reportDay = reportDay,
             )
-        ) return
-        val copy = ScheduledReportPolicy.morningCopy(chargePct, restPct) ?: return
-        runCatching {
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+        ) return false
+        val copyKind = ScheduledReportPolicy.morningCopyKind(chargePct, restPct) ?: return false
+        val copy = morningCopy(context, copyKind)
+        val lane = PostSyncRoutineNotificationBudget.Lane.MORNING_RECAP
+        var reserved = false
+        return runCatching {
+            ensureChannel(context)
+            if (!canNotify(context)) {
                 NotificationLifecycleLedger.suppressed(
                     context,
                     NotificationLifecycleId.MORNING_REPORT,
                     NotificationLifecycleCategory.STATUS,
                 )
-                return
+                return@runCatching false
             }
-            ensureChannel(context)
+            if (budget?.reserve(lane) == false) {
+                return@runCatching false
+            }
+            reserved = budget != null
             if (!post(
                     context,
                     NotificationPlatformIdentity.NotificationId.MORNING_REPORT,
                     NotificationPlatformIdentity.ActivityIntent.MORNING_REPORT,
                     NotificationLifecycleId.MORNING_REPORT,
+                    NoopNotificationRoute.SLEEP,
                     copy.first,
                     copy.second,
                 )
-            ) return
+            ) {
+                budget?.release(lane)
+                reserved = false
+                return@runCatching false
+            }
+            if (budget != null && !budget.commit(lane)) {
+                cancelMorning(context)
+                budget.release(lane)
+                reserved = false
+                return@runCatching false
+            }
+            reserved = false
             // Mark fired only after a successful post, so a notifications-disabled night still notifies
             // once they're re-enabled while the same night's row is showing.
             NoopPrefs.setReportMorningDay(context, reportDay)
+            true
         }.onFailure {
+            if (reserved) budget?.release(lane)
             NotificationLifecycleLedger.unknown(
                 context,
                 NotificationLifecycleId.MORNING_REPORT,
                 NotificationLifecycleCategory.STATUS,
             )
-        }
+        }.getOrElse { false }
     }
 
     /**
@@ -158,31 +274,38 @@ object ScheduledReportNotifier {
         newestWorkoutTs: Long?,
         title: String,
         body: String,
-    ) {
+        budget: PostSyncRoutineNotificationBudget? = null,
+    ): Boolean {
         if (NoopPrefs.postWorkoutReportEnabled(context) &&
             !NoopPrefs.reportWorkoutFrontierInitialized(context)
         ) {
             // Upgrade/process-order safety: an enabled preference without the companion frontier came
             // from an older build. Snapshot existing history silently instead of announcing an old row.
             seedWorkoutFrontier(context, newestWorkoutTs)
-            return
+            return false
         }
         if (!ScheduledReportPolicy.shouldNotifyWorkout(
                 enabled = NoopPrefs.postWorkoutReportEnabled(context),
                 newestWorkoutTs = newestWorkoutTs,
                 lastWorkoutTs = NoopPrefs.reportLastWorkoutTs(context),
             )
-        ) return
-        runCatching {
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+        ) return false
+        val lane = PostSyncRoutineNotificationBudget.Lane.POST_WORKOUT_SUMMARY
+        var reserved = false
+        return runCatching {
+            ensureChannel(context)
+            if (!canNotify(context)) {
                 NotificationLifecycleLedger.suppressed(
                     context,
                     NotificationLifecycleId.WORKOUT_REPORT,
                     NotificationLifecycleCategory.STATUS,
                 )
-                return
+                return@runCatching false
             }
-            ensureChannel(context)
+            if (budget?.reserve(lane) == false) {
+                return@runCatching false
+            }
+            reserved = budget != null
             // Enforce redaction at the final posting boundary too. One caller can produce a lean
             // no-Effort summary without going through workoutCopy(); it must not leak duration, HR,
             // sport, or another health detail onto the lock screen.
@@ -192,18 +315,32 @@ object ScheduledReportNotifier {
                     NotificationPlatformIdentity.NotificationId.WORKOUT_REPORT,
                     NotificationPlatformIdentity.ActivityIntent.WORKOUT_REPORT,
                     NotificationLifecycleId.WORKOUT_REPORT,
+                    NoopNotificationRoute.WORKOUTS,
                     privateCopy.first,
                     privateCopy.second,
                 )
-            ) return
+            ) {
+                budget?.release(lane)
+                reserved = false
+                return@runCatching false
+            }
+            if (budget != null && !budget.commit(lane)) {
+                cancelWorkout(context)
+                budget.release(lane)
+                reserved = false
+                return@runCatching false
+            }
+            reserved = false
             newestWorkoutTs?.let { NoopPrefs.setReportLastWorkoutTs(context, it) }
+            true
         }.onFailure {
+            if (reserved) budget?.release(lane)
             NotificationLifecycleLedger.unknown(
                 context,
                 NotificationLifecycleId.WORKOUT_REPORT,
                 NotificationLifecycleCategory.STATUS,
             )
-        }
+        }.getOrElse { false }
     }
 
     /**
@@ -248,13 +385,14 @@ object ScheduledReportNotifier {
         id: Int,
         activityIdentity: NotificationPlatformIdentity.ActivityIntentIdentity,
         lifecycleId: String,
+        route: NoopNotificationRoute,
         title: String,
         body: String,
     ): Boolean {
         val openApp = NotificationPlatformIdentity.activityPendingIntent(
             context,
             activityIdentity,
-            appLaunchIntent(context),
+            NotificationRouteBridge.launchIntent(context, route),
         )
         val n = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
@@ -264,7 +402,7 @@ object ScheduledReportNotifier {
             .setContentIntent(openApp)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .protectPrivateContent(context, CHANNEL_ID)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
         return NotificationLifecycleLedger.posted(
@@ -290,6 +428,22 @@ object ScheduledReportNotifier {
                 },
             )
         }
+    }
+
+    private fun morningCopy(
+        context: Context,
+        kind: ScheduledReportPolicy.MorningCopyKind,
+    ): Pair<String, String> {
+        val body = when (kind) {
+            ScheduledReportPolicy.MorningCopyKind.BOTH ->
+                R.string.appwide_morning_recap_body_both
+            ScheduledReportPolicy.MorningCopyKind.RECOVERY ->
+                R.string.appwide_morning_recap_body_recovery
+            ScheduledReportPolicy.MorningCopyKind.SLEEP ->
+                R.string.appwide_morning_recap_body_sleep
+        }
+        return context.getString(R.string.appwide_morning_recap_title) to
+            context.getString(body)
     }
 }
 

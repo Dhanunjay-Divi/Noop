@@ -9,7 +9,8 @@ identity, privacy, isolation, restore, and physical-device gates are complete.
 
 - required project APIs;
 - a regional Artifact Registry Docker repository;
-- a regional Cloud KMS key and encrypted raw-chunk bucket;
+- regional Cloud KMS keys and separate encrypted raw-chunk and app-feedback
+  buckets;
 - a seven-day build-source/log bucket scoped to the build identity;
 - a Pub/Sub raw-object topic and pull subscription;
 - separate build, API, processor, and migration service accounts;
@@ -29,8 +30,10 @@ flags can add:
   `enable_public_managed_api` gate.
 
 The stack never writes secret versions, DNS, generated mobile configuration, or
-real health data. Public Cloud Run invocation does not bypass Firebase identity,
-App Check, per-installation credentials, or tenant authorization.
+real health data. The feedback bucket accepts only an explicitly reviewed,
+redacted app-report ZIP after App Check; it is not a health-sync destination.
+Public Cloud Run invocation does not bypass Firebase identity, App Check,
+per-installation credentials, or tenant authorization.
 
 ## Prerequisites
 
@@ -159,6 +162,12 @@ change. Each successful step is evidence required by the next:
     Pub/Sub push. Long-running services cannot run migrations, and no provider
     delivery is exercised until a signed client registers an approved target.
 
+    Feedback cleanup has a separate `enable_feedback_lifecycle` switch. Enable
+    it before accepting reports, and leave it enabled while
+    `enable_feedback_ingestion = false` whenever new submissions are paused or
+    retired so cancellation and retention rows continue draining. Feedback
+    retention is always bounded to 1 through 28 days.
+
     Keep `managed_push_token_write_version = "v1"` for the first deployment
     containing the dual-version token reader. Confirm every prior API revision
     has drained and the lifecycle job uses the same new image before changing
@@ -169,7 +178,9 @@ change. Each successful step is evidence required by the next:
     the second deployment.
 14. Invoke the IAM-only services with synthetic credentials and run upload,
     duplicate, reconnect, restore, tenant-isolation, retention, export, and
-    erasure tests.
+    erasure tests. Exercise feedback reservation, signed upload, archive
+    rejection, completion receipt, status recovery, cancellation, and
+    retention using a synthetic ZIP with no health values.
 15. Verify the live controls and a zero-drift plan:
 
    ```sh
@@ -179,6 +190,9 @@ change. Each successful step is evidence required by the next:
 
 16. `enable_public_managed_api` remains false until signed physical clients,
     privacy/legal, abuse, security, recovery, load, and support gates pass.
+    Feedback additionally requires signed App Attest/Play Integrity clients,
+    operator access auditing, archive-malware review, support procedures, and
+    physical background-transfer validation before public release.
 
 The ownership authority is staged separately. Set
 `enable_ownership_identity = true` only after the email/password and recovery

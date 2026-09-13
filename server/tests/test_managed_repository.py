@@ -26,6 +26,7 @@ from app.managed_repository import (
     ManagedConflictError,
     ManagedForbiddenError,
     ManagedNotFoundError,
+    ManagedPrincipal,
     ManagedQuotaExceededError,
     PostgresManagedRepository,
 )
@@ -140,6 +141,51 @@ def _managed(
         entitlement_mode=entitlement_mode,
         replay_secret="test-managed-replay-secret-at-least-32-bytes",
     )
+
+
+@pytest.mark.asyncio
+async def test_repository_revalidates_managed_document_after_model_copy() -> None:
+    class PoolMustNotBeReached:
+        def _require_pool(self):
+            raise AssertionError("invalid mutation reached PostgreSQL")
+
+    repository = _managed(PoolMustNotBeReached())
+    now = datetime.now(UTC)
+    principal = ManagedPrincipal(
+        account_id=uuid4(),
+        identity_id=uuid4(),
+        subject_hash="a" * 64,
+        account_status="active",
+        auth_valid_after=now,
+    )
+    valid = ManagedDocumentMutation(
+        request_id=uuid4(),
+        document_kind="journal",
+        document_id=uuid4(),
+        base_revision=0,
+        content_mode="client_encrypted",
+        client_key_id=uuid4(),
+        payload_ciphertext_base64=base64.b64encode(b"x" * 17).decode("ascii"),
+        updated_at=now,
+    )
+    bypassed = valid.model_copy(
+        update={
+            "content_mode": "server_readable",
+            "client_key_id": None,
+            "payload_ciphertext_base64": None,
+            "payload_json": {"notes": "must never reach plaintext storage"},
+        }
+    )
+
+    with pytest.raises(
+        ManagedConflictError,
+        match="mutation contract is invalid",
+    ):
+        await repository.put_document(
+            principal=principal,
+            installation_id="ios-test-1",
+            mutation=bypassed,
+        )
 
 
 def _essential_streams(
@@ -598,13 +644,19 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
         document_id = uuid4()
         document_request = ManagedDocumentMutation(
             request_id=uuid4(),
-            document_kind="journal",
+            document_kind="day_ownership",
             document_id=document_id,
             base_revision=0,
             content_mode="server_readable",
             payload_json={
-                "prompt": "How did today feel?",
-                "answer": "Steady",
+                "schema_version": 1,
+                "table": "dayOwnership",
+                "key": {"day": "2026-09-11"},
+                "record": {
+                    "day": "2026-09-11",
+                    "deviceId": "test-device",
+                    "locked": 0,
+                },
             },
             updated_at=now,
         )
@@ -624,13 +676,13 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
         assert (
             await repository.get_document(
                 principal=first_principal,
-                document_kind="journal",
+                document_kind="day_ownership",
                 document_id=document_id,
             )
-        )["payload_json"]["answer"] == "Steady"
+        )["payload_json"]["record"]["deviceId"] == "test-device"
         listed_documents = await repository.list_documents(
             principal=first_principal,
-            document_kind="journal",
+            document_kind="day_ownership",
             include_deleted=False,
             after_updated_at=None,
             after_document_kind=None,
@@ -646,7 +698,41 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
                 mutation=document_request.model_copy(
                     update={
                         "request_id": uuid4(),
-                        "payload_json": {"answer": "Changed without revision"},
+                        "payload_json": {
+                            "schema_version": 1,
+                            "table": "dayOwnership",
+                            "key": {"day": "2026-09-11"},
+                            "record": {
+                                "day": "2026-09-11",
+                                "deviceId": "changed-without-revision",
+                                "locked": 0,
+                            },
+                        },
+                    }
+                ),
+            )
+        with pytest.raises(
+            ManagedConflictError,
+            match="mutation contract is invalid",
+        ):
+            await repository.put_document(
+                principal=first_principal,
+                installation_id=first_installation,
+                mutation=document_request.model_copy(
+                    update={
+                        "request_id": uuid4(),
+                        "base_revision": 1,
+                        "payload_json": {
+                            "schema_version": 1,
+                            "table": "dayOwnership",
+                            "key": {"day": "2026-09-11"},
+                            "record": {
+                                "day": "2026-09-11",
+                                "deviceId": "test-device",
+                                "locked": 0,
+                                "notes": "must remain encrypted",
+                            },
+                        },
                     }
                 ),
             )
@@ -659,7 +745,7 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
                 request_id=uuid4(),
                 snapshot_at=restore_now,
                 data_classes=[],
-                document_kinds=["journal"],
+                document_kinds=["day_ownership"],
             ),
         )
         assert restore["status"] == "running"
@@ -712,6 +798,49 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
                 hardware_backed=True,
             ),
         )
+        # Reuse the day-ownership UUID deliberately. Document identity includes kind, so
+        # the change-feed join must not cross-match same-revision rows from another kind.
+        encrypted_document_id = document_id
+        encrypted_payload = base64.b64encode(b"encrypted-journal").decode("ascii")
+        encrypted_document = await repository.put_document(
+            principal=first_principal,
+            installation_id=first_installation,
+            mutation=ManagedDocumentMutation(
+                request_id=uuid4(),
+                document_kind="journal",
+                document_id=encrypted_document_id,
+                base_revision=0,
+                content_mode="client_encrypted",
+                client_key_id=key_id,
+                payload_ciphertext_base64=encrypted_payload,
+                updated_at=now,
+            ),
+        )
+        assert encrypted_document["revision"] == 1
+        assert encrypted_document["payload_json"] is None
+        assert encrypted_document["payload_ciphertext_base64"] == encrypted_payload
+        encrypted_tombstone = await repository.put_document(
+            principal=first_principal,
+            installation_id=first_installation,
+            mutation=ManagedDocumentMutation(
+                request_id=uuid4(),
+                document_kind="journal",
+                document_id=encrypted_document_id,
+                base_revision=1,
+                content_mode="client_encrypted",
+                updated_at=now,
+                deleted=True,
+            ),
+        )
+        assert encrypted_tombstone["revision"] == 2
+        assert encrypted_tombstone["deleted_at"] is not None
+        encrypted_revision = await repository.get_document(
+            principal=first_principal,
+            document_kind="journal",
+            document_id=encrypted_document_id,
+            revision=1,
+        )
+        assert encrypted_revision["payload_ciphertext_base64"] == encrypted_payload
         export = await repository.create_export(
             principal=first_principal,
             installation_id=first_installation,
@@ -748,7 +877,25 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
             limit=10,
         )
         assert document_changes["changes"][0]["resource_kind"] == "document"
-        assert document_changes["changes"][0]["document"]["document_kind"] == "journal"
+        assert (
+            document_changes["changes"][0]["document"]["document_kind"]
+            == "day_ownership"
+        )
+        assert {
+            change["document"]["document_kind"]
+            for change in document_changes["changes"]
+            if change["resource_kind"] == "document"
+        } == {"day_ownership", "journal"}
+        filtered_changes = await repository.list_changes(
+            principal=first_principal,
+            after_sequence=3,
+            limit=10,
+            document_kinds=["day_ownership"],
+        )
+        assert filtered_changes["changes"] == []
+        assert filtered_changes["high_watermark"] == document_changes["high_watermark"]
+        assert filtered_changes["next_sequence"] == filtered_changes["high_watermark"]
+        assert filtered_changes["has_more"] is False
 
         listed = await repository.list_available_chunks(
             principal=first_principal,
@@ -766,6 +913,96 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
             enrollment=_enrollment(second_installation, uuid4()),
         )
         second_principal = await repository.principal_for_identity(second_claims)
+        for document_kind, private_document_id in (
+            ("day_ownership", document_id),
+            ("journal", encrypted_document_id),
+        ):
+            with pytest.raises(ManagedNotFoundError):
+                await repository.get_document(
+                    principal=second_principal,
+                    document_kind=document_kind,
+                    document_id=private_document_id,
+                )
+        assert (
+            await repository.list_documents(
+                principal=second_principal,
+                document_kind=None,
+                include_deleted=True,
+                after_updated_at=None,
+                after_document_kind=None,
+                after_document_id=None,
+                snapshot_at=None,
+                limit=10,
+            )
+            == []
+        )
+        empty_second_changes = await repository.list_changes(
+            principal=second_principal,
+            after_sequence=0,
+            limit=10,
+        )
+        assert empty_second_changes["high_watermark"] == 0
+        assert empty_second_changes["changes"] == []
+
+        second_document = await repository.put_document(
+            principal=second_principal,
+            installation_id=second_installation,
+            mutation=ManagedDocumentMutation(
+                request_id=uuid4(),
+                document_kind="day_ownership",
+                document_id=document_id,
+                base_revision=0,
+                content_mode="server_readable",
+                payload_json={
+                    "schema_version": 1,
+                    "table": "dayOwnership",
+                    "key": {"day": "2026-09-11"},
+                    "record": {
+                        "day": "2026-09-11",
+                        "deviceId": "second-tenant-device",
+                        "locked": 0,
+                    },
+                },
+                updated_at=now,
+            ),
+        )
+        assert second_document["revision"] == 1
+        assert (
+            await repository.get_document(
+                principal=second_principal,
+                document_kind="day_ownership",
+                document_id=document_id,
+            )
+        )["payload_json"]["record"]["deviceId"] == "second-tenant-device"
+        assert (
+            await repository.get_document(
+                principal=first_principal,
+                document_kind="day_ownership",
+                document_id=document_id,
+            )
+        )["payload_json"]["record"]["deviceId"] == "test-device"
+        second_documents = await repository.list_documents(
+            principal=second_principal,
+            document_kind="day_ownership",
+            include_deleted=False,
+            after_updated_at=None,
+            after_document_kind=None,
+            after_document_id=None,
+            snapshot_at=None,
+            limit=10,
+        )
+        assert [row["document_id"] for row in second_documents] == [str(document_id)]
+        second_changes = await repository.list_changes(
+            principal=second_principal,
+            after_sequence=0,
+            limit=10,
+        )
+        assert second_changes["high_watermark"] == 1
+        assert [
+            (row["resource_id"], row["document"]["document_kind"])
+            for row in second_changes["changes"]
+        ] == [(str(document_id), "day_ownership")]
+
         with pytest.raises(ManagedNotFoundError):
             await repository.available_chunk(
                 principal=second_principal,

@@ -35,6 +35,24 @@ resource "google_service_account" "managed_lifecycle" {
   description  = "Expires managed reservations and deletes retained objects"
 }
 
+resource "google_service_account" "feedback_lifecycle" {
+  count = var.enable_feedback_lifecycle ? 1 : 0
+
+  project      = var.project_id
+  account_id   = "${local.prefix}-feedback-life"
+  display_name = "NOOP feedback staging lifecycle"
+  description  = "Deletes only bounded feedback objects and retention metadata"
+}
+
+resource "google_service_account" "feedback_scheduler" {
+  count = var.enable_feedback_lifecycle ? 1 : 0
+
+  project      = var.project_id
+  account_id   = "${local.prefix}-feedback-sched"
+  display_name = "NOOP feedback staging scheduler"
+  description  = "Invokes only the feedback lifecycle job"
+}
+
 resource "google_service_account" "managed_scheduler" {
   project      = var.project_id
   account_id   = "${local.prefix}-scheduler"
@@ -133,6 +151,24 @@ resource "google_storage_bucket_iam_member" "managed_api_raw_reader" {
   member = "serviceAccount:${google_service_account.managed_api.email}"
 }
 
+resource "google_storage_bucket_iam_member" "managed_api_feedback_creator" {
+  bucket = google_storage_bucket.feedback.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
+resource "google_storage_bucket_iam_member" "managed_api_feedback_reader" {
+  bucket = google_storage_bucket.feedback.name
+  role   = google_project_iam_custom_role.managed_object_reader.id
+  member = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
+resource "google_storage_bucket_iam_member" "managed_api_feedback_deleter" {
+  bucket = google_storage_bucket.feedback.name
+  role   = google_project_iam_custom_role.managed_object_deleter.id
+  member = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
 resource "google_project_iam_member" "api_cloud_sql_client" {
   project = var.project_id
   role    = "roles/cloudsql.client"
@@ -206,6 +242,14 @@ resource "google_storage_bucket_iam_member" "managed_lifecycle_raw_deleter" {
   bucket = google_storage_bucket.raw_chunks.name
   role   = google_project_iam_custom_role.managed_object_deleter.id
   member = "serviceAccount:${google_service_account.managed_lifecycle.email}"
+}
+
+resource "google_storage_bucket_iam_member" "feedback_lifecycle_deleter" {
+  count = var.enable_feedback_lifecycle ? 1 : 0
+
+  bucket = google_storage_bucket.feedback.name
+  role   = google_project_iam_custom_role.managed_object_deleter.id
+  member = "serviceAccount:${google_service_account.feedback_lifecycle[0].email}"
 }
 
 resource "google_project_iam_custom_role" "managed_identity_deleter" {
@@ -299,6 +343,38 @@ resource "google_secret_manager_secret" "managed_replay_secret" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_secret_manager_secret" "feedback_capability_secret" {
+  project   = var.project_id
+  secret_id = "${local.prefix}-feedback-capability-secret"
+  labels    = local.labels
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret" "feedback_capability_previous_secret" {
+  project   = var.project_id
+  secret_id = "${local.prefix}-feedback-capability-previous-secret"
+  labels    = local.labels
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_secret_manager_secret" "managed_push_token_secret" {
   project   = var.project_id
   secret_id = "${local.prefix}-managed-push-token-secret"
@@ -379,6 +455,20 @@ resource "google_secret_manager_secret_iam_member" "managed_api_replay_secret" {
   member    = "serviceAccount:${google_service_account.managed_api.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "managed_api_feedback_capability_secret" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.feedback_capability_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "managed_api_feedback_capability_previous_secret" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.feedback_capability_previous_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
 resource "google_secret_manager_secret_iam_member" "managed_api_push_token_secret" {
   count = var.enable_managed_runtime ? 1 : 0
 
@@ -428,6 +518,14 @@ resource "google_project_iam_member" "managed_lifecycle_cloud_sql_client" {
   member  = "serviceAccount:${google_service_account.managed_lifecycle.email}"
 }
 
+resource "google_project_iam_member" "feedback_lifecycle_cloud_sql_client" {
+  count = var.enable_feedback_lifecycle ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.feedback_lifecycle[0].email}"
+}
+
 resource "google_project_iam_member" "processor_cloud_sql_client" {
   project = var.project_id
   role    = "roles/cloudsql.client"
@@ -439,6 +537,15 @@ resource "google_secret_manager_secret_iam_member" "managed_lifecycle_database_u
   secret_id = google_secret_manager_secret.database_url.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.managed_lifecycle.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "feedback_lifecycle_database_url" {
+  count = var.enable_feedback_lifecycle ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.database_url.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.feedback_lifecycle[0].email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "managed_lifecycle_replay_secret" {

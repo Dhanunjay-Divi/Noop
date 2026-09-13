@@ -140,6 +140,7 @@ jobs:
           python3 -m pip install --quiet pyyaml
           python3 Tools/appchangelog-gen.py "$NOTES_MD"
           git diff --exit-code
+          python3 Tools/FeedbackLocalization/generate.py --check
           python3 Tools/i18n_audit.py --ci HEAD
 
           echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"

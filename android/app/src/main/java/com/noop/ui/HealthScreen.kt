@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -69,6 +70,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -83,6 +85,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.noop.analytics.Baselines
 import com.noop.analytics.AgeMetricProfile
+import com.noop.analytics.BodyProfilePolicy
+import com.noop.analytics.BodyWeightTargetAvailability
 import com.noop.analytics.IllnessSignalEngine
 import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.V5HealthSignals
@@ -388,21 +392,36 @@ private fun BodyCompositionSection(
         loaded = true
     }
 
-    val currentWeight = snapshot.weight ?: BodyCompositionReading(
-        value = profile.weightKg,
-        day = null,
-        source = "profile",
-    )
-    val currentBmi = snapshot.bmi ?: run {
-        val metres = profile.heightCm / 100.0
-        val value = if (metres > 0.0) currentWeight.value / (metres * metres) else Double.NaN
-        value.takeIf { it.isFinite() && it in 5.0..100.0 }?.let {
-            BodyCompositionReading(it, currentWeight.day, "profile")
+    val currentWeight = snapshot.weight ?: profile.weightKg
+        .takeIf { profile.weightInputConfirmed }
+        ?.let { BodyCompositionReading(value = it, day = null, source = "profile") }
+    val currentBmi = if (
+        profile.ageInputConfirmed &&
+        profile.age >= BodyProfilePolicy.ADULT_MINIMUM_AGE &&
+        profile.heightInputConfirmed &&
+        currentWeight != null
+    ) {
+        snapshot.bmi ?: run {
+            val weight = currentWeight
+            val metres = profile.heightCm / 100.0
+            val value = if (metres > 0.0) weight.value / (metres * metres) else Double.NaN
+            value.takeIf { it.isFinite() && it in 5.0..100.0 }?.let {
+                BodyCompositionReading(it, weight.day, "calculated")
+            }
         }
+    } else {
+        null
     }
+    val targetAvailability = currentWeight?.let {
+        profile.targetWeightAvailability(
+            currentWeightKg = it.value,
+            targetWeightKg = profile.targetWeightKg,
+            currentWeightConfirmed = true,
+        )
+    } ?: BodyWeightTargetAvailability.MEASUREMENTS_UNCONFIRMED
     val latestDay = listOfNotNull(
         snapshot.weight?.day,
-        snapshot.bmi?.day,
+        currentBmi?.day,
         snapshot.bodyFat?.day,
         snapshot.leanMass?.day,
     ).maxOrNull();
@@ -426,58 +445,48 @@ private fun BodyCompositionSection(
                     ) {
                         Overline(uiString(R.string.appwide_health_body_composition_weight))
                         Text(
-                            UnitFormatter.massFromKilograms(currentWeight.value, massUnit),
+                            currentWeight?.let {
+                                UnitFormatter.massFromKilograms(it.value, massUnit)
+                            } ?: NoopDisplayFormat.MISSING,
                             style = NoopType.number(30f),
                             color = Palette.textPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            bodyCompositionCaption(currentWeight),
+                            currentWeight?.let(::bodyCompositionCaption)
+                                ?: uiString(R.string.appwide_health_body_composition_no_measurement),
                             style = NoopType.footnote,
                             color = Palette.textTertiary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
 
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.hairline))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
-                ) {
-                    BodyCompositionMetric(
-                        label = uiString(R.string.appwide_health_body_composition_bmi),
-                        value = currentBmi?.let { String.format(Locale.US, "%.1f", it.value) } ?: "-",
-                        detail = currentBmi?.let(::bodyCompositionCaption)
-                            ?: uiString(R.string.appwide_health_body_composition_no_value),
-                        modifier = Modifier.weight(1f),
-                    )
-                    BodyCompositionMetric(
-                        label = uiString(R.string.appwide_health_body_composition_body_fat),
-                        value = snapshot.bodyFat?.let { formatBodyFatPct(it.value) } ?: "-",
-                        detail = snapshot.bodyFat?.let(::bodyCompositionCaption)
-                            ?: uiString(R.string.appwide_health_body_composition_no_measurement),
-                        modifier = Modifier.weight(1f),
-                    )
-                    BodyCompositionMetric(
-                        label = uiString(R.string.appwide_health_body_composition_lean_mass),
-                        value = snapshot.leanMass?.let {
-                            UnitFormatter.massFromKilograms(it.value, massUnit)
-                        } ?: "-",
-                        detail = snapshot.leanMass?.let(::bodyCompositionCaption)
-                            ?: uiString(R.string.appwide_health_body_composition_no_measurement),
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+                BodyCompositionMetrics(
+                    bmi = currentBmi,
+                    bmiUnavailable = uiString(
+                        if (
+                            profile.ageInputConfirmed &&
+                            profile.age < BodyProfilePolicy.ADULT_MINIMUM_AGE
+                        ) {
+                            R.string.appwide_health_body_composition_bmi_under_20
+                        } else {
+                            R.string.appwide_health_body_composition_bmi_confirm_inputs
+                        },
+                    ),
+                    bodyFat = snapshot.bodyFat,
+                    leanMass = snapshot.leanMass,
+                    massUnit = massUnit,
+                )
 
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.hairline))
                 BodyTargetRow(
-                    currentWeightKg = currentWeight.value,
+                    currentWeightKg = currentWeight?.value,
                     targetWeightKg = profile.targetWeightKg,
                     massUnit = massUnit,
+                    availability = targetAvailability,
                 )
             }
         }
@@ -528,7 +537,7 @@ private fun BodyCompositionVisual(bodyFatPct: Double?) {
                 modifier = Modifier.size(31.dp),
             )
             Text(
-                bodyFatPct?.let(::formatBodyFatPct) ?: "-",
+                bodyFatPct?.let(::formatBodyFatPct) ?: NoopDisplayFormat.MISSING,
                 style = NoopType.captionNumber,
                 color = Palette.textPrimary,
             )
@@ -543,7 +552,54 @@ private fun BodyCompositionVisual(bodyFatPct: Double?) {
 }
 
 private fun formatBodyFatPct(value: Double): String =
-    String.format(Locale.US, "%.1f%%", value)
+    String.format(Locale.US, "%.0f%%", value)
+
+@Composable
+private fun BodyCompositionMetrics(
+    bmi: BodyCompositionReading?,
+    bmiUnavailable: String,
+    bodyFat: BodyCompositionReading?,
+    leanMass: BodyCompositionReading?,
+    massUnit: MassUnit,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val stacked = maxWidth < 340.dp || LocalDensity.current.fontScale >= 1.25f
+        val content: @Composable (Modifier) -> Unit = { metricModifier ->
+            BodyCompositionMetric(
+                label = uiString(R.string.appwide_health_body_composition_bmi),
+                value = bmi?.let { String.format(Locale.US, "%.1f", it.value) }
+                    ?: NoopDisplayFormat.MISSING,
+                detail = bmi?.let(::bodyCompositionCaption) ?: bmiUnavailable,
+                modifier = metricModifier,
+            )
+            BodyCompositionMetric(
+                label = uiString(R.string.appwide_health_body_composition_body_fat),
+                value = bodyFat?.let { formatBodyFatPct(it.value) } ?: NoopDisplayFormat.MISSING,
+                detail = bodyFat?.let(::bodyCompositionCaption)
+                    ?: uiString(R.string.appwide_health_body_composition_no_measurement),
+                modifier = metricModifier,
+            )
+            BodyCompositionMetric(
+                label = uiString(R.string.appwide_health_body_composition_lean_mass),
+                value = leanMass?.let {
+                    UnitFormatter.massFromKilograms(it.value, massUnit)
+                } ?: NoopDisplayFormat.MISSING,
+                detail = leanMass?.let(::bodyCompositionCaption)
+                    ?: uiString(R.string.appwide_health_body_composition_no_measurement),
+                modifier = metricModifier,
+            )
+        }
+        if (stacked) {
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+                content(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+                content(Modifier.weight(1f))
+            }
+        }
+    }
+}
 
 @Composable
 private fun BodyCompositionMetric(
@@ -560,8 +616,6 @@ private fun BodyCompositionMetric(
             label,
             style = NoopType.overline,
             color = Palette.textTertiary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
         Text(
             value,
@@ -574,17 +628,16 @@ private fun BodyCompositionMetric(
             detail,
             style = NoopType.caption,
             color = Palette.textTertiary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
 @Composable
 private fun BodyTargetRow(
-    currentWeightKg: Double,
+    currentWeightKg: Double?,
     targetWeightKg: Double?,
     massUnit: MassUnit,
+    availability: BodyWeightTargetAvailability,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -609,26 +662,36 @@ private fun BodyTargetRow(
             verticalArrangement = Arrangement.spacedBy(Metrics.space2),
         ) {
             Overline(uiString(R.string.appwide_health_body_composition_target_weight))
-            if (targetWeightKg != null) {
-                val delta = currentWeightKg - targetWeightKg
-                val distance = UnitFormatter.massFromKilograms(kotlin.math.abs(delta), massUnit)
+            if (
+                targetWeightKg != null &&
+                currentWeightKg != null &&
+                availability == BodyWeightTargetAvailability.AVAILABLE
+            ) {
                 Text(
-                    when {
-                        kotlin.math.abs(delta) < 0.05 ->
-                            uiString(R.string.appwide_health_body_composition_target_reached)
-                        delta > 0 ->
-                            uiString(R.string.appwide_health_body_composition_target_above, distance)
-                        else ->
-                            uiString(R.string.appwide_health_body_composition_target_below, distance)
-                    },
+                    uiString(
+                        R.string.appwide_health_body_composition_target_summary,
+                        UnitFormatter.massFromKilograms(currentWeightKg, massUnit),
+                        UnitFormatter.massFromKilograms(targetWeightKg, massUnit),
+                    ),
                     style = NoopType.subhead,
                     color = Palette.textPrimary,
                 )
                 Text(
-                    uiString(
-                        R.string.appwide_health_body_composition_target_detail,
-                        UnitFormatter.massFromKilograms(targetWeightKg, massUnit),
-                    ),
+                    uiString(R.string.appwide_health_body_composition_target_safety_note),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            } else if (
+                targetWeightKg != null ||
+                availability != BodyWeightTargetAvailability.AVAILABLE
+            ) {
+                Text(
+                    uiString(R.string.appwide_health_body_composition_target_unavailable),
+                    style = NoopType.subhead,
+                    color = Palette.textSecondary,
+                )
+                Text(
+                    uiString(R.string.appwide_health_body_composition_target_safety_note),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
@@ -661,6 +724,7 @@ private fun bodyCompositionCaption(reading: BodyCompositionReading): String {
         "apple-health" -> "Apple Health"
         "health-connect" -> "Health Connect"
         "profile" -> "Profile"
+        "calculated" -> uiString(R.string.appwide_health_body_composition_calculated)
         else -> reading.source
     }
     return listOfNotNull(reading.day?.let { asOfLabel(it)?.removePrefix("as of ") }, source)
@@ -1221,28 +1285,29 @@ private fun HealthContributorsSection(day: DailyMetric?) {
                 // a staggered fade+rise, mirroring iOS `.staggeredAppear(index:)`.
                 ContributorBar(
                     label = "HRV",
-                    readout = hrv?.let { "${it.roundToInt()} ms" } ?: "-",
+                    readout = hrv?.let { "${it.roundToInt()} ms" } ?: NoopDisplayFormat.MISSING,
                     fraction = hrv?.let { (it - 20.0) / 100.0 },
                     color = Palette.metricCyan,
                     modifier = Modifier.staggeredAppear(0),
                 )
                 ContributorBar(
                     label = uiString(R.string.l10n_health_screen_resting_hr_26677094),
-                    readout = rhr?.let { "${it.roundToInt()} bpm" } ?: "-",
+                    readout = rhr?.let { "${it.roundToInt()} bpm" } ?: NoopDisplayFormat.MISSING,
                     fraction = rhr?.let { 1.0 - ((it - 40.0) / 40.0) },
                     color = Palette.chargeColor,
                     modifier = Modifier.staggeredAppear(1),
                 )
                 ContributorBar(
                     label = uiString(R.string.l10n_health_screen_sleep_3cac34e6),
-                    readout = sleepMin?.let { sleepHoursText(it) } ?: "-",
+                    readout = sleepMin?.let { sleepHoursText(it) } ?: NoopDisplayFormat.MISSING,
                     fraction = sleepMin?.let { (it / 60.0) / 8.0 },
                     color = Palette.sleepLight,
                     modifier = Modifier.staggeredAppear(2),
                 )
                 ContributorBar(
                     label = uiString(R.string.l10n_health_screen_respiratory_1cd8c175),
-                    readout = resp?.let { String.format(Locale.US, "%.1f rpm", it) } ?: "-",
+                    readout = resp?.let { String.format(Locale.US, "%.1f rpm", it) }
+                        ?: NoopDisplayFormat.MISSING,
                     fraction = resp?.let { 1.0 - ((it - 12.0) / 8.0) },
                     color = Palette.sleepLight,
                     modifier = Modifier.staggeredAppear(3),
@@ -2233,8 +2298,10 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                             stringResource(
                                 if (liveTrackingOptedIn) {
                                     R.string.health_live_hr_on_detail
-                                } else {
+                                } else if (live.connected) {
                                     R.string.health_live_hr_off_detail
+                                } else {
+                                    R.string.appwide_health_live_hr_disconnected
                                 },
                             ),
                             style = NoopType.subhead,
@@ -2603,7 +2670,7 @@ private fun VitalsSection(
                             ) { onVitalClick(v.key) }
                             .semantics { contentDescription = v.accessibilityText },
                         vital = v,
-                        value = v.formattedValue ?: "-",
+                        value = v.formattedValue ?: NoopDisplayFormat.MISSING,
                         caption = when (captionMode) {
                             VitalCaptionMode.AS_OF -> v.asOfLabel ?: v.stateCaption
                             VitalCaptionMode.RANGE -> v.rangeCaption ?: v.stateCaption
@@ -2733,7 +2800,7 @@ private fun HealthMonitorSignal(vital: Vital, modifier: Modifier = Modifier) {
 private fun VitalTile(
     vital: Vital,
     modifier: Modifier = Modifier,
-    value: String = vital.formattedValue ?: "-",
+    value: String = vital.formattedValue ?: NoopDisplayFormat.MISSING,
     caption: String = vital.stateCaption,
     accent: Color = vital.accent,
 ) {
@@ -3108,7 +3175,9 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                         Column(modifier = Modifier.weight(1f)) {
                             Overline(label, color = Palette.textTertiary)
                             Text(
-                                text = metric?.let { "${detail.format(it)} ${detail.unit}".trim() } ?: "-",
+                                text = metric?.let {
+                                    "${detail.format(it)} ${detail.unit}".trim()
+                                } ?: NoopDisplayFormat.MISSING,
                                 style = NoopType.bodyNumber,
                                 color = Palette.textPrimary,
                             )

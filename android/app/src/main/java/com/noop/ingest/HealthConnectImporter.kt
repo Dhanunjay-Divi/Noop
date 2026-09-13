@@ -39,6 +39,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
+import kotlinx.coroutines.CancellationException
 import kotlin.math.round
 import kotlin.reflect.KClass
 
@@ -66,6 +67,11 @@ import kotlin.reflect.KClass
 object HealthConnectImporter {
 
     const val SOURCE = "Health Connect"
+
+    /** Ordinary provider/database failures are recoverable; structured coroutine cancellation is not. */
+    internal fun rethrowCancellation(error: Throwable) {
+        if (error is CancellationException) throw error
+    }
 
     private const val WHOOP = "my-whoop"
     // Health Connect data is stored under its OWN source ("health-connect"), NOT the shared
@@ -238,13 +244,23 @@ object HealthConnectImporter {
 
         // Refile any legacy Health Connect data that landed in the shared "apple-health" bucket before
         // #34 BEFORE importing, so a re-import refiles cleanly instead of duplicating across both sources.
-        try { repo.refileLegacyHealthConnect() } catch (_: Exception) { /* best-effort */ }
+        try {
+            repo.refileLegacyHealthConnect()
+        } catch (error: Exception) {
+            rethrowCancellation(error)
+            // Best-effort compatibility cleanup.
+        }
         // #112 follow-up heal: purge the shadow rows earlier imports wrote while the covered-days
         // gate missed active-strap ids - sparse HC-shaped "my-whoop" sleep/daily rows sitting over
         // nights the strap's computed ("-noop") source already covers. Runs BEFORE this import's
         // own gate is read so the healed coverage is what gets consulted. Idempotent, best-effort
         // like the refile above.
-        try { repo.purgeHcShadowedStrapDays() } catch (_: Exception) { /* best-effort */ }
+        try {
+            repo.purgeHcShadowedStrapDays()
+        } catch (error: Exception) {
+            rethrowCancellation(error)
+            // Best-effort compatibility cleanup.
+        }
 
         val client = client(context)
 
@@ -252,6 +268,7 @@ object HealthConnectImporter {
         val granted = try {
             client.permissionController.getGrantedPermissions()
         } catch (e: Exception) {
+            rethrowCancellation(e)
             return ImportSummary.failure(SOURCE, "Could not read Health Connect permissions: ${e.message}")
         }
         // Partial permissions are fine (#150): import the record types the user DID grant and skip the
@@ -607,6 +624,7 @@ object HealthConnectImporter {
                 }
             }
         } catch (e: Exception) {
+            rethrowCancellation(e)
             val readCounts = healthConnectReadCounts(recordTypeReadResults.values.toList())
             return ImportSummary.failure(
                 SOURCE,
@@ -789,6 +807,7 @@ object HealthConnectImporter {
                 )
             }
         } catch (e: Exception) {
+            rethrowCancellation(e)
             return ImportSummary.failure(
                 SOURCE,
                 "Saving Health Connect data failed: ${e.message}",
@@ -853,6 +872,7 @@ object HealthConnectImporter {
         val granted = try {
             client.permissionController.getGrantedPermissions()
         } catch (e: Exception) {
+            rethrowCancellation(e)
             return null
         }
         if (HealthPermission.getReadPermission(StepsRecord::class) !in granted) return null
@@ -885,6 +905,7 @@ object HealthConnectImporter {
         val existing = try {
             repo.appleDaily(HC_DEVICE, dayKey, dayKey).firstOrNull()
         } catch (e: Exception) {
+            rethrowCancellation(e)
             null
         }
         // Zero is indistinguishable from "no data yet today" - never overwrite a stored count with it.
@@ -896,6 +917,7 @@ object HealthConnectImporter {
             if (existing == null) repo.upsertDevice(HC_DEVICE, name = "Health Connect")
             repo.upsertAppleDaily(listOf(updated))
         } catch (e: Exception) {
+            rethrowCancellation(e)
             return existing?.steps
         }
         return sum.toInt()
@@ -935,6 +957,7 @@ object HealthConnectImporter {
             } while (pageToken != null)
             return true
         } catch (e: Exception) {
+            rethrowCancellation(e)
             // One record type failing (e.g. a device/SDK validation quirk like "count must not be less
             // than 1" seen on some Health Connect builds) must NOT abort the whole import - log it and
             // keep whatever was read, so every other data type still comes in (issue #34). The reads
@@ -1122,9 +1145,10 @@ object HealthConnectImporter {
      * unit-tested without a HealthConnectClient.
      */
     internal fun derivedBmi(weightKg: Double?, heightCm: Double): Double? {
-        if (heightCm <= 0.0) return null
-        val w = weightKg ?: return null
+        if (!heightCm.isFinite() || heightCm <= 0.0) return null
+        val w = weightKg?.takeIf { it.isFinite() && it > 0.0 } ?: return null
         return round2(FitnessAgeEngine.bmi(w, heightCm))
+            .takeIf { it.isFinite() && it in 5.0..100.0 }
     }
 
     /**

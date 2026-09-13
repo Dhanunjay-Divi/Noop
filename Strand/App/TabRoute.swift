@@ -1,4 +1,5 @@
 import SwiftUI
+import StrandAnalytics
 
 // MARK: - TabRoute
 //
@@ -33,7 +34,9 @@ enum TabRoute: Hashable {
     case stress
     case sleep
     case health
-    case hydration
+    /// Hydration is always tied to the day displayed by Today. Direct non-route entry points continue to
+    /// use `HydrationView()` and therefore retain calendar today's existing default.
+    case hydration(day: String)
     case smartAlarm
     case coupled
     /// The month-at-a-glance grid (2026-08-22) — reachable from Today's floating action button.
@@ -58,39 +61,64 @@ extension View {
     /// Maps every `TabRoute` push to its screen. Apply once to the ROOT content of each
     /// `NavigationStack` that hosts a tab-root view (the iOS tab shell's stacks; the macOS
     /// Today detail pane and TrendsView's own macOS wrap).
-    func tabRouteDestinations() -> some View {
+    func tabRouteDestinations(
+        persistentBottomChromeInset: CGFloat = 0
+    ) -> some View {
         navigationDestination(for: TabRoute.self) { route in
-            switch route {
-            case .fullDayChart: FullDayChartView()
-            case .metric(let key):
-                // Every caller passes a catalog key, so the fallback is theoretical; Health is the
-                // catch-all vitals surface. (Pre-#198 Trends fell back to the Explorer instead —
-                // unified here rather than carrying two never-taken branches.)
-                if let m = MetricCatalog.all.first(where: { $0.key == key }) {
-                    MetricDetailView(metric: m)
-                } else {
-                    HealthView()
-                }
-            case .metricSourced(let key, let source):
-                // Exact (key, source) resolution, order-independent. Fall back to the bare-key entry,
-                // then Health, so a stale route can never dead-end.
-                if let m = MetricCatalog.metric(key: key, source: source)
-                    ?? MetricCatalog.all.first(where: { $0.key == key }) {
-                    MetricDetailView(metric: m)
-                } else {
-                    HealthView()
-                }
-            case .metricExplorer: MetricExplorerView()
-            case .workouts: WorkoutsView()
-            case .dataSources: DataSourcesView()
-            case .stress: StressView()
-            case .sleep: SleepView()
-            case .health: HealthView()
-            case .hydration: HydrationView()
-            case .smartAlarm: SmartAlarmView()
-            case .coupled: CoupledView()
-            case .calendar: CalendarMonthView()
+            TabRouteDestination(route: route)
+                .environment(
+                    \.persistentBottomChromeInset,
+                    persistentBottomChromeInset
+                )
+        }
+    }
+}
+
+private struct TabRouteDestination: View {
+    let route: TabRoute
+    @EnvironmentObject private var profile: ProfileStore
+
+    private var canPresentBMI: Bool {
+        BodyProfilePolicy.canPresentAdultBMI(
+            age: profile.age,
+            currentWeightKg: profile.weightKg,
+            heightCm: profile.heightCm,
+            ageConfirmed: profile.ageInputConfirmed,
+            heightConfirmed: profile.heightInputConfirmed,
+            currentWeightConfirmed: profile.weightInputConfirmed
+        )
+    }
+
+    @ViewBuilder
+    var body: some View {
+        switch route {
+        case .fullDayChart: FullDayChartView()
+        case .metric(let key):
+            if let metric = MetricCatalog.metric(key: key, allowsBMI: canPresentBMI) {
+                MetricDetailView(metric: metric)
+            } else {
+                HealthView()
             }
+        case .metricSourced(let key, let source):
+            if let metric = MetricCatalog.metric(
+                key: key,
+                source: source,
+                allowsBMI: canPresentBMI
+            ) ?? MetricCatalog.metric(key: key, allowsBMI: canPresentBMI) {
+                MetricDetailView(metric: metric)
+            } else {
+                HealthView()
+            }
+        case .metricExplorer: MetricExplorerView()
+        case .workouts: WorkoutsView()
+        case .dataSources: DataSourcesView()
+        case .stress: StressView()
+        case .sleep: SleepView()
+        case .health: HealthView()
+        case .hydration(let day): HydrationView(selectedDay: day)
+        case .smartAlarm: SmartAlarmView()
+        case .coupled: CoupledView()
+        case .calendar: CalendarMonthView()
         }
     }
 }

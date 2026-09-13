@@ -5,29 +5,26 @@ import android.content.Context
 import android.content.res.Configuration
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
+import com.noop.alarm.WindDownForegroundReconciler
+import com.noop.alarm.WindDownScheduler
+import com.noop.alarm.WindDownStore
+import com.noop.analytics.RegistryDayOwnerSource
 import com.noop.ble.SourceCoordinator
 import com.noop.ble.WhoopBleClient
-import com.noop.analytics.RegistryDayOwnerSource
 import com.noop.ble.WhoopModel
 import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
-import com.noop.sync.RemoteSyncService
-import com.noop.sync.RemoteSyncScheduler
-import com.noop.ui.BackupSync
-import com.noop.ui.BiofeedbackPrefs
-import com.noop.ui.DebugExportScheduler
-import com.noop.ui.NoopPrefs
-import com.noop.ui.AppearanceMode
-import com.noop.ui.AppearancePrefs
-import com.noop.widget.WidgetSnapshotStore
-import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
-import com.noop.location.GpsSession
+import com.noop.feedback.FeedbackScheduler
 import com.noop.ingest.HealthConnectSyncScheduler
+import com.noop.location.GpsSession
 import com.noop.managed.ManagedCloudScheduler
 import com.noop.managed.ManagedCloudService
 import com.noop.managed.ManagedRuntimeGate
 import com.noop.managed.ManagedSafetyLiveLocationSession
+import com.noop.notif.AdaptiveDayOperationalResumeResult
+import com.noop.notif.AdaptiveDayNotifier
+import com.noop.notif.AdaptiveDayTimeZoneStore
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.ownership.OwnershipService
@@ -35,6 +32,17 @@ import com.noop.safety.SafetyContactSetupReminderScheduler
 import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
 import com.noop.social.FriendsSyncScheduler
+import com.noop.sync.RemoteSyncScheduler
+import com.noop.sync.RemoteSyncService
+import com.noop.ui.AppearanceMode
+import com.noop.ui.AppearancePrefs
+import com.noop.ui.BackupSync
+import com.noop.ui.BiofeedbackPrefs
+import com.noop.ui.DebugExportScheduler
+import com.noop.ui.NoopPrefs
+import com.noop.widget.WidgetSnapshotStore
+import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
+import java.time.ZonedDateTime
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +73,46 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
     private val activeDeviceLock = Any()
     private var activeDeviceRevision = 0L
     private val operationalRuntime = AtomicBoolean(false)
+    private val windDownForegroundHookRegistered = AtomicBoolean(false)
+    private val windDownForegroundReconciler by lazy {
+        val store = WindDownStore.from(this)
+        WindDownForegroundReconciler(
+            store = store,
+            availability = { WindDownScheduler.deliveryAvailability(this) },
+            schedule = { WindDownScheduler.schedule(this, store) },
+            cancel = { WindDownScheduler.cancel(this) },
+        )
+    }
+    private val windDownForegroundLifecycleCallbacks =
+        object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: android.app.Activity) {
+                if (!operationalRuntimeStarted) return
+                when (windDownForegroundReconciler.onAppResumed()) {
+                    WindDownScheduler.ReconcileResult.RETRY_NOTIFICATIONS_OFF ->
+                        recordWindDownForegroundRetry("notifications_off")
+                    WindDownScheduler.ReconcileResult.RETRY_CHANNEL_OFF ->
+                        recordWindDownForegroundRetry("channel_off")
+                    WindDownScheduler.ReconcileResult.RETRY_DELIVERY_CHECK_FAILURE ->
+                        recordWindDownForegroundRetry("delivery_check_failed")
+                    WindDownScheduler.ReconcileResult.RETRY_SCHEDULE_FAILURE ->
+                        recordWindDownForegroundRetry("schedule_failed")
+                    else -> Unit
+                }
+            }
+
+            override fun onActivityCreated(
+                activity: android.app.Activity,
+                savedInstanceState: android.os.Bundle?,
+            ) = Unit
+            override fun onActivityStarted(activity: android.app.Activity) = Unit
+            override fun onActivityPaused(activity: android.app.Activity) = Unit
+            override fun onActivityStopped(activity: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(
+                activity: android.app.Activity,
+                outState: android.os.Bundle,
+            ) = Unit
+            override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+        }
 
     /** True after the consent-gated Room/BLE/cloud/worker runtime has started for this process. */
     val operationalRuntimeStarted: Boolean get() = operationalRuntime.get()
@@ -105,9 +153,32 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
         // Install immediately after the bounded recorder so a failure in the initialization below keeps
         // its stack trace as well as the unmatched launch breadcrumb.
         CrashCapture.install(this)
+        val consentCleanupComplete = runCatching {
+            AdaptiveDayNotifier.recoverPendingConsentCleanup(this)
+        }.getOrElse {
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.consent_cleanup",
+                fields = mapOf("outcome" to "startup_exception"),
+            )
+            false
+        }
+        if (!consentCleanupComplete) {
+            startupScope.launch {
+                runCatching {
+                    AdaptiveDayNotifier.recoverPendingConsentCleanup(this@NoopApplication)
+                }
+            }
+        }
         lastWidgetNightMode = resources.configuration.isNightMode()
         if (hasAcceptedCurrentTerms()) {
             startOperationalRuntime()
+        } else {
+            if (!AdaptiveDayTimeZoneStore.markOperationalAccessBlocked(this)) {
+                AppDiagnosticsRecorder.record(
+                    "adaptive_day.time_zone_baseline",
+                    fields = mapOf("outcome" to "operational_block_marker_failed"),
+                )
+            }
         }
     }
 
@@ -120,8 +191,32 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
      * operational ViewModel is constructed.
      */
     fun startOperationalRuntime() {
+        if (operationalRuntime.get()) return
+        val now = ZonedDateTime.now()
+        val resumeResult = AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+            context = this,
+            offsetSec = now.offset.totalSeconds,
+            nowSec = now.toEpochSecond(),
+        )
+        when (resumeResult) {
+            AdaptiveDayOperationalResumeResult.FAILED -> {
+                AppDiagnosticsRecorder.record(
+                    "adaptive_day.time_zone_baseline",
+                    fields = mapOf("outcome" to "operational_resume_failed_closed"),
+                )
+                return
+            }
+            AdaptiveDayOperationalResumeResult.REBASED -> {
+                AppDiagnosticsRecorder.record(
+                    "adaptive_day.time_zone_baseline",
+                    fields = mapOf("outcome" to "rebased_after_operational_block"),
+                )
+            }
+            AdaptiveDayOperationalResumeResult.NOT_REQUIRED -> Unit
+        }
         if (!operationalRuntime.compareAndSet(false, true)) return
         AppDiagnosticsRecorder.record("runtime.operational_started")
+        registerWindDownForegroundReconciliation()
         resolveActiveDeviceId()
         // Canonicalize the stress-check-in choices against this build's evidence capability before
         // BLE/background readers observe them. The live path still fails closed per event.
@@ -138,6 +233,21 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
         // opt-in and is scheduled later from the activity after the user saves a destination.
         RemoteSyncService.initialize(this)
         deferProcessMaintenance()
+    }
+
+    private fun registerWindDownForegroundReconciliation() {
+        if (!windDownForegroundHookRegistered.compareAndSet(false, true)) return
+        registerActivityLifecycleCallbacks(windDownForegroundLifecycleCallbacks)
+    }
+
+    private fun recordWindDownForegroundRetry(reason: String) {
+        AppDiagnosticsRecorder.record(
+            "wind_down.foreground_reconcile",
+            fields = mapOf(
+                "outcome" to "retry_pending",
+                "reason" to reason,
+            ),
+        )
     }
 
     private fun hasAcceptedCurrentTerms(): Boolean =
@@ -273,6 +383,17 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             runCatching { managedCloud.bootstrap() }
             runCatching { ManagedCloudScheduler.reconcile(this@NoopApplication) }
             runCatching { ManagedCloudScheduler.enqueueCatchUpIfDue(this@NoopApplication) }
+            // App reports are account-free and user-staged. Repair only already-consented outbox work;
+            // this never creates a report or reads health data on its own.
+            val feedbackRecovery = runCatching {
+                FeedbackScheduler.reconcile(this@NoopApplication)
+            }
+            AppDiagnosticsRecorder.record(
+                "feedback.startup_recovery",
+                fields = mapOf(
+                    "outcome" to if (feedbackRecovery.isSuccess) "completed" else "failed",
+                ),
+            )
             // Account state reconciliation is local unless this build explicitly enables the
             // ownership authority. It never starts BLE, uploads health data, or grants NOOP+.
             runCatching { ownership.bootstrap() }

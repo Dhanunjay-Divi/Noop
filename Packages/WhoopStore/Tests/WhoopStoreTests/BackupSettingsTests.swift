@@ -42,6 +42,7 @@ final class BackupSettingsTests: XCTestCase {
             "windDown.goalMode": "extraOpportunity",
             "windDown.leadMinutes": 45,
             "sleepPlanner.wakeMinutes": 390,
+            "windDown.perDayWakeMinutes": #"{"1":480,"7":540}"#,
             "notif.masterEnabled": true,
             "notif.onlyWhenWorn": true,
             "notif.quietHoursEnabled": true,
@@ -62,7 +63,10 @@ final class BackupSettingsTests: XCTestCase {
             "hydrationReminders.strapBuzzEnabled": false,
         ]
         XCTAssertEqual(
-            Set(values.keys).union([BackupSettings.schemaVersionKey]),
+            Set(values.keys).union([
+                BackupSettings.schemaVersionKey,
+                BackupSettings.legacyRecoveryMinutesKey,
+            ]),
             Set(BackupSettings.whitelist.keys),
             "This fixture must cover every settings-schema field"
         )
@@ -71,7 +75,7 @@ final class BackupSettingsTests: XCTestCase {
 
         XCTAssertEqual(back["profile.age"] as? Int, 34)
         XCTAssertEqual(back["profile.dateOfBirth"] as? String, "1992-11-03")
-        XCTAssertEqual(back[BackupSettings.schemaVersionKey] as? Int, 4)
+        XCTAssertEqual(back[BackupSettings.schemaVersionKey] as? Int, 5)
         XCTAssertEqual(back["profile.sex"] as? String, "female")
         XCTAssertEqual(back["profile.weightKg"] as? Double, 62.5)
         XCTAssertEqual(back["profile.targetWeightKg"] as? Double, 60.0)
@@ -88,16 +92,57 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertEqual(back["today.keyMetricsDetailed"] as? Bool, true)
         XCTAssertEqual(back["windDown.goalMode"] as? String, "extraOpportunity")
         XCTAssertEqual(back["sleepPlanner.wakeMinutes"] as? Int, 390)
+        XCTAssertEqual(
+            back["windDown.perDayWakeMinutes"] as? String,
+            #"{"1":480,"7":540}"#
+        )
         XCTAssertEqual(back["hydrationReminders.intervalMinutes"] as? Int, 120)
         XCTAssertEqual(back["hydrationReminders.adaptiveEnabled"] as? Bool, false)
-        XCTAssertEqual(back.count, values.count + 1, "Only the v4 schema stamp should be added")
+        XCTAssertEqual(back.count, values.count + 1, "Only the v5 schema stamp should be added")
     }
 
     func testEveryPayloadFieldHasAnAppleDefaultsMapping() {
         XCTAssertEqual(
             Set(BackupSettings.appleDefaultsKey.keys),
-            Set(BackupSettings.whitelist.keys).subtracting([BackupSettings.schemaVersionKey]),
+            Set(BackupSettings.whitelist.keys).subtracting([
+                BackupSettings.schemaVersionKey,
+                BackupSettings.legacyRecoveryMinutesKey,
+            ]),
             "A schema field must never be encodable without a restore destination"
+        )
+    }
+
+    func testLegacyAndroidV5RecoveryRoundTripsButIsNeverApplied() throws {
+        let legacy = Data(
+            #"{"settings.schemaVersion":5,"windDown.enabled":true,"windDown.recoveryMinutes":45}"#
+                .utf8
+        )
+        let decoded = BackupSettings.decode(legacy)
+        XCTAssertEqual(decoded[BackupSettings.legacyRecoveryMinutesKey] as? Int, 45)
+        let normalized = try XCTUnwrap(BackupSettings.encode(decoded))
+        XCTAssertEqual(
+            BackupSettings.decode(normalized)[BackupSettings.legacyRecoveryMinutesKey] as? Int,
+            45
+        )
+
+        let suiteName = "BackupSettingsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(12, forKey: BackupSettings.legacyRecoveryMinutesKey)
+        BackupSettings.apply(decoded, to: defaults)
+        XCTAssertEqual(
+            defaults.integer(forKey: BackupSettings.legacyRecoveryMinutesKey),
+            12,
+            "Ordinary preference sync must preserve current local planner state"
+        )
+        BackupSettings.apply(
+            decoded,
+            to: defaults,
+            clearDerivedPlannerState: true
+        )
+        XCTAssertNil(
+            defaults.object(forKey: BackupSettings.legacyRecoveryMinutesKey),
+            "Restore must clear stale planner-derived recovery from the target device"
         )
     }
 
@@ -215,7 +260,7 @@ final class BackupSettingsTests: XCTestCase {
         let snap = BackupSettings.snapshot(from: defaults)
         XCTAssertEqual(snap["profile.age"] as? Int, 29)
         XCTAssertEqual(snap["profile.dateOfBirth"] as? String, "1997-04-09")
-        XCTAssertEqual(snap[BackupSettings.schemaVersionKey] as? Int, 4)
+        XCTAssertEqual(snap[BackupSettings.schemaVersionKey] as? Int, 5)
         XCTAssertEqual(snap["profile.weightKg"] as? Double, 82.5)
         XCTAssertEqual(snap["profile.targetWeightKg"] as? Double, 79.0)
         XCTAssertEqual(snap["profile.hrMax"] as? Int, 198, "hrMaxOverride surfaces under the canonical key")
@@ -254,6 +299,10 @@ final class BackupSettingsTests: XCTestCase {
         source.set("charge,hrv,restingHr", forKey: "today.keyMetrics")
         source.set(true, forKey: "windDown.enabled")
         source.set(6 * 60 + 45, forKey: "windDown.wakeMinutes")
+        source.set(
+            Data(#"{"1":480,"7":540}"#.utf8),
+            forKey: "windDown.perDayWakeMinutes"
+        )
         source.set(120, forKey: "hydrationReminders.intervalMinutes")
         source.set(false, forKey: "hydrationReminders.adaptiveEnabled")
 
@@ -262,6 +311,10 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertEqual(snapshot["theme.appearance"] as? String, "black")
         XCTAssertEqual(snapshot["noop.showDayCycleBackground"] as? Bool, false)
         XCTAssertEqual(snapshot["sleepPlanner.wakeMinutes"] as? Int, 405)
+        XCTAssertEqual(
+            snapshot["windDown.perDayWakeMinutes"] as? String,
+            #"{"1":480,"7":540}"#
+        )
         XCTAssertNil(snapshot["windDown.wakeMinutes"],
                      "The platform storage name must not leak into the portable payload")
 
@@ -275,8 +328,31 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertEqual(target.string(forKey: "today.keyMetrics"), "charge,hrv,restingHr")
         XCTAssertEqual(target.object(forKey: "windDown.enabled") as? Bool, true)
         XCTAssertEqual(target.object(forKey: "windDown.wakeMinutes") as? Int, 405)
+        XCTAssertEqual(
+            target.data(forKey: "windDown.perDayWakeMinutes")
+                .flatMap { String(data: $0, encoding: .utf8) },
+            #"{"1":480,"7":540}"#
+        )
         XCTAssertEqual(target.object(forKey: "hydrationReminders.intervalMinutes") as? Int, 120)
         XCTAssertEqual(target.object(forKey: "hydrationReminders.adaptiveEnabled") as? Bool, false)
+    }
+
+    func testMalformedWeekdayWakeOverridesAreDropped() throws {
+        for encoded in [
+            #"{"0":480}"#,
+            #"{"7":1440}"#,
+            #"{"7":540.5}"#,
+            #"{"07":540}"#,
+            #"[{"7":540}]"#,
+        ] {
+            let data = try JSONSerialization.data(
+                withJSONObject: ["windDown.perDayWakeMinutes": encoded]
+            )
+            XCTAssertNil(
+                BackupSettings.decode(data)["windDown.perDayWakeMinutes"],
+                encoded
+            )
+        }
     }
 
     /// #146: applying a restored age must clear a pre-existing `profile.dateOfBirth`, so the target's

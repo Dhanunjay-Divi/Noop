@@ -460,6 +460,7 @@ private fun DeviceCard(
     onBodyLocationProbe: (() -> Unit)? = null,
 ) {
     val profile = deviceProfile(device)
+    val customerName = displayName(device)
     // The per-device actions menu's open state is hoisted here so the WHOLE card is a tap target that opens
     // the same menu the trailing ⋮ button does — additive, non-destructive (the menu still gates every
     // action + confirm), and it gives the card a real `clickable` to drive `liquidPress`.
@@ -474,7 +475,7 @@ private fun DeviceCard(
         .clickable(
             interactionSource = interaction,
             indication = null,
-            onClickLabel = "Device actions for ${displayName(device)}",
+            onClickLabel = "Device actions for $customerName",
         ) { menuOpen = true }
 
     // The ACTIVE device is the hero: the liquid translucent-black frosted card (rgba(13,14,20,.80), radius
@@ -496,8 +497,10 @@ private fun DeviceCard(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
-                    Text(displayName(device), style = NoopType.headline, color = Palette.textPrimary)
-                    Text(profile.displayModel, style = NoopType.subhead, color = Palette.textSecondary)
+                    Text(customerName, style = NoopType.headline, color = Palette.textPrimary)
+                    if (shouldShowDeviceModel(customerName, profile.displayModel)) {
+                        Text(profile.displayModel, style = NoopType.subhead, color = Palette.textSecondary)
+                    }
                 }
                 // Locally-adopted Oura is Beta: a non-dot Beta chip sits beside the usual state pill.
                 if (device.sourceKind == SourceKind.oura.name) {
@@ -521,12 +524,12 @@ private fun DeviceCard(
             // What this device CAPTURES — honest, per-model (not the generic stored set, which would
             // mislabel e.g. a "Blood oxygen" chip when no SpO₂ % ever comes off the strap).
             CapabilityInfoRow(Icons.Filled.FavoriteBorder, profile.captures)
-            // What NOOP USES it for — the scores / screens this device drives.
-            CapabilityInfoRow(Icons.Filled.Bolt, profile.powers)
-            // Honest footnote: the "*" estimates + the SpO₂/steps caveats.
+            // Keep the estimate/capability caveat beside the line it qualifies.
             if (profile.footnote.isNotEmpty()) {
                 Text(profile.footnote, style = NoopType.footnote, color = Palette.textTertiary)
             }
+            // What NOOP USES it for — the scores / screens this device drives.
+            CapabilityInfoRow(Icons.Filled.Bolt, profile.powers)
 
             // #221: the full #78 pairing-refusal guidance, self-service right on the card instead of
             // buried in the strap log — only when the bond was genuinely refused.
@@ -1182,6 +1185,9 @@ internal fun displayName(device: PairedDeviceRow): String {
     else "${device.brand} ${device.model}"
     return CustomerFacingBrand.text(raw)
 }
+
+internal fun shouldShowDeviceModel(displayName: String, displayModel: String): Boolean =
+    !displayName.trim().equals(displayModel.trim(), ignoreCase = true)
 
 /** SF-Symbol-equivalent icon: WHOOP keeps the band glyph; an FTMS machine reads as gym equipment;
  *  generic straps read as a heart-rate strap. */

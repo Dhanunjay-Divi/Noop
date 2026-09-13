@@ -11,7 +11,8 @@
     <string name="managed_safety_cannot_respond">Cannot respond</string>
     <string name="managed_safety_channel_description">Urgent private alerts from accepted NOOP Safety contacts.</string>
     <string name="managed_safety_channel_name">NOOP Safety contacts</string>
-    <string name="managed_safety_confirm_body">NOOP will send a best-effort app alert to every accepted Safety contact. It does not contact emergency services or guarantee that anyone sees or acts on the alert.</string>
+    <string name="managed_safety_confirm_body">NOOP will send a best-effort app alert to every accepted Safety contact. No location will be shared. It does not contact emergency services or guarantee that anyone sees or acts on the alert.</string>
+    <string name="managed_safety_confirm_location_body">NOOP will send a best-effort app alert to every accepted Safety contact and share only the newest approved location for up to %1$d hours. Location access ends when the page ends or expires. NOOP does not contact emergency services or guarantee that anyone sees or acts on the alert.</string>
     <string name="managed_safety_confirm_send">Start Safety page</string>
     <string name="managed_safety_confirm_title">Page your NOOP Safety contacts now?</string>
     <string name="managed_safety_contact_count_format">%1$d of %2$d accepted contacts</string>

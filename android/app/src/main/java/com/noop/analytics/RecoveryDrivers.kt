@@ -224,12 +224,12 @@ object RecoveryDrivers {
         }
         if (skinIdx >= 0 && validSkinTempDev != null) {
             // Skin temp is a SYMMETRIC penalty: only |deviation| matters. Surface it as a RELATIVE
-            // deviation (signed +/- C from baseline), never an absolute temperature.
+            // deviation (signed °C from baseline), never an absolute temperature.
             drivers.add(
                 ChargeDriver(
                     label = "Skin temperature",
                     deltaPoints = delta(skinIdx),
-                    valueText = String.format(java.util.Locale.US, "%+.1f C vs baseline", validSkinTempDev),
+                    valueText = formatSkinTemperatureDeviation(validSkinTempDev),
                     baselineText = "",   // a deviation already; the reference is the personal baseline (0)
                     verdict = skinTempVerdict(validSkinTempDev),
                 ),
@@ -275,4 +275,9 @@ object RecoveryDrivers {
         dev > 0.0 -> "warmer than baseline, limiting recovery"
         else -> "cooler than baseline, limiting recovery"
     }
+}
+
+internal fun formatSkinTemperatureDeviation(value: Double): String {
+    val sign = if (value < 0.0) "−" else "+"
+    return "$sign${String.format(java.util.Locale.US, "%.1f", abs(value))} °C vs baseline"
 }

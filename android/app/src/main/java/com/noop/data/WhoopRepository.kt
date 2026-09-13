@@ -8,6 +8,7 @@ import com.noop.analytics.SleepStageTotals
 import com.noop.analytics.WhoopReferenceCalibration
 import com.noop.protocol.DroppedRtcEvent
 import com.noop.protocol.RrSourceChannel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -325,6 +326,11 @@ internal object RestDataVersionPolicy {
         dailyMetricsChanged || keys.any(sleepSurfaceKeys::contains)
 }
 
+internal data class AnalysisInputLease(
+    val claims: List<AnalysisInputGenerationClaim>,
+    val dirtyGateSucceeded: Boolean,
+)
+
 class WhoopRepository private constructor(
     private val dao: WhoopDao,
     /** Production wraps Room; DAO-only unit-test fixtures use a pass-through boundary. */
@@ -382,6 +388,11 @@ class WhoopRepository private constructor(
                 db.withTransaction { block() }
         },
     )
+
+    /** Small internal transaction seam for read-modify-write feature stores such as Hydration. */
+    internal suspend fun <R> runMetricMutationTransaction(
+        block: suspend () -> R,
+    ): R = transactor.run(block)
 
     // MARK: - Device
 
@@ -501,12 +512,138 @@ class WhoopRepository private constructor(
         }
     }
 
-    /** #836/#1196 - cheap whole-history scoring-input token. It covers every raw stream consumed by daily
-     * analysis and includes the active source identity, so switching bands invalidates an otherwise equal
-     * row watermark. The length prefix keeps the token unambiguous. */
-    suspend fun analysisFingerprint(activeSourceId: String): String =
-        "${activeSourceId.toByteArray(Charsets.UTF_8).size}:$activeSourceId:" +
-            "${dao.countAnalysisFingerprintRows()}:${dao.maxAnalysisFingerprintTs()}"
+    /**
+     * The bounded source set used by launch/resume analysis. Registered non-archived sources preserve
+     * the old global-gate behavior, while the active + canonical read IDs cover a registry read failure
+     * and imported data that intentionally has no distinct registry row.
+     */
+    internal fun analysisDirtySourceIds(
+        activeSourceId: String,
+        registeredDevices: Collection<PairedDeviceRow>,
+    ): List<String> {
+        val registeredById = registeredDevices
+            .asSequence()
+            .filter { it.id.isNotBlank() }
+            .associateBy { it.id }
+        val eligibleRegistered = registeredDevices
+            .asSequence()
+            .filter { it.status != DeviceStatus.archived.name }
+            .map { it.id }
+        val compatibleReadIds = importedSourceIdsFor(activeSourceId)
+            .asSequence()
+            // A missing registry row is the legacy compatibility path. An explicit archived row is not
+            // readable for ownership once archive() clears its day-owner overrides. Preserve the explicit
+            // active fallback because the engine can still read that id directly even before registry repair.
+            .filter {
+                it == activeSourceId ||
+                    registeredById[it]?.status != DeviceStatus.archived.name
+            }
+        val sourceIds = (eligibleRegistered + compatibleReadIds)
+            .filter(String::isNotBlank)
+            .filter { it != AnalysisInvalidationSource.OWNERSHIP }
+            .distinct()
+            .sorted()
+            .toList()
+        return listOf(AnalysisInvalidationSource.OWNERSHIP) + sourceIds
+    }
+
+    /**
+     * Snapshot one analysis pass without clearing durable state. Force-only formula/repair upgrades still
+     * receive a lease with no claims. An ordinary gate read failure fails open into scoring while leaving
+     * every durable generation pending for retry.
+     */
+    internal suspend fun claimAnalysisInput(
+        sourceIds: Collection<String>,
+        force: Boolean,
+    ): AnalysisInputLease? {
+        val normalized = sourceIds
+            .asSequence()
+            .filter(String::isNotBlank)
+            .distinct()
+            .sorted()
+            .toList()
+        if (normalized.isEmpty()) {
+            return if (force) AnalysisInputLease(emptyList(), dirtyGateSucceeded = true) else null
+        }
+        val claims = try {
+            dao.pendingAnalysisInputClaims(normalized)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            return AnalysisInputLease(emptyList(), dirtyGateSucceeded = false)
+        }
+        return if (force || claims.isNotEmpty()) {
+            AnalysisInputLease(claims, dirtyGateSucceeded = true)
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Execute a generation snapshot and advance it only after every required read and persistence in [block]
+     * succeeds. A bounded pass exact-acknowledges a fully covered snapshot or removes only its completed
+     * newest tail. Both mutations compare generation plus original bounds in the same Room transaction, so
+     * failure, cancellation, process death, or a concurrent score-bearing write leaves new work pending.
+     */
+    internal suspend fun <R> runClaimedAnalysis(
+        lease: AnalysisInputLease,
+        block: suspend (AnalysisInputConsumption) -> R,
+    ): R {
+        val consumption = AnalysisInputConsumption()
+        val result = block(consumption)
+        val progress = consumption.progressFor(lease.claims)
+        if (progress.isNotEmpty()) {
+            transactor.run {
+                for (item in progress) {
+                    val claim = item.claim
+                    val affected = claim.affectedTimeRange()
+                    if (affected == null) {
+                        // Missing/invalid bounds cannot be inferred from a scan. Exact-ack only when an
+                        // indexed existence proof, inside this same transaction, establishes that there is
+                        // no score-bearing history whose ownership/source result could remain stale.
+                        val hasScoreBearingHistory =
+                            if (claim.deviceId == AnalysisInvalidationSource.OWNERSHIP) {
+                                dao.hasAnyScoreBearingHistory()
+                            } else {
+                                dao.hasScoreBearingHistory(claim.deviceId)
+                            }
+                        if (!hasScoreBearingHistory) {
+                            dao.acknowledgeExactAnalysisInputGeneration(
+                                deviceId = claim.deviceId,
+                                generation = claim.generation,
+                                expectedEarliestAffectedTs = claim.earliestAffectedTs,
+                                expectedLatestAffectedTs = claim.latestAffectedTs,
+                            )
+                        }
+                        continue
+                    }
+
+                    val scanned = item.scanCoverage() ?: continue
+                    // A contiguous ledger can advance only from its newest edge. Interior or older-only
+                    // coverage cannot be represented without losing a pending interval, so leave it intact.
+                    if (scanned.last < affected.last || scanned.first > affected.last) continue
+
+                    if (scanned.first <= affected.first) {
+                        dao.acknowledgeExactAnalysisInputGeneration(
+                            deviceId = claim.deviceId,
+                            generation = claim.generation,
+                            expectedEarliestAffectedTs = claim.earliestAffectedTs,
+                            expectedLatestAffectedTs = claim.latestAffectedTs,
+                        )
+                    } else {
+                        dao.shrinkExactAnalysisInputNewestTail(
+                            deviceId = claim.deviceId,
+                            generation = claim.generation,
+                            expectedEarliestAffectedTs = affected.first,
+                            expectedLatestAffectedTs = affected.last,
+                            newLatestAffectedTs = scanned.first - 1L,
+                        )
+                    }
+                }
+            }
+        }
+        return result
+    }
 
     // MARK: - Server-derived caches (latest value wins on conflict)
 
@@ -525,6 +662,49 @@ class WhoopRepository private constructor(
 
     suspend fun upsertHealthConnectSyncStates(rows: List<HealthConnectSyncStateRow>) {
         if (rows.isNotEmpty()) dao.upsertHealthConnectSyncStates(rows)
+    }
+
+    /**
+     * Rebuild Health Connect-derived BMI from the already stored Health Connect weight projection and
+     * optionally commit its dependency fingerprint in the same Room transaction. This path remains
+     * available after Weight permission is revoked: a confirmed height correction can therefore update
+     * local history, and removing height deletes derived BMI instead of leaving obsolete values.
+     *
+     * [derive] owns the health policy and returns null for unusable inputs. Only exact source/day BMI rows
+     * are accepted; malformed callback output fails closed by being omitted from the replacement.
+     */
+    internal suspend fun reconcileHealthConnectDerivedBmi(
+        fingerprint: HealthConnectSyncStateRow? = null,
+        derive: (MetricSeriesRow) -> MetricSeriesRow?,
+    ): Int {
+        var publishedRows = 0
+        transactor.run {
+            val weightRows = dao.metricSeries(
+                HEALTH_CONNECT_SOURCE,
+                "weight",
+                "0000-01-01",
+                "9999-12-31",
+            ).mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
+            val bmiRows = weightRows.mapNotNull { weight ->
+                derive(weight)?.takeIf { bmi ->
+                    bmi.deviceId == HEALTH_CONNECT_SOURCE &&
+                        bmi.day == weight.day &&
+                        bmi.key == "bmi" &&
+                        bmi.value.isFinite()
+                }
+            }
+            dao.replaceMetricSeriesRange(
+                deviceId = HEALTH_CONNECT_SOURCE,
+                fromDay = "0000-01-01",
+                toDay = "9999-12-31",
+                managedKeys = listOf("bmi"),
+                rows = bmiRows,
+            )
+            fingerprint?.let { dao.upsertHealthConnectSyncStates(listOf(it)) }
+            publishedRows = bmiRows.size
+        }
+        noteMetricsChanged(listOf("bmi"))
+        return publishedRows
     }
 
     suspend fun replaceHealthConnectProjection(
@@ -947,6 +1127,53 @@ class WhoopRepository private constructor(
             noteMetricsChanged(normalized.map(MetricSeriesRow::key))
         }
     }
+
+    // MARK: - Durable editable hydration log
+
+    internal suspend fun hydrationEntries(
+        deviceId: String,
+        day: String,
+    ): List<HydrationEntryRow> = dao.hydrationEntries(deviceId, day)
+
+    internal suspend fun addHydrationEntry(
+        row: HydrationEntryRow,
+    ): HydrationEntryMutationResult =
+        dao.addHydrationEntry(row).also { result ->
+            if (result.changed) noteMetricsChanged(listOf(HydrationEntryContract.METRIC_KEY))
+        }
+
+    internal suspend fun updateHydrationEntry(
+        row: HydrationEntryRow,
+    ): HydrationEntryMutationResult =
+        dao.updateHydrationEntry(row).also { result ->
+            if (result.changed) noteMetricsChanged(listOf(HydrationEntryContract.METRIC_KEY))
+        }
+
+    internal suspend fun deleteHydrationEntry(
+        id: String,
+        deviceId: String,
+        day: String,
+    ): HydrationEntryMutationResult =
+        dao.deleteHydrationEntry(id, deviceId, day).also { result ->
+            if (result.changed) noteMetricsChanged(listOf(HydrationEntryContract.METRIC_KEY))
+        }
+
+    internal suspend fun clearHydrationEntries(
+        deviceId: String,
+        day: String,
+    ): HydrationEntryMutationResult =
+        dao.clearHydrationEntries(deviceId, day).also { result ->
+            if (result.changed) noteMetricsChanged(listOf(HydrationEntryContract.METRIC_KEY))
+        }
+
+    internal suspend fun replaceHydrationEntries(
+        deviceId: String,
+        day: String,
+        rows: List<HydrationEntryRow>,
+    ): HydrationEntryMutationResult =
+        dao.replaceHydrationEntries(deviceId, day, rows).also { result ->
+            if (result.changed) noteMetricsChanged(listOf(HydrationEntryContract.METRIC_KEY))
+        }
 
     /** Normalize generic-series units, then atomically persist one complete wearable CSV projection. */
     suspend fun importWhoopCsv(batch: WhoopCsvImportBatch) {
@@ -2027,6 +2254,10 @@ class WhoopRepository private constructor(
     suspend fun workoutsCount(deviceId: String, from: Long, to: Long): Int =
         dao.workoutsCount(deviceId, from, to)
 
+    /** Scalar natural-key count twin of [workoutsUnion], preserving active/canonical deduplication. */
+    suspend fun workoutsUnionCount(deviceId: String, from: Long, to: Long): Int =
+        dao.workoutsDistinctCount(importedSourceIds(deviceId), from, to)
+
     suspend fun sumWorkoutSteps(deviceId: String, from: Long, to: Long): Int =
         dao.sumWorkoutSteps(deviceId, from, to)
 
@@ -2048,6 +2279,10 @@ class WhoopRepository private constructor(
     /** Apple-Health daily aggregates for the inclusive day range [from, to] (YYYY-MM-DD), oldest first. */
     suspend fun appleDaily(deviceId: String, from: String, to: String): List<AppleDaily> =
         dao.appleDaily(deviceId, from, to)
+
+    /** Latest daily aggregate carrying a measured weight, without materializing the source history. */
+    suspend fun latestAppleDailyWeight(deviceId: String): AppleDaily? =
+        dao.latestAppleDailyWeight(deviceId)
 
     /** Scalar COUNT twin of [appleDaily] for count badges. */
     suspend fun appleDailyCount(deviceId: String, from: String, to: String): Int =
@@ -2292,7 +2527,7 @@ class WhoopRepository private constructor(
             unionDaysFlow(computedSourceIds(deviceId).map { dao.recentDaysFlow(it, RECENT_DAYS_CAP) }),
             dao.recentDaysFlow(HEALTH_CONNECT_SOURCE, RECENT_DAYS_CAP),
             dao.recentDaysFlow(ACTIVITY_FILE_SOURCE, RECENT_DAYS_CAP),
-            computedSleepSessionsFlow(deviceId),
+            computedRecentSleepSessionsFlow(deviceId),
         ) { imported, computed, healthConnect, activityFile, computedSleeps ->
             // recentDaysFlow returns newest-first (DESC LIMIT); mergeDaily re-sorts ascending by day, so the
             // emitted order matches daysMergedFlow exactly.
@@ -2306,6 +2541,21 @@ class WhoopRepository private constructor(
      */
     private fun computedSleepSessionsFlow(deviceId: String): Flow<List<SleepSession>> {
         val flows = computedSourceIds(deviceId).map { dao.sleepSessionsFlow(it) }
+        return if (flows.size == 1) flows[0]
+        else combine(flows) { arrays -> arrays.flatMap { it } }
+    }
+
+    /**
+     * Dashboard-only bounded twin of [computedSleepSessionsFlow]. A two-day overlap margin retains a
+     * night that begins before the oldest retained daily row, and the per-source row cap prevents a
+     * corrupted or highly fragmented history from making the reactive dashboard flow unbounded.
+     */
+    private fun computedRecentSleepSessionsFlow(deviceId: String): Flow<List<SleepSession>> {
+        val from = System.currentTimeMillis() / 1_000L -
+            RECENT_SLEEP_LOOKBACK_DAYS.toLong() * 86_400L
+        val flows = computedSourceIds(deviceId).map { source ->
+            dao.recentSleepSessionsFlow(source, from, RECENT_SLEEP_SESSION_CAP)
+        }
         return if (flows.size == 1) flows[0]
         else combine(flows) { arrays -> arrays.flatMap { it } }
     }
@@ -2666,6 +2916,8 @@ class WhoopRepository private constructor(
          *  every DB change. ~2 years comfortably covers the deepest Trends range + the rolling 7-day
          *  Fitness Age / Vitality windows, so no current surface loses data. */
         const val RECENT_DAYS_CAP = 800
+        const val RECENT_SLEEP_LOOKBACK_DAYS = RECENT_DAYS_CAP + 2
+        const val RECENT_SLEEP_SESSION_CAP = RECENT_DAYS_CAP * 4 + 8
 
         /** Canonical source ids the resolver cross-references. The strap's real id is passed in. */
         const val WHOOP_SOURCE = "my-whoop"

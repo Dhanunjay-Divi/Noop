@@ -1,8 +1,10 @@
 package com.noop
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class AppDiagnosticsRecorderTest {
     @Test fun boundedTailKeepsNewestCompleteJsonLines() {
@@ -61,5 +63,36 @@ class AppDiagnosticsRecorderTest {
         assertEquals("2m_to_15m", AppDiagnosticsRecorder.freshnessBucket(300))
         assertEquals("15m_to_2h", AppDiagnosticsRecorder.freshnessBucket(1_800))
         assertEquals("over_2h", AppDiagnosticsRecorder.freshnessBucket(8_000))
+    }
+
+    @Test fun diagnosticSnapshotFallbackIsNamedBoundedAndCategorical() {
+        val (name, bytes) = AppDiagnosticsRecorder.diagnosticSnapshotFallback(
+            "private dynamic failure text",
+        )
+        val text = String(bytes)
+
+        assertEquals(AppDiagnosticsRecorder.CURRENT_SESSION_ENTRY, name)
+        assertTrue(bytes.size < 256)
+        assertTrue(text.endsWith("\n"))
+        assertTrue(text.contains("\"event\":\"diagnostics.snapshot_unavailable\""))
+        assertTrue(text.contains("\"reason\":\"unknown\""))
+        assertFalse(text.contains("private dynamic failure text"))
+    }
+
+    @Test fun historicalExitCaptureCannotBlockTheLiveSessionQueue() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/AppDiagnosticsRecorder.kt"),
+            File(root, "app/src/main/java/com/noop/AppDiagnosticsRecorder.kt"),
+            File(root, "android/app/src/main/java/com/noop/AppDiagnosticsRecorder.kt"),
+        ).firstOrNull { it.exists() }?.readText()
+        val text = checkNotNull(source) { "Could not locate AppDiagnosticsRecorder.kt from $root" }
+        val start = text.substring(
+            text.indexOf("fun start(context: Context)"),
+            text.indexOf("fun record("),
+        )
+
+        assertTrue(start.contains("historicalExitExecutor.execute"))
+        assertFalse(start.contains("ioExecutor.execute {\n                runCatching { captureHistoricalExits()"))
     }
 }

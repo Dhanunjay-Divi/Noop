@@ -40,6 +40,141 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'required Safety escalation migration is missing';
     END IF;
+    IF (
+        SELECT count(*)
+        FROM noop_schema_migrations
+        WHERE version = ANY(
+            ARRAY[
+                '034_managed_document_contract_v2_add.sql',
+                '035_managed_document_plaintext_quarantine.sql',
+                '036_managed_document_contract_v2_validate.sql',
+                '037_managed_document_contract_v2_activate.sql',
+                '038_managed_safety_band_sos.sql'
+            ]
+        )
+    ) <> 5 THEN
+        RAISE EXCEPTION 'required managed contract migration is missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                (
+                    'managed_documents'::regclass,
+                    'managed_document_kind'
+                ),
+                (
+                    'managed_safety_incidents'::regclass,
+                    'managed_safety_incident_trigger'
+                ),
+                (
+                    'managed_safety_page_quota_events'::regclass,
+                    'managed_safety_page_quota_trigger'
+                )
+        ) AS required(table_oid, constraint_name)
+        LEFT JOIN pg_constraint constraint_row
+          ON constraint_row.conrelid = required.table_oid
+         AND constraint_row.conname = required.constraint_name
+        WHERE constraint_row.oid IS NULL
+           OR NOT constraint_row.convalidated
+    ) THEN
+        RAISE EXCEPTION 'managed document or Safety constraint is missing or unvalidated';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_attribute
+        WHERE attrelid = 'managed_safety_page_quota_events'::regclass
+          AND attname = 'trigger'
+          AND attnotnull
+          AND NOT attisdropped
+    ) THEN
+        RAISE EXCEPTION 'managed Safety quota trigger column is nullable or missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                (
+                    'managed_social_profiles'::regclass,
+                    'managed_social_profile_account_immutability'
+                ),
+                (
+                    'managed_safety_incidents'::regclass,
+                    'managed_safety_incident_quota_immutability'
+                ),
+                (
+                    'managed_safety_page_quota_events'::regclass,
+                    'managed_safety_page_quota_incident_consistency'
+                )
+        ) AS required(table_oid, trigger_name)
+        LEFT JOIN pg_trigger trigger_row
+          ON trigger_row.tgrelid = required.table_oid
+         AND trigger_row.tgname = required.trigger_name
+         AND NOT trigger_row.tgisinternal
+        WHERE trigger_row.oid IS NULL
+           OR trigger_row.tgenabled NOT IN ('O', 'A')
+    ) THEN
+        RAISE EXCEPTION 'managed Safety provenance trigger is missing or disabled';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'managed_documents'::regclass
+          AND conname IN (
+              'managed_document_content_contract',
+              'managed_document_content_contract_v2'
+          )
+    ) THEN
+        RAISE EXCEPTION 'managed document content contract activated before client readiness';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM managed_document_contract_v2_readiness
+        WHERE readiness_key = 'managed_document_content_v2'
+          AND legacy_plaintext_revisions >= 0
+          AND legacy_plaintext_heads >= 0
+          AND invalid_day_ownership_revisions >= 0
+          AND invalid_day_ownership_heads >= 0
+          AND encrypted_non_day_revisions >= 0
+          AND encrypted_non_day_heads >= 0
+    ) THEN
+        RAISE EXCEPTION 'managed document readiness inventory is missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM managed_document_heads head
+        LEFT JOIN managed_documents document
+          ON document.account_id = head.account_id
+         AND document.document_kind = head.document_kind
+         AND document.document_id = head.document_id
+         AND document.document_revision = head.current_revision
+        WHERE document.account_id IS NULL
+           OR document.content_sha256 IS DISTINCT FROM head.content_sha256
+           OR document.deleted_at IS DISTINCT FROM head.deleted_at
+    ) THEN
+        RAISE EXCEPTION 'managed document head does not match its current revision';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM managed_safety_page_quota_events quota
+        JOIN managed_safety_incidents incident
+          ON incident.incident_id = quota.incident_id
+        JOIN managed_social_profiles owner
+          ON owner.profile_id = incident.owner_profile_id
+        WHERE quota.owner_account_id IS DISTINCT FROM owner.account_id
+           OR quota.trigger IS DISTINCT FROM incident.trigger
+    ) THEN
+        RAISE EXCEPTION 'managed Safety quota provenance is inconsistent';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM managed_safety_locations location
+        JOIN managed_safety_incidents incident
+          ON incident.incident_id = location.incident_id
+        WHERE incident.status NOT IN ('open', 'acknowledged')
+    ) THEN
+        RAISE EXCEPTION 'terminal managed Safety incident retained precise location';
+    END IF;
     IF EXISTS (
         SELECT 1
         FROM installation_devices device

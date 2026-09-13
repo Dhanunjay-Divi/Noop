@@ -93,10 +93,13 @@ class RecoveryDriversTest {
             respBaseline = null, sleepPerf = null, skinTempDev = 0.4,
         )
         val skin = drivers.first { it.label == "Skin temperature" }
-        assertTrue("skin temp must read as a +/- deviation", skin.valueText.contains("vs baseline"))
-        assertTrue(skin.valueText.contains("+0.4"))
+        assertEquals("+0.4 °C vs baseline", skin.valueText)
         // The symmetric penalty never lifts Charge.
         assertTrue(skin.deltaPoints <= 0)
+    }
+
+    @Test fun negativeSkinTempUsesTrueMinusAndDegreeSymbol() {
+        assertEquals("−0.4 °C vs baseline", formatSkinTemperatureDeviation(-0.4))
     }
 
     @Test fun absoluteSkinTemperatureDoesNotCreateDeviationDriver() {

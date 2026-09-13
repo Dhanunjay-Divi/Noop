@@ -49,7 +49,7 @@ RELEASE_SOURCE_DIGESTS = {
         "98f9b95510411d6c84aa3e78233c73cb8e2263b2b0d798c23104b775f1b876ce"
     ),
     ".github/workflows/release.yml": (
-        "c79dbea991420931a246e7874b663f257fb99c53e9718a7a9d33313cc25dfc82"
+        "08751fb8e82e0c14fdb4630f45262892077b42e644d740219e7750494c34c01b"
     ),
     ".github/workflows/testing-build.yml": (
         "44cd2ac7ad024429fd885b02236267604207ff6e54f4199f7ae116d755041c10"
@@ -70,10 +70,10 @@ RELEASE_SOURCE_DIGESTS = {
         "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
-        "5bc10ff910277ea941ed4025ccda11a766082a34f46a9394ef241c6979fd36a9"
+        "c04da9970817d1aff853a5f2e9b9385b133138e8ddd875b2e0139a7a91e11203"
     ),
     "release/terminology/legacy-inventory.json": (
-        "45e622637c744033ad1186802d6b010c6b2c7b0fbc278e48053677f8963469c7"
+        "a7d31ea2df0a290def79083cf4eb19aac3e9dfa5610ecf9d62539a83a770dd8c"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -112,7 +112,7 @@ RELEASE_SOURCE_DIGESTS = {
         "86e2040fd6ce9f7abc1126e0b16a056ba84a39fa878caa3367f7273d6306e8b4"
     ),
     "Tools/i18n_audit_baseline.json": (
-        "5b7519589dbeeca37ce22a0fe35e51756a66247ecda7f27662d488fea7ed00d7"
+        "d430542f412001424065dba2167af11c814779add37f0d09c34c5b870ab087d0"
     ),
     "Tools/prepare-ios-sideload-app.sh": (
         "d81bf5b8086c21a648a1417afa58cbb5bb9781c1738f2ff9d1cae6950ab2f097"

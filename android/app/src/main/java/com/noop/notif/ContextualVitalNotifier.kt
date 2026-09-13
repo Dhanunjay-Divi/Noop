@@ -7,6 +7,7 @@ import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.noop.AppDiagnosticsRecorder
 import com.noop.R
 import com.noop.analytics.ContextualVitalPolicy
 import com.noop.ui.NotifPrefs
@@ -153,6 +154,25 @@ object ContextualVitalNotifier {
                 quietEndMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_END, 7 * 60),
             )
             if (!decision.shouldDeliver) {
+                if (decision.reason == ContextualVitalDecisionReason.DUPLICATE) {
+                    val prior = state.deliveries[candidate.kind]
+                    val receipt = ContextualPromptDeliveryLedger.pendingReceipt(
+                        context,
+                        ContextualPromptDeliveryOwner.VITAL_REVIEW,
+                    )
+                    if (
+                        receipt?.pending == true &&
+                        receipt.identity == candidate.fingerprint &&
+                        prior?.atMillis == receipt.atMillis
+                    ) {
+                        ContextualPromptDeliveryLedger.confirmPendingIfOwned(
+                            context = context,
+                            owner = ContextualPromptDeliveryOwner.VITAL_REVIEW,
+                            expectedAtMillis = receipt.atMillis,
+                            expectedIdentity = receipt.identity,
+                        )
+                    }
+                }
                 if (decision.reason == ContextualVitalDecisionReason.QUIET_HOURS) {
                     NotificationLifecycleLedger.suppressed(
                         context,
@@ -179,11 +199,13 @@ object ContextualVitalNotifier {
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .protectPrivateContent(context, CHANNEL_ID)
                 .build()
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context,
                 now.toInstant().toEpochMilli(),
+                ContextualPromptDeliveryOwner.VITAL_REVIEW,
+                identity = candidate.fingerprint,
             ) {
                 NotificationLifecycleLedger.posted(
                     context,
@@ -196,8 +218,8 @@ object ContextualVitalNotifier {
                     )
                 }
             }
-            if (postResult != ContextualPromptPostResult.POSTED) {
-                if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) {
+            if (postResult.status != ContextualPromptPostStatus.ACCEPTED) {
+                if (postResult.status == ContextualPromptPostStatus.GLOBAL_COOLDOWN) {
                     NotificationLifecycleLedger.suppressed(
                         context,
                         NotificationLifecycleId.CONTEXTUAL_VITAL,
@@ -206,7 +228,45 @@ object ContextualVitalNotifier {
                 }
                 return
             }
-            saveState(context, decision.nextState)
+            val acceptedReceipt = postResult.receipt ?: return
+            val deliveries = state.deliveries + (
+                candidate.kind to ContextualVitalDelivery(
+                    atMillis = acceptedReceipt.atMillis,
+                    fingerprint = candidate.fingerprint,
+                )
+            )
+            val privateStateStored = saveState(
+                context,
+                state.copy(
+                    lastGlobalDeliveryMillis = deliveries.values.maxOfOrNull { it.atMillis },
+                    deliveries = deliveries,
+                ),
+            )
+            if (!privateStateStored) {
+                AppDiagnosticsRecorder.record(
+                    "contextual_prompt.private_state",
+                    fields = mapOf(
+                        "owner" to ContextualPromptDeliveryOwner.VITAL_REVIEW.storageKey,
+                        "outcome" to "commit_failed",
+                    ),
+                )
+            } else if (
+                acceptedReceipt.pending &&
+                !ContextualPromptDeliveryLedger.confirmPendingIfOwned(
+                    context = context,
+                    owner = ContextualPromptDeliveryOwner.VITAL_REVIEW,
+                    expectedAtMillis = acceptedReceipt.atMillis,
+                    expectedIdentity = acceptedReceipt.identity,
+                )
+            ) {
+                AppDiagnosticsRecorder.record(
+                    "contextual_prompt.shared_state",
+                    fields = mapOf(
+                        "owner" to ContextualPromptDeliveryOwner.VITAL_REVIEW.storageKey,
+                        "outcome" to "commit_failed",
+                    ),
+                )
+            }
         }.onFailure {
             NotificationLifecycleLedger.unknown(
                 context,
@@ -246,14 +306,17 @@ object ContextualVitalNotifier {
         )
     }
 
-    private fun saveState(context: Context, state: ContextualVitalDeliveryState) {
+    private fun saveState(
+        context: Context,
+        state: ContextualVitalDeliveryState,
+    ): Boolean {
         val editor = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE).edit()
         state.lastGlobalDeliveryMillis?.let { editor.putLong(KEY_GLOBAL_AT, it) }
         for ((kind, delivery) in state.deliveries) {
             editor.putLong("${kind.name}.at", delivery.atMillis)
             editor.putString("${kind.name}.fingerprint", delivery.fingerprint)
         }
-        editor.apply()
+        return editor.commit()
     }
 
     private fun ensureChannel(context: Context) {

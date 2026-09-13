@@ -76,8 +76,36 @@ public actor ManagedStorageClient {
     }
     private struct SafetyContactsResponse: Decodable {
         let contacts: [ManagedSafetyContact]
+        let deliveryCapableCount: Int
         let minimumRequired: Int
         let maximumAllowed: Int
+
+        private enum CodingKeys: String, CodingKey {
+            case contacts
+            case deliveryCapableCount
+            case minimumRequired
+            case maximumAllowed
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            contacts = try values.decode(
+                [ManagedSafetyContact].self,
+                forKey: .contacts
+            )
+            deliveryCapableCount = try values.decodeIfPresent(
+                Int.self,
+                forKey: .deliveryCapableCount
+            ) ?? 0
+            minimumRequired = try values.decode(
+                Int.self,
+                forKey: .minimumRequired
+            )
+            maximumAllowed = try values.decode(
+                Int.self,
+                forKey: .maximumAllowed
+            )
+        }
     }
     private struct SafetyIncidentResponse: Decodable {
         let incident: ManagedSafetyIncident
@@ -119,6 +147,7 @@ public actor ManagedStorageClient {
     }
     private struct SafetyIncidentCreateRequest: Encodable {
         let requestID: UUID
+        let trigger: String
         let durationHours: Int
         let shareLocation: Bool
     }
@@ -503,14 +532,21 @@ public actor ManagedStorageClient {
             method: "GET",
             authorization: authorization
         )
+        let outboundCount = response.contacts.lazy.filter {
+            $0.role == "contact"
+        }.count
         guard response.minimumRequired == 2,
               response.maximumAllowed == 5,
+              response.deliveryCapableCount >= 0,
+              response.deliveryCapableCount <= outboundCount,
+              response.deliveryCapableCount <= response.maximumAllowed,
               response.contacts.count <= 25 else {
             throw ManagedStorageError.invalidResponse
         }
         try response.contacts.forEach(Self.validate)
         return ManagedSafetyContacts(
             contacts: response.contacts,
+            deliveryCapableCount: response.deliveryCapableCount,
             minimumRequired: response.minimumRequired,
             maximumAllowed: response.maximumAllowed
         )
@@ -528,12 +564,14 @@ public actor ManagedStorageClient {
     }
 
     public func createSafetyIncident(
+        trigger: String = "manual_sos",
         durationHours: Int,
         shareLocation: Bool,
         requestID: UUID,
         authorization: ManagedAuthorization
     ) async throws -> ManagedSafetyIncidentCreation {
-        guard [8, 12].contains(durationHours) else {
+        guard ["manual_sos", "band_sos"].contains(trigger),
+              [8, 12].contains(durationHours) else {
             throw ManagedStorageError.invalidResponse
         }
         let response: SafetyIncidentCreationResponse = try await send(
@@ -541,6 +579,7 @@ public actor ManagedStorageClient {
             method: "POST",
             body: SafetyIncidentCreateRequest(
                 requestID: requestID,
+                trigger: trigger,
                 durationHours: durationHours,
                 shareLocation: shareLocation
             ),
@@ -1202,11 +1241,26 @@ public actor ManagedStorageClient {
         guard sequence >= 0, (1...500).contains(limit) else {
             throw ManagedStorageError.invalidConfiguration
         }
-        return try await send(
-            path: "v1/managed/changes?after_sequence=\(sequence)&limit=\(limit)",
+        let feed: ManagedChangeFeed = try await send(
+            path: "v1/managed/changes?after_sequence=\(sequence)&limit=\(limit)"
+                + "&document_kind=\(ManagedDocumentKind.dayOwnership.rawValue)",
             method: "GET",
             authorization: authorization
         )
+        for change in feed.changes {
+            if change.resourceKind == "document" {
+                guard let document = change.document else {
+                    throw ManagedStorageError.invalidResponse
+                }
+                guard document.documentKind == .dayOwnership else {
+                    throw ManagedStorageError.invalidResponse
+                }
+                try Self.validateChangedDocument(document, change: change)
+            } else if change.document != nil {
+                throw ManagedStorageError.invalidResponse
+            }
+        }
+        return feed
     }
 
     public func createRestore(
@@ -1231,6 +1285,7 @@ public actor ManagedStorageClient {
             body: ManagedRestoreRequest(
                 requestID: requestID,
                 dataClasses: classes,
+                documentKinds: [.dayOwnership],
                 includeDocuments: true
             ),
             authorization: authorization
@@ -1386,6 +1441,7 @@ public actor ManagedStorageClient {
             body: mutation,
             authorization: authorization
         )
+        try Self.validateManagedDocument(response.document)
         return response.document
     }
 
@@ -1405,6 +1461,12 @@ public actor ManagedStorageClient {
             method: "GET",
             authorization: authorization
         )
+        try Self.validateManagedDocument(response.document)
+        guard response.document.documentKind == kind,
+              response.document.documentID == id,
+              revision.map({ response.document.revision == $0 }) ?? true else {
+            throw ManagedStorageError.invalidResponse
+        }
         return response.document
     }
 
@@ -1419,6 +1481,7 @@ public actor ManagedStorageClient {
             throw ManagedStorageError.invalidConfiguration
         }
         var query = [
+            "document_kind=\(ManagedDocumentKind.dayOwnership.rawValue)",
             "include_deleted=false",
             "snapshot_at=\(Self.queryValue(snapshotAt))",
             "limit=\(limit)",
@@ -1445,19 +1508,9 @@ public actor ManagedStorageClient {
             authorization: authorization
         )
         for document in page.documents {
-            guard document.revision > 0,
-                  document.contentMode == "server_readable",
-                  document.clientKeyID == nil,
-                  document.payloadJSON != nil,
-                  document.payloadCiphertextBase64 == nil,
-                  document.deletedAt == nil,
-                  document.contentSHA256.range(
-                      of: #"^[0-9a-f]{64}$"#,
-                      options: .regularExpression
-                  ) != nil,
-                  ManagedTimestamp.milliseconds(
-                      iso8601: document.updatedAt
-                  ) != nil else {
+            try Self.validateManagedDocument(document)
+            guard document.documentKind == .dayOwnership,
+                  document.deletedAt == nil else {
                 throw ManagedStorageError.invalidResponse
             }
         }
@@ -1468,6 +1521,142 @@ public actor ManagedStorageClient {
             }
         }
         return page
+    }
+
+    private static func validateManagedDocument(
+        _ document: ManagedDocument
+    ) throws {
+        let expectedContentMode = expectedDocumentContentMode(
+            for: document.documentKind
+        )
+        guard document.revision > 0,
+              document.originInstallationID.range(
+                  of: #"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"#,
+                  options: .regularExpression
+              ) != nil,
+              document.contentMode == expectedContentMode,
+              document.contentSHA256.range(
+                  of: #"^[0-9a-f]{64}$"#,
+                  options: .regularExpression
+              ) != nil,
+              ManagedTimestamp.milliseconds(
+                  iso8601: document.updatedAt
+              ) != nil,
+              document.deletedAt.map({
+                  ManagedTimestamp.milliseconds(iso8601: $0) != nil
+              }) ?? true else {
+            throw ManagedStorageError.invalidResponse
+        }
+
+        if document.deletedAt != nil {
+            let expectedDigest = ManagedDigest.sha256(
+                Data(
+                    (
+                        "deleted:\(document.documentKind.rawValue):"
+                            + "\(document.documentID.uuidString.lowercased()):"
+                            + "\(document.revision)"
+                    ).utf8
+                )
+            )
+            guard document.clientKeyID == nil,
+                  document.payloadJSON == nil,
+                  document.payloadCiphertextBase64 == nil,
+                  document.contentSHA256 == expectedDigest else {
+                throw ManagedStorageError.invalidResponse
+            }
+            return
+        }
+
+        if document.contentMode == "server_readable" {
+            guard document.clientKeyID == nil,
+                  let payload = document.payloadJSON,
+                  document.payloadCiphertextBase64 == nil else {
+                throw ManagedStorageError.invalidResponse
+            }
+            let canonical: Data
+            do {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [
+                    .sortedKeys,
+                    .withoutEscapingSlashes,
+                ]
+                canonical = try encoder.encode(payload)
+            } catch {
+                throw ManagedStorageError.invalidResponse
+            }
+            guard canonical.count <= 1_000_000,
+                  ManagedDigest.sha256(canonical)
+                    == document.contentSHA256 else {
+                throw ManagedStorageError.invalidResponse
+            }
+            return
+        }
+
+        guard document.clientKeyID != nil,
+              document.payloadJSON == nil,
+              let encoded = document.payloadCiphertextBase64,
+              let ciphertext = Data(base64Encoded: encoded),
+              ciphertext.base64EncodedString() == encoded,
+              (17...1_048_576).contains(ciphertext.count),
+              ManagedDigest.sha256(ciphertext)
+                == document.contentSHA256 else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validateChangedDocument(
+        _ document: ManagedChangeFeed.Change.Document,
+        change: ManagedChangeFeed.Change
+    ) throws {
+        let expectedContentMode = expectedDocumentContentMode(
+            for: document.documentKind
+        )
+        let deleted = document.deletedAt != nil
+        let shouldOmitClientKey =
+            deleted || expectedContentMode == "server_readable"
+        let validClientKey = shouldOmitClientKey
+            ? document.clientKeyID == nil
+            : document.clientKeyID != nil
+        let validDigest: Bool
+        if deleted {
+            validDigest = change.contentSHA256 == ManagedDigest.sha256(
+                Data(
+                    (
+                        "deleted:\(document.documentKind.rawValue):"
+                            + "\(document.documentID.uuidString.lowercased()):"
+                            + "\(document.revision)"
+                    ).utf8
+                )
+            )
+        } else {
+            validDigest = change.contentSHA256?.range(
+                of: #"^[0-9a-f]{64}$"#,
+                options: .regularExpression
+            ) != nil
+        }
+        guard document.revision > 0,
+              document.contentMode == expectedContentMode,
+              validClientKey,
+              ManagedTimestamp.milliseconds(
+                  iso8601: document.updatedAt
+              ) != nil,
+              document.deletedAt.map({
+                  ManagedTimestamp.milliseconds(iso8601: $0) != nil
+              }) ?? true,
+              change.resourceKind == "document",
+              change.resourceID == document.documentID,
+              change.chunk == nil,
+              validDigest,
+              (!deleted && change.operation == "upsert")
+                || (deleted && change.operation == "tombstone") else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func expectedDocumentContentMode(
+        for kind: ManagedDocumentKind
+    ) -> String {
+        kind == .dayOwnership ? "server_readable" : "client_encrypted"
     }
 
     public func requestErasure(
@@ -1846,7 +2035,7 @@ public actor ManagedStorageClient {
         guard ["owner", "contact"].contains(incident.role),
               !incident.ownerDisplayName.isEmpty,
               incident.ownerDisplayName.count <= 64,
-              incident.trigger == "manual_sos",
+              ["manual_sos", "band_sos"].contains(incident.trigger),
               active || terminal,
               [8, 12].contains(incident.durationHours),
               ManagedTimestamp.milliseconds(iso8601: incident.createdAt) != nil,

@@ -45,18 +45,6 @@ final class ActiveZoneWeekSnapshotTests: XCTestCase {
 
     @MainActor
     func testDaytimeActivityPersistsWhenNightIsBelowSleepSampleGate() async throws {
-        let defaults = UserDefaults.standard
-        let watermarkKey = "noop.analyzeWatermark"
-        let priorWatermark = defaults.object(forKey: watermarkKey)
-        defaults.removeObject(forKey: watermarkKey)
-        defer {
-            if let priorWatermark {
-                defaults.set(priorWatermark, forKey: watermarkKey)
-            } else {
-                defaults.removeObject(forKey: watermarkKey)
-            }
-        }
-
         let store = try await WhoopStore.inMemory()
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())

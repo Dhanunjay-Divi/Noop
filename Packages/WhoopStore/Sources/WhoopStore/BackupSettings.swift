@@ -11,7 +11,7 @@ import Foundation
 /// The whitelist is the contract. Its v1 keys remain mirrored by Android's `BackupSettingsCodec`;
 /// v2 added the schema stamp and exact civil birthday; v3 added a bounded set of durable, user-authored
 /// display, dashboard, reminder, and Sleep Planner preferences; v4 adds the optional user-selected
-/// target weight. Additive fields are ignored safely by
+/// target weight; v5 adds validated user-authored weekday wake overrides. Additive fields are ignored safely by
 /// older readers. Only stable, user-set, non-device-specific values are allowed. NEVER add device ids,
 /// peripheral ids, tokens, sync cursors, delivery de-dup state, derived planner outputs,
 /// or anything anonymity-sensitive: backups get copied into cloud folders and attached to GitHub
@@ -28,11 +28,13 @@ public enum BackupSettings {
     public static let entryName = "settings.json"
 
     /// V1 carried profile/unit values; v2 added exact civil DOB; v3 added explicitly allowlisted durable
-    /// preferences; v4 adds an optional user-selected target weight. Every older key remains for
-    /// downgrade compatibility.
-    public static let schemaVersion = 4
+    /// preferences; v4 adds an optional user-selected target weight; v5 adds portable weekday wake
+    /// overrides. Every older key remains for downgrade compatibility.
+    public static let schemaVersion = 5
     public static let schemaVersionKey = "settings.schemaVersion"
     public static let dateOfBirthKey = "profile.dateOfBirth"
+    static let perDayWakeMinutesKey = "windDown.perDayWakeMinutes"
+    static let legacyRecoveryMinutesKey = "windDown.recoveryMinutes"
 
     /// The JSON kind a whitelisted key must decode to. Anything else (wrong type, JSON bool posing
     /// as a number, nested objects) is dropped rather than guessed at.
@@ -83,8 +85,14 @@ public enum BackupSettings {
         "windDown.enabled": .bool,
         "windDown.sleepNeedMinutes": .int,
         "windDown.goalMode": .string,
+        // Android v5 briefly emitted this derived value. Retain it only so a
+        // managed document can round-trip during migration; snapshots and
+        // restores have no defaults mapping, so new backups never create or
+        // apply it.
+        legacyRecoveryMinutesKey: .int,
         "windDown.leadMinutes": .int,
         "sleepPlanner.wakeMinutes": .int,
+        perDayWakeMinutesKey: .string,
         "notif.masterEnabled": .bool,
         "notif.onlyWhenWorn": .bool,
         "notif.quietHoursEnabled": .bool,
@@ -140,6 +148,7 @@ public enum BackupSettings {
         "windDown.goalMode": "windDown.goalMode",
         "windDown.leadMinutes": "windDown.leadMinutes",
         "sleepPlanner.wakeMinutes": "windDown.wakeMinutes",
+        perDayWakeMinutesKey: "windDown.perDayWakeMinutes",
         "notif.masterEnabled": "notif.masterEnabled",
         "notif.onlyWhenWorn": "notif.onlyWhenWorn",
         "notif.quietHoursEnabled": "notif.quietHoursEnabled",
@@ -170,8 +179,14 @@ public enum BackupSettings {
         var out: [String: Any] = [schemaVersionKey: schemaVersion]
         for (canonical, kind) in whitelist {
             guard canonical != schemaVersionKey else { continue }
-            guard let storageKey = appleDefaultsKey[canonical],
-                  let raw = defaults.object(forKey: storageKey),
+            guard let storageKey = appleDefaultsKey[canonical] else { continue }
+            if canonical == perDayWakeMinutesKey {
+                guard let data = defaults.data(forKey: storageKey),
+                      let encoded = normalizedWakeOverrides(data: data) else { continue }
+                out[canonical] = encoded
+                continue
+            }
+            guard let raw = defaults.object(forKey: storageKey),
                   let coerced = normalized(raw, for: canonical, as: kind) else { continue }
             out[canonical] = coerced
         }
@@ -182,12 +197,24 @@ public enum BackupSettings {
     /// keys — the restore-side apply. Non-whitelisted keys and wrong-typed values are ignored. The
     /// caller decides WHEN (DataBackup applies only after a successful DB swap, never on a failed or
     /// rolled-back restore).
-    public static func apply(_ values: [String: Any], to defaults: UserDefaults) {
+    public static func apply(
+        _ values: [String: Any],
+        to defaults: UserDefaults,
+        clearDerivedPlannerState: Bool = false
+    ) {
+        if clearDerivedPlannerState {
+            defaults.removeObject(forKey: legacyRecoveryMinutesKey)
+        }
         for (canonical, kind) in whitelist {
             guard canonical != schemaVersionKey, canonical != dateOfBirthKey else { continue }
             guard let raw = values[canonical],
                   let coerced = normalized(raw, for: canonical, as: kind),
                   let storageKey = appleDefaultsKey[canonical] else { continue }
+            if canonical == perDayWakeMinutesKey,
+               let encoded = coerced as? String {
+                defaults.set(Data(encoded.utf8), forKey: storageKey)
+                continue
+            }
             defaults.set(coerced, forKey: storageKey)
         }
         // V2: an exact civil birthday wins over the lossy whole-years compatibility field. Store it as
@@ -346,6 +373,11 @@ public enum BackupSettings {
             return boundedInt(coerced, 5 * 60...11 * 60)
         case "windDown.goalMode":
             return allowedString(coerced, ["target", "balance", "extraOpportunity"])
+        case legacyRecoveryMinutesKey:
+            return boundedInt(coerced, 0...60)
+        case perDayWakeMinutesKey:
+            guard let encoded = coerced as? String else { return nil }
+            return normalizedWakeOverrides(encoded)
         case "windDown.leadMinutes":
             return boundedInt(coerced, 0...120)
         case "sleepPlanner.wakeMinutes",
@@ -385,6 +417,37 @@ public enum BackupSettings {
             if selected.count == 5 { break }
         }
         return selected.isEmpty ? nil : selected.joined(separator: ",")
+    }
+
+    private static func normalizedWakeOverrides(data: Data) -> String? {
+        guard let encoded = String(data: data, encoding: .utf8) else { return nil }
+        return normalizedWakeOverrides(encoded)
+    }
+
+    private static func normalizedWakeOverrides(_ encoded: String) -> String? {
+        guard let data = encoded.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let values = object as? [String: Any],
+              values.count <= 7 else { return nil }
+        var normalized: [String: Int] = [:]
+        for (key, raw) in values {
+            guard let weekday = Int(key),
+                  (1...7).contains(weekday),
+                  String(weekday) == key,
+                  let number = raw as? NSNumber,
+                  !isBoolean(number) else { return nil }
+            let value = number.doubleValue
+            guard value.isFinite,
+                  value.rounded(.towardZero) == value,
+                  value >= 0,
+                  value < 24 * 60 else { return nil }
+            normalized[key] = Int(value)
+        }
+        guard let canonical = try? JSONSerialization.data(
+            withJSONObject: normalized,
+            options: [.sortedKeys]
+        ) else { return nil }
+        return String(data: canonical, encoding: .utf8)
     }
 
     private static func boundedInt(_ value: Any, _ range: ClosedRange<Int>) -> Int? {

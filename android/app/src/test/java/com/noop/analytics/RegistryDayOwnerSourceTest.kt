@@ -4,6 +4,7 @@ import com.noop.data.DayOwnershipRow
 import com.noop.data.DeviceRegistry
 import com.noop.data.DeviceRegistryDao
 import com.noop.data.DeviceStatus
+import com.noop.data.AnalysisAffectedRange
 import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
 import kotlinx.coroutines.runBlocking
@@ -37,6 +38,18 @@ class RegistryDayOwnerSourceTest {
         override suspend fun promote(id: String, now: Long) {
             devices[id]?.let { devices[id] = it.copy(status = DeviceStatus.active.name, lastSeenAt = now) }
         }
+        override suspend fun ownershipAnalysisInputRange() =
+            AnalysisAffectedRange(null, null)
+        override suspend fun advanceAnalysisInvalidation(
+            sourceId: String,
+            earliestAffectedTs: Long?,
+            latestAffectedTs: Long?,
+        ): Int = 0
+        override suspend fun insertAnalysisInvalidationIfAbsent(
+            sourceId: String,
+            earliestAffectedTs: Long?,
+            latestAffectedTs: Long?,
+        ): Long = 1L
         override suspend fun archiveDevice(id: String) {
             devices[id]?.let { devices[id] = it.copy(status = DeviceStatus.archived.name) }
         }
@@ -81,6 +94,7 @@ class RegistryDayOwnerSourceTest {
         override suspend fun deleteLiveSessionsFor(deviceId: String) {}
         override suspend fun deleteDismissedWorkoutsFor(deviceId: String) {}
         override suspend fun deleteDismissedSleepsFor(deviceId: String) {}
+        override suspend fun deleteAnalysisDirtyFor(deviceId: String) {}
     }
 
     private fun registry(dao: FakeDao) = DeviceRegistry(
@@ -174,6 +188,23 @@ class RegistryDayOwnerSourceTest {
         // Even though the active strap has data, the locked override pins the day to the import.
         val owner = resolveWith(src, "2026-06-15", mapOf("my-whoop" to true, "oura" to true))
         assertEquals("oura", owner)
+    }
+
+    @Test
+    fun sourceBoundPassCannotRedirectToActiveOrLockedOwner() = runBlocking {
+        val delegate = object : IntelligenceEngine.DayOwnerSource {
+            override suspend fun candidatePriorities() =
+                listOf("active-band" to 0, "old-band" to 1)
+
+            override suspend fun lockedOwner(day: String): String = "active-band"
+
+            override suspend fun activeWriteId(): String = "active-band"
+        }
+        val bound = IntelligenceEngine.boundDayOwnerSource("old-band", delegate)
+
+        assertEquals(listOf("old-band" to 0), bound.candidatePriorities())
+        assertEquals("old-band", bound.lockedOwner("2026-09-11"))
+        assertEquals("old-band", bound.activeWriteId())
     }
 
     @Test

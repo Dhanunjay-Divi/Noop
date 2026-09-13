@@ -13,7 +13,7 @@ import kotlin.math.roundToInt
  *   - sexBaseline: male 2960, female 2160, unspecified/other 2560 (read from the profile sex field;
  *     `UserProfile.sex` carries "male" | "female" | "nonbinary"). These are DRINK-water targets: the
  *     EFSA/IOM total-water references (3700/2700/3200) minus the ~20% obtained from food, so the number
- *     shown is what the user must actually drink. Do not restore the raw total-water figures here.
+ *     shown is a beverage-only reference estimate. Do not restore the raw total-water figures here.
  *   - effortBump: when today's Effort/strain (0..100) is available, round(effort / 100 * 700), capped
  *     to 0..700; when there's no Effort yet, 0.
  *
@@ -95,19 +95,16 @@ object HydrationGoal {
         return ((value + step / 2) / step) * step
     }
 
-    // R3: metric-aware inputs (weight + heat) — BYTE-IDENTICAL to the Swift twin. These EXTEND the goal
+    // R3: metric-aware input (weight) — BYTE-IDENTICAL to the Swift twin. This extends the goal
     // without changing dailyGoalMl(sex, effort); that overload still returns the sex-baseline result so
-    // existing history/tests are unaffected. GOAL = round50(weightBaseline + effortBump + heatBump).
+    // existing history/tests are unaffected. Wrist skin temperature is deliberately not used because it
+    // is not validated evidence of an individual's fluid requirement.
 
     /** ~35 ml per kg body mass per day — the standard adult maintenance estimate. */
     const val ML_PER_KG: Int = 35
     /** The weight-derived baseline is clamped to a sane adult range (ml). */
     const val WEIGHT_BASELINE_FLOOR: Int = 1500
     const val WEIGHT_BASELINE_CEIL: Int = 5000
-    /** Heat bump: extra ml per whole °C of skin-temp elevation above baseline, and its cap. */
-    const val HEAT_BUMP_PER_DEG: Int = 300
-    const val MAX_HEAT_BUMP: Int = 600
-
     /** Baseline ml: weight-based (round(35*kg) clamped) when [weightKg] is finite and > 0, else the sex
      *  baseline. Null/non-finite/<=0 weight -> sex baseline (back-compat). */
     fun weightBaselineMl(sex: String, weightKg: Double?): Int {
@@ -116,21 +113,45 @@ object HydrationGoal {
         return raw.coerceIn(WEIGHT_BASELINE_FLOOR, WEIGHT_BASELINE_CEIL)
     }
 
-    /** Heat bump (ml) from skin-temp deviation in °C above baseline: round(devC*300) clamped 0..600.
-     *  Null/non-finite, absolute imported temperatures, implausible deviations, or non-positive
-     *  deviations -> 0. */
-    fun heatBumpMl(skinTempDevC: Double?): Int {
-        val dev = VitalBands.skinTempDeviation(skinTempDevC) ?: return 0
-        if (dev <= 0.0) return 0
-        val raw = (dev * HEAT_BUMP_PER_DEG).roundToInt()
-        return raw.coerceIn(0, MAX_HEAT_BUMP)
+    /** Compatibility shim for older callers. Skin temperature is not used to infer fluid need. */
+    fun heatBumpMl(@Suppress("UNUSED_PARAMETER") skinTempDevC: Double?): Int = 0
+
+    /** The metric-aware daily goal (ml): round50(weightBaseline + effortBump). */
+    fun dailyGoalMl(sex: String, weightKg: Double?, effort: Double?): Int {
+        val raw = weightBaselineMl(sex, weightKg) + effortBump(effort)
+        return roundToNearest(raw, ROUND_TO)
     }
 
-    /** The metric-aware daily goal (ml): round50(weightBaseline + effortBump + heatBump). With
-     *  weightKg == null and skinTempDevC == null this equals dailyGoalMl(sex, effort). */
-    fun dailyGoalMl(sex: String, weightKg: Double?, effort: Double?, skinTempDevC: Double?): Int {
-        val raw = weightBaselineMl(sex, weightKg) + effortBump(effort) + heatBumpMl(skinTempDevC)
-        return roundToNearest(raw, ROUND_TO)
+    /** Source-compatible overload. [skinTempDevC] is intentionally ignored. */
+    fun dailyGoalMl(
+        sex: String,
+        weightKg: Double?,
+        effort: Double?,
+        @Suppress("UNUSED_PARAMETER") skinTempDevC: Double?,
+    ): Int = dailyGoalMl(sex, weightKg, effort)
+
+    /**
+     * Product-facing adult hydration estimate. Returns null until the profile inputs used for the target
+     * are explicitly confirmed. Manual intake logging remains available without a target.
+     *
+     * A confirmed plausible weight is preferred. Without one, a confirmed sex baseline may be used.
+     * Confirmed adult age is always required.
+     */
+    fun personalizedDailyGoalMl(
+        age: Int,
+        ageConfirmed: Boolean,
+        sex: String,
+        sexConfirmed: Boolean,
+        weightKg: Double?,
+        weightConfirmed: Boolean,
+        effort: Double?,
+    ): Int? {
+        if (!ageConfirmed || age < BodyProfilePolicy.ADULT_MINIMUM_AGE) return null
+        if (weightConfirmed && weightKg != null && weightKg.isFinite() && weightKg in 20.0..400.0) {
+            return dailyGoalMl(sex, weightKg, effort)
+        }
+        if (!sexConfirmed) return null
+        return dailyGoalMl(sex, effort)
     }
 
     /** Evenly spaced reminder minutes-of-day within waking hours [wakeHour, sleepHour); quiet hours

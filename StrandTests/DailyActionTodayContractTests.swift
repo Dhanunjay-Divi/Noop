@@ -35,11 +35,19 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(today.contains("DailyActionPlanner.plan("))
         XCTAssertTrue(today.contains("BehaviorStore.decodeDailyActionCheckIn("))
         XCTAssertTrue(today.contains("setDailyActionCheckIn("))
+        XCTAssertTrue(today.contains(
+            "behavior.setDailyActionCheckIn(value, for: selectedDayKey)"
+        ))
         XCTAssertTrue(today.contains("selectedDayOffset == 0"))
         XCTAssertTrue(today.contains("dailyPlanTargetStatusKey(plan)"))
         XCTAssertTrue(today.contains(#""daily_plan.target.withheld""#))
         XCTAssertTrue(today.contains("@Environment(\\.dynamicTypeSize)"))
         XCTAssertTrue(today.contains("if !dynamicTypeSize.isAccessibilitySize"))
+        XCTAssertTrue(today.contains("let compactAdjustment = todayDetailsExpanded"))
+        XCTAssertTrue(today.contains("if let compactAdjustment"))
+        XCTAssertTrue(today.contains("dailyPlanWorkoutAdjustment(compactAdjustment)"))
+        XCTAssertTrue(today.contains("--demo-daily-plan-collapsed"))
+        XCTAssertTrue(today.contains("if dynamicTypeSize.isAccessibilitySize"))
 
         for state in ["checkInNeeded", "calibrating", "recoveryShift", "stop", "ready"] {
             XCTAssertTrue(today.contains("case .\(state):"), "Missing \(state) presentation")
@@ -62,9 +70,17 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(today.contains("NoopPrefs.dailyActionCheckIn(context, selectedDayKey)"))
         XCTAssertTrue(today.contains("NoopPrefs.setDailyActionCheckIn("))
         XCTAssertTrue(today.contains("DailyActionPlanner.plan("))
-        XCTAssertTrue(today.contains("TodaySection.WHY -> DailyPlanWhySection("))
-        XCTAssertTrue(today.contains("TodaySection.TARGET -> DailyPlanTargetSection("))
-        XCTAssertTrue(today.contains("TodaySection.WATCH -> DailyPlanWatchSection("))
+        XCTAssertTrue(today.contains("TodaySection.WHY -> TodayDetailSection("))
+        XCTAssertTrue(today.contains("DailyPlanWhySection("))
+        XCTAssertTrue(today.contains("TodaySection.TARGET -> TodayDetailSection("))
+        XCTAssertTrue(today.contains("DailyPlanTargetSection("))
+        XCTAssertTrue(today.contains("TodaySection.WATCH -> TodayDetailSection("))
+        XCTAssertTrue(today.contains("DailyPlanWatchSection("))
+        XCTAssertTrue(today.contains(
+            "compactAdjustment = dailyActionPlan.workoutAdjustment"
+        ))
+        XCTAssertTrue(today.contains("if (!expanded && compactAdjustment != null)"))
+        XCTAssertTrue(today.contains("LocalDensity.current.fontScale >= 1.3f"))
         XCTAssertTrue(today.contains("dailyPlanTargetStatusResource(plan)"))
         XCTAssertTrue(today.contains("R.string.daily_plan_target_withheld"))
         XCTAssertTrue(today.contains(
@@ -80,13 +96,34 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertFalse(today.contains("A solid session is well supported"))
     }
 
+    func testAppleTodayRefreshesItsCachedPlanWhenContextualInputsChange() throws {
+        let today = try text("Strand/Liquid/LiquidTodayView.swift")
+        let observer = try XCTUnwrap(
+            today.range(
+                of: "NotificationCenter.default.publisher(for: ContextualInterventionInputs.didChange)"
+            )
+        )
+        let refresh = try XCTUnwrap(
+            today.range(
+                of: "refreshCachedDailyActionPlanForCalendar()",
+                range: observer.upperBound..<today.endIndex
+            )
+        )
+
+        XCTAssertLessThan(observer.lowerBound, refresh.lowerBound)
+        XCTAssertTrue(today.contains("sleepTargetMinutes: WindDownNudge.sleepNeedMinutes"))
+        XCTAssertTrue(today.contains("sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed"))
+    }
+
     func testDailyPlanVisualMatrixUsesRealPlannerStatesAndDisposableSimulator() throws {
         let today = try text("Strand/Liquid/LiquidTodayView.swift")
         let script = try text("Tools/ios-daily-plan-visual-qa.sh")
 
         XCTAssertTrue(today.contains(#""--demo-daily-plan""#))
         XCTAssertTrue(today.contains(#""--demo-daily-plan-check-in""#))
+        XCTAssertTrue(today.contains(#""--demo-planned-workout""#))
         XCTAssertTrue(today.contains("Daily Plan QA availability="))
+        XCTAssertTrue(today.contains("plannedWorkout="))
         for state in ["unanswered", "asUsual", "belowUsual", "painOrUnwell"] {
             XCTAssertTrue(script.contains(state), state)
         }
@@ -95,10 +132,15 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(script.contains("trap cleanup EXIT INT TERM"))
         XCTAssertTrue(script.contains("simctl delete"))
         XCTAssertTrue(script.contains("validate_capture"))
-        XCTAssertTrue(script.contains("assert_log_state"))
+        XCTAssertTrue(script.contains("wait_for_qa_state"))
+        XCTAssertTrue(script.contains("noop-daily-plan-qa.txt"))
+        XCTAssertTrue(script.contains("|| return 1"))
+        XCTAssertTrue(script.contains("|| exit 1"))
         XCTAssertTrue(script.contains("warm_up_seed"))
-        XCTAssertTrue(script.contains("AppleDemoSeeder: seeded"))
+        XCTAssertTrue(script.contains("*.png(N)"))
         XCTAssertTrue(script.contains("signalstats"))
+        XCTAssertTrue(script.contains("capture planned-workout"))
+        XCTAssertTrue(script.contains("capture accessibility-planned-workout"))
     }
 
     func testGeneratedDailyPlanCopyCoversNineLocalesAndBothPlatforms() throws {

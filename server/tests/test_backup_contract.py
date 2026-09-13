@@ -99,7 +99,7 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "noop_backup_passphrase" in compose
     assert "NOOP_BACKUP_SECRET_FILE" in compose
     assert "backup-healthcheck.sh" in compose
-    for safety_table in (
+    for required_relation in (
         "safety_profiles",
         "safety_contacts",
         "safety_dispatches",
@@ -116,8 +116,19 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
         "safety_dispatch_tombstones",
         "installation_credentials",
         "installation_devices",
+        "managed_accounts",
+        "managed_social_profiles",
+        "managed_documents",
+        "managed_document_heads",
+        "managed_account_change_sequences",
+        "managed_change_events",
+        "managed_document_contract_v2_readiness",
+        "managed_safety_incidents",
+        "managed_safety_page_quota_events",
+        "managed_safety_locations",
+        "managed_safety_push_deliveries",
     ):
-        assert safety_table in drill
+        assert required_relation in drill
     assert "restore drill failed Safety control verification" in drill
     assert "restore-application-smoke.sh" in drill
     assert "restore-application-smoke.sh" in backup_image
@@ -136,6 +147,20 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "011_safety_data_lifecycle.sql" in smoke
     assert "012_tenancy_cutover_invariants.sql" in smoke
     assert "013_safety_escalation_contract.sql" in smoke
+    assert "034_managed_document_contract_v2_add.sql" in smoke
+    assert "035_managed_document_plaintext_quarantine.sql" in smoke
+    assert "036_managed_document_contract_v2_validate.sql" in smoke
+    assert "037_managed_document_contract_v2_activate.sql" in smoke
+    assert "038_managed_safety_band_sos.sql" in smoke
+    assert "managed_document_contract_v2_readiness" in smoke
+    assert "content contract activated before client readiness" in smoke
+    assert "managed_safety_page_quota_trigger" in smoke
+    assert "managed_social_profile_account_immutability" in smoke
+    assert "managed_safety_incident_quota_immutability" in smoke
+    assert "managed_safety_page_quota_incident_consistency" in smoke
+    assert "managed document head does not match its current revision" in smoke
+    assert "managed Safety quota provenance is inconsistent" in smoke
+    assert "terminal managed Safety incident retained precise location" in smoke
     assert "Safety escalation round is outside its incident contract" in smoke
     assert "orphaned Safety queue rows were restored" in smoke
     assert "orphaned installation device ownership was restored" in smoke

@@ -117,6 +117,14 @@ final class LiquidChargeCarryTests: XCTestCase {
         XCTAssertEqual(Display.scored(pct: 61).pct, 61)
     }
 
+    func testOnlyTodaysOwnScoreCanShapeLiveSessionCopy() {
+        XCTAssertTrue(Display.scored(pct: 61).hasCurrentRecovery)
+        XCTAssertFalse(Display.carried(pct: 82.3, caption: "Last night · 4 Jul").hasCurrentRecovery)
+        XCTAssertFalse(Display.calibrating(nights: 2).hasCurrentRecovery)
+        XCTAssertFalse(Display.baselineReady.hasCurrentRecovery)
+        XCTAssertFalse(Display.noData.hasCurrentRecovery)
+    }
+
     /// Calibrating and no-data draw nothing — the honest empty vessel. Never a fabricated 0.
     func testStatesWithNoHonestNumberDrawNothing() {
         XCTAssertNil(Display.calibrating(nights: 2).pct)

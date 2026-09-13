@@ -9,6 +9,39 @@ import StrandAnalytics
 /// here pins the code path the View actually runs. Mirrors WeeklyDigestCardFormattingTest's rough cases.
 final class WeeklyDigestChipStyleTests: XCTestCase {
 
+    func testRecoveryPresentationUsesPinnedBandEdges() {
+        XCTAssertEqual(RecoveryBandPresentation.level(for: 33.999), .low)
+        XCTAssertEqual(RecoveryBandPresentation.level(for: 34), .steady)
+        XCTAssertEqual(RecoveryBandPresentation.level(for: 66.999), .steady)
+        XCTAssertEqual(RecoveryBandPresentation.level(for: 67), .strong)
+    }
+
+    func testRecoveryPresentationUsesOneSummaryVocabulary() {
+        XCTAssertEqual(RecoveryBandPresentation.label(for: 10), "Low")
+        XCTAssertEqual(RecoveryBandPresentation.label(for: 41), "Steady")
+        XCTAssertEqual(RecoveryBandPresentation.label(for: 82), "Strong")
+    }
+
+    func testImportedRestDisclosureIsScopedToTheSelectedWeek() {
+        var current = ImportedSleepFigures()
+        current.performancePct = 94
+        var prior = ImportedSleepFigures()
+        prior.performancePct = 88
+
+        XCTAssertTrue(
+            WeeklyDigestSource.hasImportedRestScore(
+                ["2026-09-09": current, "2026-09-01": prior],
+                anchorDay: "2026-09-12"
+            )
+        )
+        XCTAssertFalse(
+            WeeklyDigestSource.hasImportedRestScore(
+                ["2026-09-01": prior],
+                anchorDay: "2026-09-12"
+            )
+        )
+    }
+
     private func stat(mean: Double, n: Int) -> SeriesStat {
         SeriesStat(mean: mean, median: mean, min: mean, max: mean, stdev: 0, n: n, slopePerDay: 0)
     }
@@ -33,11 +66,23 @@ final class WeeklyDigestChipStyleTests: XCTestCase {
     // Full weeks (>= the focus floor both sides) keep their verdict tone + frame.
     func testFullWeeksAreNotNeutralized() {
         let full = summary(.charge, thisMean: 56, thisN: 5, prevMean: 50, prevN: 5)
+        XCTAssertTrue(WeeklyDigestChipStyle.hasDefinedPercent(full))
         XCTAssertFalse(WeeklyDigestChipStyle.neutralizesTone(full))
         XCTAssertFalse(WeeklyDigestChipStyle.dropsVerdictFrame(full))
         // 3 days each side is exactly the focus floor: still a real comparison.
         let floor = summary(.charge, thisMean: 56, thisN: 3, prevMean: 50, prevN: 3)
         XCTAssertFalse(WeeklyDigestChipStyle.neutralizesTone(floor))
+    }
+
+    func testRecoveryDeltaUsesCurrentBandToneInsteadOfDirectionalVerdict() {
+        let decline = summary(.charge, thisMean: 72, thisN: 5, prevMean: 82, prevN: 5)
+        XCTAssertEqual(WeeklyDigestChipStyle.tone(for: decline), .recoveryBand)
+    }
+
+    func testSubOnePercentDeltaKeepsDirectionSeparateFromMagnitude() {
+        let decline = summary(.charge, thisMean: 49.8, thisN: 5, prevMean: 50, prevN: 5)
+        XCTAssertEqual(WeeklyDigestChipStyle.deltaText(for: decline), "<1%")
+        XCTAssertFalse(WeeklyDigestChipStyle.deltaText(for: decline).contains("−"))
     }
 
     // A sparse PREVIOUS week (the reporter's #463 shape: this week 5 days, last week 2) is rough:
@@ -55,9 +100,18 @@ final class WeeklyDigestChipStyleTests: XCTestCase {
         XCTAssertTrue(WeeklyDigestChipStyle.dropsVerdictFrame(s))
     }
 
-    // A missing side reads "new" (neutral already) and is NOT rough - rough is only thin-but-present.
-    func testMissingSideIsNotNeutralized() {
+    // A missing side reads "new" and has no percentage denominator.
+    func testMissingSideIsNeutralAndUnpercentable() {
         let s = summary(.charge, thisMean: 60, thisN: 5, prevMean: 0, prevN: 0)
-        XCTAssertFalse(WeeklyDigestChipStyle.neutralizesTone(s))
+        XCTAssertFalse(WeeklyDigestChipStyle.hasDefinedPercent(s))
+        XCTAssertTrue(WeeklyDigestChipStyle.neutralizesTone(s))
+        XCTAssertTrue(WeeklyDigestChipStyle.dropsVerdictFrame(s))
+    }
+
+    func testZeroBaselineIsNewAndNeutral() {
+        let s = summary(.effort, thisMean: 40, thisN: 5, prevMean: 0, prevN: 3)
+        XCTAssertFalse(WeeklyDigestChipStyle.hasDefinedPercent(s))
+        XCTAssertTrue(WeeklyDigestChipStyle.neutralizesTone(s))
+        XCTAssertTrue(WeeklyDigestChipStyle.dropsVerdictFrame(s))
     }
 }

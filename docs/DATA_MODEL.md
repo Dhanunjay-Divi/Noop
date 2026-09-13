@@ -66,7 +66,7 @@ settings before any query runs:
 `WhoopStore` is an `actor`: GRDB calls enter through the actor, while the pool can
 serve committed WAL read snapshots alongside the single writer. The migrator
 (`makeMigrator()`, below) is the source of truth for what tables/columns exist and
-currently runs through **v30** (`v30-remote-sync-pending-indexes`).
+currently runs through **v57** (`v57-analysis-dirty-source`).
 
 ---
 
@@ -79,8 +79,10 @@ The schema falls into these groups:
 | **Device/source registry** | `device`, `pairedDevice`, `dayOwnership` | BLE pairing, source capabilities, active/day ownership |
 | **Decoded streams** (durable) | `hrSample`, `rrInterval`, `event`, `battery`, `spo2Sample`, `skinTempSample`, `respSample`, `gravitySample`, `stepSample`, `ppgHrSample`, `sleepStateSample`, `ppgWaveformSample`, `rawImuSample` | Decoded from strap frames on-device |
 | **Raw outbox** (transient) | `rawBatch` | Compressed raw BLE frames, prunable |
-| **Bookkeeping** | `cursors` | Highwater / read cursors |
+| **Bookkeeping** | `cursors`, `analysisDirtySource` | Highwater/read cursors and durable O(1) scoring invalidation |
 | **Metric and user-data stores** | `sleepSession`, `dailyMetric`, `journal`, `workout`, `appleDaily`, `metricSeries`, `labMarker`, `liveSession` | Derived metrics, imports, user-entered labs, coaching sessions |
+| **Body, nutrition, strength, and hydration** | `bodyMeasurement`, `nutritionEntry`, nutrition catalog tables, strength planning/session tables, `hydrationEntry` | Confirmed/imported body measurements and explicit user records |
+| **Managed-sync bookkeeping** | Managed upload windows, dirty windows, restore checkpoints, document state, and document outbox tables | Optional NOOP+ transfer state; not evidence that a document was uploaded |
 | **Oura raw archive** (durable, v25) | `ouraRaw` | Verbatim Oura API payloads behind the opt-in cloud import — see below |
 
 All timestamp columns named `ts`, `startTs`, `endTs`, `capturedAt`, etc. are **unix seconds**
@@ -123,6 +125,15 @@ Migrations are registered in `Packages/WhoopStore/Sources/WhoopStore/Database.sw
 | **v27–v28** | Add packed PPG waveform and raw IMU sample stores. |
 | **v29** | Adds the durable self-host delivery marker to `stepSample`. |
 | **v30** | Adds partial indexes over pending self-hosted-sync rows. |
+| **v31–v33** | Quarantine implausible future R-R rows and add stable R-R ordering/source-channel identity. |
+| **v34–v38** | Add body measurements, workout steps, corrected device capability state, HealthKit sync state, and nullable sleep motion-quality evidence. |
+| **v39–v43** | Add nutrition entries/catalog data, strength-training and set-rest state, and bounded Coach history memory. |
+| **v44–v46** | Add exact sleep R-R evidence, daily HRV method provenance, and adaptive strength/gym planning. |
+| **v47–v49** | Add on-demand remote-sync indexes plus durable sleep-state and PPG delivery outboxes. |
+| **v50–v54** | Add managed-sync state, upload-window state, dirty-window tracking, snapshot restore checkpoints, and document synchronization state. |
+| **v55** | Adds editable hydration entries and migrates the legacy scalar into a row projection. |
+| **v56** | Adds managed-document tracking for hydration rows while retaining the client-encrypted/local-first transfer gate. |
+| **v57** | Adds the per-source `analysisDirtySource` generation ledger and score-bearing stream triggers. Android carries the matching schema as Room v48. |
 
 ### Decoded-row remote-delivery markers
 
@@ -341,6 +352,30 @@ A simple key/value table for incremental-processing highwater marks (`Cursors.sw
 Helpers namespace the `name`: `highwater:<stream>` (upload/forward-only highwater) and
 `read:<stream>` (pull cursor). The distinct prefixes keep the two cursor families from colliding
 for the same stream.
+
+### `analysisDirtySource` *(Apple v57 / Android Room v48)*
+
+One row per nonblank source with score-bearing raw input. Inserts, deletes, and
+score-column updates on `hrSample`, `ppgHrSample`, `rrInterval`,
+`gravitySample`, `respSample`, `skinTempSample`, `spo2Sample`, `stepSample`,
+`sleepStateSample`, and `event` advance `generation`. Transport-only `synced`
+updates, battery rows, and raw waveform rows do not.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `deviceId` | TEXT NOT NULL | **Primary key.** Source whose scoring input changed. |
+| `generation` | INTEGER NOT NULL | Monotonic input generation advanced by triggers. |
+| `acknowledgedGeneration` | INTEGER NOT NULL | Exact generation completed by the last successful analysis pass. |
+
+Analysis reads a generation snapshot without clearing it, persists all required
+derived output, then acknowledges only that snapshot. A crash or cancellation
+before acknowledgement remains pending after restart. A concurrent raw write
+advances beyond the snapshot and therefore remains dirty. Existing databases
+seed one pending generation from the ten score-bearing tables; deleting all
+data for a source removes this marker last, after raw-row delete triggers run.
+The trigger insert path uses guarded `INSERT ... SELECT ... WHERE NOT EXISTS`
+rather than a trigger-level conflict clause, so an outer SQLite UPSERT or
+REPLACE cannot override the marker's conflict behavior.
 
 ---
 

@@ -424,6 +424,9 @@ class RoomManagedSyncStateStore(
     override suspend fun changeSequence(): Long =
         dao.changeCursor(accountScopeHash)?.sequence ?: 0L
 
+    override suspend fun changeFeedCapabilityVersion(): Int =
+        dao.changeCursor(accountScopeHash)?.changeFeedCapabilityVersion ?: 0
+
     override suspend fun saveChangeSequence(sequence: Long) {
         dao.advanceChangeCursor(accountScopeHash, sequence, clock())
     }
@@ -460,7 +463,7 @@ class RoomManagedSyncStateStore(
         }.getOrElse { throw ManagedStorageException.InvalidResponse() }
         val requestId = runCatching { UUID.fromString(stored.requestId) }
             .getOrElse { throw ManagedStorageException.InvalidResponse() }
-        if (classes.isEmpty() || classes != classes.sorted()) {
+        if (classes != classes.sorted() || stored.changeFeedCapabilityVersion < 0) {
             throw ManagedStorageException.InvalidResponse()
         }
         if (stored.restoreJobId == null) {
@@ -480,7 +483,11 @@ class RoomManagedSyncStateStore(
             ) {
                 throw ManagedStorageException.InvalidResponse()
             }
-            return ManagedSnapshotRestoreCheckpoint(requestId, classes)
+            return ManagedSnapshotRestoreCheckpoint(
+                requestId,
+                classes,
+                stored.changeFeedCapabilityVersion,
+            )
         }
         val restoreJobId = runCatching { UUID.fromString(stored.restoreJobId) }
             .getOrElse { throw ManagedStorageException.InvalidResponse() }
@@ -519,6 +526,7 @@ class RoomManagedSyncStateStore(
         return ManagedSnapshotRestoreCheckpoint(
             requestId = requestId,
             dataClasses = classes,
+            changeFeedCapabilityVersion = stored.changeFeedCapabilityVersion,
             restoreJobId = restoreJobId,
             snapshotAt = stored.snapshotAt
                 ?: throw ManagedStorageException.InvalidResponse(),
@@ -540,8 +548,8 @@ class RoomManagedSyncStateStore(
     override suspend fun saveSnapshotRestoreCheckpoint(
         checkpoint: ManagedSnapshotRestoreCheckpoint,
     ) {
-        if (checkpoint.dataClasses.isEmpty() ||
-            checkpoint.dataClasses != checkpoint.dataClasses.sorted() ||
+        if (checkpoint.dataClasses != checkpoint.dataClasses.sorted() ||
+            checkpoint.changeFeedCapabilityVersion < 0 ||
             (checkpoint.cursor != null && checkpoint.restoreJobId == null) ||
             (checkpoint.documentCursor != null && checkpoint.restoreJobId == null)
         ) {
@@ -552,6 +560,7 @@ class RoomManagedSyncStateStore(
                 accountScopeHash = accountScopeHash,
                 requestId = checkpoint.requestId.toString(),
                 dataClassesJSON = JSONArray(checkpoint.dataClasses).toString(),
+                changeFeedCapabilityVersion = checkpoint.changeFeedCapabilityVersion,
                 restoreJobId = checkpoint.restoreJobId?.toString(),
                 snapshotAt = checkpoint.snapshotAt,
                 changeSequence = checkpoint.changeSequence,
@@ -575,7 +584,15 @@ class RoomManagedSyncStateStore(
         dao.deleteSnapshotRestore(accountScopeHash)
     }
 
-    override suspend fun finishSnapshotRestore(changeSequence: Long) {
-        dao.finishSnapshotRestore(accountScopeHash, changeSequence, clock())
+    override suspend fun finishSnapshotRestore(
+        changeSequence: Long,
+        changeFeedCapabilityVersion: Int,
+    ) {
+        dao.finishSnapshotRestore(
+            accountScopeHash,
+            changeSequence,
+            changeFeedCapabilityVersion,
+            clock(),
+        )
     }
 }

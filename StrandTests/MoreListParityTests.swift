@@ -132,27 +132,31 @@ final class MoreListParityTests: XCTestCase {
     }
 
     /// The iPhone shell owns one custom bar outside the native TabView. Its clearance must come from
-    /// that bar's rendered height and be applied once as an inherited scroll-content margin. This keeps
-    /// final rows reachable and fully opaque without shrinking the full-bleed page backdrop.
-    func testCustomiPhoneTabBarHasOneMeasuredFullScreenReservation() throws {
+    /// that bar's rendered height and be applied once as a real safe-area inset. Unlike a scroll-content
+    /// margin, the inset keeps large Dynamic Type rows from rendering behind persistent navigation.
+    func testCustomiPhoneTabBarHasOneMeasuredSafeAreaReservation() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
         let scaffold = try sourceText("Strand/Screens/ScreenScaffold.swift")
+        let tabRoutes = try sourceText("Strand/App/TabRoute.swift")
         let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
         let visualHarness = try sourceText("Tools/ios-tab-shell-visual-qa.sh")
 
         XCTAssertTrue(shell.contains("FloatingTabBarHeightPreferenceKey"))
         XCTAssertTrue(shell.contains("value: geometry.size.height"))
         XCTAssertEqual(
-            shell.components(separatedBy:
-                ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
-            ).count - 1,
+            shell.components(separatedBy: ".safeAreaInset(edge: .bottom, spacing: 0)").count - 1,
             1,
-            "The measured custom-bar clearance must be reserved once as a scroll-content margin."
+            "The measured custom-bar clearance must be reserved exactly once as a safe-area inset."
         )
+        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight)"))
+        XCTAssertFalse(shell.contains(
+            ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
+        ), "A scroll-content margin still permits large text to render under the floating controls.")
         XCTAssertFalse(shell.contains(".padding(.bottom, visibleTabBarHeight)"),
                        "Outer padding creates an opaque band behind the floating controls.")
-        XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"),
-                       "A nested safe-area inset can leave pushed-screen footers beneath the custom bar.")
+        XCTAssertTrue(shell.contains("if !keyboardVisible, dynamicTypeSize.isAccessibilitySize"))
+        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight + 28)"),
+                      "Accessibility text sizes need an opaque reading boundary above the glass rail.")
         XCTAssertFalse(shell.contains(".mask(alignment: .bottom)"),
                        "A shell mask washes out the final visible row before it reaches the reserved strip.")
         XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.94 : 0.90"),
@@ -202,8 +206,44 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertFalse(shell.contains("UIResponder.keyboardWillHideNotification"),
                        "Restoring during keyboard dismissal briefly lays the bar out in mid-screen.")
 
-        XCTAssertFalse(scaffold.contains("tabBarClearance"),
-                       "ScreenScaffold must not duplicate the shell's measured reservation.")
+        XCTAssertTrue(scaffold.contains("@Environment(\\.persistentBottomChromeInset)"))
+        XCTAssertTrue(scaffold.contains(
+            ".padding(.bottom, NoopMetrics.space4 + persistentBottomChromeInset)"
+        ))
+        XCTAssertTrue(shell.contains(
+            ".tabRouteDestinations(\n                    persistentBottomChromeInset: visibleTabBarHeight"
+        ))
+        XCTAssertTrue(tabRoutes.contains(
+            "\\.persistentBottomChromeInset,\n                    persistentBottomChromeInset"
+        ))
+        let safeAreaStart = try XCTUnwrap(
+            shell.range(of: ".safeAreaInset(edge: .bottom, spacing: 0)")
+        )
+        let accessibilityBoundary = try XCTUnwrap(
+            shell.range(
+                of: "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize",
+                range: safeAreaStart.upperBound..<shell.endIndex
+            )
+        )
+        XCTAssertFalse(
+            shell[safeAreaStart.lowerBound..<accessibilityBoundary.lowerBound]
+                .contains("persistentBottomChromeInset"),
+            "Tab roots must keep the single shell safe-area reservation without a second content tail."
+        )
+        let moreDestinationStart = try XCTUnwrap(
+            shell.range(of: ".navigationDestination(for: MoreDestination.self)")
+        )
+        let moreDestinationEnd = try XCTUnwrap(
+            shell.range(
+                of: ".environment(\\.scrollToTopSignal, scrollSignal)",
+                range: moreDestinationStart.upperBound..<shell.endIndex
+            )
+        )
+        XCTAssertTrue(
+            shell[moreDestinationStart.lowerBound..<moreDestinationEnd.lowerBound]
+                .contains("\\.persistentBottomChromeInset"),
+            "Pushed More destinations need the measured tail reservation."
+        )
         XCTAssertFalse(liquidToday.contains("Color.clear.frame(height: 90)"),
                        "LiquidToday must inherit the tab-root reservation instead of a magic spacer.")
         XCTAssertTrue(liquidToday.contains(".padding(.bottom, NoopMetrics.space4)"),
@@ -215,6 +255,22 @@ final class MoreListParityTests: XCTestCase {
                       "Liquid Today's bottom proof must wait for async cards instead of racing a timer.")
         XCTAssertTrue(liquidToday.contains("--demo-scroll-bottom"),
                       "Both scroll implementations need the DEBUG runtime bottom-reachability proof.")
+    }
+
+    func testLiquidTodayUsesNativeModernScrollGeometry() throws {
+        let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+
+        XCTAssertTrue(liquidToday.contains(".modifier(LegacyLiquidTodayScrollOffsetProbe())"))
+        XCTAssertTrue(liquidToday.contains("content.onScrollGeometryChange(for: CGFloat.self)"))
+        XCTAssertTrue(liquidToday.contains(
+            "-(geometry.contentOffset.y + geometry.contentInsets.top)"
+        ))
+        XCTAssertFalse(
+            liquidToday.contains(
+                "GeometryReader { g in\n                    Color.clear.preference"
+            ),
+            "The zero-height LazyVStack probe can trap iOS 26 in an unbounded layout transaction."
+        )
     }
 
     /// The reference interaction is an Instagram-style glass island: labelled at rest, compact while
@@ -270,8 +326,12 @@ final class MoreListParityTests: XCTestCase {
                       "The glass island needs an opaque accessibility fallback.")
         XCTAssertTrue(shell.contains("compact && !dynamicTypeSize.isAccessibilitySize"),
                       "Accessibility Dynamic Type must retain visible labels.")
-        XCTAssertTrue(shell.contains(".font(.system(size: 11,"),
-                      "Tab labels need a native-sized fixed font so the longest title never ellipsizes.")
+        XCTAssertTrue(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxxLarge)"),
+                      "Tab labels must scale through the largest stable five-tab size.")
+        XCTAssertTrue(shell.contains(".font(StrandFont.footnote.weight("),
+                      "Tab labels must use semantic Dynamic Type rather than a fixed point size.")
+        XCTAssertFalse(shell.contains(".font(.system(size: 11,"),
+                       "The custom tab bar must not bypass Dynamic Type with a fixed label size.")
         // The rail used to shorten Workouts to a hard-coded "Train". That literal had no String Catalog
         // entry, so it rendered untranslated in all nine locales; it was removed. The rail now draws the
         // LOCALIZED title and stays whole via lineLimit + minimumScaleFactor. Pin that, and pin the
@@ -284,6 +344,10 @@ final class MoreListParityTests: XCTestCase {
                        "An untranslated English tab label must not be reintroduced; add a catalog key instead.")
         XCTAssertTrue(shell.contains(".accessibilityLabel(item.title)"),
                       "The concise activity label must not replace the full spoken destination name.")
+        XCTAssertTrue(shell.contains("Label(item.title, systemImage: item.icon)"),
+                      "Each destination must expose its full label and icon in the Large Content Viewer.")
+        XCTAssertTrue(shell.contains("Label(currentItem.title, systemImage: currentItem.icon)"),
+                      "Compact navigation must retain a Large Content Viewer representation.")
         XCTAssertTrue(shell.contains(".frame(minHeight: 44)"))
     }
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `second Android review correction locally verified; replacement protected integration pending`
+- State: `completed on protected main; physical-device evidence pending`
 - Owner: project team
 - Branch: `codex/mobile-desktop-visual-parity-20260910`
 - Start commit: `beb0e88f70141766c32a0bcd270f5f8889c6f10d`
@@ -148,6 +148,7 @@ physical-device, and external-service evidence.
 | Hosted Apple first attempt | Protected pull request `#13` ran the full macOS suite: 1,701 tests executed with one expected skip and one failure in `MoreListParityTests.testAdaptiveScaffoldBackgroundUsesDynamicInk` | The hosted matrix reached the changed Apple source and exposed that an older source-contract assertion still required the pre-responsive fixed `30pt` title | A green replacement head |
 | Hosted assertion correction | The contract now verifies responsive `todayGreetingSize` followed by adaptive `StrandPalette.textPrimary`; the exact `MoreListParityTests` suite passed 14 tests locally with zero failures or skips | The corrected test still rejects hard-coded white ink while accepting the intentional `28/30pt` responsive title policy | A hosted rerun was still required at this evidence point and is recorded in the next row |
 | Hosted Apple rerun on prior head | GitHub Actions run `34446056639` reran successfully on `67ffd848`; iOS/macOS job `102802245051` and the stable `apple-ci-required` result both passed | The prior reviewed head satisfies the complete protected Apple matrix after the launch-timeout rerun | The newer Android-only correction head still requires its own protected matrix |
+| Protected final integration | Pull request `#13` resolved all six review conversations, passed every required protected context including final Apple run `34468107934`, and merged normally as `2efd5e89999bd54b3fd6e316322b39d7e953ee8f` | The reviewed visual and accessibility source is integrated on protected `main` without a bypass | Physical-device smoothness, touch, OLED, OEM, BLE, background, battery, or haptic behavior |
 | Terminology snapshot review | Regenerated inventory retains 17,367 classified occurrences across 1,511 groups with identical category totals, a byte-identical active allowlist, and zero forbidden mappings; semantic entries are unchanged and only source line locations moved. The reviewed inventory digest is `45e622637c744033ad1186802d6b010c6b2c7b0fbc278e48053677f8963469c7` | The UI edit introduces no new or modified active customer/core legacy terminology and the fail-closed inventory matches the source tree | Independent provenance review of pre-existing compatibility terminology |
 | Repository policy matrix | All 227 Tools tests passed; required CI verified 5 conditional workflows, 5 universal workflows, and 10 contexts; 9 release controls, 12-metric calibration parity, no-new-copy localization, 1,203-file health-claims scan, 230-component legal inventory, distribution provenance, private-data, 50 operations records, terminology, and diff checks passed | The exact local tree preserves release, metric, localization, claims, provenance, privacy, and durable-evidence contracts | Hosted exact-SHA checks, external legal approval, or physical behavior |
 | Resource cleanup | API 35 emulator stopped, Gradle and Kotlin daemons stopped, both temporary DerivedData roots and the temporary terminology candidate removed, and no Android or Apple simulator remains booted | Temporary runtime and build resources created by this round are no longer consuming device or daemon resources | The pre-existing Gradle-managed AVD cache, repository build products, or unrelated user resources |
@@ -174,13 +175,10 @@ physical-device, and external-service evidence.
   (`Fix compact iOS weather touch target`), and `4ff38930`
   (`Fix Android localized Today accessibility`)
 - Branch and remote state:
-  `codex/mobile-desktop-visual-parity-20260910` is open as protected pull
-  request `#13`; commit `4ff38930` and this evidence update still require push,
-  replacement hosted checks, two resolved review conversations, and normal
-  merge
+  protected pull request `#13` merged normally to `main` as `2efd5e89`; all
+  required hosted contexts passed and all six review conversations are resolved
 - Repository visibility verified: standalone GitHub repository relationship
-  inherited from the current active handoff; exact protected integration
-  remains pending
+  inherited from the current active handoff
 - Version/build impact: no version change
 - Release or distribution impact: no artifact published
 
@@ -206,15 +204,13 @@ physical-device, and external-service evidence.
   tablet branches, but they do not replace physical-device accessibility,
   frame-pacing, OLED, OEM, or touch-target review.
 - The first protected Apple run failed one stale source-contract assertion.
-  Its later exact-head matrix was fully green, but protected integration remains
-  incomplete until the final Android correction head passes every required
-  check and both new review conversations are resolved against that evidence.
+  Its later exact-head matrix was fully green and protected integration
+  completed; physical-device evidence remains intentionally unclaimed.
 
 ## Next round
 
-1. Merge this focused visual change only after the replacement protected
-   matrix is green, then implement the already-recorded single explainable
-   customer-day recommendation arbiter as a separate reviewable round.
+1. Run representative physical-device smoothness, accessibility, touch-target,
+   OLED, and OEM rendering checks before release.
 
 ## Privacy check
 

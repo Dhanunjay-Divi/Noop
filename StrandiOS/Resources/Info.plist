@@ -57,10 +57,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>FirebaseAppCheckTokenAutoRefreshEnabled</key>
 	<true/>
-	<key>FirebaseMessagingInstallationIdEnabled</key>
-	<true/>
 	<key>FirebaseMessagingAutoInitEnabled</key>
 	<false/>
+	<key>FirebaseMessagingInstallationIdEnabled</key>
+	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.healthcare-fitness</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
@@ -114,6 +114,8 @@
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads selected data only if you explicitly enable NOOP+ managed backup or your own self-hosted server.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>If you enable planned-workout guidance, NOOP checks upcoming calendar titles on-device to find a likely workout. It keeps only the workout time and never stores event titles, attendees, notes, locations, or identifiers.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>NOOP uses the camera only while you explicitly scan a food barcode. Images and video are processed on-device and are not stored.</string>
 	<key>NSHealthShareUsageDescription</key>

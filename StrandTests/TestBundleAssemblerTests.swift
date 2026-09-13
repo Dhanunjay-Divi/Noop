@@ -76,10 +76,11 @@ final class TestBundleAssemblerTests: XCTestCase {
 
     func testAppReportScreenshotFailsClosedUnlessValidAndBounded() {
         let signature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-        let valid = signature + Data([0x00, 0x01])
         XCTAssertEqual(
-            TestBundleAssembler.appReportScreenshotEntry(valid)?.data,
-            valid
+            TestBundleAssembler.appReportScreenshotEntry(
+                FeedbackScreenshotFixture.rawMetadataBearing
+            )?.data,
+            FeedbackScreenshotFixture.sanitized
         )
         XCTAssertNil(TestBundleAssembler.appReportScreenshotEntry(Data("not a png".utf8)))
         XCTAssertNil(TestBundleAssembler.appReportScreenshotEntry(

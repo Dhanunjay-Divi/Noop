@@ -518,6 +518,14 @@ private struct DeviceCard: View {
                 // mislabel e.g. a "Blood oxygen" chip when no SpO₂ % ever comes off the strap).
                 capabilityRow(symbol: "waveform.path.ecg", text: profile.captures,
                               tint: StrandPalette.textSecondary)
+                // Keep the estimate/capability caveat beside the line it qualifies. The disclosure
+                // below remains for firmware and protocol diagnostics.
+                if !profile.footnote.isEmpty {
+                    Text(profile.footnote)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 // What NOOP USES it for — the scores/screens this device drives.
                 capabilityRow(symbol: "bolt.fill", text: profile.powers,
                               tint: StrandPalette.textSecondary)
@@ -610,11 +618,16 @@ private struct DeviceCard: View {
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("noop.device.\(device.id).name")
-                Text(profile.displayModel)
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                if DeviceCapabilityProfile.shouldShowModel(
+                    displayName: device.displayName,
+                    displayModel: profile.displayModel
+                ) {
+                    Text(profile.displayModel)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -636,9 +649,6 @@ private struct DeviceCard: View {
             VStack(alignment: .leading, spacing: 9) {
                 if device.sourceKind == .oura && !isLiveConnected && device.status == .paired {
                     ouraLocalStateNote
-                }
-                if !profile.footnote.isEmpty {
-                    technicalLine(symbol: "info.circle", text: profile.footnote)
                 }
                 if let fw = liveFirmware {
                     technicalLine(symbol: "cpu", text: String(localized: "Firmware \(fw)"))
@@ -895,6 +905,13 @@ struct DeviceCapabilityProfile {
     let captures: String       // "·"-joined honest capture labels for THIS model
     let powers: String         // the NOOP scores / screens this device drives
     let footnote: String       // one short honest caveat line ("*" estimates + the SpO₂/steps notes)
+
+    static func shouldShowModel(displayName: String, displayModel: String) -> Bool {
+        displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare(
+                displayModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            ) != .orderedSame
+    }
 
     static func make(for d: PairedDevice) -> DeviceCapabilityProfile {
         // FTMS gym machine: a live machine + (when reported) HR session, recorded via the existing

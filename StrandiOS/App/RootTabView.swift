@@ -37,6 +37,7 @@ struct RootTabView: View {
     @EnvironmentObject private var router: NavRouter
     @EnvironmentObject private var updateStore: UpdateStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject private var contextualActions = ContextualActionCenter.shared
 
     /// Which quick-action screen the centre FAB is presenting (nil = sheet closed).
@@ -185,8 +186,9 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        // Keep the custom bar over a full-bleed page and reserve its measured height inside scroll
-        // content. Content remains fully opaque up to that reserved strip.
+        // Keep the custom bar over a full-bleed page and reserve its measured height as a real safe-area
+        // inset. A content margin only extends a ScrollView's endpoint; it still lets large Dynamic Type
+        // rows render underneath the persistent controls while the user is reading them.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
@@ -218,7 +220,29 @@ struct RootTabView: View {
             // steal gestures from Trends' year strip (and other horizontally scrolling controls), while
             // pushed pages already need the system edge-swipe for Back. Native iOS tab bars do not require
             // page swiping, so leave horizontal gestures to the content that owns them.
-            .contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear
+                    .frame(height: visibleTabBarHeight)
+                    .accessibilityHidden(true)
+            }
+            if !keyboardVisible, dynamicTypeSize.isAccessibilitySize {
+                // At accessibility text sizes a single line can be taller than the floating rail. Keep
+                // the glass treatment, but give it an opaque reading boundary so active content never
+                // competes with persistent navigation. The safe-area inset above preserves reachability.
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: StrandPalette.surfaceBase.opacity(0), location: 0),
+                        .init(color: StrandPalette.surfaceBase.opacity(0.98), location: 0.08),
+                        .init(color: StrandPalette.surfaceBase, location: 1),
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: visibleTabBarHeight + 28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
 
             if !keyboardVisible {
                 HStack(alignment: .center, spacing: 8) {
@@ -233,11 +257,11 @@ struct RootTabView: View {
                             resetTabBarScrollTracking()
                         },
                         onReselect: { tag in
-                            // Re-tapping the active tab refreshes that page's data (2026-07-02) and, from a
-                            // subpage, pops that tab's stack back to its root (#135) — an animated pop via the
-                            // path, not a rebuild. At the root the pop is skipped, so scroll position survives
-                            // and the refresh doesn't double with a re-run of the root's `.task` (#198).
-                            Task { await repo.refresh() }
+                            // Re-tapping the active tab is navigation-only: from a subpage it pops that tab's
+                            // stack to its root (#135); at the root it scrolls the existing screen to the top
+                            // (#198). Data refresh remains owned by explicit pull-to-refresh and the app's
+                            // launch/sync/staleness paths, so this frequent gesture never starts a broad
+                            // history read or invalidates an otherwise-current Today screen.
                             tabBarCompact = false
                             if !tabPaths[tag].isEmpty {
                                 tabPaths[tag] = NavigationPath()
@@ -406,6 +430,7 @@ struct RootTabView: View {
                 AppScrollHitchMonitor.shared.end(reason: "scene_inactive")
                 return
             }
+            WindDownNudge.restoreScheduleIfAuthorized()
             Task { await contextualActions.importDeliveredNotifications() }
         }
         // Quick-action sheet presents with the calm easing (~0.42s) per the README sheet spec —
@@ -487,23 +512,34 @@ struct RootTabView: View {
             contextualActions.complete(action)
             expandedContextualActionID = nil
             routeToMore(.insights)
-        case .windDown, .recovery:
+        case .windDown:
             contextualActions.complete(action)
             expandedContextualActionID = nil
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
-                selectedTab = IPhonePrimaryTab.sleep.rawValue
-            }
+            openNotificationRoute(.sleep)
+        case .recovery:
+            contextualActions.complete(action)
+            expandedContextualActionID = nil
+            openNotificationRoute(action.resolvedRecoveryRoute)
         }
     }
 
     private func refreshAdaptiveHydrationContext() async {
         let day = Repository.localDayKey(Date())
-        let reading = await repo.hydrationReading(day: day)
+        let reading = try? await repo.hydrationReading(day: day)
         HydrationReminders.updateAdaptiveContext(
             temperatureC: nil,
             effort: repo.localCalendarToday?.strain,
             consumedML: reading?.valueML,
-            goalML: repo.hydrationGoalML(profileSex: profile.sex)
+            goalML: reading.flatMap { _ in
+                repo.hydrationGoalML(
+                    profileAge: profile.age,
+                    ageConfirmed: profile.ageInputConfirmed,
+                    profileSex: profile.sex,
+                    sexConfirmed: profile.sexInputConfirmed,
+                    weightKg: profile.weightKg,
+                    weightConfirmed: profile.weightInputConfirmed
+                )
+            }
         )
     }
 
@@ -649,6 +685,10 @@ struct RootTabView: View {
     /// on a pushed detail page.
     private func consumePendingNotificationRoute() {
         guard let route = NotificationRouteBridge.consumePending() else { return }
+        openNotificationRoute(route)
+    }
+
+    private func openNotificationRoute(_ route: NoopNotificationRoute) {
         quickAction = nil
         pendingMoreDestination = nil
         withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
@@ -812,7 +852,9 @@ struct RootTabView: View {
             view
                 .background(StrandPalette.surfaceBase.ignoresSafeArea())
                 .toolbar(.hidden, for: .navigationBar)
-                .tabRouteDestinations()
+                .tabRouteDestinations(
+                    persistentBottomChromeInset: visibleTabBarHeight
+                )
         }
         // Drive this tab's root scroll-to-top on an at-root re-tap (#198 follow-up); read by ScreenScaffold
         // / LiquidTodayView inside. Only THIS tab's token changes on its reselect, so the others don't scroll.
@@ -922,6 +964,14 @@ struct RootTabView: View {
                 ZStack {
                     StrandPalette.surfaceBase.ignoresSafeArea()
                     route.destination
+                        // The shell's safe-area inset protects the live viewport. iOS 26 does not
+                        // consistently translate that ancestor inset into scroll-content tail space
+                        // for pushed destinations, so only the pushed subtree receives a matching
+                        // endpoint reservation. The More root keeps the single shell-owned inset.
+                        .environment(
+                            \.persistentBottomChromeInset,
+                            visibleTabBarHeight
+                        )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .onAppear {
                             AppDiagnosticsRecorder.shared.record(
@@ -1069,7 +1119,7 @@ struct RootTabView: View {
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(StrandFont.footnote.weight(.semibold))
                         .foregroundStyle(StrandPalette.textTertiary)
                         .rotationEffect(.degrees(isOpen ? 0 : -90))
                 }
@@ -1710,7 +1760,7 @@ private struct FloatingTabBar: View {
     /// Compact mode is an explicit disclosure control, not a re-select gesture. Expanding must therefore
     /// preserve the current navigation stack, scroll position, and cached data.
     var onExpand: () -> Void = {}
-    /// Fires when the user taps the ALREADY-active tab (2026-07-02: re-tap should refresh).
+    /// Fires when the user taps the already-active tab so the shell can pop or scroll to the root.
     var onReselect: (Int) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -1731,7 +1781,7 @@ private struct FloatingTabBar: View {
 
     /// Compaction is suppressed at accessibility text sizes. A sighted low-vision user who asked for larger
     /// text is exactly the person who cannot afford an icon-only rail: they lose the one persistent cue for
-    /// which section they are in. This is complementary to the `.dynamicTypeSize(...xxLarge)` cap below,
+    /// which section they are in. This is complementary to the `.dynamicTypeSize(...xxxLarge)` cap below,
     /// not replaced by it - the cap makes expanded labels FIT, this keeps them PRESENT. VoiceOver is
     /// unaffected either way, since every control keeps `.accessibilityLabel(item.title)`.
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
@@ -1855,9 +1905,10 @@ private struct FloatingTabBar: View {
                                      ? (appearanceMode == .black ? 0.18 : 0.26)
                                      : 0.075),
                 radius: visuallyCompact ? 8 : 11, x: 0, y: visuallyCompact ? 3 : 5)
-        // Native tab bars keep their labels compact while destination content honors Larger Text.
-        // Cap only this navigation chrome so five stable destinations never truncate or overlap.
-        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+        // Keep the five destinations stable while still honoring the user's Larger Text setting.
+        // The semantic caption style scales through the largest non-accessibility size; accessibility
+        // sizes retain all labels and can use the Large Content Viewer attached to each control.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .animation(reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28),
                    value: visuallyCompact)
     }
@@ -1905,6 +1956,9 @@ private struct FloatingTabBar: View {
         .accessibilityLabel("Show navigation")
         .accessibilityValue(Text(currentItem.title))
         .accessibilityHint("Expands the tab bar")
+        .accessibilityShowsLargeContentViewer {
+            Label(currentItem.title, systemImage: currentItem.icon)
+        }
         .accessibilityIdentifier("noop.tab.compact")
     }
 
@@ -1925,13 +1979,10 @@ private struct FloatingTabBar: View {
                     .scaleEffect(active ? 1.08 : 1)
                     .offset(y: active ? -1 : 0)
                 Text(visualTitle(for: item))
-                    // Native tab labels remain optically stable while destination content follows
-                    // Dynamic Type. The visible label is the LOCALIZED destination title; the five-item
-                    // rail stays whole via lineLimit(1) + minimumScaleFactor(0.8) rather than by
-                    // hard-coding a shorter English word. The previous "Train" shortening was a bare
-                    // English literal with no String Catalog entry, so it shipped untranslated in all
-                    // nine locales - a worse defect than a slightly tighter label.
-                    .font(.system(size: 11, weight: active ? .semibold : .medium, design: .rounded))
+                    // The visible label is the localized destination title. A semantic caption style
+                    // follows Dynamic Type, while lineLimit + minimumScaleFactor keeps the five-item
+                    // rail intact without introducing untranslated shorthand.
+                    .font(StrandFont.footnote.weight(active ? .semibold : .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -1959,6 +2010,9 @@ private struct FloatingTabBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(item.title)
+        .accessibilityShowsLargeContentViewer {
+            Label(item.title, systemImage: item.icon)
+        }
         .accessibilityIdentifier("noop.tab.\(item.tag)")
         .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
     }
@@ -2186,14 +2240,17 @@ private struct ContextualActionRail: View {
             HydrationGlassGlyph(fill: 0.38, tint: tint(action))
                 .frame(width: size, height: size + 3)
         } else {
-            Image(systemName: symbol(action.kind))
+            Image(systemName: symbol(action))
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(tint(action))
         }
     }
 
-    private func symbol(_ kind: ContextualActionKind) -> String {
-        switch kind {
+    private func symbol(_ action: ContextualAction) -> String {
+        if action.kind == .recovery, action.route == .workouts {
+            return "figure.run"
+        }
+        switch action.kind {
         case .hydration: return "drop.fill"
         case .breathe: return "wind"
         case .journal: return "square.and.pencil"
@@ -2217,11 +2274,18 @@ private struct ContextualActionRail: View {
         case .hydration: return String(localized: "Add \(action.amountML ?? 250) ml")
         case .breathe: return String(localized: "Start breathing")
         case .journal: return String(localized: "Open journal")
-        case .windDown, .recovery: return String(localized: "Open Sleep")
+        case .windDown: return String(localized: "Open Sleep")
+        case .recovery:
+            return action.route == .workouts
+                ? String(localized: "Workouts")
+                : String(localized: "Open Sleep")
         }
     }
 
     private func primaryIcon(_ action: ContextualAction) -> String {
+        if action.kind == .recovery, action.route == .workouts {
+            return "figure.run"
+        }
         switch action.kind {
         case .hydration: return "plus"
         case .breathe: return "play.fill"

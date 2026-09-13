@@ -59,6 +59,158 @@ variable "raw_bucket_name" {
   }
 }
 
+variable "feedback_retention_days" {
+  description = "Age at which explicitly submitted synthetic feedback archives are deleted."
+  type        = number
+  default     = 28
+
+  validation {
+    condition = (
+      floor(var.feedback_retention_days) == var.feedback_retention_days
+      && var.feedback_retention_days >= 1
+      && var.feedback_retention_days <= 28
+    )
+    error_message = "Feedback retention must be 1 through 28 days."
+  }
+}
+
+variable "feedback_bucket_name" {
+  description = "Optional globally unique override for the private feedback bucket."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.feedback_bucket_name == null
+      || can(regex("^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$", var.feedback_bucket_name))
+    )
+    error_message = "feedback_bucket_name must be a valid Cloud Storage bucket name."
+  }
+}
+
+variable "feedback_external_abuse_gate_approved" {
+  description = "Explicit owner gate confirming device attestation, edge throttling, monitoring, and abuse operations were validated outside this stack."
+  type        = bool
+  default     = false
+}
+
+variable "feedback_capability_primary_key_version" {
+  description = "Application-visible version label for the primary feedback capability key."
+  type        = string
+  default     = "v1"
+
+  validation {
+    condition     = can(regex("^v[0-9]{1,4}$", var.feedback_capability_primary_key_version))
+    error_message = "feedback_capability_primary_key_version must match v followed by 1 through 4 digits."
+  }
+}
+
+variable "feedback_capability_previous_key_version" {
+  description = "Application-visible version label for the retained feedback capability verification key."
+  type        = string
+  default     = "v0"
+
+  validation {
+    condition     = can(regex("^v[0-9]{1,4}$", var.feedback_capability_previous_key_version))
+    error_message = "feedback_capability_previous_key_version must match v followed by 1 through 4 digits."
+  }
+}
+
+variable "feedback_capability_write_version" {
+  description = "Capability issue format. Keep legacy for the first code rollout; then select a configured key version only after every instance can verify it."
+  type        = string
+  default     = "legacy"
+
+  validation {
+    condition = (
+      var.feedback_capability_write_version == "legacy"
+      || can(regex("^v[0-9]{1,4}$", var.feedback_capability_write_version))
+    )
+    error_message = "feedback_capability_write_version must be legacy or a version label."
+  }
+}
+
+variable "feedback_capability_primary_secret_manager_version" {
+  description = "Pinned Secret Manager version containing the primary feedback capability key."
+  type        = string
+  default     = "1"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*$", var.feedback_capability_primary_secret_manager_version))
+    error_message = "feedback_capability_primary_secret_manager_version must be a positive numeric version."
+  }
+}
+
+variable "feedback_capability_previous_secret_manager_version" {
+  description = "Pinned Secret Manager version containing the retained feedback capability verification key."
+  type        = string
+  default     = "1"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*$", var.feedback_capability_previous_secret_manager_version))
+    error_message = "feedback_capability_previous_secret_manager_version must be a positive numeric version."
+  }
+}
+
+variable "enable_feedback_lifecycle" {
+  description = "Drain feedback cleanup and retention independently of accepting new reports."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = (
+      !var.enable_feedback_lifecycle
+      || (
+        var.enable_managed_runtime
+        && var.enable_managed_database
+        && var.runtime_image != null
+        && var.feedback_capability_primary_key_version != var.feedback_capability_previous_key_version
+        && contains(
+          [
+            "legacy",
+            var.feedback_capability_primary_key_version,
+            var.feedback_capability_previous_key_version,
+          ],
+          var.feedback_capability_write_version,
+        )
+      )
+    )
+    error_message = "enable_feedback_lifecycle requires the managed runtime, Cloud SQL, a digest-pinned image, and a valid two-key capability configuration for drain controls."
+  }
+}
+
+variable "enable_feedback_ingestion" {
+  description = "Enable authenticated, App Check-protected feedback reservations on the managed API. This does not grant public Cloud Run invocation."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = (
+      !var.enable_feedback_ingestion
+      || (
+        var.enable_managed_runtime
+        && var.enable_managed_identity
+        && var.enable_managed_app_check
+        && var.managed_auth_app_check_enforcement == "ENFORCED"
+        && var.enable_managed_database
+        && var.runtime_image != null
+        && var.enable_feedback_lifecycle
+        && var.feedback_external_abuse_gate_approved
+        && var.feedback_capability_primary_key_version != var.feedback_capability_previous_key_version
+        && contains(
+          [
+            "legacy",
+            var.feedback_capability_primary_key_version,
+            var.feedback_capability_previous_key_version,
+          ],
+          var.feedback_capability_write_version,
+        )
+      )
+    )
+    error_message = "enable_feedback_ingestion requires the managed runtime, identity, enforced App Check, Cloud SQL, a digest-pinned image, feedback lifecycle draining, an explicit external abuse gate, and a valid two-key capability configuration."
+  }
+}
+
 variable "enable_managed_database" {
   description = "Create the synthetic-only staging Cloud SQL instance."
   type        = bool

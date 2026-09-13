@@ -449,10 +449,16 @@ struct SettingsView: View {
                 rowDivider
                 FormRow(label: "Date of birth") {
                     HStack(spacing: 12) {
-                        Text("\(profile.age)")
-                            .font(StrandFont.bodyNumber)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                            .frame(minWidth: 28, alignment: .trailing)
+                        HStack(spacing: 4) {
+                            Text("Age")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                            Text("\(profile.age)")
+                                .font(StrandFont.bodyNumber)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .accessibilityHidden(true)
                         // #146: age is derived from the date of birth, so it advances on its own.
                         DatePicker("Date of birth",
                                    selection: $profile.dateOfBirth,
@@ -505,25 +511,33 @@ struct SettingsView: View {
                 }
                 rowDivider
                 FormRow(label: "BMI") {
-                    Text(FitnessAgeEngine.bmi(
-                        weightKg: profile.weightKg,
-                        heightCm: profile.heightCm
-                    ).formatted(.number.precision(.fractionLength(1))))
-                        .font(StrandFont.bodyNumber)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                        .accessibilityLabel("Body mass index")
-                        .accessibilityValue(FitnessAgeEngine.bmi(
-                            weightKg: profile.weightKg,
-                            heightCm: profile.heightCm
-                        ).formatted(.number.precision(.fractionLength(1))))
+                    if let bmi = profile.adultBMI {
+                        Text(bmi.formatted(.number.precision(.fractionLength(1))))
+                            .font(StrandFont.bodyNumber)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .accessibilityLabel("Body mass index")
+                            .accessibilityValue(
+                                bmi.formatted(.number.precision(.fractionLength(1)))
+                            )
+                    } else {
+                        Text(profile.ageInputConfirmed
+                             && profile.age < BodyProfilePolicy.adultMinimumAge
+                             ? "appwide.health.body_composition.bmi_under_20"
+                             : "appwide.health.body_composition.bmi_confirm_inputs")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                Text("BMI is a limited height-and-weight screening calculation. It is not a diagnosis or a measure of body composition.")
+                Text("appwide.health.body_composition.bmi_screening_note")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 rowDivider
                 FormRow(label: "Target weight (optional)") {
-                    if profile.targetWeightKg != nil {
+                    let availability = profile.targetWeightAvailability()
+                    if profile.targetWeightKg != nil, availability == .available {
                         HStack(spacing: 8) {
                             if massUnit == .pounds {
                                 poundsField(
@@ -550,7 +564,24 @@ struct SettingsView: View {
                             .help("Clear target weight")
                             .accessibilityLabel("Clear target weight")
                         }
-                    } else {
+                    } else if profile.targetWeightKg != nil {
+                        HStack(spacing: 8) {
+                            Text("appwide.health.body_composition.target_unavailable")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button {
+                                profile.setTargetWeightKg(nil)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear target weight")
+                            .accessibilityLabel("Clear target weight")
+                        }
+                    } else if availability == .available {
                         Button {
                             profile.setTargetWeightKg(profile.weightKg)
                         } label: {
@@ -561,9 +592,15 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                         .help("Add a target weight")
                         .accessibilityLabel("Add target weight")
+                    } else {
+                        Text("appwide.health.body_composition.target_unavailable")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Text("Optional and entirely your choice. NOOP does not recommend a target or a rate of change.")
+                Text("appwide.health.body_composition.target_safety_note")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1669,15 +1706,13 @@ struct SettingsView: View {
         }
     }
 
-    /// Live Sessions (beta) — the silent-guardian in-workout coach. Default ON (the entry itself is
-    /// BETA-labelled on the Liquid Today); off removes the Start-session control entirely. Same key the
-    /// Today entry reads (`LiveSessionPrefs.betaKey`).
-    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = true
+    /// Live Sessions (beta) — explicit opt-in until supported-band cues are hardware validated.
+    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = false
     private var liveSessionsCard: some View {
         SettingsSection(
             icon: "shield.lefthalf.filled",
             title: "Experimental · Live Sessions",
-            blurb: "A one-tap guarded workout: Noop Band watches your heart rate against a zone gated on today's Recovery and only vibrates to correct course. Silence means you're on track."
+            blurb: "Live heart-rate coaching against a range shaped by today's Recovery. The screen always shows state; wrist cues require a connected, bonded, supported band and enabled wrist alerts."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
                 Toggle(isOn: $liveSessionsBeta) {
@@ -1686,7 +1721,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
                 .toggleStyle(.noopSwitch)
-                Text("Silence-first Noop Band coaching during workouts.")
+                Text("appwide.live_session.start_detail")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2749,7 +2784,7 @@ struct LiveActivityPreferenceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: $liveActivityEnabled) {
-                Text("Live HR Live Activity")
+                Text("appwide.health.live_activity.lock_screen")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
             }
@@ -2765,7 +2800,10 @@ struct LiveActivityPreferenceRow: View {
 
             if liveActivityEnabled {
                 Toggle(isOn: $showCharge) {
-                    Label("Charge indicator", systemImage: "bolt.heart.fill")
+                    Label(
+                        "appwide.health.live_activity.recovery_indicator",
+                        systemImage: "bolt.heart.fill"
+                    )
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }

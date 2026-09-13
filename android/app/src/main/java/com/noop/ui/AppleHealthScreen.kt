@@ -24,8 +24,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.noop.data.AppleDaily
 import com.noop.data.MetricSeriesRow
+import com.noop.analytics.BodyProfilePolicy
 import java.util.Locale
 import kotlin.math.roundToInt
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 // MARK: - Apple Health (per-source page)
 //
@@ -93,8 +95,10 @@ private class AppleData(
     fun raw(key: String): List<HealthPoint> = series[key] ?: emptyList()
 
     /** True if ANY per-day row or any series holds data (drives the empty state). */
-    val hasAnyData: Boolean
-        get() = rows.isNotEmpty() || series.values.any { it.isNotEmpty() }
+    fun hasAnyData(canPresentBmi: Boolean): Boolean =
+        rows.isNotEmpty() || series.any { (key, values) ->
+            values.isNotEmpty() && (canPresentBmi || key != "bmi")
+        }
 }
 
 /** A key's resolved (possibly auto-widened) window in the active range. */
@@ -121,6 +125,19 @@ private fun resolve(series: List<HealthPoint>, requested: AppleRange): Resolved 
 
 @Composable
 fun AppleHealthScreen(vm: AppViewModel) {
+    val context = LocalContext.current
+    val profile = remember(context) { ProfileStore.from(context) }
+    val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val canPresentBmi = remember(profileVersion) {
+        BodyProfilePolicy.canPresentAdultBmi(
+            age = profile.age,
+            currentWeightKg = profile.weightKg,
+            heightCm = profile.heightCm,
+            ageConfirmed = profile.ageInputConfirmed,
+            heightConfirmed = profile.heightInputConfirmed,
+            currentWeightConfirmed = profile.weightInputConfirmed,
+        )
+    }
     var loaded by remember { mutableStateOf(false) }
     var data by remember { mutableStateOf(AppleData(emptyList(), emptyMap())) }
     var range by remember { mutableStateOf(AppleRange.Quarter) }
@@ -167,13 +184,22 @@ fun AppleHealthScreen(vm: AppViewModel) {
     LazyScreenScaffold(title = uiString(R.string.l10n_apple_health_screen_apple_health_b19b87da), subtitle = subtitle) {
         when {
             !loaded -> item { LoadingCard() }
-            !data.hasAnyData -> item { EmptyState() }
+            !data.hasAnyData(canPresentBmi) -> item { EmptyState() }
             else -> {
-                item { RangeControl(data = data, range = range, onSelect = { range = it }) }
+                item {
+                    RangeControl(
+                        data = data,
+                        range = range,
+                        canPresentBmi = canPresentBmi,
+                        onSelect = { range = it },
+                    )
+                }
                 item { TileGrid(data = data, range = range) }
                 item { HeartSection(data = data, range = range) }
                 item { ActivitySection(data = data, range = range) }
-                item { BodySection(data = data, range = range) }
+                item {
+                    BodySection(data = data, range = range, canPresentBmi = canPresentBmi)
+                }
                 item { SleepSection(data = data, range = range) }
             }
         }
@@ -200,11 +226,20 @@ private fun spanSubtitle(loaded: Boolean, data: AppleData, range: AppleRange): S
 }
 
 @Composable
-private fun RangeControl(data: AppleData, range: AppleRange, onSelect: (AppleRange) -> Unit) {
+private fun RangeControl(
+    data: AppleData,
+    range: AppleRange,
+    canPresentBmi: Boolean,
+    onSelect: (AppleRange) -> Unit,
+) {
     // Count visible days off the canonical steps series, and flag if any tracked series
     // had to auto-widen because its selected window was empty.
     val stepsRows = resolve(data.raw("steps"), range).rows
-    val anyWidened = data.series.any { (_, s) -> s.isNotEmpty() && resolve(s, range).fellBack }
+    val anyWidened = data.series.any { (key, series) ->
+        (canPresentBmi || key != "bmi") &&
+            series.isNotEmpty() &&
+            resolve(series, range).fellBack
+    }
     val n = stepsRows.size
     val unit = if (n == 1) "day" else "days"
     val base = "$n $unit · ${range.windowName}"
@@ -382,7 +417,7 @@ private fun ActivitySection(data: AppleData, range: AppleRange) {
 }
 
 @Composable
-private fun BodySection(data: AppleData, range: AppleRange) {
+private fun BodySection(data: AppleData, range: AppleRange, canPresentBmi: Boolean) {
     // Weight + lean mass (stored kg) re-label under the independent weight preference.
     val massUnit = UnitPrefs.mass(LocalContext.current)
     ChartSection("Body Composition", "Slow threads", range) {
@@ -395,8 +430,10 @@ private fun BodySection(data: AppleData, range: AppleRange) {
         MetricChartCard(data, range, "lean_mass", "Lean body mass", Palette.accent) {
             UnitFormatter.massFromKilograms(it, massUnit)
         }
-        MetricChartCard(data, range, "bmi", "BMI", Palette.metricPurple) {
-            String.format(Locale.US, "%.1f", it)
+        if (canPresentBmi) {
+            MetricChartCard(data, range, "bmi", "BMI", Palette.metricPurple) {
+                String.format(Locale.US, "%.1f", it)
+            }
         }
     }
 }

@@ -21,7 +21,7 @@ final class ManagedSyncStateTests: XCTestCase {
         ] {
             XCTAssertTrue(tables.contains(table), "missing \(table)")
         }
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 54)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 60)
     }
 
     func testSourceAndCheckpointRoundTripWithoutSampleOutbox() async throws {
@@ -439,6 +439,7 @@ final class ManagedSyncStateTests: XCTestCase {
             accountScopeHash: scope,
             requestID: "11111111-1111-5111-8111-111111111111",
             dataClasses: ["essential_timeseries", "raw_ppg"],
+            changeFeedCapabilityVersion: 1,
             restoreJobID: "22222222-2222-5222-8222-222222222222",
             snapshotAt: "2026-09-01T00:00:00Z",
             changeSequence: 42,
@@ -458,26 +459,41 @@ final class ManagedSyncStateTests: XCTestCase {
         try await store.finishManagedSnapshotRestore(
             accountScopeHash: scope,
             changeSequence: 42,
+            changeFeedCapabilityVersion: 1,
             updatedAtMs: 2_000
         )
         let firstSequence = try await store.managedChangeSequence(accountScopeHash: scope)
+        let firstCapability = try await store.managedChangeFeedCapabilityVersion(
+            accountScopeHash: scope
+        )
         let firstFinishedCheckpoint = try await store.managedSnapshotRestore(
             accountScopeHash: scope
         )
         XCTAssertEqual(firstSequence, 42)
+        XCTAssertEqual(firstCapability, 1)
         XCTAssertNil(firstFinishedCheckpoint)
 
+        try await store.saveManagedChangeSequence(
+            50,
+            accountScopeHash: scope,
+            updatedAtMs: 2_500
+        )
         try await store.saveManagedSnapshotRestore(checkpoint)
         try await store.finishManagedSnapshotRestore(
             accountScopeHash: scope,
             changeSequence: 7,
+            changeFeedCapabilityVersion: 2,
             updatedAtMs: 3_000
         )
         let finalSequence = try await store.managedChangeSequence(accountScopeHash: scope)
+        let finalCapability = try await store.managedChangeFeedCapabilityVersion(
+            accountScopeHash: scope
+        )
         let finalCheckpoint = try await store.managedSnapshotRestore(
             accountScopeHash: scope
         )
-        XCTAssertEqual(finalSequence, 42)
+        XCTAssertEqual(finalSequence, 50)
+        XCTAssertEqual(finalCapability, 1)
         XCTAssertNil(finalCheckpoint)
     }
 }

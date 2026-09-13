@@ -2,10 +2,22 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
+from uuid import uuid4
 
-from app.managed_models import MANAGED_DOCUMENT_KINDS, ManagedDocumentKind
+import pytest
+from pydantic import ValidationError
+
+from app.managed_models import (
+    MANAGED_CLIENT_ENCRYPTED_DOCUMENT_KINDS,
+    MANAGED_DOCUMENT_CONTENT_MODES,
+    MANAGED_DOCUMENT_KINDS,
+    MANAGED_SERVER_READABLE_DOCUMENT_KINDS,
+    ManagedDocumentKind,
+    ManagedDocumentMutation,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 COVERAGE = ROOT / "server" / "schemas" / "managed" / "mobile-storage-map-v1.json"
@@ -21,6 +33,25 @@ SCHEMA_SEEDS = [
 
 def _coverage() -> dict:
     return json.loads(COVERAGE.read_text())
+
+
+def _day_ownership_payload(
+    *,
+    key_day: str = "2026-09-11",
+    record_day: str = "2026-09-11",
+    device_id: str = "test-device",
+    locked: object = 0,
+) -> dict:
+    return {
+        "schema_version": 1,
+        "table": "dayOwnership",
+        "key": {"day": key_day},
+        "record": {
+            "day": record_day,
+            "deviceId": device_id,
+            "locked": locked,
+        },
+    }
 
 
 def _ios_tables() -> set[str]:
@@ -102,6 +133,120 @@ def test_every_storage_target_resolves_to_a_registered_contract() -> None:
 
 def test_document_literal_and_runtime_registry_cannot_drift() -> None:
     assert set(get_args(ManagedDocumentKind)) == MANAGED_DOCUMENT_KINDS
+
+
+def test_document_content_modes_match_the_mobile_storage_contract() -> None:
+    coverage = _coverage()
+    expected_modes: dict[str, str] = {}
+    for table, contract in coverage["sqlite_tables"].items():
+        if contract["classification"] != "managed_document":
+            continue
+        target = contract["target"]
+        prior = expected_modes.setdefault(target, contract["content_mode"])
+        assert prior == contract["content_mode"], table
+    for target in coverage["preference_domains"].values():
+        prior = expected_modes.setdefault(target, "client_encrypted")
+        assert prior == "client_encrypted", target
+
+    # These extension targets have no current mobile source table. They must
+    # remain encrypted rather than becoming implicit plaintext escape hatches.
+    expected_modes["other"] = "client_encrypted"
+    expected_modes["user_marker"] = "client_encrypted"
+
+    assert expected_modes == MANAGED_DOCUMENT_CONTENT_MODES
+    assert MANAGED_SERVER_READABLE_DOCUMENT_KINDS == {
+        "day_ownership",
+    }
+    assert MANAGED_CLIENT_ENCRYPTED_DOCUMENT_KINDS == (
+        MANAGED_DOCUMENT_KINDS - MANAGED_SERVER_READABLE_DOCUMENT_KINDS
+    )
+
+
+def test_document_mutation_rejects_a_kind_content_mode_mismatch() -> None:
+    common = {
+        "request_id": uuid4(),
+        "document_id": uuid4(),
+        "base_revision": 0,
+        "updated_at": datetime.now(UTC),
+    }
+
+    ManagedDocumentMutation(
+        **common,
+        document_kind="day_ownership",
+        content_mode="server_readable",
+        payload_json=_day_ownership_payload(),
+    )
+    ManagedDocumentMutation(
+        **common,
+        document_kind="journal",
+        content_mode="client_encrypted",
+        client_key_id=uuid4(),
+        payload_ciphertext_base64="AAAAAAAAAAAAAAAAAAAAAAA=",
+    )
+
+    with pytest.raises(ValidationError, match="client_encrypted"):
+        ManagedDocumentMutation(
+            **common,
+            document_kind="journal",
+            content_mode="server_readable",
+            payload_json={"notes": "must not reach plaintext storage"},
+        )
+    with pytest.raises(ValidationError, match="registered schema"):
+        ManagedDocumentMutation(
+            **common,
+            document_kind="day_ownership",
+            content_mode="server_readable",
+            payload_json={
+                "schema_version": 1,
+                "table": "dayOwnership",
+                "key": {"day": "2026-09-11"},
+                "record": {
+                    "day": "2026-09-11",
+                    "deviceId": "test-device",
+                    "locked": 0,
+                    "notes": "plaintext escape",
+                },
+            },
+        )
+    with pytest.raises(ValidationError, match="server_readable"):
+        ManagedDocumentMutation(
+            **common,
+            document_kind="day_ownership",
+            content_mode="client_encrypted",
+            client_key_id=uuid4(),
+            payload_ciphertext_base64="AAAAAAAAAAAAAAAAAAAAAAA=",
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            **_day_ownership_payload(),
+            "schema_version": True,
+        },
+        _day_ownership_payload(key_day="2026-09-10"),
+        _day_ownership_payload(key_day="2026-02-30", record_day="2026-02-30"),
+        _day_ownership_payload(device_id=" test-device"),
+        _day_ownership_payload(device_id="test\u0001device"),
+        _day_ownership_payload(device_id="test\ud800device"),
+        _day_ownership_payload(device_id="x" * 257),
+        _day_ownership_payload(locked=2),
+        _day_ownership_payload(locked=0.5),
+        _day_ownership_payload(locked="1"),
+    ],
+)
+def test_server_readable_day_ownership_schema_fails_closed(payload: dict) -> None:
+    with pytest.raises(ValidationError, match="registered schema"):
+        ManagedDocumentMutation(
+            request_id=uuid4(),
+            document_kind="day_ownership",
+            document_id=uuid4(),
+            base_revision=0,
+            content_mode="server_readable",
+            payload_json=payload,
+            updated_at=datetime.now(UTC),
+        )
 
 
 def test_uncalibrated_local_adc_tables_never_map_to_calibrated_metrics() -> None:

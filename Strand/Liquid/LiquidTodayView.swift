@@ -99,12 +99,12 @@ struct LiquidTodayView: View {
     @State private var showCustomise = false
     @State private var showSettings = false
     @State private var synthesisExpanded = false
+    @State private var todayDetailsExpanded = Self.initialTodayDetailsExpanded
     @State private var showLiveSession = false
     @State private var showNotificationPermissionAlert = false
 
-    /// Live Sessions (silent guardian) beta gate — the SAME key the Settings toggle writes. Default ON
-    /// (the entry is BETA-labelled in-UI); off removes the Start-session control entirely.
-    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = true
+    /// Live Sessions (silent guardian) beta gate — opt-in until physical-band validation is complete.
+    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = false
     // #today-layout (parity with Android): the user-chosen section order, persisted under the byte-identical
     // "today.sectionOrder" key the Android TodayLayoutPrefs uses. Reordered via the Arrange sheet (native
     // drag-to-reorder rows); every section always renders (decode inserts a missing one at its default spot).
@@ -113,10 +113,17 @@ struct LiquidTodayView: View {
     private var sectionOrder: [TodaySection] {
         let saved = TodayLayoutPrefs.decodeOrder(sectionOrderRaw)
         #if DEBUG
+        // Daily Plan screenshot QA must materialise the very tall target before asking ScrollViewReader
+        // to frame it. In the production order, LazyVStack can estimate the off-screen accessibility
+        // frame from the preceding hero/why cards and stop one section early at the largest text sizes.
+        // This launch-only order changes no persisted preference and keeps every production section.
+        if CommandLine.arguments.contains("--demo-daily-plan") {
+            return [.target] + saved.filter { $0 != .target }
+        }
         // Screenshot QA can bring the otherwise off-screen metrics grid into the first lazy-stack batch.
         // Reordering the same production sections is more deterministic than synthesizing swipe coordinates.
         if CommandLine.arguments.contains("--demo-key-metrics") {
-            return [.keyMetrics] + saved.filter { $0 != .keyMetrics }
+            return [.hero, .keyMetrics] + saved.filter { $0 != .hero && $0 != .keyMetrics }
         }
         #endif
         return saved
@@ -150,6 +157,7 @@ struct LiquidTodayView: View {
     @State private var cachedDisplayDay: DailyMetric?
     @State private var cachedReadiness: ReadinessEngine.Readiness?
     @State private var cachedDailyActionPlan: DailyActionPlanner.Plan?
+    @StateObject private var plannedWorkoutCalendar = PlannedWorkoutCalendarStore.shared
     /// The exact day currently supporting the readiness read. Kept beside the cached result so Today can
     /// stamp freshness/confidence without recomputing or implying a carried night belongs to today.
     @State private var readinessAsOfDay: String?
@@ -381,8 +389,17 @@ struct LiquidTodayView: View {
     private static let topAnchorID = "liquidToday.top"
     private static let bottomAnchorID = "liquidToday.bottom"
     private static let patternsAnchorID = "liquidToday.patterns"
+    private static let dailyPlanDisclosureAnchorID = "liquidToday.dailyPlanDisclosure"
     private static let dailyPlanAnchorID = "liquidToday.dailyPlan"
     private static let keyMetricsAnchorID = "liquidToday.keyMetrics"
+    private static var initialTodayDetailsExpanded: Bool {
+        #if DEBUG
+        CommandLine.arguments.contains("--demo-daily-plan") &&
+            !CommandLine.arguments.contains("--demo-daily-plan-collapsed")
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
         liquidBody
@@ -403,13 +420,6 @@ struct LiquidTodayView: View {
             VStack(spacing: 0) {
                 // Zero-height scroll-to-top anchor (#198 follow-up): the target for an at-root Today re-tap.
                 Color.clear.frame(height: 0).id(Self.topAnchorID)
-                // Scroll-offset probe at the very top (before padding), so its minY in the scroll's
-                // coordinate space reads the top OVERSCROLL: ~0 at rest, positive as you pull down.
-                GeometryReader { g in
-                    Color.clear.preference(key: PullOffsetKey.self,
-                                           value: g.frame(in: .named(Self.pullSpace)).minY)
-                }
-                .frame(height: 0)
 
                 liquidRefreshIndicator   // grows in the revealed space; a vessel filling with the pull
 
@@ -433,30 +443,15 @@ struct LiquidTodayView: View {
                     // byte-identical "today.sectionOrder" key Android uses. A gated-off Start-session renders
                     // nothing and keeps its slot in the saved order.
                     ForEach(sectionOrder) { section in
-                        switch section {
-                        case .hero: heroCard
-                        case .liveSession: if liveSessionsBeta { liveSessionStartRow }
-                        // NEW (2026-08-22) — the three blocks that answer, in reading order: why is my
-                        // score that number, what should I do about it, and is anything off. They reuse
-                        // this screen's own card/glyph language and its already-loaded data, so nothing
-                        // existing moved and no new plumbing was introduced.
-                        case .why: whySection
-                        case .target:
-                            if selectedDayOffset == 0 {
-                                targetSection.id(Self.dailyPlanAnchorID)
+                        if isTodayDetailSection(section) {
+                            if section == firstVisibleTodayDetailSection {
+                                todayDetailsDisclosure
                             }
-                        case .watch: watchSection
-                        case .synthesis: synthesisSection
-                        case .keyMetrics: keyMetricsSection.id(Self.keyMetricsAnchorID)
-                        case .workouts: lastWorkoutsSection
-                        case .heartRate: heartRateSection
-                        case .recoveryVitals: recoveryVitalsSection
-                        case .yourCards: yourCardsSection
-                        // #656: the persistent journal widget (last-7-days strip + tap-through). Now a
-                        // reorderable section like the others — the Arrange sheet moves it. Today only;
-                        // the card self-hides when the reminder toggle is off (an empty branch renders
-                        // nothing yet keeps its slot). Twin of Android TodayScreen's JOURNAL arm.
-                        case .journal: if selectedDayOffset == 0 { JournalReminderCard() }
+                            if todayDetailsExpanded {
+                                todaySection(section)
+                            }
+                        } else {
+                            todaySection(section)
                         }
                     }
                     // The suggestion leaf owns the auto-detection mode and candidate gates, so mounting it
@@ -475,6 +470,7 @@ struct LiquidTodayView: View {
                 // this entire root, so scrolling here must expose the true final card above that bar.
                 Color.clear.frame(height: 0).id(Self.bottomAnchorID)
             }
+            .modifier(LegacyLiquidTodayScrollOffsetProbe())
             #if os(macOS)
             // Keep the phone-shaped column readable + centred on the wide mac detail pane. The sky is a
             // ScrollView background (full-bleed), so constraining the content column here doesn't touch it.
@@ -486,13 +482,12 @@ struct LiquidTodayView: View {
             active: repo.historyWritesActive,
             blocked: $historyWriteQueryGate
         ))
-        .coordinateSpace(name: Self.pullSpace)
-        .onPreferenceChange(PullOffsetKey.self) { offset in
+        .modifier(LiquidTodayScrollPositionReporter { offset in
             scrollTracker.offset = offset
             scrollInteraction.observe(offset: offset)
             handlePull(offset)
             reportScrollPosition(offset)
-        }
+        })
         .environment(\.noopInteractionInProgress, scrollInteraction.isActive)
         .onDisappear { scrollInteraction.reset() }
         // The original satin-obsidian field is a FIXED full-bleed backdrop behind the scroll content,
@@ -523,6 +518,31 @@ struct LiquidTodayView: View {
         .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(repo.deviceId)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(historyReadsBlocked)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
             await load()
         }
+        .onChangeCompat(of: plannedWorkoutCalendar.snapshot) { _ in
+            refreshCachedDailyActionPlanForCalendar()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: ContextualInterventionInputs.didChange)
+        ) { _ in
+            refreshCachedDailyActionPlanForCalendar()
+        }
+        .task(id: cachedDailyActionPlan?.workoutAdjustment?.startSec) {
+            guard let startSec = cachedDailyActionPlan?.workoutAdjustment?.startSec else {
+                return
+            }
+            let nowSec = Int(Date().timeIntervalSince1970)
+            if startSec > nowSec {
+                do {
+                    try await Task.sleep(
+                        nanoseconds: UInt64(startSec - nowSec) * 1_000_000_000
+                    )
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            refreshCachedDailyActionPlanForCalendar()
+        }
         #if DEBUG
         // Deterministic screenshot framing only; absent in Release. Key this to the real load state rather
         // than a wall-clock guess: compact simulators can take longer than 650 ms to seed, and scrolling
@@ -534,7 +554,23 @@ struct LiquidTodayView: View {
             // applied, leaving a deterministic "bottom" screenshot one bar-height short on cold launch.
             try? await Task.sleep(nanoseconds: 250_000_000)
             if CommandLine.arguments.contains("--demo-daily-plan") {
-                proxy.scrollTo(Self.dailyPlanAnchorID, anchor: .top)
+                // The debug order materialises the target first. Re-assert its zero-height marker after
+                // large accessibility text finishes layout, framing it below the status area instead of
+                // capturing a clipped line from the preceding card.
+                let framingAnchor = UnitPoint(
+                    x: 0.5,
+                    y: dynamicTypeSize.isAccessibilitySize ? 0.12 : 0.08
+                )
+                let framingID = CommandLine.arguments.contains("--demo-daily-plan-collapsed")
+                    ? Self.dailyPlanDisclosureAnchorID
+                    : Self.dailyPlanAnchorID
+                for delay in [0, 300_000_000, 600_000_000] as [UInt64] {
+                    if delay > 0 {
+                        try? await Task.sleep(nanoseconds: delay)
+                    }
+                    guard !Task.isCancelled else { return }
+                    proxy.scrollTo(framingID, anchor: framingAnchor)
+                }
             } else if CommandLine.arguments.contains("--demo-key-metrics") {
                 proxy.scrollTo(Self.keyMetricsAnchorID, anchor: .top)
             } else if CommandLine.arguments.contains("--demo-patterns") {
@@ -929,37 +965,206 @@ struct LiquidTodayView: View {
     }
     #endif
 
+    private func isTodayDetailSection(_ section: TodaySection) -> Bool {
+        switch section {
+        case .why, .target, .watch, .synthesis:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var firstVisibleTodayDetailSection: TodaySection? {
+        sectionOrder.first { section in
+            isTodayDetailSection(section) && (section != .target || selectedDayOffset == 0)
+        }
+    }
+
+    @ViewBuilder
+    private func todaySection(_ section: TodaySection) -> some View {
+        switch section {
+        case .hero:
+            heroCard
+        case .liveSession:
+            if liveSessionsBeta {
+                liveSessionStartRow
+            }
+        case .why:
+            whySection
+        case .target:
+            if selectedDayOffset == 0 {
+                VStack(spacing: 0) {
+                    // Keep the programmatic target independent from the very tall Dynamic Type card.
+                    // SwiftUI can otherwise use an approximate LazyVStack frame and land midway through
+                    // the preceding signal row while the target is still being materialised.
+                    Color.clear.frame(height: 0).id(Self.dailyPlanAnchorID)
+                    targetSection
+                }
+            }
+        case .watch:
+            watchSection
+        case .synthesis:
+            synthesisSection
+        case .keyMetrics:
+            keyMetricsSection.id(Self.keyMetricsAnchorID)
+        case .workouts:
+            lastWorkoutsSection
+        case .heartRate:
+            heartRateSection
+        case .recoveryVitals:
+            recoveryVitalsSection
+        case .yourCards:
+            yourCardsSection
+        case .journal:
+            if selectedDayOffset == 0 { JournalReminderCard() }
+        }
+    }
+
+    private var todayDetailsDisclosure: some View {
+        let evidenceLabels = dailyPlanSummaryEvidenceLabels
+        let compactAdjustment = todayDetailsExpanded
+            ? nil
+            : dailyActionPlan.workoutAdjustment
+        return Button {
+            withAnimation(StrandMotion.interactive) {
+                todayDetailsExpanded.toggle()
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                    Image(systemName: dailyPlanSummarySymbol)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(dailyPlanSummaryTint)
+                        .padding(.top, 2)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(dailyPlanActionLabel(dailyActionPlan.action))
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !evidenceLabels.isEmpty {
+                            Text(evidenceLabels.joined(separator: " / "))
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Text(todayDetailsExpanded
+                             ? "daily_plan.details.hide"
+                             : "daily_plan.details.show")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    Spacer(minLength: NoopMetrics.space2)
+                    Image(systemName: todayDetailsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .padding(.top, 4)
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 48)
+
+                if let compactAdjustment {
+                    dailyPlanDivider
+                        .padding(.horizontal, 16)
+                    dailyPlanWorkoutAdjustment(compactAdjustment)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                }
+            }
+            .background(FrostedCardSurface(cornerRadius: NoopMetrics.cardRadius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(LiquidPressStyle())
+        .accessibilityHint(Text("daily_plan.details.hint"))
+        .accessibilityValue(
+            Text(todayDetailsExpanded
+                 ? "appwide.a11y.expanded"
+                 : "appwide.a11y.collapsed")
+        )
+        .id(Self.dailyPlanDisclosureAnchorID)
+    }
+
     /// Live Session entry (silent guardian, beta). It opens an explicit pre-session explanation; no
     /// realtime tracking begins until the separate Start confirmation on that screen.
     private var liveSessionStartRow: some View {
         Button { showLiveSession = true } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "shield.lefthalf.filled")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(StrandPalette.metricCyan)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text("appwide.live_session.start")
-                            .font(StrandFont.subhead)
-                            .foregroundStyle(StrandPalette.onDarkPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .layoutPriority(1)
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "shield.lefthalf.filled")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(StrandPalette.metricCyan)
+                                .padding(.top, 3)
+                            LiveSessionEntryCopy(
+                                live: ble.state,
+                                hasCurrentRecovery: chargeDisplay.hasCurrentRecovery,
+                                kind: .title
+                            )
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.onDarkPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(StrandPalette.onDarkTertiary)
+                                .padding(.top, 5)
+                        }
                         Text("BETA")
                             .font(StrandFont.overlineScaled(8.5)).tracking(0)
                             .foregroundStyle(StrandPalette.onDarkSecondary)
                             .padding(.horizontal, 8).padding(.vertical, 2.5)
                             .background(Capsule().fill(.white.opacity(0.05))
                                 .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
+                            .fixedSize()
+                        LiveSessionEntryCopy(
+                            live: ble.state,
+                            hasCurrentRecovery: chargeDisplay.hasCurrentRecovery,
+                            kind: .detail
+                        )
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.onDarkSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text("appwide.live_session.start_detail")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.onDarkSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    HStack(spacing: 12) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(StrandPalette.metricCyan)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 8) {
+                                LiveSessionEntryCopy(
+                                    live: ble.state,
+                                    hasCurrentRecovery: chargeDisplay.hasCurrentRecovery,
+                                    kind: .title
+                                )
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.onDarkPrimary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .layoutPriority(1)
+                                Text("BETA")
+                                    .font(StrandFont.overlineScaled(8.5)).tracking(0)
+                                    .foregroundStyle(StrandPalette.onDarkSecondary)
+                                    .padding(.horizontal, 8).padding(.vertical, 2.5)
+                                    .background(Capsule().fill(.white.opacity(0.05))
+                                        .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
+                            }
+                            LiveSessionEntryCopy(
+                                live: ble.state,
+                                hasCurrentRecovery: chargeDisplay.hasCurrentRecovery,
+                                kind: .detail
+                            )
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.onDarkSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StrandPalette.onDarkTertiary)
+                    }
                 }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(StrandPalette.onDarkTertiary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -992,7 +1197,7 @@ struct LiquidTodayView: View {
             )
         }
         .buttonStyle(LiquidPressStyle())
-        .accessibilityLabel("appwide.live_session.start_accessibility")
+        .accessibilityElement(children: .combine)
     }
 
     private var heroCard: some View {
@@ -1248,7 +1453,7 @@ struct LiquidTodayView: View {
                      value: stressText, symbol: card.icon, tint: StrandPalette.accent, frac: fracOver(stress, 3))
         case .fitnessAge:
             cardLink(.metric("fitness_age"), title: card.title, sub: card.subtitle,
-                     value: visibleFitnessAge.map(FitnessAgePresentation.value) ?? "–", symbol: card.icon,
+                     value: visibleFitnessAge.map(FitnessAgePresentation.value) ?? StrandFormat.missing, symbol: card.icon,
                      tint: StrandPalette.chargeColor, frac: 0.5)
         case .vitality:
             cardLink(.metric("vitality"), title: card.title, sub: card.subtitle,
@@ -1280,13 +1485,13 @@ struct LiquidTodayView: View {
             let value = liquidSpo2
             cardLink(.metricSourced(key: "spo2", source: "my-whoop"), title: card.title,
                      sub: value == nil ? card.subtitle : String(localized: "Latest available reading"),
-                     value: value.map { String(format: "%.0f%%", $0) } ?? "–", symbol: card.icon,
+                     value: value.map { String(format: "%.0f%%", $0) } ?? StrandFormat.missing, symbol: card.icon,
                      tint: StrandPalette.metricCyan, frac: fracOver(value, 100))
         case .skinTemp:
             let value = liquidSkinTemperature
             cardLink(.metricSourced(key: "skin_temp", source: "my-whoop"), title: card.title,
                      sub: value == nil ? card.subtitle : String(localized: "Latest available reading"),
-                     value: value.map(skinTemperatureText) ?? "–", symbol: card.icon,
+                     value: value.map(skinTemperatureText) ?? StrandFormat.missing, symbol: card.icon,
                      tint: StrandPalette.metricAmber, frac: nil)
         case .calories:
             energyCardLink(card)
@@ -1295,13 +1500,13 @@ struct LiquidTodayView: View {
                      value: sleepText, symbol: card.icon,
                      tint: StrandPalette.restColor, frac: fracOver(displayDay?.totalSleepMin, 480))
         case .hydration:
-            cardLink(.hydration, title: card.title, sub: card.subtitle,
+            cardLink(.hydration(day: selectedDayKey), title: card.title, sub: card.subtitle,
                      value: hydrationGoalML.map {
-                         HydrationGoal.cardValueString(totalML: hydrationTotalML ?? 0, goalML: $0)
-                     } ?? "-",
+                         HydrationStore.cardValue(totalML: hydrationTotalML, goalML: $0)
+                     } ?? StrandFormat.missing,
                      symbol: card.icon, tint: StrandPalette.metricCyan,
-                     frac: hydrationGoalML.map {
-                         HydrationGoal.fraction(totalML: hydrationTotalML ?? 0, goalML: $0)
+                     frac: hydrationGoalML.flatMap { goal in
+                         hydrationTotalML.map { HydrationGoal.fraction(totalML: $0, goalML: goal) }
                      })
         case .coupled:
             // A tap-through to the full Coupled day screen. No value.
@@ -1584,6 +1789,34 @@ struct LiquidTodayView: View {
         readiness.signals.filter { $0.flag == .watch || $0.flag == .bad }
     }
 
+    private var dailyPlanSummaryEvidenceLabels: [String] {
+        var sources: [DailyActionPlanner.EvidenceSource] = []
+        for evidence in dailyActionPlan.evidence where !sources.contains(evidence.source) {
+            sources.append(evidence.source)
+            if sources.count == 2 { break }
+        }
+        return sources.map { dailyPlanEvidenceLabel($0) }
+    }
+
+    private var dailyPlanSummarySymbol: String {
+        switch dailyActionPlan.availability {
+        case .ready: return "checkmark.circle.fill"
+        case .checkInNeeded: return "questionmark.circle.fill"
+        case .calibrating: return "chart.line.uptrend.xyaxis"
+        case .recoveryShift: return "figure.walk"
+        case .stop: return "pause.circle.fill"
+        }
+    }
+
+    private var dailyPlanSummaryTint: Color {
+        switch dailyActionPlan.availability {
+        case .ready: return StrandPalette.statusPositive
+        case .checkInNeeded: return StrandPalette.textTertiary
+        case .calibrating, .recoveryShift: return StrandPalette.statusWarning
+        case .stop: return StrandPalette.statusCritical
+        }
+    }
+
     private var whySection: some View {
         let signals = dailyPlanWhySignals
         return VStack(spacing: 8) {
@@ -1645,6 +1878,10 @@ struct LiquidTodayView: View {
 
                     dailyPlanDivider
                     dailyPlanResult(plan)
+                    if let adjustment = plan.workoutAdjustment {
+                        dailyPlanDivider
+                        dailyPlanWorkoutAdjustment(adjustment)
+                    }
 
                     Button {
                         withAnimation(StrandMotion.interactive) {
@@ -1915,9 +2152,11 @@ struct LiquidTodayView: View {
         return Button {
             setDailyActionCheckIn(value)
         } label: {
-            HStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(StrandFont.subhead)
                     .foregroundStyle(selected ? StrandPalette.accent : StrandPalette.textTertiary)
+                    .padding(.top, 2)
                 Text(label)
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
@@ -1947,19 +2186,37 @@ struct LiquidTodayView: View {
         action: String? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: symbol)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(StrandFont.headline)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                    Text(body)
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(body)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(body)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             if let action {
@@ -1969,6 +2226,149 @@ struct LiquidTodayView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private func dailyPlanWorkoutAdjustment(
+        _ adjustment: DailyActionPlanner.WorkoutAdjustment
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label {
+                Text("daily_plan.workout_adjustment.title")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+            } icon: {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(StrandPalette.accent)
+            }
+
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let measuredSleepMinutes = adjustment.measuredSleepMinutes {
+                            dailyPlanWorkoutMetric(
+                                symbol: "bed.double.fill",
+                                label: "daily_plan.workout_adjustment.sleep_label",
+                                value: dailyPlanDuration(minutes: measuredSleepMinutes)
+                            )
+                        }
+                        dailyPlanWorkoutMetric(
+                            symbol: "clock.fill",
+                            label: "daily_plan.workout_adjustment.workout_label",
+                            value: Date(timeIntervalSince1970: TimeInterval(adjustment.startSec))
+                                .formatted(date: .omitted, time: .shortened)
+                        )
+                    }
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        if let measuredSleepMinutes = adjustment.measuredSleepMinutes {
+                            dailyPlanWorkoutMetric(
+                                symbol: "bed.double.fill",
+                                label: "daily_plan.workout_adjustment.sleep_label",
+                                value: dailyPlanDuration(minutes: measuredSleepMinutes)
+                            )
+                        }
+                        dailyPlanWorkoutMetric(
+                            symbol: "clock.fill",
+                            label: "daily_plan.workout_adjustment.workout_label",
+                            value: Date(timeIntervalSince1970: TimeInterval(adjustment.startSec))
+                                .formatted(date: .omitted, time: .shortened)
+                        )
+                    }
+                }
+            }
+
+            if let sleepDeficit = dailyPlanSleepDeficit(adjustment) {
+                Text(sleepDeficit)
+                    .font(StrandFont.subhead.weight(.semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(dailyPlanWorkoutAdjustmentCopy(adjustment.reason))
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func dailyPlanWorkoutMetric(
+        symbol: String,
+        label: LocalizedStringKey,
+        value: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(StrandPalette.textTertiary)
+                .frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(StrandFont.overline)
+                    .tracking(0)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                Text(value)
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func dailyPlanWorkoutAdjustmentCopy(
+        _ reason: DailyActionPlanner.WorkoutAdjustmentReason
+    ) -> LocalizedStringKey {
+        switch reason {
+        case .sleepDeficit:
+            return "daily_plan.workout_adjustment.sleep_deficit"
+        case .recoveryShift:
+            return "daily_plan.workout_adjustment.recovery_shift"
+        case .sleepAndRecovery:
+            return "daily_plan.workout_adjustment.sleep_and_recovery"
+        }
+    }
+
+    private func dailyPlanSleepDeficit(
+        _ adjustment: DailyActionPlanner.WorkoutAdjustment
+    ) -> String? {
+        guard let deficit = adjustment.sleepDeficitMinutes,
+              deficit > 0,
+              let reference = adjustment.sleepReference else { return nil }
+        let hours = deficit / 60
+        let minutes = deficit % 60
+        let key: String
+        switch (reference, hours > 0) {
+        case (.personalUsual, false):
+            key = "daily_plan.workout_adjustment.deficit_usual_minutes"
+        case (.personalUsual, true):
+            key = "daily_plan.workout_adjustment.deficit_usual_hours_minutes"
+        case (.explicitTarget, false):
+            key = "daily_plan.workout_adjustment.deficit_target_minutes"
+        case (.explicitTarget, true):
+            key = "daily_plan.workout_adjustment.deficit_target_hours_minutes"
+        }
+        if hours > 0 {
+            return String(format: String(localized: String.LocalizationValue(key)), hours, minutes)
+        }
+        return String(format: String(localized: String.LocalizationValue(key)), minutes)
+    }
+
+    private func dailyPlanDuration(minutes: Int) -> String {
+        let bounded = max(0, minutes)
+        let hours = bounded / 60
+        let remainder = bounded % 60
+        if hours > 0 {
+            return String(
+                format: String(localized: "appwide.day_overview.duration_hours_minutes_format"),
+                hours,
+                remainder
+            )
+        }
+        return String(
+            format: String(localized: "appwide.day_overview.duration_minutes_format"),
+            remainder
+        )
     }
 
     private func dailyPlanEvidence(_ plan: DailyActionPlanner.Plan) -> some View {
@@ -2161,12 +2561,24 @@ struct LiquidTodayView: View {
         let resp = displayDay?.respRateBpm ?? vitalsDay?.respRateBpm
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("RECOVERY VITALS").font(StrandFont.overline).tracking(0)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                    Spacer()
-                    if let line = vitalsProvenanceLine {
-                        Text(line).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("RECOVERY VITALS").font(StrandFont.overline).tracking(0)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        if let line = vitalsProvenanceLine {
+                            Text(line).font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text("RECOVERY VITALS").font(StrandFont.overline).tracking(0)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        Spacer()
+                        if let line = vitalsProvenanceLine {
+                            Text(line).font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
                     }
                 }
                 vitalRow(String(localized: "Heart-rate variability"), unitText(hrv, "ms"),
@@ -2179,12 +2591,25 @@ struct LiquidTodayView: View {
         }
     }
 
+    @ViewBuilder
     private func vitalRow(_ label: String, _ value: String, symbol: String) -> some View {
-        HStack(spacing: 12) {
-            MetricGlyph(symbol, size: 28)
-            Text(label).font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
-            Spacer()
-            Text(value).font(StrandFont.number(15)).foregroundStyle(StrandPalette.textPrimary)
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+                MetricGlyph(symbol, size: 28)
+                Text(label).font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                Text(value).font(StrandFont.number(15))
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
+        } else {
+            HStack(spacing: 12) {
+                MetricGlyph(symbol, size: 28)
+                Text(label).font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                Spacer()
+                Text(value).font(StrandFont.number(15))
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
         }
     }
 
@@ -2268,7 +2693,7 @@ struct LiquidTodayView: View {
                   trend: keyMetricTrends[.bloodOxygen], symbol: metric.icon, key: "spo2")
         case .respiratory:
             let resp = displayDay?.respRateBpm ?? vitalsDay?.respRateBpm
-            ktile(String(localized: "Respiratory"), resp.map { String(format: "%.1f", $0) } ?? "-",
+            ktile(String(localized: "Respiratory"), resp.map { String(format: "%.1f", $0) } ?? StrandFormat.missing,
                   "rpm", StrandPalette.effortColor, nil, trend: keyMetricTrends[.respiratory],
                   symbol: metric.icon, key: "resp_rate")
         case .steps:
@@ -2276,7 +2701,7 @@ struct LiquidTodayView: View {
                   nil, trend: keyMetricTrends[.steps], symbol: metric.icon, key: stepsDetailKey,
                   detailMetric: stepsDetailMetric)
         case .weight:
-            ktile(String(localized: "Weight"), importedWeightKg.map(weightText) ?? "-", "",
+            ktile(String(localized: "Weight"), importedWeightKg.map(weightText) ?? StrandFormat.missing, "",
                   StrandPalette.metricAmber, nil, trend: keyMetricTrends[.weight],
                   symbol: metric.icon, key: "weight")
         case .calories:
@@ -2660,13 +3085,27 @@ struct LiquidTodayView: View {
             NavigationLink(value: TabRoute.dataSources) {
                 card {
                     VStack(spacing: 12) {
-                        HStack {
-                            Text("Synced from").font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
-                            Spacer()
-                            HStack(spacing: 4) {
-                                Text("View sources").font(StrandFont.subhead).foregroundStyle(StrandPalette.textTertiary)
-                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                        if dynamicTypeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Synced from").font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                Label("View sources", systemImage: "chevron.right")
+                                    .font(StrandFont.subhead)
                                     .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            HStack {
+                                Text("Synced from").font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                Spacer()
+                                HStack(spacing: 4) {
+                                    Text("View sources").font(StrandFont.subhead)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                }
                             }
                         }
                         LiquidStrapBatteryRow()
@@ -2684,15 +3123,30 @@ struct LiquidTodayView: View {
         // ObsidianFlow is adaptive — pearl in Light mode and obsidian in Dark mode — so section ink
         // must resolve with the appearance instead of assuming that an enabled scene is always dark.
         let color = StrandPalette.textSecondary
-        return HStack(alignment: .firstTextBaseline) {
-            Text(LocalizedStringKey(title))
-                .font(StrandFont.overline)
-                .tracking(0)
-                .foregroundStyle(color)
-            Spacer()
-            Text(LocalizedStringKey(trailing))
-                .font(StrandFont.caption)
-                .foregroundStyle(color)
+        return Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(LocalizedStringKey(title))
+                        .font(StrandFont.overline)
+                        .tracking(0)
+                        .foregroundStyle(color)
+                    Text(LocalizedStringKey(trailing))
+                        .font(StrandFont.caption)
+                        .foregroundStyle(color)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(LocalizedStringKey(title))
+                        .font(StrandFont.overline)
+                        .tracking(0)
+                        .foregroundStyle(color)
+                    Spacer()
+                    Text(LocalizedStringKey(trailing))
+                        .font(StrandFont.caption)
+                        .foregroundStyle(color)
+                }
+            }
         }
         .padding(.horizontal, 2)
         .padding(.top, 4)
@@ -2790,8 +3244,22 @@ struct LiquidTodayView: View {
         }
 
         if hydrationEnabled {
-            hydrationTotalML = await repo.hydrationTotal(day: Repository.localDayKey(Date()))
-            hydrationGoalML = repo.hydrationGoalML(profileSex: profile.sex)
+            do {
+                hydrationTotalML = try await repo.hydrationTotal(
+                    day: requestedDayKey
+                )
+            } catch {
+                // Preserve the last confirmed value. The focused Hydration screen owns retry UI.
+            }
+            hydrationGoalML = repo.hydrationGoalML(
+                profileAge: profile.age,
+                ageConfirmed: profile.ageInputConfirmed,
+                profileSex: profile.sex,
+                sexConfirmed: profile.sexInputConfirmed,
+                weightKg: profile.weightKg,
+                weightConfirmed: profile.weightInputConfirmed,
+                day: requestedDayKey
+            )
         } else {
             hydrationTotalML = nil
             hydrationGoalML = nil
@@ -2819,15 +3287,34 @@ struct LiquidTodayView: View {
         let readinessResult = ReadinessEngine.evaluate(days: repo.days, today: requestedDayKey)
         cachedReadiness = readinessResult
         readinessAsOfDay = readinessResult.asOfDay
-        let dailyPlan = makeDailyActionPlan(readiness: readinessResult)
+        let planningNow = Date()
+        let plannedWorkoutSnapshot = isToday
+            ? await plannedWorkoutCalendar.refresh(now: planningNow)
+            : nil
+        guard !Task.isCancelled,
+              requestedOffset == selectedDayOffset,
+              requestedDayKey == selectedDayKey else { return }
+        let dailyPlan = makeDailyActionPlan(
+            readiness: readinessResult,
+            plannedWorkoutSnapshot: plannedWorkoutSnapshot,
+            now: planningNow
+        )
         cachedDailyActionPlan = dailyPlan
         #if DEBUG
         if CommandLine.arguments.contains("--demo-daily-plan") {
-            NSLog(
+            let qaState =
                 "Daily Plan QA availability=\(dailyPlan.availability.rawValue) " +
-                "checkIn=\(currentDailyActionCheckIn.rawValue) " +
-                "target=\(dailyPlan.target.map { "\($0.lower)-\($0.upper)" } ?? "none")"
-            )
+                "plannedWorkout=\(dailyPlan.workoutAdjustment != nil)"
+            if let caches = FileManager.default.urls(
+                for: .cachesDirectory,
+                in: .userDomainMask
+            ).first {
+                try? qaState.write(
+                    to: caches.appendingPathComponent("noop-daily-plan-qa.txt"),
+                    atomically: true,
+                    encoding: .utf8
+                )
+            }
         }
         #endif
         // Prior-day vitals carry, resolved ONCE here (never in body). Bound to today's own key so it can't
@@ -2915,19 +3402,28 @@ struct LiquidTodayView: View {
             ? Int(Date().timeIntervalSince1970)
             : selectedCalendarWindow.upperBound
 
-        async let restA = repo.exploreSeries(key: "sleep_performance", source: "my-whoop")
-        async let fitA = repo.exploreSeries(key: "fitness_age", source: "my-whoop")
-        async let vitA = repo.exploreSeries(key: "vitality", source: "my-whoop")
+        // The default Explore/Apple helpers intentionally cover ~11 years for history screens. Today needs
+        // only the selected day plus its compact trailing trend window. Historical navigation grows this
+        // bound just enough to include the requested day; the ordinary Today mount reads 30/90 days.
+        let historyLookbackDays = max(30, requestedOffset + 15)
+        let ageMetricLookbackDays = max(90, requestedOffset + 15)
+        async let restA = repo.exploreSeries(
+            key: "sleep_performance", source: "my-whoop", days: historyLookbackDays)
+        async let fitA = repo.exploreSeries(
+            key: "fitness_age", source: "my-whoop", days: ageMetricLookbackDays)
+        async let vitA = repo.exploreSeries(
+            key: "vitality", source: "my-whoop", days: ageMetricLookbackDays)
         async let fitProfileA = repo.exploreSeries(
-            key: AgeMetricProfile.fitnessAgeKey, source: "my-whoop")
+            key: AgeMetricProfile.fitnessAgeKey, source: "my-whoop", days: ageMetricLookbackDays)
         async let vitProfileA = repo.exploreSeries(
-            key: AgeMetricProfile.vitalityKey, source: "my-whoop")
-        async let stepsA = repo.exploreSeries(key: "steps_est", source: "my-whoop")
+            key: AgeMetricProfile.vitalityKey, source: "my-whoop", days: ageMetricLookbackDays)
+        async let stepsA = repo.exploreSeries(
+            key: "steps_est", source: "my-whoop", days: historyLookbackDays)
         async let spo2A = repo.resolvedSeries(
             key: "spo2",
             source: Repository.whoopSource,
             days: max(30, requestedOffset + 15))
-        async let appleA = repo.appleDailyRows()
+        async let appleA = repo.appleDailyRows(days: historyLookbackDays)
         async let hrA = repo.hrBuckets(from: from, to: to, bucketSeconds: 300)
         async let wkA = repo.workoutRows(overlappingFrom: selectedCalendarWindow.lowerBound,
                                          to: selectedCalendarWindow.upperBound)
@@ -3069,7 +3565,19 @@ struct LiquidTodayView: View {
             "hr_bucket_count": String(hrValuesLocal.count),
             "workout_count": String(workoutsLocal.count),
             "trend_metric_count": String(keyMetricTrendsLocal.count),
+            "history_row_bucket": Self.diagnosticCountBucket(
+                max(restSeries.count, stepsSeries.count)),
+            "apple_row_bucket": Self.diagnosticCountBucket(appleRows.count),
         ]
+    }
+
+    private static func diagnosticCountBucket(_ count: Int) -> String {
+        switch count {
+        case ...0: return "empty"
+        case 1...30: return "up_to_30"
+        case 31...90: return "31_to_90"
+        default: return "over_90"
+        }
     }
 
     private func updateAdaptiveHydrationContext() {
@@ -3084,7 +3592,8 @@ struct LiquidTodayView: View {
             temperatureC: temperatureC,
             effort: selectedDayOffset == 0 && isCurrentCalendarDay ? cachedDisplayDay?.strain : nil,
             consumedML: selectedDayOffset == 0 && isCurrentCalendarDay ? hydrationTotalML : nil,
-            goalML: selectedDayOffset == 0 && isCurrentCalendarDay ? hydrationGoalML : nil
+            goalML: selectedDayOffset == 0 && isCurrentCalendarDay && hydrationTotalML != nil
+                ? hydrationGoalML : nil
         )
     }
 
@@ -3118,6 +3627,59 @@ struct LiquidTodayView: View {
         }
         return DailyActionPlanner.CheckIn(rawValue: arguments[index + 1])
     }
+
+    private static func demoPlannedWorkoutContext(
+        dayKey: String
+    ) -> (
+        now: Date,
+        recentSleep: [DailyActionPlanner.SleepDay],
+        workout: DailyActionPlanner.PlannedWorkout
+    )? {
+        guard CommandLine.arguments.contains("--demo-planned-workout") else { return nil }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .autoupdatingCurrent
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let day = formatter.date(from: dayKey),
+              formatter.string(from: day) == dayKey,
+              let now = calendar.date(bySettingHour: 9, minute: 41, second: 0, of: day),
+              let start = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: day),
+              let end = calendar.date(byAdding: .hour, value: 1, to: start)
+        else { return nil }
+
+        var recentSleep = [
+            DailyActionPlanner.SleepDay(
+                day: dayKey,
+                minutes: 6 * 60 + 12,
+                observedAtSec: Int(now.timeIntervalSince1970) - 2 * 60 * 60,
+                observedSessionDurationMinutes: 6 * 60 + 12
+            )
+        ]
+        for offset in 1...7 {
+            guard let prior = calendar.date(byAdding: .day, value: -offset, to: day) else {
+                continue
+            }
+            recentSleep.append(
+                DailyActionPlanner.SleepDay(
+                    day: formatter.string(from: prior),
+                    minutes: 7 * 60 + 30
+                )
+            )
+        }
+        return (
+            now: now,
+            recentSleep: recentSleep,
+            workout: DailyActionPlanner.PlannedWorkout(
+                day: dayKey,
+                startSec: Int(start.timeIntervalSince1970),
+                endSec: Int(end.timeIntervalSince1970)
+            )
+        )
+    }
     #endif
 
     private var dailyActionPlan: DailyActionPlanner.Plan {
@@ -3125,29 +3687,96 @@ struct LiquidTodayView: View {
     }
 
     private func makeDailyActionPlan(
-        readiness: ReadinessEngine.Readiness
+        readiness: ReadinessEngine.Readiness,
+        checkIn: DailyActionPlanner.CheckIn? = nil,
+        plannedWorkoutSnapshot: PlannedWorkoutCalendarSnapshot? = nil,
+        now: Date = Date()
     ) -> DailyActionPlanner.Plan {
-        DailyActionPlanner.plan(
+        var planningNow = now
+        let currentSleepAggregate = repo.days
+            .last(where: { $0.day == selectedDayKey })?
+            .totalSleepMin
+        let currentSleepObservation: (endSec: Int, durationMinutes: Double)? =
+            repo.sleeps
+            .sorted { $0.endTs > $1.endTs }
+            .compactMap { session in
+                let end = Date(timeIntervalSince1970: TimeInterval(session.endTs))
+                return max(
+                    Repository.logicalDayKey(end),
+                    Repository.localDayKey(end)
+                ) == selectedDayKey
+                    ? session
+                    : nil
+            }
+            .compactMap { session in
+                let durationMinutes =
+                    Double(session.endTs - session.effectiveStartTs) / 60.0
+                guard DailyActionPlanner.matchedSleepObservationEndSec(
+                    aggregateMinutes: currentSleepAggregate,
+                    sessionDurationMinutes: durationMinutes,
+                    sessionEndSec: session.endTs,
+                    nowSec: Int(planningNow.timeIntervalSince1970)
+                ) != nil else { return nil }
+                return (session.endTs, durationMinutes)
+            }
+            .first
+        var recentSleep = repo.days.map {
+            DailyActionPlanner.SleepDay(
+                day: $0.day,
+                minutes: $0.totalSleepMin,
+                observedAtSec: $0.day == selectedDayKey
+                    ? currentSleepObservation?.endSec
+                    : nil,
+                observedSessionDurationMinutes: $0.day == selectedDayKey
+                    ? currentSleepObservation?.durationMinutes
+                    : nil
+            )
+        }
+        var plannedWorkout = selectedDayOffset == 0
+            ? (plannedWorkoutSnapshot ?? plannedWorkoutCalendar.snapshot)?
+                .plannedWorkout(forPlanningDay: selectedDayKey)
+            : nil
+        #if DEBUG
+        if selectedDayOffset == 0,
+           let demo = Self.demoPlannedWorkoutContext(dayKey: selectedDayKey) {
+            planningNow = demo.now
+            recentSleep = demo.recentSleep
+            plannedWorkout = demo.workout
+        }
+        #endif
+        return DailyActionPlanner.plan(
             today: selectedDayKey,
             readiness: readiness,
-            checkIn: currentDailyActionCheckIn,
+            checkIn: checkIn ?? currentDailyActionCheckIn,
             recentEffort: repo.days.map {
                 DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
-            }
+            },
+            recentSleep: recentSleep,
+            sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed,
+            plannedWorkout: plannedWorkout,
+            nowSec: Int(planningNow.timeIntervalSince1970)
         )
     }
 
     private func setDailyActionCheckIn(_ value: DailyActionPlanner.CheckIn) {
         guard selectedDayOffset == 0 else { return }
+        behavior.setDailyActionCheckIn(value, for: selectedDayKey)
         dailyActionCheckInDay = selectedDayKey
         dailyActionCheckInValue = value.rawValue
-        cachedDailyActionPlan = DailyActionPlanner.plan(
-            today: selectedDayKey,
+        cachedDailyActionPlan = makeDailyActionPlan(
             readiness: readiness,
             checkIn: value,
-            recentEffort: repo.days.map {
-                DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
-            }
+            plannedWorkoutSnapshot: plannedWorkoutCalendar.snapshot
+        )
+    }
+
+    private func refreshCachedDailyActionPlanForCalendar(now: Date = Date()) {
+        guard let cachedReadiness else { return }
+        cachedDailyActionPlan = makeDailyActionPlan(
+            readiness: cachedReadiness,
+            plannedWorkoutSnapshot: plannedWorkoutCalendar.snapshot,
+            now: now
         )
     }
 
@@ -3346,16 +3975,18 @@ struct LiquidTodayView: View {
 
     private func frac(_ v: Double?) -> Double? { v.map { max(0, min(1, $0 / 100)) } }
     private func fracOver(_ v: Double?, _ over: Double) -> Double? { v.map { max(0, min(1, $0 / over)) } }
-    private func intText(_ v: Double?) -> String { v.map { String(Int($0.rounded())) } ?? "–" }
+    private func intText(_ v: Double?) -> String {
+        v.map { String(Int($0.rounded())) } ?? StrandFormat.missing
+    }
 
     private func kcalText(_ v: Double?, includesUnit: Bool = true) -> String {
-        guard let v else { return "–" }
+        guard let v else { return StrandFormat.missing }
         let n = v.formatted(.number.grouping(.automatic).precision(.fractionLength(0)))
         return includesUnit ? "\(n) kcal" : n
     }
 
     private func unitText(_ v: Double?, _ unit: String, decimals: Int = 0) -> String {
-        guard let v else { return "–" }
+        guard let v else { return StrandFormat.missing }
         let n = decimals > 0 ? String(format: "%.\(decimals)f", v) : String(Int(v.rounded()))
         return unit.isEmpty ? n : "\(n) \(unit)"
     }
@@ -3363,12 +3994,12 @@ struct LiquidTodayView: View {
     private var stressText: String { stress.map { String(Int($0.rounded())) } ?? "Calibrating" }
 
     private var sleepText: String {
-        guard let m = displayDay?.totalSleepMin else { return "–" }
+        guard let m = displayDay?.totalSleepMin else { return StrandFormat.missing }
         return "\(Int(m) / 60)h \(Int(m) % 60)m"
     }
 
     private var stepsText: String {
-        guard let s = stepCount else { return "–" }
+        guard let s = stepCount else { return StrandFormat.missing }
         let f = NumberFormatter()
         f.numberStyle = .decimal
         return f.string(from: NSNumber(value: Int(s))) ?? "\(Int(s))"
@@ -3380,7 +4011,7 @@ struct LiquidTodayView: View {
     private var effortScale: EffortScale { UnitPrefs.resolveEffortScale(effortScaleRaw) }
 
     private func effortText(_ s: Double?) -> String {
-        guard let s else { return "–" }
+        guard let s else { return StrandFormat.missing }
         // Route through the shared formatter instead of hardcoding *21: a default (0–100) user was shown the
         // WHOOP-scaled number here while the hero + Workouts table showed 0–100, two numbers for one workout.
         return UnitFormatter.effortDisplay(s, scale: effortScale)
@@ -3817,10 +4448,73 @@ private final class LiquidTodayScrollTracker {
     var offset: CGFloat = 0
 }
 
-/// Carries the Today scroll's top overscroll offset up to the view for the custom liquid pull-to-refresh.
+/// Carries the legacy Today scroll offset up to the view for pull-to-refresh and shell compaction.
 private struct PullOffsetKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// A geometry preference remains necessary on iOS 17 and macOS. Attach it to the full scroll content:
+/// a zero-height probe inside the LazyVStack can trap iOS 26 in an unbounded layout transaction after
+/// repeated direction changes.
+private struct LegacyLiquidTodayScrollOffsetProbe: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 18.0, *) {
+            content
+        } else {
+            legacyProbe(content)
+        }
+        #else
+        legacyProbe(content)
+        #endif
+    }
+
+    private func legacyProbe(_ content: Content) -> some View {
+        content.background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: PullOffsetKey.self,
+                    value: geometry.frame(in: .named(LiquidTodayView.pullSpace)).minY
+                )
+            }
+        }
+    }
+}
+
+/// Native scroll geometry avoids layout feedback on current iOS and reports normalized values:
+/// zero at rest, negative down-page progress, and positive top overscroll. Legacy platforms retain
+/// the full-content preference probe above.
+private struct LiquidTodayScrollPositionReporter: ViewModifier {
+    let report: (CGFloat) -> Void
+    @State private var legacyTopOffset: CGFloat?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                -(geometry.contentOffset.y + geometry.contentInsets.top)
+            } action: { _, offset in
+                report(offset)
+            }
+        } else {
+            legacyReporter(content)
+        }
+        #else
+        legacyReporter(content)
+        #endif
+    }
+
+    private func legacyReporter(_ content: Content) -> some View {
+        content
+            .coordinateSpace(name: LiquidTodayView.pullSpace)
+            .onPreferenceChange(PullOffsetKey.self) { offset in
+                if legacyTopOffset == nil { legacyTopOffset = offset }
+                report(offset - (legacyTopOffset ?? offset))
+            }
+    }
 }
 
 // MARK: - NOOP wordmark (centred, with a tap easter egg)
@@ -3910,7 +4604,7 @@ private struct HeroScoreCell: View {
     /// This fills the vessel without inventing a provisional Recovery number.
     var fillFraction: Double? = nil
     /// Honest non-score readout shown inside the vessel, e.g. "2/4" calibration nights.
-    var emptyText: String = "–"
+    var emptyText: String = StrandFormat.missing
     var accessibilityValueOverride: String? = nil
 
     @State private var shown: Double = 0
@@ -3940,7 +4634,7 @@ private struct HeroScoreCell: View {
         if score != nil {
             CountUpNumber(value: shown, font: StrandFont.rounded(26), decimals: decimals)
         } else {
-            let size: CGFloat = emptyText == "–" ? 26 : 19
+            let size: CGFloat = emptyText == StrandFormat.missing ? 26 : 19
             Text(emptyText).font(StrandFont.rounded(size))
         }
     }
@@ -4806,9 +5500,12 @@ private struct TodayArrangeSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        let order = TodayLayoutPrefs.decodeOrder(orderRaw)
+        let order = TodayLayoutPrefs.decodeOrder(orderRaw).filter { $0 != .hero }
         NavigationStack {
             List {
+                Label(TodaySection.hero.title, systemImage: "pin.fill")
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textSecondary)
                 ForEach(order) { section in
                     Text(section.title)
                         .font(StrandFont.body)
@@ -4817,7 +5514,7 @@ private struct TodayArrangeSheet: View {
                 .onMove { from, to in
                     var next = order
                     next.move(fromOffsets: from, toOffset: to)
-                    orderRaw = TodayLayoutPrefs.encode(next)
+                    orderRaw = TodayLayoutPrefs.encode([.hero] + next)
                 }
             }
             .navigationTitle("Arrange Today")
@@ -4839,6 +5536,39 @@ private struct TodayArrangeSheet: View {
         #if os(macOS)
         .frame(minWidth: 340, minHeight: 420)
         #endif
+    }
+}
+
+private struct LiveSessionEntryCopy: View {
+    enum Kind {
+        case title
+        case detail
+    }
+
+    @ObservedObject var live: LiveState
+    let hasCurrentRecovery: Bool
+    let kind: Kind
+
+    @ViewBuilder
+    var body: some View {
+        switch kind {
+        case .title:
+            if liveSessionBandReady(live) {
+                Text("appwide.live_session.start")
+            } else {
+                Text("appwide.live_session.connect_band")
+            }
+        case .detail:
+            if liveSessionBandReady(live) {
+                if hasCurrentRecovery {
+                    Text("appwide.live_session.start_detail")
+                } else {
+                    Text("appwide.live_session.start_detail_unavailable")
+                }
+            } else {
+                Text("appwide.live_session.band_required")
+            }
+        }
     }
 }
 
@@ -4923,7 +5653,7 @@ private struct LiquidLiveHR: View {
     private func stat(_ label: String, _ v: Double?) -> some View {
         HStack(spacing: 5) {
             Text(label).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
-            Text(v.map { String(Int($0.rounded())) } ?? "–")
+            Text(v.map { String(Int($0.rounded())) } ?? StrandFormat.missing)
                 .font(StrandFont.captionNumber).foregroundStyle(StrandPalette.textSecondary)
         }
     }
@@ -5042,6 +5772,13 @@ extension LiquidTodayView {
             case .carried(let p, _): return p
             case .calibrating, .baselineReady, .noData: return nil
             }
+        }
+
+        var hasCurrentRecovery: Bool {
+            if case .scored = self {
+                return true
+            }
+            return false
         }
 
         /// The short Charge-state pill beside the greeting. It shares a row with the greeting under a

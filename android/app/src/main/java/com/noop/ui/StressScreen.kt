@@ -298,7 +298,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.StressContent(
             modifier = Modifier.staggeredAppear(1),
             verticalArrangement = Arrangement.spacedBy(Metrics.gap),
         ) {
-            SectionHeader("Latest Read", overline = "Markers", trailing = "vs prior baseline")
+            SectionHeader(
+                "Latest Read",
+                overline = "Markers",
+                trailing = stringResource(R.string.appwide_common_vs_baseline),
+            )
             StressTiles(model)
         }
     }
@@ -959,7 +963,7 @@ private fun StressTiles(model: StressModel) {
             MarkerTile(
                 modifier = m,
                 label = uiString(R.string.l10n_stress_screen_resting_hr_26677094),
-                value = model.rhrToday?.let { "$it bpm" } ?: "-",
+                value = model.rhrToday?.let { "$it bpm" } ?: NoopDisplayFormat.MISSING,
                 delta = model.rhrDelta,
                 accent = Palette.metricRose,
                 higherIsStress = true,
@@ -970,7 +974,7 @@ private fun StressTiles(model: StressModel) {
             MarkerTile(
                 modifier = m,
                 label = "HRV",
-                value = model.hrvToday?.let { "${it.roundToInt()} ms" } ?: "-",
+                value = model.hrvToday?.let { "${it.roundToInt()} ms" } ?: NoopDisplayFormat.MISSING,
                 delta = model.hrvDelta,
                 accent = Palette.metricPurple,
                 higherIsStress = false,
@@ -1146,7 +1150,7 @@ private fun StressMethodologyCard(model: StressModel, modifier: Modifier = Modif
             )
             HorizontalDivider(color = Palette.hairline)
             Row(modifier = Modifier.fillMaxWidth()) {
-                BandLegend("0-1", "LOW", StressRamp.CALM)
+                BandLegend("0-1", StressBand.Low.title, StressRamp.CALM)
                 BandLegend("1-2", "MEDIUM", StressRamp.STEADY)
                 BandLegend("2-3", "HIGH", StressRamp.TENSE)
             }
@@ -1205,10 +1209,17 @@ private fun StressEmpty() {
 
 // MARK: - Stress band
 
-internal enum class StressBand(val title: String, val tone: StrandTone) {
+internal enum class StressBand(private val fallbackTitle: String, val tone: StrandTone) {
     Low("LOW", StrandTone.Positive),
     Medium("MEDIUM", StrandTone.Warning),
     High("HIGH", StrandTone.Critical);
+
+    val title: String
+        get() = if (this == Low) {
+            uiString(R.string.appwide_stress_band_light_load)
+        } else {
+            fallbackTitle
+        }
 
     companion object {
         fun forScore(score: Double): StressBand = when {
@@ -1353,7 +1364,7 @@ internal class StressModel private constructor(
             val calmValue: String
             val calmCaption: String
             if (recent.isEmpty()) {
-                calmValue = "-"
+                calmValue = NoopDisplayFormat.MISSING
                 calmCaption = "needs history"
             } else {
                 val calm = recent.count { it.value < 1.0 }

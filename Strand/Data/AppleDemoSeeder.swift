@@ -3,6 +3,15 @@ import Foundation
 import StrandAnalytics
 import WhoopStore
 
+enum VisualQALog {
+    static func emit(_ message: String) {
+        NSLog("%@", message)
+        if let data = (message + "\n").data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
+    }
+}
+
 // MARK: - DEBUG-only demo seed (Apple parity with Android's DemoSeeder)
 // Seeds a comprehensive, self-contained synthetic dataset so a DEBUG build can walk every screen —
 // Today, Sleep, Trends, Workouts, Health, Stress, Insights, Explore — with no strap and no import.

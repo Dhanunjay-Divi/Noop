@@ -73,10 +73,10 @@ extension WhoopStore {
         }
     }
 
-    /// Cheap change token for every raw stream that can alter daily scoring. A history chunk can deliver
-    /// HR before motion or R-R intervals; watching HR alone would let a later sleep-critical chunk match
-    /// the prior watermark and remain unscored after an interruption. Battery and raw waveform storage do
-    /// not directly feed `analyzeRecent`, so they are intentionally excluded.
+    /// Legacy diagnostic fingerprint retained for the offline history harness. Production idle/resume
+    /// analysis no longer calls this history-sized aggregate; it snapshots and acknowledges
+    /// `analysisDirtySource` generations.
+    /// Battery and raw waveform storage do not directly feed scoring, so they remain excluded here.
     public func analysisFingerprint(
         deviceId: String, from: Int, to: Int
     ) async throws -> (count: Int, maxTs: Int) {

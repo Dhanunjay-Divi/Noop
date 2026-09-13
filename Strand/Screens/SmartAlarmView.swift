@@ -70,6 +70,16 @@ struct SmartAlarmView: View {
         .onChangeCompat(of: sleepPlan.recoveryMinutes) { _ in
             if behavior.smartAlarmMode == .adaptiveSleep { model.applySmartAlarm() }
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: WindDownNudge.stateDidChange
+            )
+        ) { _ in
+            windDownOn = WindDownNudge.isEnabled
+            wakeMinutes = WindDownNudge.wakeMinutes
+            overrides = WindDownNudge.perDayWakeOverrides
+            perDayOn = WindDownNudge.hasPerDayOverrides
+        }
         .alert(String(localized: "Notifications are off"), isPresented: $showNotifDeniedAlert) {
             Button(String(localized: "Open Settings")) { Self.openNotificationSettings() }
             Button(String(localized: "Not now"), role: .cancel) {}
@@ -96,6 +106,17 @@ struct SmartAlarmView: View {
     /// Naps contribute only when they have recorded sleep stages; missing nights remain skipped.
     private var sleepPlan: SleepPlan {
         SleepPlanner.plan(
+            wakeMinute: nextPlannerWakeMinutes,
+            sleepTargetMinutes: sleepTargetMinutes,
+            windDownLeadMinutes: windDownLeadMinutes,
+            debtBalanceMinutes: plannerLedger.nightCount == 0 ? nil : plannerLedger.balanceMin,
+            historyNights: plannerLedger.nightCount,
+            goalMode: sleepGoalMode
+        )
+    }
+
+    private var provisionalSleepPlan: SleepPlan {
+        SleepPlanner.plan(
             wakeMinute: wakeMinutes,
             sleepTargetMinutes: sleepTargetMinutes,
             windDownLeadMinutes: windDownLeadMinutes,
@@ -103,6 +124,22 @@ struct SmartAlarmView: View {
             historyNights: plannerLedger.nightCount,
             goalMode: sleepGoalMode
         )
+    }
+
+    private var nextPlannerWakeMinutes: Int {
+        guard let plan = WindDownNudge.nextDatedPlan(
+            defaultWakeMinutes: wakeMinutes,
+            wakeOverrides: overrides,
+            targetSleepMinutes: provisionalSleepPlan.sleepOpportunityMinutes,
+            leadMinutes: windDownLeadMinutes
+        ) else {
+            return wakeMinutes
+        }
+        let components = Calendar.current.dateComponents(
+            [.hour, .minute],
+            from: plan.wakeDate
+        )
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
     }
 
     private var plannerLedger: SleepDebtLedger {
@@ -523,11 +560,14 @@ struct SmartAlarmView: View {
                         .accessibilityLabel("Remind me to wind down")
                         .onChangeCompat(of: windDownOn) { on in
                             WindDownNudge.setEnabled(on) { outcome in
-                                // Denied at the OS level: the reminder can never fire, so reflect reality
-                                // (revert the switch) and surface the path to Settings.
-                                if outcome == .denied {
+                                switch outcome {
+                                case .scheduled:
+                                    windDownOn = true
+                                case .denied:
                                     windDownOn = false
                                     showNotifDeniedAlert = true
+                                case .failed, .off:
+                                    windDownOn = false
                                 }
                             }
                         }
@@ -721,7 +761,10 @@ struct SmartAlarmView: View {
                        displayedComponents: .hourAndMinute)
                 .labelsHidden()
                 .accessibilityLabel("\(Self.weekdayName(weekday)) wake time")
+                .accessibilityIdentifier("noop.sleep-planner.wake.\(weekday)")
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("noop.sleep-planner.wake-row.\(weekday)")
     }
 
     /// A binding for one weekday's wake override — reads the effective minute, writes a NEW override (a pick

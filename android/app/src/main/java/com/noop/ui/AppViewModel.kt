@@ -1,7 +1,15 @@
 package com.noop.ui
 
+import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.CalendarContract
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.noop.NoopApplication
@@ -33,6 +41,7 @@ import com.noop.analytics.StrainScorer
 import com.noop.analytics.UserProfile
 import com.noop.analytics.WorkoutSport
 import com.noop.analytics.WorkoutCautionPolicy
+import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.location.GpsSession
 import kotlinx.coroutines.Job
 import com.noop.ble.HrBroadcaster
@@ -58,6 +67,9 @@ import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.LiftingImporter
 import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.notif.AdaptiveDayEvaluator
+import com.noop.notif.AdaptiveDayEvaluationGate
+import com.noop.notif.AdaptiveDayNotifier
+import com.noop.notif.AdaptivePlannedWorkoutScheduler
 import com.noop.notif.AdaptiveDayTimeZoneStore
 import com.noop.notif.ContextualVitalNotifier
 import com.noop.notif.HydrationReminderPrefs
@@ -89,16 +101,19 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.Instant
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlin.math.roundToInt
 
 /**
- * Upgrade boundary for Charge formula changes that leave raw-input fingerprints unchanged.
+ * Upgrade boundary for Charge formula changes that do not create a raw-input dirty marker.
  *
  * The revision string makes future formula updates fail open into one full-history pass. AppViewModel
  * writes completion only from the successful branch of the scoring call.
@@ -127,10 +142,17 @@ internal data class TodayRestCompositeCacheKey(
     val restDataVersion: Long,
 )
 
+internal data class MatchedSleepObservation(
+    val endSec: Long,
+    val durationMinutes: Double,
+)
+
 /** Stable live fields the Today root is allowed to observe. Sensor values and sync counters stay in leaves. */
 internal data class DashboardLiveSnapshot(
     val connected: Boolean,
     val bonded: Boolean,
+    val encryptedBond: Boolean,
+    val worn: Boolean,
     val batteryPct: Double?,
     val isGeneration5: Boolean,
     val charging: Boolean?,
@@ -140,6 +162,8 @@ internal fun LiveState.dashboardLiveSnapshot(): DashboardLiveSnapshot =
     DashboardLiveSnapshot(
         connected = connected,
         bonded = bonded,
+        encryptedBond = encryptedBond,
+        worn = worn,
         batteryPct = batteryPct,
         isGeneration5 = isGeneration5,
         charging = charging,
@@ -190,6 +214,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Process-wide context for prefs + the background-connection service. */
     private val appContext = app.applicationContext
+    private var plannedWorkoutCalendarObserverRegistered = false
+    private var plannedWorkoutCalendarEvaluationJob: Job? = null
+    private var adaptiveDayInputEvaluationJob: Job? = null
+    private val plannedWorkoutCalendarObserver =
+        object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                onPlannedWorkoutCalendarChanged()
+            }
+        }
 
     /** The process owns the store + BLE client (see [NoopApplication]) so the connection can outlive
      *  this Activity-scoped ViewModel and keep streaming under [WhoopConnectionService]. */
@@ -239,7 +272,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _selectedDeviceId.value = id
         noopApp.sourceCoordinator.onActiveDeviceChanged(id)
         refreshActiveDeviceName()
-        if (changed) scheduleAgeMetricRecompute()
+        if (changed) {
+            analyzeKick.trySend(Unit)
+            scheduleAgeMetricRecompute()
+        }
     }
 
     /** The active band's display name (nickname, else collapsed brand+model), surfaced on the Live screen
@@ -264,8 +300,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  the SourceCoordinator, not the WHOOP client, so it isn't touched here. */
     suspend fun archivePairedDevice(id: String) {
         val devices = runCatching { noopApp.deviceRegistry.all() }.getOrDefault(emptyList())
+        val wasEligible = devices.any {
+            it.id == id && it.status != com.noop.data.DeviceStatus.archived.name
+        }
         noopApp.deviceRegistry.archive(id)
         if (com.noop.ble.SourceCoordinator.isWhoop(id, devices)) ble.releaseStrap()
+        if (wasEligible) {
+            analyzeKick.trySend(Unit)
+            scheduleAgeMetricRecompute()
+        }
     }
 
     /** Rename a device (blank clears the nickname → falls back to brand+model). */
@@ -584,7 +627,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val contextualVo2ReviewEnabled: StateFlow<Boolean> =
         _contextualVo2ReviewEnabled.asStateFlow()
     private val _adaptiveDayGuidanceEnabled =
-        MutableStateFlow(NoopPrefs.adaptiveDayGuidance(appContext))
+        MutableStateFlow(AdaptiveDayConsentGate.guidance(appContext))
     val adaptiveDayGuidanceEnabled: StateFlow<Boolean> =
         _adaptiveDayGuidanceEnabled.asStateFlow()
 
@@ -694,7 +737,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // Wind-down nudge (#207) — cross-platform, NON-safety-critical. A gentle evening notification
     // derived from the user's earliest wake time. Inexact daily alarm; no exact-alarm permission.
-    private val windDownStore = WindDownStore.from(appContext)
+    private val windDownStore = WindDownStore.from(appContext).also {
+        it.migrateWakeMinutesIfNeeded(phoneAlarmStore.targetMinutes)
+    }
     private val _windDownEnabled = MutableStateFlow(windDownStore.enabled)
     /** Whether the evening wind-down nudge is scheduled. */
     val windDownEnabled: StateFlow<Boolean> = _windDownEnabled.asStateFlow()
@@ -708,6 +753,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _windDownLeadMinutes = MutableStateFlow(windDownStore.leadMinutes)
     /** Time reserved to settle before the suggested bedtime. */
     val windDownLeadMinutes: StateFlow<Int> = _windDownLeadMinutes.asStateFlow()
+    private val _windDownWakeMinutes = MutableStateFlow(windDownStore.wakeMinutes)
+    /** Planner-owned default wake time; independent of phone and band alarm schedules. */
+    val windDownWakeMinutes: StateFlow<Int> = _windDownWakeMinutes.asStateFlow()
+    private val _windDownWakeOverrides =
+        MutableStateFlow(windDownStore.perDayWakeOverrides)
+    /** Planner-only Calendar.DAY_OF_WEEK overrides. */
+    val windDownWakeOverrides: StateFlow<Map<Int, Int>> =
+        _windDownWakeOverrides.asStateFlow()
     private val _windDownRecoveryMinutes = MutableStateFlow(windDownStore.recoveryMinutes)
     /** Planner-derived bounded addition from recent debt (0–60 minutes). */
     val windDownRecoveryMinutes: StateFlow<Int> = _windDownRecoveryMinutes.asStateFlow()
@@ -779,12 +832,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         selectedDeviceId.flatMapLatest { repository.recentDaysMergedFlow(it) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    internal suspend fun matchedSleepObservation(
+        dayKey: String,
+        aggregateMinutes: Double?,
+        nowSec: Long = System.currentTimeMillis() / 1_000L,
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): MatchedSleepObservation? {
+        val sessions = repository.sleepSessionsMerged(
+            deviceId = selectedDeviceId.value,
+            from = nowSec - DailyActionPlanner.CURRENT_SLEEP_MAXIMUM_AGE_SECONDS,
+            to = nowSec,
+            limit = 64,
+        )
+        for (session in sessions.sortedByDescending { it.endTs }) {
+            val end = Instant.ofEpochSecond(session.endTs).atZone(zoneId)
+            if (
+                maxOf(logicalDay(end).toString(), end.toLocalDate().toString()) == dayKey
+            ) {
+                val durationMinutes =
+                    (session.endTs - session.effectiveStartTs) / 60.0
+                if (
+                    DailyActionPlanner.matchedSleepObservationEndSec(
+                        aggregateMinutes = aggregateMinutes,
+                        sessionDurationMinutes = durationMinutes,
+                        sessionEndSec = session.endTs,
+                        nowSec = nowSec,
+                    ) != null
+                ) {
+                    return MatchedSleepObservation(
+                        endSec = session.endTs,
+                        durationMinutes = durationMinutes,
+                    )
+                }
+            }
+        }
+        return null
+    }
+
     /**
      * #386 self-heal: a "kick" the app-resume hook sends to wake the 15-min analyze loop early, so an
      * OEM-killed overnight re-score tick catches up the moment the user opens NOOP instead of showing a
-     * stale Today card until the next sync/tick. The loop re-runs its EXISTING fingerprint-gated
-     * analyzeRecent — a cheap no-op when the HR stream is unchanged, a real catch-up when a kill left
-     * unscored data (the watermark only advances on a completed run). `recentDays` is a reactive Room
+     * stale Today card until the next sync/tick. The loop re-runs its durable dirty-marker-gated
+     * analyzeRecent — an O(1) no-op when inputs are unchanged, a real catch-up when a kill left
+     * unscored data (an unacknowledged generation survives failure or process death). `recentDays` is a reactive Room
      * flow, so the caught-up rows refresh the card on their own.
      *
      * A CONFLATED Channel, deliberately (NOT a replay=0 SharedFlow): a kick sent while the loop is busy
@@ -805,12 +895,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val salvageProbeLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityResumed(activity: android.app.Activity) {
             ble.salvageProbeIfBondLoopPaused()
+            // The process-wide Application hook reconciles notification/channel revocation first.
+            // Mirror its persisted fail-closed result into this Activity-scoped UI on every resume.
+            _windDownEnabled.value = windDownStore.enabled
             // #386 self-heal: nudge the analyze loop so a night the killed overnight tick never scored is
-            // caught up now. Gated + coalesced downstream, so a healthy resume costs one fingerprint read.
+            // caught up now. Gated + coalesced downstream, so a healthy resume costs one indexed
+            // generation snapshot.
             analyzeKick.trySend(Unit)
             viewModelScope.launch { refreshAdaptiveHydrationContext() }
             viewModelScope.launch { refreshCycleTracking() }
-            viewModelScope.launch { evaluateAdaptiveDayGuidance() }
+            refreshPlannedWorkoutCalendar()
             refreshAgeMetricsIfProfileChanged()
         }
         override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
@@ -830,6 +924,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (resolved == _selectedDeviceId.value) return@collect
                 _selectedDeviceId.value = resolved
                 refreshActiveDeviceName()
+                analyzeKick.trySend(Unit)
                 scheduleAgeMetricRecompute()
             }
         }
@@ -840,6 +935,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         noopApp.sourceCoordinator.start()
         // #78 hole-4: wire the app-foreground salvage probe (see salvageProbeLifecycleCallbacks above).
         noopApp.registerActivityLifecycleCallbacks(salvageProbeLifecycleCallbacks)
+        reconcilePlannedWorkoutCalendarObserver()
         // Resolve the active band's name for the Live screen header (MW-6). Falls back to "WHOOP" in the
         // UI until this first read lands.
         refreshActiveDeviceName()
@@ -933,11 +1029,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     return@collect
                 }
                 scheduleAgeMetricRecompute()
+                reconcileHealthConnectBmiProjection()
             }
         }
         // Recompute the illness banner + today's row whenever cached days change.
         viewModelScope.launch {
-            recentDays.collect { days ->
+            recentDays
+                .onEach { AdaptiveDayEvaluationGate.invalidate() }
+                .collectLatest { days ->
                 // Only treat a row as "today" if its date is the phone's ACTUAL local calendar day.
                 // Was days.lastOrNull() — the newest stored row regardless of date — so after importing
                 // historical data the newest import (e.g. months old) showed as today's synthesis (#23).
@@ -1010,7 +1109,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         ),
                     )
                 }
-            }
+                }
         }
 
         // Turn the strap's offloaded raw data into dashboard scores on launch and every
@@ -1088,7 +1187,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
                 // #836 parity (Android): the 15-min tick normally skips when raw inputs are unchanged. A
-                // formula-only upgrade does not move that fingerprint, so the explicit Charge revision
+                // formula-only upgrade does not create a dirty marker, so the explicit Charge revision
                 // overrides the skip and expands this one pass to full history. The completion marker is
                 // written only from onSuccess below; interruption/failure therefore retries next iteration.
                 val prefs = NoopPrefs.of(appContext)
@@ -1098,30 +1197,65 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val activeZoneUpgradePending = ActiveZoneUpgradeGate.needsRescore(
                     prefs.getString(ActiveZoneUpgradeGate.COMPLETED_REVISION_KEY, null),
                 )
-                val analyzeFp = repository.analysisFingerprint(deviceId)
-                if (chargeUpgradePending ||
-                    activeZoneUpgradePending ||
-                    analyzeFp != NoopPrefs.analyzeWatermark(appContext)
-                ) {
+                // Compatibility for explicit repair controls such as changing the HRV scoring window.
+                // They historically wrote an empty watermark to request one pass. Preserve that O(1)
+                // signal without bringing the COUNT/MAX fingerprint scan back to launch/resume.
+                val explicitRescorePending =
+                    prefs.getString(NoopPrefs.KEY_ANALYZE_WATERMARK, null) == ""
+                val analysisSourceId = deviceId
+                val registeredAnalysisSources = try {
+                    noopApp.deviceRegistry.all()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    emptyList()
+                }
+                val analysisSourceIds = repository.analysisDirtySourceIds(
+                    activeSourceId = analysisSourceId,
+                    registeredDevices = registeredAnalysisSources,
+                )
+                val analysisLease = repository.claimAnalysisInput(
+                    sourceIds = analysisSourceIds,
+                    force = chargeUpgradePending ||
+                        activeZoneUpgradePending ||
+                        explicitRescorePending,
+                )
+                if (analysisLease != null) {
+                    val analysisNowSeconds = System.currentTimeMillis() / 1_000L
+                    val requestedAnalysisDays = if (chargeUpgradePending) {
+                        ChargeFormulaUpgradeGate.HISTORY_DAYS
+                    } else {
+                        ActiveZoneUpgradeGate.HISTORY_DAYS
+                    }
+                    val analysisPlan = IntelligenceEngine.analysisScoringPlan(
+                        requestedMaxDays = requestedAnalysisDays,
+                        claims = analysisLease.claims,
+                        nowSeconds = analysisNowSeconds,
+                    )
                     val analysisDiagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
                         "analysis.recent",
                         fields = mapOf(
                             "charge_upgrade" to chargeUpgradePending.toString(),
                             "active_zone_upgrade" to activeZoneUpgradePending.toString(),
+                            "explicit_rescore" to explicitRescorePending.toString(),
+                            "change_gate_ok" to analysisLease.dirtyGateSucceeded.toString(),
+                            "pass_kind" to analysisPlan.passKind.name.lowercase(),
+                            "scan_days" to analysisPlan.maxDays.toString(),
                         ),
                     )
                     runCatching {
-                        IntelligenceEngine.analyzeRecent(
-                        repo = repository,
-                        profileProvider = ::currentProfile,
-                        maxDays = if (chargeUpgradePending) {
-                            ChargeFormulaUpgradeGate.HISTORY_DAYS
-                        } else {
-                            ActiveZoneUpgradeGate.HISTORY_DAYS
-                        },
-                        importedDeviceId = deviceId,
-                        maxHROverride = profileStore.hrMaxOverride
-                            .takeIf { it > 0 }?.toDouble(),
+                        repository.runClaimedAnalysis(analysisLease) { analysisConsumption ->
+                            IntelligenceEngine.analyzeRecent(
+                                repo = repository,
+                                profileProvider = ::currentProfile,
+                                maxDays = analysisPlan.maxDays,
+                                nowSeconds = analysisPlan.anchorNowSeconds,
+                                analysisTimezoneOffsetSeconds =
+                                    analysisPlan.timezoneOffsetSeconds,
+                                historicalCatchUp = analysisPlan.isHistoricalCatchUp,
+                                importedDeviceId = analysisSourceId,
+                                maxHROverride = profileStore.hrMaxOverride
+                                    .takeIf { it > 0 }?.toDouble(),
                         // I2 read-through (Phase 1B-4): resolve the single owning device per day from the
                         // registry. A single-WHOOP install resolves to [deviceId] for every day, so the
                         // reads stay byte-identical; multi-source installs score each day from one source.
@@ -1212,8 +1346,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 { line -> ble.externalLog(line, com.noop.testcentre.TestDomain.HRV) }
                             else null,
                         // #141: nightly HRV over deep-sleep windows only when the user picked WHOOP-style.
-                        deepHrvWindow = UnitPrefs.hrvWindow(appContext) == HrvWindow.DEEP_SLEEP,
-                        )
+                                deepHrvWindow =
+                                    UnitPrefs.hrvWindow(appContext) == HrvWindow.DEEP_SLEEP,
+                                sourceConsumed = analysisConsumption::markSourceConsumed,
+                                sourcesEvaluatedForOwnership =
+                                    analysisConsumption::markSourcesEvaluatedForOwnership,
+                            )
+                        }
                         // analyzeRecent now hops to Dispatchers.Default; a scope cancellation surfaces as a
                         // CancellationException that runCatching would otherwise swallow, breaking the loop's
                         // own cancellation — rethrow it so onCleared() actually stops the loop. (#125)
@@ -1223,8 +1362,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             outcome = "completed",
                             includeResourceSnapshot = true,
                         )
-                        NoopPrefs.setAnalyzeWatermark(appContext, analyzeFp)
-                        if (chargeUpgradePending) {
+                        if (chargeUpgradePending && analysisPlan.requestedWindowSatisfied) {
                             prefs.edit()
                                 .putString(
                                     ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY,
@@ -1232,7 +1370,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 )
                                 .apply()
                         }
-                        if (activeZoneUpgradePending) {
+                        if (activeZoneUpgradePending && analysisPlan.requestedWindowSatisfied) {
                             prefs.edit()
                                 .putString(
                                     ActiveZoneUpgradeGate.COMPLETED_REVISION_KEY,
@@ -1240,18 +1378,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 )
                                 .apply()
                         }
+                        if (explicitRescorePending &&
+                            analysisPlan.requestedWindowSatisfied &&
+                            prefs.getString(NoopPrefs.KEY_ANALYZE_WATERMARK, null) == ""
+                        ) {
+                            prefs.edit().remove(NoopPrefs.KEY_ANALYZE_WATERMARK).apply()
+                        }
                         // Foreground/periodic reanalysis parity with the background post-sync hook. Reuse the
                         // Today card's suggestion-only scan; the notifier never asks permission or saves.
-                        AutoWorkoutCandidateNotifier.afterReanalysis(
-                            context = appContext,
-                            repository = repository,
-                            activeDeviceId = deviceId,
-                            traceSink =
-                                if (com.noop.testcentre.TestCentre.from(appContext)
-                                        .active(com.noop.testcentre.TestDomain.WORKOUTS))
-                                    { line -> ble.externalLog(line, com.noop.testcentre.TestDomain.WORKOUTS) }
-                                else null,
-                        )
+                        if (!analysisPlan.isHistoricalCatchUp) {
+                            AutoWorkoutCandidateNotifier.afterReanalysis(
+                                context = appContext,
+                                repository = repository,
+                                activeDeviceId = analysisSourceId,
+                                traceSink =
+                                    if (com.noop.testcentre.TestCentre.from(appContext)
+                                            .active(com.noop.testcentre.TestDomain.WORKOUTS))
+                                        { line ->
+                                            ble.externalLog(
+                                                line,
+                                                com.noop.testcentre.TestDomain.WORKOUTS,
+                                            )
+                                        }
+                                    else null,
+                            )
+                        }
                     }.onFailure {
                         com.noop.AppDiagnosticsRecorder.endOperation(
                             analysisDiagnostic,
@@ -1277,7 +1428,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 // 15-min backstop cadence, but wake EARLY on an app-resume kick (#386 self-heal) so a
                 // night the overnight tick was killed before scoring catches up the moment the user opens
-                // NOOP. The next iteration's fingerprint gate makes an unnecessary wake a cheap no-op.
+                // NOOP. The next iteration's dirty-marker gate makes an unnecessary wake a cheap no-op.
                 withTimeoutOrNull(ANALYZE_INTERVAL_MS) { analyzeKick.receive() }
             }
         }
@@ -1303,11 +1454,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val currentRow = todayRow?.takeIf { it.day == localDay }
         val reading = runCatching { HydrationStore.reading(repository) }.getOrNull()
         val profile = ProfileStore.from(appContext)
-        val goalMl = HydrationGoal.dailyGoalMl(
+        val goalMl = HydrationGoal.personalizedDailyGoalMl(
+            age = profile.age,
+            ageConfirmed = profile.ageInputConfirmed,
             sex = profile.sex,
-            weightKg = null,
+            sexConfirmed = profile.sexInputConfirmed,
+            weightKg = profile.weightKg,
+            weightConfirmed = profile.weightInputConfirmed,
             effort = currentRow?.strain,
-            skinTempDevC = currentRow?.skinTempDevC,
         )
         val changed = HydrationReminderPrefs.updateAdaptiveContext(
             context = appContext,
@@ -2181,8 +2335,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _workouts.value = sorted
             // Post-workout summary (#517) — opt-in, default OFF. The newest session (by start) drives a
             // one-shot Effort + duration + avg-HR notification when it's strictly newer than the last one
-            // summarised, so a re-sync of the same backlog never re-fires. Honest timing: a strap-only
-            // workout only surfaces on the next history offload, so the copy says "after your strap synced".
+            // summarised, so a re-sync of the same backlog never re-fires. Honest timing: a band-only
+            // workout only surfaces on the next history offload, so the copy says "after your band synced".
             sorted.firstOrNull()?.let { maybeNotifyWorkout(it) }
         }
     }
@@ -2210,7 +2364,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 row.avgHr?.let { add("avg $it bpm") }
             }
             "Workout logged: ${WorkoutEditing.displaySport(row.sport)}" to
-                (pieces.joinToString(" · ") + ". Summarised after your strap synced.")
+                (pieces.joinToString(" · ") + ". Summarised after your band synced.")
         }
         ScheduledReportNotifier.onWorkout(appContext, row.startTs, title, body)
     }
@@ -2610,9 +2764,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshHcWritebackStatus() { _hcWritebackStatus.value = readHcWritebackStatus() }
 
     init {
-        // On app open, catch up Health Connect if it is overdue. This remains the dependable path on
-        // every supported Android release. Eligible platform versions can additionally run the opt-in,
-        // best-effort periodic worker when the dedicated background-health permission is granted.
+        runCatching {
+            WindDownScheduler.reconcilePersisted(appContext, windDownStore)
+        }.onFailure {
+            WindDownScheduler.cancel(appContext)
+        }
+        _windDownEnabled.value = windDownStore.enabled
+
+        // Correct the local Health Connect-derived BMI projection even when auto-sync or provider
+        // permissions are off. Then catch up provider data if auto-sync is enabled and overdue.
+        reconcileHealthConnectBmiProjection()
         syncHealthConnectIfStale()
 
         // Rebuild either a recording manual workout or an ended save-retry snapshot. Placed in THIS init —
@@ -2672,26 +2833,54 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (HealthConnectImporter.sdkStatus(appContext) != HealthConnectClient.SDK_AVAILABLE) {
                     return@withContext false
                 }
-                val granted = runCatching {
+                val granted = try {
                     HealthConnectImporter.client(appContext).permissionController.getGrantedPermissions()
-                }.getOrDefault(emptySet())
-                // Partial permissions are fine (#150): auto-import as long as at least one type is granted.
-                if (granted.none { it in HealthConnectImporter.PERMISSIONS }) return@withContext false
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    HealthConnectReconciler.reconcileLocalBmiProjection(
+                        repository = repository,
+                        currentHeightCm = { profileStore.bodyCompositionImportHeightCm },
+                    )
+                    return@withContext false
+                }
+                // Empty/partial permissions still run the local BMI dependency correction. The engine
+                // accesses only record types represented by granted permissions.
                 // A token advances only after its bounded Health Connect-owned projection is rebuilt.
                 // Provider failures keep the old token, so the next foreground/worker run replays it.
-                runCatching {
+                val outcome = try {
                     HealthConnectReconciler.reconcile(
                         context = appContext,
                         repository = repository,
                         grantedPermissions = granted,
-                        heightCm = profileStore.heightCm,
+                        currentHeightCm = { profileStore.bodyCompositionImportHeightCm },
                     )
-                }.getOrNull() is HealthConnectReconcileResult.Success
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+                outcome is HealthConnectReconcileResult.Success
             }
             if (ran) {
                 val t = System.currentTimeMillis()
                 NoopPrefs.setHcLastSync(appContext, t)
                 _hcLastSync.value = t
+            }
+        }
+    }
+
+    private fun reconcileHealthConnectBmiProjection() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                HealthConnectReconciler.reconcileLocalBmiProjection(
+                    repository = repository,
+                    currentHeightCm = { profileStore.bodyCompositionImportHeightCm },
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A later profile revision, foreground sync, or worker run retries the local correction.
             }
         }
     }
@@ -2882,8 +3071,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         phoneAlarmStore.targetMinutes = minutes
         _phoneAlarmTargetMinutes.value = phoneAlarmStore.targetMinutes
         if (phoneAlarmStore.enabled) SmartAlarmScheduler.arm(appContext, phoneAlarmStore)
-        // The wind-down nudge is derived from the wake time, so keep it in step.
-        if (windDownStore.enabled) WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
         // #536: re-arm the strap at the new earliest time when "Buzz WHOOP 4" is on. Routed through the
         // single reconciler so it can't clobber a smart-alarm the user still has on (#5).
         reconcileStrapAlarm()
@@ -2910,20 +3097,62 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Whether the OS will honour an exact alarm right now (API 31+ gates it behind a permission). */
     fun canScheduleExactAlarms(): Boolean = SmartAlarmScheduler.canScheduleExact(appContext)
 
-    /** Enable/disable the evening wind-down nudge. Schedules the daily inexact reminder from the
-     *  current earliest wake time, or cancels it. */
-    fun setWindDownEnabled(enabled: Boolean) {
-        windDownStore.enabled = enabled
-        _windDownEnabled.value = enabled
-        if (enabled) WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
-        else WindDownScheduler.cancel(appContext)
+    /** Enable/disable the evening wind-down nudge. Enabling is committed only when Android can
+     *  actually deliver this notification; a revoked app/channel permission leaves the control off. */
+    fun setWindDownEnabled(enabled: Boolean): Boolean {
+        if (!enabled) {
+            windDownStore.enabled = false
+            _windDownEnabled.value = false
+            WindDownScheduler.cancel(appContext)
+            return true
+        }
+        if (!WindDownScheduler.notificationsAvailable(appContext)) {
+            windDownStore.enabled = false
+            _windDownEnabled.value = false
+            WindDownScheduler.cancel(appContext)
+            return false
+        }
+        val result = WindDownScheduler.commitEnableAfterAcceptance(
+            store = windDownStore,
+            schedule = { WindDownScheduler.schedule(appContext, windDownStore) },
+            cancel = { WindDownScheduler.cancel(appContext) },
+        )
+        return when (result) {
+            is WindDownScheduler.ScheduleResult.Scheduled -> {
+                _windDownEnabled.value = true
+                true
+            }
+            is WindDownScheduler.ScheduleResult.Failed -> {
+                _windDownEnabled.value = false
+                false
+            }
+        }
     }
 
+    private fun rescheduleWindDownIfEnabled() {
+        if (!windDownStore.enabled) return
+        runCatching {
+            WindDownScheduler.reconcilePersisted(appContext, windDownStore)
+        }.onFailure {
+            WindDownScheduler.cancel(appContext)
+        }
+        _windDownEnabled.value = windDownStore.enabled
+    }
+
+    fun windDownNotificationsAvailable(): Boolean =
+        WindDownScheduler.notificationsAvailable(appContext)
+
+    fun windDownNotificationSettingsIntent(): Intent =
+        WindDownScheduler.notificationSettingsIntent(appContext)
+
     fun setWindDownSleepNeedMinutes(minutes: Int) {
+        val prior = windDownStore.sleepNeedMinutes
+        val wasExplicit = windDownStore.hasExplicitSleepNeed
         windDownStore.sleepNeedMinutes = minutes
         _windDownSleepNeedMinutes.value = windDownStore.sleepNeedMinutes
-        if (windDownStore.enabled) {
-            WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
+        rescheduleWindDownIfEnabled()
+        if (!wasExplicit || windDownStore.sleepNeedMinutes != prior) {
+            onAdaptiveDayInputsChanged()
         }
     }
 
@@ -2935,9 +3164,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setWindDownLeadMinutes(minutes: Int) {
         windDownStore.leadMinutes = minutes
         _windDownLeadMinutes.value = windDownStore.leadMinutes
-        if (windDownStore.enabled) {
-            WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
-        }
+        rescheduleWindDownIfEnabled()
+    }
+
+    fun setWindDownWakeMinutes(minutes: Int) {
+        windDownStore.wakeMinutes = minutes
+        _windDownWakeMinutes.value = windDownStore.wakeMinutes
+        rescheduleWindDownIfEnabled()
+    }
+
+    fun setWindDownWakeOverride(weekday: Int, minutes: Int?) {
+        windDownStore.setWakeOverride(weekday, minutes)
+        _windDownWakeOverrides.value = windDownStore.perDayWakeOverrides
+        rescheduleWindDownIfEnabled()
     }
 
     /** Refresh the persisted planner addition without creating a reschedule loop when unchanged. */
@@ -2946,9 +3185,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (next == windDownStore.recoveryMinutes) return
         windDownStore.recoveryMinutes = next
         _windDownRecoveryMinutes.value = windDownStore.recoveryMinutes
-        if (windDownStore.enabled) {
-            WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
-        }
+        rescheduleWindDownIfEnabled()
     }
 
     // --- Illness watch (opt-out; the evaluation itself is the pure IllnessWatch.evaluate).
@@ -2981,14 +3218,101 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setAdaptiveDayGuidanceEnabled(enabled: Boolean) {
-        _adaptiveDayGuidanceEnabled.value = enabled
-        NoopPrefs.setAdaptiveDayGuidance(appContext, enabled)
-        if (!enabled) {
-            AdaptiveDayTimeZoneStore.discardPending(appContext)
-            return
+    fun setAdaptiveDayGuidanceEnabled(enabled: Boolean): Boolean {
+        if (!AdaptiveDayNotifier.setGuidanceConsent(appContext, enabled)) {
+            _adaptiveDayGuidanceEnabled.value =
+                AdaptiveDayConsentGate.guidance(appContext)
+            return false
         }
-        viewModelScope.launch { evaluateAdaptiveDayGuidance() }
+        AdaptiveDayEvaluationGate.invalidate()
+        _adaptiveDayGuidanceEnabled.value = enabled
+        if (!enabled) {
+            plannedWorkoutCalendarEvaluationJob?.cancel()
+            AdaptiveDayTimeZoneStore.discardPending(appContext)
+            PlannedWorkoutCalendarStore.clear()
+            AdaptivePlannedWorkoutScheduler.cancel(appContext)
+            reconcilePlannedWorkoutCalendarObserver()
+            return true
+        }
+        onPlannedWorkoutCalendarChanged()
+        return true
+    }
+
+    fun onPlannedWorkoutCalendarChanged() {
+        reconcilePlannedWorkoutCalendarObserver()
+        AdaptiveDayEvaluationGate.invalidate()
+        PlannedWorkoutCalendarStore.invalidate()
+        AdaptivePlannedWorkoutScheduler.cancel(appContext)
+        AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+            appContext,
+            currentFingerprint = null,
+        )
+        plannedWorkoutCalendarEvaluationJob?.cancel()
+        plannedWorkoutCalendarEvaluationJob = viewModelScope.launch {
+            PlannedWorkoutCalendarStore.refresh(
+                context = appContext,
+                force = true,
+            )
+            evaluateAdaptiveDayGuidance()
+        }
+    }
+
+    fun refreshPlannedWorkoutCalendar() {
+        reconcilePlannedWorkoutCalendarObserver()
+        if (plannedWorkoutCalendarEvaluationJob?.isActive == true) return
+        AdaptiveDayEvaluationGate.invalidate()
+        plannedWorkoutCalendarEvaluationJob = viewModelScope.launch {
+            PlannedWorkoutCalendarStore.refresh(
+                context = appContext,
+                force = true,
+            )
+            evaluateAdaptiveDayGuidance()
+        }
+    }
+
+    fun onAdaptiveDayInputsChanged() {
+        AdaptiveDayEvaluationGate.invalidate()
+        adaptiveDayInputEvaluationJob?.cancel()
+        adaptiveDayInputEvaluationJob = viewModelScope.launch {
+            evaluateAdaptiveDayGuidance()
+        }
+    }
+
+    private fun reconcilePlannedWorkoutCalendarObserver() {
+        val shouldObserve =
+            AdaptiveDayConsentGate.guidance(appContext) &&
+                AdaptiveDayConsentGate.plannedWorkoutCalendar(appContext) &&
+                ContextCompat.checkSelfPermission(
+                    appContext,
+                    Manifest.permission.READ_CALENDAR,
+                ) == PackageManager.PERMISSION_GRANTED
+        when {
+            shouldObserve && !plannedWorkoutCalendarObserverRegistered -> {
+                runCatching {
+                    appContext.contentResolver.registerContentObserver(
+                        CalendarContract.Events.CONTENT_URI,
+                        true,
+                        plannedWorkoutCalendarObserver,
+                    )
+                }.onSuccess {
+                    plannedWorkoutCalendarObserverRegistered = true
+                }
+            }
+            !shouldObserve && plannedWorkoutCalendarObserverRegistered -> {
+                unregisterPlannedWorkoutCalendarObserver()
+            }
+        }
+    }
+
+    private fun unregisterPlannedWorkoutCalendarObserver() {
+        if (!plannedWorkoutCalendarObserverRegistered) return
+        runCatching {
+            appContext.contentResolver.unregisterContentObserver(
+                plannedWorkoutCalendarObserver,
+            )
+        }.onSuccess {
+            plannedWorkoutCalendarObserverRegistered = false
+        }
     }
 
     /**
@@ -3007,6 +3331,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             days = days,
             now = now,
             sleepTargetMinutes = windDownStore.sleepNeedMinutes,
+            sleepTargetIsExplicit = windDownStore.hasExplicitSleepNeed,
         )
     }
 
@@ -3497,6 +3822,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // workout lease before a replacement VM rehydrates the same session, preventing a stale screen
         // want or double acquisition across Activity teardown.
         releaseActiveWorkoutRealtimeLease()
+        plannedWorkoutCalendarEvaluationJob?.cancel()
+        adaptiveDayInputEvaluationJob?.cancel()
+        unregisterPlannedWorkoutCalendarObserver()
         super.onCleared()
         // #78 hole-4: drop the app-foreground salvage-probe hook with this ViewModel (the next Activity's
         // ViewModel re-registers its own), so a cleared VM can never leak resume callbacks.

@@ -17,7 +17,7 @@ final class SafetySOSRuntime {
         let status: String
     }
 
-    enum TriggerOutcome {
+    enum TriggerOutcome: Equatable {
         case opened
         case alreadyActive
         case unavailable(String)
@@ -53,6 +53,17 @@ final class SafetySOSRuntime {
 
     private init() {}
 
+    static func dispatchManagedSOS(
+        notificationDeliveryAvailable: Bool,
+        locationSharingConsented: Bool,
+        createIncident: @MainActor (Bool) async -> TriggerOutcome
+    ) async -> TriggerOutcome {
+        // Result notifications are best-effort status feedback, not a prerequisite
+        // for contacting configured Safety contacts.
+        _ = notificationDeliveryAvailable
+        return await createIncident(locationSharingConsented)
+    }
+
     func trigger(
         completion: @escaping @MainActor (TriggerOutcome) -> Void
     ) {
@@ -61,6 +72,34 @@ final class SafetySOSRuntime {
             guard let self else { return }
             defer { triggerTask = nil }
 
+            #if os(iOS)
+            let notificationAvailable =
+                await Self.notificationDeliveryAvailable()
+            let locationConsented = Self.bandSOSLocationSharingAllowed(
+                consented: SafetySOSGesturePreferences.sharesLocation,
+                backgroundAuthorized: Self.backgroundLocationAvailable()
+            )
+            let outcome = await Self.dispatchManagedSOS(
+                notificationDeliveryAvailable: notificationAvailable,
+                locationSharingConsented: locationConsented
+            ) { shareLocation in
+                let managed = await ManagedCloudService.shared.triggerBandSOS(
+                    durationHours: SafetyPagingPreferences.shareDurationHours,
+                    shareLocation: shareLocation
+                )
+                switch managed {
+                case .opened:
+                    return .opened
+                case .alreadyActive:
+                    return .alreadyActive
+                case .unavailable(let reason):
+                    return .unavailable(reason)
+                }
+            }
+            postResultNotification(outcome)
+            completion(outcome)
+            return
+            #else
             let service = SafetyPagingService()
             await service.refresh()
             if let incident = service.activeIncident {
@@ -90,6 +129,7 @@ final class SafetySOSRuntime {
             }
             postResultNotification(outcome)
             completion(outcome)
+            #endif
         }
     }
 
@@ -544,6 +584,19 @@ final class SafetySOSRuntime {
                 .notificationSettings().authorizationStatus
         )
     }
+
+    static func bandSOSLocationSharingAllowed(
+        consented: Bool,
+        backgroundAuthorized: Bool
+    ) -> Bool {
+        consented && backgroundAuthorized
+    }
+
+    #if os(iOS)
+    private static func backgroundLocationAvailable() -> Bool {
+        CLLocationManager().authorizationStatus == .authorizedAlways
+    }
+    #endif
 
     static func requestNotificationAuthorizationIfNeeded() async -> Bool {
         let center = UNUserNotificationCenter.current()

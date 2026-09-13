@@ -52,7 +52,7 @@
     <string name="friends_waiting_shared_day">等待分享每日資料</string>
     <string name="friends_scores_waiting">%1$s 上傳每日摘要後，分數會顯示在這裡。</string>
     <string name="friends_open_sharing_named">開啟與 %1$s 的分享設定</string>
-    <string name="friends_score_charge">活力</string>
+    <string name="friends_score_charge">恢復</string>
     <string name="friends_score_effort">負荷</string>
     <string name="friends_score_rest">休息</string>
     <string name="friends_detail_sleep">睡眠 %1$s</string>
@@ -82,7 +82,7 @@
     <string name="friends_server_address">伺服器位址</string>
     <string name="friends_invite_code">邀請代碼</string>
     <string name="friends_join_default_title">預設分享</string>
-    <string name="friends_join_default_body">活力、負荷和休息</string>
+    <string name="friends_join_default_body">恢復、消耗和睡眠評分</string>
     <string name="friends_join_never_title">絕不傳送到好友</string>
     <string name="friends_join_never_body">原始心率和 R-R、睡眠階段、日誌、運動、路線、匯出內容及裝置識別碼</string>
     <string name="friends_join_trust_title">信任營運者</string>

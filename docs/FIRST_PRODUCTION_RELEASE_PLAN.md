@@ -104,6 +104,12 @@ remains manual until the final go/no-go review.
 - There is no first-party NOOP firmware, GATT contract, packet schema, device
   identity, provisioning flow, secure boot, DFU contract, manufacturing test
   interface, or NOOP Band SDK in this repository.
+- An owner-supplied HBand/Veepoo Android/iPhone SDK package was statically
+  assessed on 2026-09-12. It is a candidate transport input, not a repository
+  integration or production capability claim. Exact band project flags,
+  distribution authority, vendor-network isolation, firmware identity,
+  physical behavior, and security evidence remain open; see
+  [`NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`](NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md).
 - There is no supplier-backed printed-label discovery, identify haptic,
   cryptographically authenticated tap confirmation, owner-key provisioning,
   approved operator release/return workflow, production ownership deployment,
@@ -229,33 +235,38 @@ Exact UUIDs and byte layouts remain pending the input dossier.
 
 ### 6.1 Repository boundaries
 
-Create the following neutral structure:
+The NOOP-owned protocol, adapters, fixtures, and conformance tools live in the
+separate private `Dhanunjay-Divi/NoopBandSDK` repository. The initial
+English-only, binary-free scaffold is published at commit `ee82cc0`.
 
 ```text
-band/
-  spec/                 Canonical versioned protocol and capability schema
-  fixtures/             Synthetic golden frames and failure vectors
-  simulator/            Deterministic virtual band and fault injection
-  conformance/          Host and firmware compliance scenarios
-firmware/
+NoopBandSDK/
+  spec/                 Canonical capability and protocol schemas
+  fixtures/             Synthetic golden and failure vectors
+  conformance/          Cross-platform and firmware scenarios
+  apple/                Pure Swift API, session, and supplier adapter
+  android/              Pure Kotlin API, session, and supplier adapter
+  tools/                Simulator, inspector, and conformance CLI
+  vendor/               Hashes/manifests only; supplier drops stay untracked
+
+Noop/
+  Strand/BLE/           Apple app-facing product/storage adapter
+  android/.../ble/      Android app-facing product/storage adapter
+
+NoopBandFirmware/ or supplier-controlled firmware repository
   app/                  Production band application
   bootloader/           Secure boot and recovery/DFU
   boards/               Board-revision configuration
   manufacturing/        End-of-line test protocol and tools
-Packages/
-  NoopBandProtocol/     Pure Swift values, framing, state machines
-  NoopStore/            Device-neutral persistence API
-android/app/src/main/java/com/noop/band/
-  protocol/             Pure Kotlin protocol implementation
-  transport/            Android BLE lifecycle
-Tools/noop-band-cli/    Development, fixture, and conformance tool
 ```
 
-Firmware may live in a separate access-controlled repository if the
-manufacturer, export, signing-key, or build-system boundary requires it. If so,
-`band/spec`, synthetic fixtures, conformance tests, release manifests, and the
-mobile SDK interfaces remain versioned here without private keys or restricted
-vendor material.
+The app repository consumes exact tagged/digested SDK artifacts and keeps only
+its product/storage adapters. Supplier binaries live in a restricted artifact
+registry only after rights and security gates pass; they do not enter either
+Git repository. Original multilingual vendor drops stay immutable and
+untracked. NOOP-owned public SDK APIs, source, samples, diagnostics, and docs
+are English-only. Firmware remains separately access-controlled when
+manufacturer, export, signing-key, or toolchain boundaries require it.
 
 ### 6.2 Canonical layers
 
@@ -374,7 +385,37 @@ arbitrary errors.
 - No band capability is marked production-supported until its physical matrix
   passes.
 
-### 6.7 Ownership and onboarding contract
+### 6.7 Supplier SDK intake boundary
+
+The owner-supplied SDK confirms that a phone integration can expose
+device-side connection confirmation, a rotatable four-digit device password,
+model-dependent live/history data, reconnect, haptics, and OTA. It also
+requires one serialized operation queue and warns against multiple iOS apps
+reading the same peripheral. The supplied iOS archive is arm64 iPhoneOS only,
+so the Mac app remains an account-backed viewer rather than a BLE collector.
+
+These interfaces do not replace NOOP's protocol, ownership, provenance,
+observability, or medical-truth contracts. The default password is not owner
+identity; vendor `deviceNumber` is not assumed to match the printed label; a
+single device tap is not the planned challenge-bound at-least-three-tap proof;
+and vendor-named apnea/body-composition outputs are not validated NOOP
+features. The package remains outside Git until legal, dependency, security,
+privacy, network, exact-version, and update-support gates pass.
+
+The neutral SDK contract is developed in the separate private
+`Dhanunjay-Divi/NoopBandSDK` repository. Its local gate rejects tracked
+supplier binaries and CJK text in NOOP-owned public source/docs. This does not
+alter or delete NOOP's supported app localizations, and it does not rewrite the
+immutable original supplier drop.
+
+Implementation must wrap the binary behind neutral Apple/Android transport
+adapters, serialize every operation, capability-gate every feature, normalize
+and durably store before checkpointing, deny unexpected egress, and emit only
+bounded identifier-free lifecycle evidence. The exact findings and physical
+matrix are in
+[`NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`](NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md).
+
+### 6.8 Ownership and onboarding contract
 
 The first-party release target uses this sequence on Apple and Android:
 
@@ -845,7 +886,9 @@ run, or a successful store upload alone.
 
 Provide these through the appropriate secure or account-owned channel:
 
-1. The band input dossier, supplier SDK and license, printed-label mapping,
+1. The exact supplier project/model code and capability report, written
+   distribution/support authority for the reviewed SDK binaries and
+   dependencies, complete notices/SBOM, printed-label mapping,
    pairing/identify/gesture/claim contract, firmware owner contact, firmware
    source/toolchain access, and at least three representative engineering bands
    per hardware revision for cross-platform and destructive OTA testing.
@@ -886,15 +929,17 @@ Work can start before bands arrive:
 2. Finish the remaining phase-zero owner, legal, transfer, support, and payment
    decisions now that India-first, USA-second, and the ownership flow are
    recorded.
-3. Complete the supplier-backed label, identify, cryptographic-possession,
+3. Complete the supplier-backed exact-model capability, SDK distribution,
+   label, identify, cryptographic-possession,
    owner-key, return/release, legal, and signed physical-client gates for the
    implemented ownership foundation without guessing supplier bytes.
 4. Build the terminology classifier/allowlist and remove the false
    legacy-to-first-party display mapping.
 5. Introduce neutral core stream/store/source boundaries and old-data
    migration fixtures without removing the working hardware adapter.
-6. Create the protocol-spec template, neutral SDK interfaces, deterministic
-   virtual band, synthetic conformance corpus, and observability categories.
+6. Create the protocol-spec template, neutral SDK interfaces and quarantined
+   vendor adapters, deterministic virtual band, synthetic conformance corpus,
+   egress controls, and observability categories.
 7. Start signing, store, privacy, certification, manufacturing, and metric
    validation work because their lead times are independent of mobile code.
 

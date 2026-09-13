@@ -156,6 +156,13 @@ class StressModelTest {
         assertFalse(timed.contains("bpm"))
     }
 
+    @Test
+    fun zeroStressBandHoursRemainMeasuredZero() {
+        val source = stressSource()
+        assertTrue(source.contains("l10n_stress_screen_hours_h_7610ac7c, hours"))
+        assertFalse(source.contains("hours <= 0"))
+    }
+
     private fun stressSource(): String {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val file = listOf(

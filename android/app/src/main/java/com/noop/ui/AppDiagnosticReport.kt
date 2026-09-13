@@ -8,44 +8,62 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,18 +74,35 @@ import com.noop.NoopApplication
 import com.noop.R
 import com.noop.ble.WhoopModel
 import com.noop.data.WhoopDatabase
+import com.noop.feedback.FeedbackArchive
+import com.noop.feedback.FeedbackArchiveException
+import com.noop.feedback.FeedbackFailureCategory
+import com.noop.feedback.FeedbackOutbox
+import com.noop.feedback.FeedbackOutboxException
+import com.noop.feedback.FeedbackRuntimeStatus
+import com.noop.feedback.FeedbackRuntimeStatusBus
+import com.noop.feedback.FeedbackScheduler
+import com.noop.feedback.FeedbackScreenshotCaptureGuard
+import com.noop.feedback.FeedbackScreenshotPreview
+import com.noop.feedback.FeedbackState
 import com.noop.testcentre.DisplayScreenshot
 import com.noop.testcentre.ReportReviewGate
 import com.noop.testcentre.TestBundleAssembler
 import com.noop.testcentre.TestBundleMeta
 import com.noop.testcentre.TestDomain
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.resume
 import kotlin.math.sqrt
 
 internal object AppDiagnosticReportRequestBridge {
@@ -100,12 +135,19 @@ internal class PhysicalShakeDetector(
 
 internal class AppDiagnosticReportController(
     private val activity: ComponentActivity,
+    private val awaitScreenshotSurface: suspend (View) -> Unit =
+        ::awaitUnderlyingScreenForScreenshot,
+    private val screenshotPixelReader: (View) -> Bitmap? = ::captureVisibleWindow,
 ) {
     enum class Phase {
         EXPLANATION,
         BUILDING,
         REVIEW,
-        SHARING,
+        QUEUED,
+        UPLOADING,
+        RETRY_SCHEDULED,
+        SENT,
+        CANCELED,
         FAILED,
     }
 
@@ -116,21 +158,86 @@ internal class AppDiagnosticReportController(
     var userNote by mutableStateOf("")
         private set
     var includeScreenshot by mutableStateOf(false)
+        private set
     var screenshotAvailable by mutableStateOf(false)
+        private set
+    var screenshotCaptureInProgress by mutableStateOf(false)
+        private set
+    var screenshotCaptureSurfaceHidden by mutableStateOf(false)
         private set
     var entries by mutableStateOf<List<Pair<String, ByteArray>>>(emptyList())
         private set
     var statusMessage by mutableStateOf<String?>(null)
         private set
+    var uploadProgress by mutableStateOf(0)
+        private set
+    var receipt by mutableStateOf<String?>(null)
+        private set
+    var deliveryState by mutableStateOf<FeedbackState?>(null)
+        private set
 
     private var lastRequestAtMs: Long? = null
     private var capturedScreenPng: ByteArray? = null
+    private var localFeedbackId: String? = null
+    private var feedbackObservation: Job? = null
+    private var screenshotCaptureJob: Job? = null
+    private val screenshotCaptureGuard = FeedbackScreenshotCaptureGuard()
+    private var activeScreenshotCaptureToken: Long? = null
+    private var deliveryFailure = false
+    private var deliveryFailureCategory = FeedbackFailureCategory.NONE
+    private var deliveryActionInProgress by mutableStateOf(false)
+
+    init {
+        activity.lifecycleScope.launch {
+            val latest = withContext(Dispatchers.IO) {
+                if ((activity.application as NoopApplication).operationalRuntimeStarted) {
+                    FeedbackScheduler.reconcile(activity)
+                }
+                FeedbackOutbox.from(activity).latestVisible()
+            } ?: return@launch
+            localFeedbackId = latest.localId
+            applyRuntime(
+                FeedbackRuntimeStatus(
+                    record = latest,
+                    progressPercent = FeedbackScheduler.progressFor(latest.state),
+                ),
+            )
+            observeFeedback(latest.localId)
+        }
+    }
 
     val preventsDismissal: Boolean
-        get() = phase == Phase.BUILDING || phase == Phase.SHARING
+        get() = phase == Phase.BUILDING
 
     val includesScreenAttachment: Boolean
         get() = entries.any { it.first == DisplayScreenshot.BUNDLE_NAME }
+
+    val screenAttachmentBytes: ByteArray?
+        get() = entries.firstOrNull { it.first == DisplayScreenshot.BUNDLE_NAME }?.second
+
+    val isDeliveryFailure: Boolean
+        get() = deliveryFailure
+
+    val canRetryDelivery: Boolean
+        get() = !deliveryActionInProgress && when (deliveryState) {
+            FeedbackState.QUEUED,
+            FeedbackState.RETRY_SCHEDULED,
+            FeedbackState.FAILED,
+            FeedbackState.CANCEL_RETRY_SCHEDULED,
+            FeedbackState.CANCEL_FAILED,
+            -> deliveryFailureCategory !in setOf(
+                FeedbackFailureCategory.ARCHIVE_INVALID,
+                FeedbackFailureCategory.OUTBOX_FULL,
+            )
+            else -> false
+        }
+
+    val canCancelDelivery: Boolean
+        get() = !deliveryActionInProgress &&
+            deliveryState?.terminal == false &&
+            deliveryState != FeedbackState.CANCELING &&
+            deliveryState != FeedbackState.CANCEL_RETRY_SCHEDULED &&
+            deliveryState != FeedbackState.CANCEL_FAILED
 
     val reviewPreview: String
         get() {
@@ -165,50 +272,100 @@ internal class AppDiagnosticReportController(
             includeResourceSnapshot = true,
         )
 
-        // Draw before mounting the report sheet. Compression runs off-main; bytes stay transient and are
-        // excluded unless the user explicitly enables the attachment.
-        val bitmap = captureVisibleWindow(activity.window.decorView)
-        capturedScreenPng = null
-        screenshotAvailable = false
-        includeScreenshot = false
+        if (localFeedbackId != null) {
+            isPresented = true
+            return
+        }
+
+        invalidateScreenshotCapture()
         userNote = ""
         entries = emptyList()
         statusMessage = null
         phase = Phase.EXPLANATION
         isPresented = true
-
-        if (bitmap == null) {
-            AppDiagnosticsRecorder.record(
-                "report.screen_snapshot_captured",
-                fields = mapOf("available" to "false"),
-            )
-            return
-        }
-        activity.lifecycleScope.launch(Dispatchers.Default) {
-            val png = compressPng(bitmap)
-            bitmap.recycle()
-            val validated = TestBundleAssembler.appReportScreenshotEntry(png)?.second
-            withContext(Dispatchers.Main.immediate) {
-                if (!isPresented) return@withContext
-                capturedScreenPng = validated
-                screenshotAvailable = validated != null
-                AppDiagnosticsRecorder.record(
-                    "report.screen_snapshot_captured",
-                    fields = mapOf(
-                        "available" to (validated != null).toString(),
-                    ),
-                )
-            }
-        }
     }
 
     fun updateUserNote(value: String) {
         userNote = value.take(TestBundleAssembler.MAX_USER_NOTE_CHARACTERS)
     }
 
+    fun updateScreenshotInclusion(enabled: Boolean) {
+        if (phase != Phase.EXPLANATION) return
+        if (!enabled) {
+            invalidateScreenshotCapture()
+            return
+        }
+        if (includeScreenshot && (screenshotCaptureInProgress || screenshotAvailable)) return
+
+        val captureToken = screenshotCaptureGuard.updateOptIn(true) ?: return
+        screenshotCaptureJob?.cancel()
+        activeScreenshotCaptureToken = captureToken
+        includeScreenshot = true
+        screenshotAvailable = false
+        capturedScreenPng = null
+        screenshotCaptureInProgress = true
+        screenshotCaptureSurfaceHidden = true
+        val view = activity.window.decorView
+        screenshotCaptureJob = activity.lifecycleScope.launch(Dispatchers.Main.immediate) {
+            var pendingBitmap: Bitmap? = null
+            try {
+                try {
+                    awaitScreenshotSurface(view)
+                    if (!screenshotCaptureGuard.accepts(captureToken, isPresented)) {
+                        return@launch
+                    }
+                    pendingBitmap = screenshotPixelReader(view)
+                } finally {
+                    if (activeScreenshotCaptureToken == captureToken) {
+                        screenshotCaptureSurfaceHidden = false
+                    }
+                }
+
+                val bitmap = pendingBitmap
+                pendingBitmap = null
+                val validated = bitmap?.let { captured ->
+                    withContext(Dispatchers.Default) {
+                        try {
+                            TestBundleAssembler.appReportScreenshotEntry(
+                                compressPng(captured),
+                            )?.second
+                        } finally {
+                            captured.recycle()
+                        }
+                    }
+                }
+                if (!screenshotCaptureGuard.accepts(captureToken, isPresented)) {
+                    return@launch
+                }
+                capturedScreenPng = validated
+                screenshotAvailable = validated != null
+                includeScreenshot = validated != null
+                AppDiagnosticsRecorder.record(
+                    "report.screen_snapshot_captured",
+                    fields = mapOf(
+                        "available" to (validated != null).toString(),
+                    ),
+                )
+            } finally {
+                pendingBitmap?.recycle()
+                if (activeScreenshotCaptureToken == captureToken) {
+                    activeScreenshotCaptureToken = null
+                    screenshotCaptureJob = null
+                    screenshotCaptureInProgress = false
+                    screenshotCaptureSurfaceHidden = false
+                }
+            }
+        }
+    }
+
     fun build() {
-        if (phase != Phase.EXPLANATION && phase != Phase.FAILED) return
+        if (screenshotCaptureInProgress ||
+            (phase != Phase.EXPLANATION && (phase != Phase.FAILED || deliveryFailure))
+        ) {
+            return
+        }
         phase = Phase.BUILDING
+        deliveryFailure = false
         statusMessage = null
         val note = userNote
         val screenshot = capturedScreenPng.takeIf { includeScreenshot }
@@ -222,7 +379,7 @@ internal class AppDiagnosticReportController(
         )
 
         activity.lifecycleScope.launch {
-            val assembled = runCatching {
+            val prepared = runCatching {
                 withContext(Dispatchers.IO) {
                     val app = activity.application as NoopApplication
                     val dbPath = activity.getDatabasePath(WhoopDatabase.DB_NAME).path
@@ -274,28 +431,32 @@ internal class AppDiagnosticReportController(
                         ?.let { raw ->
                             runCatching { WhoopModel.valueOf(raw).displayName }.getOrNull()
                         }
-                    TestBundleAssembler.assemble(
-                        context = activity,
-                        profile = TestDomain.MASTER,
-                        logText = app.ble.exportLogText(),
-                        storage = storage,
-                        strapModel = model,
-                        purpose = TestBundleAssembler.Purpose.APP_HANG,
-                        runtimeDiagnostics = AppDiagnosticsRecorder.diagnosticEntries(),
-                        userNote = note,
-                        appReportScreenshotPng = screenshot,
+                    FeedbackArchive.prepareForReview(
+                        TestBundleAssembler.assemble(
+                            context = activity,
+                            profile = TestDomain.MASTER,
+                            // APP_HANG deliberately excludes the strap transcript. Do not even retain
+                            // the live log in the report-building call.
+                            logText = "",
+                            storage = storage,
+                            strapModel = model,
+                            purpose = TestBundleAssembler.Purpose.APP_HANG,
+                            runtimeDiagnostics = AppDiagnosticsRecorder.diagnosticEntries(),
+                            userNote = note,
+                            appReportScreenshotPng = screenshot,
+                        ),
                     )
                 }
             }.getOrElse {
                 AppDiagnosticsRecorder.record(
                     "report.build_failed",
-                    fields = mapOf("failure_kind" to it.javaClass.simpleName),
+                    fields = mapOf("failure_kind" to reportFailureKind(it)),
                     includeResourceSnapshot = true,
                 )
-                emptyList()
+                null
             }
 
-            if (assembled.isEmpty()) {
+            if (prepared == null || prepared.entries.isEmpty()) {
                 phase = Phase.FAILED
                 statusMessage = activity.getString(R.string.app_report_error_prepare)
                 AppDiagnosticsRecorder.record(
@@ -305,11 +466,15 @@ internal class AppDiagnosticReportController(
                 )
                 return@launch
             }
-            entries = assembled
+            entries = prepared.entries
             phase = Phase.REVIEW
             AppDiagnosticsRecorder.record(
                 "report.build_completed",
-                fields = mapOf("file_count" to assembled.size.toString()),
+                fields = mapOf(
+                    "file_count" to prepared.entries.size.toString(),
+                    "unsafe_entries_excluded" to
+                        prepared.excludedUnsafeEntryCount.toString(),
+                ),
             )
         }
     }
@@ -317,61 +482,235 @@ internal class AppDiagnosticReportController(
     fun removeScreenAttachment() {
         if (phase != Phase.REVIEW || !includesScreenAttachment) return
         entries = entries.filterNot { it.first == DisplayScreenshot.BUNDLE_NAME }
-        includeScreenshot = false
+        invalidateScreenshotCapture()
         statusMessage = activity.getString(R.string.app_report_status_snapshot_removed)
         AppDiagnosticsRecorder.record("report.screen_snapshot_removed")
     }
 
-    fun share() {
+    fun sendFeedback() {
         if (phase != Phase.REVIEW || entries.isEmpty()) return
-        phase = Phase.SHARING
+        phase = Phase.QUEUED
+        deliveryState = FeedbackState.QUEUED
+        uploadProgress = 0
+        receipt = null
+        deliveryFailure = false
         statusMessage = null
-        val reportEntries = entries
-        val name = LogExport.bundleName(
-            profile = "app-report",
-            platform = "android",
-            version = BuildConfig.VERSION_NAME,
-        )
+        val reportEntries = entries.map { (name, bytes) -> name to bytes.copyOf() }
+        val includesNote = reportEntries.any { it.first == "user-note.txt" }
+        val includesScreenshot =
+            reportEntries.any { it.first == DisplayScreenshot.BUNDLE_NAME }
         AppDiagnosticsRecorder.record(
-            "report.share_requested",
-            fields = mapOf("file_count" to reportEntries.size.toString()),
+            "report.send_confirmed",
+            fields = mapOf(
+                "file_count" to reportEntries.size.toString(),
+                "user_context_included" to includesNote.toString(),
+                "screen_snapshot_included" to includesScreenshot.toString(),
+            ),
         )
         activity.lifecycleScope.launch {
-            val result = LogExport.exportBundle(activity, reportEntries, name)
-            phase = if (result == null) Phase.FAILED else Phase.REVIEW
-            statusMessage = if (result == null) {
-                activity.getString(R.string.app_report_error_share)
-            } else {
-                activity.getString(R.string.app_report_status_share_opened, name)
+            val staged = runCatching {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    val record = FeedbackOutbox.from(activity).stage(
+                        entries = reportEntries,
+                        includesUserNote = includesNote,
+                        includesScreenshot = includesScreenshot,
+                    )
+                    FeedbackScheduler.enqueue(activity, record)
+                    record
+                }
+            }.getOrElse {
+                phase = Phase.REVIEW
+                deliveryState = null
+                statusMessage = activity.getString(R.string.app_report_error_queue)
+                AppDiagnosticsRecorder.record(
+                    "report.queue_failed",
+                    fields = mapOf("failure_kind" to reportFailureKind(it)),
+                )
+                return@launch
             }
-            AppDiagnosticsRecorder.record(
-                "report.share_completed",
-                fields = mapOf(
-                    "outcome" to
-                        if (result == null) "archive_failed" else "share_sheet_opened",
+            localFeedbackId = staged.localId
+            clearSensitiveDraft()
+            applyRuntime(FeedbackRuntimeStatus(staged, 0))
+            observeFeedback(staged.localId)
+        }
+    }
+
+    fun retryFeedback() {
+        if (deliveryActionInProgress) return
+        val localId = localFeedbackId ?: return
+        deliveryActionInProgress = true
+        activity.lifecycleScope.launch {
+            val result = runCatching {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    when (deliveryState) {
+                        FeedbackState.QUEUED -> {
+                            val record = FeedbackOutbox.from(activity).load(localId)
+                                ?: return@withContext null
+                            FeedbackScheduler.enqueue(activity, record, replace = true)
+                            record
+                        }
+                        else -> FeedbackScheduler.retry(activity, localId)
+                    }
+                }
+            }.getOrNull()
+            deliveryActionInProgress = false
+            if (result == null) {
+                statusMessage = activity.getString(R.string.app_report_error_action)
+                AppDiagnosticsRecorder.record(
+                    "report.retry_failed",
+                    fields = mapOf("failure_kind" to "operation_failed"),
+                )
+                return@launch
+            }
+            deliveryFailure = false
+            applyRuntime(
+                FeedbackRuntimeStatus(
+                    result,
+                    FeedbackScheduler.progressFor(result.state),
                 ),
             )
+        }
+    }
+
+    fun cancelFeedback() {
+        if (deliveryActionInProgress) return
+        val localId = localFeedbackId ?: return
+        deliveryActionInProgress = true
+        activity.lifecycleScope.launch {
+            val record = runCatching {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    FeedbackScheduler.cancel(activity, localId)
+                }
+            }.getOrNull()
+            deliveryActionInProgress = false
+            if (record == null) {
+                statusMessage = activity.getString(R.string.app_report_error_action)
+                AppDiagnosticsRecorder.record(
+                    "report.cancel_failed",
+                    fields = mapOf("failure_kind" to "operation_failed"),
+                )
+                return@launch
+            }
+            applyRuntime(FeedbackRuntimeStatus(record, 0))
         }
     }
 
     fun close() {
         if (preventsDismissal) return
         isPresented = false
-        phase = Phase.EXPLANATION
+        invalidateScreenshotCapture()
+        if (phase == Phase.SENT || phase == Phase.CANCELED) {
+            localFeedbackId?.let(FeedbackRuntimeStatusBus::forget)
+            feedbackObservation?.cancel()
+            feedbackObservation = null
+            localFeedbackId = null
+            deliveryState = null
+            deliveryFailure = false
+            deliveryFailureCategory = FeedbackFailureCategory.NONE
+            uploadProgress = 0
+            receipt = null
+            resetDraft()
+        } else if (localFeedbackId == null) {
+            resetDraft()
+        }
+    }
+
+    private fun observeFeedback(localId: String) {
+        feedbackObservation?.cancel()
+        feedbackObservation = activity.lifecycleScope.launch {
+            FeedbackRuntimeStatusBus.statuses.collect { statuses ->
+                statuses[localId]?.let(::applyRuntime)
+            }
+        }
+    }
+
+    private fun applyRuntime(status: FeedbackRuntimeStatus) {
+        if (localFeedbackId != null && localFeedbackId != status.record.localId) return
+        deliveryState = status.record.state
+        uploadProgress = status.progressPercent.coerceIn(0, 100)
+        receipt = status.receipt
+        phase = when (status.record.state) {
+            FeedbackState.QUEUED,
+            FeedbackState.CANCELING,
+            -> Phase.QUEUED
+            FeedbackState.UPLOADING -> Phase.UPLOADING
+            FeedbackState.RETRY_SCHEDULED,
+            FeedbackState.CANCEL_RETRY_SCHEDULED,
+            -> Phase.RETRY_SCHEDULED
+            FeedbackState.SENT -> Phase.SENT
+            FeedbackState.CANCELED -> Phase.CANCELED
+            FeedbackState.FAILED,
+            FeedbackState.CANCEL_FAILED,
+            -> Phase.FAILED
+        }
+        deliveryFailure =
+            status.record.state == FeedbackState.FAILED ||
+                status.record.state == FeedbackState.CANCEL_FAILED
+        deliveryFailureCategory = status.record.failureCategory
+        statusMessage = deliveryStatusMessage(status.record)
+    }
+
+    private fun deliveryStatusMessage(record: com.noop.feedback.FeedbackRecord): String =
+        when (record.state) {
+        FeedbackState.QUEUED -> activity.getString(R.string.app_report_status_queued)
+        FeedbackState.UPLOADING -> activity.getString(R.string.app_report_status_uploading)
+        FeedbackState.RETRY_SCHEDULED ->
+            activity.getString(R.string.app_report_status_retry_scheduled)
+        FeedbackState.CANCELING ->
+            activity.getString(R.string.app_report_status_canceling)
+        FeedbackState.CANCEL_RETRY_SCHEDULED ->
+            activity.getString(R.string.app_report_status_cancel_retry_scheduled)
+        FeedbackState.CANCEL_FAILED ->
+            activity.getString(R.string.app_report_error_cancel_failed)
+        FeedbackState.SENT -> activity.getString(
+            if (record.localArchiveRemoved) {
+                R.string.app_report_status_sent
+            } else {
+                R.string.app_report_status_sent_cleanup_pending
+            },
+        )
+        FeedbackState.CANCELED -> activity.getString(
+            if (record.localArchiveRemoved) {
+                R.string.app_report_status_canceled
+            } else {
+                R.string.app_report_status_canceled_cleanup_pending
+            },
+        )
+        FeedbackState.FAILED -> when (record.failureCategory) {
+            FeedbackFailureCategory.ARCHIVE_INVALID ->
+                activity.getString(R.string.app_report_error_archive_invalid)
+            FeedbackFailureCategory.CONFIGURATION ->
+                activity.getString(R.string.app_report_error_configuration)
+            FeedbackFailureCategory.SERVER_REJECTED,
+            FeedbackFailureCategory.INVALID_RESPONSE,
+            -> activity.getString(R.string.app_report_error_rejected)
+            else -> activity.getString(R.string.app_report_error_delivery)
+        }
+    }
+
+    private fun clearSensitiveDraft() {
         userNote = ""
-        includeScreenshot = false
-        screenshotAvailable = false
-        capturedScreenPng = null
+        invalidateScreenshotCapture()
         entries = emptyList()
+    }
+
+    private fun resetDraft() {
+        phase = Phase.EXPLANATION
+        clearSensitiveDraft()
         statusMessage = null
     }
 
-    private fun captureVisibleWindow(view: View): Bitmap? = runCatching {
-        if (view.width <= 0 || view.height <= 0) return@runCatching null
-        Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { bitmap ->
-            view.draw(Canvas(bitmap))
-        }
-    }.getOrNull()
+    private fun invalidateScreenshotCapture() {
+        screenshotCaptureGuard.invalidate()
+        activeScreenshotCaptureToken = null
+        screenshotCaptureJob?.cancel()
+        screenshotCaptureJob = null
+        screenshotCaptureInProgress = false
+        screenshotCaptureSurfaceHidden = false
+        includeScreenshot = false
+        screenshotAvailable = false
+        capturedScreenPng = null
+    }
 
     private fun compressPng(bitmap: Bitmap): ByteArray? = runCatching {
         ByteArrayOutputStream().use { output ->
@@ -381,10 +720,38 @@ internal class AppDiagnosticReportController(
     }.getOrNull()
 }
 
+private suspend fun awaitUnderlyingScreenForScreenshot(view: View) {
+    repeat(2) {
+        suspendCancellableCoroutine { continuation ->
+            val callback = Runnable {
+                if (continuation.isActive) continuation.resume(Unit)
+            }
+            view.postOnAnimation(callback)
+            continuation.invokeOnCancellation {
+                view.removeCallbacks(callback)
+            }
+        }
+    }
+}
+
+private fun captureVisibleWindow(view: View): Bitmap? = runCatching {
+    val size = FeedbackScreenshotPreview.captureSize(view.width, view.height)
+        ?: return@runCatching null
+    Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888).also { bitmap ->
+        Canvas(bitmap).apply {
+            scale(
+                size.width.toFloat() / view.width.toFloat(),
+                size.height.toFloat() / view.height.toFloat(),
+            )
+            view.draw(this)
+        }
+    }
+}.getOrNull()
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppDiagnosticReportSheet(controller: AppDiagnosticReportController) {
-    if (!controller.isPresented) return
+    if (!controller.isPresented || controller.screenshotCaptureSurfaceHidden) return
 
     ModalBottomSheet(
         onDismissRequest = controller::close,
@@ -412,9 +779,14 @@ internal fun AppDiagnosticReportSheet(controller: AppDiagnosticReportController)
                         ReportExplanation(controller)
                     AppDiagnosticReportController.Phase.BUILDING ->
                         ReportBuilding()
-                    AppDiagnosticReportController.Phase.REVIEW,
-                    AppDiagnosticReportController.Phase.SHARING,
-                    -> ReportReview(controller)
+                    AppDiagnosticReportController.Phase.REVIEW ->
+                        ReportReview(controller)
+                    AppDiagnosticReportController.Phase.QUEUED,
+                    AppDiagnosticReportController.Phase.UPLOADING,
+                    AppDiagnosticReportController.Phase.RETRY_SCHEDULED,
+                    AppDiagnosticReportController.Phase.SENT,
+                    AppDiagnosticReportController.Phase.CANCELED,
+                    -> ReportDelivery(controller)
                     AppDiagnosticReportController.Phase.FAILED ->
                         ReportFailure(controller)
                 }
@@ -463,6 +835,7 @@ private fun ReportSheetTitle(controller: AppDiagnosticReportController) {
 
 @Composable
 private fun ReportExplanation(controller: AppDiagnosticReportController) {
+    val snapshotConsentLabel = uiString(R.string.app_report_include_snapshot)
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ReportHeader(
             title = uiString(R.string.app_report_capture_title),
@@ -548,7 +921,17 @@ private fun ReportExplanation(controller: AppDiagnosticReportController) {
 
         NoopCard {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("noop.app-report.include-screenshot")
+                    .toggleable(
+                        value = controller.includeScreenshot,
+                        role = Role.Switch,
+                        onValueChange = controller::updateScreenshotInclusion,
+                    )
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = snapshotConsentLabel
+                    },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -575,9 +958,7 @@ private fun ReportExplanation(controller: AppDiagnosticReportController) {
                 }
                 NoopToggleSwitch(
                     checked = controller.includeScreenshot,
-                    onCheckedChange = { controller.includeScreenshot = it },
-                    modifier = Modifier.testTag("noop.app-report.include-screenshot"),
-                    enabled = controller.screenshotAvailable,
+                    onCheckedChange = null,
                 )
             }
         }
@@ -592,6 +973,7 @@ private fun ReportExplanation(controller: AppDiagnosticReportController) {
             text = uiString(R.string.app_report_build),
             leadingIcon = Icons.Filled.Description,
             fullWidth = true,
+            enabled = !controller.screenshotCaptureInProgress,
             onClick = controller::build,
         )
         NoopButton(
@@ -625,6 +1007,23 @@ private fun ReportBuilding() {
 
 @Composable
 private fun ReportReview(controller: AppDiagnosticReportController) {
+    val screenshotBytes = controller.screenAttachmentBytes
+    var screenshotBitmap by remember(screenshotBytes) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(screenshotBytes) {
+        val pending = AtomicReference<Bitmap?>()
+        try {
+            withContext(Dispatchers.Default) {
+                pending.set(screenshotBytes?.let(FeedbackScreenshotPreview::decode))
+            }
+            screenshotBitmap = pending.getAndSet(null)
+        } finally {
+            pending.getAndSet(null)?.recycle()
+        }
+    }
+    DisposableEffect(screenshotBitmap) {
+        val displayedBitmap = screenshotBitmap
+        onDispose { displayedBitmap?.recycle() }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ReportHeader(
             uiString(R.string.app_report_ready_title),
@@ -670,6 +1069,26 @@ private fun ReportReview(controller: AppDiagnosticReportController) {
             }
         }
 
+        screenshotBitmap?.let { bitmap ->
+            Text(
+                uiString(R.string.app_report_snapshot_preview_title),
+                style = NoopType.overline,
+                color = Palette.textSecondary,
+            )
+            NoopCard {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription =
+                        uiString(R.string.app_report_snapshot_preview_content_description),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(220.dp)
+                        .testTag("noop.app-report.snapshot-preview"),
+                )
+            }
+        }
+
         if (controller.reviewPreview.isNotBlank()) {
             Text(
                 uiString(R.string.app_report_redacted_preview),
@@ -698,15 +1117,11 @@ private fun ReportReview(controller: AppDiagnosticReportController) {
         }
 
         NoopButton(
-            text = if (controller.phase == AppDiagnosticReportController.Phase.SHARING) {
-                uiString(R.string.app_report_preparing_zip)
-            } else {
-                uiString(R.string.app_report_share_zip)
-            },
-            leadingIcon = Icons.Filled.Upload,
+            text = uiString(R.string.app_report_send_feedback),
+            leadingIcon = Icons.Filled.CloudUpload,
             fullWidth = true,
-            enabled = controller.phase != AppDiagnosticReportController.Phase.SHARING,
-            onClick = controller::share,
+            modifier = Modifier.testTag("noop.app-report.send-feedback"),
+            onClick = controller::sendFeedback,
         )
         if (controller.includesScreenAttachment) {
             NoopButton(
@@ -721,18 +1136,175 @@ private fun ReportReview(controller: AppDiagnosticReportController) {
 }
 
 @Composable
+private fun ReportDelivery(controller: AppDiagnosticReportController) {
+    val state = controller.deliveryState
+    val icon = when (state) {
+        FeedbackState.SENT -> Icons.Filled.CheckCircle
+        FeedbackState.RETRY_SCHEDULED,
+        FeedbackState.CANCEL_RETRY_SCHEDULED,
+        -> Icons.Filled.Schedule
+        FeedbackState.CANCELED -> Icons.Filled.Close
+        else -> Icons.Filled.CloudUpload
+    }
+    val tint = when (state) {
+        FeedbackState.SENT -> Palette.statusPositive
+        FeedbackState.RETRY_SCHEDULED,
+        FeedbackState.CANCEL_RETRY_SCHEDULED,
+        -> Palette.statusWarning
+        FeedbackState.CANCELED -> Palette.textSecondary
+        else -> Palette.accent
+    }
+    val title = when (state) {
+        FeedbackState.QUEUED -> uiString(R.string.app_report_queued_title)
+        FeedbackState.UPLOADING -> uiString(R.string.app_report_uploading_title)
+        FeedbackState.RETRY_SCHEDULED ->
+            uiString(R.string.app_report_retry_scheduled_title)
+        FeedbackState.CANCELING ->
+            uiString(R.string.app_report_canceling_title)
+        FeedbackState.CANCEL_RETRY_SCHEDULED ->
+            uiString(R.string.app_report_cancel_retry_title)
+        FeedbackState.SENT -> uiString(R.string.app_report_sent_title)
+        FeedbackState.CANCELED -> uiString(R.string.app_report_canceled_title)
+        else -> uiString(R.string.app_report_queued_title)
+    }
+    val progressText = if (state == FeedbackState.UPLOADING) {
+        uiString(R.string.app_report_progress_percent, controller.uploadProgress)
+    } else {
+        null
+    }
+    val accessibilityState = listOfNotNull(
+        title,
+        controller.statusMessage,
+        progressText,
+    ).joinToString(". ")
+
+    Column(
+        modifier = Modifier
+            .testTag("noop.app-report.delivery-status")
+            .semantics {
+                liveRegion = LiveRegionMode.Polite
+                stateDescription = accessibilityState
+            },
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        NoopCard {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(36.dp),
+                )
+                Text(title, style = NoopType.title2, color = Palette.textPrimary)
+                Text(
+                    controller.statusMessage.orEmpty(),
+                    style = NoopType.body,
+                    color = Palette.textSecondary,
+                )
+                if (state == FeedbackState.UPLOADING) {
+                    LinearProgressIndicator(
+                        progress = { controller.uploadProgress / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("noop.app-report.upload-progress"),
+                        color = Palette.accent,
+                        trackColor = Palette.hairline,
+                    )
+                    Text(
+                        progressText.orEmpty(),
+                        style = NoopType.mono,
+                        color = Palette.textTertiary,
+                    )
+                }
+                if (state == FeedbackState.SENT) {
+                    Text(
+                        controller.receipt?.let {
+                            uiString(R.string.app_report_receipt, it)
+                        } ?: uiString(R.string.app_report_receipt_confirmed),
+                        modifier = Modifier.testTag("noop.app-report.receipt"),
+                        style = NoopType.mono,
+                        color = Palette.statusPositiveText,
+                    )
+                }
+            }
+        }
+
+        if (controller.canRetryDelivery) {
+            NoopButton(
+                text = uiString(R.string.app_report_retry_now),
+                leadingIcon = Icons.Filled.Refresh,
+                fullWidth = true,
+                modifier = Modifier.testTag("noop.app-report.retry"),
+                onClick = controller::retryFeedback,
+            )
+        }
+        if (controller.canCancelDelivery) {
+            NoopButton(
+                text = uiString(R.string.app_report_cancel_send),
+                leadingIcon = Icons.Filled.Close,
+                kind = NoopButtonKind.Secondary,
+                fullWidth = true,
+                modifier = Modifier.testTag("noop.app-report.cancel-send"),
+                onClick = controller::cancelFeedback,
+            )
+        }
+        NoopButton(
+            text = when (state) {
+                FeedbackState.SENT,
+                FeedbackState.CANCELED,
+                -> uiString(R.string.app_report_close)
+                else -> uiString(R.string.app_report_continue_background)
+            },
+            leadingIcon = Icons.Filled.Close,
+            kind = NoopButtonKind.Tertiary,
+            fullWidth = true,
+            onClick = controller::close,
+        )
+    }
+}
+
+@Composable
 private fun ReportFailure(controller: AppDiagnosticReportController) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ReportHeader(
-            uiString(R.string.app_report_not_ready_title),
+            if (controller.isDeliveryFailure) {
+                uiString(R.string.app_report_send_failed_title)
+            } else {
+                uiString(R.string.app_report_not_ready_title)
+            },
             controller.statusMessage ?: uiString(R.string.app_report_prepare_zip_fallback),
         )
-        NoopButton(
-            text = uiString(R.string.app_report_try_again),
-            leadingIcon = Icons.Filled.BugReport,
-            fullWidth = true,
-            onClick = controller::build,
-        )
+        if (controller.isDeliveryFailure) {
+            if (controller.canRetryDelivery) {
+                NoopButton(
+                    text = uiString(R.string.app_report_retry_now),
+                    leadingIcon = Icons.Filled.Refresh,
+                    fullWidth = true,
+                    modifier = Modifier.testTag("noop.app-report.retry"),
+                    onClick = controller::retryFeedback,
+                )
+            }
+            if (controller.canCancelDelivery) {
+                NoopButton(
+                    text = uiString(R.string.app_report_cancel_send),
+                    leadingIcon = Icons.Filled.Close,
+                    kind = NoopButtonKind.Secondary,
+                    fullWidth = true,
+                    modifier = Modifier.testTag("noop.app-report.cancel-send"),
+                    onClick = controller::cancelFeedback,
+                )
+            }
+        } else {
+            NoopButton(
+                text = uiString(R.string.app_report_try_again),
+                leadingIcon = Icons.Filled.BugReport,
+                fullWidth = true,
+                onClick = controller::build,
+            )
+        }
         NoopButton(
             text = uiString(R.string.app_report_close),
             leadingIcon = Icons.Filled.Close,
@@ -768,4 +1340,20 @@ private fun EvidenceRow(
             Text(detail, style = NoopType.footnote, color = Palette.textTertiary)
         }
     }
+}
+
+private fun reportFailureKind(error: Throwable): String = when (error) {
+    is FeedbackArchiveException -> "archive_rejected"
+    is FeedbackOutboxException -> when (error.reason) {
+        FeedbackOutboxException.Reason.FULL -> "outbox_full"
+        FeedbackOutboxException.Reason.RECORD_NOT_FOUND -> "record_missing"
+        FeedbackOutboxException.Reason.INVALID_RECORD,
+        FeedbackOutboxException.Reason.INVALID_TRANSITION,
+        -> "outbox_invalid"
+        FeedbackOutboxException.Reason.STATE_UNAVAILABLE -> "outbox_read"
+        FeedbackOutboxException.Reason.WRITE_FAILED -> "outbox_write"
+    }
+    is java.io.IOException -> "io"
+    is SecurityException -> "permission"
+    else -> "unexpected"
 }

@@ -3,6 +3,7 @@ package com.noop.testcentre
 import android.content.Context
 import android.os.Build
 import com.noop.BuildConfig
+import com.noop.feedback.FeedbackScreenshotSanitizer
 import com.noop.CrashCapture
 import com.noop.ble.redactStrapLogPii
 import com.noop.brand.CustomerFacingBrand
@@ -57,9 +58,6 @@ object TestBundleAssembler {
             "This report contains bounded operational diagnostics for lifecycle, responsiveness, " +
             "storage, and sync.\n" +
             "Band transcripts, sensor values, health timestamps, and the health database are not included."
-    private val PNG_SIGNATURE =
-        byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
-
     /** Durable collection proof. A connected label or transport packet is not enough; this indexed
      * frontier must advance. Kept byte-aligned with the Swift report line. */
     fun persistedHrFrontierLine(
@@ -85,14 +83,13 @@ object TestBundleAssembler {
 
     /** Validate an explicitly approved pre-report screen snapshot before it crosses the bundle boundary. */
     fun appReportScreenshotEntry(png: ByteArray?): Pair<String, ByteArray>? {
-        if (png == null ||
-            png.size < PNG_SIGNATURE.size ||
-            png.size > MAX_APP_REPORT_SCREENSHOT_BYTES
-        ) {
-            return null
-        }
-        if (PNG_SIGNATURE.indices.any { png[it] != PNG_SIGNATURE[it] }) return null
-        return DisplayScreenshot.BUNDLE_NAME to png
+        val sanitized = png?.let {
+            FeedbackScreenshotSanitizer.sanitize(
+                it,
+                maximumBytes = MAX_APP_REPORT_SCREENSHOT_BYTES,
+            )
+        } ?: return null
+        return DisplayScreenshot.BUNDLE_NAME to sanitized
     }
 
     /** Output of the standalone diagnostics-only privacy boundary. Normal user health-data export does
@@ -188,7 +185,7 @@ object TestBundleAssembler {
         logText: String,
         collectionLine: String?,
     ): String {
-        if (purpose == Purpose.APP_HANG) return header + "\n" + APP_RUNTIME_REPORT_TEXT
+        if (purpose == Purpose.APP_HANG) return APP_RUNTIME_REPORT_TEXT
         val body = logText.ifBlank {
             "(strap log is empty, connect to your strap, reproduce the issue, then report again)"
         }

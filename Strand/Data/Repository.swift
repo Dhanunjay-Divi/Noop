@@ -597,6 +597,32 @@ final class Repository: ObservableObject {
     /// so the card sat stale until an unrelated sync landed. Race-free: Repository is @MainActor.
     @Published private(set) var hydrationSeq = 0
     func noteHydrationChanged() { hydrationSeq += 1 }
+    /// A hydration mutation spans an async read-modify-write. Main-actor isolation alone does not make
+    /// that span atomic because another tap can enter while the first store call is suspended. Chain each
+    /// operation behind the prior task so rapid adds, edits, and deletes cannot overwrite one another.
+    private var hydrationMutationTail: Task<HydrationMutationResult, Never>?
+    func performSerializedHydrationMutation(
+        _ operation: @escaping @MainActor @Sendable () async -> HydrationMutationResult
+    ) async -> HydrationMutationResult {
+        let predecessor = hydrationMutationTail
+        let task = Task { @MainActor in
+            _ = await predecessor?.value
+            return await operation()
+        }
+        hydrationMutationTail = task
+        return await task.value
+    }
+    #if DEBUG
+    private(set) var hydrationReadFailureForTesting = false
+    private(set) var hydrationWriteFailureForTesting = false
+    func setHydrationFailureForTesting(
+        reads: Bool = false,
+        writes: Bool = false
+    ) {
+        hydrationReadFailureForTesting = reads
+        hydrationWriteFailureForTesting = writes
+    }
+    #endif
 
     /// Bumped whenever a period-start row is logged or removed. Cycle surfaces can refresh the
     /// sensitive local series without forcing an unrelated full strap-data reload.
@@ -2357,26 +2383,45 @@ final class Repository: ObservableObject {
     }
 
     private func restageFromRaw(start: Int, end: Int) async -> RestagedSleep? {
-        guard let store = await ensureStore() else { return nil }
+        try? await restageFromRawStrict(start: start, end: end)
+    }
+
+    /// Throwing analysis counterpart. A sparse window is a valid nil result; unavailable storage, failed
+    /// raw reads, and cancellation remain failures so a scoring generation cannot be acknowledged.
+    private func restageFromRawStrict(start: Int, end: Int) async throws -> RestagedSleep? {
+        guard let store = await ensureStore() else {
+            throw RepositoryReadError.storeUnavailable
+        }
         let lo = start - 3_600, hi = end + 3_600
-        let grav = (try? await store.gravitySamples(deviceId: deviceId, from: lo, to: hi, limit: 200_000)) ?? []
+        let grav = try await store.gravitySamples(
+            deviceId: deviceId, from: lo, to: hi, limit: 200_000)
         let inWindowGravity = grav.lazy.filter { $0.ts >= start && $0.ts <= end }.count
         let windowSeconds = max(1, end - start)
         guard inWindowGravity >= max(20, windowSeconds / 120) else { return nil }
-        let hr = (try? await store.hrSamples(deviceId: deviceId, from: lo, to: hi, limit: 200_000)) ?? []
-        let rr = (try? await store.rrIntervals(deviceId: deviceId, from: lo, to: hi, limit: 200_000)) ?? []
-        let resp = (try? await store.respSamples(deviceId: deviceId, from: lo, to: hi, limit: 200_000)) ?? []
+        try Task.checkCancellation()
+        let hr = try await store.hrSamples(
+            deviceId: deviceId, from: lo, to: hi, limit: 200_000)
+        let rr = try await store.rrIntervals(
+            deviceId: deviceId, from: lo, to: hi, limit: 200_000)
+        let resp = try await store.respSamples(
+            deviceId: deviceId, from: lo, to: hi, limit: 200_000)
         // Read only when the refinement below might actually use it (see `useMotionAwareWake`) — a plain
         // read cost, but no point paying it on the (default) off path.
         let useMotionAwareWake = PuffinExperiment.motionAwareWakeEnabled
-        let steps = useMotionAwareWake
-            ? ((try? await store.stepSamples(deviceId: deviceId, from: lo, to: hi, limit: 200_000)) ?? [])
-            : []
+        let steps: [StepSample]
+        if useMotionAwareWake {
+            steps = try await store.stepSamples(
+                deviceId: deviceId, from: lo, to: hi, limit: 200_000)
+        } else {
+            steps = []
+        }
         // V2 staging ships enabled after cross-subject validation; disabling its setting selects the
         // retained V1 `SleepStager`. Read once here off the actor; the switch only chooses which engine
         // runs over the already-detected window. (V7 Pillar 3b)
         let useV2 = PuffinExperiment.experimentalSleepV2Enabled
-        return await Task.detached(priority: .utility) {
+        let stagingTask = Task.detached(priority: .utility) {
+            () throws -> RestagedSleep? in
+            try Task.checkCancellation()
             let staged = useV2
                 ? SleepStagerV2.stageSession(start: start, end: end, grav: grav, hr: hr, rr: rr, resp: resp)
                 : SleepStager.stageSession(start: start, end: end, grav: grav, hr: hr, rr: rr, resp: resp)
@@ -2401,7 +2446,11 @@ final class Repository: ObservableObject {
                 stagesJSON: stagesJSON,
                 rrEligibleWindowCount: counts.eligibleWindowCount,
                 rrValidWindowCount: counts.validRRWindowCount)
-        }.value
+        }
+        return try await withTaskCancellationHandler(
+            operation: { try await stagingTask.value },
+            onCancel: { stagingTask.cancel() }
+        )
     }
 
     /// Self-heal pass for the edit-races-sync bug. A night edited BEFORE the strap sync imported its raw
@@ -2414,20 +2463,30 @@ final class Repository: ObservableObject {
     /// imported night (raw never dense) is left untouched (`restageFromRaw` returns nil). Reads/writes the
     /// COMPUTED source , the same one `analyzeRecent` reads edited rows from. Returns the (possibly
     /// refreshed) edited rows so the caller recomputes daily aggregates from the corrected stages.
-    func selfHealEditedStages(from windowStart: Int, to windowEnd: Int) async -> [CachedSleepSession] {
-        guard let store = await ensureStore() else { return [] }
-        func editedRows() async -> [CachedSleepSession] {
-            ((try? await store.sleepSessions(deviceId: computedDeviceId, from: windowStart,
-                                             to: windowEnd, limit: 100_000)) ?? [])
+    func selfHealEditedStages(
+        from windowStart: Int,
+        to windowEnd: Int
+    ) async throws -> [CachedSleepSession] {
+        guard let store = await ensureStore() else {
+            throw RepositoryReadError.storeUnavailable
+        }
+        func editedRows() async throws -> [CachedSleepSession] {
+            (try await store.sleepSessions(
+                deviceId: computedDeviceId,
+                from: windowStart,
+                to: windowEnd,
+                limit: 100_000
+            ))
                 .filter { $0.userEdited }
         }
-        let edited = await editedRows()
+        let edited = try await editedRows()
         guard !edited.isEmpty else { return [] }
         var healed = false
         for row in edited {
+            try Task.checkCancellation()
             // Re-derive over the LOCKED corrected window (effective onset → wake). Skip when the raw
             // isn't dense yet, or when the result already matches what's stored (steady state , no write).
-            guard let restaged = await restageFromRaw(
+            guard let restaged = try await restageFromRawStrict(
                 start: row.effectiveStartTs,
                 end: row.endTs
             ) else { continue }
@@ -2435,16 +2494,15 @@ final class Repository: ObservableObject {
                     || restaged.rrEligibleWindowCount != row.rrEligibleWindowCount
                     || restaged.rrValidWindowCount != row.rrValidWindowCount
             else { continue }
-            let n = (try? await store.updateSleepStages(deviceId: computedDeviceId,
-                                                        detectedStartTs: row.startTs,
-                                                        stagesJSON: restaged.stagesJSON,
-                                                        rrEligibleWindowCount:
-                                                            restaged.rrEligibleWindowCount,
-                                                        rrValidWindowCount:
-                                                            restaged.rrValidWindowCount)) ?? 0
+            let n = try await store.updateSleepStages(
+                deviceId: computedDeviceId,
+                detectedStartTs: row.startTs,
+                stagesJSON: restaged.stagesJSON,
+                rrEligibleWindowCount: restaged.rrEligibleWindowCount,
+                rrValidWindowCount: restaged.rrValidWindowCount)
             if n > 0 { healed = true }
         }
-        return healed ? await editedRows() : edited
+        return healed ? try await editedRows() : edited
     }
 
     // MARK: - Metric explorer reads (generic substrate)

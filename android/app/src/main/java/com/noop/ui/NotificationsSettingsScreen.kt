@@ -20,8 +20,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -41,6 +43,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TimePickerDefaults
 import androidx.compose.material3.rememberTimePickerState
@@ -58,12 +61,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -87,6 +91,12 @@ import java.util.Calendar
 //
 // Delivery requires a NotificationListenerService with Notification Access granted — the
 // behaviour card deep-links to Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS for that.
+
+internal val NotificationSettingsMinimumTouchTarget = 48.dp
+internal const val NotificationSettingsStackedFontScale = 1.30f
+
+internal fun notificationSettingsUsesStackedControls(fontScale: Float): Boolean =
+    fontScale > NotificationSettingsStackedFontScale
 
 // MARK: - Domain model (mirrors NotificationSettingsStore.swift)
 
@@ -232,14 +242,7 @@ private enum class ReportNotificationKind {
 }
 
 internal fun reportNotificationsAvailable(context: Context): Boolean {
-    val runtimePermissionGranted =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
-    return runtimePermissionGranted &&
-        NotificationManagerCompat.from(context).areNotificationsEnabled()
+    return ScheduledReportNotifier.canNotify(context)
 }
 
 @Composable
@@ -333,11 +336,11 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
         val kind = pendingReportPermission
         pendingReportPermission = null
         if (kind != null) {
+            val allowed = granted && reportNotificationsAvailable(context)
             applyReportPermission(
                 kind,
-                granted && NotificationManagerCompat.from(context).areNotificationsEnabled(),
-                permissionDenied = !granted ||
-                    !NotificationManagerCompat.from(context).areNotificationsEnabled(),
+                allowed,
+                permissionDenied = !allowed,
             )
         }
     }
@@ -692,37 +695,58 @@ private fun CallsCard(
     onTest: () -> Unit,
 ) {
     val contentAlpha = if (masterEnabled) 1f else Palette.disabledOpacity
+    val stacksControls =
+        notificationSettingsUsesStackedControls(LocalDensity.current.fontScale)
     AlertSection(
         icon = Icons.Filled.Call,
         title = uiString(R.string.l10n_notifications_settings_screen_calls_0a19b7e2),
         blurb = "Tap your wrist for incoming phone calls and strict best-effort VoIP calls.",
     ) {
         Column(modifier = Modifier.alphaIf(contentAlpha)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(uiString(R.string.l10n_notifications_settings_screen_buzz_on_incoming_calls_625804a1), style = NoopType.body, color = Palette.textPrimary)
-                    Text(
-                        uiString(R.string.l10n_notifications_settings_screen_uses_the_same_quiet_hours_and_03badcac),
-                        style = NoopType.footnote,
-                        color = Palette.textTertiary,
+            if (stacksControls) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = NotificationSettingsMinimumTouchTarget)
+                        .padding(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CallsSummary(modifier = Modifier.fillMaxWidth())
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        CallsControls(
+                            callsEnabled = callsEnabled,
+                            masterEnabled = masterEnabled,
+                            bonded = bonded,
+                            pattern = pattern,
+                            onCallsEnabled = onCallsEnabled,
+                            onPattern = onPattern,
+                            onTest = onTest,
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = NotificationSettingsMinimumTouchTarget)
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CallsSummary(modifier = Modifier.weight(1f))
+                    CallsControls(
+                        callsEnabled = callsEnabled,
+                        masterEnabled = masterEnabled,
+                        bonded = bonded,
+                        pattern = pattern,
+                        onCallsEnabled = onCallsEnabled,
+                        onPattern = onPattern,
+                        onTest = onTest,
                     )
                 }
-                if (callsEnabled) {
-                    PatternMenu(pattern = pattern, enabled = masterEnabled, appName = "calls", onSelect = onPattern)
-                    TestIconButton(enabled = masterEnabled && bonded, appName = "calls", onClick = onTest)
-                }
-                NoopSwitch(
-                    checked = callsEnabled,
-                    onChange = onCallsEnabled,
-                    enabled = masterEnabled,
-                    label = uiString(R.string.l10n_notifications_settings_screen_buzz_on_incoming_calls_625804a1),
-                )
             }
             if (callsEnabled) {
                 RowDivider()
@@ -751,6 +775,67 @@ private fun CallsCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CallsSummary(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            uiString(
+                R.string.l10n_notifications_settings_screen_buzz_on_incoming_calls_625804a1,
+            ),
+            style = NoopType.body,
+            color = Palette.textPrimary,
+        )
+        Text(
+            uiString(
+                R.string.l10n_notifications_settings_screen_uses_the_same_quiet_hours_and_03badcac,
+            ),
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+        )
+    }
+}
+
+@Composable
+private fun CallsControls(
+    callsEnabled: Boolean,
+    masterEnabled: Boolean,
+    bonded: Boolean,
+    pattern: BuzzPattern,
+    onCallsEnabled: (Boolean) -> Unit,
+    onPattern: (BuzzPattern) -> Unit,
+    onTest: () -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (callsEnabled) {
+            PatternMenu(
+                pattern = pattern,
+                enabled = masterEnabled,
+                appName = "calls",
+                onSelect = onPattern,
+            )
+            TestIconButton(
+                enabled = masterEnabled && bonded,
+                appName = "calls",
+                onClick = onTest,
+            )
+        }
+        NoopSwitch(
+            checked = callsEnabled,
+            onChange = onCallsEnabled,
+            enabled = masterEnabled,
+            label = uiString(
+                R.string.l10n_notifications_settings_screen_buzz_on_incoming_calls_625804a1,
+            ),
+        )
     }
 }
 
@@ -787,7 +872,7 @@ private fun DeliveryNote() {
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(50))
-                .clickable {
+                .clickable(role = Role.Button) {
                     runCatching {
                         context.startActivity(
                             Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
@@ -795,8 +880,16 @@ private fun DeliveryNote() {
                         )
                     }
                 }
+                .sizeIn(
+                    minWidth = NotificationSettingsMinimumTouchTarget,
+                    minHeight = NotificationSettingsMinimumTouchTarget,
+                )
                 .padding(horizontal = 2.dp, vertical = 2.dp)
-                .semantics { contentDescription = uiString(R.string.l10n_notifications_settings_screen_open_notification_access_settings_93fcd1bf) },
+                .semantics {
+                    contentDescription = uiString(
+                        R.string.l10n_notifications_settings_screen_open_notification_access_settings_93fcd1bf,
+                    )
+                },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -856,14 +949,76 @@ private fun AppRow(
     onPattern: (BuzzPattern) -> Unit,
     onTest: () -> Unit,
 ) {
+    val stacksControls =
+        notificationSettingsUsesStackedControls(LocalDensity.current.fontScale)
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .heightIn(min = NotificationSettingsMinimumTouchTarget)
+        // An enabled app reads as a selected row: a soft accentMuted wash behind it.
+        .clip(RoundedCornerShape(10.dp))
+        .then(if (enabled) Modifier.background(Palette.accentMuted) else Modifier)
+        .padding(horizontal = 8.dp, vertical = if (stacksControls) 8.dp else 4.dp)
+
+    if (stacksControls) {
+        Column(
+            modifier = rowModifier,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            AppSummary(
+                app = app,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AppControls(
+                    app = app,
+                    enabled = enabled,
+                    pattern = pattern,
+                    interactive = interactive,
+                    bonded = bonded,
+                    onToggle = onToggle,
+                    onPattern = onPattern,
+                    onTest = onTest,
+                )
+            }
+        }
+    } else {
+        Row(
+            modifier = rowModifier,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            AppSummary(
+                app = app,
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+            )
+            AppControls(
+                app = app,
+                enabled = enabled,
+                pattern = pattern,
+                interactive = interactive,
+                bonded = bonded,
+                onToggle = onToggle,
+                onPattern = onPattern,
+                onTest = onTest,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppSummary(
+    app: NotifApp,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            // An enabled app reads as a selected row: a soft accentMuted wash behind it.
-            .clip(RoundedCornerShape(10.dp))
-            .then(if (enabled) Modifier.background(Palette.accentMuted) else Modifier)
-            .padding(horizontal = 8.dp),
+        modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -886,24 +1041,43 @@ private fun AppRow(
                 color = if (enabled) Palette.accent else Palette.textTertiary,
             )
         }
+    }
+}
 
-        if (enabled) {
-            PatternMenu(
-                pattern = pattern,
-                enabled = interactive,
-                appName = app.name,
-                onSelect = onPattern,
-            )
-            TestIconButton(enabled = interactive && bonded, appName = app.name, onClick = onTest)
-        }
-
-        NoopSwitch(
-            checked = enabled,
-            onChange = onToggle,
+@Composable
+private fun AppControls(
+    app: NotifApp,
+    enabled: Boolean,
+    pattern: BuzzPattern,
+    interactive: Boolean,
+    bonded: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onPattern: (BuzzPattern) -> Unit,
+    onTest: () -> Unit,
+) {
+    if (enabled) {
+        PatternMenu(
+            pattern = pattern,
             enabled = interactive,
-            label = uiString(R.string.l10n_notifications_settings_screen_app_name_wrist_alerts_dd3540fa, app.name),
+            appName = app.name,
+            onSelect = onPattern,
+        )
+        TestIconButton(
+            enabled = interactive && bonded,
+            appName = app.name,
+            onClick = onTest,
         )
     }
+
+    NoopSwitch(
+        checked = enabled,
+        onChange = onToggle,
+        enabled = interactive,
+        label = uiString(
+            R.string.l10n_notifications_settings_screen_app_name_wrist_alerts_dd3540fa,
+            app.name,
+        ),
+    )
 }
 
 // MARK: - Pattern menu (DropdownMenu replacing the macOS Menu)
@@ -917,15 +1091,27 @@ private fun PatternMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
-    Box {
+    Box(
+        modifier = Modifier
+            .clickable(enabled = enabled, role = Role.Button) { expanded = true }
+            .sizeIn(
+                minWidth = NotificationSettingsMinimumTouchTarget,
+                minHeight = NotificationSettingsMinimumTouchTarget,
+            )
+            .semantics {
+                contentDescription = uiString(
+                    R.string.l10n_notifications_settings_screen_buzz_pattern_for_appname_905a31bd,
+                    appName,
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
         Row(
             modifier = Modifier
                 .clip(shape)
                 .background(Palette.surfaceInset)
                 .border(1.dp, Palette.hairline, shape)
-                .clickable(enabled = enabled) { expanded = true }
-                .padding(horizontal = 10.dp, vertical = 5.dp)
-                .semantics { contentDescription = uiString(R.string.l10n_notifications_settings_screen_buzz_pattern_for_appname_905a31bd, appName) },
+                .padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
@@ -969,15 +1155,34 @@ private fun TestIconButton(enabled: Boolean, appName: String, onClick: () -> Uni
     val tint = if (enabled) Palette.accent else Palette.textTertiary
     Box(
         modifier = Modifier
-            .size(28.dp)
-            .clip(shape)
-            .background(Palette.accent.copy(alpha = if (enabled) 0.12f else 0.04f))
-            .border(1.dp, tint.copy(alpha = 0.30f), shape)
-            .clickable(enabled = enabled, onClick = onClick)
-            .semantics { contentDescription = uiString(R.string.l10n_notifications_settings_screen_test_appname_buzz_dbae5be3, appName) },
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .sizeIn(
+                minWidth = NotificationSettingsMinimumTouchTarget,
+                minHeight = NotificationSettingsMinimumTouchTarget,
+            )
+            .semantics {
+                contentDescription = uiString(
+                    R.string.l10n_notifications_settings_screen_test_appname_buzz_dbae5be3,
+                    appName,
+                )
+            },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(shape)
+                .background(Palette.accent.copy(alpha = if (enabled) 0.12f else 0.04f))
+                .border(1.dp, tint.copy(alpha = 0.30f), shape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.PlayArrow,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(15.dp),
+            )
+        }
     }
 }
 
@@ -985,18 +1190,27 @@ private fun TestIconButton(enabled: Boolean, appName: String, onClick: () -> Uni
 private fun PillButton(label: String, icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(50)
     val tint = if (enabled) Palette.accent else Palette.textTertiary
-    Row(
+    Box(
         modifier = Modifier
-            .clip(shape)
-            .background(Palette.accent.copy(alpha = if (enabled) 0.12f else 0.04f))
-            .border(1.dp, tint.copy(alpha = 0.30f), shape)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .sizeIn(
+                minWidth = NotificationSettingsMinimumTouchTarget,
+                minHeight = NotificationSettingsMinimumTouchTarget,
+            ),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
-        Text(label, style = NoopType.caption, color = tint)
+        Row(
+            modifier = Modifier
+                .clip(shape)
+                .background(Palette.accent.copy(alpha = if (enabled) 0.12f else 0.04f))
+                .border(1.dp, tint.copy(alpha = 0.30f), shape)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+            Text(label, style = NoopType.caption, color = tint)
+        }
     }
 }
 
@@ -1013,18 +1227,31 @@ internal fun TimeChip(
     val shape = RoundedCornerShape(50)
     val hour = minutes / 60
     val minute = minutes % 60
-    Text(
-        text = uiString(R.string.l10n_notifications_settings_screen_02d_02d_ce23a78c, hour, minute),
-        style = NoopType.number(15f),
-        color = Palette.accent,
+    Box(
         modifier = Modifier
-            .clip(shape)
-            .background(Palette.surfaceInset)
-            .border(1.dp, Palette.hairline, shape)
-            .clickable { showPicker = true }
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clickable(role = Role.Button) { showPicker = true }
+            .sizeIn(
+                minWidth = NotificationSettingsMinimumTouchTarget,
+                minHeight = NotificationSettingsMinimumTouchTarget,
+            )
             .semantics { contentDescription = accessibilityLabel },
-    )
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = uiString(
+                R.string.l10n_notifications_settings_screen_02d_02d_ce23a78c,
+                hour,
+                minute,
+            ),
+            style = NoopType.number(15f),
+            color = Palette.accent,
+            modifier = Modifier
+                .clip(shape)
+                .background(Palette.surfaceInset)
+                .border(1.dp, Palette.hairline, shape)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+    }
 
     if (showPicker) {
         // Material3 1.2.x has TimePicker + rememberTimePickerState but not a packaged
@@ -1063,27 +1290,29 @@ internal fun TimeChip(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 ) {
-                    Text(
-                        uiString(R.string.l10n_notifications_settings_screen_cancel_77dfd213),
-                        style = NoopType.body,
-                        color = Palette.textSecondary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .clickable { showPicker = false }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                    Text(
-                        uiString(R.string.l10n_notifications_settings_screen_set_448ab73b),
-                        style = NoopType.body,
-                        color = Palette.accent,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .clickable {
-                                onPicked(state.hour * 60 + state.minute)
-                                showPicker = false
-                            }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
+                    TextButton(onClick = { showPicker = false }) {
+                        Text(
+                            uiString(
+                                R.string.l10n_notifications_settings_screen_cancel_77dfd213,
+                            ),
+                            style = NoopType.body,
+                            color = Palette.textSecondary,
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            onPicked(state.hour * 60 + state.minute)
+                            showPicker = false
+                        },
+                    ) {
+                        Text(
+                            uiString(
+                                R.string.l10n_notifications_settings_screen_set_448ab73b,
+                            ),
+                            style = NoopType.body,
+                            color = Palette.accent,
+                        )
+                    }
                 }
             }
         }
@@ -1127,18 +1356,55 @@ private fun FormToggleRow(
     enabled: Boolean = true,
     onChange: (Boolean) -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(label, style = NoopType.body, color = Palette.textPrimary)
-            Text(help, style = NoopType.footnote, color = Palette.textTertiary)
+    val stacksControls =
+        notificationSettingsUsesStackedControls(LocalDensity.current.fontScale)
+    if (stacksControls) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = NotificationSettingsMinimumTouchTarget)
+                .padding(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(label, style = NoopType.body, color = Palette.textPrimary)
+                Text(help, style = NoopType.footnote, color = Palette.textTertiary)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                NoopSwitch(
+                    checked = checked,
+                    onChange = onChange,
+                    enabled = enabled,
+                    label = label,
+                )
+            }
         }
-        Spacer(Modifier.width(16.dp))
-        NoopSwitch(checked = checked, onChange = onChange, enabled = enabled, label = label)
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = NotificationSettingsMinimumTouchTarget)
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(label, style = NoopType.body, color = Palette.textPrimary)
+                Text(help, style = NoopType.footnote, color = Palette.textTertiary)
+            }
+            Spacer(Modifier.width(16.dp))
+            NoopSwitch(
+                checked = checked,
+                onChange = onChange,
+                enabled = enabled,
+                label = label,
+            )
+        }
     }
 }
 

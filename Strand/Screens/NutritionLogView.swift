@@ -672,9 +672,9 @@ struct NutritionLogView: View {
             fastingGlucose = snapshot.fastingGlucose
             #if DEBUG
             if AppleDemoSeeder.nutritionRequested {
-                NSLog(
+                VisualQALog.emit(
                     "Nutrition demo state applied entries=\(entries.count) " +
-                    "recent=\(recentEntries.count) mixed=\(totals.hasMixedSources)"
+                        "recent=\(recentEntries.count) mixed=\(totals.hasMixedSources)"
                 )
             }
             #endif

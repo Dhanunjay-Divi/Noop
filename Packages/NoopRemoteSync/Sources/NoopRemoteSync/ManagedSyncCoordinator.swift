@@ -65,6 +65,7 @@ public struct ManagedUploadCheckpoint: Codable, Equatable, Sendable {
 public struct ManagedSnapshotRestoreCheckpoint: Equatable, Sendable {
     public var requestID: UUID
     public var dataClasses: [String]
+    public var changeFeedCapabilityVersion: Int
     public var restoreJobID: UUID?
     public var snapshotAt: String?
     public var changeSequence: Int64?
@@ -80,6 +81,7 @@ public struct ManagedSnapshotRestoreCheckpoint: Equatable, Sendable {
     public init(
         requestID: UUID,
         dataClasses: [String],
+        changeFeedCapabilityVersion: Int = 0,
         restoreJobID: UUID? = nil,
         snapshotAt: String? = nil,
         changeSequence: Int64? = nil,
@@ -94,6 +96,7 @@ public struct ManagedSnapshotRestoreCheckpoint: Equatable, Sendable {
     ) {
         self.requestID = requestID
         self.dataClasses = dataClasses
+        self.changeFeedCapabilityVersion = changeFeedCapabilityVersion
         self.restoreJobID = restoreJobID
         self.snapshotAt = snapshotAt
         self.changeSequence = changeSequence
@@ -273,6 +276,7 @@ public protocol ManagedSyncStateStoring: Sendable {
     ) async throws -> ManagedPruneResult
 
     func changeSequence() async throws -> Int64
+    func changeFeedCapabilityVersion() async throws -> Int
     func saveChangeSequence(_ sequence: Int64) async throws
 
     func isChangeApplied(_ change: ManagedChangeFeed.Change) async throws -> Bool
@@ -283,7 +287,10 @@ public protocol ManagedSyncStateStoring: Sendable {
         _ checkpoint: ManagedSnapshotRestoreCheckpoint
     ) async throws
     func clearSnapshotRestoreCheckpoint() async throws
-    func finishSnapshotRestore(changeSequence: Int64) async throws
+    func finishSnapshotRestore(
+        changeSequence: Int64,
+        changeFeedCapabilityVersion: Int
+    ) async throws
 }
 
 public extension ManagedSyncStateStoring {
@@ -299,10 +306,6 @@ public extension ManagedSyncStateStoring {
 
     func clearSnapshotRestoreCheckpoint() async throws {}
 
-    func finishSnapshotRestore(changeSequence: Int64) async throws {
-        try await saveChangeSequence(changeSequence)
-        try await clearSnapshotRestoreCheckpoint()
-    }
 }
 
 public protocol ManagedRestoreApplying: Sendable {
@@ -441,6 +444,7 @@ public actor ManagedSyncCoordinator {
         "raw_motion",
         "derived_summaries",
     ]
+    public static let changeFeedCapabilityVersion = 1
 
     private let transport: any ManagedStorageTransport
     private let extractor: any ManagedChunkExtracting
@@ -1041,15 +1045,28 @@ public actor ManagedSyncCoordinator {
         var applied = 0
         var hasMore = false
 
-        if var checkpoint = try await state.snapshotRestoreCheckpoint() {
-            if checkpoint.dataClasses != dataClasses {
+        var checkpoint = try await state.snapshotRestoreCheckpoint()
+        let storedCapabilityVersion = try await state.changeFeedCapabilityVersion()
+        if storedCapabilityVersion != Self.changeFeedCapabilityVersion {
+            if checkpoint?.changeFeedCapabilityVersion != Self.changeFeedCapabilityVersion
+                || checkpoint?.dataClasses != dataClasses {
                 try await state.clearSnapshotRestoreCheckpoint()
-                checkpoint = ManagedSnapshotRestoreCheckpoint(
+                let initial = ManagedSnapshotRestoreCheckpoint(
                     requestID: UUID(),
-                    dataClasses: dataClasses
+                    dataClasses: dataClasses,
+                    changeFeedCapabilityVersion: Self.changeFeedCapabilityVersion
                 )
-                try await state.saveSnapshotRestoreCheckpoint(checkpoint)
+                try await state.saveSnapshotRestoreCheckpoint(initial)
+                checkpoint = initial
             }
+        } else if checkpoint?.changeFeedCapabilityVersion != Self.changeFeedCapabilityVersion
+            || checkpoint?.dataClasses != dataClasses {
+            if checkpoint != nil {
+                try await state.clearSnapshotRestoreCheckpoint()
+            }
+            checkpoint = nil
+        }
+        if let checkpoint {
             let snapshot = try await resumeSnapshotRestoreRecoveringInvalidation(
                 checkpoint: checkpoint,
                 authorization: authorization,
@@ -1077,7 +1094,8 @@ public actor ManagedSyncCoordinator {
                 guard case .cursorExpired = error else { throw error }
                 var checkpoint = ManagedSnapshotRestoreCheckpoint(
                     requestID: UUID(),
-                    dataClasses: dataClasses
+                    dataClasses: dataClasses,
+                    changeFeedCapabilityVersion: Self.changeFeedCapabilityVersion
                 )
                 try await state.saveSnapshotRestoreCheckpoint(checkpoint)
                 checkpoint = try await state.snapshotRestoreCheckpoint() ?? checkpoint
@@ -1090,6 +1108,22 @@ public actor ManagedSyncCoordinator {
                     maxBytes: maxSnapshotBytes
                 )
                 return (applied + snapshot.applied, true)
+            }
+            guard feed.minimumSequence > 0,
+                  feed.highWatermark >= sequence,
+                  feed.nextSequence >= sequence,
+                  feed.nextSequence <= feed.highWatermark,
+                  feed.changes.allSatisfy({
+                      $0.sequence > sequence
+                          && $0.sequence <= feed.nextSequence
+                  }),
+                  feed.hasMore
+                    ? (
+                        !feed.changes.isEmpty
+                            && feed.nextSequence == feed.changes.last?.sequence
+                    )
+                    : feed.nextSequence == feed.highWatermark else {
+                throw ManagedStorageError.invalidResponse
             }
             for change in feed.changes {
                 guard change.sequence > sequence else {
@@ -1136,6 +1170,10 @@ public actor ManagedSyncCoordinator {
                 try await state.saveChangeSequence(sequence)
                 applied += 1
             }
+            if feed.nextSequence > sequence {
+                sequence = feed.nextSequence
+                try await state.saveChangeSequence(sequence)
+            }
             hasMore = feed.hasMore
             if !feed.hasMore { break }
         }
@@ -1169,7 +1207,8 @@ public actor ManagedSyncCoordinator {
                 try await state.saveSnapshotRestoreCheckpoint(
                     ManagedSnapshotRestoreCheckpoint(
                         requestID: UUID(),
-                        dataClasses: checkpoint.dataClasses
+                        dataClasses: checkpoint.dataClasses,
+                        changeFeedCapabilityVersion: Self.changeFeedCapabilityVersion
                     )
                 )
                 return (0, false)
@@ -1373,7 +1412,10 @@ public actor ManagedSyncCoordinator {
               completed.selectedBytes == selectedBytes else {
             throw ManagedStorageError.invalidResponse
         }
-        try await state.finishSnapshotRestore(changeSequence: changeSequence)
+        try await state.finishSnapshotRestore(
+            changeSequence: changeSequence,
+            changeFeedCapabilityVersion: checkpoint.changeFeedCapabilityVersion
+        )
         return (applied, true)
     }
 

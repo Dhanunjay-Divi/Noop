@@ -273,7 +273,12 @@ class ManagedStorageClientTest {
             okio.Buffer().also { captured!!.body!!.writeTo(it) }.readUtf8(),
         )
         assertEquals(true, body.getBoolean("include_documents"))
-        assertEquals(0, body.getJSONArray("document_kinds").length())
+        assertEquals(
+            listOf("day_ownership"),
+            List(body.getJSONArray("document_kinds").length()) {
+                body.getJSONArray("document_kinds").getString(it)
+            },
+        )
         assertEquals(
             listOf("essential_timeseries", "raw_ppg"),
             List(body.getJSONArray("data_classes").length()) {
@@ -285,37 +290,57 @@ class ManagedStorageClientTest {
     @Test
     fun documentPutGetAndSnapshotListUseTheManagedRoutes() = runTest {
         val documentId = UUID.fromString("a2810672-1c29-5e68-9ddd-45e8c3164500")
+        val clientKeyId = UUID.fromString("11111111-2222-4333-8444-555555555555")
+        val ciphertext = "noop-encrypted-journal-payload".toByteArray()
+        val digest = ManagedDigest.sha256(ciphertext)
         val payload = JSONObject()
             .put("schema_version", 1)
-            .put("table", "journal")
+            .put("table", "dayOwnership")
             .put(
                 "key",
                 JSONObject()
-                    .put("deviceId", "strap")
-                    .put("day", "2026-09-04")
-                    .put("question", "late_caffeine"),
+                    .put("day", "2026-09-11"),
             )
             .put(
                 "record",
                 JSONObject()
-                    .put("deviceId", "strap")
-                    .put("day", "2026-09-04")
-                    .put("question", "late_caffeine")
-                    .put("answeredYes", 1)
-                    .put("notes", "after lunch")
-                    .put("numericValue", 2.5),
+                    .put("day", "2026-09-11")
+                    .put("deviceId", "remote-band")
+                    .put("locked", 1),
             )
         val documentJson = JSONObject()
             .put("document_kind", "journal")
             .put("document_id", documentId.toString())
             .put("revision", 1)
             .put("origin_installation_id", authorization.installationId)
+            .put("content_mode", "client_encrypted")
+            .put("client_key_id", clientKeyId.toString())
+            .put("content_sha256", digest)
+            .put("payload_json", JSONObject.NULL)
+            .put(
+                "payload_ciphertext_base64",
+                java.util.Base64.getEncoder().encodeToString(ciphertext),
+            )
+            .put("updated_at", "2026-09-04T12:00:00Z")
+            .put("deleted_at", JSONObject.NULL)
+            .put("duplicate", false)
+        val ownershipId = UUID.fromString("22222222-2222-5222-8222-222222222222")
+        val ownershipJson = JSONObject()
+            .put("document_kind", "day_ownership")
+            .put("document_id", ownershipId.toString())
+            .put("revision", 1)
+            .put("origin_installation_id", authorization.installationId)
             .put("content_mode", "server_readable")
             .put("client_key_id", JSONObject.NULL)
-            .put("content_sha256", "a".repeat(64))
+            .put(
+                "content_sha256",
+                ManagedDigest.sha256(
+                    ManagedCanonicalJson.encode(payload).toByteArray(),
+                ),
+            )
             .put("payload_json", payload)
             .put("payload_ciphertext_base64", JSONObject.NULL)
-            .put("updated_at", "2026-09-04T12:00:00Z")
+            .put("updated_at", "2026-09-04T12:01:00Z")
             .put("deleted_at", JSONObject.NULL)
             .put("duplicate", false)
         val captured = mutableListOf<Request>()
@@ -333,14 +358,12 @@ class ManagedStorageClientTest {
                         request,
                         200,
                         JSONObject()
-                            .put("documents", org.json.JSONArray().put(documentJson))
                             .put(
-                                "next_cursor",
-                                JSONObject()
-                                    .put("after_updated_at", "2026-09-04T12:00:00Z")
-                                    .put("after_document_kind", "journal")
-                                    .put("after_document_id", documentId.toString()),
+                                "documents",
+                                org.json.JSONArray()
+                                    .put(ownershipJson),
                             )
+                            .put("next_cursor", JSONObject.NULL)
                             .toString(),
                     )
                 }
@@ -351,9 +374,11 @@ class ManagedStorageClientTest {
             documentKind = ManagedDocumentKind.JOURNAL,
             documentId = documentId,
             baseRevision = 0,
-            contentMode = "server_readable",
-            payloadJson = payload,
-            contentSha256 = "a".repeat(64),
+            contentMode = "client_encrypted",
+            clientKeyId = clientKeyId,
+            payloadCiphertextBase64 = java.util.Base64.getEncoder()
+                .encodeToString(ciphertext),
+            contentSha256 = digest,
             updatedAt = "2026-09-04T12:00:00Z",
         )
 
@@ -374,8 +399,11 @@ class ManagedStorageClientTest {
             limit = 25,
         )
 
-        assertEquals(1, page.documents.size)
-        assertEquals(documentId, page.nextCursor?.afterDocumentId)
+        assertEquals(
+            listOf("server_readable"),
+            page.documents.map(ManagedDocument::contentMode),
+        )
+        assertEquals(null, page.nextCursor)
         assertEquals("PUT", captured[0].method)
         assertEquals(
             "/v1/managed/documents/journal/$documentId",
@@ -385,12 +413,149 @@ class ManagedStorageClientTest {
             okio.Buffer().also { captured[0].body!!.writeTo(it) }.readUtf8(),
         )
         assertEquals(0L, putBody.getLong("base_revision"))
-        assertEquals(payload.toString(), putBody.getJSONObject("payload_json").toString())
+        assertEquals("client_encrypted", putBody.getString("content_mode"))
+        assertEquals(
+            java.util.Base64.getEncoder().encodeToString(ciphertext),
+            putBody.getString("payload_ciphertext_base64"),
+        )
         assertEquals("GET", captured[1].method)
         assertEquals("1", captured[1].url.queryParameter("revision"))
         assertEquals("/v1/managed/documents", captured[2].url.encodedPath)
+        assertEquals(
+            "day_ownership",
+            captured[2].url.queryParameter("document_kind"),
+        )
         assertEquals("false", captured[2].url.queryParameter("include_deleted"))
         assertEquals("25", captured[2].url.queryParameter("limit"))
+    }
+
+    @Test
+    fun snapshotListRejectsSensitiveServerReadableDocument() = runTest {
+        val documentId = UUID.fromString("a2810672-1c29-5e68-9ddd-45e8c3164500")
+        val payload = JSONObject().put("secret", "not-server-readable")
+        val canonical = ManagedCanonicalJson.encode(payload).toByteArray()
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "documents",
+                            org.json.JSONArray().put(
+                                JSONObject()
+                                    .put("document_kind", "journal")
+                                    .put("document_id", documentId.toString())
+                                    .put("revision", 1)
+                                    .put(
+                                        "origin_installation_id",
+                                        authorization.installationId,
+                                    )
+                                    .put("content_mode", "server_readable")
+                                    .put("client_key_id", JSONObject.NULL)
+                                    .put(
+                                        "content_sha256",
+                                        ManagedDigest.sha256(canonical),
+                                    )
+                                    .put("payload_json", payload)
+                                    .put(
+                                        "payload_ciphertext_base64",
+                                        JSONObject.NULL,
+                                    )
+                                    .put("updated_at", "2026-09-04T12:00:00Z")
+                                    .put("deleted_at", JSONObject.NULL)
+                                    .put("duplicate", false),
+                            ),
+                        )
+                        .put("next_cursor", JSONObject.NULL)
+                        .toString(),
+                )
+            },
+        )
+
+        val failure = try {
+            client.documents(
+                authorization,
+                snapshotAt = "2026-09-04T13:00:00Z",
+                after = null,
+                limit = 25,
+            )
+            null
+        } catch (error: Throwable) {
+            error
+        }
+
+        assertTrue(failure is ManagedStorageException.InvalidResponse)
+    }
+
+    @Test
+    fun snapshotListRejectsMalformedEncryptedMetadata() = runTest {
+        val documentId = UUID.fromString("77777777-7777-5777-8777-777777777777")
+        val clientKeyId = UUID.fromString("88888888-8888-5888-8888-888888888888")
+        val ciphertext = "noop-encrypted-journal-payload".toByteArray()
+        val encoded = java.util.Base64.getEncoder().encodeToString(ciphertext)
+        val digest = ManagedDigest.sha256(ciphertext)
+        val invalidDocuments = listOf(
+            JSONObject()
+                .put("document_kind", "journal")
+                .put("document_id", documentId.toString())
+                .put("revision", 1)
+                .put("origin_installation_id", authorization.installationId)
+                .put("content_mode", "client_encrypted")
+                .put("client_key_id", JSONObject.NULL)
+                .put("content_sha256", digest)
+                .put("payload_json", JSONObject.NULL)
+                .put("payload_ciphertext_base64", encoded)
+                .put("updated_at", "2026-09-11T15:00:00Z")
+                .put("deleted_at", JSONObject.NULL)
+                .put("duplicate", false),
+            JSONObject()
+                .put("document_kind", "day_ownership")
+                .put("document_id", documentId.toString())
+                .put("revision", 1)
+                .put("origin_installation_id", authorization.installationId)
+                .put("content_mode", "client_encrypted")
+                .put("client_key_id", clientKeyId.toString())
+                .put("content_sha256", digest)
+                .put("payload_json", JSONObject.NULL)
+                .put("payload_ciphertext_base64", encoded)
+                .put("updated_at", "2026-09-11T15:00:00Z")
+                .put("deleted_at", JSONObject.NULL)
+                .put("duplicate", false),
+        )
+
+        invalidDocuments.forEach { document ->
+            val client = ManagedStorageClient(
+                config,
+                client { request ->
+                    response(
+                        request,
+                        200,
+                        JSONObject()
+                            .put(
+                                "documents",
+                                org.json.JSONArray().put(document),
+                            )
+                            .put("next_cursor", JSONObject.NULL)
+                            .toString(),
+                    )
+                },
+            )
+            val failure = try {
+                client.documents(
+                    authorization,
+                    snapshotAt = "2026-09-11T16:00:00Z",
+                    after = null,
+                    limit = 25,
+                )
+                null
+            } catch (error: Throwable) {
+                error
+            }
+
+            assertTrue(failure is ManagedStorageException.InvalidResponse)
+        }
     }
 
     @Test
@@ -418,7 +583,7 @@ class ManagedStorageClientTest {
                                     .put(
                                         "document",
                                         JSONObject()
-                                            .put("document_kind", "preferences")
+                                            .put("document_kind", "day_ownership")
                                             .put("document_id", documentId.toString())
                                             .put("revision", 1)
                                             .put("content_mode", "server_readable")
@@ -444,6 +609,131 @@ class ManagedStorageClientTest {
         assertNull(feed.changes.single().eventEnd)
         assertNull(feed.changes.single().document?.clientKeyId)
         assertNull(feed.changes.single().document?.deletedAt)
+    }
+
+    @Test
+    fun changeFeedRejectsSensitiveServerReadableMetadata() = runTest {
+        val documentId = UUID.fromString("a2810672-1c29-5e68-9ddd-45e8c3164500")
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "changes",
+                            org.json.JSONArray().put(
+                                JSONObject()
+                                    .put("sequence", 1)
+                                    .put("resource_kind", "document")
+                                    .put("resource_id", documentId.toString())
+                                    .put("operation", "upsert")
+                                    .put("content_sha256", "a".repeat(64))
+                                    .put("data_class", "user_documents")
+                                    .put("event_start", JSONObject.NULL)
+                                    .put("event_end", JSONObject.NULL)
+                                    .put(
+                                        "document",
+                                        JSONObject()
+                                            .put("document_kind", "journal")
+                                            .put("document_id", documentId.toString())
+                                            .put("revision", 1)
+                                            .put("content_mode", "server_readable")
+                                            .put("client_key_id", JSONObject.NULL)
+                                            .put("updated_at", "2026-09-04T12:00:00Z")
+                                            .put("deleted_at", JSONObject.NULL),
+                                    ),
+                            ),
+                        )
+                        .put("minimum_sequence", 1)
+                        .put("high_watermark", 1)
+                        .put("next_sequence", 1)
+                        .put("has_more", false)
+                        .toString(),
+                )
+            },
+        )
+
+        val failure = try {
+            client.changes(authorization, afterSequence = 0, limit = 200)
+            null
+        } catch (error: Throwable) {
+            error
+        }
+
+        assertTrue(failure is ManagedStorageException.InvalidResponse)
+    }
+
+    @Test
+    fun changeFeedRejectsMissingOrMisroutedDocumentMetadata() = runTest {
+        val documentId = UUID.fromString("55555555-5555-5555-8555-555555555555")
+        val clientKeyId = UUID.fromString("66666666-6666-5666-8666-666666666666")
+        val digest = ManagedDigest.sha256(
+            "noop-encrypted-journal-payload".toByteArray(),
+        )
+        val rows = listOf(
+            JSONObject()
+                .put("sequence", 1)
+                .put("resource_kind", "document")
+                .put("resource_id", documentId.toString())
+                .put("operation", "upsert")
+                .put("content_sha256", digest)
+                .put("data_class", "user_documents")
+                .put("event_start", JSONObject.NULL)
+                .put("event_end", JSONObject.NULL),
+            JSONObject()
+                .put("sequence", 1)
+                .put("resource_kind", "chunk")
+                .put("resource_id", documentId.toString())
+                .put("operation", "upsert")
+                .put("content_sha256", digest)
+                .put("data_class", "user_documents")
+                .put("event_start", JSONObject.NULL)
+                .put("event_end", JSONObject.NULL)
+                .put(
+                    "document",
+                    JSONObject()
+                        .put("document_kind", "journal")
+                        .put("document_id", documentId.toString())
+                        .put("revision", 1)
+                        .put("content_mode", "client_encrypted")
+                        .put("client_key_id", clientKeyId.toString())
+                        .put("updated_at", "2026-09-11T15:00:00Z")
+                        .put("deleted_at", JSONObject.NULL),
+                ),
+        )
+
+        rows.forEach { row ->
+            val client = ManagedStorageClient(
+                config,
+                client { request ->
+                    response(
+                        request,
+                        200,
+                        JSONObject()
+                            .put("changes", org.json.JSONArray().put(row))
+                            .put("minimum_sequence", 1)
+                            .put("high_watermark", 1)
+                            .put("next_sequence", 1)
+                            .put("has_more", false)
+                            .toString(),
+                    )
+                },
+            )
+            val failure = try {
+                client.changes(
+                    authorization,
+                    afterSequence = 0,
+                    limit = 200,
+                )
+                null
+            } catch (error: Throwable) {
+                error
+            }
+
+            assertTrue(failure is ManagedStorageException.InvalidResponse)
+        }
     }
 
     @Test
@@ -831,10 +1121,12 @@ class ManagedStorageClientTest {
                                 .put(safetyContact(firstId, "First"))
                                 .put(safetyContact(secondId, "Second")),
                         )
+                        .put("delivery_capable_count", 2)
                         .put("minimum_required", 2)
                         .put("maximum_allowed", 5)
                     "/v1/managed/safety/incidents" -> {
                         val requestBody = request.jsonBody()
+                        assertEquals("band_sos", requestBody.getString("trigger"))
                         assertEquals(8, requestBody.getInt("duration_hours"))
                         assertTrue(requestBody.getBoolean("share_location"))
                         JSONObject()
@@ -845,6 +1137,7 @@ class ManagedStorageClientTest {
                                     ownerId,
                                     firstId,
                                     secondId,
+                                    trigger = "band_sos",
                                 ),
                             )
                             .put("push_outcome", "attempted")
@@ -878,10 +1171,13 @@ class ManagedStorageClientTest {
         )
         assertEquals("android-installation", registration.installationId)
         assertEquals("token", registration.targetKind)
-        assertEquals(2, client.safetyContacts(authorization).contacts.size)
+        val contacts = client.safetyContacts(authorization)
+        assertEquals(2, contacts.contacts.size)
+        assertEquals(2, contacts.deliveryCapableCount)
         val creation = client.createSafetyIncident(
             authorization = authorization,
             requestId = UUID.randomUUID(),
+            trigger = "band_sos",
             durationHours = 8,
             shareLocation = true,
         )
@@ -897,6 +1193,46 @@ class ManagedStorageClientTest {
             capturedAt = "2026-09-08T10:01:00Z",
         )
         assertEquals(3L, location.sequence)
+    }
+
+    @Test
+    fun managedSafetyContactsMissingDeliveryCapabilityFailsClosed() = runTest {
+        val contactId =
+            UUID.fromString("00000000-0000-0000-0000-000000000109")
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                assertEquals(
+                    "/v1/managed/safety/contacts",
+                    request.url.encodedPath,
+                )
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "contacts",
+                            org.json.JSONArray().put(
+                                JSONObject()
+                                    .put("profile_id", contactId.toString())
+                                    .put("display_name", "Contact")
+                                    .put("role", "contact")
+                                    .put(
+                                        "accepted_at",
+                                        "2026-09-08T09:00:00Z",
+                                    ),
+                            ),
+                        )
+                        .put("minimum_required", 2)
+                        .put("maximum_allowed", 5)
+                        .toString(),
+                )
+            },
+        )
+
+        val contacts = client.safetyContacts(authorization)
+        assertEquals(1, contacts.contacts.size)
+        assertEquals(0, contacts.deliveryCapableCount)
     }
 
     @Test
@@ -989,12 +1325,13 @@ class ManagedStorageClientTest {
         ownerId: UUID,
         firstId: UUID,
         secondId: UUID,
+        trigger: String = "manual_sos",
     ): JSONObject = JSONObject()
         .put("incident_id", incidentId.toString())
         .put("role", "owner")
         .put("owner_profile_id", ownerId.toString())
         .put("owner_display_name", "Owner")
-        .put("trigger", "manual_sos")
+        .put("trigger", trigger)
         .put("status", "open")
         .put("duration_hours", 8)
         .put("share_location", true)

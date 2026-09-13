@@ -3,7 +3,7 @@ import UserNotifications
 
 /// A destination carried by a NOOP notification. The route is deliberately small: notifications
 /// open a trusted top-level screen, never a URL or arbitrary stored navigation value.
-enum NoopNotificationRoute: String, Equatable, Sendable {
+enum NoopNotificationRoute: String, Codable, Equatable, Sendable {
     case today
     case trends
     case workouts
@@ -50,6 +50,51 @@ enum NotificationRouteBridge {
     }
 }
 
+/// One completed sync may make several routine notifications eligible at once. This in-memory budget
+/// lets the highest-priority eligible lane own that sync without consuming lower-lane dedupe state.
+/// Safety alerts and active-workout cautions do not use this budget.
+@MainActor
+final class PostSyncRoutineNotificationBudget {
+    enum Lane: String, Equatable, Sendable {
+        case autoWorkout = "auto_workout"
+        case adaptiveDay = "adaptive_day"
+        case postWorkoutSummary = "post_workout_summary"
+        case morningRecap = "morning_recap"
+    }
+
+    private(set) var claimedLane: Lane?
+    private var reservedLane: Lane?
+
+    var isClaimed: Bool {
+        claimedLane != nil
+    }
+
+    @discardableResult
+    func reserve(_ lane: Lane) -> Bool {
+        guard claimedLane == nil, reservedLane == nil else { return false }
+        reservedLane = lane
+        return true
+    }
+
+    @discardableResult
+    func commit(_ lane: Lane) -> Bool {
+        guard claimedLane == nil, reservedLane == lane else { return false }
+        reservedLane = nil
+        claimedLane = lane
+        return true
+    }
+
+    func release(_ lane: Lane) {
+        guard reservedLane == lane else { return }
+        reservedLane = nil
+    }
+
+    @discardableResult
+    func claim(_ lane: Lane) -> Bool {
+        reserve(lane) && commit(lane)
+    }
+}
+
 /// Two privacy-safe local reminders that help users review data already stored on their device.
 ///
 /// This is a true opt-in automation:
@@ -64,6 +109,7 @@ enum DailyReviewNotifications {
     static let eveningMinutesKey = "dailyReview.eveningMinutes"
     static let completedJournalDaysKey = "dailyReview.completedJournalDays"
     static let scheduledEveningIDsKey = "dailyReview.scheduledEveningIDs"
+    private static var scheduleGeneration: UInt64 = 0
 
     private static let morningRequestID = "daily-review-morning"
     /// Removed after the completion-aware one-shot schedule shipped. Keep cancelling it on upgrades.
@@ -113,6 +159,8 @@ enum DailyReviewNotifications {
         _ on: Bool,
         completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
     ) {
+        scheduleGeneration &+= 1
+        let generation = scheduleGeneration
         guard on else {
             UserDefaults.standard.set(false, forKey: enabledKey)
             LocalNotificationLifecycle.cancel(identifiers: requestIDs)
@@ -126,21 +174,27 @@ enum DailyReviewNotifications {
             let settings = await center.notificationSettings()
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                UserDefaults.standard.set(true, forKey: enabledKey)
-                schedule()
-                completion?(.scheduled)
+                await enableAndSchedule(
+                    generation: generation,
+                    center: center,
+                    completion: completion
+                )
             case .notDetermined:
                 let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
                 if granted {
-                    UserDefaults.standard.set(true, forKey: enabledKey)
-                    schedule()
-                    completion?(.scheduled)
+                    await enableAndSchedule(
+                        generation: generation,
+                        center: center,
+                        completion: completion
+                    )
                 } else {
+                    guard generation == scheduleGeneration else { return }
                     UserDefaults.standard.set(false, forKey: enabledKey)
                     recordSuppressedRequests()
                     completion?(.denied)
                 }
             default:
+                guard generation == scheduleGeneration else { return }
                 UserDefaults.standard.set(false, forKey: enabledKey)
                 recordSuppressedRequests()
                 completion?(.denied)
@@ -150,12 +204,12 @@ enum DailyReviewNotifications {
 
     static func setMorningMinutes(_ minutes: Int) {
         UserDefaults.standard.set(clampMinute(minutes), forKey: morningMinutesKey)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func setEveningMinutes(_ minutes: Int) {
         UserDefaults.standard.set(clampMinute(minutes), forKey: eveningMinutesKey)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     /// Keep the evening journal prompt honest. Logging any answer completes that local day; clearing
@@ -170,7 +224,7 @@ enum DailyReviewNotifications {
             days.remove(day)
         }
         persistCompletedJournalDays(days)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     /// Repository reconciliation after launch/restore. Only the bounded schedule window is supplied,
@@ -180,7 +234,7 @@ enum DailyReviewNotifications {
         let reconciled = days.intersection(eligible)
         guard reconciled != completedJournalDays else { return }
         persistCompletedJournalDays(reconciled)
-        if isEnabled { schedule(now: now) }
+        if isEnabled { requestReschedule(now: now) }
     }
 
     static func journalHorizonDayKeys(
@@ -205,7 +259,7 @@ enum DailyReviewNotifications {
             let settings = await UNUserNotificationCenter.current().notificationSettings()
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                schedule()
+                requestReschedule()
             default:
                 recordSuppressedRequests()
                 break
@@ -282,54 +336,142 @@ enum DailyReviewNotifications {
         UserDefaults.standard.set(days.sorted(), forKey: completedJournalDaysKey)
     }
 
-    private static func schedule(now: Date = Date()) {
-        let center = UNUserNotificationCenter.current()
-        LocalNotificationLifecycle.cancel(identifiers: requestIDs, on: center)
+    private static func enableAndSchedule(
+        generation: UInt64,
+        center: UNUserNotificationCenter,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)?
+    ) async {
+        guard generation == scheduleGeneration else { return }
         registerPrivacyCategory(on: center)
+        let result = await reconcileSchedule(
+            expectedGeneration: generation,
+            client: .system(center: center)
+        )
+        guard generation == scheduleGeneration else { return }
+        if result?.activeCount ?? 0 > 0 {
+            UserDefaults.standard.set(true, forKey: enabledKey)
+            completion?(.scheduled)
+        } else {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            completion?(.off)
+        }
+    }
 
+    private static func requestReschedule(now: Date = Date()) {
+        scheduleGeneration &+= 1
+        let generation = scheduleGeneration
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            registerPrivacyCategory(on: center)
+            let result = await reconcileSchedule(
+                now: now,
+                expectedGeneration: generation,
+                client: .system(center: center)
+            )
+            guard generation == scheduleGeneration else { return }
+            applyRescheduleResult(result)
+        }
+    }
+
+    static func applyRescheduleResult(
+        _ result: LocalNotificationReconciliationResult?
+    ) {
+        guard let result, result.activeCount == 0 else { return }
+        UserDefaults.standard.set(false, forKey: enabledKey)
+    }
+
+    @discardableResult
+    static func reconcileSchedule(
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        expectedGeneration: UInt64? = nil,
+        coordinator: LocalNotificationCapacityCoordinator? = nil,
+        client: LocalNotificationCenterClient
+    ) async -> LocalNotificationReconciliationResult? {
+        let priorIDs = requestIDs
+        let requests = notificationRequests(
+            now: now,
+            calendar: calendar
+        )
+        let result = await LocalNotificationLifecycle.reconcile(
+            candidateRequests: requests,
+            replacingIdentifiers: Set(
+                priorIDs + requests.map(\.identifier)
+            ),
+            now: now,
+            calendar: calendar,
+            coordinator: coordinator,
+            isStillCurrent: {
+                expectedGeneration.map { $0 == scheduleGeneration } ?? true
+            },
+            client: client
+        )
+        if let expectedGeneration,
+           expectedGeneration != scheduleGeneration {
+            return nil
+        }
+        let active = Set(result.activeIdentifiers)
+        let acceptedEveningIDs = requests.map(\.identifier).filter {
+            $0.hasPrefix("\(eveningRequestID)-")
+                && active.contains($0)
+        }
+        if acceptedEveningIDs.isEmpty {
+            UserDefaults.standard.removeObject(
+                forKey: scheduledEveningIDsKey
+            )
+        } else {
+            UserDefaults.standard.set(
+                acceptedEveningIDs,
+                forKey: scheduledEveningIDsKey
+            )
+        }
+        return result
+    }
+
+    static func notificationRequests(
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [UNNotificationRequest] {
         let morning = reminderSpecs(morning: morningMinutes, evening: eveningMinutes)[0]
         var morningComponents = DateComponents()
         morningComponents.hour = morning.minuteOfDay / 60
         morningComponents.minute = morning.minuteOfDay % 60
-        schedule(
+        var requests = [
+            notificationRequest(
             morning,
             trigger: UNCalendarNotificationTrigger(
                 dateMatching: morningComponents,
                 repeats: true
-            ),
-            on: center
-        )
+            )
+            )
+        ]
 
         let eveningSpecs = eveningReminderSpecs(
             now: now,
             minuteOfDay: eveningMinutes,
-            completedDays: completedJournalDays
-        )
-        UserDefaults.standard.set(
-            eveningSpecs.map(\.reminder.identifier),
-            forKey: scheduledEveningIDsKey
+            completedDays: completedJournalDays,
+            calendar: calendar
         )
         for dated in eveningSpecs {
-            let components = Calendar.current.dateComponents(
+            let components = calendar.dateComponents(
                 [.year, .month, .day, .hour, .minute],
                 from: dated.fireDate
             )
-            schedule(
+            requests.append(notificationRequest(
                 dated.reminder,
                 trigger: UNCalendarNotificationTrigger(
                     dateMatching: components,
                     repeats: false
-                ),
-                on: center
-            )
+                )
+            ))
         }
+        return requests
     }
 
-    private static func schedule(
+    private static func notificationRequest(
         _ spec: ReminderSpec,
-        trigger: UNNotificationTrigger,
-        on center: UNUserNotificationCenter
-    ) {
+        trigger: UNNotificationTrigger
+    ) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.applyProminence(.ambient)
         content.title = spec.title
@@ -340,13 +482,10 @@ enum DailyReviewNotifications {
         content.categoryIdentifier = privacyCategoryID
         content.threadIdentifier = "noop.daily-review"
         content.userInfo = [NotificationRouteBridge.userInfoKey: spec.route.rawValue]
-        LocalNotificationLifecycle.schedule(
-            UNNotificationRequest(
-                identifier: spec.identifier,
-                content: content,
-                trigger: trigger
-            ),
-            on: center
+        return UNNotificationRequest(
+            identifier: spec.identifier,
+            content: content,
+            trigger: trigger
         )
     }
 
@@ -472,15 +611,36 @@ enum MorningRecapNotifications {
     static func shouldNotify(
         enabled: Bool,
         materializedAfterSync: Bool,
-        chargeOrRestPresent: Bool,
+        recoveryOrSleepScorePresent: Bool,
         reportDay: String,
         lastReportDay: String?
     ) -> Bool {
         enabled
             && materializedAfterSync
-            && chargeOrRestPresent
+            && recoveryOrSleepScorePresent
             && !reportDay.isEmpty
             && reportDay != lastReportDay
+    }
+
+    static func copy(
+        recoveryPresent: Bool,
+        sleepScorePresent: Bool
+    ) -> (title: String, body: String)? {
+        guard recoveryPresent || sleepScorePresent else { return nil }
+        let body = switch (recoveryPresent, sleepScorePresent) {
+        case (true, true):
+            String(localized: "appwide.morning_recap.body.both")
+        case (true, false):
+            String(localized: "appwide.morning_recap.body.recovery")
+        case (false, true):
+            String(localized: "appwide.morning_recap.body.sleep")
+        case (false, false):
+            preconditionFailure("Guarded above")
+        }
+        return (
+            String(localized: "appwide.morning_recap.title"),
+            body
+        )
     }
 
     static func setEnabled(
@@ -533,27 +693,37 @@ enum MorningRecapNotifications {
 
     static func postIfAuthorized(
         reportDay: String,
-        chargeOrRestPresent: Bool,
-        materializedAfterSync: Bool = true
+        recoveryPresent: Bool,
+        sleepScorePresent: Bool,
+        materializedAfterSync: Bool = true,
+        budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         await postIfAuthorized(
             reportDay: reportDay,
-            chargeOrRestPresent: chargeOrRestPresent,
+            recoveryPresent: recoveryPresent,
+            sleepScorePresent: sleepScorePresent,
             materializedAfterSync: materializedAfterSync,
-            client: .system
+            client: .system,
+            budget: budget
         )
     }
 
     static func postIfAuthorized(
         reportDay: String,
-        chargeOrRestPresent: Bool,
-        materializedAfterSync: Bool,
-        client: NotificationClient
+        recoveryPresent: Bool,
+        sleepScorePresent: Bool,
+        materializedAfterSync: Bool = true,
+        client: NotificationClient,
+        budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
+        guard let copy = copy(
+            recoveryPresent: recoveryPresent,
+            sleepScorePresent: sleepScorePresent
+        ) else { return }
         guard shouldNotify(
             enabled: isEnabled,
             materializedAfterSync: materializedAfterSync,
-            chargeOrRestPresent: chargeOrRestPresent,
+            recoveryOrSleepScorePresent: recoveryPresent || sleepScorePresent,
             reportDay: reportDay,
             lastReportDay: UserDefaults.standard.string(forKey: lastReportDayKey)
         ), activeReportDay != reportDay else { return }
@@ -570,11 +740,19 @@ enum MorningRecapNotifications {
               isEnabled else { return }
         await client.preparePrivateCategory()
         guard generation == deliveryGeneration, isEnabled else { return }
+        let lane = PostSyncRoutineNotificationBudget.Lane.morningRecap
+        guard budget?.reserve(lane) ?? true else { return }
+        var committed = budget == nil
+        defer {
+            if !committed {
+                budget?.release(lane)
+            }
+        }
 
         let content = UNMutableNotificationContent()
         content.applyProminence(.ambient)
-        content.title = String(localized: "Your morning recap is ready")
-        content.body = String(localized: "Open NOOP to review your Recovery and Sleep Score.")
+        content.title = copy.title
+        content.body = copy.body
         content.sound = .default
         content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
         content.threadIdentifier = "noop.morning-recap"
@@ -590,11 +768,18 @@ enum MorningRecapNotifications {
                 client.remove([requestID])
                 return
             }
+            if let budget {
+                guard budget.commit(lane) else {
+                    client.remove([requestID])
+                    return
+                }
+            }
+            committed = true
             UserDefaults.standard.set(reportDay, forKey: lastReportDayKey)
         } catch {
-            if generation != deliveryGeneration || !isEnabled {
-                client.remove([requestID])
-            }
+            // `add` can fail after Notification Center observed the request. Retract the stable
+            // identifier before releasing the budget so a lower-priority lane cannot double-stack.
+            client.remove([requestID])
         }
     }
 
@@ -769,13 +954,21 @@ enum PostWorkoutSummaryNotifications {
             && newestWorkoutStart.map { $0 > lastWorkoutStart } == true
     }
 
-    static func postIfAuthorized(newestWorkoutStart: Int?) async {
-        await postIfAuthorized(newestWorkoutStart: newestWorkoutStart, client: .system)
+    static func postIfAuthorized(
+        newestWorkoutStart: Int?,
+        budget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
+        await postIfAuthorized(
+            newestWorkoutStart: newestWorkoutStart,
+            client: .system,
+            budget: budget
+        )
     }
 
     static func postIfAuthorized(
         newestWorkoutStart: Int?,
-        client: NotificationClient
+        client: NotificationClient,
+        budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         guard isEnabled else {
             clear(client: client)
@@ -812,6 +1005,14 @@ enum PostWorkoutSummaryNotifications {
               isEnabled else { return }
         await client.preparePrivateCategory()
         guard generation == deliveryGeneration, isEnabled else { return }
+        let lane = PostSyncRoutineNotificationBudget.Lane.postWorkoutSummary
+        guard budget?.reserve(lane) ?? true else { return }
+        var committed = budget == nil
+        defer {
+            if !committed {
+                budget?.release(lane)
+            }
+        }
 
         let text = copy
         let content = UNMutableNotificationContent()
@@ -833,13 +1034,18 @@ enum PostWorkoutSummaryNotifications {
                 client.remove([requestID])
                 return
             }
+            if let budget {
+                guard budget.commit(lane) else {
+                    client.remove([requestID])
+                    return
+                }
+            }
+            committed = true
             // Advance only after Notification Center accepted the request. A denied or failed post can
             // retry on the next completed sync instead of losing the workout silently.
             advanceFrontier(to: newestWorkoutStart)
         } catch {
-            if generation != deliveryGeneration || !isEnabled {
-                client.remove([requestID])
-            }
+            client.remove([requestID])
         }
     }
 
@@ -1096,6 +1302,7 @@ enum AutoWorkoutNotifications {
         let startSec: Int
         let content: UNMutableNotificationContent
         let client: NotificationClient
+        let budget: PostSyncRoutineNotificationBudget?
     }
 
     /// Posting is serialized because every delivery intentionally replaces the same request identifier.
@@ -1166,25 +1373,51 @@ enum AutoWorkoutNotifications {
         AutoWorkoutSuggestionIdentity.token(startSec: startSec, endSec: endSec)
     }
 
-    static func postIfAuthorized(startSec: Int, endSec: Int) async {
-        await postIfAuthorized(startSec: startSec, endSec: endSec, client: .system)
+    static func postIfAuthorized(
+        startSec: Int,
+        endSec: Int,
+        budget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
+        await postIfAuthorized(
+            startSec: startSec,
+            endSec: endSec,
+            client: .system,
+            budget: budget
+        )
     }
 
     static func postIfAuthorized(
         startSec: Int,
         endSec: Int,
-        client: NotificationClient
+        client: NotificationClient,
+        budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         guard PuffinExperiment.autoDetectWorkoutsEnabled, isEnabled else {
             clear(client: client)
             return
         }
-        await post(kind: .candidate, startSec: startSec, endSec: endSec, client: client)
+        await post(
+            kind: .candidate,
+            startSec: startSec,
+            endSec: endSec,
+            client: client,
+            budget: budget
+        )
     }
 
-    static func postAutoSavedIfAuthorized(startSec: Int, endSec: Int) async {
+    static func postAutoSavedIfAuthorized(
+        startSec: Int,
+        endSec: Int,
+        budget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
         guard PuffinExperiment.autoWorkoutMode == .autoSave else { return }
-        await post(kind: .autoSaved, startSec: startSec, endSec: endSec, client: .system)
+        await post(
+            kind: .autoSaved,
+            startSec: startSec,
+            endSec: endSec,
+            client: .system,
+            budget: budget
+        )
     }
 
     enum Kind: String {
@@ -1212,7 +1445,8 @@ enum AutoWorkoutNotifications {
         kind: Kind,
         startSec: Int,
         endSec: Int,
-        client: NotificationClient
+        client: NotificationClient,
+        budget: PostSyncRoutineNotificationBudget?
     ) async {
         let candidateToken = token(startSec: startSec, endSec: endSec)
         let deliveryToken = kind.rawValue + ":" + candidateToken
@@ -1220,6 +1454,8 @@ enum AutoWorkoutNotifications {
                             startSec: startSec, defaults: .standard),
               activeDeliveryToken != deliveryToken,
               !deliveryQueue.contains(where: { $0.deliveryToken == deliveryToken }) else { return }
+        let lane = PostSyncRoutineNotificationBudget.Lane.autoWorkout
+        guard budget?.reserve(lane) ?? true else { return }
 
         let content = UNMutableNotificationContent()
         content.applyProminence(.ambient)
@@ -1237,7 +1473,8 @@ enum AutoWorkoutNotifications {
             kind: kind,
             startSec: startSec,
             content: content,
-            client: client
+            client: client,
+            budget: budget
         ))
         guard !isDrainingDeliveries else { return }
         isDrainingDeliveries = true
@@ -1252,6 +1489,13 @@ enum AutoWorkoutNotifications {
     }
 
     private static func deliver(_ delivery: QueuedDelivery) async {
+        let lane = PostSyncRoutineNotificationBudget.Lane.autoWorkout
+        var committed = delivery.budget == nil
+        defer {
+            if !committed {
+                delivery.budget?.release(lane)
+            }
+        }
         guard delivery.generation == deliveryGeneration,
               shouldDeliver(deliveryToken: delivery.deliveryToken, kind: delivery.kind,
                             startSec: delivery.startSec, defaults: .standard) else { return }
@@ -1276,15 +1520,20 @@ enum AutoWorkoutNotifications {
                 delivery.client.remove([requestID])
                 return
             }
+            if let budget = delivery.budget {
+                guard budget.commit(lane) else {
+                    delivery.client.remove([requestID])
+                    return
+                }
+            }
+            committed = true
             remember(deliveryToken: delivery.deliveryToken, defaults: .standard)
         } catch {
             // Keep the token unset so a later completed sync can retry delivery.
-            // The daemon can still have accepted a request before reporting a cancellation/error. The
-            // serialized drain guarantees this cleanup cannot erase a newer queued delivery.
-            if delivery.generation != deliveryGeneration
-                || (delivery.kind != .autoSaved && !isEnabled) {
-                delivery.client.remove([requestID])
-            }
+            // The daemon can still have accepted a request before reporting an error. Retract the
+            // stable identifier before releasing the sync slot; the serialized drain guarantees this
+            // cleanup cannot erase a newer queued delivery.
+            delivery.client.remove([requestID])
         }
     }
 
@@ -1329,6 +1578,9 @@ enum AutoWorkoutNotifications {
 
     static func clear(client: NotificationClient) {
         deliveryGeneration &+= 1
+        for delivery in deliveryQueue {
+            delivery.budget?.release(.autoWorkout)
+        }
         deliveryQueue.removeAll()
         // The suspended delivery still owns the drain, but it belongs to the retired generation. Do
         // not let its token suppress a same-candidate retry that arrives after this clear.

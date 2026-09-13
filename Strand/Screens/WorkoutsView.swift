@@ -2638,6 +2638,7 @@ private struct WorkoutRecoveryTrendChart: View {
 
 struct DailyOverviewSheet: View {
     @EnvironmentObject private var repo: Repository
+    @EnvironmentObject private var profile: ProfileStore
     @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
     @AppStorage(UnitPrefs.temperatureKey) private var temperatureUnitRaw = ""
@@ -2668,6 +2669,17 @@ struct DailyOverviewSheet: View {
 
     private var noData: String {
         String(localized: "appwide.day_overview.no_data")
+    }
+
+    private var canPresentBMI: Bool {
+        BodyProfilePolicy.canPresentAdultBMI(
+            age: profile.age,
+            currentWeightKg: profile.weightKg,
+            heightCm: profile.heightCm,
+            ageConfirmed: profile.ageInputConfirmed,
+            heightConfirmed: profile.heightInputConfirmed,
+            currentWeightConfirmed: profile.weightInputConfirmed
+        )
     }
 
     private struct MetricItem {
@@ -3079,6 +3091,7 @@ struct DailyOverviewSheet: View {
     private var supplementalItems: [MetricItem] {
         var seen = Set<String>()
         var items = trackedMetrics.compactMap { metric -> MetricItem? in
+            guard canPresentBMI || metric.descriptor.key != "bmi" else { return nil }
             guard !Self.coreMetricKeys.contains(metric.descriptor.key) else { return nil }
             guard scope.includesSupplementalMetric(
                 key: metric.descriptor.key,
@@ -3301,7 +3314,7 @@ struct DailyOverviewSheet: View {
 
     private func loadHydration(day: String) async -> HydrationReading? {
         guard scope.loadsHydration else { return nil }
-        return await repo.hydrationReading(day: day)
+        return try? await repo.hydrationReading(day: day)
     }
 
     private func loadJournal(day: String) async -> [JournalEntry] {

@@ -13,6 +13,8 @@ from typing import Any
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from pydantic import ValidationError
+
 from app.managed_identity import ManagedIdentityClaims
 from app.managed_models import (
     ManagedChunkReservation,
@@ -30,6 +32,7 @@ from app.managed_models import (
     ManagedSocialSummaryMutation,
     ManagedSocialVisibilityPatch,
     ManagedSourceRegistration,
+    validate_managed_server_readable_payload,
 )
 from app.managed_object_store import ManagedObjectMetadata
 
@@ -2917,11 +2920,16 @@ class PostgresManagedRepository:
         principal: ManagedPrincipal,
         after_sequence: int,
         limit: int,
+        document_kinds: list[str] | None = None,
     ) -> dict[str, Any]:
         if after_sequence < 0:
             raise ValueError("after_sequence cannot be negative")
         if not 1 <= limit <= 500:
             raise ValueError("limit must be between 1 and 500")
+        if document_kinds is not None and len(set(document_kinds)) != len(
+            document_kinds
+        ):
+            raise ValueError("document_kinds cannot contain duplicates")
         sequence = await self._pool().fetchrow(
             """
             SELECT last_sequence, minimum_retained_sequence
@@ -2975,17 +2983,24 @@ class PostgresManagedRepository:
             LEFT JOIN managed_documents document
               ON change.resource_kind = 'document'
              AND document.account_id = change.account_id
+             AND document.document_kind = change.metadata ->> 'document_kind'
              AND document.document_id = change.resource_id
              AND document.document_revision = change.resource_revision
             WHERE change.account_id = $1
               AND change.change_sequence > $2
               AND change.change_sequence <= $3
+              AND (
+                  change.resource_kind <> 'document'
+                  OR $4::text[] IS NULL
+                  OR document.document_kind = ANY($4)
+              )
             ORDER BY change.change_sequence
-            LIMIT $4
+            LIMIT $5
             """,
             principal.account_id,
             after_sequence,
             high_watermark,
+            document_kinds,
             limit + 1,
         )
         has_more = len(rows) > limit
@@ -3051,7 +3066,7 @@ class PostgresManagedRepository:
             "changes": changes,
             "minimum_sequence": minimum_sequence,
             "high_watermark": high_watermark,
-            "next_sequence": (changes[-1]["sequence"] if changes else after_sequence),
+            "next_sequence": (changes[-1]["sequence"] if has_more else high_watermark),
             "has_more": has_more,
         }
 
@@ -4366,6 +4381,14 @@ class PostgresManagedRepository:
         mutation: ManagedDocumentMutation,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        try:
+            mutation = ManagedDocumentMutation.model_validate(
+                mutation.model_dump(mode="python")
+            )
+        except ValidationError:
+            raise ManagedConflictError(
+                "managed document mutation contract is invalid"
+            ) from None
         revision = mutation.base_revision + 1
         idempotency_hash = hashlib.sha256(
             (f"change:document:{principal.account_id}:{mutation.request_id}").encode(
@@ -4382,6 +4405,15 @@ class PostgresManagedRepository:
                 ).encode("utf-8")
             ).hexdigest()
         elif mutation.content_mode == "server_readable":
+            try:
+                validate_managed_server_readable_payload(
+                    mutation.document_kind,
+                    payload_json or {},
+                )
+            except ValueError:
+                raise ManagedConflictError(
+                    "managed document payload schema is invalid"
+                ) from None
             try:
                 canonical = json.dumps(
                     payload_json,

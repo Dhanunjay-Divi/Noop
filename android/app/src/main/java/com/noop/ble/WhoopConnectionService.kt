@@ -40,6 +40,7 @@ import com.noop.notif.NotificationLifecycleId
 import com.noop.notif.NotificationLifecycleLedger
 import com.noop.notif.NotificationPlatformIdentity
 import com.noop.notif.NotificationLifecycleState
+import com.noop.notif.protectPrivateContent
 import com.noop.safety.SafetyIncidentLocationTracker
 import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
@@ -911,7 +912,7 @@ class WhoopConnectionService : Service() {
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .protectPrivateContent(this, CHANNEL_ID)
         if (!safetyLocationActive || state.connected) {
             builder.addAction(0, "Disconnect", stopAction)
         }

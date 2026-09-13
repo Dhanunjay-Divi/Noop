@@ -30,7 +30,9 @@ emergency services.
    delivery, plus each delivery state.
 7. The owner selects an 8- or 12-hour incident window. Only the newest location
    fix is retained and exposed through the signed responder page; no route
-   history is stored. Resolution or cancellation stops sharing sooner.
+   history is stored. Every terminal transition (`resolved`, `cancelled`,
+   `expired`, or `failed`) deletes that precise fix in the same repository
+   transaction. Incident and delivery history may remain without coordinates.
 8. If every SMS and voice path explicitly fails for every contact, the incident
    becomes terminal `failed`. The client tells the owner that no contact
    delivery was confirmed and directs them to call local emergency services. An
@@ -132,7 +134,9 @@ profile's Safety rows. Installation-wide erasure also removes its Safety and
 Friends profiles.
 
 Retention deletes only terminal incidents and pending-expired, declined, or
-revoked contacts. It never ages an active incident or accepted contact.
+revoked contacts. It never ages an active incident or accepted contact. Precise
+incident locations are deleted immediately on terminal transition, independent
+of `NOOP_SAFETY_INCIDENT_RETENTION_DAYS`.
 Retiring an incident leaves a short idempotency tombstone without contact,
 location, or delivery data, preventing a delayed client retry from creating a
 second page. Operators can run the same bounded policy with:

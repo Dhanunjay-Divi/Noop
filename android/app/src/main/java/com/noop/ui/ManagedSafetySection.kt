@@ -60,6 +60,7 @@ import com.noop.managed.ManagedCloudPhase
 import com.noop.managed.ManagedCloudService
 import com.noop.managed.ManagedSafetyContact
 import com.noop.managed.ManagedSafetyIncident
+import com.noop.managed.ManagedSafetyLocationAuthorization
 import com.noop.managed.ManagedSafetyRequest
 import com.noop.managed.ManagedSocialIdentifier
 import com.noop.safety.SafetyLocation
@@ -71,6 +72,7 @@ import kotlinx.coroutines.launch
 internal fun ManagedSafetySection(
     currentLocation: SafetyLocation?,
     locationReady: Boolean,
+    foregroundLocationReady: Boolean,
     backgroundLocationReady: Boolean,
     onRequestLocation: () -> Unit,
     onRequestBackgroundLocation: () -> Unit,
@@ -85,9 +87,20 @@ internal fun ManagedSafetySection(
     val state by service.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var noopId by rememberSaveable { mutableStateOf("") }
-    var shareLocation by rememberSaveable { mutableStateOf(true) }
+    var shareLocation by rememberSaveable { mutableStateOf(false) }
     var confirmPage by rememberSaveable { mutableStateOf(false) }
     var contactToRemove by remember { mutableStateOf<ManagedSafetyContact?>(null) }
+    val managedLocationReady = locationReady &&
+        currentLocation?.horizontalAccuracyMeters?.let {
+            it.isFinite() && it in 0.0..10_000.0
+        } == true
+    val locationIncidentReady =
+        ManagedSafetyLocationAuthorization.canStartIncident(
+            shareLocation = shareLocation,
+            sdkInt = Build.VERSION.SDK_INT,
+            foregroundGranted = foregroundLocationReady,
+            backgroundGranted = backgroundLocationReady,
+        ) && (!shareLocation || managedLocationReady)
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -149,10 +162,26 @@ internal fun ManagedSafetySection(
         AlertDialog(
             onDismissRequest = { confirmPage = false },
             title = { Text(stringResource(R.string.managed_safety_confirm_title)) },
-            text = { Text(stringResource(R.string.managed_safety_confirm_body)) },
+            text = {
+                Text(
+                    if (shareLocation) {
+                        stringResource(
+                            R.string.managed_safety_confirm_location_body,
+                            durationHours,
+                        )
+                    } else {
+                        stringResource(R.string.managed_safety_confirm_body)
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(
+                    enabled = !state.busy && locationIncidentReady,
                     onClick = {
+                        if (!locationIncidentReady) {
+                            confirmPage = false
+                            return@TextButton
+                        }
                         confirmPage = false
                         val fix = currentLocation
                         scope.launch {
@@ -249,12 +278,209 @@ internal fun ManagedSafetySection(
     val activeOwner = state.safetyIncidents.firstOrNull {
         it.role == "owner" && it.status in setOf("open", "acknowledged")
     }
-    val managedLocationReady = locationReady &&
-        currentLocation?.horizontalAccuracyMeters?.let {
-            it.isFinite() && it in 0.0..10_000.0
-        } == true
     val eightHourLabel = stringResource(R.string.safety_sos_duration_8_hours)
     val twelveHourLabel = stringResource(R.string.safety_sos_duration_12_hours)
+
+    NoopCard(tint = Palette.statusCritical) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space16)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(Icons.Filled.Warning, contentDescription = null, tint = Palette.statusCritical)
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.space4)) {
+                    Text(
+                        stringResource(R.string.managed_safety_page_title),
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
+                    )
+                    Text(
+                        stringResource(R.string.managed_safety_page_body),
+                        style = NoopType.body,
+                        color = Palette.textSecondary,
+                    )
+                }
+            }
+            Text(
+                stringResource(R.string.managed_safety_duration),
+                style = NoopType.overline,
+                color = Palette.textTertiary,
+            )
+            SegmentedPillControl(
+                items = listOf(8, 12),
+                selection = durationHours,
+                label = { if (it == 12) twelveHourLabel else eightHourLabel },
+                accessibilityLabel = {
+                    context.getString(
+                        if (it == 12) {
+                            R.string.safety_sos_duration_12_hours
+                        } else {
+                            R.string.safety_sos_duration_8_hours
+                        },
+                    )
+                },
+                onSelect = onDurationHoursChange,
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = shareLocation,
+                        role = Role.Switch,
+                        onValueChange = { shareLocation = it },
+                    )
+                    .padding(vertical = Metrics.space4)
+                    .semantics(mergeDescendants = true) {},
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.managed_safety_location_current),
+                        style = NoopType.body,
+                        color = Palette.textPrimary,
+                    )
+                    Text(
+                        stringResource(R.string.managed_safety_location_current_body),
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+                Spacer(Modifier.width(Metrics.space12))
+                NoopToggleSwitch(checked = shareLocation, onCheckedChange = null)
+            }
+            if (
+                shareLocation &&
+                (!foregroundLocationReady || !managedLocationReady)
+            ) {
+                NoopButton(
+                    text = stringResource(R.string.safety_location_get),
+                    leadingIcon = Icons.Filled.LocationOn,
+                    kind = NoopButtonKind.Secondary,
+                    fullWidth = true,
+                    onClick = onRequestLocation,
+                )
+                Text(
+                    stringResource(R.string.managed_safety_location_needed),
+                    style = NoopType.caption,
+                    color = Palette.statusWarning,
+                )
+            }
+            if (
+                shareLocation &&
+                managedLocationReady &&
+                !backgroundLocationReady
+            ) {
+                Text(
+                    stringResource(
+                        R.string.managed_safety_location_background_body,
+                    ),
+                    style = NoopType.caption,
+                    color = Palette.statusWarning,
+                )
+                NoopButton(
+                    text = stringResource(
+                        R.string.managed_safety_location_background_enable,
+                    ),
+                    leadingIcon = Icons.Filled.MyLocation,
+                    kind = NoopButtonKind.Secondary,
+                    fullWidth = true,
+                    onClick = onRequestBackgroundLocation,
+                )
+            }
+            NoopButton(
+                text = if (state.busy) {
+                    stringResource(R.string.managed_safety_working)
+                } else {
+                    stringResource(R.string.managed_safety_confirm_send)
+                },
+                leadingIcon = Icons.AutoMirrored.Filled.Send,
+                kind = NoopButtonKind.Destructive,
+                fullWidth = true,
+                enabled = !state.busy &&
+                    (contacts?.deliveryCapableCount ?: 0) >= minimum &&
+                    activeOwner == null &&
+                    locationIncidentReady,
+                onClick = { confirmPage = true },
+            )
+            when {
+                (contacts?.deliveryCapableCount ?: 0) < minimum -> Text(
+                    stringResource(
+                        R.string.managed_safety_threshold_remaining_format,
+                        minimum - (contacts?.deliveryCapableCount ?: 0),
+                    ),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+                activeOwner != null -> Text(
+                    stringResource(R.string.safety_page_disabled_active),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+                else -> StatePill(
+                    stringResource(R.string.managed_safety_threshold_ready),
+                    tone = StrandTone.Positive,
+                )
+            }
+            ManagedSafetyIncidents(
+                incidents = state.safetyIncidents,
+                currentLocation = currentLocation,
+                locationReady = managedLocationReady,
+                busy = state.busy,
+                onRespond = { incident, responding ->
+                    scope.launch {
+                        service.respondToSafetyIncident(
+                            incident.incidentId,
+                            responding,
+                        )
+                    }
+                },
+                onEnd = { incident, resolved ->
+                    scope.launch {
+                        service.endSafetyIncident(incident.incidentId, resolved)
+                    }
+                },
+                onRetry = { incident ->
+                    scope.launch { service.retrySafetyPush(incident.incidentId) }
+                },
+                onUpdateLocation = { incident ->
+                    val fix = currentLocation
+                    val accuracy = fix?.horizontalAccuracyMeters
+                    if (fix != null && accuracy != null) {
+                        scope.launch {
+                            service.updateSafetyLocation(
+                                incidentId = incident.incidentId,
+                                latitude = fix.latitude,
+                                longitude = fix.longitude,
+                                horizontalAccuracyM = accuracy,
+                                capturedAt = Instant.ofEpochSecond(fix.capturedAtUnix),
+                            )
+                            service.refreshSafety()
+                        }
+                    }
+                },
+                onOpenMap = { incident ->
+                    incident.location?.let { fix ->
+                        context.startActivity(
+                            Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse(
+                                    "geo:${fix.latitude},${fix.longitude}" +
+                                        "?q=${fix.latitude},${fix.longitude}",
+                                ),
+                            ),
+                        )
+                    }
+                },
+            )
+            if (state.safetyStatus.isNotBlank()) {
+                Text(
+                    state.safetyStatus,
+                    style = NoopType.caption,
+                    color = Palette.textSecondary,
+                )
+            }
+        }
+    }
 
     NoopCard {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.space16)) {
@@ -336,7 +562,7 @@ internal fun ManagedSafetySection(
 
             ManagedSafetyContacts(
                 contacts = contacts?.contacts.orEmpty(),
-                outboundCount = outboundContacts.size,
+                outboundCount = contacts?.deliveryCapableCount ?: 0,
                 minimum = minimum,
                 busy = state.busy,
                 onRemove = { contactToRemove = it },
@@ -354,204 +580,6 @@ internal fun ManagedSafetySection(
                     kind = NoopButtonKind.Secondary,
                     fullWidth = true,
                     onClick = ::ensureNotifications,
-                )
-            }
-        }
-    }
-
-    NoopCard(tint = Palette.statusCritical) {
-        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space16)) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Icon(Icons.Filled.Warning, contentDescription = null, tint = Palette.statusCritical)
-                Column(verticalArrangement = Arrangement.spacedBy(Metrics.space4)) {
-                    Text(
-                        stringResource(R.string.managed_safety_page_title),
-                        style = NoopType.headline,
-                        color = Palette.textPrimary,
-                    )
-                    Text(
-                        stringResource(R.string.managed_safety_page_body),
-                        style = NoopType.body,
-                        color = Palette.textSecondary,
-                    )
-                }
-            }
-            Text(
-                stringResource(R.string.managed_safety_duration),
-                style = NoopType.overline,
-                color = Palette.textTertiary,
-            )
-            SegmentedPillControl(
-                items = listOf(8, 12),
-                selection = durationHours,
-                label = { if (it == 12) twelveHourLabel else eightHourLabel },
-                accessibilityLabel = {
-                    context.getString(
-                        if (it == 12) {
-                            R.string.safety_sos_duration_12_hours
-                        } else {
-                            R.string.safety_sos_duration_8_hours
-                        },
-                    )
-                },
-                onSelect = onDurationHoursChange,
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .toggleable(
-                        value = shareLocation,
-                        role = Role.Switch,
-                        onValueChange = { shareLocation = it },
-                    )
-                    .padding(vertical = Metrics.space4)
-                    .semantics(mergeDescendants = true) {},
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.managed_safety_location_current),
-                        style = NoopType.body,
-                        color = Palette.textPrimary,
-                    )
-                    Text(
-                        stringResource(R.string.managed_safety_location_current_body),
-                        style = NoopType.footnote,
-                        color = Palette.textTertiary,
-                    )
-                }
-                Spacer(Modifier.width(Metrics.space12))
-                NoopToggleSwitch(checked = shareLocation, onCheckedChange = null)
-            }
-            if (shareLocation && !managedLocationReady) {
-                NoopButton(
-                    text = stringResource(R.string.safety_location_get),
-                    leadingIcon = Icons.Filled.LocationOn,
-                    kind = NoopButtonKind.Secondary,
-                    fullWidth = true,
-                    onClick = onRequestLocation,
-                )
-                Text(
-                    stringResource(R.string.managed_safety_location_needed),
-                    style = NoopType.caption,
-                    color = Palette.statusWarning,
-                )
-            }
-            if (
-                shareLocation &&
-                managedLocationReady &&
-                !backgroundLocationReady
-            ) {
-                Text(
-                    stringResource(
-                        R.string.managed_safety_location_background_body,
-                    ),
-                    style = NoopType.caption,
-                    color = Palette.statusWarning,
-                )
-                NoopButton(
-                    text = stringResource(
-                        R.string.managed_safety_location_background_enable,
-                    ),
-                    leadingIcon = Icons.Filled.MyLocation,
-                    kind = NoopButtonKind.Secondary,
-                    fullWidth = true,
-                    onClick = onRequestBackgroundLocation,
-                )
-            }
-            NoopButton(
-                text = if (state.busy) {
-                    stringResource(R.string.managed_safety_working)
-                } else {
-                    stringResource(R.string.managed_safety_confirm_send)
-                },
-                leadingIcon = Icons.AutoMirrored.Filled.Send,
-                kind = NoopButtonKind.Destructive,
-                fullWidth = true,
-                enabled = !state.busy &&
-                    outboundContacts.size >= minimum &&
-                    activeOwner == null &&
-                    (!shareLocation || managedLocationReady),
-                onClick = { confirmPage = true },
-            )
-            when {
-                outboundContacts.size < minimum -> Text(
-                    stringResource(
-                        R.string.managed_safety_threshold_remaining_format,
-                        minimum - outboundContacts.size,
-                    ),
-                    style = NoopType.caption,
-                    color = Palette.textTertiary,
-                )
-                activeOwner != null -> Text(
-                    stringResource(R.string.safety_page_disabled_active),
-                    style = NoopType.caption,
-                    color = Palette.textTertiary,
-                )
-                else -> StatePill(
-                    stringResource(R.string.managed_safety_threshold_ready),
-                    tone = StrandTone.Positive,
-                )
-            }
-            ManagedSafetyIncidents(
-                incidents = state.safetyIncidents,
-                currentLocation = currentLocation,
-                locationReady = managedLocationReady,
-                busy = state.busy,
-                onRespond = { incident, responding ->
-                    scope.launch {
-                        service.respondToSafetyIncident(
-                            incident.incidentId,
-                            responding,
-                        )
-                    }
-                },
-                onEnd = { incident, resolved ->
-                    scope.launch {
-                        service.endSafetyIncident(incident.incidentId, resolved)
-                    }
-                },
-                onRetry = { incident ->
-                    scope.launch { service.retrySafetyPush(incident.incidentId) }
-                },
-                onUpdateLocation = { incident ->
-                    val fix = currentLocation
-                    val accuracy = fix?.horizontalAccuracyMeters
-                    if (fix != null && accuracy != null) {
-                        scope.launch {
-                            service.updateSafetyLocation(
-                                incidentId = incident.incidentId,
-                                latitude = fix.latitude,
-                                longitude = fix.longitude,
-                                horizontalAccuracyM = accuracy,
-                                capturedAt = Instant.ofEpochSecond(fix.capturedAtUnix),
-                            )
-                            service.refreshSafety()
-                        }
-                    }
-                },
-                onOpenMap = { incident ->
-                    incident.location?.let { fix ->
-                        context.startActivity(
-                            Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse(
-                                    "geo:${fix.latitude},${fix.longitude}" +
-                                        "?q=${fix.latitude},${fix.longitude}",
-                                ),
-                            ),
-                        )
-                    }
-                },
-            )
-            if (state.safetyStatus.isNotBlank()) {
-                Text(
-                    state.safetyStatus,
-                    style = NoopType.caption,
-                    color = Palette.textSecondary,
                 )
             }
         }

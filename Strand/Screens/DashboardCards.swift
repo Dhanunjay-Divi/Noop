@@ -1,5 +1,51 @@
 import Foundation
 import SwiftUI
+import StrandAnalytics
+import StrandDesign
+
+// MARK: - Recovery band presentation
+
+/// User-facing Recovery vocabulary and color derived from the scoring engine's pinned 34/67 bands.
+/// Summary surfaces use these three states so Today, Calendar, and Week in review cannot drift.
+enum RecoveryBandPresentation {
+    enum Level: Equatable {
+        case low
+        case steady
+        case strong
+    }
+
+    static func level(for score: Double) -> Level {
+        switch RecoveryScorer.band(score) {
+        case "red": return .low
+        case "yellow": return .steady
+        default: return .strong
+        }
+    }
+
+    static func label(for score: Double) -> String {
+        switch level(for: score) {
+        case .low: return String(localized: "Low")
+        case .steady: return String(localized: "Steady")
+        case .strong: return String(localized: "Strong")
+        }
+    }
+
+    static func color(for score: Double) -> Color {
+        switch level(for: score) {
+        case .low: return StrandPalette.statusCritical
+        case .steady: return StrandPalette.statusWarning
+        case .strong: return StrandPalette.statusPositive
+        }
+    }
+
+    static func gaugeStops(for score: Double) -> [Gradient.Stop] {
+        let color = color(for: score)
+        return [
+            .init(color: color.opacity(0.68), location: 0),
+            .init(color: color, location: 1),
+        ]
+    }
+}
 
 // MARK: - "Your cards" customisable dashboard (WHOOP "My Dashboard")
 //

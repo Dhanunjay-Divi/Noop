@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -413,12 +414,15 @@ fun AppRoot(
                 expandedContextualActionId = null
                 openTopLevel(Destination.Insights.route)
             }
-            ContextualActionKind.WIND_DOWN,
-            ContextualActionKind.RECOVERY,
-            -> {
+            ContextualActionKind.WIND_DOWN -> {
                 ContextualActionCenter.complete(context, action)
                 expandedContextualActionId = null
                 openTopLevel(Destination.Sleep.route)
+            }
+            ContextualActionKind.RECOVERY -> {
+                ContextualActionCenter.complete(context, action)
+                expandedContextualActionId = null
+                openTopLevel(action.resolvedRecoveryRoute().navRoute)
             }
         }
     }
@@ -498,7 +502,7 @@ fun AppRoot(
                         onOpenSettings = { openTopLevel(Destination.Settings.route) },
                         // The opt-in Hydration card (only shown when Hydration tracking is on) pushes its
                         // detail. A normal push so the back-stack returns to Today.
-                        onOpenHydration = { nav.navigate(Destination.Hydration.route) },
+                        onOpenHydration = { dayKey -> nav.navigate(hydrationRoute(dayKey)) },
                         // #706/#684: the dashboard cards draw a tappable chevron; wire each to its detail,
                         // matching iOS. Stress + the vitals are pushes; Sleep is a top-level tab switch.
                         onOpenStress = { nav.navigate(Destination.Stress.route) },
@@ -522,6 +526,8 @@ fun AppRoot(
                         // destination the Sleep screen's morning sheet uses.
                         onOpenJournal = { openTopLevel(Destination.Insights.route) },
                         onOpenCalendar = { nav.navigate(Destination.Calendar.route) },
+                        demoPlannedWorkout =
+                            BuildConfig.DEBUG && initialRoute == DEMO_PLANNED_WORKOUT_ROUTE,
                     )
                 }
                 composable(Destination.Calendar.route) {
@@ -579,7 +585,18 @@ fun AppRoot(
                         },
                     )
                 }
-                composable(Destination.Hydration.route) { HydrationScreen(viewModel) }
+                composable(Destination.Hydration.route) {
+                    HydrationScreen(
+                        viewModel = viewModel,
+                        dayKey = HydrationStore.dayKey(),
+                    )
+                }
+                composable(HYDRATION_ROUTE_PATTERN) { backStackEntry ->
+                    HydrationScreen(
+                        viewModel = viewModel,
+                        dayKey = backStackEntry.arguments?.getString(HYDRATION_DAY_ARGUMENT),
+                    )
+                }
                 composable(Destination.VitalSigns.route) {
                     VitalSignsScreen(
                         vm = viewModel,
@@ -1137,24 +1154,43 @@ private val barTrailingTabs = listOf(
     BarTab(Destination.Sleep, Icons.Filled.Bed, R.string.nav_sleep),
 )
 
-internal fun bottomBarShowsVisualLabels(
+internal data class BottomBarLabelLayout(
+    val maxLines: Int,
+    val barHeightDp: Int,
+)
+
+internal fun bottomBarLabelLayout(
     fontScale: Float,
     availableSlotWidthPx: Int = Int.MAX_VALUE,
     widestLabelWidthPx: Int = 0,
     horizontalSafetyPaddingPx: Int = 0,
-): Boolean = fontScale <= 1.30f &&
-    widestLabelWidthPx + horizontalSafetyPaddingPx <= availableSlotWidthPx
+): BottomBarLabelLayout {
+    val slotWidth = availableSlotWidthPx.coerceAtLeast(1)
+    val requiredWidth = (widestLabelWidthPx + horizontalSafetyPaddingPx).coerceAtLeast(1)
+    val maxLines = kotlin.math.ceil(requiredWidth.toDouble() / slotWidth.toDouble())
+        .toInt()
+        .coerceIn(1, 3)
+    val scaledLineHeightDp = kotlin.math.ceil(12f * fontScale.coerceAtLeast(1f))
+        .toInt()
+    val contentHeightDp = 6 + 18 + 3 + (scaledLineHeightDp * maxLines) + 6
+    return BottomBarLabelLayout(
+        maxLines = maxLines,
+        barHeightDp = maxOf(56, contentHeightDp),
+    )
+}
 
 @Composable
-internal fun rememberBottomBarShowsVisualLabels(
+internal fun rememberBottomBarLabelLayout(
     labels: List<String>,
     availableWidth: Dp,
     horizontalContentPadding: Dp = 0.dp,
     interItemSpacing: Dp = 0.dp,
     labelHorizontalSafetyPadding: Dp = 6.dp,
     labelFontSize: TextUnit = 10.sp,
-): Boolean {
-    if (labels.isEmpty()) return false
+): BottomBarLabelLayout {
+    if (labels.isEmpty()) {
+        return bottomBarLabelLayout(fontScale = LocalDensity.current.fontScale)
+    }
 
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer(cacheSize = labels.size * 2)
@@ -1179,7 +1215,7 @@ internal fun rememberBottomBarShowsVisualLabels(
         labelHorizontalSafetyPadding.roundToPx()
     }
 
-    return bottomBarShowsVisualLabels(
+    return bottomBarLabelLayout(
         fontScale = density.fontScale,
         availableSlotWidthPx = availableSlotWidthPx,
         widestLabelWidthPx = widestLabelWidthPx,
@@ -1211,16 +1247,14 @@ private fun GlassBottomBar(
         ) {
             BoxWithConstraints(
                 modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp)
-                    .navigationGlassSurface(barShape),
+                    .weight(1f),
             ) {
                 val tabLabels = buildList {
                     barLeadingTabs.forEach { add(stringResource(it.labelRes)) }
                     barTrailingTabs.forEach { add(stringResource(it.labelRes)) }
                     add(stringResource(R.string.nav_more))
                 }
-                val showVisualLabels = rememberBottomBarShowsVisualLabels(
+                val labelLayout = rememberBottomBarLabelLayout(
                     labels = tabLabels,
                     availableWidth = maxWidth,
                     horizontalContentPadding = 12.dp,
@@ -1228,7 +1262,9 @@ private fun GlassBottomBar(
                 )
                 Row(
                     modifier = Modifier
+                        .height(labelLayout.barHeightDp.dp)
                         .fillMaxSize()
+                        .navigationGlassSurface(barShape)
                         .padding(horizontal = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(1.dp),
@@ -1239,7 +1275,7 @@ private fun GlassBottomBar(
                             label = stringResource(tab.labelRes),
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
-                            showLabel = showVisualLabels,
+                            labelMaxLines = labelLayout.maxLines,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1250,7 +1286,7 @@ private fun GlassBottomBar(
                             label = stringResource(tab.labelRes),
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
-                            showLabel = showVisualLabels,
+                            labelMaxLines = labelLayout.maxLines,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1260,7 +1296,7 @@ private fun GlassBottomBar(
                         label = stringResource(R.string.nav_more),
                         active = selected == Destination.More,
                         testTag = "noop.tab.more",
-                        showLabel = showVisualLabels,
+                        labelMaxLines = labelLayout.maxLines,
                         modifier = Modifier.weight(1f),
                         onClick = { onTabSelected(Destination.More) },
                     )
@@ -1406,7 +1442,7 @@ private fun BarSlot(
     label: String,
     active: Boolean,
     testTag: String,
-    showLabel: Boolean,
+    labelMaxLines: Int,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -1420,7 +1456,7 @@ private fun BarSlot(
     )
     Column(
         modifier = modifier
-            .height(44.dp)
+            .fillMaxHeight()
             .testTag(testTag)
             .clip(shape)
             .background(
@@ -1456,24 +1492,28 @@ private fun BarSlot(
             contentDescription = null,
             tint = tint,
             modifier = Modifier
-                .size(if (showLabel) Metrics.iconSmall else 22.dp)
+                .size(Metrics.iconSmall)
                 .graphicsLayer {
                     scaleX = selectedScale
                     scaleY = selectedScale
                     translationY = if (active) -1.dp.toPx() else 0f
                 },
         )
-        if (showLabel) {
-            Text(
-                label,
-                style = NoopType.footnote.copy(
-                    fontSize = 10.sp,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                ),
-                color = tint,
-                maxLines = 1,
-            )
-        }
+        Text(
+            label,
+            style = NoopType.footnote.copy(
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            ),
+            color = tint,
+            maxLines = labelMaxLines,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 1.dp),
+        )
     }
 }
 

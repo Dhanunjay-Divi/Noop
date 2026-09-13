@@ -19,7 +19,7 @@ class TodayLayoutPrefsTest {
     }
 
     @Test
-    fun encodeDecode_roundTripsAReorderedList() {
+    fun encodeDecode_pinsHeroAndRoundTripsSecondaryOrder() {
         val reordered = listOf(
             TodaySection.HEART_RATE, TodaySection.HERO, TodaySection.YOUR_CARDS,
             TodaySection.LIVE_SESSION, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
@@ -28,10 +28,31 @@ class TodayLayoutPrefsTest {
         )
         val encoded = TodayLayoutPrefs.encode(reordered)
         assertEquals(
-            "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,why,target,watch,journal",
+            "hero,heartRate,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,why,target,watch,journal",
             encoded,
         )
-        assertEquals(reordered, TodayLayoutPrefs.decodeOrder(encoded))
+        assertEquals(
+            listOf(
+                TodaySection.HERO, TodaySection.HEART_RATE, TodaySection.YOUR_CARDS,
+                TodaySection.LIVE_SESSION, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
+                TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS, TodaySection.WHY,
+                TodaySection.TARGET, TodaySection.WATCH, TodaySection.JOURNAL,
+            ),
+            TodayLayoutPrefs.decodeOrder(encoded),
+        )
+    }
+
+    @Test
+    fun decode_normalizesOlderSavedHeroPosition() {
+        assertEquals(
+            listOf(
+                TodaySection.HERO, TodaySection.LIVE_SESSION, TodaySection.WHY,
+                TodaySection.TARGET, TodaySection.WATCH, TodaySection.SYNTHESIS,
+                TodaySection.KEY_METRICS, TodaySection.WORKOUTS, TodaySection.HEART_RATE,
+                TodaySection.RECOVERY_VITALS, TodaySection.YOUR_CARDS, TodaySection.JOURNAL,
+            ),
+            TodayLayoutPrefs.decodeOrder("heartRate,hero,yourCards"),
+        )
     }
 
     /** The v1 upgrade path: an order saved by the FIRST cut (6 sections — no hero/liveSession, which were

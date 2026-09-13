@@ -74,6 +74,60 @@ resource "google_storage_bucket" "raw_chunks" {
   depends_on = [google_kms_crypto_key_iam_member.gcs_raw_chunks]
 }
 
+resource "google_kms_crypto_key" "feedback" {
+  name                       = "${local.prefix}-feedback"
+  key_ring                   = google_kms_key_ring.health_data.id
+  purpose                    = "ENCRYPT_DECRYPT"
+  rotation_period            = "7776000s"
+  destroy_scheduled_duration = "2592000s"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_kms_crypto_key_iam_member" "gcs_feedback" {
+  crypto_key_id = google_kms_crypto_key.feedback.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:${data.google_storage_project_service_account.gcs.email_address}"
+}
+
+resource "google_storage_bucket" "feedback" {
+  project                     = var.project_id
+  name                        = local.feedback_bucket_name
+  location                    = var.region
+  storage_class               = "STANDARD"
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+  labels = merge(local.labels, {
+    data_class = "private-feedback"
+  })
+
+  versioning {
+    enabled = false
+  }
+
+  soft_delete_policy {
+    retention_duration_seconds = 0
+  }
+
+  encryption {
+    default_kms_key_name = google_kms_crypto_key.feedback.id
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      age = var.feedback_retention_days
+    }
+  }
+
+  depends_on = [google_kms_crypto_key_iam_member.gcs_feedback]
+}
+
 resource "google_storage_bucket" "build_source" {
   project                     = var.project_id
   name                        = "${var.project_id}-noop-build-${var.environment}"

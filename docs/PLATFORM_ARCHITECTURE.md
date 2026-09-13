@@ -1,7 +1,7 @@
 # NOOP platform architecture
 
 **Status:** principal design and release contract
-**Reviewed:** 2026-09-04
+**Reviewed:** 2026-09-12
 **Scope:** native clients, day guidance, managed storage, and 1K-to-1M growth
 
 This document works backward from the customer experience. It is both a target
@@ -103,6 +103,7 @@ action:
 | Capability | Current evidence | Target or remaining gate |
 |---|---|---|
 | Local BLE capture and durable SQLite | Implemented on Apple and Android | Physical-device reconnect, suspension, battery, and upgrade matrix remains |
+| Owner-supplied first-party candidate SDK | Android and iPhone packages were statically assessed on 2026-09-12; they expose confirmation/password, model-gated live/history, reconnect, haptic, weather, and OTA surfaces | Exact band project/capability report, distribution authority, neutral adapters, network quarantine, signed physical behavior, firmware possession proof, and security review remain |
 | First-party band ownership account | Supplier-independent schema, isolated runtime, verified email/password flow, optional phone linking, atomic claim, replacement-installation authorization, revocation, and matched mobile state machines are implemented default-off; possession always returns unavailable | Supplier printed-label mapping, approved cryptographic possession provider, owner-key provisioning, controlled release, physical validation, production identity/abuse operations, and India/USA legal review |
 | Remote terms and returns | Digest-verified no-cache terms fetch, exact acceptance metadata, and static mobile rendering are implemented default-off; no approved document is published and return duration remains undecided between 14 and 30 days | Immutable signed publication and historical availability, approved return clock, objective condition grades, lawful refund deductions, appeals, and operator-only wipe/release |
 | Local scoring and source provenance | Implemented with pure Swift/Kotlin engines and explicit missing-data behavior | Held-out accuracy and subgroup validation remains metric-specific |
@@ -133,6 +134,21 @@ The phone is authoritative for:
 The cloud must never be required to render today's core experience. A server
 result may enrich a long-horizon trend, but it cannot make a stale local signal
 fresh or silently override a local safety/privacy gate.
+
+#### One collector, multiple viewers
+
+Exactly one phone owns the live BLE collection session for a band. The owner
+may view the resulting history on a Mac or another signed-in device through
+explicit NOOP+ sync, but those viewers do not compete for the peripheral. The
+owner-supplied iOS SDK is an arm64 iPhoneOS static library with no macOS,
+Catalyst, or simulator slice, and its own documentation warns against multiple
+applications reading the same peripheral concurrently.
+
+A future collector handoff must be explicit: pause new commands, durably commit
+and checkpoint received history, release the collector lease, disconnect, then
+let the new supported phone resume from the last durable position. Concurrent
+collectors, silent handoff, and desktop BLE collection are out of scope for the
+first release.
 
 ### 4.2 Durable before derived
 

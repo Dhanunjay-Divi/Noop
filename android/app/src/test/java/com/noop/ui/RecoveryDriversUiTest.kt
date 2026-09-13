@@ -77,6 +77,12 @@ class RecoveryDriversUiTest {
         assertTrue(!canExplainRecovery(null))
     }
 
+    @Test fun driverPointLabelsUseExplicitSignsAndTrueMinus() {
+        assertEquals("+3", chargeDriverPointLabel(3))
+        assertEquals("−2", chargeDriverPointLabel(-2))
+        assertEquals("0", chargeDriverPointLabel(0))
+    }
+
     @Test fun displayedAndFutureRowsCannotRewriteExplanationBaseline() {
         val prior = (1..6).map { day("2026-01-%02d".format(it), hrv = 50.0, rhr = 60) }
         val displayed = day("2026-01-10", hrv = 100.0, rhr = 40, recovery = 70.0)

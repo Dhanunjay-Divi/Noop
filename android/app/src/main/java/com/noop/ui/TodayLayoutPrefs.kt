@@ -6,9 +6,9 @@ import android.content.Context
 //
 // The Today screen's sections — the Charge/Effort/Rest hero, the Start-session entry, Synthesis, Key
 // Metrics, Workouts, Heart Rate, Recovery Vitals, Your Cards — rendered in one fixed order. This lets the
-// user REORDER them, with the default being the original order so nothing changes for anyone who never
-// rearranges. Display-only — no metric is computed or stored differently; this only decides the SEQUENCE
-// the already-built sections render in.
+// user REORDER the secondary sections, with the default being the original order so nothing changes for
+// anyone who never rearranges. The core score hero is always pinned first; display-only — no metric is
+// computed or stored differently; this only decides the SEQUENCE the already-built sections render in.
 //
 // Stored as a single comma-joined string of section keys in SharedPreferences ("today.sectionOrder"), the
 // same mechanism KeyMetricPrefs/DashboardCards use. Mirrors the macOS TodayLayoutPrefs.swift +
@@ -65,13 +65,18 @@ object TodayLayoutPrefs {
     fun order(context: Context): List<TodaySection> =
         decodeOrder(NoopPrefs.of(context).getString(KEY_ORDER, null))
 
+    /** Keep the primary score surface first across old preferences and cross-platform restores. */
+    internal fun pinHero(sections: List<TodaySection>): List<TodaySection> =
+        listOf(TodaySection.HERO) + sections.filterNot { it == TodaySection.HERO }
+
     /** Persist the section order. */
     fun setOrder(context: Context, sections: List<TodaySection>) {
         NoopPrefs.of(context).edit().putString(KEY_ORDER, encode(sections)).apply()
     }
 
     /** Encode an ordered list of sections into the stored comma-joined string. */
-    fun encode(sections: List<TodaySection>): String = sections.joinToString(",") { it.raw }
+    fun encode(sections: List<TodaySection>): String =
+        pinHero(sections).joinToString(",") { it.raw }
 
     /**
      * Decode the stored string into the FULL ordered section list. An empty/unset string yields the
@@ -99,6 +104,6 @@ object TodayLayoutPrefs {
             val insertAt = saved.indexOfFirst { defIdx(it) > defIdx(missing) }
             if (insertAt == -1) saved.add(missing) else saved.add(insertAt, missing)
         }
-        return saved
+        return pinHero(saved)
     }
 }

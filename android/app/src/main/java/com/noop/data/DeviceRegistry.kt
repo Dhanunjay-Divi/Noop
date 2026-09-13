@@ -1,6 +1,9 @@
 package com.noop.data
 
 import androidx.room.withTransaction
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 
 /**
  * Device-registry façade over [WhoopDao] + [WhoopDatabase] — the Android port of the Swift
@@ -32,6 +35,41 @@ class DeviceRegistry(
         },
     )
 
+    private suspend fun markOwnershipDirty(affectedRange: LongRange? = null) {
+        val resolvedRange = affectedRange ?: dao.ownershipAnalysisInputRange().validRange()
+        val earliest = resolvedRange?.first
+        val latest = resolvedRange?.last
+        if (
+            dao.advanceAnalysisInvalidation(
+                AnalysisInvalidationSource.OWNERSHIP,
+                earliest,
+                latest,
+            ) == 0
+        ) {
+            dao.insertAnalysisInvalidationIfAbsent(
+                AnalysisInvalidationSource.OWNERSHIP,
+                earliest,
+                latest,
+            )
+        }
+    }
+
+    private fun AnalysisAffectedRange.validRange(): LongRange? {
+        val earliest = earliestAffectedTs ?: return null
+        val latest = latestAffectedTs ?: return null
+        return if (earliest >= 0L && latest >= earliest) earliest..latest else null
+    }
+
+    private fun ownershipDayRange(day: String): LongRange? {
+        val timestamp = runCatching {
+            LocalDate.parse(day)
+                .atTime(LocalTime.NOON)
+                .atZone(ZoneId.systemDefault())
+                .toEpochSecond()
+        }.getOrNull() ?: return null
+        return timestamp..timestamp
+    }
+
     /** All paired devices, oldest first. */
     suspend fun all(): List<PairedDeviceRow> = dao.pairedDevices().map { row ->
         val whoop = row.brand.equals("WHOOP", ignoreCase = true) || row.id == "my-whoop" || row.id.startsWith("whoop-")
@@ -54,13 +92,31 @@ class DeviceRegistry(
      */
     suspend fun setActive(id: String, now: Long = System.currentTimeMillis() / 1000) {
         transactor.run {
+            val previous = dao.activeDeviceId()
+            if (previous == id) {
+                dao.promote(id, now)
+                return@run
+            }
             dao.demoteActive()
             dao.promote(id, now)
+            markOwnershipDirty()
         }
     }
 
-    /** Archive a device — keeps its row and samples (invariant I4). */
-    suspend fun archive(id: String) = dao.archiveDevice(id)
+    /**
+     * Archive a device while preserving its row and samples (invariant I4). Ownership overrides are
+     * selection metadata, not recordings: clear them atomically so an archived source cannot still win a
+     * day after claim construction excludes it, then invalidate ownership for one complete recompute.
+     */
+    suspend fun archive(id: String) {
+        transactor.run {
+            val row = dao.pairedDevices().firstOrNull { it.id == id } ?: return@run
+            if (row.status == DeviceStatus.archived.name) return@run
+            dao.archiveDevice(id)
+            dao.deleteDayOwnershipFor(id)
+            markOwnershipDirty()
+        }
+    }
 
     /** Atomically update the paired model and matching legacy-device name for this exact id. */
     suspend fun setModel(id: String, model: String) {
@@ -101,8 +157,9 @@ class DeviceRegistry(
      * skinTempSample, respSample, gravitySample, stepSample, ppgHrSample, ppgWaveformSample, event,
      * battery, bodyMeasurement, dailyMetric,
      * sleepSession, journal, workout, appleDaily, metricSeries, dayOwnership, sleepStateSample, labMarker,
-     * liveSession, dismissedWorkout, dismissedSleep. DeviceRegistryTest.deleteDeviceDataCallsEveryDaoDeleteMethod
-     * guards completeness (fails if a delete*For DAO method isn't wired in here).
+     * liveSession, dismissedWorkout, dismissedSleep, and analysisDirtySource.
+     * DeviceRegistryTest.deleteDeviceDataCallsEveryDaoDeleteMethod guards completeness (fails if a
+     * delete*For DAO method isn't wired in here).
      */
     suspend fun deleteDeviceData(id: String) {
         transactor.run {
@@ -132,12 +189,24 @@ class DeviceRegistry(
             dao.deleteLiveSessionsFor(id)
             dao.deleteDismissedWorkoutsFor(id)
             dao.deleteDismissedSleepsFor(id)
+            // Raw-table deletes above intentionally fire analysis triggers. Remove the marker last so a
+            // completed delete-all neither retains the source identifier nor schedules an empty rescore.
+            dao.deleteAnalysisDirtyFor(id)
         }
     }
 
-    /** Set the owner override for a day (insert-or-replace). */
-    suspend fun setDayOwner(day: String, deviceId: String, locked: Boolean) =
-        dao.setDayOwner(DayOwnershipRow(day = day, deviceId = deviceId, locked = locked))
+    /**
+     * Set the owner override for a day and durably invalidate the ownership projection in the same
+     * transaction. An exact replay is a no-op: it must not manufacture another generation.
+     */
+    suspend fun setDayOwner(day: String, deviceId: String, locked: Boolean) {
+        val replacement = DayOwnershipRow(day = day, deviceId = deviceId, locked = locked)
+        transactor.run {
+            if (dao.dayOwner(day) == replacement) return@run
+            dao.setDayOwner(replacement)
+            markOwnershipDirty(ownershipDayRange(day))
+        }
+    }
 
     /** The owner override for a day, or null if none. */
     suspend fun dayOwner(day: String): DayOwnershipRow? = dao.dayOwner(day)

@@ -411,7 +411,7 @@ internal object StaleSyncReminderNotifier {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .protectPrivateContent(context, CHANNEL_ID)
             .build()
         if (!stillRelevant()) return false
         NotificationLifecycleLedger.posted(

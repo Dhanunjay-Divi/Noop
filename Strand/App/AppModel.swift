@@ -63,6 +63,23 @@ enum ActiveZoneUpgradeGate {
     }
 }
 
+struct AdaptiveDayEvaluationGenerationGate {
+    private(set) var generation: UInt64 = 0
+
+    mutating func invalidate() {
+        generation &+= 1
+    }
+
+    mutating func begin() -> UInt64 {
+        invalidate()
+        return generation
+    }
+
+    func isCurrent(_ token: UInt64) -> Bool {
+        token == generation
+    }
+}
+
 /// Root app state: owns the live BLE connection state and the CoreBluetooth engine.
 /// More subsystems (Repository, AnalyticsEngine, ImportCoordinator) get wired in here
 /// in later milestones.
@@ -281,6 +298,13 @@ final class AppModel: ObservableObject {
     /// Coalesces a burst of repository publications into one contextual-vitals read. A newer refresh
     /// cancels the pending pass; delivery itself remains deduplicated by ContextualInterventionPolicy.
     private var contextualEvaluationTask: Task<Void, Never>?
+    /// A completed ingest owns one awaited routine-notification coordinator. Repository publishers fire
+    /// during that same refresh; suppress their independent contextual task so adaptive guidance cannot
+    /// bypass the shared one-notification budget.
+    private var postSyncRoutineCoordinationActive = false
+    /// Invalidates scheduler callbacks and queued evaluations before their replacement reaches EventKit.
+    /// An older superseded query therefore cannot reconcile a newer workout as if the calendar were empty.
+    private var adaptiveDayEvaluationGate = AdaptiveDayEvaluationGenerationGate()
     /// Debounced profile reconciliation. A DOB/sex/waist edit invalidates stored provenance immediately;
     /// this task writes the matching replacement values and then wakes metric-series-only views.
     private var ageMetricRecomputeTask: Task<Void, Never>?
@@ -472,6 +496,16 @@ final class AppModel: ObservableObject {
                 self.scheduleContextualInterventionEvaluation()
             }
             .store(in: &hrCancellables)
+        NotificationCenter.default.publisher(for: PlannedWorkoutCalendarStore.providerDidChange)
+            .sink { [weak self] _ in
+                self?.scheduleContextualInterventionEvaluation()
+            }
+            .store(in: &hrCancellables)
+        NotificationCenter.default.publisher(for: ContextualInterventionInputs.didChange)
+            .sink { [weak self] _ in
+                self?.scheduleContextualInterventionEvaluation()
+            }
+            .store(in: &hrCancellables)
 
         // Physical-input + wear hooks (fired live by FrameRouter).
         live.onDoubleTap = { [weak self] in self?.handleDoubleTap() }
@@ -522,18 +556,23 @@ final class AppModel: ObservableObject {
         }
         // Illness/strain early-warning recomputes when the daily history changes.
         repo.$days.sink { [weak self] days in
-            self?.evaluateIllness(days)
-            self?.evaluateStrainTarget()
-            self?.scheduleContextualInterventionEvaluation()
+            guard let self, self.operationalWorkStarted else { return }
+            self.evaluateIllness(days)
+            self.evaluateStrainTarget()
+            ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
+            self.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         repo.$refreshSeq.dropFirst().sink { [weak self] _ in
-            self?.scheduleContextualInterventionEvaluation()
+            guard let self, self.operationalWorkStarted else { return }
+            ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
+            self.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         // A newly-published detected session is the authoritative duration-alarm input. Reconcile after
         // every real sleep-cache change; repeated analysis of the same session is deduplicated by onset.
         repo.$sleeps.dropFirst().sink { [weak self] sessions in
-            guard let self,
-                  self.behavior.smartAlarmEnabled,
+            guard let self else { return }
+            WindDownNudge.suppressIfAlreadyAsleep(sessions: sessions)
+            guard self.behavior.smartAlarmEnabled,
                   self.behavior.smartAlarmMode == .sleepDuration else { return }
             self.reconcileSleepDurationAlarm(sessions: sessions)
         }.store(in: &hrCancellables)
@@ -647,7 +686,19 @@ final class AppModel: ObservableObject {
                 includeResourceSnapshot: true
             )
         }
+        let now = Date()
+        let resumedAfterBlock = AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+            offsetSec: TimeZone.autoupdatingCurrent.secondsFromGMT(for: now),
+            nowSec: Int(now.timeIntervalSince1970)
+        )
+        if resumedAfterBlock {
+            AppDiagnosticsRecorder.shared.record(
+                "adaptive_day.time_zone_baseline",
+                fields: ["outcome": "rebased_after_operational_block"]
+            )
+        }
         operationalWorkStarted = true
+        AdaptiveDeliveredNotificationExpiryScheduler.reconcile(now: now)
 
         AppModel.shared = self   // publish for App Intents only after the launch gate is open
         // An unfinished GPS workout resumes location + realtime hardware, so restoration belongs on the
@@ -668,6 +719,8 @@ final class AppModel: ObservableObject {
         Task.detached { AppModel.purgeImportInbox(); AppModel.purgeImportTemp() }
 
         startAnalysisLoop()
+        ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
+        scheduleContextualInterventionEvaluation()
     }
 
     /// Turn the strap's offloaded raw data into dashboard scores on launch and every 30 minutes. Kept in
@@ -951,6 +1004,10 @@ final class AppModel: ObservableObject {
 
     private func refreshAfterPersistedHistory() async {
         guard operationalWorkStarted else { return }
+        postSyncRoutineCoordinationActive = true
+        contextualEvaluationTask?.cancel()
+        contextualEvaluationTask = nil
+        defer { postSyncRoutineCoordinationActive = false }
         live.append(log: "Backfill: scoring newly persisted history")
         await repo.refresh(days: 120)
         // Score the freshly-offloaded raw data RIGHT NOW rather than waiting for the next 15-minute
@@ -959,12 +1016,28 @@ final class AppModel: ObservableObject {
         // already running and refreshes the dashboard itself once the new scores persist. (PR #218)
         await intelligence.analyzeRecent(force: true)
         await refreshV5Signals()
-        await reconcileMorningRecapNotifications()
-        // A completed sync is the earliest reliable moment to inspect an offloaded session. Existing
-        // users keep their chosen mode; fresh installs default to Ask until the classifier has real-world
-        // validation. A legacy Auto-save preference resolves to approval-first Ask until confidence is calibrated.
-        await processAutomaticWorkoutAfterSync()
-        await reconcilePostWorkoutSummaryNotifications()
+        let notificationBudget = PostSyncRoutineNotificationBudget()
+        // One late sync can materialize a workout, its summary, and a scored night together. Prefer the
+        // actionable workout review, then its summary, then the recap, while leaving every skipped lane's
+        // durable frontier untouched so it can be reconsidered by a later sync.
+        await processAutomaticWorkoutAfterSync(notificationBudget: notificationBudget)
+        await evaluateContextualInterventions(notificationBudget: notificationBudget)
+        if !notificationBudget.isClaimed {
+            await reconcilePostWorkoutSummaryNotifications(notificationBudget: notificationBudget)
+        }
+        if !notificationBudget.isClaimed {
+            await reconcileMorningRecapNotifications(notificationBudget: notificationBudget)
+        }
+        if let lane = notificationBudget.claimedLane {
+            AppDiagnosticsRecorder.shared.record(
+                "post_sync.notification_budget",
+                fields: [
+                    "lane": lane.rawValue,
+                    "outcome": "claimed",
+                    "source": "band_history",
+                ]
+            )
+        }
         #if os(iOS)
         // #980: a strap backfill routinely completes while the app is BACKGROUNDED (it runs as a
         // bluetooth-central, so it stays alive to receive the offload). The only other widget-publish
@@ -977,7 +1050,9 @@ final class AppModel: ObservableObject {
         #endif
     }
 
-    private func processAutomaticWorkoutAfterSync() async {
+    private func processAutomaticWorkoutAfterSync(
+        notificationBudget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
         let mode = PuffinExperiment.autoWorkoutMode
         guard mode != .off else {
             AutoWorkoutNotifications.clear()
@@ -999,14 +1074,20 @@ final class AppModel: ObservableObject {
             if await repo.saveDetectedWorkout(candidate, markForReview: true) {
                 await repo.refresh()
                 await AutoWorkoutNotifications.postAutoSavedIfAuthorized(
-                    startSec: candidate.startSec, endSec: candidate.endSec)
+                    startSec: candidate.startSec,
+                    endSec: candidate.endSec,
+                    budget: notificationBudget
+                )
                 return
             }
             // A failed unattended write is never reported as saved. Fall through to the review prompt so
             // the user can retry explicitly when notifications are already available.
         }
         await AutoWorkoutNotifications.postIfAuthorized(
-            startSec: candidate.startSec, endSec: candidate.endSec)
+            startSec: candidate.startSec,
+            endSec: candidate.endSec,
+            budget: notificationBudget
+        )
     }
 
     /// Repairs notification state at launch/foreground as well as after a backfill. Detection remains
@@ -1014,6 +1095,34 @@ final class AppModel: ObservableObject {
     /// than lingering after its candidate, mode, or explicit notification opt-in is no longer current.
     func reconcileAutomaticWorkoutSurfaces() async {
         await processAutomaticWorkoutAfterSync()
+    }
+
+    /// HealthKit can commit a workout or scored night while NOOP has no active scene. Reuse the same
+    /// private, opt-in routine lanes without allowing one provider wake to create a notification burst.
+    /// Adaptive-day evaluation remains owned by the repository refresh path and its global prompt ledger.
+    func reconcileRoutineNotificationsAfterExternalHealthSync() async {
+        let notificationBudget = PostSyncRoutineNotificationBudget()
+        await reconcilePostWorkoutSummaryNotifications(
+            notificationBudget: notificationBudget
+        )
+        await evaluateContextualInterventions(
+            notificationBudget: notificationBudget
+        )
+        if !notificationBudget.isClaimed {
+            await reconcileMorningRecapNotifications(
+                notificationBudget: notificationBudget
+            )
+        }
+        if let lane = notificationBudget.claimedLane {
+            AppDiagnosticsRecorder.shared.record(
+                "post_sync.notification_budget",
+                fields: [
+                    "lane": lane.rawValue,
+                    "outcome": "claimed",
+                    "source": "external_health",
+                ]
+            )
+        }
     }
 
     /// Toggle the optional post-workout phone summary. Enabling snapshots the current newest workout
@@ -1047,19 +1156,28 @@ final class AppModel: ObservableObject {
 
     /// Called only after persisted wearable history has refreshed and scored. This timing is honest:
     /// a workout summary can arrive after the session, whenever the next sync completes.
-    private func reconcilePostWorkoutSummaryNotifications() async {
+    private func reconcilePostWorkoutSummaryNotifications(
+        notificationBudget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
         let newest = await repo.workoutRows().map(\.startTs).max()
-        await PostWorkoutSummaryNotifications.postIfAuthorized(newestWorkoutStart: newest)
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: newest,
+            budget: notificationBudget
+        )
     }
 
     /// Data-triggered twin of Android's morning recap. It runs only from a completed persisted-history
     /// refresh, so opening the app on an old row cannot manufacture a fresh-notification event.
-    private func reconcileMorningRecapNotifications() async {
+    private func reconcileMorningRecapNotifications(
+        notificationBudget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
         guard let row = repo.today, row.totalSleepMin != nil else { return }
         let sleepScore = Repository.dailyColumn(key: "sleep_performance", day: row)
         await MorningRecapNotifications.postIfAuthorized(
             reportDay: row.day,
-            chargeOrRestPresent: row.recovery != nil || sleepScore != nil
+            recoveryPresent: row.recovery != nil,
+            sleepScorePresent: sleepScore != nil,
+            budget: notificationBudget
         )
     }
 
@@ -1623,8 +1741,7 @@ final class AppModel: ObservableObject {
                     title: String(localized: "appwide.stress_checkin.notification_title"),
                     body: String(localized: "appwide.stress_checkin.notification_body"),
                     route: .breathe
-                ),
-                now: now
+                )
             )
         }
         live.append(log: "Stress check-in · short-window HRV moved below recent baseline")
@@ -1795,6 +1912,23 @@ final class AppModel: ObservableObject {
         } else {
             await repo.refresh()
         }
+    }
+
+    /// Own the entire Apple Health projection refresh and its routine notification reconciliation.
+    /// Repository publishers fire during `refreshAfterAppleHealthSync`; holding the coordination gate
+    /// across that refresh prevents a separate adaptive task from escaping the one-prompt sync budget.
+    func processAppleHealthProjectionChange(
+        authorized: Bool,
+        now: Date = Date()
+    ) async {
+        postSyncRoutineCoordinationActive = true
+        contextualEvaluationTask?.cancel()
+        contextualEvaluationTask = nil
+        defer { postSyncRoutineCoordinationActive = false }
+
+        await refreshAfterAppleHealthSync(authorized: authorized, now: now)
+        repo.noteAgeMetricsChanged()
+        await reconcileRoutineNotificationsAfterExternalHealthSync()
     }
     #endif
 
@@ -2401,7 +2535,11 @@ final class AppModel: ObservableObject {
                 live.append(log: "Double-tap → confirmed \(amountML) ml water")
                 Task { [weak self] in
                     guard let self else { return }
-                    _ = await self.repo.logHydration(amountMl: amountML)
+                    let result = await self.repo.logHydration(amountMl: amountML)
+                    guard result.succeeded else {
+                        self.live.append(log: "Double-tap → water log failed")
+                        return
+                    }
                     HydrationReminders.markDoubleTapConfirmed(contextKey: pending.contextKey)
                     self.buzz(loops: 1)
                 }
@@ -2657,12 +2795,16 @@ final class AppModel: ObservableObject {
     /// Background refreshes await this boundary so iOS cannot complete the BG task between enqueueing
     /// and evaluating newly imported sleep/vital evidence.
     func reevaluateContextualInterventionsNow() async {
+        guard operationalWorkStarted else { return }
+        adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = nil
         await evaluateContextualInterventions()
     }
 
     private func scheduleContextualInterventionEvaluation() {
+        guard operationalWorkStarted, !postSyncRoutineCoordinationActive else { return }
+        adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = Task { [weak self] in
             await Task.yield()
@@ -2675,8 +2817,11 @@ final class AppModel: ObservableObject {
     /// two fresh low days; explicit body temperature gets a recheck-only review; VO2 needs two persistent
     /// recent points against an older reference. Skin temperature stays in the corroborated multi-vital
     /// rule and is never treated as body temperature.
-    private func evaluateContextualInterventions() async {
-        evaluateAdaptiveDayGuidance()
+    private func evaluateContextualInterventions(
+        notificationBudget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
+        guard operationalWorkStarted else { return }
+        await evaluateAdaptiveDayGuidance(notificationBudget: notificationBudget)
 
         if ContextualInterventionSettings.vitalReviewEnabled {
             if let oxygen = ContextualVitalPolicy.oxygenCandidate(sourceRows: repo.vitalRows) {
@@ -2768,15 +2913,29 @@ final class AppModel: ObservableObject {
     /// Evaluate fresh sleep, personal sleep timing, and a persisted timezone transition through one
     /// ranked policy. The offset baseline is maintained even while the feature is off so enabling it
     /// later cannot resurrect an old trip as a new observation.
-    private func evaluateAdaptiveDayGuidance(now: Date = Date()) {
+    private func evaluateAdaptiveDayGuidance(
+        now: Date = Date(),
+        notificationBudget: PostSyncRoutineNotificationBudget? = nil
+    ) async {
+        guard operationalWorkStarted else { return }
+        let evaluationGeneration = adaptiveDayEvaluationGate.begin()
         let nowSec = Int(now.timeIntervalSince1970)
         let offset = TimeZone.autoupdatingCurrent.secondsFromGMT(for: now)
+        let priorRoutineHistoryStart = AdaptiveDayTimeZoneStore.routineHistoryStartSec()
         let change = AdaptiveDayTimeZoneStore.observe(
             offsetSec: offset,
             nowSec: nowSec
         )
+        let routineHistoryStart = AdaptiveDayTimeZoneStore.routineHistoryStartSec()
+        if routineHistoryStart != priorRoutineHistoryStart {
+            AppDiagnosticsRecorder.shared.record(
+                "adaptive_day.time_zone_baseline",
+                fields: ["outcome": "routine_history_reset"]
+            )
+        }
         guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled else {
             AdaptiveDayTimeZoneStore.discardPending()
+            ContextualInterventionCenter.clearAdaptiveDayArtifacts()
             return
         }
         let today = max(Repository.logicalDayKey(now), Repository.localDayKey(now))
@@ -2785,19 +2944,177 @@ final class AppModel: ObservableObject {
             nowSec: nowSec,
             currentTimeZoneOffsetSec: offset,
             sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed,
             sleepDays: repo.days.map {
                 .init(day: $0.day, totalSleepMinutes: $0.totalSleepMin)
             },
             sleepWindows: repo.sleeps.map {
                 .init(startSec: $0.effectiveStartTs, endSec: $0.endTs)
             },
-            timeZoneChange: change
+            timeZoneChange: change,
+            routineHistoryStartSec: routineHistoryStart
         ))
-        guard let recommendation else { return }
-        ContextualInterventionCenter.post(
-            AdaptiveDayInterventionFactory.candidate(from: recommendation),
-            now: now
+        if let recommendation, recommendation.kind == .travelAdjustment {
+            guard !Task.isCancelled else { return }
+            AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                keepingFingerprint: nil
+            )
+            await postAdaptiveIntervention(
+                AdaptiveDayInterventionFactory.candidate(from: recommendation),
+                notificationBudget: notificationBudget
+            )
+            return
+        }
+
+        let calendarRefresh = await PlannedWorkoutCalendarStore.shared.refreshOutcome(now: now)
+        guard !Task.isCancelled else { return }
+        guard adaptiveDayEvaluationGate.isCurrent(evaluationGeneration) else { return }
+        let plannedWorkout: PlannedWorkoutCalendarSnapshot?
+        switch calendarRefresh {
+        case .completed(let snapshot):
+            plannedWorkout = snapshot
+        case .superseded:
+            return
+        case .failed:
+            if let recommendation {
+                await postAdaptiveIntervention(
+                    AdaptiveDayInterventionFactory.candidate(from: recommendation),
+                    notificationBudget: notificationBudget
+                )
+            }
+            return
+        }
+        let currentSleepAggregate = repo.days
+            .last(where: { $0.day == today })?
+            .totalSleepMin
+        let currentSleepObservation: (endSec: Int, durationMinutes: Double)? =
+            repo.sleeps
+            .sorted { $0.endTs > $1.endTs }
+            .compactMap { session in
+                let end = Date(timeIntervalSince1970: TimeInterval(session.endTs))
+                return max(
+                    Repository.logicalDayKey(end),
+                    Repository.localDayKey(end)
+                ) == today
+                    ? session
+                    : nil
+            }
+            .compactMap { session in
+                let durationMinutes =
+                    Double(session.endTs - session.effectiveStartTs) / 60.0
+                guard DailyActionPlanner.matchedSleepObservationEndSec(
+                    aggregateMinutes: currentSleepAggregate,
+                    sessionDurationMinutes: durationMinutes,
+                    sessionEndSec: session.endTs,
+                    nowSec: nowSec
+                ) != nil else { return nil }
+                return (session.endTs, durationMinutes)
+            }
+            .first
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: ReadinessEngine.evaluate(days: repo.days, today: today),
+            checkIn: behavior.dailyActionCheckIn(for: today),
+            recentEffort: repo.days.map {
+                DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
+            },
+            recentSleep: repo.days.map {
+                DailyActionPlanner.SleepDay(
+                    day: $0.day,
+                    minutes: $0.totalSleepMin,
+                    observedAtSec: $0.day == today
+                        ? currentSleepObservation?.endSec
+                        : nil,
+                    observedSessionDurationMinutes: $0.day == today
+                        ? currentSleepObservation?.durationMinutes
+                        : nil
+                )
+            },
+            sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed,
+            plannedWorkout: plannedWorkout?.plannedWorkout(forPlanningDay: today),
+            nowSec: nowSec
         )
+        if let adjustment = plan.workoutAdjustment {
+            let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+                from: adjustment,
+                day: today,
+                observedAt: now
+            )
+            let leadSeconds = adjustment.startSec - nowSec
+            if leadSeconds <= 0 {
+                AdaptivePlannedWorkoutScheduler.cancelPending()
+                ContextualInterventionCenter.expirePlannedWorkoutArtifacts(
+                    fingerprint: candidate.fingerprint
+                )
+            } else {
+                ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                    keepingFingerprint: candidate.fingerprint
+                )
+                if leadSeconds > Int(AdaptivePlannedWorkoutScheduler.leadTime) {
+                    let scheduled = await AdaptivePlannedWorkoutScheduler.schedule(
+                        adjustment: adjustment,
+                        day: today,
+                        now: now
+                    ) { [weak self] in
+                        await self?.evaluateAdaptiveDayGuidance(now: Date())
+                    }
+                    guard !Task.isCancelled else { return }
+                    guard adaptiveDayEvaluationGate.isCurrent(evaluationGeneration) else {
+                        return
+                    }
+                    if scheduled { return }
+                } else {
+                    AdaptivePlannedWorkoutScheduler.cancelPending()
+                }
+                if leadSeconds <= Int(AdaptivePlannedWorkoutScheduler.leadTime) {
+                    await postAdaptiveIntervention(
+                        candidate,
+                        notificationBudget: notificationBudget
+                    ) { [weak self] retryAt in
+                        _ = AdaptivePlannedWorkoutScheduler.scheduleRetry(
+                            start: Date(
+                                timeIntervalSince1970: TimeInterval(adjustment.startSec)
+                            ),
+                            fingerprint: candidate.fingerprint,
+                            retryAt: retryAt
+                        ) { [weak self] in
+                            await self?.evaluateAdaptiveDayGuidance(now: Date())
+                        }
+                    }
+                    return
+                }
+            }
+        } else {
+            AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcileMissingPlannedWorkoutArtifacts(
+                now: now
+            )
+        }
+
+        if let recommendation {
+            await postAdaptiveIntervention(
+                AdaptiveDayInterventionFactory.candidate(from: recommendation),
+                notificationBudget: notificationBudget
+            )
+        }
+    }
+
+    private func postAdaptiveIntervention(
+        _ candidate: ContextualInterventionCandidate,
+        notificationBudget: PostSyncRoutineNotificationBudget?,
+        onRetry: (@MainActor @Sendable (Date) -> Void)? = nil
+    ) async {
+        if let notificationBudget {
+            await ContextualInterventionCenter.post(
+                candidate,
+                using: notificationBudget,
+                onRetry: onRetry
+            )
+        } else {
+            ContextualInterventionCenter.post(candidate, onRetry: onRetry)
+        }
     }
 
     // MARK: - v5 skin-temp suite engines (cycle phase + body clock)

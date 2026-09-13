@@ -1176,6 +1176,231 @@ extension WhoopStore {
                     .defaults(to: false)
             }
         }
+        // v55: editable Apple hydration entries and their daily metric projection must commit together.
+        // This replaces the former split SQLite/UserDefaults write without changing Android's scalar-only
+        // hydration contract.
+        migrator.registerMigration("v55-hydration-entry") { db in
+            try db.create(table: "hydrationEntry") { t in
+                t.column("id", .text).primaryKey()
+                t.column("deviceId", .text).notNull()
+                t.column("day", .text).notNull()
+                t.column("amountML", .integer).notNull()
+                t.column("loggedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_hydrationEntry_device_day_loggedAt",
+                on: "hydrationEntry",
+                columns: ["deviceId", "day", "loggedAt"]
+            )
+        }
+        // v56: hydration rows enter the managed pipeline under the storage map's client-encrypted
+        // contract. This installs local tracking/backfill for v55 databases; production transport
+        // stays gated until the adapter implements client encryption and key recovery.
+        migrator.registerMigration("v56-managed-hydration-document") { db in
+            try installManagedDocumentTriggers(
+                db,
+                specs: managedDocumentTableSpecs.filter {
+                    $0.tableName == "hydrationEntry"
+                },
+                seedExisting: true
+            )
+        }
+        // v57: crash-safe O(1) analysis invalidation. The former idle/resume gate scanned COUNT/MAX across
+        // every score-bearing table for every source. One durable row now carries a monotonic input
+        // generation and the newest generation a fully successful pass acknowledged. Analysis snapshots
+        // without mutating this row; process death therefore cannot lose work, and a later score-bearing
+        // write remains pending after an older claim is acknowledged. Transport-only `synced` updates are
+        // excluded.
+        migrator.registerMigration("v57-analysis-dirty-source") { db in
+            try db.create(table: "analysisDirtySource") { t in
+                t.column("deviceId", .text).notNull().primaryKey()
+                t.column("generation", .integer).notNull()
+                t.column("acknowledgedGeneration", .integer).notNull()
+                t.column("earliestAffectedTs", .integer)
+                t.column("latestAffectedTs", .integer)
+            }
+            try installAnalysisDirtySourceTriggers(db)
+
+            // Existing databases need one real pass after upgrading. Seed from the score-bearing tables
+            // themselves instead of the registry: imported or legacy source ids are not guaranteed to have
+            // a registry row, while an empty paired source has nothing to score. The one-time migration scan
+            // also captures the complete historical extent that the first v57 pass must cover.
+            let sourceRows = analysisDirtySourceTables.map { table in
+                #"SELECT deviceId, ts FROM "\#(table)""#
+            }.joined(separator: "\nUNION ALL\n")
+            try db.execute(sql: """
+                INSERT INTO analysisDirtySource (
+                    deviceId, generation, acknowledgedGeneration,
+                    earliestAffectedTs, latestAffectedTs
+                )
+                SELECT source.deviceId, 1, 0, MIN(source.ts), MAX(source.ts)
+                FROM (
+                    \(sourceRows)
+                ) AS source
+                WHERE \(analysisNonBlankDeviceIdSQL("source.deviceId"))
+                GROUP BY source.deviceId
+                """)
+        }
+        // v58: forward repair for pre-release databases that had already recorded the original v57
+        // generation-only migration before affected-time bounds were added. A migration identifier is
+        // immutable once GRDB records it, so changing v57 alone strands those databases on the old shape.
+        // Add the nullable columns when absent, replace every old trigger with the bounded form, and seed
+        // one pending full-history pass only when the existing dirty row does not already cover its source.
+        migrator.registerMigration("v58-analysis-dirty-bounds-repair") { db in
+            let tableExists = try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'analysisDirtySource'
+                    )
+                    """
+            ) == 1
+            var requiresHistoryRepair = !tableExists
+            if !tableExists {
+                try db.create(table: "analysisDirtySource") { t in
+                    t.column("deviceId", .text).notNull().primaryKey()
+                    t.column("generation", .integer).notNull()
+                    t.column("acknowledgedGeneration", .integer).notNull()
+                    t.column("earliestAffectedTs", .integer)
+                    t.column("latestAffectedTs", .integer)
+                }
+            } else {
+                let columns = Set(
+                    try Row.fetchAll(
+                        db,
+                        sql: #"PRAGMA table_info("analysisDirtySource")"#
+                    ).compactMap { row -> String? in row["name"] }
+                )
+                requiresHistoryRepair =
+                    !columns.contains("earliestAffectedTs")
+                    || !columns.contains("latestAffectedTs")
+                if !columns.contains("earliestAffectedTs") {
+                    try db.alter(table: "analysisDirtySource") { t in
+                        t.add(column: "earliestAffectedTs", .integer)
+                    }
+                }
+                if !columns.contains("latestAffectedTs") {
+                    try db.alter(table: "analysisDirtySource") { t in
+                        t.add(column: "latestAffectedTs", .integer)
+                    }
+                }
+            }
+
+            try installAnalysisDirtySourceTriggers(db)
+            guard requiresHistoryRepair else {
+                return
+            }
+
+            let sourceRows = analysisDirtySourceTables.map { table in
+                #"SELECT deviceId, ts FROM "\#(table)""#
+            }.joined(separator: "\nUNION ALL\n")
+            try db.execute(sql: """
+                CREATE TEMP TABLE analysisDirtyBoundsRepair AS
+                SELECT source.deviceId AS deviceId,
+                       MIN(source.ts) AS earliestAffectedTs,
+                       MAX(source.ts) AS latestAffectedTs
+                FROM (
+                    \(sourceRows)
+                ) AS source
+                WHERE \(analysisNonBlankDeviceIdSQL("source.deviceId"))
+                GROUP BY source.deviceId;
+
+                UPDATE analysisDirtySource
+                SET generation = CASE
+                        WHEN generation > acknowledgedGeneration
+                         AND earliestAffectedTs IS NOT NULL
+                         AND latestAffectedTs IS NOT NULL
+                         AND earliestAffectedTs <= (
+                             SELECT earliestAffectedTs
+                             FROM analysisDirtyBoundsRepair
+                             WHERE deviceId = analysisDirtySource.deviceId
+                         )
+                         AND latestAffectedTs >= (
+                             SELECT latestAffectedTs
+                             FROM analysisDirtyBoundsRepair
+                             WHERE deviceId = analysisDirtySource.deviceId
+                         )
+                        THEN generation
+                        ELSE generation + 1
+                    END,
+                    earliestAffectedTs = CASE
+                        WHEN generation > acknowledgedGeneration
+                         AND earliestAffectedTs IS NOT NULL
+                        THEN MIN(
+                            earliestAffectedTs,
+                            (
+                                SELECT earliestAffectedTs
+                                FROM analysisDirtyBoundsRepair
+                                WHERE deviceId = analysisDirtySource.deviceId
+                            )
+                        )
+                        ELSE (
+                            SELECT earliestAffectedTs
+                            FROM analysisDirtyBoundsRepair
+                            WHERE deviceId = analysisDirtySource.deviceId
+                        )
+                    END,
+                    latestAffectedTs = CASE
+                        WHEN generation > acknowledgedGeneration
+                         AND latestAffectedTs IS NOT NULL
+                        THEN MAX(
+                            latestAffectedTs,
+                            (
+                                SELECT latestAffectedTs
+                                FROM analysisDirtyBoundsRepair
+                                WHERE deviceId = analysisDirtySource.deviceId
+                            )
+                        )
+                        ELSE (
+                            SELECT latestAffectedTs
+                            FROM analysisDirtyBoundsRepair
+                            WHERE deviceId = analysisDirtySource.deviceId
+                        )
+                    END
+                WHERE deviceId IN (
+                    SELECT deviceId FROM analysisDirtyBoundsRepair
+                );
+
+                INSERT INTO analysisDirtySource (
+                    deviceId, generation, acknowledgedGeneration,
+                    earliestAffectedTs, latestAffectedTs
+                )
+                SELECT repair.deviceId, 1, 0,
+                       repair.earliestAffectedTs, repair.latestAffectedTs
+                FROM analysisDirtyBoundsRepair AS repair
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM analysisDirtySource
+                    WHERE deviceId = repair.deviceId
+                );
+
+                DROP TABLE analysisDirtyBoundsRepair;
+                """)
+        }
+        // v59: managed-document mutations belong only to the account active when the local change
+        // occurred. Legacy rows have no trustworthy owner, so quarantine them under an unbound random
+        // profile rather than guessing from account state. Signed-out edits clear stale intent for the
+        // changed key but create no new upload, and a later account can only read its own partition.
+        migrator.registerMigration("v59-managed-document-account-isolation") { db in
+            try migrateManagedDocumentAccountIsolation(db)
+        }
+        // v60: a filtered change-feed cursor is valid only for the document capability set that
+        // produced it. Snapshot checkpoints carry the target version so interrupted upgrades resume
+        // safely, while legacy cursors force one bounded snapshot before incremental sync continues.
+        migrator.registerMigration("v60-managed-change-feed-capability") { db in
+            try db.alter(table: "managedChangeCursor") { t in
+                t.add(
+                    column: "changeFeedCapabilityVersion",
+                    .integer
+                ).notNull().defaults(to: 0)
+            }
+            try db.alter(table: "managedSnapshotRestore") { t in
+                t.add(
+                    column: "changeFeedCapabilityVersion",
+                    .integer
+                ).notNull().defaults(to: 0)
+            }
+        }
         return migrator
     }
 
@@ -1204,7 +1429,133 @@ extension WhoopStore {
     }
 }
 
+extension WhoopStore {
+    /// Score-bearing timestamped tables considered by both trigger installation and ownership
+    /// invalidation. Keep one authoritative list so registry mutations cannot drift from ingestion.
+    static let analysisDirtySourceTables = [
+        "hrSample",
+        "ppgHrSample",
+        "rrInterval",
+        "gravitySample",
+        "respSample",
+        "skinTempSample",
+        "spo2Sample",
+        "stepSample",
+        "sleepStateSample",
+        "event",
+    ]
+}
+
 private extension WhoopStore {
+    static func installAnalysisDirtySourceTriggers(_ db: Database) throws {
+        for table in analysisDirtySourceTables {
+            let scoreColumns = try Row.fetchAll(
+                db,
+                sql: "PRAGMA table_info(\"\(table)\")"
+            ).compactMap { row -> String? in
+                row["name"]
+            }.filter { $0 != "synced" }
+            guard !scoreColumns.isEmpty else { continue }
+
+            let updateColumns = scoreColumns
+                .map { "\"\($0)\"" }
+                .joined(separator: ", ")
+            let prefix = "analysis_dirty_\(table)"
+            try db.execute(sql: """
+                DROP TRIGGER IF EXISTS "\(prefix)_insert";
+                DROP TRIGGER IF EXISTS "\(prefix)_delete";
+                DROP TRIGGER IF EXISTS "\(prefix)_update";
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER "\(prefix)_insert"
+                AFTER INSERT ON "\(table)"
+                BEGIN
+                    \(analysisGenerationAdvanceSQL(
+                        deviceId: "NEW.deviceId",
+                        earliestAffectedTs: "NEW.ts",
+                        latestAffectedTs: "NEW.ts"
+                    ));
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER "\(prefix)_delete"
+                AFTER DELETE ON "\(table)"
+                BEGIN
+                    \(analysisGenerationAdvanceSQL(
+                        deviceId: "OLD.deviceId",
+                        earliestAffectedTs: "OLD.ts",
+                        latestAffectedTs: "OLD.ts"
+                    ));
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER "\(prefix)_update"
+                AFTER UPDATE OF \(updateColumns) ON "\(table)"
+                BEGIN
+                    \(analysisGenerationAdvanceSQL(
+                        deviceId: "OLD.deviceId",
+                        earliestAffectedTs: """
+                            CASE WHEN NEW.deviceId = OLD.deviceId
+                                 THEN MIN(OLD.ts, NEW.ts) ELSE OLD.ts END
+                            """,
+                        latestAffectedTs: """
+                            CASE WHEN NEW.deviceId = OLD.deviceId
+                                 THEN MAX(OLD.ts, NEW.ts) ELSE OLD.ts END
+                            """
+                    ));
+                    \(analysisGenerationAdvanceSQL(
+                        deviceId: "NEW.deviceId",
+                        earliestAffectedTs: "NEW.ts",
+                        latestAffectedTs: "NEW.ts",
+                        additionalPredicate: "NEW.deviceId <> OLD.deviceId"
+                    ));
+                END
+                """)
+        }
+    }
+
+    /// UPDATE + guarded INSERT deliberately avoids an UPSERT clause inside a trigger. SQLite can propagate
+    /// an outer statement's conflict policy into trigger writes; this shape is conflict-proof even when a
+    /// score-bearing row arrives through `INSERT ... ON CONFLICT DO UPDATE`.
+    static func analysisGenerationAdvanceSQL(
+        deviceId: String,
+        earliestAffectedTs: String,
+        latestAffectedTs: String,
+        additionalPredicate: String? = nil
+    ) -> String {
+        let extra = additionalPredicate.map { "\n  AND \($0)" } ?? ""
+        let valid = analysisNonBlankDeviceIdSQL(deviceId)
+        return """
+            UPDATE analysisDirtySource
+            SET generation = generation + 1,
+                earliestAffectedTs = CASE
+                    WHEN earliestAffectedTs IS NULL THEN \(earliestAffectedTs)
+                    ELSE MIN(earliestAffectedTs, \(earliestAffectedTs))
+                END,
+                latestAffectedTs = CASE
+                    WHEN latestAffectedTs IS NULL THEN \(latestAffectedTs)
+                    ELSE MAX(latestAffectedTs, \(latestAffectedTs))
+                END
+            WHERE deviceId = \(deviceId)
+              AND \(valid)\(extra);
+            INSERT INTO analysisDirtySource (
+                deviceId, generation, acknowledgedGeneration,
+                earliestAffectedTs, latestAffectedTs
+            )
+            SELECT \(deviceId), 1, 0, \(earliestAffectedTs), \(latestAffectedTs)
+            WHERE \(valid)\(extra)
+              AND NOT EXISTS (
+                  SELECT 1 FROM analysisDirtySource
+                  WHERE deviceId = \(deviceId)
+              )
+            """
+    }
+
+    static func analysisNonBlankDeviceIdSQL(_ expression: String) -> String {
+        "length(trim(\(expression), char(9) || char(10) || char(11) || " +
+            "char(12) || char(13) || ' ')) > 0"
+    }
+
     struct ManagedDirtyTriggerSpec {
         let table: String
         let timestampColumn: String

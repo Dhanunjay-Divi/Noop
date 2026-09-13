@@ -178,6 +178,7 @@ final class IntelligenceDaySourceTests: XCTestCase {
         XCTAssertEqual(first.unchangedDeleteCount, 0)
         XCTAssertEqual(first.failedDeleteCount, 0)
         XCTAssertEqual(first.failedReadCount, 0)
+        XCTAssertFalse(first.cancelled)
         let computedRows = try await store.sleepSessions(
             deviceId: "computed", from: 0, to: 100_000, limit: 20)
         let ouraRows = try await store.sleepSessions(
@@ -200,6 +201,7 @@ final class IntelligenceDaySourceTests: XCTestCase {
             freshStarts: [10_600])
         XCTAssertTrue(second.deleted.isEmpty, "a completed repair must be idempotent")
         XCTAssertEqual(second.unchangedDeleteCount, 0)
+        XCTAssertFalse(second.cancelled)
         XCTAssertFalse(second.hasFailures)
     }
 
@@ -230,6 +232,31 @@ final class IntelligenceDaySourceTests: XCTestCase {
         let rowsAfterFailure = try await store.sleepSessions(
             deviceId: "oura", from: 0, to: 30_000, limit: 20)
         XCTAssertEqual(rowsAfterFailure.count, 2, "a failed delete must leave both source rows intact")
+    }
+
+    @MainActor
+    func testSleepRepairCancellationIsNotDowngradedToADeleteFailure() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertSleepSessions([
+            sleep(10_000, 20_000),
+            sleep(10_600, 19_000),
+        ], deviceId: "oura")
+
+        let result = await IntelligenceEngine.healBankedSleepSessions(
+            store: store,
+            deviceIds: ["oura"],
+            from: 0,
+            to: 30_000,
+            oldestDay: "1970-01-01",
+            newestDay: "2100-01-01",
+            timezoneOffsetSeconds: 0,
+            freshStarts: [],
+            deleteSession: { _, _ in throw CancellationError() })
+
+        XCTAssertTrue(result.cancelled)
+        XCTAssertTrue(result.deleted.isEmpty)
+        XCTAssertEqual(result.failedDeleteCount, 0)
+        XCTAssertTrue(result.hasFailures)
     }
 
     // MARK: - diagnostic line shape (the strap-log proof the next report ships)

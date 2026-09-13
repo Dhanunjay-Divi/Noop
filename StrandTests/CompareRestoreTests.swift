@@ -12,6 +12,7 @@ final class CompareRestoreTests: XCTestCase {
     private let recovery = "my-whoop:recovery"
     private let hrv = "my-whoop:hrv"
     private let sleep = "my-whoop:sleep_performance"
+    private let bmi = "apple-health:bmi"
 
     func testBlankYieldsNilSoTheCallerUsesDefaults() {
         XCTAssertNil(CompareView.restoreSelection("", minSelection: 2, maxSelection: 4))
@@ -47,5 +48,30 @@ final class CompareRestoreTests: XCTestCase {
         XCTAssertEqual(
             CompareView.restoreSelection("\(recovery),\(recovery),\(hrv)", minSelection: 2, maxSelection: 4)?.map(\.id),
             [recovery, hrv])
+    }
+
+    func testBmiSelectionRequiresEligibleProfileButCatalogRetainsDescriptor() {
+        XCTAssertNotNil(MetricCatalog.all.first { $0.id == bmi })
+        XCTAssertNil(MetricCatalog.visible(allowsBMI: false).first { $0.id == bmi })
+        XCTAssertNotNil(MetricCatalog.visible(allowsBMI: true).first { $0.id == bmi })
+
+        XCTAssertEqual(
+            CompareView.restoreSelection(
+                "\(bmi),\(recovery)",
+                minSelection: 1,
+                maxSelection: 4,
+                allowsBMI: false
+            )?.map(\.id),
+            [recovery]
+        )
+        XCTAssertEqual(
+            CompareView.restoreSelection(
+                "\(bmi),\(recovery)",
+                minSelection: 1,
+                maxSelection: 4,
+                allowsBMI: true
+            )?.map(\.id),
+            [bmi, recovery]
+        )
     }
 }

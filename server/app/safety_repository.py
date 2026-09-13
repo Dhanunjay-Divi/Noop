@@ -529,7 +529,9 @@ class MemorySafetyRepository:
                 row["dispatch_id"] in dispatch_ids for row in self._responses.values()
             )
             row_count += sum(
-                dispatch_id in self._locations for dispatch_id in dispatch_ids
+                dispatch_id in self._locations
+                and self._dispatches[dispatch_id]["status"] in {"open", "acknowledged"}
+                for dispatch_id in dispatch_ids
             )
             if row_count > max_rows:
                 raise ExportLimitExceededError(max_rows)
@@ -1444,6 +1446,7 @@ class MemorySafetyRepository:
                         row["dispatch_id"],
                         now=now,
                     )
+                    self._delete_incident_location(row["dispatch_id"])
             if any(
                 row["profile_id"] == profile_id
                 and row["status"] in {"open", "acknowledged"}
@@ -2151,6 +2154,7 @@ class MemorySafetyRepository:
                         dispatch["dispatch_id"],
                         now=now,
                     )
+                    self._delete_incident_location(dispatch["dispatch_id"])
                     changed += 1
             return changed
 
@@ -2173,18 +2177,25 @@ class MemorySafetyRepository:
             profile = self._profiles.get(dispatch["profile_id"])
             if profile is None:
                 return None
-            effective_status = (
-                "expired"
-                if dispatch["status"] in {"open", "acknowledged"}
+            if (
+                dispatch["status"] in {"open", "acknowledged"}
                 and dispatch["expires_at"] <= now
-                else dispatch["status"]
-            )
+            ):
+                dispatch.update(
+                    {
+                        "status": "expired",
+                        "updated_at": now,
+                        "completed_at": now,
+                    }
+                )
+                self._cancel_pending_deliveries(dispatch_id, now=now)
+                self._delete_incident_location(dispatch_id)
             return {
                 "dispatch_id": dispatch_id,
                 "contact_id": contact_id,
                 "contact_display_name": contact["display_name"],
                 "owner_display_name": profile["display_name"],
-                "status": effective_status,
+                "status": dispatch["status"],
                 "expires_at": dispatch["expires_at"],
                 "trigger": dispatch["trigger"],
                 "share_duration_hours": dispatch["share_duration_hours"],
@@ -2192,7 +2203,7 @@ class MemorySafetyRepository:
                 "response": self._responses.get((dispatch_id, contact_id)),
                 "latest_location": (
                     self._locations.get(dispatch_id)
-                    if effective_status in {"open", "acknowledged"}
+                    if dispatch["status"] in {"open", "acknowledged"}
                     else None
                 ),
             }
@@ -2224,6 +2235,7 @@ class MemorySafetyRepository:
                     }
                 )
                 self._cancel_pending_deliveries(dispatch_id, now=now)
+                self._delete_incident_location(dispatch_id)
             if dispatch["status"] in {"resolved", "cancelled", "expired", "failed"}:
                 raise SafetyConflictError(
                     "this safety incident is no longer accepting responses"
@@ -2274,6 +2286,7 @@ class MemorySafetyRepository:
                 raise SafetyNotFoundError("safety incident was not found")
             target = "resolved" if action == "resolve" else "cancelled"
             if dispatch["status"] == target:
+                self._delete_incident_location(dispatch_id)
                 return self._dispatch_payload(
                     dispatch_id,
                     idempotent_replay=True,
@@ -2293,6 +2306,7 @@ class MemorySafetyRepository:
                 }
             )
             self._cancel_pending_deliveries(dispatch_id, now=now)
+            self._delete_incident_location(dispatch_id)
             return self._dispatch_payload(
                 dispatch_id,
                 idempotent_replay=False,
@@ -2583,6 +2597,9 @@ class MemorySafetyRepository:
                     }
                 )
 
+    def _delete_incident_location(self, dispatch_id: str) -> None:
+        self._locations.pop(dispatch_id, None)
+
     def _expedite_voice_fallback(
         self, source_delivery: dict[str, Any], now: datetime
     ) -> None:
@@ -2625,6 +2642,7 @@ class MemorySafetyRepository:
                     "completed_at": now,
                 }
             )
+            self._delete_incident_location(dispatch_id)
 
     def _finish_started_attempt(
         self,
@@ -2760,7 +2778,11 @@ class MemorySafetyRepository:
             "acknowledged_contact_display_name": acknowledged_name,
             "deliveries": deliveries,
             "responses": responses,
-            "latest_location": self._locations.get(dispatch_id),
+            "latest_location": (
+                self._locations.get(dispatch_id)
+                if dispatch["status"] in {"open", "acknowledged"}
+                else None
+            ),
         }
 
 
@@ -3009,10 +3031,13 @@ class PostgresSafetyRepository:
                           )
                           UNION ALL
                           SELECT 1
-                          FROM safety_incident_locations
-                          WHERE dispatch_id IN (
+                          FROM safety_incident_locations l
+                          JOIN safety_dispatches i
+                            ON i.dispatch_id = l.dispatch_id
+                          WHERE l.dispatch_id IN (
                             SELECT dispatch_id FROM selected_dispatches
                           )
+                            AND i.status IN ('open', 'acknowledged')
                           LIMIT $4
                         ) AS bounded_export
                         """,
@@ -3172,11 +3197,14 @@ class PostgresSafetyRepository:
                     )
                     locations = await connection.fetch(
                         """
-                        SELECT dispatch_id, sequence, latitude, longitude,
-                               horizontal_accuracy_meters, captured_at,
-                               received_at
-                        FROM safety_incident_locations
-                        WHERE dispatch_id = ANY($1::uuid[])
+                        SELECT l.dispatch_id, l.sequence, l.latitude, l.longitude,
+                               l.horizontal_accuracy_meters, l.captured_at,
+                               l.received_at
+                        FROM safety_incident_locations l
+                        JOIN safety_dispatches i
+                          ON i.dispatch_id = l.dispatch_id
+                        WHERE l.dispatch_id = ANY($1::uuid[])
+                          AND i.status IN ('open', 'acknowledged')
                         """,
                         dispatch_ids,
                     )
@@ -4626,6 +4654,7 @@ class PostgresSafetyRepository:
                     now,
                 )
                 if expired:
+                    expired_ids = [row["dispatch_id"] for row in expired]
                     await connection.execute(
                         """
                         UPDATE safety_deliveries
@@ -4637,8 +4666,12 @@ class PostgresSafetyRepository:
                         WHERE dispatch_id = ANY($1::uuid[])
                           AND status IN ('pending', 'retry_wait', 'leased')
                         """,
-                        [row["dispatch_id"] for row in expired],
+                        expired_ids,
                         now,
+                    )
+                    await self._delete_incident_locations(
+                        connection,
+                        expired_ids,
                     )
                 active = await connection.fetchval(
                     """
@@ -5657,6 +5690,7 @@ class PostgresSafetyRepository:
                     now,
                 )
                 if rows:
+                    expired_ids = [row["dispatch_id"] for row in rows]
                     await connection.execute(
                         """
                         UPDATE safety_deliveries
@@ -5668,8 +5702,12 @@ class PostgresSafetyRepository:
                         WHERE dispatch_id = ANY($1::uuid[])
                           AND status IN ('pending', 'retry_wait', 'leased')
                         """,
-                        [row["dispatch_id"] for row in rows],
+                        expired_ids,
                         now,
+                    )
+                    await self._delete_incident_locations(
+                        connection,
+                        expired_ids,
                     )
                 return len(rows)
 
@@ -5680,17 +5718,38 @@ class PostgresSafetyRepository:
         contact_id: str,
         now: datetime,
     ) -> dict[str, Any] | None:
-        row = await self._pool().fetchrow(
-            """
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                expired_dispatch_id = await connection.fetchval(
+                    """
+                    UPDATE safety_dispatches
+                    SET status = 'expired',
+                        updated_at = $2,
+                        completed_at = $2
+                    WHERE dispatch_id = $1
+                      AND status IN ('open', 'acknowledged')
+                      AND expires_at <= $2
+                    RETURNING dispatch_id
+                    """,
+                    UUID(dispatch_id),
+                    now,
+                )
+                if expired_dispatch_id is not None:
+                    await self._cancel_pending_deliveries(
+                        connection,
+                        dispatch_id=dispatch_id,
+                        now=now,
+                    )
+                    await self._delete_incident_locations(
+                        connection,
+                        [expired_dispatch_id],
+                    )
+                row = await connection.fetchrow(
+                    """
             SELECT i.dispatch_id, c.contact_id,
                    c.display_name AS contact_display_name,
                    p.display_name AS owner_display_name,
-                   CASE
-                     WHEN i.status IN ('open', 'acknowledged')
-                          AND i.expires_at <= $3
-                     THEN 'expired'
-                     ELSE i.status
-                   END AS status,
+                   i.status,
                    i.expires_at, i.trigger, i.share_duration_hours, i.evidence,
                    r.decision,
                    r.source,
@@ -5715,10 +5774,9 @@ class PostgresSafetyRepository:
             WHERE i.dispatch_id = $1
             LIMIT 1
             """,
-            UUID(dispatch_id),
-            UUID(contact_id),
-            now,
-        )
+                    UUID(dispatch_id),
+                    UUID(contact_id),
+                )
         if row is None:
             return None
         decoded = dict(row)
@@ -5813,6 +5871,10 @@ class PostgresSafetyRepository:
                         connection,
                         dispatch_id=dispatch_id,
                         now=now,
+                    )
+                    await self._delete_incident_locations(
+                        connection,
+                        [UUID(dispatch_id)],
                     )
                     expired_while_locked = True
                 else:
@@ -5915,6 +5977,10 @@ class PostgresSafetyRepository:
                 if incident is None:
                     raise SafetyNotFoundError("safety incident was not found")
                 if incident["status"] == target:
+                    await self._delete_incident_locations(
+                        connection,
+                        [UUID(dispatch_id)],
+                    )
                     return await self._dispatch_payload(
                         connection,
                         dispatch_id,
@@ -5957,6 +6023,10 @@ class PostgresSafetyRepository:
                     connection,
                     dispatch_id=dispatch_id,
                     now=now,
+                )
+                await self._delete_incident_locations(
+                    connection,
+                    [UUID(dispatch_id)],
                 )
                 return await self._dispatch_payload(
                     connection,
@@ -6372,7 +6442,7 @@ class PostgresSafetyRepository:
             """,
             UUID(dispatch_id),
         )
-        await connection.execute(
+        failed_dispatch_id = await connection.fetchval(
             """
             UPDATE safety_dispatches i
             SET status = 'failed',
@@ -6399,10 +6469,16 @@ class PostgresSafetyRepository:
                 WHERE d.dispatch_id = i.dispatch_id
                   AND a.status IN ('started', 'queued', 'sent', 'unknown')
               )
+            RETURNING i.dispatch_id
             """,
             UUID(dispatch_id),
             now,
         )
+        if failed_dispatch_id is not None:
+            await self._delete_incident_locations(
+                connection,
+                [failed_dispatch_id],
+            )
 
     async def _cancel_pending_deliveries(
         self,
@@ -6427,6 +6503,21 @@ class PostgresSafetyRepository:
             UUID(dispatch_id),
             UUID(contact_id) if contact_id else None,
             now,
+        )
+
+    async def _delete_incident_locations(
+        self,
+        connection: Any,
+        dispatch_ids: list[UUID],
+    ) -> None:
+        if not dispatch_ids:
+            return
+        await connection.execute(
+            """
+            DELETE FROM safety_incident_locations
+            WHERE dispatch_id = ANY($1::uuid[])
+            """,
+            dispatch_ids,
         )
 
     async def _dispatch_payload(
@@ -6488,18 +6579,20 @@ class PostgresSafetyRepository:
             """,
             UUID(dispatch_id),
         )
-        location = await connection.fetchrow(
-            """
-            SELECT sequence, latitude, longitude,
-                   horizontal_accuracy_meters, captured_at, received_at
-            FROM safety_incident_locations
-            WHERE dispatch_id = $1
-            """,
-            UUID(dispatch_id),
-        )
         decoded_dispatch = dict(dispatch)
         if isinstance(decoded_dispatch.get("evidence"), str):
             decoded_dispatch["evidence"] = json.loads(decoded_dispatch["evidence"])
+        location = None
+        if decoded_dispatch["status"] in {"open", "acknowledged"}:
+            location = await connection.fetchrow(
+                """
+                SELECT sequence, latitude, longitude,
+                       horizontal_accuracy_meters, captured_at, received_at
+                FROM safety_incident_locations
+                WHERE dispatch_id = $1
+                """,
+                UUID(dispatch_id),
+            )
         return decoded_dispatch | {
             "idempotent_replay": idempotent_replay,
             "deliveries": [dict(row) for row in deliveries],

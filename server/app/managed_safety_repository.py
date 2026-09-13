@@ -1341,40 +1341,71 @@ class PostgresManagedSafetyRepository:
         result["duplicate"] = False
         return result
 
-    async def list_contacts(
+    async def contact_snapshot(
         self,
         *,
         principal: ManagedPrincipal,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], int]:
         self._require_active(principal)
-        profile = await self._profile(
-            self._pool(),
-            account_id=principal.account_id,
-        )
-        rows = await self._pool().fetch(
-            """
-            SELECT contact.owner_profile_id,
-                   contact.contact_profile_id,
-                   contact.created_at,
-                   other.profile_id AS other_profile_id,
-                   other.display_name
-            FROM managed_safety_contacts contact
-            JOIN managed_social_profiles other
-              ON other.profile_id = CASE
-                  WHEN contact.owner_profile_id = $1
-                  THEN contact.contact_profile_id
-                  ELSE contact.owner_profile_id
-              END
-            JOIN managed_accounts other_account
-              ON other_account.account_id = other.account_id
-             AND other_account.status = 'active'
-            WHERE contact.owner_profile_id = $1
-               OR contact.contact_profile_id = $1
-            ORDER BY other.display_name, other.profile_id
-            """,
-            profile["profile_id"],
-        )
-        return [
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._profile(
+                    connection,
+                    account_id=principal.account_id,
+                    for_update=True,
+                )
+                rows = await connection.fetch(
+                    """
+                    SELECT contact.owner_profile_id,
+                           contact.contact_profile_id,
+                           contact.created_at,
+                           other.profile_id AS other_profile_id,
+                           other.display_name,
+                           (
+                               contact.owner_profile_id = $1
+                               AND NOT EXISTS (
+                                   SELECT 1
+                                   FROM managed_social_blocks block
+                                   WHERE (
+                                       block.blocker_profile_id = $1
+                                       AND block.blocked_profile_id =
+                                           contact.contact_profile_id
+                                   ) OR (
+                                       block.blocker_profile_id =
+                                           contact.contact_profile_id
+                                       AND block.blocked_profile_id = $1
+                                   )
+                               )
+                               AND EXISTS (
+                                   SELECT 1
+                                   FROM managed_push_installations push
+                                   JOIN managed_account_installations installation
+                                     ON installation.account_id = push.account_id
+                                    AND installation.installation_id =
+                                        push.installation_id
+                                    AND installation.status = 'active'
+                                   WHERE push.account_id = other.account_id
+                                     AND push.status = 'active'
+                               )
+                           ) AS delivery_capable
+                    FROM managed_safety_contacts contact
+                    JOIN managed_social_profiles other
+                      ON other.profile_id = CASE
+                          WHEN contact.owner_profile_id = $1
+                          THEN contact.contact_profile_id
+                          ELSE contact.owner_profile_id
+                      END
+                     AND other.status = 'active'
+                    JOIN managed_accounts other_account
+                      ON other_account.account_id = other.account_id
+                     AND other_account.status = 'active'
+                    WHERE contact.owner_profile_id = $1
+                       OR contact.contact_profile_id = $1
+                    ORDER BY other.display_name, other.profile_id
+                    """,
+                    profile["profile_id"],
+                )
+        contacts = [
             {
                 "profile_id": str(row["other_profile_id"]),
                 "display_name": str(row["display_name"]),
@@ -1387,6 +1418,15 @@ class PostgresManagedSafetyRepository:
             }
             for row in rows
         ]
+        return contacts, sum(1 for row in rows if bool(row["delivery_capable"]))
+
+    async def list_contacts(
+        self,
+        *,
+        principal: ManagedPrincipal,
+    ) -> list[dict[str, Any]]:
+        contacts, _ = await self.contact_snapshot(principal=principal)
+        return contacts
 
     async def remove_contact(
         self,
@@ -1569,7 +1609,8 @@ class PostgresManagedSafetyRepository:
                 )
                 if replay is not None:
                     if (
-                        int(replay["duration_hours"]) != request.duration_hours
+                        replay["trigger"] != request.trigger
+                        or int(replay["duration_hours"]) != request.duration_hours
                         or bool(replay["share_location"]) != request.share_location
                     ):
                         raise ManagedConflictError(
@@ -1726,12 +1767,17 @@ class PostgresManagedSafetyRepository:
                     row["account_id"]
                     for row in await connection.fetch(
                         """
-                        SELECT account_id, installation_id
-                        FROM managed_push_installations
-                        WHERE account_id = ANY($1::uuid[])
-                          AND status = 'active'
-                        ORDER BY account_id, installation_id
-                        FOR UPDATE
+                        SELECT push.account_id, push.installation_id
+                        FROM managed_push_installations push
+                        JOIN managed_account_installations installation
+                          ON installation.account_id = push.account_id
+                         AND installation.installation_id =
+                             push.installation_id
+                         AND installation.status = 'active'
+                        WHERE push.account_id = ANY($1::uuid[])
+                          AND push.status = 'active'
+                        ORDER BY push.account_id, push.installation_id
+                        FOR UPDATE OF push, installation
                         """,
                         [row["account_id"] for row in contact_candidates],
                     )
@@ -1761,13 +1807,14 @@ class PostgresManagedSafetyRepository:
                         expires_at,
                         purge_after
                     ) VALUES (
-                        $1, $2, $3, 'manual_sos', 'open', $4, $5,
-                        $6, $7, $7::timestamptz + interval '30 days'
+                        $1, $2, $3, $4, 'open', $5, $6,
+                        $7, $8, $8::timestamptz + interval '30 days'
                     )
                     """,
                     incident_id,
                     owner["profile_id"],
                     request.request_id,
+                    request.trigger,
                     request.duration_hours,
                     request.share_location,
                     now,
@@ -1779,18 +1826,20 @@ class PostgresManagedSafetyRepository:
                         owner_account_id,
                         client_request_id,
                         incident_id,
+                        trigger,
                         duration_hours,
                         share_location,
                         created_at,
                         purge_after
                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6,
-                        $7::timestamptz + interval '30 days'
+                        $1, $2, $3, $4, $5, $6, $7,
+                        $8::timestamptz + interval '30 days'
                     )
                     """,
                     owner["account_id"],
                     request.request_id,
                     incident_id,
+                    request.trigger,
                     request.duration_hours,
                     request.share_location,
                     now,
@@ -3055,6 +3104,10 @@ class ManagedSafetyPushService:
             SAFETY_PUSH_MIN_CLAIM_SECONDS,
             provider_delivery_seconds + SAFETY_PUSH_RECEIPT_MARGIN_SECONDS,
         )
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(self.provider, "available", False))
 
     async def register(
         self,

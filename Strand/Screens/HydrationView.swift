@@ -5,6 +5,314 @@ import StrandAnalytics
 import UIKit
 #endif
 
+private enum HydrationUIFailure: Equatable {
+    case load
+    case save
+}
+
+enum HydrationDetailModelError: Error, Equatable {
+    case invalidDayKey
+}
+
+struct HydrationDetailSnapshot {
+    let reading: HydrationReading?
+    let history: [(day: String, value: Double?)]
+    let entries: [HydrationEntry]
+
+    var totalML: Double? { reading?.valueML }
+}
+
+/// One immutable day binding for the hydration detail. Every store operation requires this binding, so a
+/// historical route cannot accidentally reach a Repository overload whose omitted day defaults to today.
+@MainActor
+struct HydrationDetailModel {
+    let selectedDayKey: String
+    let hasValidDay: Bool
+
+    init(selectedDayKey: String? = nil, now: Date = Date()) {
+        if let selectedDayKey {
+            self.selectedDayKey = selectedDayKey
+            self.hasValidDay = HydrationStore.isValidDayKey(selectedDayKey)
+        } else {
+            self.selectedDayKey = Repository.localDayKey(now)
+            self.hasValidDay = true
+        }
+    }
+
+    func load(from repo: Repository) async throws -> HydrationDetailSnapshot {
+        guard hasValidDay else { throw HydrationDetailModelError.invalidDayKey }
+        async let reading = repo.hydrationReading(day: selectedDayKey)
+        async let history = repo.hydrationHistory(days: 7, throughDay: selectedDayKey)
+        async let entries = repo.hydrationEntries(day: selectedDayKey)
+        let (loadedReading, loadedHistory, loadedEntries) = try await (
+            reading,
+            history,
+            entries
+        )
+        return HydrationDetailSnapshot(
+            reading: loadedReading,
+            history: loadedHistory,
+            entries: loadedEntries
+        )
+    }
+
+    func add(amountML: Int, to repo: Repository) async -> HydrationMutationResult {
+        guard hasValidDay else { return .failed }
+        return await repo.logHydration(amountMl: amountML, day: selectedDayKey)
+    }
+
+    func delete(entryID: UUID, from repo: Repository) async -> HydrationMutationResult {
+        guard hasValidDay else { return .failed }
+        return await repo.deleteHydrationEntry(id: entryID, day: selectedDayKey)
+    }
+
+    func update(
+        entryID: UUID,
+        amountML: Int,
+        in repo: Repository
+    ) async -> HydrationMutationResult {
+        guard hasValidDay else { return .failed }
+        return await repo.updateHydrationEntry(
+            id: entryID,
+            amountMl: amountML,
+            day: selectedDayKey
+        )
+    }
+}
+
+struct HydrationWeekdayText: Equatable {
+    let compact: String
+    let spoken: String
+}
+
+enum HydrationDisplayFormatting {
+    private static let dayKeyParser: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    static func date(forDayKey dayKey: String) -> Date? {
+        dayKeyParser.date(from: dayKey)
+    }
+
+    static func decimalLitres(
+        fromML valueML: Double,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        HydrationGoal.litres(fromML: valueML).formatted(
+            .number
+                .locale(locale)
+                .precision(.fractionLength(1))
+        )
+    }
+
+    static func visibleMillilitres(
+        _ valueML: Int,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        localizedFormat(
+            "appwide.hydration.millilitres_format",
+            locale: locale,
+            valueML
+        )
+    }
+
+    static func spokenMillilitres(
+        _ valueML: Int,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        localizedFormat("%lld millilitres", locale: locale, valueML)
+    }
+
+    static func shortMinutes(
+        _ minutes: Int,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        localizedFormat("%lld min", locale: locale, minutes)
+    }
+
+    static func heroGoal(
+        _ goalML: Int,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        localizedFormat(
+            "of %@ L",
+            locale: locale,
+            decimalLitres(fromML: Double(goalML), locale: locale)
+        )
+    }
+
+    static func ringAccessibilityValue(
+        totalML: Double?,
+        goalML: Int?,
+        missingText: String,
+        targetUnavailable: String,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        guard let totalML else { return missingText }
+        guard let goalML else {
+            return localizedFormat(
+                "%@. %@",
+                locale: locale,
+                spokenMillilitres(Int(totalML.rounded()), locale: locale),
+                targetUnavailable
+            )
+        }
+        return localizedFormat(
+            "%@ of %@ litres",
+            locale: locale,
+            decimalLitres(fromML: totalML, locale: locale),
+            decimalLitres(fromML: Double(goalML), locale: locale)
+        )
+    }
+
+    static func weekdayText(
+        forDayKey dayKey: String,
+        locale: Locale = .autoupdatingCurrent
+    ) -> HydrationWeekdayText? {
+        guard let date = date(forDayKey: dayKey) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        let weekdayIndex = calendar.component(.weekday, from: date) - 1
+        let compactSymbols = calendar.veryShortStandaloneWeekdaySymbols
+        let spokenSymbols = calendar.standaloneWeekdaySymbols
+        guard compactSymbols.indices.contains(weekdayIndex),
+              spokenSymbols.indices.contains(weekdayIndex) else {
+            return nil
+        }
+        return HydrationWeekdayText(
+            compact: compactSymbols[weekdayIndex],
+            spoken: spokenSymbols[weekdayIndex]
+        )
+    }
+
+    static func historyAccessibilityLabel(
+        dayKey: String,
+        valueML: Double?,
+        missingText: String,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        let weekday = weekdayText(forDayKey: dayKey, locale: locale)
+        let spokenDay = weekday?.spoken ?? dayKey
+        guard let valueML else {
+            return localizedFormat(
+                "%@: %@",
+                locale: locale,
+                spokenDay,
+                missingText
+            )
+        }
+        return localizedFormat(
+            "%@: %@ litres",
+            locale: locale,
+            spokenDay,
+            decimalLitres(fromML: valueML, locale: locale)
+        )
+    }
+
+    static func entryTime(
+        _ date: Date,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        date.formatted(
+            .dateTime
+                .hour()
+                .minute()
+                .locale(locale)
+        )
+    }
+
+    static func entryAccessibilityLabel(
+        amountML: Int,
+        loggedAt: Date,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        localizedFormat(
+            "Logged %lld millilitres at %@",
+            locale: locale,
+            amountML,
+            entryTime(loggedAt, locale: locale)
+        )
+    }
+
+    static func deleteEntryAccessibilityLabel(
+        amountML: Int,
+        loggedAt: Date,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        localizedFormat(
+            "Delete the %lld millilitre drink logged at %@",
+            locale: locale,
+            amountML,
+            entryTime(loggedAt, locale: locale)
+        )
+    }
+
+    static func customAccessibilityLabel(
+        amountML: Int,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        localizedFormat(
+            "Log custom %lld millilitres",
+            locale: locale,
+            amountML
+        )
+    }
+
+    static func quickLogSummary(
+        sipML: Int,
+        cupML: Int,
+        bottleML: Int,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        localizedFormat(
+            "Sip %lld ml · Cup %lld ml · Bottle %lld ml",
+            locale: locale,
+            sipML,
+            cupML,
+            bottleML
+        )
+    }
+
+    static func percent(
+        _ value: Int,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        localizedFormat("%lld percent", locale: locale, value)
+    }
+
+    private static func localizedFormat(
+        _ key: String.LocalizationValue,
+        locale: Locale,
+        _ arguments: CVarArg...
+    ) -> String {
+        let bundle = localizationBundle(for: locale)
+        return String(
+            format: String(localized: key, bundle: bundle, locale: locale),
+            locale: locale,
+            arguments: arguments
+        )
+    }
+
+    private static func localizationBundle(for locale: Locale) -> Bundle {
+        let main = Bundle.main
+        guard let localization = Bundle.preferredLocalizations(
+            from: main.localizations,
+            forPreferences: [locale.identifier]
+        ).first,
+              let path = main.path(forResource: localization, ofType: "lproj"),
+              let bundle = Bundle(path: path) else {
+            return main
+        }
+        return bundle
+    }
+}
+
 // MARK: - Hydration detail (opt-in, confirmed NOOP + Apple Health records)
 //
 // Liquid finish: water in a vessel is the literal metaphor, so the hero is the canonical `LiquidVessel`
@@ -19,19 +327,20 @@ import UIKit
 struct HydrationView: View {
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var profile: ProfileStore
+    private let detailModel: HydrationDetailModel
 
     /// Today's running total (ml) + the 7-day history (oldest→newest), loaded off the gesture path and
     /// refreshed after each log. A reload key the taps bump so the `.task` re-reads the store.
-    @State private var totalML: Double = 0
-    @State private var history: [(day: String, value: Double)] = []
+    @State private var hydrationSnapshot: HydrationDetailSnapshot?
     @State private var reloadTick = 0
     /// The animated fill the hero vessel + tube drive to on appear and after each log, so the liquid
     /// rises smoothly rather than snapping (the Today HeroScoreCell idiom).
     @State private var heroFraction: Double = 0
     /// #798 - today's individual logged drinks (for swipe-to-delete + tap-to-edit), and the entry being
     /// edited in the amount sheet (nil when the sheet is closed).
-    @State private var entries: [HydrationEntry] = []
     @State private var editingEntry: HydrationEntry?
+    @State private var hasLoadedHydration = false
+    @State private var hydrationFailure: HydrationUIFailure?
     /// #798 - the user's custom container size (ml), editable from the custom-size sheet. Persisted local-only.
     @AppStorage(HydrationStore.customSizeKey) private var customSizeML = HydrationGoal.cupML
     @State private var showCustomSizeSheet = false
@@ -50,25 +359,103 @@ struct HydrationView: View {
     @AppStorage("notif.masterEnabled") private var wristAlertsEnabled = false
     @State private var showNotificationPermissionAlert = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.locale) private var locale
 
-    private var goalML: Int { repo.hydrationGoalML(profileSex: profile.sex) }
-    private var fraction: Double { HydrationGoal.fraction(totalML: totalML, goalML: goalML) }
+    init(selectedDay: String? = nil) {
+        detailModel = HydrationDetailModel(selectedDayKey: selectedDay)
+    }
+
+    private var selectedDayKey: String { detailModel.selectedDayKey }
+    private var reading: HydrationReading? { hydrationSnapshot?.reading }
+    private var history: [(day: String, value: Double?)] {
+        hydrationSnapshot?.history ?? []
+    }
+    private var entries: [HydrationEntry] { hydrationSnapshot?.entries ?? [] }
+    private var isToday: Bool {
+        selectedDayKey == Repository.localDayKey(Date())
+    }
+    private var selectedDayTitle: String {
+        guard !isToday else { return String(localized: "Today") }
+        guard let date = HydrationDisplayFormatting.date(forDayKey: selectedDayKey) else {
+            return selectedDayKey
+        }
+        return date.formatted(
+            .dateTime
+                .weekday(.abbreviated)
+                .month(.abbreviated)
+                .day()
+                .year()
+                .locale(locale)
+        )
+    }
+    private var selectedDaySentence: String {
+        isToday ? String(localized: "today") : selectedDayTitle
+    }
+    private var goalML: Int? {
+        repo.hydrationGoalML(
+            profileAge: profile.age,
+            ageConfirmed: profile.ageInputConfirmed,
+            profileSex: profile.sex,
+            sexConfirmed: profile.sexInputConfirmed,
+            weightKg: profile.weightKg,
+            weightConfirmed: profile.weightInputConfirmed,
+            day: selectedDayKey
+        )
+    }
+    private var totalML: Double? { reading?.valueML }
+    private var provenance: HydrationProvenancePresentation? {
+        reading?.provenance(
+            strings: HydrationProvenanceStrings(
+                noopOnlyLabel: String(localized: "appwide.hydration.source.noop"),
+                externalOnlyLabel: String(localized: "appwide.hydration.source.apple_health"),
+                bothLabel: String(localized: "appwide.hydration.source.noop_and_apple_health"),
+                bothExplanation: String(
+                    localized: "appwide.hydration.source_merge.apple_health"
+                )
+            )
+        )
+    }
+    private var subtitle: String {
+        String(
+            format: String(localized: "appwide.hydration.subtitle.apple_health_format"),
+            locale: locale,
+            selectedDayTitle
+        )
+    }
+    private var fraction: Double {
+        guard let totalML, let goalML else { return 0 }
+        return HydrationGoal.fraction(totalML: totalML, goalML: goalML)
+    }
     private var percent: Int { min(100, Int((fraction * 100).rounded(.towardZero))) }
+    private var ringAccessibilityValue: String {
+        HydrationDisplayFormatting.ringAccessibilityValue(
+            totalML: totalML,
+            goalML: goalML,
+            missingText: missingStateText,
+            targetUnavailable: String(
+                localized: "appwide.hydration.target_unavailable"
+            ),
+            locale: locale
+        )
+    }
 
     var body: some View {
         ScreenScaffold(title: "Hydration",
-                       subtitle: "Your available NOOP and Apple Health fluid intake today.",
+                       subtitle: LocalizedStringKey(subtitle),
                        onRefresh: { await reload() },
                        // Liquid finish: the same full-bleed day-of-sky backdrop Today + the other liquid
                        // tabs carry, so Hydration sits in one atmosphere.
                        topBackground: liquidScaffoldSky()) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                hydrationFailureSection
                 ringSection
                 logSection
-                reminderSection
+                if isToday {
+                    reminderSection
+                }
                 entriesSection
                 historySection
-                todayTotalSection
+                selectedDayTotalSection
                 Text("A simple goal that adjusts to your effort. General wellness guidance, not medical advice.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -117,6 +504,55 @@ struct HydrationView: View {
 
     // MARK: - Hero (the vessel: water filling toward the goal, in litres)
 
+    private var missingStateText: String {
+        if !hasLoadedHydration, hydrationFailure == .load {
+            return String(localized: "appwide.hydration.unavailable")
+        }
+        return HydrationStore.notLoggedText
+    }
+
+    @ViewBuilder
+    private var hydrationFailureSection: some View {
+        if let hydrationFailure {
+            card(padding: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(StrandPalette.statusWarning)
+                        .accessibilityHidden(true)
+                    Text(
+                        hydrationFailure == .load
+                            ? String(localized: "appwide.hydration.load_failed")
+                            : String(localized: "appwide.hydration.save_failed")
+                    )
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button {
+                        if hydrationFailure == .load {
+                            Task { await reload() }
+                        } else {
+                            self.hydrationFailure = nil
+                        }
+                    } label: {
+                        Image(systemName: hydrationFailure == .load ? "arrow.clockwise" : "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(StrandPalette.accent)
+                    .accessibilityLabel(
+                        hydrationFailure == .load
+                            ? String(localized: "appwide.hydration.retry")
+                            : String(localized: "appwide.action.dismiss")
+                    )
+                }
+            }
+        }
+    }
+
     private var ringSection: some View {
         card {
             VStack(spacing: NoopMetrics.cardInnerSpacing) {
@@ -128,22 +564,64 @@ struct HydrationView: View {
                     LiquidVessel(value: heroFraction, tint: StrandPalette.accent, animated: true)
                         .frame(width: 184, height: 184)
                     VStack(spacing: 2) {
-                        CountUpText(value: HydrationGoal.litres(fromML: totalML),
-                                    format: { String(format: "%.1f", $0) },
-                                    font: StrandFont.rounded(40, weight: .bold),
-                                    color: StrandPalette.onDarkPrimary)
-                            .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
-                        Text(String(localized: "of \(String(format: "%.1f", HydrationGoal.litres(fromML: Double(goalML)))) L"))
-                            .font(StrandFont.subhead)
-                            .foregroundStyle(StrandPalette.onDarkSecondary)
+                        if let totalML {
+                            CountUpText(value: HydrationGoal.litres(fromML: totalML),
+                                        format: {
+                                            $0.formatted(
+                                                .number
+                                                    .locale(locale)
+                                                    .precision(.fractionLength(1))
+                                            )
+                                        },
+                                        font: StrandFont.rounded(40, weight: .bold),
+                                        color: StrandPalette.onDarkPrimary)
+                                .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
+                        } else {
+                            Text(missingStateText)
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.onDarkPrimary)
+                        }
+                        if let goalML {
+                            Text(
+                                HydrationDisplayFormatting.heroGoal(
+                                    goalML,
+                                    locale: locale
+                                )
+                            )
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.onDarkSecondary)
+                        }
                     }
                     .allowsHitTesting(false)   // taps fall through to the vessel → splash
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Hydration today")
-                .accessibilityValue("\(String(format: "%.1f", HydrationGoal.litres(fromML: totalML))) of \(String(format: "%.1f", HydrationGoal.litres(fromML: Double(goalML)))) litres")
+                .accessibilityLabel(
+                    String(
+                        format: String(
+                            localized: "appwide.hydration.a11y.day_format",
+                            locale: locale
+                        ),
+                        locale: locale,
+                        selectedDaySentence
+                    )
+                )
+                .accessibilityValue(ringAccessibilityValue)
 
-                Text("\(percent)% of today's goal")
+                Text(
+                    goalML == nil
+                        ? String(localized: "appwide.hydration.target_unavailable")
+                        : totalML == nil
+                        ? missingStateText
+                        : String(
+                            format: String(
+                                localized: "appwide.hydration.goal_progress_format",
+                                locale: locale
+                            ),
+                            locale: locale,
+                            percent,
+                            selectedDaySentence
+                        )
+                )
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
             }
@@ -175,7 +653,12 @@ struct HydrationView: View {
                 NoopButton("Custom \(customSizeML) ml", systemImage: "drop.circle", kind: .secondary, fullWidth: true) {
                     Task { await add(ml: customSizeML) }
                 }
-                .accessibilityLabel("Log custom \(customSizeML) millilitres")
+                .accessibilityLabel(
+                    HydrationDisplayFormatting.customAccessibilityLabel(
+                        amountML: customSizeML,
+                        locale: locale
+                    )
+                )
                 Button { showCustomSizeSheet = true } label: {
                     Image(systemName: "pencil")
                         .font(.system(size: 15, weight: .semibold))
@@ -188,7 +671,14 @@ struct HydrationView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Set custom container size")
             }
-            Text("Sip \(HydrationGoal.sipML) ml · Cup \(HydrationGoal.cupML) ml · Bottle \(HydrationGoal.bottleML) ml")
+            Text(
+                HydrationDisplayFormatting.quickLogSummary(
+                    sipML: HydrationGoal.sipML,
+                    cupML: HydrationGoal.cupML,
+                    bottleML: HydrationGoal.bottleML,
+                    locale: locale
+                )
+            )
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
         }
@@ -199,7 +689,10 @@ struct HydrationView: View {
         NoopButton(title, systemImage: systemImage, kind: .secondary, fullWidth: true) {
             Task { await add(ml: ml) }
         }
-        .accessibilityLabel(Text("Log") + Text(verbatim: " ") + Text(title))
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(
+            HydrationDisplayFormatting.spokenMillilitres(ml, locale: locale)
+        )
     }
 
     // MARK: - Contextual water reminders
@@ -258,7 +751,12 @@ struct HydrationView: View {
                                 .font(StrandFont.body)
                                 .foregroundStyle(StrandPalette.textPrimary)
                             Spacer()
-                            Text("\(reminderInterval) min")
+                            Text(
+                                HydrationDisplayFormatting.shortMinutes(
+                                    reminderInterval,
+                                    locale: locale
+                                )
+                            )
                                 .font(StrandFont.captionNumber)
                                 .foregroundStyle(StrandPalette.textSecondary)
                                 .monospacedDigit()
@@ -298,10 +796,22 @@ struct HydrationView: View {
 
                     if doubleTapConfirm {
                         Stepper(value: doubleTapAmountBinding, in: 50...1_000, step: 50) {
-                            reminderValueRow("Confirmed amount", value: "\(doubleTapAmountML) ml")
+                            reminderValueRow(
+                                "Confirmed amount",
+                                value: HydrationDisplayFormatting.visibleMillilitres(
+                                    doubleTapAmountML,
+                                    locale: locale
+                                )
+                            )
                         }
                         Stepper(value: doubleTapWindowBinding, in: 5...30, step: 5) {
-                            reminderValueRow("Tap window", value: "\(doubleTapWindowMinutes) min")
+                            reminderValueRow(
+                                "Tap window",
+                                value: HydrationDisplayFormatting.shortMinutes(
+                                    doubleTapWindowMinutes,
+                                    locale: locale
+                                )
+                            )
                         }
                         Toggle(isOn: bandFirstToggle) {
                             VStack(alignment: .leading, spacing: 2) {
@@ -488,7 +998,18 @@ struct HydrationView: View {
         if !entries.isEmpty {
             card(padding: 18) {
                 VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                    Text("Today's drinks").strandOverline()
+                    Text(
+                        isToday
+                            ? String(localized: "Today's drinks")
+                            : String(
+                                format: String(
+                                    localized: "appwide.hydration.drinks_on_format",
+                                    locale: locale
+                                ),
+                                locale: locale,
+                                selectedDayTitle
+                            )
+                    ).strandOverline()
                     // #842 — render rows in a plain VStack inside the page ScrollView. The previous nested,
                     // scroll-disabled List with a hardcoded `count * 44 + 8` height clipped every row past
                     // the third (real rows are taller than 44pt) and couldn't be scrolled to. Tap a row to
@@ -512,18 +1033,27 @@ struct HydrationView: View {
 
     /// One logged-drink row: the time it was logged + its amount (tap to edit) with a trailing trash.
     private func entryRow(_ entry: HydrationEntry) -> some View {
-        HStack(spacing: 10) {
+        let entryTime = HydrationDisplayFormatting.entryTime(
+            entry.loggedAt,
+            locale: locale
+        )
+        return HStack(spacing: 10) {
             Button { editingEntry = entry } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "drop.fill")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(StrandPalette.accent)
                         .accessibilityHidden(true)
-                    Text(Self.entryTimeFmt.string(from: entry.loggedAt))
+                    Text(entryTime)
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer(minLength: 8)
-                    Text("\(entry.amountMl) ml")
+                    Text(
+                        HydrationDisplayFormatting.visibleMillilitres(
+                            entry.amountMl,
+                            locale: locale
+                        )
+                    )
                         .font(StrandFont.subhead.weight(.semibold))
                         .foregroundStyle(StrandPalette.textPrimary)
                         .monospacedDigit()
@@ -532,7 +1062,13 @@ struct HydrationView: View {
             }
             // Liquid tap response: the same physical settle-inward every tappable liquid row gets.
             .buttonStyle(LiquidPressStyle())
-            .accessibilityLabel("Logged \(entry.amountMl) millilitres at \(Self.entryTimeFmt.string(from: entry.loggedAt))")
+            .accessibilityLabel(
+                HydrationDisplayFormatting.entryAccessibilityLabel(
+                    amountML: entry.amountMl,
+                    loggedAt: entry.loggedAt,
+                    locale: locale
+                )
+            )
             .accessibilityHint("Tap to edit the amount")
             Button(role: .destructive) {
                 Task { await deleteEntry(entry) }
@@ -544,20 +1080,33 @@ struct HydrationView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Delete the \(entry.amountMl) millilitre drink logged at \(Self.entryTimeFmt.string(from: entry.loggedAt))")
+            .accessibilityLabel(
+                HydrationDisplayFormatting.deleteEntryAccessibilityLabel(
+                    amountML: entry.amountMl,
+                    loggedAt: entry.loggedAt,
+                    locale: locale
+                )
+            )
         }
     }
-
-    private static let entryTimeFmt: DateFormatter = {
-        let f = DateFormatter(); f.timeStyle = .short; f.dateStyle = .none; return f
-    }()
 
     // MARK: - 7-day mini history (flat bars, today on the right)
 
     private var historySection: some View {
         card(padding: 18) {
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                Text("Last 7 days").strandOverline()
+                Text(
+                    isToday
+                        ? String(localized: "Last 7 days")
+                        : String(
+                            format: String(
+                                localized: "appwide.hydration.history_through_format",
+                                locale: locale
+                            ),
+                            locale: locale,
+                            selectedDayTitle
+                        )
+                ).strandOverline()
                 historyBars
             }
         }
@@ -565,21 +1114,29 @@ struct HydrationView: View {
 
     @ViewBuilder private var historyBars: some View {
         if history.isEmpty {
-            Text("No history yet.")
+            Text(
+                !hasLoadedHydration && hydrationFailure == .load
+                    ? String(localized: "appwide.hydration.unavailable")
+                    : "No history yet."
+            )
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
         } else {
             // Scale the bars to the LARGER of the goal and the biggest day, so an over-goal day doesn't clip.
-            let ceiling = max(Double(max(goalML, 1)), history.map(\.value).max() ?? 0, 1)
+            let ceiling = max(Double(max(goalML ?? 0, 1)), history.compactMap(\.value).max() ?? 0, 1)
             let lastIndex = history.count - 1
             HStack(alignment: .bottom, spacing: 10) {
                 ForEach(Array(history.enumerated()), id: \.element.day) { idx, bar in
+                    let weekday = HydrationDisplayFormatting.weekdayText(
+                        forDayKey: bar.day,
+                        locale: locale
+                    )
                     VStack(spacing: 6) {
                         ZStack(alignment: .bottom) {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(StrandPalette.textPrimary.opacity(0.10))
                                 .frame(height: 96)
-                            let frac = min(1.0, max(0.0, bar.value / ceiling))
+                            let frac = min(1.0, max(0.0, (bar.value ?? 0) / ceiling))
                             if frac > 0 {
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                                     .fill(idx == lastIndex ? StrandPalette.accent
@@ -587,102 +1144,200 @@ struct HydrationView: View {
                                     .frame(height: max(3, 96 * CGFloat(frac)))
                             }
                         }
-                        Text(weekdayInitial(bar.day))
+                        Text(weekday?.compact ?? "·")
                             .font(StrandFont.overline)
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(weekdayInitial(bar.day)): \(String(format: "%.1f", HydrationGoal.litres(fromML: bar.value))) litres")
+                    .accessibilityLabel(
+                        HydrationDisplayFormatting.historyAccessibilityLabel(
+                            dayKey: bar.day,
+                            valueML: bar.value,
+                            missingText: HydrationStore.notLoggedText,
+                            locale: locale
+                        )
+                    )
                 }
             }
         }
     }
 
-    // MARK: - Today's total (the honest day figure; per-tap rows aren't persisted)
+    // MARK: - Selected day's total
 
-    private var todayTotalSection: some View {
+    private var selectedDayTotalSection: some View {
         card(padding: 18) {
             VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-                Text("Today").strandOverline()
-                if totalML <= 0 {
-                    Text("No drinks logged yet. Tap Sip, Cup or Bottle to start.")
+                Text(selectedDayTitle).strandOverline()
+                if totalML == nil {
+                    Text(missingStateText)
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
-                } else {
+                } else if let totalML {
                     HStack(spacing: 10) {
                         Image(systemName: "drop.fill")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(StrandPalette.accent)
                             .accessibilityHidden(true)
-                        Text("Logged today")
+                        Text(
+                            isToday
+                                ? String(localized: "Logged today")
+                                : String(
+                                    format: String(
+                                        localized: "appwide.hydration.logged_on_format",
+                                        locale: locale
+                                    ),
+                                    locale: locale,
+                                    selectedDayTitle
+                                )
+                        )
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textPrimary)
                         Spacer(minLength: 8)
-                        Text("\(Int(totalML)) ml")
+                        Text(
+                            HydrationDisplayFormatting.visibleMillilitres(
+                                Int(totalML),
+                                locale: locale
+                            )
+                        )
                             .font(StrandFont.headline.weight(.semibold))
                             .foregroundStyle(StrandPalette.textPrimary)
                             .monospacedDigit()
                     }
                     // Progress toward goal as the liquid tube (the same horizontal vessel Today's Key
                     // Metrics use), filling to the animated `heroFraction` so it rises with the hero.
-                    LiquidTube(frac: heroFraction, tint: StrandPalette.accent, height: 8, animated: false)
-                        .accessibilityLabel("Progress toward today's goal")
-                        .accessibilityValue("\(percent) percent")
+                    if goalML != nil {
+                        LiquidTube(frac: heroFraction, tint: StrandPalette.accent, height: 8, animated: false)
+                            .accessibilityLabel(
+                                String(
+                                    format: String(
+                                        localized: "appwide.hydration.progress_a11y_format",
+                                        locale: locale
+                                    ),
+                                    locale: locale,
+                                    selectedDaySentence
+                                )
+                            )
+                            .accessibilityValue(
+                                HydrationDisplayFormatting.percent(
+                                    percent,
+                                    locale: locale
+                                )
+                            )
+                    } else {
+                        Text(String(localized: "appwide.hydration.target_unavailable"))
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let provenance {
+                        Divider()
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(
+                                provenance.sourceTotals.isEmpty
+                                    ? String(localized: "appwide.hydration.source")
+                                    : String(localized: "appwide.hydration.sources")
+                            )
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                            Spacer(minLength: 8)
+                            Text(provenance.sourceLabel)
+                                .font(StrandFont.footnote.weight(.semibold))
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        .accessibilityElement(children: .combine)
+
+                        ForEach(provenance.sourceTotals, id: \.source) { sourceTotal in
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(sourceLabel(for: sourceTotal.source))
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                Spacer(minLength: 8)
+                                Text(
+                                    HydrationDisplayFormatting.visibleMillilitres(
+                                        Int(sourceTotal.valueML),
+                                        locale: locale
+                                    )
+                                )
+                                    .font(StrandFont.footnote.weight(.semibold))
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                    .monospacedDigit()
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+
+                        if let explanation = provenance.explanation {
+                            Text(explanation)
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
             }
         }
     }
 
-    // MARK: - Data
-
-    /// The single-letter weekday for a yyyy-MM-dd key (M T W T F S S), or "·" when unparseable. Mirrors
-    /// the Android `weekdayInitial` (EEE → first letter, US locale).
-    // #perf: fixed-locale formatters, hoisted to static so the history-bar ForEach doesn't allocate two
-    // DateFormatters per bar per render (label + a11y both call this). Locale is pinned (en_US_POSIX /
-    // en_US), so caching is behaviour-identical — no dependence on the device locale.
-    private static let dayKeyParser: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-    private static let weekdayAbbrev: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US")
-        f.dateFormat = "EEE"
-        return f
-    }()
-    private func weekdayInitial(_ dayKey: String) -> String {
-        guard let date = Self.dayKeyParser.date(from: dayKey) else { return "·" }
-        return String(Self.weekdayAbbrev.string(from: date).prefix(1))
+    private func sourceLabel(for source: HydrationReadingSource) -> String {
+        switch source {
+        case .noop:
+            String(localized: "appwide.hydration.source.noop")
+        case .appleHealth:
+            String(localized: "appwide.hydration.source.apple_health")
+        case .both:
+            String(localized: "appwide.hydration.source.noop_and_apple_health")
+        }
     }
+
+    // MARK: - Data
 
     /// Log `ml` (additive day total + a per-entry row, #798) and refresh.
     private func add(ml: Int) async {
         guard ml > 0 else { return }
-        _ = await repo.logHydration(amountMl: ml)
-        reloadTick &+= 1
+        finishMutation(await detailModel.add(amountML: ml, to: repo))
     }
 
     /// #798 - delete a logged drink, re-deriving the day total, then refresh.
     private func deleteEntry(_ entry: HydrationEntry) async {
-        _ = await repo.deleteHydrationEntry(id: entry.id)
-        reloadTick &+= 1
+        finishMutation(await detailModel.delete(entryID: entry.id, from: repo))
     }
 
     /// #798 - set a logged drink's amount, re-deriving the day total, then refresh.
     private func updateEntry(_ entry: HydrationEntry, to ml: Int) async {
-        _ = await repo.updateHydrationEntry(id: entry.id, amountMl: ml)
+        finishMutation(
+            await detailModel.update(entryID: entry.id, amountML: ml, in: repo)
+        )
+    }
+
+    private func finishMutation(_ result: HydrationMutationResult) {
+        guard result.succeeded else {
+            hydrationFailure = .save
+            return
+        }
+        hydrationFailure = nil
         reloadTick &+= 1
     }
 
-    /// Load today's total + the 7-day history + today's per-entry list from the store.
+    /// Load the selected day's total, trailing history, and per-entry list from the store.
     private func reload() async {
-        totalML = await repo.hydrationTotal(day: Repository.localDayKey(Date()))
-        history = await repo.hydrationHistory(days: 7)
-        entries = repo.hydrationEntries()
+        do {
+            let snapshot = try await detailModel.load(from: repo)
+            guard !Task.isCancelled else { return }
+            hydrationSnapshot = snapshot
+            hasLoadedHydration = true
+            if hydrationFailure == .load {
+                hydrationFailure = nil
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            hydrationSnapshot = nil
+            editingEntry = nil
+            hasLoadedHydration = false
+            hydrationFailure = .load
+        }
     }
 }
 
@@ -697,6 +1352,7 @@ private struct HydrationAmountSheet: View {
     let onCancel: () -> Void
 
     @State private var ml: Int
+    @Environment(\.locale) private var locale
 
     /// Bounds for a plausible single container (10 ml up to 3 L), stepping in 10 ml increments.
     private static let minML = 10
@@ -715,39 +1371,51 @@ private struct HydrationAmountSheet: View {
     static func clamp(_ value: Int) -> Int { min(maxML, max(minML, value)) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
-            Text(title)
-                .font(StrandFont.title2)
-                .foregroundStyle(StrandPalette.textPrimary)
-            HStack {
-                Text("Amount")
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                Spacer()
-                Text("\(ml) ml")
-                    .font(StrandFont.rounded(28, weight: .bold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                Text(title)
+                    .font(StrandFont.title2)
                     .foregroundStyle(StrandPalette.textPrimary)
-                    .monospacedDigit()
+                HStack {
+                    Text("Amount")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Spacer()
+                    Text(
+                        HydrationDisplayFormatting.visibleMillilitres(
+                            ml,
+                            locale: locale
+                        )
+                    )
+                        .font(StrandFont.rounded(28, weight: .bold))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .monospacedDigit()
+                }
+                Stepper(value: $ml, in: Self.minML...Self.maxML, step: Self.stepML) {
+                    Text("Adjust amount")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+                .accessibilityLabel("Amount in millilitres")
+                .accessibilityValue(
+                    HydrationDisplayFormatting.spokenMillilitres(
+                        ml,
+                        locale: locale
+                    )
+                )
+                HStack(spacing: NoopMetrics.gap) {
+                    NoopButton("Cancel", kind: .secondary, fullWidth: true) { onCancel() }
+                    NoopButton("Save", kind: .primary, fullWidth: true) { onSave(Self.clamp(ml)) }
+                }
             }
-            Stepper(value: $ml, in: Self.minML...Self.maxML, step: Self.stepML) {
-                Text("Adjust amount")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
-            }
-            .accessibilityLabel("Amount in millilitres")
-            .accessibilityValue("\(ml) millilitres")
-            HStack(spacing: NoopMetrics.gap) {
-                NoopButton("Cancel", kind: .secondary, fullWidth: true) { onCancel() }
-                NoopButton("Save", kind: .primary, fullWidth: true) { onSave(Self.clamp(ml)) }
-            }
+            .padding(NoopMetrics.space5)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(NoopMetrics.space5)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
         // iOS-only sheet sizing - macOS sheets are free-floating windows and reject detents (see the
         // shared `noopSheetPresentation` note); the call site stays cross-platform via this guard.
         #if os(iOS)
-        .presentationDetents([.height(300)])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         #endif
     }

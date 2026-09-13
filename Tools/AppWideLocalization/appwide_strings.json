@@ -1,4 +1,26 @@
 {
+  "appwide.a11y.collapsed": {
+    "de": "Reduziert",
+    "en": "Collapsed",
+    "es": "Contraído",
+    "fr": "Réduit",
+    "it": "Compresso",
+    "pt-PT": "Recolhido",
+    "ru": "Свернуто",
+    "zh-Hans": "已折叠",
+    "zh-Hant": "已收合"
+  },
+  "appwide.a11y.expanded": {
+    "de": "Erweitert",
+    "en": "Expanded",
+    "es": "Expandido",
+    "fr": "Développé",
+    "it": "Espanso",
+    "pt-PT": "Expandido",
+    "ru": "Развернуто",
+    "zh-Hans": "已展开",
+    "zh-Hant": "已展開"
+  },
   "appwide.a11y.state_format": {
     "de": "%1$s. %2$s",
     "en": "%1$s. %2$s",
@@ -42,6 +64,325 @@
     "ru": "Примерно соответствует возрасту в профиле",
     "zh-Hans": "与个人资料年龄大致相同",
     "zh-Hant": "與個人資料年齡大致相同"
+  },
+  "appwide.hydration.not_logged": {
+    "de": "Nicht protokolliert",
+    "en": "Not logged",
+    "es": "No registrado",
+    "fr": "Non enregistré",
+    "it": "Non registrato",
+    "pt-PT": "Não registado",
+    "ru": "Не записано",
+    "zh-Hans": "未记录",
+    "zh-Hant": "未記錄"
+  },
+  "appwide.hydration.unavailable": {
+    "de": "Nicht verfügbar",
+    "en": "Unavailable",
+    "es": "No disponible",
+    "fr": "Indisponible",
+    "it": "Non disponibile",
+    "pt-PT": "Indisponível",
+    "ru": "Недоступно",
+    "zh-Hans": "暂不可用",
+    "zh-Hant": "暫不可用"
+  },
+  "appwide.hydration.load_failed": {
+    "de": "Hydration konnte nicht geladen werden. Versuche es erneut.",
+    "en": "Hydration couldn’t be loaded. Try again.",
+    "es": "No se pudo cargar la hidratación. Inténtalo de nuevo.",
+    "fr": "Impossible de charger l’hydratation. Réessayez.",
+    "it": "Impossibile caricare l’idratazione. Riprova.",
+    "pt-PT": "Não foi possível carregar a hidratação. Tente novamente.",
+    "ru": "Не удалось загрузить данные о воде. Повторите попытку.",
+    "zh-Hans": "无法加载饮水数据。请重试。",
+    "zh-Hant": "無法載入飲水資料。請再試一次。"
+  },
+  "appwide.hydration.save_failed": {
+    "de": "Dieser Wassereintrag konnte nicht gespeichert werden. Versuche es erneut.",
+    "en": "Couldn’t save that water entry. Try again.",
+    "es": "No se pudo guardar esa entrada de agua. Inténtalo de nuevo.",
+    "fr": "Impossible d’enregistrer cette consommation d’eau. Réessayez.",
+    "it": "Impossibile salvare questa registrazione d’acqua. Riprova.",
+    "pt-PT": "Não foi possível guardar este registo de água. Tente novamente.",
+    "ru": "Не удалось сохранить запись о воде. Повторите попытку.",
+    "zh-Hans": "无法保存这条饮水记录。请重试。",
+    "zh-Hant": "無法儲存這筆飲水記錄。請再試一次。"
+  },
+  "appwide.hydration.retry": {
+    "de": "Hydration erneut laden",
+    "en": "Retry hydration",
+    "es": "Reintentar hidratación",
+    "fr": "Réessayer l’hydratation",
+    "it": "Riprova idratazione",
+    "pt-PT": "Tentar hidratação novamente",
+    "ru": "Повторить загрузку данных о воде",
+    "zh-Hans": "重新加载饮水数据",
+    "zh-Hant": "重新載入飲水資料"
+  },
+  "appwide.hydration.clear_day": {
+    "de": "%1$s löschen",
+    "en": "Clear %1$s",
+    "es": "Borrar %1$s",
+    "fr": "Effacer %1$s",
+    "it": "Cancella %1$s",
+    "pt-PT": "Limpar %1$s",
+    "ru": "Очистить: %1$s",
+    "zh-Hans": "清除%1$s",
+    "zh-Hant": "清除%1$s"
+  },
+  "appwide.hydration.logged_day": {
+    "de": "%1$s erfasst",
+    "en": "Logged %1$s",
+    "es": "Registrado %1$s",
+    "fr": "Enregistré %1$s",
+    "it": "Registrato %1$s",
+    "pt-PT": "Registado %1$s",
+    "ru": "Записано: %1$s",
+    "zh-Hans": "已记录%1$s",
+    "zh-Hant": "已記錄%1$s"
+  },
+  "appwide.hydration.source": {
+    "de": "Quelle",
+    "en": "Source",
+    "es": "Fuente",
+    "fr": "Source",
+    "it": "Fonte",
+    "pt-PT": "Origem",
+    "ru": "Источник",
+    "zh-Hans": "来源",
+    "zh-Hant": "來源"
+  },
+  "appwide.hydration.sources": {
+    "de": "Quellen",
+    "en": "Sources",
+    "es": "Fuentes",
+    "fr": "Sources",
+    "it": "Fonti",
+    "pt-PT": "Origens",
+    "ru": "Источники",
+    "zh-Hans": "来源",
+    "zh-Hant": "來源"
+  },
+  "appwide.hydration.source.noop": {
+    "de": "NOOP",
+    "en": "NOOP",
+    "es": "NOOP",
+    "fr": "NOOP",
+    "it": "NOOP",
+    "pt-PT": "NOOP",
+    "ru": "NOOP",
+    "zh-Hans": "NOOP",
+    "zh-Hant": "NOOP"
+  },
+  "appwide.hydration.source.apple_health": {
+    "de": "Apple Health",
+    "en": "Apple Health",
+    "es": "Apple Health",
+    "fr": "Apple Health",
+    "it": "Apple Health",
+    "pt-PT": "Apple Health",
+    "ru": "Apple Health",
+    "zh-Hans": "Apple Health",
+    "zh-Hant": "Apple Health"
+  },
+  "appwide.hydration.source.health_connect": {
+    "de": "Health Connect",
+    "en": "Health Connect",
+    "es": "Health Connect",
+    "fr": "Health Connect",
+    "it": "Health Connect",
+    "pt-PT": "Health Connect",
+    "ru": "Health Connect",
+    "zh-Hans": "Health Connect",
+    "zh-Hant": "Health Connect"
+  },
+  "appwide.hydration.source.noop_and_apple_health": {
+    "de": "NOOP und Apple Health",
+    "en": "NOOP and Apple Health",
+    "es": "NOOP y Apple Health",
+    "fr": "NOOP et Apple Health",
+    "it": "NOOP e Apple Health",
+    "pt-PT": "NOOP e Apple Health",
+    "ru": "NOOP и Apple Health",
+    "zh-Hans": "NOOP 和 Apple Health",
+    "zh-Hant": "NOOP 和 Apple Health"
+  },
+  "appwide.hydration.source.noop_and_health_connect": {
+    "de": "NOOP und Health Connect",
+    "en": "NOOP and Health Connect",
+    "es": "NOOP y Health Connect",
+    "fr": "NOOP et Health Connect",
+    "it": "NOOP e Health Connect",
+    "pt-PT": "NOOP e Health Connect",
+    "ru": "NOOP и Health Connect",
+    "zh-Hans": "NOOP 和 Health Connect",
+    "zh-Hant": "NOOP 和 Health Connect"
+  },
+  "appwide.hydration.source_merge.apple_health": {
+    "de": "NOOP- und Apple-Health-Einträge können sich überschneiden und lassen sich nicht zuverlässig zuordnen. Die angezeigte Gesamtmenge verwendet daher den höheren Quellwert, statt beide zu addieren.",
+    "en": "NOOP and Apple Health records may overlap and cannot be matched reliably. The displayed total uses the larger source total instead of adding them.",
+    "es": "Los registros de NOOP y Apple Health pueden solaparse y no se pueden asociar de forma fiable. Por eso, el total mostrado usa el mayor total de origen en vez de sumarlos.",
+    "fr": "Les données NOOP et Apple Health peuvent se chevaucher et ne peuvent pas être rapprochées de façon fiable. Le total affiché utilise donc le total source le plus élevé au lieu de les additionner.",
+    "it": "I dati di NOOP e Apple Health possono sovrapporsi e non possono essere associati in modo affidabile. Il totale mostrato usa quindi il totale di origine più alto invece di sommarli.",
+    "pt-PT": "Os registos do NOOP e do Apple Health podem sobrepor-se e não podem ser associados de forma fiável. Por isso, o total apresentado usa o maior total de origem em vez de os somar.",
+    "ru": "Записи NOOP и Apple Health могут пересекаться, и их нельзя надёжно сопоставить. Поэтому показанный итог равен большему значению из источников, а не их сумме.",
+    "zh-Hans": "NOOP 与 Apple Health 的记录可能重叠，且无法可靠匹配。因此，显示的总量取两个来源中较大的值，而不是相加。",
+    "zh-Hant": "NOOP 與 Apple Health 的記錄可能重疊，且無法可靠配對。因此，顯示的總量取兩個來源中較大的值，而不是相加。"
+  },
+  "appwide.hydration.source_merge.health_connect": {
+    "de": "NOOP- und Health-Connect-Einträge können sich überschneiden und lassen sich nicht zuverlässig zuordnen. Die angezeigte Gesamtmenge verwendet daher den höheren Quellwert, statt beide zu addieren.",
+    "en": "NOOP and Health Connect records may overlap and cannot be matched reliably. The displayed total uses the larger source total instead of adding them.",
+    "es": "Los registros de NOOP y Health Connect pueden solaparse y no se pueden asociar de forma fiable. Por eso, el total mostrado usa el mayor total de origen en vez de sumarlos.",
+    "fr": "Les données NOOP et Health Connect peuvent se chevaucher et ne peuvent pas être rapprochées de façon fiable. Le total affiché utilise donc le total source le plus élevé au lieu de les additionner.",
+    "it": "I dati di NOOP e Health Connect possono sovrapporsi e non possono essere associati in modo affidabile. Il totale mostrato usa quindi il totale di origine più alto invece di sommarli.",
+    "pt-PT": "Os registos do NOOP e do Health Connect podem sobrepor-se e não podem ser associados de forma fiável. Por isso, o total apresentado usa o maior total de origem em vez de os somar.",
+    "ru": "Записи NOOP и Health Connect могут пересекаться, и их нельзя надёжно сопоставить. Поэтому показанный итог равен большему значению из источников, а не их сумме.",
+    "zh-Hans": "NOOP 与 Health Connect 的记录可能重叠，且无法可靠匹配。因此，显示的总量取两个来源中较大的值，而不是相加。",
+    "zh-Hant": "NOOP 與 Health Connect 的記錄可能重疊，且無法可靠配對。因此，顯示的總量取兩個來源中較大的值，而不是相加。"
+  },
+  "appwide.hydration.subtitle.apple_health_format": {
+    "de": "Verfügbare erfasste Trinkmenge aus NOOP und Apple Health · %1$s.",
+    "en": "Available recorded intake from NOOP and Apple Health · %1$s.",
+    "es": "Ingesta registrada disponible de NOOP y Apple Health · %1$s.",
+    "fr": "Apport hydrique enregistré disponible dans NOOP et Apple Health · %1$s.",
+    "it": "Assunzione registrata disponibile da NOOP e Apple Health · %1$s.",
+    "pt-PT": "Consumo registado disponível no NOOP e Apple Health · %1$s.",
+    "ru": "Доступные записи о воде из NOOP и Apple Health · %1$s.",
+    "zh-Hans": "NOOP 与 Apple Health 中可用的饮水记录 · %1$s。",
+    "zh-Hant": "NOOP 與 Apple Health 中可用的飲水記錄 · %1$s。"
+  },
+  "appwide.hydration.subtitle.health_connect_format": {
+    "de": "Verfügbare erfasste Trinkmenge aus NOOP und Health Connect · %1$s.",
+    "en": "Available recorded intake from NOOP and Health Connect · %1$s.",
+    "es": "Ingesta registrada disponible de NOOP y Health Connect · %1$s.",
+    "fr": "Apport hydrique enregistré disponible dans NOOP et Health Connect · %1$s.",
+    "it": "Assunzione registrata disponibile da NOOP e Health Connect · %1$s.",
+    "pt-PT": "Consumo registado disponível no NOOP e Health Connect · %1$s.",
+    "ru": "Доступные записи о воде из NOOP и Health Connect · %1$s.",
+    "zh-Hans": "NOOP 与 Health Connect 中可用的饮水记录 · %1$s。",
+    "zh-Hant": "NOOP 與 Health Connect 中可用的飲水記錄 · %1$s。"
+  },
+  "appwide.hydration.a11y.day_format": {
+    "de": "Hydration %1$s",
+    "en": "Hydration %1$s",
+    "es": "Hidratación %1$s",
+    "fr": "Hydratation %1$s",
+    "it": "Idratazione %1$s",
+    "pt-PT": "Hidratação %1$s",
+    "ru": "Гидратация: %1$s",
+    "zh-Hans": "饮水 %1$s",
+    "zh-Hant": "飲水 %1$s"
+  },
+  "appwide.hydration.goal_progress_format": {
+    "de": "%1$d %% des Ziels für %2$s",
+    "en": "%1$d%% of the goal for %2$s",
+    "es": "%1$d %% del objetivo para %2$s",
+    "fr": "%1$d %% de l’objectif pour %2$s",
+    "it": "%1$d%% dell’obiettivo per %2$s",
+    "pt-PT": "%1$d%% do objetivo para %2$s",
+    "ru": "%1$d %% от цели на %2$s",
+    "zh-Hans": "%2$s 目标的 %1$d%%",
+    "zh-Hant": "%2$s 目標的 %1$d%%"
+  },
+  "appwide.hydration.target_unavailable": {
+    "de": "Bestätige deine Profildaten für Erwachsene, um ein persönliches Ziel zu sehen.",
+    "en": "Confirm your adult profile details to see a personalized goal.",
+    "es": "Confirma los datos de tu perfil adulto para ver un objetivo personalizado.",
+    "fr": "Confirmez les informations de votre profil adulte pour voir un objectif personnalisé.",
+    "it": "Conferma i dati del profilo adulto per vedere un obiettivo personalizzato.",
+    "pt-PT": "Confirma os dados do teu perfil de adulto para veres um objetivo personalizado.",
+    "ru": "Подтвердите данные профиля взрослого, чтобы увидеть персональную цель.",
+    "zh-Hans": "确认成人个人资料后即可查看个性化目标。",
+    "zh-Hant": "確認成人個人資料後即可查看個人化目標。"
+  },
+  "appwide.hydration.drinks_on_format": {
+    "de": "Getränke am %1$s",
+    "en": "Drinks on %1$s",
+    "es": "Bebidas del %1$s",
+    "fr": "Boissons du %1$s",
+    "it": "Bevande del %1$s",
+    "pt-PT": "Bebidas de %1$s",
+    "ru": "Напитки за %1$s",
+    "zh-Hans": "%1$s 的饮水记录",
+    "zh-Hant": "%1$s 的飲水記錄"
+  },
+  "appwide.hydration.history_through_format": {
+    "de": "7 Tage bis %1$s",
+    "en": "7 days through %1$s",
+    "es": "7 días hasta %1$s",
+    "fr": "7 jours jusqu’au %1$s",
+    "it": "7 giorni fino al %1$s",
+    "pt-PT": "7 dias até %1$s",
+    "ru": "7 дней по %1$s",
+    "zh-Hans": "截至 %1$s 的 7 天",
+    "zh-Hant": "截至 %1$s 的 7 天"
+  },
+  "appwide.hydration.logged_on_format": {
+    "de": "Erfasst am %1$s",
+    "en": "Logged on %1$s",
+    "es": "Registrado el %1$s",
+    "fr": "Enregistré le %1$s",
+    "it": "Registrato il %1$s",
+    "pt-PT": "Registado em %1$s",
+    "ru": "Записано: %1$s",
+    "zh-Hans": "已记录 %1$s",
+    "zh-Hant": "已記錄 %1$s"
+  },
+  "appwide.hydration.progress_a11y_format": {
+    "de": "Fortschritt zum Ziel für %1$s",
+    "en": "Progress toward the goal for %1$s",
+    "es": "Progreso hacia el objetivo para %1$s",
+    "fr": "Progression vers l’objectif pour %1$s",
+    "it": "Progresso verso l’obiettivo per %1$s",
+    "pt-PT": "Progresso em direção ao objetivo para %1$s",
+    "ru": "Прогресс к цели на %1$s",
+    "zh-Hans": "%1$s 的目标进度",
+    "zh-Hant": "%1$s 的目標進度"
+  },
+  "appwide.hydration.millilitres_format": {
+    "de": "%1$d ml",
+    "en": "%1$d ml",
+    "es": "%1$d ml",
+    "fr": "%1$d ml",
+    "it": "%1$d ml",
+    "pt-PT": "%1$d ml",
+    "ru": "%1$d мл",
+    "zh-Hans": "%1$d 毫升",
+    "zh-Hant": "%1$d 毫升"
+  },
+  "appwide.hydration.edit_entry_accessibility_format": {
+    "de": "%1$s-Wassereintrag bearbeiten",
+    "en": "Edit %1$s water entry",
+    "es": "Editar entrada de agua de %1$s",
+    "fr": "Modifier l’entrée d’eau de %1$s",
+    "it": "Modifica la registrazione d’acqua di %1$s",
+    "pt-PT": "Editar registo de água de %1$s",
+    "ru": "Изменить запись о воде: %1$s",
+    "zh-Hans": "编辑 %1$s 饮水记录",
+    "zh-Hant": "編輯 %1$s 飲水記錄"
+  },
+  "appwide.hydration.delete_entry_accessibility_format": {
+    "de": "%1$s-Wassereintrag löschen",
+    "en": "Delete %1$s water entry",
+    "es": "Eliminar entrada de agua de %1$s",
+    "fr": "Supprimer l’entrée d’eau de %1$s",
+    "it": "Elimina la registrazione d’acqua di %1$s",
+    "pt-PT": "Eliminar registo de água de %1$s",
+    "ru": "Удалить запись о воде: %1$s",
+    "zh-Hans": "删除 %1$s 饮水记录",
+    "zh-Hant": "刪除 %1$s 飲水記錄"
+  },
+  "appwide.action.dismiss": {
+    "de": "Schließen",
+    "en": "Dismiss",
+    "es": "Cerrar",
+    "fr": "Fermer",
+    "it": "Chiudi",
+    "pt-PT": "Fechar",
+    "ru": "Закрыть",
+    "zh-Hans": "关闭",
+    "zh-Hant": "關閉"
   },
   "appwide.fitness_age.value_format": {
     "de": "%1$d J.",
@@ -307,6 +648,50 @@
     "zh-Hans": "BMI",
     "zh-Hant": "BMI"
   },
+  "appwide.health.body_composition.bmi_confirm_inputs": {
+    "de": "Bestätige Größe und Gewicht, um den BMI für Erwachsene anzuzeigen.",
+    "en": "Confirm height and weight to show adult BMI.",
+    "es": "Confirma la altura y el peso para mostrar el IMC de adultos.",
+    "fr": "Confirmez la taille et le poids pour afficher l’IMC adulte.",
+    "it": "Conferma altezza e peso per mostrare il BMI per adulti.",
+    "pt-PT": "Confirme a altura e o peso para mostrar o IMC de adulto.",
+    "ru": "Подтвердите рост и вес, чтобы показать ИМТ для взрослых.",
+    "zh-Hans": "确认身高和体重后可显示成人 BMI。",
+    "zh-Hant": "確認身高和體重後可顯示成人 BMI。"
+  },
+  "appwide.health.body_composition.bmi_under_20": {
+    "de": "Der BMI für Erwachsene wird vor dem 20. Lebensjahr nicht angezeigt.",
+    "en": "Adult BMI is not shown before age 20.",
+    "es": "El IMC de adultos no se muestra antes de los 20 años.",
+    "fr": "L’IMC adulte n’est pas affiché avant 20 ans.",
+    "it": "Il BMI per adulti non viene mostrato prima dei 20 anni.",
+    "pt-PT": "O IMC de adulto não é mostrado antes dos 20 anos.",
+    "ru": "ИМТ для взрослых не показывается до 20 лет.",
+    "zh-Hans": "20 岁前不显示成人 BMI。",
+    "zh-Hant": "20 歲前不顯示成人 BMI。"
+  },
+  "appwide.health.body_composition.bmi_screening_note": {
+    "de": "Der BMI wird für Erwachsene ab 20 Jahren aus bestätigter Größe und bestätigtem Gewicht berechnet. Er ist ein begrenzter Screeningwert, keine Diagnose und keine Messung der Körperzusammensetzung.",
+    "en": "BMI is calculated from confirmed height and weight for adults 20+. It is a limited screening value, not a diagnosis or a body-composition measurement.",
+    "es": "El IMC se calcula con la altura y el peso confirmados para adultos de 20 años o más. Es un valor de cribado limitado, no un diagnóstico ni una medición de la composición corporal.",
+    "fr": "L’IMC est calculé à partir de la taille et du poids confirmés chez les adultes de 20 ans et plus. C’est une valeur de dépistage limitée, pas un diagnostic ni une mesure de la composition corporelle.",
+    "it": "Il BMI è calcolato da altezza e peso confermati per gli adulti dai 20 anni in su. È un valore di screening limitato, non una diagnosi né una misura della composizione corporea.",
+    "pt-PT": "O IMC é calculado a partir da altura e do peso confirmados para adultos com 20 anos ou mais. É um valor de rastreio limitado, não um diagnóstico nem uma medição da composição corporal.",
+    "ru": "ИМТ рассчитывается по подтверждённым росту и весу для взрослых от 20 лет. Это ограниченный скрининговый показатель, а не диагноз или измерение состава тела.",
+    "zh-Hans": "成人 BMI 仅在 20 岁及以上且身高、体重已确认时计算。它只是有限的筛查值，不是诊断或身体成分测量。",
+    "zh-Hant": "成人 BMI 僅在 20 歲及以上且身高、體重已確認時計算。它只是有限的篩查值，不是診斷或身體組成測量。"
+  },
+  "appwide.health.body_composition.calculated": {
+    "de": "Berechnet",
+    "en": "Calculated",
+    "es": "Calculado",
+    "fr": "Calculé",
+    "it": "Calcolato",
+    "pt-PT": "Calculado",
+    "ru": "Рассчитано",
+    "zh-Hans": "计算值",
+    "zh-Hant": "計算值"
+  },
   "appwide.health.body_composition.body_fat": {
     "de": "KÖRPERFETT",
     "en": "BODY FAT",
@@ -352,15 +737,15 @@
     "zh-Hant": "無測量值"
   },
   "appwide.health.body_composition.disclaimer": {
-    "de": "Ganzkörperwerte behalten ihre aufgezeichnete Quelle. NOOP leitet keine Fett- oder Muskelverteilung für Arme, Beine oder Rumpf ab; dafür ist kompatible segmentale Messhardware erforderlich.",
-    "en": "Whole-body values retain their recorded source. NOOP does not infer arm, leg, or trunk fat and muscle distribution; that requires compatible segmental measurement hardware.",
-    "es": "Los valores de cuerpo completo conservan su fuente registrada. NOOP no infiere la distribución de grasa o músculo en brazos, piernas o tronco; para ello se necesita hardware compatible de medición segmentaria.",
-    "fr": "Les valeurs du corps entier conservent leur source enregistrée. NOOP ne déduit pas la répartition de la graisse ou des muscles dans les bras, les jambes ou le tronc ; cela nécessite un matériel de mesure segmentaire compatible.",
-    "it": "I valori del corpo intero mantengono la fonte registrata. NOOP non deduce la distribuzione di grasso o muscoli in braccia, gambe o tronco; è necessario un hardware compatibile per la misurazione segmentale.",
-    "pt-PT": "Os valores de corpo inteiro mantêm a respetiva fonte registada. O NOOP não infere a distribuição de gordura ou músculo nos braços, pernas ou tronco; isso requer hardware compatível de medição segmentar.",
-    "ru": "Значения для всего тела сохраняют исходный источник. NOOP не определяет распределение жира и мышц по рукам, ногам или туловищу: для этого требуется совместимое оборудование сегментарного анализа.",
-    "zh-Hans": "全身数值会保留其记录来源。NOOP 不推断手臂、腿部或躯干的脂肪和肌肉分布；这需要兼容的分段测量硬件。",
-    "zh-Hant": "全身數值會保留其記錄來源。NOOP 不推斷手臂、腿部或軀幹的脂肪和肌肉分佈；這需要相容的分段測量硬體。"
+    "de": "Ganzkörperwerte behalten Quelle und Datum. Körperfett und Magermasse sind Schätzungen des jeweiligen Messgeräts und können unter anderem mit der Hydration schwanken; vergleiche Trends statt einzelner Messungen. NOOP leitet keine segmentale Verteilung ab.",
+    "en": "Whole-body values retain their source and date. Body fat and lean mass are source-device estimates that can vary with hydration and other conditions; compare trends rather than single readings. NOOP does not infer segmental distribution.",
+    "es": "Los valores de cuerpo completo conservan su fuente y fecha. La grasa corporal y la masa magra son estimaciones del dispositivo de origen y pueden variar con la hidratación y otras condiciones; compara tendencias, no lecturas aisladas. NOOP no infiere la distribución segmentaria.",
+    "fr": "Les valeurs du corps entier conservent leur source et leur date. La masse grasse et la masse maigre sont des estimations de l’appareil source et peuvent varier avec l’hydratation et d’autres conditions ; comparez les tendances plutôt qu’une mesure isolée. NOOP ne déduit pas la répartition segmentaire.",
+    "it": "I valori del corpo intero mantengono fonte e data. Massa grassa e massa magra sono stime del dispositivo di origine e possono variare con l’idratazione e altre condizioni; confronta le tendenze, non le singole letture. NOOP non deduce la distribuzione segmentale.",
+    "pt-PT": "Os valores de corpo inteiro mantêm a fonte e a data. A gordura corporal e a massa magra são estimativas do dispositivo de origem e podem variar com a hidratação e outras condições; compare tendências, não leituras isoladas. O NOOP não infere a distribuição segmentar.",
+    "ru": "Значения для всего тела сохраняют источник и дату. Жировая и безжировая масса являются оценками исходного устройства и могут меняться из-за гидратации и других условий; сравнивайте тренды, а не отдельные измерения. NOOP не определяет сегментарное распределение.",
+    "zh-Hans": "全身数值会保留来源和日期。体脂和瘦体重是来源设备的估算值，可能受水分状态等条件影响；请比较长期趋势，而非单次读数。NOOP 不推断分段分布。",
+    "zh-Hant": "全身數值會保留來源和日期。體脂和瘦體重是來源裝置的估算值，可能受水分狀態等條件影響；請比較長期趨勢，而非單次讀數。NOOP 不推斷分段分佈。"
   },
   "appwide.health.body_composition.loading": {
     "de": "Messungen werden geladen…",
@@ -460,6 +845,39 @@
     "ru": "Цель %1$s · выбрана вами",
     "zh-Hans": "目标 %1$s · 由你选择",
     "zh-Hant": "目標 %1$s · 由你選擇"
+  },
+  "appwide.health.body_composition.target_summary": {
+    "de": "Aktuell %1$s · ausgewähltes Ziel %2$s",
+    "en": "Current %1$s · selected target %2$s",
+    "es": "Actual %1$s · objetivo seleccionado %2$s",
+    "fr": "Actuel %1$s · objectif sélectionné %2$s",
+    "it": "Attuale %1$s · obiettivo selezionato %2$s",
+    "pt-PT": "Atual %1$s · objetivo selecionado %2$s",
+    "ru": "Сейчас %1$s · выбранная цель %2$s",
+    "zh-Hans": "当前 %1$s · 所选目标 %2$s",
+    "zh-Hant": "目前 %1$s · 所選目標 %2$s"
+  },
+  "appwide.health.body_composition.target_unavailable": {
+    "de": "Der Zielfortschritt ist mit dem aktuellen Profil nicht verfügbar.",
+    "en": "Target progress is unavailable with the current profile.",
+    "es": "El progreso del objetivo no está disponible con el perfil actual.",
+    "fr": "La progression vers l’objectif n’est pas disponible avec le profil actuel.",
+    "it": "L’avanzamento verso l’obiettivo non è disponibile con il profilo attuale.",
+    "pt-PT": "O progresso do objetivo não está disponível com o perfil atual.",
+    "ru": "Прогресс цели недоступен для текущего профиля.",
+    "zh-Hans": "当前个人资料不支持目标进度。",
+    "zh-Hant": "目前個人資料不支援目標進度。"
+  },
+  "appwide.health.body_composition.target_safety_note": {
+    "de": "Optionale Gewichtsziele sind für Erwachsene ab 20 Jahren mit bestätigten Messwerten gedacht. Sie sind nicht für Schwangerschaft, die Zeit nach der Geburt, Essstörungsbehandlung oder ärztlich geleitete Pläne bestimmt. NOOP legt weder Tempo noch zusätzliche Bewegung fest.",
+    "en": "Optional weight goals are for adults 20+ with confirmed measurements. They are not intended for pregnancy, postpartum recovery, eating-disorder care, or a clinician-directed plan. NOOP never assigns a pace or extra exercise.",
+    "es": "Los objetivos de peso opcionales son para adultos de 20 años o más con mediciones confirmadas. No están pensados para el embarazo, la recuperación posparto, la atención de trastornos alimentarios ni planes dirigidos por un profesional sanitario. NOOP nunca asigna un ritmo ni ejercicio adicional.",
+    "fr": "Les objectifs de poids facultatifs sont destinés aux adultes de 20 ans et plus disposant de mesures confirmées. Ils ne conviennent pas à la grossesse, au rétablissement post-partum, aux soins des troubles alimentaires ni à un programme encadré par un professionnel. NOOP n’impose jamais de rythme ni d’exercice supplémentaire.",
+    "it": "Gli obiettivi di peso facoltativi sono per adulti dai 20 anni in su con misure confermate. Non sono destinati a gravidanza, recupero post-partum, cura dei disturbi alimentari o piani guidati da un professionista. NOOP non assegna mai un ritmo o esercizio aggiuntivo.",
+    "pt-PT": "Os objetivos de peso opcionais destinam-se a adultos com 20 anos ou mais e medições confirmadas. Não se destinam à gravidez, recuperação pós-parto, cuidados de perturbações alimentares ou planos orientados por um profissional. O NOOP nunca define um ritmo nem exercício adicional.",
+    "ru": "Необязательные цели по весу предназначены для взрослых от 20 лет с подтверждёнными измерениями. Они не предназначены для беременности, послеродового восстановления, лечения расстройств пищевого поведения или плана под наблюдением врача. NOOP не назначает темп или дополнительную нагрузку.",
+    "zh-Hans": "可选体重目标仅适用于 20 岁及以上且测量已确认的成人，不适用于孕期、产后恢复、进食障碍照护或由临床专业人员指导的计划。NOOP 不会指定速度或额外运动。",
+    "zh-Hant": "選填體重目標僅適用於 20 歲及以上且測量已確認的成人，不適用於孕期、產後恢復、飲食失調照護或由臨床專業人員指導的計劃。NOOP 不會指定速度或額外運動。"
   },
   "appwide.health.body_composition.no_target": {
     "de": "Kein Ziel ausgewählt",
@@ -736,6 +1154,28 @@
     "zh-Hans": "系统设置中已关闭通知。",
     "zh-Hant": "系統設定中已關閉通知。"
   },
+  "appwide.activity_suggestion_notifications": {
+    "de": "Mitteilungen zu Aktivitätsvorschlägen",
+    "en": "Activity suggestion notifications",
+    "es": "Notificaciones de sugerencias de actividad",
+    "fr": "Notifications de suggestion d’activité",
+    "it": "Notifiche dei suggerimenti di attività",
+    "pt-PT": "Notificações de sugestões de atividade",
+    "ru": "Уведомления о предложениях активности",
+    "zh-Hans": "活动建议通知",
+    "zh-Hant": "活動建議通知"
+  },
+  "appwide.activity_suggestion_notifications_detail": {
+    "de": "Standardmäßig aus. Nach einer Synchronisierung kann eine kürzlich durch Bewegung bestätigte Aktivität zur Prüfung auf dem Sperrbildschirm erscheinen. NOOP speichert sie nie ohne deine Zustimmung.",
+    "en": "Off by default. After a sync, a recent motion-corroborated activity can appear on the Lock Screen for review. NOOP never saves it without your approval.",
+    "es": "Desactivadas de forma predeterminada. Tras una sincronización, una actividad reciente confirmada por movimiento puede aparecer en la pantalla de bloqueo para que la revises. NOOP nunca la guarda sin tu aprobación.",
+    "fr": "Désactivées par défaut. Après une synchronisation, une activité récente corroborée par le mouvement peut apparaître sur l’écran verrouillé pour vérification. NOOP ne l’enregistre jamais sans votre accord.",
+    "it": "Disattivate per impostazione predefinita. Dopo una sincronizzazione, un’attività recente confermata dal movimento può apparire nella schermata di blocco per la revisione. NOOP non la salva mai senza la tua approvazione.",
+    "pt-PT": "Desativadas por predefinição. Após uma sincronização, uma atividade recente confirmada por movimento pode aparecer no ecrã bloqueado para revisão. O NOOP nunca a guarda sem a sua aprovação.",
+    "ru": "По умолчанию отключено. После синхронизации недавняя активность, подтверждённая движением, может появиться на экране блокировки для проверки. NOOP никогда не сохраняет её без вашего подтверждения.",
+    "zh-Hans": "默认关闭。同步后，近期经运动信号佐证的活动可显示在锁定屏幕上供你审核。未经你确认，NOOP 绝不会保存。",
+    "zh-Hant": "預設關閉。同步後，近期經動作訊號佐證的活動可顯示在鎖定畫面上供你審核。未經你確認，NOOP 絕不會儲存。"
+  },
   "appwide.notifications.effort_permission_message": {
     "de": "Aktiviere Mitteilungen in den Einstellungen, um die optionale Belastungsmarke zu erhalten. NOOP funktioniert auch ohne sie normal.",
     "en": "Allow notifications in Settings to receive the optional Effort marker. NOOP still works normally without it.",
@@ -802,27 +1242,38 @@
     "zh-Hans": "启动训练教练",
     "zh-Hant": "啟動訓練教練"
   },
+  "appwide.live_session.connect_band": {
+    "de": "Band verbinden und tragen",
+    "en": "Connect and wear band",
+    "es": "Conecta y ponte la pulsera",
+    "fr": "Connectez et portez le bracelet",
+    "it": "Connetti e indossa la fascia",
+    "pt-PT": "Liga e coloca a bracelete",
+    "ru": "Подключите и наденьте браслет",
+    "zh-Hans": "连接并佩戴手环",
+    "zh-Hant": "連線並佩戴手環"
+  },
   "appwide.live_session.start_detail": {
-    "de": "Bandvibrationen steuern deine Belastung anhand der heutigen Erholung und Herzfrequenz.",
-    "en": "Band vibrations guide effort using today's Recovery and heart rate.",
-    "es": "Las vibraciones de la pulsera guían tu esfuerzo según la Recuperación y la frecuencia cardiaca de hoy.",
-    "fr": "Les vibrations du bracelet guident votre effort selon la Récupération et la fréquence cardiaque du jour.",
-    "it": "Le vibrazioni del bracciale guidano lo sforzo usando il Recupero e la frequenza cardiaca di oggi.",
-    "pt-PT": "As vibrações da pulseira orientam o esforço com base na Recuperação e frequência cardíaca de hoje.",
-    "ru": "Вибрации браслета направляют нагрузку с учётом сегодняшнего Восстановления и пульса.",
-    "zh-Hans": "手环根据今天的恢复状况和心率，通过振动引导训练强度。",
-    "zh-Hant": "手環根據今天的恢復狀況和心率，透過振動引導訓練強度。"
+    "de": "Live-Herzfrequenz-Coaching auf Basis der heutigen Erholung. Handgelenkhinweise benötigen ein bereites Band.",
+    "en": "Live heart-rate coaching shaped by today's Recovery. Wrist cues require a ready band.",
+    "es": "Coaching con frecuencia cardiaca en directo según la Recuperación de hoy. Las señales en la muñeca requieren una pulsera preparada.",
+    "fr": "Coaching avec fréquence cardiaque en direct selon la Récupération du jour. Les signaux au poignet nécessitent un bracelet prêt.",
+    "it": "Coaching con frequenza cardiaca in tempo reale in base al Recupero di oggi. I segnali al polso richiedono una fascia pronta.",
+    "pt-PT": "Orientação com frequência cardíaca em direto baseada na Recuperação de hoje. Os sinais no pulso requerem uma bracelete pronta.",
+    "ru": "Тренировка по пульсу в реальном времени с учётом сегодняшнего Восстановления. Для сигналов на запястье нужен готовый браслет.",
+    "zh-Hans": "根据今日恢复提供实时心率指导。腕部提示需要手环已准备就绪。",
+    "zh-Hant": "根據今日恢復提供即時心率指導。手腕提示需要手環已準備就緒。"
   },
   "appwide.live_session.start_accessibility": {
-    "de": "Workout-Coach starten. Beta. Bandvibrationen steuern deine Belastung anhand der heutigen Erholung und Herzfrequenz.",
-    "en": "Start workout coach. Beta. Band vibrations guide effort using today's Recovery and heart rate.",
-    "es": "Iniciar coach de entrenamiento. Beta. Las vibraciones de la pulsera guían tu esfuerzo según la Recuperación y la frecuencia cardiaca de hoy.",
-    "fr": "Démarrer le coach d’entraînement. Bêta. Les vibrations du bracelet guident votre effort selon la Récupération et la fréquence cardiaque du jour.",
-    "it": "Avvia coach di allenamento. Beta. Le vibrazioni del bracciale guidano lo sforzo usando il Recupero e la frequenza cardiaca di oggi.",
-    "pt-PT": "Iniciar orientação de treino. Beta. As vibrações da pulseira orientam o esforço com base na Recuperação e frequência cardíaca de hoje.",
-    "ru": "Запустить тренера для тренировки. Бета. Вибрации браслета направляют нагрузку с учётом сегодняшнего Восстановления и пульса.",
-    "zh-Hans": "启动训练教练。测试版。手环根据今天的恢复状况和心率，通过振动引导训练强度。",
-    "zh-Hant": "啟動訓練教練。測試版。手環根據今天的恢復狀況和心率，透過振動引導訓練強度。"
+    "de": "Workout-Coach starten. Beta. Live-Herzfrequenz-Coaching auf Basis der heutigen Erholung. Handgelenkhinweise benötigen ein verbundenes, getragenes Band.",
+    "en": "Start workout coach. Beta. Live heart-rate coaching shaped by today's Recovery. Wrist cues require a connected, worn band.",
+    "es": "Iniciar coach de entrenamiento. Beta. Coaching con frecuencia cardiaca en directo según la Recuperación de hoy. Las señales en la muñeca requieren una pulsera conectada y puesta.",
+    "fr": "Démarrer le coach d’entraînement. Bêta. Coaching avec fréquence cardiaque en direct selon la Récupération du jour. Les signaux au poignet nécessitent un bracelet connecté et porté.",
+    "it": "Avvia coach di allenamento. Beta. Coaching con frequenza cardiaca in tempo reale in base al Recupero di oggi. I segnali al polso richiedono una fascia connessa e indossata.",
+    "pt-PT": "Iniciar orientação de treino. Beta. Orientação com frequência cardíaca em direto baseada na Recuperação de hoje. Os sinais no pulso requerem uma bracelete ligada e colocada.",
+    "ru": "Запустить тренера для тренировки. Бета. Тренировка по пульсу в реальном времени с учётом сегодняшнего Восстановления. Для сигналов на запястье нужен подключённый и надетый браслет.",
+    "zh-Hans": "启动训练教练。测试版。根据今日恢复提供实时心率指导。腕部提示需要手环已连接并佩戴。",
+    "zh-Hant": "啟動訓練教練。測試版。根據今日恢復提供即時心率指導。手腕提示需要手環已連線並佩戴。"
   },
   "appwide.live_session.preflight_title": {
     "de": "Workout-Coach",
@@ -891,26 +1342,26 @@
     "zh-Hant": "今日恢復、近期靜息心率和個人資料中的最大心率共同設定區間。若沒有恢復評分，NOOP 會採用較為謹慎的中間區間。"
   },
   "appwide.live_session.preflight_cues_title": {
-    "de": "Wann das Band vibriert",
-    "en": "When the band vibrates",
-    "es": "Cuándo vibra la pulsera",
-    "fr": "Quand le bracelet vibre",
-    "it": "Quando vibra la fascia",
-    "pt-PT": "Quando a bracelete vibra",
-    "ru": "Когда браслет вибрирует",
-    "zh-Hans": "手环何时振动",
-    "zh-Hant": "手環何時振動"
+    "de": "So funktionieren Hinweise",
+    "en": "How cues work",
+    "es": "Cómo funcionan las señales",
+    "fr": "Fonctionnement des signaux",
+    "it": "Come funzionano i segnali",
+    "pt-PT": "Como funcionam os sinais",
+    "ru": "Как работают подсказки",
+    "zh-Hans": "提示如何工作",
+    "zh-Hant": "提示如何運作"
   },
   "appwide.live_session.preflight_cues_body": {
-    "de": "In der ersten Minute bleibt das Band still. Danach bedeuten 2 leichte Impulse mehr Belastung nach 25 Sekunden unter dem Ziel; 3 kräftige Impulse bedeuten langsamer werden, wenn ein schneller Anstieg 25 Sekunden über dem Ziel bleibt. Kurze Ausschläge bleiben still, und derselbe Hinweis wartet mindestens 50 Sekunden.",
-    "en": "The first minute stays quiet. Then 2 light taps mean increase effort after 25 seconds below target; 3 firm taps mean ease off after a sharp rise stays above target for 25 seconds. Brief spikes stay silent, and the same cue waits at least 50 seconds.",
-    "es": "El primer minuto permanece en silencio. Después, 2 toques suaves indican que aumentes el esfuerzo tras 25 segundos por debajo del objetivo; 3 toques firmes indican que aflojes si una subida brusca se mantiene 25 segundos por encima. Los picos breves no generan avisos y la misma señal espera al menos 50 segundos.",
-    "fr": "La première minute reste silencieuse. Ensuite, 2 légères impulsions invitent à intensifier après 25 secondes sous la cible ; 3 impulsions fermes invitent à ralentir si une hausse rapide reste 25 secondes au-dessus. Les pics brefs restent silencieux et un même signal attend au moins 50 secondes.",
-    "it": "Il primo minuto resta silenzioso. Poi 2 tocchi leggeri indicano di aumentare lo sforzo dopo 25 secondi sotto l’obiettivo; 3 tocchi decisi indicano di rallentare se un aumento rapido resta sopra l’obiettivo per 25 secondi. I picchi brevi non attivano segnali e lo stesso segnale attende almeno 50 secondi.",
-    "pt-PT": "O primeiro minuto fica em silêncio. Depois, 2 toques leves indicam mais esforço após 25 segundos abaixo do objetivo; 3 toques firmes indicam abrandar se uma subida rápida ficar 25 segundos acima. Picos breves não geram avisos e o mesmo sinal espera pelo menos 50 segundos.",
-    "ru": "В первую минуту сигналов нет. Затем 2 лёгких импульса предлагают повысить нагрузку после 25 секунд ниже цели; 3 сильных импульса предлагают снизить темп, если резкий подъём держится выше цели 25 секунд. Короткие скачки игнорируются, а одинаковые сигналы разделены минимум 50 секундами.",
-    "zh-Hans": "第一分钟不会提示。之后，低于目标持续 25 秒时，2 次轻振表示应提高强度；心率快速上升并高于目标持续 25 秒时，3 次强振表示应降低强度。短暂波动不会提示，相同提示至少间隔 50 秒。",
-    "zh-Hant": "第一分鐘不會提示。之後，低於目標持續 25 秒時，2 次輕振表示應提高強度；心率快速上升並高於目標持續 25 秒時，3 次強振表示應降低強度。短暫波動不會提示，相同提示至少間隔 50 秒。"
+    "de": "Die erste Minute bleibt still. Danach zeigt der Bildschirm, wann du die Belastung erhöhen oder senken solltest. Mit aktivierten Handgelenkhinweisen bedeuten 2 leichte Impulse mehr Belastung nach 25 Sekunden unter dem Ziel und 3 kräftige Impulse langsamer werden, wenn ein schneller Anstieg 25 Sekunden über dem Ziel bleibt. Kurze Ausschläge bleiben still, und derselbe Hinweis wartet mindestens 50 Sekunden.",
+    "en": "The first minute stays quiet. Then the screen shows when to increase or ease effort. With wrist alerts on, 2 light taps mean increase after 25 seconds below target and 3 firm taps mean ease off after a sharp rise stays above target for 25 seconds. Brief spikes stay silent, and the same cue waits at least 50 seconds.",
+    "es": "El primer minuto permanece en silencio. Después, la pantalla indica cuándo aumentar o reducir el esfuerzo. Con los avisos de muñeca activados, 2 toques suaves indican aumentar tras 25 segundos por debajo del objetivo y 3 toques firmes indican aflojar si una subida brusca se mantiene 25 segundos por encima. Los picos breves no generan avisos y la misma señal espera al menos 50 segundos.",
+    "fr": "La première minute reste silencieuse. Ensuite, l’écran indique quand intensifier ou réduire l’effort. Avec les alertes au poignet activées, 2 légères impulsions invitent à intensifier après 25 secondes sous la cible et 3 impulsions fermes à ralentir si une hausse rapide reste 25 secondes au-dessus. Les pics brefs restent silencieux et un même signal attend au moins 50 secondes.",
+    "it": "Il primo minuto resta silenzioso. Poi lo schermo indica quando aumentare o ridurre lo sforzo. Con gli avvisi al polso attivi, 2 tocchi leggeri indicano di aumentare dopo 25 secondi sotto l’obiettivo e 3 tocchi decisi di rallentare se un aumento rapido resta sopra l’obiettivo per 25 secondi. I picchi brevi non attivano segnali e lo stesso segnale attende almeno 50 secondi.",
+    "pt-PT": "O primeiro minuto fica em silêncio. Depois, o ecrã indica quando aumentar ou reduzir o esforço. Com os alertas no pulso ativos, 2 toques leves indicam aumentar após 25 segundos abaixo do objetivo e 3 toques firmes indicam abrandar se uma subida rápida ficar 25 segundos acima. Picos breves não geram avisos e o mesmo sinal espera pelo menos 50 segundos.",
+    "ru": "В первую минуту подсказок нет. Затем экран показывает, когда повысить или снизить нагрузку. При включённых сигналах на запястье 2 лёгких импульса предлагают повысить нагрузку после 25 секунд ниже цели, а 3 сильных предлагают снизить темп, если резкий подъём держится выше цели 25 секунд. Короткие скачки игнорируются, а одинаковые подсказки разделены минимум 50 секундами.",
+    "zh-Hans": "第一分钟不会提示。之后，屏幕会显示何时提高或降低强度。开启腕部提醒后，低于目标持续 25 秒时，2 次轻振表示提高强度；心率快速上升并高于目标持续 25 秒时，3 次强振表示降低强度。短暂波动不会提示，相同提示至少间隔 50 秒。",
+    "zh-Hant": "第一分鐘不會提示。之後，螢幕會顯示何時提高或降低強度。開啟手腕提醒後，低於目標持續 25 秒時，2 次輕振表示提高強度；心率快速上升並高於目標持續 25 秒時，3 次強振表示降低強度。短暫波動不會提示，相同提示至少間隔 50 秒。"
   },
   "appwide.live_session.preflight_stop_title": {
     "de": "Wann das Coaching endet",
@@ -944,6 +1395,94 @@
     "ru": "Начать",
     "zh-Hans": "开始指导",
     "zh-Hant": "開始指導"
+  },
+  "appwide.live_session.band_required": {
+    "de": "Verbinde und trage vor dem Start ein gekoppeltes unterstütztes Band.",
+    "en": "Connect and wear a bonded supported band before starting.",
+    "es": "Conecta y ponte una pulsera compatible vinculada antes de empezar.",
+    "fr": "Connectez et portez un bracelet compatible jumelé avant de commencer.",
+    "it": "Connetti e indossa una fascia compatibile associata prima di iniziare.",
+    "pt-PT": "Liga e coloca uma bracelete compatível emparelhada antes de iniciar.",
+    "ru": "Перед началом подключите и наденьте сопряжённый поддерживаемый браслет.",
+    "zh-Hans": "开始前，请连接并佩戴已配对的受支持手环。",
+    "zh-Hant": "開始前，請連線並佩戴已配對的受支援手環。"
+  },
+  "appwide.live_session.wrist_ready": {
+    "de": "Live-Herzfrequenz und Handgelenkhinweise sind bereit.",
+    "en": "Live heart rate and wrist cues are ready.",
+    "es": "La frecuencia cardiaca en directo y las señales en la muñeca están listas.",
+    "fr": "La fréquence cardiaque en direct et les signaux au poignet sont prêts.",
+    "it": "La frequenza cardiaca in tempo reale e i segnali al polso sono pronti.",
+    "pt-PT": "A frequência cardíaca em direto e os sinais no pulso estão prontos.",
+    "ru": "Пульс в реальном времени и сигналы на запястье готовы.",
+    "zh-Hans": "实时心率和腕部提示已准备就绪。",
+    "zh-Hant": "即時心率和手腕提示已準備就緒。"
+  },
+  "appwide.live_session.screen_only": {
+    "de": "Live-Herzfrequenz ist bereit. Handgelenkhinweise sind aus, daher bleibt die Anleitung auf dem Bildschirm.",
+    "en": "Live heart rate is ready. Wrist alerts are off, so guidance stays on screen.",
+    "es": "La frecuencia cardiaca en directo está lista. Los avisos de muñeca están desactivados, por lo que la guía permanece en pantalla.",
+    "fr": "La fréquence cardiaque en direct est prête. Les alertes au poignet sont désactivées, donc le guidage reste à l’écran.",
+    "it": "La frequenza cardiaca in tempo reale è pronta. Gli avvisi al polso sono disattivati, quindi la guida resta sullo schermo.",
+    "pt-PT": "A frequência cardíaca em direto está pronta. Os alertas no pulso estão desativados, por isso a orientação permanece no ecrã.",
+    "ru": "Пульс в реальном времени готов. Сигналы на запястье выключены, поэтому подсказки останутся на экране.",
+    "zh-Hans": "实时心率已准备就绪。腕部提醒已关闭，因此指导会显示在屏幕上。",
+    "zh-Hant": "即時心率已準備就緒。手腕提醒已關閉，因此指導會顯示在螢幕上。"
+  },
+  "appwide.managed_safety.band_sos.sign_in": {
+    "de": "Melde dich bei NOOP+ an, bevor du Band-SOS aktivierst.",
+    "en": "Sign in to NOOP+ before enabling band SOS.",
+    "es": "Inicia sesión en NOOP+ antes de activar el SOS de la pulsera.",
+    "fr": "Connectez-vous à NOOP+ avant d’activer le SOS du bracelet.",
+    "it": "Accedi a NOOP+ prima di attivare SOS dalla fascia.",
+    "pt-PT": "Inicia sessão no NOOP+ antes de ativar o SOS da bracelete.",
+    "ru": "Войдите в NOOP+, прежде чем включать SOS с браслета.",
+    "zh-Hans": "启用手环 SOS 前，请先登录 NOOP+。",
+    "zh-Hant": "啟用手環 SOS 前，請先登入 NOOP+。"
+  },
+  "appwide.managed_safety.band_sos.load_contacts": {
+    "de": "Öffne Safety einmal, um deine App-Kontakte zu laden.",
+    "en": "Open Safety once to load your app contacts.",
+    "es": "Abre Seguridad una vez para cargar tus contactos de la app.",
+    "fr": "Ouvrez Sécurité une fois pour charger vos contacts dans l’app.",
+    "it": "Apri Sicurezza una volta per caricare i contatti nell’app.",
+    "pt-PT": "Abre Segurança uma vez para carregar os contactos na app.",
+    "ru": "Откройте раздел «Безопасность», чтобы загрузить контакты приложения.",
+    "zh-Hans": "请打开一次“安全”，以加载应用内联系人。",
+    "zh-Hant": "請開啟一次「安全」，以載入 App 內聯絡人。"
+  },
+  "appwide.managed_safety.band_sos.contacts_remaining": {
+    "de": "Noch benötigte akzeptierte App-Kontakte: %1$d.",
+    "en": "Accepted app contacts still needed: %1$d.",
+    "es": "Contactos aceptados de la app que aún faltan: %1$d.",
+    "fr": "Contacts acceptés dans l’app encore nécessaires : %1$d.",
+    "it": "Contatti accettati nell’app ancora necessari: %1$d.",
+    "pt-PT": "Contactos aceites na app ainda necessários: %1$d.",
+    "ru": "Ещё нужны принятые контакты приложения: %1$d.",
+    "zh-Hans": "仍需已接受的应用内联系人：%1$d。",
+    "zh-Hant": "仍需已接受的 App 內聯絡人：%1$d。"
+  },
+  "appwide.managed_safety.band_sos.request_rejected": {
+    "de": "Das Safety-Netzwerk der App hat die Anfrage nicht angenommen.",
+    "en": "The app Safety network did not accept the request.",
+    "es": "La red de Seguridad de la app no aceptó la solicitud.",
+    "fr": "Le réseau Sécurité de l’app n’a pas accepté la demande.",
+    "it": "La rete Sicurezza dell’app non ha accettato la richiesta.",
+    "pt-PT": "A rede de Segurança da app não aceitou o pedido.",
+    "ru": "Сеть безопасности приложения не приняла запрос.",
+    "zh-Hans": "应用内安全网络未接受该请求。",
+    "zh-Hant": "App 內安全網路未接受此要求。"
+  },
+  "appwide.managed_safety.band_sos.notifications": {
+    "de": "Aktiviere NOOP-Mitteilungen, bevor du Band-SOS einschaltest.",
+    "en": "Enable NOOP notifications before turning on band SOS.",
+    "es": "Activa las notificaciones de NOOP antes de activar el SOS de la pulsera.",
+    "fr": "Activez les notifications NOOP avant d’activer le SOS du bracelet.",
+    "it": "Attiva le notifiche NOOP prima di attivare SOS dalla fascia.",
+    "pt-PT": "Ativa as notificações do NOOP antes de ligares o SOS da bracelete.",
+    "ru": "Включите уведомления NOOP, прежде чем включать SOS с браслета.",
+    "zh-Hans": "开启手环 SOS 前，请启用 NOOP 通知。",
+    "zh-Hant": "開啟手環 SOS 前，請啟用 NOOP 通知。"
   },
   "appwide.automations.tap_guide.alarm_body": {
     "de": "Stoppt den aktiven Bandalarm, wenn die Reaktion auf Tippen unter „Alarme“ aktiviert ist.",
@@ -1087,6 +1626,17 @@
     "ru": "Вибрация телефона",
     "zh-Hans": "手机触感反馈",
     "zh-Hant": "手機觸覺回饋"
+  },
+  "appwide.breathe.test_buzz_help": {
+    "de": "Eine Testvibration an das Band senden. Eine gekoppelte Verbindung ist erforderlich.",
+    "en": "Send one test vibration to the band. A bonded connection is required.",
+    "es": "Envía una vibración de prueba a la banda. Se necesita una conexión vinculada.",
+    "fr": "Envoyer une vibration de test au bracelet. Une connexion associée est requise.",
+    "it": "Invia una vibrazione di prova al bracciale. È richiesta una connessione associata.",
+    "pt-PT": "Enviar uma vibração de teste para a pulseira. É necessária uma ligação emparelhada.",
+    "ru": "Отправить один тестовый вибросигнал на браслет. Требуется сопряжённое подключение.",
+    "zh-Hans": "向手环发送一次测试振动。需要已配对的连接。",
+    "zh-Hant": "向手環傳送一次測試震動。需要已配對的連線。"
   },
   "appwide.calendar.a11y.day_no_data_format": {
     "de": "Tag %1$d, keine Daten",
@@ -1903,15 +2453,15 @@
     "zh-Hant": "今日訊號"
   },
   "appwide.daily_signal.status.aligned": {
-    "de": "Abgestimmt",
-    "en": "Aligned",
-    "es": "Alineado",
-    "fr": "Aligné",
-    "it": "Allineato",
-    "pt-PT": "Alinhado",
-    "ru": "Согласовано",
-    "zh-Hans": "一致",
-    "zh-Hant": "一致"
+    "de": "Stabil",
+    "en": "Steady",
+    "es": "Estable",
+    "fr": "Stable",
+    "it": "Stabile",
+    "pt-PT": "Estável",
+    "ru": "Стабильно",
+    "zh-Hans": "稳定",
+    "zh-Hant": "穩定"
   },
   "appwide.daily_signal.status.building": {
     "de": "Lernt",
@@ -1936,15 +2486,15 @@
     "zh-Hant": "查看"
   },
   "appwide.daily_signal.status.recheck": {
-    "de": "Erneut prüfen",
-    "en": "Recheck",
-    "es": "Revisar",
-    "fr": "Revérifier",
-    "it": "Ricontrolla",
-    "pt-PT": "Rever",
-    "ru": "Перепроверить",
-    "zh-Hans": "复查",
-    "zh-Hant": "複查"
+    "de": "Beobachten",
+    "en": "Watch",
+    "es": "Vigilar",
+    "fr": "À surveiller",
+    "it": "Da osservare",
+    "pt-PT": "A vigiar",
+    "ru": "Наблюдать",
+    "zh-Hans": "留意",
+    "zh-Hant": "留意"
   },
   "appwide.disclaimer.estimates": {
     "de": "Auf diesem Gerät aus deinen eigenen Signalen berechnet. Schätzungen, kein Medizinprodukt.",
@@ -4223,6 +4773,17 @@
     "zh-Hans": "此训练的已导入心率区间分布。",
     "zh-Hant": "此訓練的已匯入心率區間分佈。"
   },
+  "appwide.workouts.band_hr_zone_split_detail": {
+    "de": "Zeit in jeder Maximalpulszone, geschätzt aus der Herzfrequenz des Bands in diesem Zeitraum.",
+    "en": "Time in each max-heart-rate zone, estimated from the band’s heart rate during this window.",
+    "es": "Tiempo en cada zona de frecuencia cardíaca máxima, estimado a partir de la frecuencia cardíaca de la banda durante este intervalo.",
+    "fr": "Temps dans chaque zone de fréquence cardiaque maximale, estimé à partir de la fréquence cardiaque du bracelet pendant cette période.",
+    "it": "Tempo in ogni zona di frequenza cardiaca massima, stimato dalla frequenza cardiaca del bracciale in questo intervallo.",
+    "pt-PT": "Tempo em cada zona de frequência cardíaca máxima, estimado a partir da frequência cardíaca da pulseira durante este período.",
+    "ru": "Время в каждой зоне максимальной частоты пульса, рассчитанное по данным пульса браслета за этот интервал.",
+    "zh-Hans": "各最大心率区间的时长，根据此时间段内手环记录的心率估算。",
+    "zh-Hant": "各最大心率區間的時長，根據此時段內手環記錄的心率估算。"
+  },
   "appwide.day_overview.title": {
     "de": "Tagesübersicht",
     "en": "Day overview",
@@ -4783,6 +5344,61 @@
     "ru": "Сон был короче вашей цели. Используйте более короткие периоды концентрации, при необходимости снизьте нагрузку и берегите вечернее время подготовки ко сну.",
     "zh-Hans": "睡眠时长低于目标。缩短专注时段，必要时选择较轻的活动，并守住今晚的睡前放松时间。",
     "zh-Hant": "睡眠時間低於目標。縮短專注時段，必要時選擇較輕的活動，並守住今晚的睡前放鬆時間。"
+  },
+  "appwide.adaptive_day_guidance.calendar.label": {
+    "de": "Geplante Trainings berücksichtigen",
+    "en": "Use planned workouts",
+    "es": "Usar entrenamientos previstos",
+    "fr": "Utiliser les entraînements prévus",
+    "it": "Usa gli allenamenti pianificati",
+    "pt-PT": "Usar treinos planeados",
+    "ru": "Учитывать запланированные тренировки",
+    "zh-Hans": "使用计划锻炼",
+    "zh-Hant": "使用計畫運動"
+  },
+  "appwide.adaptive_day_guidance.calendar.help": {
+    "de": "Mit deiner Erlaubnis prüft NOOP nur auf diesem Gerät die heutigen Kalendertitel und behält ausschließlich die Zeit eines eindeutig benannten Trainings. Kalenderinhalte werden weder gespeichert noch hochgeladen.",
+    "en": "With permission, NOOP checks today's calendar titles on this device and keeps only the time of a clearly named workout. Calendar content is never stored or uploaded.",
+    "es": "Con permiso, NOOP revisa en este dispositivo los títulos del calendario de hoy y conserva solo la hora de un entrenamiento claramente identificado. El contenido del calendario nunca se guarda ni se sube.",
+    "fr": "Avec votre autorisation, NOOP vérifie sur cet appareil les titres du calendrier du jour et ne conserve que l’heure d’un entraînement clairement nommé. Le contenu du calendrier n’est jamais stocké ni envoyé.",
+    "it": "Con l’autorizzazione, NOOP controlla su questo dispositivo i titoli del calendario di oggi e conserva solo l’orario di un allenamento chiaramente indicato. Il contenuto del calendario non viene mai archiviato o caricato.",
+    "pt-PT": "Com autorização, o NOOP verifica neste dispositivo os títulos do calendário de hoje e guarda apenas a hora de um treino claramente identificado. O conteúdo do calendário nunca é armazenado nem enviado.",
+    "ru": "С разрешения NOOP проверяет на этом устройстве названия событий календаря за сегодня и сохраняет только время явно указанной тренировки. Содержимое календаря не хранится и не отправляется.",
+    "zh-Hans": "经你许可后，NOOP 仅在此设备上检查今天的日历标题，并只保留明确标注为锻炼的时间。日历内容绝不会被存储或上传。",
+    "zh-Hant": "經你許可後，NOOP 僅在此裝置上檢查今天的行事曆標題，並只保留明確標示為運動的時間。行事曆內容絕不會被儲存或上傳。"
+  },
+  "appwide.adaptive_day_guidance.calendar.permission_unavailable": {
+    "de": "Kalenderzugriff ist nicht verfügbar. Erlaube NOOP den Kalenderzugriff in den Systemeinstellungen.",
+    "en": "Calendar access is unavailable. Allow NOOP calendar access in system settings.",
+    "es": "El acceso al calendario no está disponible. Permite que NOOP acceda al calendario en los ajustes del sistema.",
+    "fr": "L’accès au calendrier n’est pas disponible. Autorisez NOOP à accéder au calendrier dans les réglages système.",
+    "it": "L’accesso al calendario non è disponibile. Consenti a NOOP di accedere al calendario nelle impostazioni di sistema.",
+    "pt-PT": "O acesso ao calendário não está disponível. Permita o acesso do NOOP ao calendário nas definições do sistema.",
+    "ru": "Доступ к календарю недоступен. Разрешите NOOP доступ к календарю в настройках системы.",
+    "zh-Hans": "日历访问不可用。请在系统设置中允许 NOOP 访问日历。",
+    "zh-Hant": "行事曆存取無法使用。請在系統設定中允許 NOOP 存取行事曆。"
+  },
+  "appwide.adaptive_day_guidance.planned_workout.title": {
+    "de": "Zieh heute ein leichteres Training in Betracht",
+    "en": "Consider a lighter workout today",
+    "es": "Valora un entrenamiento más ligero hoy",
+    "fr": "Envisagez un entraînement plus léger aujourd’hui",
+    "it": "Valuta un allenamento più leggero oggi",
+    "pt-PT": "Considere um treino mais leve hoje",
+    "ru": "Сегодня стоит подумать о более лёгкой тренировке",
+    "zh-Hans": "今天可考虑降低锻炼强度",
+    "zh-Hant": "今天可考慮降低運動強度"
+  },
+  "appwide.adaptive_day_guidance.planned_workout.body": {
+    "de": "Ein geplantes Training steht bevor und der heutige Schlaf oder die Erholung sprechen für Flexibilität. Prüfe dein Befinden, bevor du beginnst.",
+    "en": "A planned workout is coming up, and today's sleep or recovery supports keeping it flexible. Check how you feel before you start.",
+    "es": "Se acerca un entrenamiento previsto y el sueño o la recuperación de hoy aconsejan mantenerlo flexible. Comprueba cómo te sientes antes de empezar.",
+    "fr": "Un entraînement prévu approche, et le sommeil ou la récupération du jour suggèrent de rester flexible. Évaluez votre état avant de commencer.",
+    "it": "Si avvicina un allenamento pianificato e il sonno o il recupero di oggi suggeriscono flessibilità. Valuta come ti senti prima di iniziare.",
+    "pt-PT": "Aproxima-se um treino planeado e o sono ou a recuperação de hoje sugerem flexibilidade. Avalie como se sente antes de começar.",
+    "ru": "Скоро запланированная тренировка, а сегодняшний сон или восстановление указывают на необходимость гибкости. Оцените самочувствие перед началом.",
+    "zh-Hans": "计划锻炼即将开始，而今天的睡眠或恢复信号建议灵活调整。开始前请确认自己的感受。",
+    "zh-Hant": "計畫運動即將開始，而今天的睡眠或恢復訊號建議彈性調整。開始前請確認自己的感受。"
   },
   "appwide.workout_guidance.label": {
     "de": "Hinweise zur Trainingsbelastung",
@@ -6939,5 +7555,456 @@
     "ru": "Отдых %1$d мин",
     "zh-Hans": "休息 %1$d 分钟",
     "zh-Hant": "休息 %1$d 分鐘"
+  },
+  "appwide.charge.confidence.calibrating": {
+    "de": "Kalibrierung",
+    "en": "Calibrating",
+    "es": "Calibrando",
+    "fr": "Étalonnage",
+    "it": "Calibrazione",
+    "pt-PT": "A calibrar",
+    "ru": "Калибровка",
+    "zh-Hans": "校准中",
+    "zh-Hant": "校準中"
+  },
+  "appwide.charge.confidence.estimate": {
+    "de": "Schätzung",
+    "en": "Estimate",
+    "es": "Estimación",
+    "fr": "Estimation",
+    "it": "Stima",
+    "pt-PT": "Estimativa",
+    "ru": "Оценка",
+    "zh-Hans": "估算",
+    "zh-Hant": "估算"
+  },
+  "appwide.charge.confidence.reliable": {
+    "de": "Zuverlässig",
+    "en": "Reliable",
+    "es": "Fiable",
+    "fr": "Fiable",
+    "it": "Affidabile",
+    "pt-PT": "Fiável",
+    "ru": "Надёжно",
+    "zh-Hans": "可靠",
+    "zh-Hant": "可靠"
+  },
+  "appwide.health.live_activity.lock_screen": {
+    "de": "Live-HF auf dem Sperrbildschirm anzeigen",
+    "en": "Show live HR on Lock Screen",
+    "es": "Mostrar FC en directo en la pantalla bloqueada",
+    "fr": "Afficher la FC en direct sur l’écran verrouillé",
+    "it": "Mostra la FC in tempo reale sulla schermata di blocco",
+    "pt-PT": "Mostrar FC em direto no ecrã bloqueado",
+    "ru": "Показывать пульс в реальном времени на экране блокировки",
+    "zh-Hans": "在锁定屏幕上显示实时心率",
+    "zh-Hant": "在鎖定畫面上顯示即時心率"
+  },
+  "appwide.health.live_hr.disconnected": {
+    "de": "Noop Band ist nicht verbunden. Verbinde es, bevor du Live-HF startest.",
+    "en": "Noop Band is not connected. Connect it before starting Live HR.",
+    "es": "Noop Band no está conectado. Conéctalo antes de iniciar la FC en directo.",
+    "fr": "Noop Band n’est pas connecté. Connectez-le avant de démarrer la FC en direct.",
+    "it": "Noop Band non è connesso. Collegalo prima di avviare la FC in tempo reale.",
+    "pt-PT": "A Noop Band não está ligada. Liga-a antes de iniciares a FC em direto.",
+    "ru": "Noop Band не подключён. Подключите его перед запуском пульса в реальном времени.",
+    "zh-Hans": "Noop Band 未连接。请先连接，再开始实时心率。",
+    "zh-Hant": "Noop Band 未連線。請先連線，再開始即時心率。"
+  },
+  "appwide.live_session.start_detail_unavailable": {
+    "de": "Live-Herzfrequenz-Coaching nutzt deine Herzfrequenz, solange die heutige Recovery nicht verfügbar ist.",
+    "en": "Live heart-rate coaching uses heart rate while today's Recovery is unavailable.",
+    "es": "La guía de frecuencia cardiaca en directo usa tu frecuencia cardiaca mientras la Recuperación de hoy no está disponible.",
+    "fr": "Le coaching de fréquence cardiaque en direct utilise votre fréquence cardiaque lorsque la Récupération du jour n’est pas disponible.",
+    "it": "Il coaching con frequenza cardiaca in tempo reale usa la frequenza cardiaca quando il Recupero di oggi non è disponibile.",
+    "pt-PT": "A orientação com frequência cardíaca em direto usa a tua frequência cardíaca quando a Recuperação de hoje não está disponível.",
+    "ru": "Если сегодняшнее восстановление недоступно, рекомендации в реальном времени используют данные пульса.",
+    "zh-Hans": "今日恢复不可用时，实时指导会使用心率数据。",
+    "zh-Hant": "今日恢復不可用時，即時指導會使用心率資料。"
+  },
+  "appwide.today.recovery_detail_format": {
+    "de": "Recovery: %1$s.",
+    "en": "Recovery: %1$s.",
+    "es": "Recuperación: %1$s.",
+    "fr": "Récupération : %1$s.",
+    "it": "Recupero: %1$s.",
+    "pt-PT": "Recuperação: %1$s.",
+    "ru": "Восстановление: %1$s.",
+    "zh-Hans": "恢复：%1$s。",
+    "zh-Hant": "恢復：%1$s。"
+  },
+  "appwide.today.recovery_detail_unavailable": {
+    "de": "Recovery ist noch nicht verfügbar.",
+    "en": "Recovery is not available yet.",
+    "es": "La Recuperación aún no está disponible.",
+    "fr": "La Récupération n’est pas encore disponible.",
+    "it": "Il Recupero non è ancora disponibile.",
+    "pt-PT": "A Recuperação ainda não está disponível.",
+    "ru": "Показатель восстановления пока недоступен.",
+    "zh-Hans": "恢复尚不可用。",
+    "zh-Hant": "恢復尚不可用。"
+  },
+  "appwide.today.recovery_no_data": {
+    "de": "Keine Daten",
+    "en": "No data",
+    "es": "Sin datos",
+    "fr": "Aucune donnée",
+    "it": "Nessun dato",
+    "pt-PT": "Sem dados",
+    "ru": "Нет данных",
+    "zh-Hans": "无数据",
+    "zh-Hant": "無資料"
+  },
+  "appwide.morning_recap.body.both": {
+    "de": "Öffne NOOP, um deine Erholung und deinen Schlafwert anzusehen.",
+    "en": "Open NOOP to review your Recovery and Sleep Score.",
+    "es": "Abre NOOP para revisar tu Recuperación y Puntuación de sueño.",
+    "fr": "Ouvrez NOOP pour consulter votre Récupération et votre Score de sommeil.",
+    "it": "Apri NOOP per rivedere Recupero e Punteggio del sonno.",
+    "pt-PT": "Abre o NOOP para rever a Recuperação e a Pontuação do sono.",
+    "ru": "Откройте NOOP, чтобы посмотреть восстановление и оценку сна.",
+    "zh-Hans": "打开 NOOP 查看你的恢复和睡眠评分。",
+    "zh-Hant": "打開 NOOP 查看你的恢復和睡眠評分。"
+  },
+  "appwide.morning_recap.body.recovery": {
+    "de": "Öffne NOOP, um deine Erholung anzusehen.",
+    "en": "Open NOOP to review your Recovery.",
+    "es": "Abre NOOP para revisar tu Recuperación.",
+    "fr": "Ouvrez NOOP pour consulter votre Récupération.",
+    "it": "Apri NOOP per rivedere il Recupero.",
+    "pt-PT": "Abre o NOOP para rever a Recuperação.",
+    "ru": "Откройте NOOP, чтобы посмотреть восстановление.",
+    "zh-Hans": "打开 NOOP 查看你的恢复。",
+    "zh-Hant": "打開 NOOP 查看你的恢復。"
+  },
+  "appwide.morning_recap.body.sleep": {
+    "de": "Öffne NOOP, um deinen Schlafwert anzusehen.",
+    "en": "Open NOOP to review your Sleep Score.",
+    "es": "Abre NOOP para revisar tu Puntuación de sueño.",
+    "fr": "Ouvrez NOOP pour consulter votre Score de sommeil.",
+    "it": "Apri NOOP per rivedere il Punteggio del sonno.",
+    "pt-PT": "Abre o NOOP para rever a Pontuação do sono.",
+    "ru": "Откройте NOOP, чтобы посмотреть оценку сна.",
+    "zh-Hans": "打开 NOOP 查看你的睡眠评分。",
+    "zh-Hant": "打開 NOOP 查看你的睡眠評分。"
+  },
+  "appwide.morning_recap.title": {
+    "de": "Deine Morgenzusammenfassung ist bereit",
+    "en": "Your morning recap is ready",
+    "es": "Tu resumen matutino está listo",
+    "fr": "Votre récapitulatif du matin est prêt",
+    "it": "Il riepilogo del mattino è pronto",
+    "pt-PT": "O teu resumo da manhã está pronto",
+    "ru": "Утренний обзор готов",
+    "zh-Hans": "晨间摘要已就绪",
+    "zh-Hant": "晨間摘要已就緒"
+  },
+  "appwide.sleep.imported_confidence_note": {
+    "de": "Für diesen importierten Schlafwert wurde keine Anbieter-Konfidenz mitgeliefert.",
+    "en": "Provider confidence was not included with this imported Sleep Score.",
+    "es": "La confianza del proveedor no se incluyó con esta Puntuación de sueño importada.",
+    "fr": "L’indice de confiance du fournisseur n’était pas inclus avec ce score de sommeil importé.",
+    "it": "L’affidabilità del fornitore non era inclusa con questo punteggio del sonno importato.",
+    "pt-PT": "A confiança do fornecedor não foi incluída com esta Pontuação do sono importada.",
+    "ru": "Оценка уверенности поставщика не была включена в импортированный показатель сна.",
+    "zh-Hans": "此导入的睡眠评分未包含提供方置信度。",
+    "zh-Hant": "此匯入的睡眠評分未包含提供方信賴度。"
+  },
+  "appwide.stress.band.light_load": {
+    "de": "Leichte Belastung",
+    "en": "Light load",
+    "es": "Carga ligera",
+    "fr": "Charge légère",
+    "it": "Carico leggero",
+    "pt-PT": "Carga ligeira",
+    "ru": "Низкая нагрузка",
+    "zh-Hans": "轻度负荷",
+    "zh-Hant": "輕度負荷"
+  },
+  "appwide.trends.load_failed_title": {
+    "de": "Trends nicht verfügbar",
+    "en": "Trends unavailable",
+    "es": "Tendencias no disponibles",
+    "fr": "Tendances indisponibles",
+    "it": "Tendenze non disponibili",
+    "pt-PT": "Tendências indisponíveis",
+    "ru": "Тренды недоступны",
+    "zh-Hans": "趋势不可用",
+    "zh-Hant": "趨勢不可用"
+  },
+  "appwide.trends.load_failed_body": {
+    "de": "NOOP konnte deinen lokalen Verlauf nicht lesen. Deine Daten wurden nicht verändert.",
+    "en": "NOOP could not read your local history. Your data was not changed.",
+    "es": "NOOP no pudo leer tu historial local. Tus datos no se modificaron.",
+    "fr": "NOOP n’a pas pu lire votre historique local. Vos données n’ont pas été modifiées.",
+    "it": "NOOP non ha potuto leggere la cronologia locale. I tuoi dati non sono stati modificati.",
+    "pt-PT": "O NOOP não conseguiu ler o histórico local. Os seus dados não foram alterados.",
+    "ru": "NOOP не удалось прочитать локальную историю. Ваши данные не изменены.",
+    "zh-Hans": "NOOP 无法读取本地历史记录。你的数据未被更改。",
+    "zh-Hant": "NOOP 無法讀取本機歷史記錄。你的資料未被更改。"
+  },
+  "appwide.trends.partial_title": {
+    "de": "Verfügbarer Verlauf wird angezeigt",
+    "en": "Showing available history",
+    "es": "Mostrando el historial disponible",
+    "fr": "Affichage de l’historique disponible",
+    "it": "Visualizzazione della cronologia disponibile",
+    "pt-PT": "A mostrar o histórico disponível",
+    "ru": "Показана доступная история",
+    "zh-Hans": "正在显示可用历史记录",
+    "zh-Hant": "正在顯示可用歷史記錄"
+  },
+  "appwide.trends.partial_body": {
+    "de": "Ein Teil des lokalen Verlaufs konnte nicht gelesen werden. Verfügbare aktuelle Daten werden angezeigt.",
+    "en": "Some local history could not be read. Available recent data is shown.",
+    "es": "No se pudo leer parte del historial local. Se muestran los datos recientes disponibles.",
+    "fr": "Une partie de l’historique local n’a pas pu être lue. Les données récentes disponibles sont affichées.",
+    "it": "Non è stato possibile leggere parte della cronologia locale. Sono mostrati i dati recenti disponibili.",
+    "pt-PT": "Não foi possível ler parte do histórico local. São apresentados os dados recentes disponíveis.",
+    "ru": "Часть локальной истории не удалось прочитать. Показаны доступные недавние данные.",
+    "zh-Hans": "部分本地历史记录无法读取。现已显示可用的近期数据。",
+    "zh-Hant": "部分本機歷史記錄無法讀取。現已顯示可用的近期資料。"
+  },
+  "appwide.trends.prepare_failed_title": {
+    "de": "Trends konnten nicht vorbereitet werden",
+    "en": "Trends could not be prepared",
+    "es": "No se pudieron preparar las tendencias",
+    "fr": "Les tendances n’ont pas pu être préparées",
+    "it": "Non è stato possibile preparare le tendenze",
+    "pt-PT": "Não foi possível preparar as tendências",
+    "ru": "Не удалось подготовить тренды",
+    "zh-Hans": "无法生成趋势",
+    "zh-Hant": "無法產生趨勢"
+  },
+  "appwide.trends.prepare_failed_body": {
+    "de": "Dein lokaler Verlauf ist weiterhin verfügbar. Versuche erneut, die Diagramme vorzubereiten.",
+    "en": "Your local history is still available. Try preparing the charts again.",
+    "es": "Tu historial local sigue disponible. Intenta preparar los gráficos de nuevo.",
+    "fr": "Votre historique local reste disponible. Réessayez de préparer les graphiques.",
+    "it": "La cronologia locale è ancora disponibile. Prova a preparare di nuovo i grafici.",
+    "pt-PT": "O histórico local continua disponível. Tente preparar os gráficos novamente.",
+    "ru": "Локальная история по-прежнему доступна. Попробуйте снова подготовить графики.",
+    "zh-Hans": "你的本地历史记录仍然可用。请重试生成图表。",
+    "zh-Hant": "你的本機歷史記錄仍然可用。請重試產生圖表。"
+  },
+  "appwide.trends.retry": {
+    "de": "Erneut versuchen",
+    "en": "Try again",
+    "es": "Intentar de nuevo",
+    "fr": "Réessayer",
+    "it": "Riprova",
+    "pt-PT": "Tentar novamente",
+    "ru": "Повторить",
+    "zh-Hans": "重试",
+    "zh-Hant": "重試"
+  },
+  "appwide.trends.updating_title": {
+    "de": "Trends werden aktualisiert",
+    "en": "Updating trends",
+    "es": "Actualizando tendencias",
+    "fr": "Mise à jour des tendances",
+    "it": "Aggiornamento delle tendenze",
+    "pt-PT": "A atualizar tendências",
+    "ru": "Обновление трендов",
+    "zh-Hans": "正在更新趋势",
+    "zh-Hant": "正在更新趨勢"
+  },
+  "appwide.trends.updating_body": {
+    "de": "Die letzte verfügbare Ansicht bleibt sichtbar, während der lokale Verlauf aktualisiert wird.",
+    "en": "The last available view stays visible while local history refreshes.",
+    "es": "La última vista disponible permanece visible mientras se actualiza el historial local.",
+    "fr": "La dernière vue disponible reste affichée pendant l’actualisation de l’historique local.",
+    "it": "L’ultima vista disponibile resta visibile durante l’aggiornamento della cronologia locale.",
+    "pt-PT": "A última vista disponível permanece visível enquanto o histórico local é atualizado.",
+    "ru": "Последний доступный вид остаётся на экране, пока обновляется локальная история.",
+    "zh-Hans": "本地历史记录刷新时，将继续显示上次可用的视图。",
+    "zh-Hant": "本機歷史記錄重新整理時，將繼續顯示上次可用的檢視。"
+  },
+  "appwide.trends.weekly_digest_failed_title": {
+    "de": "Wochenrückblick nicht verfügbar",
+    "en": "Week in review unavailable",
+    "es": "Resumen semanal no disponible",
+    "fr": "Bilan de la semaine indisponible",
+    "it": "Riepilogo settimanale non disponibile",
+    "pt-PT": "Resumo semanal indisponível",
+    "ru": "Обзор недели недоступен",
+    "zh-Hans": "每周回顾不可用",
+    "zh-Hant": "每週回顧不可用"
+  },
+  "appwide.trends.weekly_digest_failed_body": {
+    "de": "Der restliche Trends-Bereich ist verfügbar. Versuche diese Zusammenfassung erneut.",
+    "en": "The rest of Trends is available. Try this summary again.",
+    "es": "El resto de Tendencias está disponible. Vuelve a intentar este resumen.",
+    "fr": "Le reste des tendances est disponible. Réessayez ce résumé.",
+    "it": "Il resto delle tendenze è disponibile. Riprova questo riepilogo.",
+    "pt-PT": "O restante das Tendências está disponível. Tente este resumo novamente.",
+    "ru": "Остальные тренды доступны. Попробуйте снова создать этот обзор.",
+    "zh-Hans": "其余趋势仍可使用。请重试此摘要。",
+    "zh-Hant": "其餘趨勢仍可使用。請重試此摘要。"
+  },
+  "appwide.weekly_digest.imported_sleep_not_included": {
+    "de": "Importierter Schlaf nicht einbezogen",
+    "en": "Imported sleep not included",
+    "es": "Sueño importado no incluido",
+    "fr": "Sommeil importé non inclus",
+    "it": "Sonno importato non incluso",
+    "pt-PT": "Sono importado não incluído",
+    "ru": "Импортированный сон не включён",
+    "zh-Hans": "未包含导入的睡眠",
+    "zh-Hant": "未包含匯入的睡眠"
+  },
+  "appwide.common.vs_baseline": {
+    "de": "vs. Ausgangswert",
+    "en": "vs baseline",
+    "es": "vs. referencia",
+    "fr": "vs référence",
+    "it": "vs riferimento",
+    "pt-PT": "vs referência",
+    "ru": "к исходному уровню",
+    "zh-Hans": "与基线相比",
+    "zh-Hant": "與基準相比"
+  },
+  "appwide.friends.data_boundary": {
+    "de": "Nur Erholung, Effort, Schlafwert, Schlafdauer, HRV und Ruheherzfrequenz können geteilt werden. Rohdaten, Standorte, Journale, Routen, Workouts und Schlafphasen sind ausgeschlossen.",
+    "en": "Only Recovery, Effort, Sleep Score, sleep duration, HRV, and resting heart rate can be shared. Raw streams, locations, journals, routes, workouts, and sleep stages are excluded.",
+    "es": "Solo se pueden compartir Recuperación, Effort, Puntuación de sueño, duración del sueño, VFC y frecuencia cardíaca en reposo. Se excluyen flujos sin procesar, ubicaciones, diarios, rutas, entrenamientos y fases del sueño.",
+    "fr": "Seuls Récupération, Effort, Score de sommeil, la durée du sommeil, la VFC et la fréquence cardiaque au repos peuvent être partagés. Les flux bruts, positions, journaux, itinéraires, entraînements et phases du sommeil sont exclus.",
+    "it": "È possibile condividere solo Recupero, Effort, Punteggio del sonno, durata del sonno, HRV e frequenza cardiaca a riposo. Flussi grezzi, posizioni, diario, percorsi, allenamenti e fasi del sonno sono esclusi.",
+    "pt-PT": "Só podem ser partilhados Recuperação, Effort, Pontuação do sono, duração do sono, VFC e frequência cardíaca em repouso. Fluxos brutos, localizações, diários, percursos, treinos e fases do sono são excluídos.",
+    "ru": "Можно делиться только показателями восстановления, нагрузки, оценки сна, продолжительности сна, ВСР и пульса в покое. Не передаются необработанные потоки, местоположение, журнал, маршруты, тренировки и стадии сна.",
+    "zh-Hans": "只能共享恢复、Effort、睡眠评分、睡眠时长、HRV 和静息心率。不包括原始数据流、位置、日志、路线、锻炼和睡眠阶段。",
+    "zh-Hant": "只能分享恢復、Effort、睡眠評分、睡眠時長、HRV 和靜息心率。不包括原始資料流、位置、日誌、路線、鍛鍊和睡眠階段。"
+  },
+  "appwide.health.live_activity.recovery_indicator": {
+    "de": "Erholungsanzeige",
+    "en": "Recovery indicator",
+    "es": "Indicador de recuperación",
+    "fr": "Indicateur de récupération",
+    "it": "Indicatore di recupero",
+    "pt-PT": "Indicador de recuperação",
+    "ru": "Индикатор восстановления",
+    "zh-Hans": "恢复指标",
+    "zh-Hant": "恢復指標"
+  },
+  "appwide.sleep.empty_history_help": {
+    "de": "Hier gibt es noch keine Nächte. Importiere einen Wearable-Export unter Datenquellen, um sofort jede Nacht, deine Schlafphasen und Trends zu sehen. Oder öffne Intelligence, um die letzte Nacht zu sehen, die nach dem Schlafen mit dem Band berechnet wurde.",
+    "en": "No nights here yet. Import a wearable export in Data Sources to see every night, your sleep stages and trends straight away. Or open Intelligence to see last night computed from the band after you wear it to bed.",
+    "es": "Aún no hay noches aquí. Importa una exportación del wearable en Fuentes de datos para ver cada noche, tus fases de sueño y tendencias de inmediato. O abre Inteligencia para ver la noche anterior calculada desde la pulsera después de llevarla puesta al dormir.",
+    "fr": "Pas encore de nuits ici. Importez un export de votre appareil dans Sources de données pour voir immédiatement chaque nuit, vos stades de sommeil et vos tendances. Ou ouvrez Intelligence pour voir la nuit dernière calculée à partir du bracelet après l’avoir porté au lit.",
+    "it": "Ancora nessuna notte qui. Importa un’esportazione del dispositivo in Sorgenti dati per vedere subito ogni notte, le fasi del sonno e gli andamenti. Oppure apri Intelligence per vedere la scorsa notte calcolata dalla fascia dopo averla indossata a letto.",
+    "pt-PT": "Ainda não há noites aqui. Importe uma exportação do wearable em Fontes de dados para ver imediatamente todas as noites, as fases do sono e as tendências. Ou abra o Intelligence para ver a noite passada calculada a partir da bracelete depois de a usar para dormir.",
+    "ru": "Пока нет данных о сне. Импортируйте данные носимого устройства в разделе «Источники данных», чтобы сразу увидеть все ночи, стадии сна и тренды. Или откройте «Аналитику», чтобы увидеть расчёт за последнюю ночь после сна с браслетом.",
+    "zh-Hans": "这里还没有夜间记录。请在「数据来源」中导入可穿戴设备导出文件，即可立即查看每一晚、睡眠阶段和趋势。或者在佩戴手环入睡后，打开「智能」查看根据手环计算出的昨晚数据。",
+    "zh-Hant": "這裡還沒有夜間記錄。請在「資料來源」中匯入穿戴裝置匯出檔案，即可立即查看每一晚、睡眠階段和趨勢。或者在佩戴手環入睡後，打開「智慧」查看根據手環計算出的昨晚資料。"
+  },
+  "appwide.sleep.score_a11y_format": {
+    "de": "Schlafwert %1$d von 100",
+    "en": "Sleep Score %1$d of 100",
+    "es": "Puntuación de sueño %1$d de 100",
+    "fr": "Score de sommeil %1$d sur 100",
+    "it": "Punteggio del sonno %1$d su 100",
+    "pt-PT": "Pontuação do sono %1$d de 100",
+    "ru": "Оценка сна %1$d из 100",
+    "zh-Hans": "睡眠评分 %1$d，共 100",
+    "zh-Hant": "睡眠評分 %1$d，共 100"
+  },
+  "appwide.trends.report.explainer": {
+    "de": "So liest du dies: HRV, Ruhepuls, Schlafdauer, Atemfrequenz und Hauttemperatur werden vom Band gemessen. Die Hauttemperatur wird als Abweichung von deinem eigenen Ausgangswert gezeigt. Workouts ist die Anzahl der protokollierten oder erkannten Aktivitäten. Recovery, Effort und Stress sind NOOPs eigene Werte auf dem Gerät und keine klinischen Messwerte. Recovery ist ein täglicher Bereitschaftswert aus HRV, Ruhepuls, Schlaf und Hauttemperaturtrend. Effort ist die aus der Herzfrequenz abgeleitete kardiovaskuläre Belastung. Stress ist ein autonomer Belastungsindex von 0 bis 3 aus Ruhepuls und HRV.",
+    "en": "How to read this: HRV, Resting HR, Sleep duration, Respiratory rate and Skin temperature are measured from the band. Skin temperature is shown as the deviation from your own baseline. Workouts is the count of activities you logged or that were detected. Recovery, Effort and Stress are NOOP's own on-device scores, not clinical measures. Recovery is a daily readiness composite of HRV, resting HR, sleep and skin-temperature trend. Effort is cardiovascular load derived from heart rate. Stress is a 0 to 3 autonomic-load index from resting HR and HRV.",
+    "es": "Cómo leer esto: la VFC, la frecuencia cardíaca en reposo, la duración del sueño, la frecuencia respiratoria y la temperatura de la piel se miden desde la pulsera. La temperatura de la piel se muestra como la desviación de tu propia referencia. Entrenamientos es el número de actividades que registraste o que fueron detectadas. Recuperación, Effort y Stress son puntuaciones propias de NOOP en el dispositivo, no medidas clínicas. Recuperación es un compuesto diario de VFC, frecuencia cardíaca en reposo, sueño y tendencia de temperatura de la piel. Effort es la carga cardiovascular derivada de la frecuencia cardíaca. Stress es un índice de carga autonómica de 0 a 3 basado en la frecuencia cardíaca en reposo y la VFC.",
+    "fr": "Comment lire ceci : la VFC, la fréquence cardiaque au repos, la durée du sommeil, la fréquence respiratoire et la température cutanée sont mesurées par le bracelet. La température cutanée est affichée comme un écart par rapport à votre propre référence. Les entraînements correspondent au nombre d’activités enregistrées ou détectées. Recovery, Effort et Stress sont des scores calculés sur l’appareil par NOOP, et non des mesures cliniques. Recovery combine chaque jour la VFC, la fréquence cardiaque au repos, le sommeil et la tendance de température cutanée. Effort représente la charge cardiovasculaire dérivée de la fréquence cardiaque. Stress est un indice de charge autonome de 0 à 3 fondé sur la fréquence cardiaque au repos et la VFC.",
+    "it": "Come leggerlo: HRV, frequenza cardiaca a riposo, durata del sonno, frequenza respiratoria e temperatura cutanea sono misurate dalla fascia. La temperatura cutanea è mostrata come deviazione dal tuo riferimento. Allenamenti è il numero di attività registrate o rilevate. Recovery, Effort e Stress sono punteggi di NOOP calcolati sul dispositivo, non misure cliniche. Recovery combina ogni giorno HRV, frequenza cardiaca a riposo, sonno e andamento della temperatura cutanea. Effort è il carico cardiovascolare derivato dalla frequenza cardiaca. Stress è un indice di carico autonomico da 0 a 3 basato su frequenza cardiaca a riposo e HRV.",
+    "pt-PT": "Como ler isto: VFC, frequência cardíaca em repouso, duração do sono, frequência respiratória e temperatura da pele são medidas pela bracelete. A temperatura da pele é apresentada como o desvio da tua referência. Treinos é o número de atividades registadas ou detetadas. Recovery, Effort e Stress são pontuações do NOOP calculadas no dispositivo, não medidas clínicas. Recovery combina diariamente VFC, frequência cardíaca em repouso, sono e tendência da temperatura da pele. Effort é a carga cardiovascular derivada da frequência cardíaca. Stress é um índice de carga autonómica de 0 a 3 baseado na frequência cardíaca em repouso e VFC.",
+    "ru": "Как читать отчёт: ВСР, пульс в покое, продолжительность сна, частота дыхания и температура кожи измеряются браслетом. Температура кожи показана как отклонение от вашего исходного уровня. Тренировки: количество записанных или распознанных активностей. Recovery, Effort и Stress: собственные оценки NOOP на устройстве, а не клинические показатели. Recovery объединяет ВСР, пульс в покое, сон и тенденцию температуры кожи. Effort показывает сердечно-сосудистую нагрузку, рассчитанную по пульсу. Stress показывает индекс автономной нагрузки от 0 до 3 на основе пульса в покое и ВСР.",
+    "zh-Hans": "阅读方式：HRV、静息心率、睡眠时长、呼吸频率和皮肤温度由手环测量。皮肤温度显示为相对个人基线的偏差。锻炼次数是你记录或系统检测到的活动数量。Recovery、Effort 和 Stress 是 NOOP 在设备端计算的评分，并非临床测量。Recovery 综合每日 HRV、静息心率、睡眠和皮肤温度趋势。Effort 是根据心率计算的心血管负荷。Stress 是基于静息心率和 HRV 的 0 到 3 自主负荷指数。",
+    "zh-Hant": "閱讀方式：HRV、靜息心率、睡眠時長、呼吸頻率和皮膚溫度由手環測量。皮膚溫度顯示為相對個人基準的偏差。鍛鍊次數是你記錄或系統偵測到的活動數量。Recovery、Effort 和 Stress 是 NOOP 在裝置端計算的評分，並非臨床測量。Recovery 綜合每日 HRV、靜息心率、睡眠和皮膚溫度趨勢。Effort 是根據心率計算的心血管負荷。Stress 是基於靜息心率和 HRV 的 0 到 3 自主負荷指數。"
+  },
+  "appwide.trends.report.no_data_format": {
+    "de": "Im Zeitraum %1$s gab es keine Werte für Workout, Stress, Recovery, Schlaf, HRV, Ruhepuls, Belastung, Atemfrequenz oder Hauttemperatur. Trage dein Band noch ein paar Tage oder wähle einen größeren Zeitraum und exportiere erneut.",
+    "en": "No workout, stress, recovery, sleep, HRV, resting-HR, strain, respiratory-rate or skin-temperature readings fell inside %1$s. Wear your band a few more days, or pick a wider range, then export again.",
+    "es": "No hubo lecturas de entrenamiento, estrés, recuperación, sueño, VFC, frecuencia cardíaca en reposo, esfuerzo, frecuencia respiratoria ni temperatura de la piel dentro de %1$s. Lleva tu pulsera unos días más o elige un rango más amplio y vuelve a exportar.",
+    "fr": "Aucune lecture d’entraînement, de stress, de récupération, de sommeil, de VFC, de fréquence cardiaque au repos, d’effort, de fréquence respiratoire ou de température cutanée ne se situe dans %1$s. Portez votre bracelet quelques jours de plus ou choisissez une plage plus large, puis exportez à nouveau.",
+    "it": "Nessuna lettura di allenamento, stress, recupero, sonno, HRV, frequenza cardiaca a riposo, carico, frequenza respiratoria o temperatura cutanea rientra in %1$s. Indossa la fascia per qualche altro giorno o scegli un intervallo più ampio, quindi esporta di nuovo.",
+    "pt-PT": "Nenhuma leitura de treino, stress, recuperação, sono, VFC, frequência cardíaca em repouso, esforço, frequência respiratória ou temperatura da pele está em %1$s. Usa a bracelete por mais alguns dias ou escolhe um intervalo maior e exporta novamente.",
+    "ru": "В диапазоне %1$s нет данных о тренировках, стрессе, восстановлении, сне, ВСР, пульсе в покое, нагрузке, частоте дыхания или температуре кожи. Поносите браслет ещё несколько дней или выберите более широкий диапазон и экспортируйте снова.",
+    "zh-Hans": "%1$s 内没有锻炼、压力、恢复、睡眠、HRV、静息心率、强度、呼吸频率或皮肤温度读数。请再佩戴手环几天，或选择更宽的范围，然后重新导出。",
+    "zh-Hant": "%1$s 內沒有鍛鍊、壓力、恢復、睡眠、HRV、靜息心率、強度、呼吸頻率或皮膚溫度讀數。請再佩戴手環幾天，或選擇更寬的範圍，然後重新匯出。"
+  },
+  "appwide.coach.recovery_prompt": {
+    "de": "Wie entwickelt sich meine Erholung?",
+    "en": "How is my Recovery trending?",
+    "es": "¿Cómo evoluciona mi Recuperación?",
+    "fr": "Comment évolue ma Récupération ?",
+    "it": "Come sta andando il mio Recupero?",
+    "pt-PT": "Qual é a tendência da minha Recuperação?",
+    "ru": "Как меняется моё восстановление?",
+    "zh-Hans": "我的恢复趋势如何？",
+    "zh-Hant": "我的恢復趨勢如何？"
+  },
+  "appwide.coach.subtitle": {
+    "de": "Frage zu Erholung, Anstrengung, Schlafwert und Workouts anhand deiner eigenen Daten.",
+    "en": "Ask about Recovery, Effort, Sleep Score, and workouts using your own data.",
+    "es": "Pregunta sobre Recuperación, Esfuerzo, Puntuación de sueño y entrenamientos usando tus propios datos.",
+    "fr": "Posez des questions sur la Récupération, l’Effort, le Score de sommeil et les entraînements à partir de vos propres données.",
+    "it": "Chiedi informazioni su Recupero, Sforzo, Punteggio del sonno e allenamenti usando i tuoi dati.",
+    "pt-PT": "Pergunta sobre Recuperação, Esforço, Pontuação do sono e treinos usando os teus próprios dados.",
+    "ru": "Спрашивайте о восстановлении, нагрузке, оценке сна и тренировках на основе ваших данных.",
+    "zh-Hans": "使用你自己的数据询问恢复、消耗、睡眠评分和锻炼。",
+    "zh-Hant": "使用你自己的資料詢問恢復、消耗、睡眠評分和鍛鍊。"
+  },
+  "appwide.insights.behaviour_history_help": {
+    "de": "Erfasse oben Verhaltensweisen. Nach einigen Tagen ordnet NOOP ein, wie sie mit Erholung, HRV und Schlafwert zusammenhängen. Ein Wearable-Export kann den Verlauf rückwirkend ergänzen.",
+    "en": "Log behaviors above. After a few days, NOOP ranks how each one relates to Recovery, HRV, and Sleep Score. A wearable export can backfill history.",
+    "es": "Registra comportamientos arriba. Tras unos días, NOOP ordena cómo se relaciona cada uno con Recuperación, VFC y Puntuación de sueño. Una exportación del wearable puede completar el historial.",
+    "fr": "Enregistrez des comportements ci-dessus. Après quelques jours, NOOP classe leur relation avec la Récupération, la VFC et le Score de sommeil. Un export de l’appareil peut compléter l’historique.",
+    "it": "Registra i comportamenti qui sopra. Dopo alcuni giorni, NOOP ordina il modo in cui ciascuno si collega a Recupero, HRV e Punteggio del sonno. Un’esportazione del dispositivo può completare la cronologia.",
+    "pt-PT": "Regista os comportamentos acima. Após alguns dias, o NOOP ordena a relação de cada um com Recuperação, VFC e Pontuação do sono. Uma exportação do wearable pode preencher o histórico.",
+    "ru": "Записывайте привычки выше. Через несколько дней NOOP покажет, как каждая из них связана с восстановлением, ВСР и оценкой сна. Экспорт носимого устройства может дополнить историю.",
+    "zh-Hans": "在上方记录行为。几天后，NOOP 会排列每项行为与恢复、HRV 和睡眠评分的关联。可穿戴设备导出文件可以回填历史。",
+    "zh-Hant": "在上方記錄行為。幾天後，NOOP 會排列每項行為與恢復、HRV 和睡眠評分的關聯。穿戴裝置匯出檔案可以回填歷史。"
+  },
+  "appwide.intelligence.no_scored_nights": {
+    "de": "Noch keine bewerteten Nächte. Trage dein Band über Nacht, während NOOP verbunden ist. Anstrengung und Schlafwert können nach einer Nacht erscheinen; Erholung braucht etwa vier gültige Nächte, um deine Basislinie zu lernen.",
+    "en": "No scored nights yet. Wear your band overnight with NOOP connected. Effort and Sleep Score can appear after one night; Recovery needs about four valid nights to learn your baseline.",
+    "es": "Aún no hay noches puntuadas. Lleva la pulsera durante la noche con NOOP conectado. Esfuerzo y Puntuación de sueño pueden aparecer tras una noche; Recuperación necesita unas cuatro noches válidas para aprender tu referencia.",
+    "fr": "Aucune nuit notée pour l’instant. Portez votre bracelet la nuit avec NOOP connecté. L’Effort et le Score de sommeil peuvent apparaître après une nuit ; la Récupération nécessite environ quatre nuits valides pour apprendre votre référence.",
+    "it": "Ancora nessuna notte valutata. Indossa la fascia durante la notte con NOOP connesso. Sforzo e Punteggio del sonno possono apparire dopo una notte; Recupero richiede circa quattro notti valide per imparare il tuo riferimento.",
+    "pt-PT": "Ainda não há noites pontuadas. Usa a bracelete durante a noite com o NOOP ligado. Esforço e Pontuação do sono podem aparecer após uma noite; Recuperação precisa de cerca de quatro noites válidas para aprender a tua referência.",
+    "ru": "Пока нет оценённых ночей. Носите браслет ночью при подключённом NOOP. Нагрузка и оценка сна могут появиться после одной ночи; восстановлению нужно около четырёх корректных ночей для изучения вашей нормы.",
+    "zh-Hans": "还没有已评分的夜晚。请在 NOOP 保持连接时整晚佩戴手环。消耗和睡眠评分可在一晚后出现；恢复大约需要四个有效夜晚来学习你的基线。",
+    "zh-Hant": "還沒有已評分的夜晚。請在 NOOP 保持連線時整晚佩戴手環。消耗和睡眠評分可在一晚後出現；恢復大約需要四個有效夜晚來學習你的基準。"
+  },
+  "appwide.intelligence.subtitle": {
+    "de": "NOOP berechnet Erholung, Anstrengung und Schlafwert direkt auf deinem Gerät, ohne Cloud-Berechnung.",
+    "en": "NOOP calculates Recovery, Effort, and Sleep Score on your device, without a cloud calculation.",
+    "es": "NOOP calcula Recuperación, Esfuerzo y Puntuación de sueño en tu dispositivo, sin cálculos en la nube.",
+    "fr": "NOOP calcule la Récupération, l’Effort et le Score de sommeil sur votre appareil, sans calcul dans le cloud.",
+    "it": "NOOP calcola Recupero, Sforzo e Punteggio del sonno sul tuo dispositivo, senza calcoli nel cloud.",
+    "pt-PT": "O NOOP calcula Recuperação, Esforço e Pontuação do sono no teu dispositivo, sem cálculos na cloud.",
+    "ru": "NOOP рассчитывает восстановление, нагрузку и оценку сна на вашем устройстве, без облачных вычислений.",
+    "zh-Hans": "NOOP 在你的设备上计算恢复、消耗和睡眠评分，无需云端计算。",
+    "zh-Hant": "NOOP 在你的裝置上計算恢復、消耗和睡眠評分，無需雲端計算。"
+  },
+  "appwide.workouts.band_hr": {
+    "de": "Von der Band-Herzfrequenz",
+    "en": "From band heart rate",
+    "es": "Desde la frecuencia cardíaca de la pulsera",
+    "fr": "À partir de la fréquence cardiaque du bracelet",
+    "it": "Dalla frequenza cardiaca della fascia",
+    "pt-PT": "A partir da frequência cardíaca da bracelete",
+    "ru": "По пульсу с браслета",
+    "zh-Hans": "来自手环心率",
+    "zh-Hant": "來自手環心率"
+  },
+  "appwide.weekly_digest.history_help": {
+    "de": "Eine Wochenübersicht braucht ein paar Tage Verlauf. Trage dein Band oder importiere einen Wearable-Export unter Datenquellen.",
+    "en": "A weekly digest needs a few days of history. Wear your band or import a wearable export in Data Sources.",
+    "es": "Un resumen semanal necesita unos días de historial. Usa tu pulsera o importa una exportación del wearable en Fuentes de datos.",
+    "fr": "Un résumé hebdomadaire nécessite quelques jours d’historique. Portez votre bracelet ou importez un export de votre appareil dans Sources de données.",
+    "it": "Un riepilogo settimanale richiede qualche giorno di cronologia. Indossa la fascia o importa un’esportazione del dispositivo in Sorgenti dati.",
+    "pt-PT": "Um resumo semanal precisa de alguns dias de histórico. Usa a bracelete ou importa uma exportação do wearable em Fontes de dados.",
+    "ru": "Для еженедельной сводки нужно несколько дней истории. Носите браслет или импортируйте данные носимого устройства в разделе «Источники данных».",
+    "zh-Hans": "每周摘要需要几天的历史数据。请佩戴手环，或在「数据来源」中导入可穿戴设备导出文件。",
+    "zh-Hant": "每週摘要需要幾天的歷史資料。請佩戴手環，或在「資料來源」中匯入穿戴裝置匯出檔案。"
   }
 }

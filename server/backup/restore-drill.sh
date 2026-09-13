@@ -53,6 +53,21 @@ schema_ok=$(psql \
         AND to_regclass('public.safety_invitation_attempts') IS NOT NULL
         AND to_regclass('public.safety_provider_rate_state') IS NOT NULL
         AND to_regclass('public.safety_dispatch_tombstones') IS NOT NULL
+        AND to_regclass('public.managed_accounts') IS NOT NULL
+        AND to_regclass('public.managed_social_profiles') IS NOT NULL
+        AND to_regclass('public.managed_documents') IS NOT NULL
+        AND to_regclass('public.managed_document_heads') IS NOT NULL
+        AND to_regclass('public.managed_account_change_sequences') IS NOT NULL
+        AND to_regclass('public.managed_change_events') IS NOT NULL
+        AND to_regclass(
+            'public.managed_document_contract_v2_readiness'
+        ) IS NOT NULL
+        AND to_regclass('public.managed_safety_incidents') IS NOT NULL
+        AND to_regclass(
+            'public.managed_safety_page_quota_events'
+        ) IS NOT NULL
+        AND to_regclass('public.managed_safety_locations') IS NOT NULL
+        AND to_regclass('public.managed_safety_push_deliveries') IS NOT NULL
     )::int;")
 if [ "$schema_ok" != "1" ]; then
     echo "restore drill failed schema verification" >&2
@@ -121,6 +136,15 @@ psql \
         ),
         'safety_dispatch_tombstones', (
             SELECT count(*) FROM safety_dispatch_tombstones
+        ),
+        'managed_accounts', (SELECT count(*) FROM managed_accounts),
+        'managed_documents', (SELECT count(*) FROM managed_documents),
+        'managed_change_events', (SELECT count(*) FROM managed_change_events),
+        'managed_safety_incidents', (
+            SELECT count(*) FROM managed_safety_incidents
+        ),
+        'managed_safety_locations', (
+            SELECT count(*) FROM managed_safety_locations
         )
     );"
 

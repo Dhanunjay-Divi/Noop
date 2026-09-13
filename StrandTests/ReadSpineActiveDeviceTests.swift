@@ -22,6 +22,45 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
                     spo2Pct: nil, skinTempDevC: nil, respRateBpm: 14, steps: nil, activeKcalEst: nil)
     }
 
+    @MainActor
+    private func seedScorableNight(
+        store: WhoopStore,
+        deviceId: String,
+        daysAgo: Int = 0
+    ) async throws -> (day: String, claims: [AnalysisInputGenerationClaim]) {
+        let calendar = Calendar.current
+        let now = Date()
+        let midnight = calendar.startOfDay(for: now)
+        let requestedDay = try XCTUnwrap(
+            calendar.date(byAdding: .day, value: -daysAgo, to: midnight)
+        )
+        let requestedEnd = try XCTUnwrap(
+            calendar.date(byAdding: .hour, value: 7, to: requestedDay)
+        )
+        let endDate = daysAgo == 0 && requestedEnd > now
+            ? try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: requestedEnd))
+            : requestedEnd
+        let end = Int(endDate.timeIntervalSince1970)
+        let start = end - 7 * 3_600
+        let ppg = (start..<end).map {
+            PpgHrSample(ts: $0, bpm: 50, conf: 0.92)
+        }
+        let gravity = (start..<end).map {
+            GravitySample(ts: $0, x: 0, y: 0, z: 1)
+        }
+        let rr = stride(from: start, to: end, by: 2).enumerated().map { index, ts in
+            RRInterval(ts: ts, rrMs: index.isMultiple(of: 2) ? 1_195 : 1_205)
+        }
+        _ = try await store.insert(
+            Streams(rr: rr, gravity: gravity, ppgHr: ppg),
+            deviceId: deviceId
+        )
+        return (
+            Repository.localDayKey(endDate),
+            try await store.pendingAnalysisInputGenerations(deviceIds: [deviceId])
+        )
+    }
+
     /// The core regression: re-point the active-strap read id to the re-added strap, then the read deviceId
     /// equals the WRITE (Collector) id, and a latest-data lookup finds the LIVE data written under the NEW id.
     /// The lookup now unions, so the most-recent day across BOTH ids wins (the fresh today, not the stale day).
@@ -172,22 +211,10 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
 
     /// Regression for the real "slept last night, still 0/4" failure: after remove/re-add, overnight
     /// history is written under the fresh active id and a WHOOP 5/MG night may carry only PPG-derived HR.
-    /// The idle watermark must move, the active source must own the day, and scoring must bank Sleep/RHR/HRV
+    /// The idle dirty gate must open, the active source must own the day, and scoring must bank Sleep/RHR/HRV
     /// under the stable canonical computed id.
     @MainActor
     func testReAddedBandPpgOnlyNightAdvancesCalibration() async throws {
-        let defaults = UserDefaults.standard
-        let watermarkKey = "noop.analyzeWatermark"
-        let priorWatermark = defaults.object(forKey: watermarkKey)
-        defaults.removeObject(forKey: watermarkKey)
-        defer {
-            if let priorWatermark {
-                defaults.set(priorWatermark, forKey: watermarkKey)
-            } else {
-                defaults.removeObject(forKey: watermarkKey)
-            }
-        }
-
         let store = try await WhoopStore.inMemory()
         let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
         try registry.add(PairedDevice(
@@ -203,8 +230,7 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         let engine = IntelligenceEngine(
             repo: repo, profile: ProfileStore(), deviceId: canonicalId)
 
-        // Bank the empty multi-source watermark first. The old implementation watched only canonicalId,
-        // so the second non-forced pass incorrectly saw the same "0:0" and returned without scoring.
+        // A forced pass remains independent of dirty state and must still run for formula/repair callers.
         _ = await engine.analyzeRecent(maxDays: 1, force: true)
 
         let calendar = Calendar.current
@@ -227,7 +253,7 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         XCTAssertEqual(inserted.gravity, gravity.count)
 
         let receipt = await engine.analyzeRecent(maxDays: 1, force: false)
-        XCTAssertNotNil(receipt, "PPG history on the active re-added source must invalidate the watermark")
+        XCTAssertNotNil(receipt, "PPG history on the active re-added source must mark analysis dirty")
 
         let day = Repository.localDayKey(endDate)
         let rows = try await store.dailyMetrics(
@@ -245,7 +271,77 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         )
     }
 
-    func testAnalysisFingerprintSourcesIncludeActiveAndCanonicalButNotArchived() {
+    @MainActor
+    func testOptionalRespirationReadFailurePublishesScoredNightWithoutAcknowledgingClaim() async throws {
+        let store = try await WhoopStore.inMemory()
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        let engine = IntelligenceEngine(
+            repo: repo, profile: ProfileStore(), deviceId: canonicalId)
+        let fixture = try await seedScorableNight(store: store, deviceId: canonicalId)
+        XCTAssertFalse(fixture.claims.isEmpty)
+
+        engine.setAnalysisReadFailuresForTesting([.respiration])
+        let receipt = await engine.analyzeRecent(maxDays: 2, force: false)
+
+        XCTAssertNotNil(
+            receipt,
+            "an optional respiration read failure must not discard valid HR/sleep scoring"
+        )
+        let rows = try await store.dailyMetrics(
+            deviceId: canonicalId + "-noop",
+            from: fixture.day,
+            to: fixture.day
+        )
+        XCTAssertGreaterThan(
+            try XCTUnwrap(rows.first?.totalSleepMin),
+            0,
+            "the valid sleep result must still publish with respiration evidence omitted"
+        )
+        let pending = try await store.pendingAnalysisInputGenerations(deviceIds: [canonicalId])
+        XCTAssertEqual(
+            pending,
+            fixture.claims,
+            "degraded optional evidence must leave the exact claimed generation pending"
+        )
+    }
+
+    @MainActor
+    func testRegistrySnapshotReadFailuresPublishWithFallbackWithoutAcknowledgingClaim() async throws {
+        let store = try await WhoopStore.inMemory()
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        let engine = IntelligenceEngine(
+            repo: repo, profile: ProfileStore(), deviceId: canonicalId)
+        let fixture = try await seedScorableNight(store: store, deviceId: canonicalId)
+        XCTAssertFalse(fixture.claims.isEmpty)
+
+        engine.setAnalysisReadFailuresForTesting([.registryAll, .registryActiveDeviceId])
+        let receipt = await engine.analyzeRecent(maxDays: 2, force: false)
+
+        XCTAssertNotNil(
+            receipt,
+            "registry snapshot failures must retain the canonical safe fallback scoring path"
+        )
+        let rows = try await store.dailyMetrics(
+            deviceId: canonicalId + "-noop",
+            from: fixture.day,
+            to: fixture.day
+        )
+        XCTAssertGreaterThan(
+            try XCTUnwrap(rows.first?.totalSleepMin),
+            0,
+            "registry fallback must still publish a valid canonical HR/sleep result"
+        )
+        let pending = try await store.pendingAnalysisInputGenerations(deviceIds: [canonicalId])
+        XCTAssertEqual(
+            pending,
+            fixture.claims,
+            "an incomplete registry ownership snapshot must never acknowledge source claims"
+        )
+    }
+
+    func testAnalysisDirtySourcesIncludeActiveAndCanonicalButNotArchived() {
         let devices = [
             PairedDevice(
                 id: newId, brand: "WHOOP", model: "WHOOP 5.0",
@@ -260,43 +356,413 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         ]
 
         XCTAssertEqual(
-            IntelligenceEngine.analysisFingerprintDeviceIds(
+            IntelligenceEngine.analysisDirtySourceIds(
                 registered: devices, readIds: [newId, canonicalId],
                 fallbackDeviceId: canonicalId),
-            [canonicalId, newId]
+            [AnalysisInputSource.ownership, canonicalId, newId]
         )
     }
 
-    func testAnalysisWatermarkRequiresEveryCorePersistenceBoundary() {
-        XCTAssertTrue(
-            IntelligenceEngine.analysisPassCanAdvanceWatermark(
-                scorePersistenceSucceeded: true,
-                activeZonePersistenceSucceeded: true,
-                repairHasFailures: false
+    func testAnalysisInputAcknowledgementRequiresEveryPassBoundary() {
+        XCTAssertTrue(IntelligenceEngine.AnalysisPassIntegrity().canAcknowledgeInputs)
+
+        var readFailure = IntelligenceEngine.AnalysisPassIntegrity()
+        readFailure.requiredReadsSucceeded = false
+        XCTAssertFalse(readFailure.canAcknowledgeInputs)
+
+        var persistenceFailure = IntelligenceEngine.AnalysisPassIntegrity()
+        persistenceFailure.requiredPersistenceSucceeded = false
+        XCTAssertFalse(persistenceFailure.canAcknowledgeInputs)
+
+        var repairFailure = IntelligenceEngine.AnalysisPassIntegrity()
+        repairFailure.repairSucceeded = false
+        XCTAssertFalse(repairFailure.canAcknowledgeInputs)
+
+        var cancellation = IntelligenceEngine.AnalysisPassIntegrity()
+        cancellation.cancelled = true
+        XCTAssertFalse(cancellation.canAcknowledgeInputs)
+    }
+
+    func testAnalysisRunGatePreservesForcedFormulaPassAndFailsOpen() {
+        let claim = AnalysisInputGenerationClaim(deviceId: canonicalId, generation: 1)
+
+        XCTAssertTrue(IntelligenceEngine.analysisRunNeeded(
+            force: true,
+            generationSnapshotSucceeded: true,
+            claims: []
+        ), "a formula/repair upgrade must run even when no source generation is pending")
+        XCTAssertFalse(IntelligenceEngine.analysisRunNeeded(
+            force: false,
+            generationSnapshotSucceeded: true,
+            claims: []
+        ))
+        XCTAssertTrue(IntelligenceEngine.analysisRunNeeded(
+            force: false,
+            generationSnapshotSucceeded: false,
+            claims: []
+        ), "a failed generation snapshot must fail open into real analysis")
+        XCTAssertTrue(IntelligenceEngine.analysisRunNeeded(
+            force: false,
+            generationSnapshotSucceeded: true,
+            claims: [claim]
+        ))
+    }
+
+    func testHistoricalClaimUsesBoundedAnchoredBatchForAffectedCalendarDay() {
+        let now = 1_780_000_000
+        let oldTs = Int64(now - 30 * 86_400)
+        let historical = AnalysisInputGenerationClaim(
+            deviceId: canonicalId,
+            generation: 1,
+            earliestAffectedTs: oldTs,
+            latestAffectedTs: oldTs + 3_600
+        )
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: [historical],
+            now: now,
+            timezoneOffsetSeconds: 0
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: now,
+            timezoneOffsetSeconds: 0
+        )
+
+        XCTAssertTrue(plan.isHistoricalCatchUp)
+        XCTAssertEqual(plan.maxDays, 1)
+        XCTAssertEqual(
+            IntelligenceEngine.midnightLocal(plan.referenceNow, offsetSec: 0),
+            IntelligenceEngine.midnightLocal(Int(oldTs), offsetSec: 0)
+        )
+        XCTAssertTrue(coverage.covers(historical))
+    }
+
+    func testMultiYearHistoricalClaimNeverCreatesAnUnboundedPass() {
+        let now = 1_780_000_000
+        let latest = Int64(now - 30 * 86_400)
+        let earliest = latest - 6 * 365 * 86_400
+        let historical = AnalysisInputGenerationClaim(
+            deviceId: canonicalId,
+            generation: 1,
+            earliestAffectedTs: earliest,
+            latestAffectedTs: latest
+        )
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: [historical],
+            now: now,
+            timezoneOffsetSeconds: 0
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: now,
+            timezoneOffsetSeconds: 0
+        )
+
+        XCTAssertTrue(plan.isHistoricalCatchUp)
+        XCTAssertEqual(plan.maxDays, 21)
+        XCTAssertFalse(coverage.covers(historical))
+        XCTAssertEqual(
+            coverage.endTs - coverage.startTs + 1,
+            Int64(21 * 86_400)
+        )
+    }
+
+    func testEveryIncompleteOrCancelledAnalysisOutcomeLeavesClaimPending() async throws {
+        var readFailure = IntelligenceEngine.AnalysisPassIntegrity()
+        readFailure.requiredReadsSucceeded = false
+        var persistenceFailure = IntelligenceEngine.AnalysisPassIntegrity()
+        persistenceFailure.requiredPersistenceSucceeded = false
+        var repairFailure = IntelligenceEngine.AnalysisPassIntegrity()
+        repairFailure.repairSucceeded = false
+        var cancellation = IntelligenceEngine.AnalysisPassIntegrity()
+        cancellation.cancelled = true
+        let outcomes = [
+            (readFailure, "required read"),
+            (persistenceFailure, "required persistence"),
+            (repairFailure, "repair"),
+            (cancellation, "cancellation"),
+        ]
+
+        for (index, outcome) in outcomes.enumerated() {
+            let store = try await WhoopStore.inMemory()
+            let source = "incomplete-\(index)"
+            _ = try await store.insert(
+                Streams(hr: [HRSample(ts: 100, bpm: 60)]),
+                deviceId: source
+            )
+            let claims = try await store.pendingAnalysisInputGenerations(deviceIds: [source])
+            XCTAssertEqual(claims, [
+                AnalysisInputGenerationClaim(
+                    deviceId: source,
+                    generation: 1,
+                    earliestAffectedTs: 100,
+                    latestAffectedTs: 100
+                ),
+            ])
+
+            try await IntelligenceEngine.finalizeAnalysisInputClaims(
+                store: store,
+                claims: claims,
+                integrity: outcome.0,
+                coverage: .init(startTs: 0, endTs: 1_000),
+                consumedSourceIDs: [source],
+                ownershipEvaluatedSourceIDs: []
+            )
+
+            let retried = try await store.pendingAnalysisInputGenerations(deviceIds: [source])
+            XCTAssertEqual(retried, claims, "\(outcome.1) must leave the exact claim pending")
+        }
+    }
+
+    func testSuccessfulPassAcknowledgesOnlyItsClaimedGeneration() async throws {
+        let store = try await WhoopStore.inMemory()
+        let source = "exact-generation"
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 100, bpm: 60)]),
+            deviceId: source
+        )
+        let first = try await store.pendingAnalysisInputGenerations(deviceIds: [source])
+
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 101, bpm: 61)]),
+            deviceId: source
+        )
+        try await IntelligenceEngine.finalizeAnalysisInputClaims(
+            store: store,
+            claims: first,
+            integrity: IntelligenceEngine.AnalysisPassIntegrity(),
+            coverage: .init(startTs: 0, endTs: 1_000),
+            consumedSourceIDs: [source],
+            ownershipEvaluatedSourceIDs: []
+        )
+
+        let laterWrite = try await store.pendingAnalysisInputGenerations(deviceIds: [source])
+        XCTAssertEqual(laterWrite, [
+            AnalysisInputGenerationClaim(
+                deviceId: source,
+                generation: 2,
+                earliestAffectedTs: 100,
+                latestAffectedTs: 101
+            ),
+        ])
+        try await IntelligenceEngine.finalizeAnalysisInputClaims(
+            store: store,
+            claims: laterWrite,
+            integrity: IntelligenceEngine.AnalysisPassIntegrity(),
+            coverage: .init(startTs: 0, endTs: 1_000),
+            consumedSourceIDs: [source],
+            ownershipEvaluatedSourceIDs: []
+        )
+        let clean = try await store.pendingAnalysisInputGenerations(deviceIds: [source])
+        XCTAssertEqual(clean, [])
+    }
+
+    @MainActor
+    func testHistoricalDirtyClaimExpandsPastTwentyOneDaysAndScoresAffectedNight() async throws {
+        let store = try await WhoopStore.inMemory()
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        let engine = IntelligenceEngine(
+            repo: repo, profile: ProfileStore(), deviceId: canonicalId)
+        let fixture = try await seedScorableNight(
+            store: store,
+            deviceId: canonicalId,
+            daysAgo: 30
+        )
+        XCTAssertFalse(fixture.claims.isEmpty)
+        try await store.acknowledgeAnalysisInputGenerations(fixture.claims)
+
+        let correctedTs = try XCTUnwrap(fixture.claims.first?.earliestAffectedTs)
+        let correctedSecond = try XCTUnwrap(Int(exactly: correctedTs))
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: correctedSecond, bpm: 51)]),
+            deviceId: canonicalId
+        )
+        let correctionClaims = try await store.pendingAnalysisInputGenerations(
+            deviceIds: [canonicalId]
+        )
+        XCTAssertEqual(correctionClaims.count, 1)
+        XCTAssertEqual(correctionClaims.first?.earliestAffectedTs, correctedTs)
+        XCTAssertEqual(correctionClaims.first?.latestAffectedTs, correctedTs)
+
+        let receipt = await engine.analyzeRecent(maxDays: 21, force: false)
+
+        XCTAssertNotNil(receipt)
+        let rows = try await store.dailyMetrics(
+            deviceId: canonicalId + "-noop",
+            from: fixture.day,
+            to: fixture.day
+        )
+        XCTAssertFalse(
+            rows.isEmpty,
+            "a 30-day-old correction must expand the scoring window beyond the normal 21 days"
+        )
+        let pendingAfterCorrection = try await store.pendingAnalysisInputGenerations(
+            deviceIds: [canonicalId]
+        )
+        XCTAssertEqual(
+            pendingAfterCorrection,
+            [],
+            "the old generation may clear only after its affected night is actually scanned"
+        )
+    }
+
+    func testClaimOutsideActualScanCoverageRemainsPending() async throws {
+        let store = try await WhoopStore.inMemory()
+        let source = "outside-scan"
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 100, bpm: 60)]),
+            deviceId: source
+        )
+        let claims = try await store.pendingAnalysisInputGenerations(deviceIds: [source])
+
+        try await IntelligenceEngine.finalizeAnalysisInputClaims(
+            store: store,
+            claims: claims,
+            integrity: IntelligenceEngine.AnalysisPassIntegrity(),
+            coverage: .init(startTs: 101, endTs: 1_000),
+            consumedSourceIDs: [source],
+            ownershipEvaluatedSourceIDs: []
+        )
+
+        let pendingAfterNarrowScan = try await store.pendingAnalysisInputGenerations(
+            deviceIds: [source]
+        )
+        XCTAssertEqual(pendingAfterNarrowScan, claims)
+    }
+
+    func testInvalidAffectedBoundsRemainPendingAfterSuccessfulPass() async throws {
+        let store = try await WhoopStore.inMemory()
+        let source = "invalid-bounds"
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 100, bpm: 60)]),
+            deviceId: source
+        )
+        let claims = try await store.pendingAnalysisInputGenerations(deviceIds: [source])
+        let pending = try XCTUnwrap(claims.first)
+        let invalidClaim = AnalysisInputGenerationClaim(
+            deviceId: pending.deviceId,
+            generation: pending.generation,
+            earliestAffectedTs: 200,
+            latestAffectedTs: 100
+        )
+        XCTAssertNil(invalidClaim.affectedTimeRange)
+
+        try await IntelligenceEngine.finalizeAnalysisInputClaims(
+            store: store,
+            claims: [invalidClaim],
+            integrity: IntelligenceEngine.AnalysisPassIntegrity(),
+            coverage: .init(startTs: 0, endTs: 1_000),
+            consumedSourceIDs: [source],
+            ownershipEvaluatedSourceIDs: []
+        )
+
+        let pendingAfterInvalidBounds = try await store.pendingAnalysisInputGenerations(
+            deviceIds: [source]
+        )
+        XCTAssertEqual(pendingAfterInvalidBounds, claims)
+    }
+
+    func testInvalidOwnershipClaimAcknowledgesOnlyWhenStoreHasNoScoreBearingHistory() async throws {
+        let emptyStore = try await WhoopStore.inMemory()
+        try await emptyStore.seedAnalysisInputClaimForTesting(
+            AnalysisInputGenerationClaim(
+                deviceId: AnalysisInputSource.ownership,
+                generation: 1
             )
         )
-        XCTAssertFalse(
-            IntelligenceEngine.analysisPassCanAdvanceWatermark(
-                scorePersistenceSucceeded: false,
-                activeZonePersistenceSucceeded: true,
-                repairHasFailures: false
-            ),
-            "a failed atomic score transaction must leave the next idle pass eligible to retry"
+        let emptyClaim = try await emptyStore.pendingAnalysisInputGenerations(
+            deviceIds: [AnalysisInputSource.ownership]
         )
-        XCTAssertFalse(
-            IntelligenceEngine.analysisPassCanAdvanceWatermark(
-                scorePersistenceSucceeded: true,
-                activeZonePersistenceSucceeded: false,
-                repairHasFailures: false
-            ),
-            "failed active-minute persistence must not be hidden behind an unchanged-input watermark"
+        XCTAssertEqual(emptyClaim.count, 1)
+        XCTAssertNil(emptyClaim.first?.affectedTimeRange)
+
+        try await IntelligenceEngine.finalizeAnalysisInputClaims(
+            store: emptyStore,
+            claims: emptyClaim,
+            integrity: IntelligenceEngine.AnalysisPassIntegrity(),
+            coverage: .init(startTs: 0, endTs: 1_000),
+            consumedSourceIDs: [],
+            ownershipEvaluatedSourceIDs: []
         )
-        XCTAssertFalse(
-            IntelligenceEngine.analysisPassCanAdvanceWatermark(
-                scorePersistenceSucceeded: true,
-                activeZonePersistenceSucceeded: true,
-                repairHasFailures: true
+        let emptyPending = try await emptyStore.pendingAnalysisInputGenerations(
+            deviceIds: [AnalysisInputSource.ownership]
+        )
+        XCTAssertEqual(emptyPending, [])
+
+        let populatedStore = try await WhoopStore.inMemory()
+        _ = try await populatedStore.insert(
+            Streams(hr: [HRSample(ts: 100, bpm: 60)]),
+            deviceId: "ownership-history"
+        )
+        try await populatedStore.seedAnalysisInputClaimForTesting(
+            AnalysisInputGenerationClaim(
+                deviceId: AnalysisInputSource.ownership,
+                generation: 1
             )
+        )
+        let populatedClaim = try await populatedStore.pendingAnalysisInputGenerations(
+            deviceIds: [AnalysisInputSource.ownership]
+        )
+
+        try await IntelligenceEngine.finalizeAnalysisInputClaims(
+            store: populatedStore,
+            claims: populatedClaim,
+            integrity: IntelligenceEngine.AnalysisPassIntegrity(),
+            coverage: .init(startTs: 0, endTs: 1_000),
+            consumedSourceIDs: [],
+            ownershipEvaluatedSourceIDs: []
+        )
+        let populatedPending = try await populatedStore.pendingAnalysisInputGenerations(
+            deviceIds: [AnalysisInputSource.ownership]
+        )
+        XCTAssertEqual(populatedPending, populatedClaim)
+    }
+
+    func testSuccessfulPassLeavesClaimFromUnevaluatedReadSourcePending() async throws {
+        let store = try await WhoopStore.inMemory()
+        let selected = "registered-selected"
+        let staleReadID = "unregistered-read-id"
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 100, bpm: 60)]),
+            deviceId: selected
+        )
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 100, bpm: 61)]),
+            deviceId: staleReadID
+        )
+        let claims = try await store.pendingAnalysisInputGenerations(
+            deviceIds: [selected, staleReadID]
+        )
+
+        try await IntelligenceEngine.finalizeAnalysisInputClaims(
+            store: store,
+            claims: claims,
+            integrity: IntelligenceEngine.AnalysisPassIntegrity(),
+            coverage: .init(startTs: 0, endTs: 1_000),
+            consumedSourceIDs: [selected],
+            ownershipEvaluatedSourceIDs: [selected]
+        )
+
+        let pending = try await store.pendingAnalysisInputGenerations(
+            deviceIds: [selected, staleReadID]
+        )
+        XCTAssertEqual(
+            pending,
+            [
+                AnalysisInputGenerationClaim(
+                    deviceId: staleReadID,
+                    generation: 1,
+                    earliestAffectedTs: 100,
+                    latestAffectedTs: 100
+                ),
+            ]
         )
     }
 

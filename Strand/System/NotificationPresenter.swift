@@ -7,6 +7,7 @@ enum LocalNotificationLifecycleState: String, Codable, CaseIterable, Sendable {
     case presented
     case cancelled
     case suppressed
+    case capacityLimited
     case unknown
 }
 
@@ -158,7 +159,7 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
             "safety_check_in", "safety_contact_setup", "safety_sos_result",
             "illness_check_in", "daily_review", "inactivity", "smart_alarm",
             "battery", "wind_down", "hydration", "metric_review",
-            "contextual_vital", "caffeine_cutoff", "stale_sync",
+            "contextual_vital", "adaptive_day", "caffeine_cutoff", "stale_sync",
             "managed_poke", "unknown",
         ])
         if canonical.contains(raw) {
@@ -176,6 +177,8 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
             "wellness-check-in": "illness_check_in",
             "noop.band-sync.stale": "stale_sync",
             "managed-poke": "managed_poke",
+            "contextual-adaptivePlannedWorkout": "adaptive_day",
+            "contextual-adaptivePlannedWorkout-boundary": "adaptive_day",
         ]
         if let mapped = exact[raw] {
             return mapped
@@ -211,28 +214,653 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
     }
 }
 
+struct LocalNotificationReconciliationResult: Equatable, Sendable {
+    let acceptedIdentifiers: [String]
+    let retainedIdentifiers: [String]
+    let capacityLimitedIdentifiers: [String]
+    let failedIdentifiers: [String]
+    let removedIdentifiers: [String]
+
+    var acceptedCount: Int { acceptedIdentifiers.count }
+    var activeIdentifiers: [String] {
+        Array(Set(acceptedIdentifiers + retainedIdentifiers)).sorted()
+    }
+    var activeCount: Int { activeIdentifiers.count }
+
+    func accepted(_ identifier: String) -> Bool {
+        acceptedIdentifiers.contains(identifier)
+    }
+
+    init(
+        acceptedIdentifiers: [String],
+        retainedIdentifiers: [String] = [],
+        capacityLimitedIdentifiers: [String],
+        failedIdentifiers: [String],
+        removedIdentifiers: [String]
+    ) {
+        self.acceptedIdentifiers = acceptedIdentifiers
+        self.retainedIdentifiers = retainedIdentifiers
+        self.capacityLimitedIdentifiers = capacityLimitedIdentifiers
+        self.failedIdentifiers = failedIdentifiers
+        self.removedIdentifiers = removedIdentifiers
+    }
+}
+
+@MainActor
+struct LocalNotificationCenterClient {
+    let pendingRequests: () async -> [UNNotificationRequest]
+    let add: (UNNotificationRequest) async throws -> Void
+    let removePending: ([String]) -> Void
+
+    static func system(
+        center: UNUserNotificationCenter = .current()
+    ) -> LocalNotificationCenterClient {
+        LocalNotificationCenterClient(
+            pendingRequests: {
+                await withCheckedContinuation { continuation in
+                    center.getPendingNotificationRequests {
+                        continuation.resume(returning: $0)
+                    }
+                }
+            },
+            add: { request in
+                try await center.add(request)
+            },
+            removePending: { identifiers in
+                center.removePendingNotificationRequests(
+                    withIdentifiers: identifiers
+                )
+            }
+        )
+    }
+}
+
+enum LocalNotificationCapacityPolicy {
+    static let systemCapacity = 64
+    static let reservedPrioritySlots = 4
+    private static let staleSyncRequestIdentifier = "noop.band-sync.stale"
+
+    enum Priority: Int, Comparable {
+        case safetyCritical
+        case userExplicit
+        case transient
+        case routine
+        case maintenance
+
+        static func < (lhs: Priority, rhs: Priority) -> Bool {
+            lhs.rawValue < rhs.rawValue
+        }
+
+        var isPriorityProtected: Bool {
+            self <= .transient
+        }
+    }
+
+    struct Plan {
+        let selectedCandidateRequests: [UNNotificationRequest]
+        let selectedExistingRequests: [UNNotificationRequest]
+        let capacityLimitedCandidateRequests: [UNNotificationRequest]
+        let existingIdentifiersToRemove: [String]
+    }
+
+    private struct RankedRequest {
+        let request: UNNotificationRequest
+        let priority: Priority
+        let nextFireDate: Date
+        let isCandidate: Bool
+    }
+
+    static func plan(
+        existingRequests: [UNNotificationRequest],
+        candidateRequests: [UNNotificationRequest],
+        replacingIdentifiers: Set<String>,
+        preservingExistingIdentifiers: Set<String> = [],
+        capacity: Int = systemCapacity,
+        reservedPrioritySlots: Int = reservedPrioritySlots,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Plan {
+        let boundedCapacity = max(1, capacity)
+        let boundedReserve = min(
+            max(0, reservedPrioritySlots),
+            boundedCapacity
+        )
+        let candidatesByID = requestsByIdentifier(candidateRequests)
+        let replacementIDs = replacingIdentifiers
+            .union(candidatesByID.keys)
+
+        let existingByID = requestsByIdentifier(existingRequests)
+        let retainedExisting = existingByID.values.filter {
+            !replacementIDs.contains($0.identifier)
+        }
+        let preservedExisting = retainedExisting.filter {
+            preservingExistingIdentifiers.contains($0.identifier)
+        }
+        let preservedExistingIDs = Set(
+            preservedExisting.map(\.identifier)
+        )
+        let preservedRanked = preservedExisting.map {
+            rankedRequest(
+                $0,
+                isCandidate: false,
+                now: now,
+                calendar: calendar
+            )
+        }.sorted(by: rankedBefore)
+        let ranked = (
+            retainedExisting.filter {
+                !preservedExistingIDs.contains($0.identifier)
+            }.map {
+                rankedRequest(
+                    $0,
+                    isCandidate: false,
+                    now: now,
+                    calendar: calendar
+                )
+            }
+            + candidatesByID.values.map {
+                rankedRequest(
+                    $0,
+                    isCandidate: true,
+                    now: now,
+                    calendar: calendar
+                )
+            }
+        ).sorted(by: rankedBefore)
+
+        let selectedPreserved = Array(
+            preservedRanked.prefix(boundedCapacity)
+        )
+        let remainingCapacity = max(
+            0,
+            boundedCapacity - selectedPreserved.count
+        )
+        let preservedPriorityCount = selectedPreserved.filter {
+            $0.priority.isPriorityProtected
+        }.count
+        let remainingReserve = max(
+            0,
+            boundedReserve - preservedPriorityCount
+        )
+        let protected = ranked.filter(\.priority.isPriorityProtected)
+        let unprotected = ranked.filter {
+            !$0.priority.isPriorityProtected
+        }
+        let selectedRemaining: [RankedRequest]
+        if protected.count >= remainingCapacity {
+            selectedRemaining = Array(
+                protected.prefix(remainingCapacity)
+            )
+        } else {
+            let unprotectedAllowance = max(
+                0,
+                remainingCapacity - max(
+                    remainingReserve,
+                    protected.count
+                )
+            )
+            selectedRemaining = protected
+                + Array(unprotected.prefix(unprotectedAllowance))
+        }
+        let selected = selectedPreserved + selectedRemaining
+
+        let selectedIDs = Set(selected.map(\.request.identifier))
+        let selectedCandidates = selected
+            .filter(\.isCandidate)
+            .map(\.request)
+        let selectedExisting = selected
+            .filter { !$0.isCandidate }
+            .map(\.request)
+        let limitedCandidates = candidatesByID.values
+            .filter { !selectedIDs.contains($0.identifier) }
+            .sorted {
+                rankedBefore(
+                    rankedRequest(
+                        $0,
+                        isCandidate: true,
+                        now: now,
+                        calendar: calendar
+                    ),
+                    rankedRequest(
+                        $1,
+                        isCandidate: true,
+                        now: now,
+                        calendar: calendar
+                    )
+                )
+            }
+        let removals = existingByID.keys
+            .filter { !selectedIDs.contains($0) }
+            .sorted()
+
+        return Plan(
+            selectedCandidateRequests: selectedCandidates,
+            selectedExistingRequests: selectedExisting,
+            capacityLimitedCandidateRequests: limitedCandidates,
+            existingIdentifiersToRemove: removals
+        )
+    }
+
+    static func priority(
+        for request: UNNotificationRequest
+    ) -> Priority {
+        let identifier = request.identifier
+        if request.content.interruptionLevel == .timeSensitive
+            || identifier == SafetyCheckInNotifications.requestIdentifier
+            || identifier == "safety-gesture-result"
+            || identifier.hasPrefix("noop.safety.")
+            || identifier.hasPrefix("workout-caution-") {
+            return .safetyCritical
+        }
+        if identifier.hasPrefix("smart-alarm-")
+            || identifier == "strain-target"
+            || identifier == "hydration-reminder-missed-response" {
+            return .userExplicit
+        }
+        if request.trigger == nil {
+            return .transient
+        }
+        if identifier == staleSyncRequestIdentifier
+            || identifier.hasPrefix("battery-") {
+            return .maintenance
+        }
+        if identifier.hasPrefix("wind-down-nudge")
+            || identifier.hasPrefix("daily-review-")
+            || identifier.hasPrefix("hydration-reminder-")
+            || identifier.hasPrefix("metric-review-")
+            || identifier.hasPrefix("contextual-")
+            || identifier.hasPrefix("caffeine-cutoff-")
+            || identifier.hasPrefix("inactivity-")
+            || identifier == "wellness-check-in" {
+            return .routine
+        }
+        // Preserve an unknown request as user-explicit until its ownership is
+        // classified. This avoids deleting a legacy alarm merely to make room
+        // for a new routine horizon.
+        return .userExplicit
+    }
+
+    private static func requestsByIdentifier(
+        _ requests: [UNNotificationRequest]
+    ) -> [String: UNNotificationRequest] {
+        requests.reduce(into: [:]) { result, request in
+            result[request.identifier] = request
+        }
+    }
+
+    private static func rankedRequest(
+        _ request: UNNotificationRequest,
+        isCandidate: Bool,
+        now: Date,
+        calendar: Calendar
+    ) -> RankedRequest {
+        RankedRequest(
+            request: request,
+            priority: priority(for: request),
+            nextFireDate: nextFireDate(
+                for: request,
+                now: now,
+                calendar: calendar
+            ),
+            isCandidate: isCandidate
+        )
+    }
+
+    private static func rankedBefore(
+        _ lhs: RankedRequest,
+        _ rhs: RankedRequest
+    ) -> Bool {
+        if lhs.priority != rhs.priority {
+            return lhs.priority < rhs.priority
+        }
+        if lhs.nextFireDate != rhs.nextFireDate {
+            return lhs.nextFireDate < rhs.nextFireDate
+        }
+        return lhs.request.identifier < rhs.request.identifier
+    }
+
+    private static func nextFireDate(
+        for request: UNNotificationRequest,
+        now: Date,
+        calendar: Calendar
+    ) -> Date {
+        guard let trigger = request.trigger else { return now }
+        if let interval = trigger as? UNTimeIntervalNotificationTrigger {
+            return now.addingTimeInterval(interval.timeInterval)
+        }
+        guard let calendarTrigger = trigger
+            as? UNCalendarNotificationTrigger else {
+            return .distantFuture
+        }
+
+        var resolvedCalendar = calendar
+        let components = calendarTrigger.dateComponents
+        if let timeZone = components.timeZone {
+            resolvedCalendar.timeZone = timeZone
+        }
+        if !calendarTrigger.repeats,
+           let absoluteDate = resolvedCalendar.date(from: components) {
+            return absoluteDate
+        }
+        return resolvedCalendar.nextDate(
+            after: now.addingTimeInterval(-1),
+            matching: components,
+            matchingPolicy: .nextTimePreservingSmallerComponents,
+            repeatedTimePolicy: .first,
+            direction: .forward
+        ) ?? .distantFuture
+    }
+}
+
+/// Serializes every pending-request mutation against one observed Notification Center snapshot.
+/// The coordinator never persists producer state; it returns the exact identifiers the OS accepted.
+@MainActor
+final class LocalNotificationCapacityCoordinator {
+    static let shared = LocalNotificationCapacityCoordinator()
+
+    private let capacity: Int
+    private let reservedPrioritySlots: Int
+    private var isReconciling = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(
+        capacity: Int = LocalNotificationCapacityPolicy.systemCapacity,
+        reservedPrioritySlots: Int =
+            LocalNotificationCapacityPolicy.reservedPrioritySlots
+    ) {
+        self.capacity = max(1, capacity)
+        self.reservedPrioritySlots = min(
+            max(0, reservedPrioritySlots),
+            self.capacity
+        )
+    }
+
+    func reconcile(
+        candidateRequests: [UNNotificationRequest],
+        replacingIdentifiers: Set<String>,
+        preservingExistingIdentifiers: Set<String> = [],
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        isStillCurrent: @MainActor () -> Bool = { true },
+        client: LocalNotificationCenterClient
+    ) async -> LocalNotificationReconciliationResult {
+        await acquire()
+        defer { release() }
+
+        guard isStillCurrent() else {
+            return LocalNotificationReconciliationResult(
+                acceptedIdentifiers: [],
+                retainedIdentifiers: [],
+                capacityLimitedIdentifiers: [],
+                failedIdentifiers: [],
+                removedIdentifiers: []
+            )
+        }
+        let existingRequests = await client.pendingRequests()
+        guard isStillCurrent() else {
+            return LocalNotificationReconciliationResult(
+                acceptedIdentifiers: [],
+                retainedIdentifiers: [],
+                capacityLimitedIdentifiers: [],
+                failedIdentifiers: [],
+                removedIdentifiers: []
+            )
+        }
+        let candidatesByID = candidateRequests.reduce(into: [
+            String: UNNotificationRequest
+        ]()) { result, request in
+            result[request.identifier] = request
+        }
+        var failedIDs = Set<String>()
+        var attemptedIDs = Set<String>()
+        var acceptedByID: [String: UNNotificationRequest] = [:]
+        var removedExistingIDs = Set<String>()
+        var finalPlan = LocalNotificationCapacityPolicy.plan(
+            existingRequests: existingRequests,
+            candidateRequests: Array(candidatesByID.values),
+            replacingIdentifiers: replacingIdentifiers,
+            preservingExistingIdentifiers: preservingExistingIdentifiers,
+            capacity: capacity,
+            reservedPrioritySlots: reservedPrioritySlots,
+            now: now,
+            calendar: calendar
+        )
+
+        while true {
+            let eligibleCandidates = candidatesByID.values.filter {
+                !failedIDs.contains($0.identifier)
+            }
+            let effectiveReplacementIDs = replacingIdentifiers
+                .subtracting(failedIDs)
+            let plan = LocalNotificationCapacityPolicy.plan(
+                existingRequests: existingRequests,
+                candidateRequests: eligibleCandidates,
+                replacingIdentifiers: effectiveReplacementIDs,
+                preservingExistingIdentifiers: preservingExistingIdentifiers,
+                capacity: capacity,
+                reservedPrioritySlots: reservedPrioritySlots,
+                now: now,
+                calendar: calendar
+            )
+            finalPlan = plan
+
+            let newRemovals = plan.existingIdentifiersToRemove.filter {
+                removedExistingIDs.insert($0).inserted
+            }
+            if !newRemovals.isEmpty {
+                client.removePending(newRemovals)
+            }
+
+            let requestsToAttempt = plan.selectedCandidateRequests.filter {
+                !attemptedIDs.contains($0.identifier)
+            }
+            guard !requestsToAttempt.isEmpty else { break }
+
+            for request in requestsToAttempt {
+                guard isStillCurrent() else { break }
+                attemptedIDs.insert(request.identifier)
+                do {
+                    try await client.add(request)
+                    acceptedByID[request.identifier] = request
+                } catch {
+                    failedIDs.insert(request.identifier)
+                    acceptedByID.removeValue(forKey: request.identifier)
+                }
+            }
+            guard isStillCurrent() else { break }
+        }
+
+        let finalSelectedCandidateIDs = Set(
+            finalPlan.selectedCandidateRequests.map(\.identifier)
+        )
+        let acceptedButDeselectedIDs = Set(acceptedByID.keys)
+            .subtracting(finalSelectedCandidateIDs)
+        if !acceptedButDeselectedIDs.isEmpty {
+            client.removePending(acceptedButDeselectedIDs.sorted())
+        }
+        let acceptedIDs = finalPlan.selectedCandidateRequests.compactMap {
+            acceptedByID[$0.identifier] == nil ? nil : $0.identifier
+        }
+        let selectedExistingIDs = Set(
+            finalPlan.selectedExistingRequests.map(\.identifier)
+        )
+        var restoredExistingIDs = Set<String>()
+        for request in finalPlan.selectedExistingRequests
+        where removedExistingIDs.contains(request.identifier) {
+            do {
+                try await client.add(request)
+                restoredExistingIDs.insert(request.identifier)
+            } catch {
+                // Existing request restoration is best-effort. The producer's
+                // accepted set remains truthful and the queue stays bounded.
+            }
+        }
+
+        let capacityLimitedIDs = candidatesByID.keys
+            .filter {
+                !finalSelectedCandidateIDs.contains($0)
+                    && !failedIDs.contains($0)
+            }
+            .sorted()
+        let finalRemovedIDs = removedExistingIDs
+            .subtracting(restoredExistingIDs)
+            .subtracting(Set(acceptedIDs))
+            .filter { !selectedExistingIDs.contains($0) }
+            .sorted()
+        let retainedExistingIDs = selectedExistingIDs
+            .subtracting(removedExistingIDs)
+            .union(restoredExistingIDs)
+            .intersection(
+                replacingIdentifiers.union(
+                    preservingExistingIdentifiers
+                )
+            )
+            .sorted()
+
+        let result = LocalNotificationReconciliationResult(
+            acceptedIdentifiers: acceptedIDs,
+            retainedIdentifiers: retainedExistingIDs,
+            capacityLimitedIdentifiers: capacityLimitedIDs,
+            failedIdentifiers: failedIDs.sorted(),
+            removedIdentifiers: finalRemovedIDs
+        )
+        guard isStillCurrent() else {
+            if !result.acceptedIdentifiers.isEmpty {
+                client.removePending(result.acceptedIdentifiers)
+            }
+            return LocalNotificationReconciliationResult(
+                acceptedIdentifiers: [],
+                retainedIdentifiers: [],
+                capacityLimitedIdentifiers: [],
+                failedIdentifiers: [],
+                removedIdentifiers: result.removedIdentifiers
+            )
+        }
+        return result
+    }
+
+    private func acquire() async {
+        guard isReconciling else {
+            isReconciling = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    private func release() {
+        guard !waiters.isEmpty else {
+            isReconciling = false
+            return
+        }
+        waiters.removeFirst().resume()
+    }
+}
+
+enum LocalNotificationSchedulingError: Error {
+    case capacityLimited
+    case notificationCenterRejected
+}
+
 /// Central boundary for local notification adds and removals. Callers still own authorization and policy;
 /// this boundary records only the observable result of their interaction with Notification Center.
 enum LocalNotificationLifecycle {
+    @MainActor
+    static func reconcile(
+        candidateRequests: [UNNotificationRequest],
+        replacingIdentifiers: Set<String>,
+        preservingExistingIdentifiers: Set<String> = [],
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        coordinator: LocalNotificationCapacityCoordinator? = nil,
+        isStillCurrent: @MainActor () -> Bool = { true },
+        client: LocalNotificationCenterClient
+    ) async -> LocalNotificationReconciliationResult {
+        let requestsByID = candidateRequests.reduce(into: [
+            String: UNNotificationRequest
+        ]()) { result, request in
+            result[request.identifier] = request
+        }
+        let result = await (coordinator ?? .shared).reconcile(
+            candidateRequests: Array(requestsByID.values),
+            replacingIdentifiers: replacingIdentifiers,
+            preservingExistingIdentifiers: preservingExistingIdentifiers,
+            now: now,
+            calendar: calendar,
+            isStillCurrent: isStillCurrent,
+            client: client
+        )
+
+        for identifier in result.removedIdentifiers {
+            LocalNotificationLifecycleLedger.shared.recordCancellation(
+                identifier: identifier
+            )
+        }
+        for identifier in result.acceptedIdentifiers {
+            guard let request = requestsByID[identifier] else { continue }
+            record(request, state: .scheduled)
+        }
+        for identifier in result.capacityLimitedIdentifiers {
+            guard let request = requestsByID[identifier] else { continue }
+            record(request, state: .capacityLimited)
+        }
+        for identifier in result.failedIdentifiers {
+            guard let request = requestsByID[identifier] else { continue }
+            record(request, state: .unknown)
+        }
+        return result
+    }
+
+    @MainActor
+    static func reconcile(
+        candidateRequests: [UNNotificationRequest],
+        replacingIdentifiers: Set<String>,
+        preservingExistingIdentifiers: Set<String> = [],
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        coordinator: LocalNotificationCapacityCoordinator? = nil,
+        isStillCurrent: @MainActor () -> Bool = { true },
+        on center: UNUserNotificationCenter = .current()
+    ) async -> LocalNotificationReconciliationResult {
+        await reconcile(
+            candidateRequests: candidateRequests,
+            replacingIdentifiers: replacingIdentifiers,
+            preservingExistingIdentifiers: preservingExistingIdentifiers,
+            now: now,
+            calendar: calendar,
+            coordinator: coordinator,
+            isStillCurrent: isStillCurrent,
+            client: .system(center: center)
+        )
+    }
+
+    @MainActor
     static func schedule(
         _ request: UNNotificationRequest,
         on center: UNUserNotificationCenter = .current()
     ) async throws {
-        do {
-            try await center.add(request)
-            record(request, state: .scheduled)
-        } catch {
-            record(request, state: .unknown)
-            throw error
+        let result = await reconcile(
+            candidateRequests: [request],
+            replacingIdentifiers: [request.identifier],
+            on: center
+        )
+        if result.accepted(request.identifier) {
+            return
         }
+        if result.capacityLimitedIdentifiers.contains(request.identifier) {
+            throw LocalNotificationSchedulingError.capacityLimited
+        }
+        throw LocalNotificationSchedulingError.notificationCenterRejected
     }
 
+    @MainActor
     static func schedule(
         _ request: UNNotificationRequest,
         on center: UNUserNotificationCenter = .current()
     ) {
-        center.add(request) { error in
-            record(request, state: error == nil ? .scheduled : .unknown)
+        Task { @MainActor in
+            _ = try? await schedule(request, on: center)
         }
     }
 

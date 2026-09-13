@@ -109,6 +109,8 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+private const val SLEEP_MISSING_VALUE = "\u2014"
+
 /**
  * Sleep — Whoop-sleep clarity on the locked Noop component system. Mirrors the macOS
  * SleepView (Strand/Screens/SleepView.swift) section-for-section:
@@ -743,26 +745,8 @@ fun SleepScreen(
                     ),
                     overline = nightRelativeLabel(nightOffset),
                     confidence = assessment?.confidence,
+                    imported = importedScore,
                 )
-            }
-            item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-            // SLEEP MARKS - tap to log "going to sleep" / "I'm awake" (#461, Phase 1). LOGGING ONLY:
-            // a mark is persisted to the `sleep_mark` series + the shareable strap log; it never
-            // changes the detected sleep. Mirrors macOS SleepView.sleepMarkCard.
-            item {
-            SleepMarkCard(
-                onMark = { type ->
-                    val mark = SleepMark.now(type)
-                    // The shareable strap log is the human-readable surface in a debug export.
-                    vm.ble.externalLog(mark.logLine())
-                    scope.launch {
-                        runCatching {
-                            vm.repo.upsertMetricSeries(listOf(mark.metricPoint("my-whoop")))
-                        }
-                    }
-                    Toast.makeText(context, mark.confirmation(), Toast.LENGTH_SHORT).show()
-                },
-            )
             }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
             item {
@@ -902,6 +886,28 @@ fun SleepScreen(
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
                 item { MetricGrid(m, onMetricClick = { detailMetricKey = it }) }
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                // Logging stays easy to reach, but follows the selected night's actual metrics.
+                item {
+                    SleepMarkCard(
+                        onMark = { type ->
+                            val mark = SleepMark.now(type)
+                            vm.ble.externalLog(mark.logLine())
+                            scope.launch {
+                                runCatching {
+                                    vm.repo.upsertMetricSeries(
+                                        listOf(mark.metricPoint("my-whoop")),
+                                    )
+                                }
+                            }
+                            Toast.makeText(
+                                context,
+                                mark.confirmation(),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        },
+                    )
+                }
+                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
                 item { SleepDebtLedgerCard(m.sleepDebtLedger) }
                 // StagesVsTypical describes ONE specific night's deep/REM/light minutes under the
                 // "Selected night" header, so it must read the SELECTED day's model, never the
@@ -937,7 +943,10 @@ fun SleepScreen(
 @Composable
 private fun SleepMarkCard(onMark: (SleepMarkType) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader(title = uiString(R.string.l10n_sleep_screen_sleep_marks_8e9b86f0), overline = "Tap to log", trailing = "Phase 1")
+        SectionHeader(
+            title = uiString(R.string.l10n_sleep_screen_sleep_marks_8e9b86f0),
+            overline = "Tap to log",
+        )
         NoopCard(tint = Palette.restColor) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -1132,9 +1141,10 @@ private fun RestHero(
     source: String,
     overline: String,
     confidence: ScoreConfidence?,
+    imported: Boolean,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Sleep performance", overline = overline, trailing = "Sleep Score")
+        SectionHeader("Sleep Score", overline = overline)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1202,6 +1212,26 @@ private fun RestHero(
                             } else {
                                 Palette.statusWarning
                             },
+                        )
+                    }
+                }
+                if (imported) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Icon(
+                            Icons.Filled.Info,
+                            contentDescription = null,
+                            tint = Palette.textTertiary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            stringResource(R.string.appwide_sleep_imported_confidence_note),
+                            style = NoopType.footnote,
+                            color = Palette.textSecondary,
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
@@ -2572,7 +2602,7 @@ private fun NightNavHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                timeLabel ?: clock ?: "-",
+                timeLabel ?: clock ?: NoopDisplayFormat.MISSING,
                 style = NoopType.captionNumber,
                 color = Palette.accent,
                 maxLines = 1,
@@ -2707,7 +2737,7 @@ private fun WakeEventsCard(count: Int?, hasStageEvidence: Boolean) {
                 )
             }
             Text(
-                count?.toString() ?: "-",
+                count?.toString() ?: NoopDisplayFormat.MISSING,
                 style = NoopType.chartValue,
                 color = Palette.textPrimary,
             )
@@ -3004,7 +3034,8 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
         add { mod ->
             SparkTile(
                 mod, "Respiratory",
-                value = m.respiratory.latest?.let { String.format(Locale.US, "%.1f", it) } ?: "-",
+                value = m.respiratory.latest?.let { String.format(Locale.US, "%.1f", it) }
+                    ?: NoopDisplayFormat.MISSING,
                 caption = vsTypical(m.respiratory.latest, m.respiratory.typical, " rpm", decimals = 1),
                 accent = Palette.metricPurple,
                 spark = m.respiratory.series, sparkColor = Palette.metricPurple,
@@ -3020,7 +3051,7 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
         // two-column width. The remaining six peer metrics keep the established 2 × 3 grid.
         SparkTile(
             Modifier.fillMaxWidth(), "Sleep Debt",
-            value = m.sleepDebt.latest?.let { durationText(it) } ?: "-",
+            value = m.sleepDebt.latest?.let { durationText(it) } ?: NoopDisplayFormat.MISSING,
             caption = debtCaption(m.sleepDebt.latest),
             accent = debtColor(m.sleepDebt.latest),
             spark = m.sleepDebt.series, sparkColor = Palette.metricRose,
@@ -3256,9 +3287,12 @@ private fun DurationTrend(m: SleepModel) {
             footer = {
                 ChartFooter(
                     listOf(
-                        "Avg" to (avg?.let { String.format(Locale.US, "%.1f h", it) } ?: "-"),
-                        "Min" to (pts.minOrNull()?.let { String.format(Locale.US, "%.1f h", it) } ?: "-"),
-                        "Max" to (pts.maxOrNull()?.let { String.format(Locale.US, "%.1f h", it) } ?: "-"),
+                        "Avg" to (avg?.let { String.format(Locale.US, "%.1f h", it) }
+                            ?: NoopDisplayFormat.MISSING),
+                        "Min" to (pts.minOrNull()?.let { String.format(Locale.US, "%.1f h", it) }
+                            ?: NoopDisplayFormat.MISSING),
+                        "Max" to (pts.maxOrNull()?.let { String.format(Locale.US, "%.1f h", it) }
+                            ?: NoopDisplayFormat.MISSING),
                         "Nights" to "${pts.size}",
                     ),
                 )
@@ -3296,8 +3330,16 @@ private fun DurationTrend(m: SleepModel) {
             footer = {
                 ChartFooter(
                     listOf(
-                        "Avg" to (m.trendDebtHours.sleepAverageOrNull()?.let { durationText(it * 60.0) } ?: "â€”"),
-                        "Max" to (m.trendDebtHours.maxOrNull()?.let { durationText(it * 60.0) } ?: "â€”"),
+                        "Avg" to (
+                            m.trendDebtHours.sleepAverageOrNull()
+                                ?.let { durationText(it * 60.0) }
+                                ?: SLEEP_MISSING_VALUE
+                            ),
+                        "Max" to (
+                            m.trendDebtHours.maxOrNull()
+                                ?.let { durationText(it * 60.0) }
+                                ?: SLEEP_MISSING_VALUE
+                            ),
                         "Days" to "${m.trendDebtHours.size}",
                     ),
                 )

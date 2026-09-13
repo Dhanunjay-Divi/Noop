@@ -11,7 +11,8 @@
     <string name="managed_safety_cannot_respond">Kann nicht reagieren</string>
     <string name="managed_safety_channel_description">Dringende private Hinweise von angenommenen NOOP Safety-Kontakten.</string>
     <string name="managed_safety_channel_name">NOOP Safety-Kontakte</string>
-    <string name="managed_safety_confirm_body">NOOP sendet nach bestem Bemühen einen App-Hinweis an jeden angenommenen Safety-Kontakt. Es kontaktiert keine Rettungsdienste und garantiert nicht, dass jemand den Hinweis sieht oder darauf reagiert.</string>
+    <string name="managed_safety_confirm_body">NOOP sendet nach bestem Bemühen einen App-Hinweis an jeden angenommenen Safety-Kontakt. Es wird kein Standort geteilt. NOOP kontaktiert keine Rettungsdienste und garantiert nicht, dass jemand den Hinweis sieht oder darauf reagiert.</string>
+    <string name="managed_safety_confirm_location_body">NOOP sendet nach bestem Bemühen einen App-Hinweis an jeden angenommenen Safety-Kontakt und teilt bis zu %1$d Stunden lang nur den neuesten freigegebenen Standort. Der Standortzugriff endet, wenn die Alarmierung beendet wird oder abläuft. NOOP kontaktiert keine Rettungsdienste und garantiert keine Reaktion.</string>
     <string name="managed_safety_confirm_send">Safety-Alarmierung starten</string>
     <string name="managed_safety_confirm_title">Deine NOOP Safety-Kontakte jetzt alarmieren?</string>
     <string name="managed_safety_contact_count_format">%1$d von %2$d angenommenen Kontakten</string>

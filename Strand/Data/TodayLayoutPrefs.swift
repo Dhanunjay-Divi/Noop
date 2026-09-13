@@ -5,9 +5,9 @@ import SwiftUI
 //
 // The liquid Today's sections — the Recovery/Effort/Sleep hero, the Start-session entry, Synthesis, Key
 // Metrics, Workouts, Heart Rate, Recovery Vitals, Your Cards — rendered in one fixed order. This lets the
-// user REORDER them, with the default being the original order so nothing changes for anyone who never
-// rearranges. Display-only — no metric is computed or stored differently; this only decides the SEQUENCE
-// the already-built sections render in.
+// user REORDER the secondary sections, with the default being the original order so nothing changes for
+// anyone who never rearranges. The core score hero is always pinned first; display-only — no metric is
+// computed or stored differently; this only decides the SEQUENCE the already-built sections render in.
 //
 // Stored as a single comma-joined string of section keys in @AppStorage("today.sectionOrder"), the same
 // mechanism KeyMetricPrefs uses. The Android side mirrors this byte-identically in TodayLayoutPrefs.kt
@@ -78,9 +78,15 @@ enum TodayLayoutPrefs {
     /// UserDefaults key — a comma-joined list of `TodaySection` rawValues in display order.
     static let orderKey = "today.sectionOrder"
 
+    /// Keep the primary score surface first even when restoring an older custom order or receiving a
+    /// cross-platform backup that placed it elsewhere.
+    static func pinHero(_ sections: [TodaySection]) -> [TodaySection] {
+        [.hero] + sections.filter { $0 != .hero }
+    }
+
     /// Encode an ordered section list into the stored comma-joined string.
     static func encode(_ sections: [TodaySection]) -> String {
-        sections.map(\.rawValue).joined(separator: ",")
+        pinHero(sections).map(\.rawValue).joined(separator: ",")
     }
 
     /// Decode the stored string into the FULL ordered section list. An empty/unset string yields the
@@ -110,6 +116,6 @@ enum TodayLayoutPrefs {
             let insertAt = saved.firstIndex { defIdx($0) > defIdx(missing) }
             if let insertAt { saved.insert(missing, at: insertAt) } else { saved.append(missing) }
         }
-        return saved
+        return pinHero(saved)
     }
 }

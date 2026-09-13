@@ -56,6 +56,132 @@ final class IntelligenceEngine: ObservableObject {
         let whoopStrapDays: Set<String>
     }
 
+    /// One pass-wide acknowledgement verdict. Storage failures remain retryable without changing the
+    /// user-visible fallback behavior: the pass may preserve or publish whatever boundaries succeeded, but
+    /// its claimed input generations remain pending until every required read, persistence, repair, and
+    /// cancellation boundary is complete.
+    struct AnalysisPassIntegrity: Equatable, Sendable {
+        var requiredReadsSucceeded = true
+        var requiredPersistenceSucceeded = true
+        var repairSucceeded = true
+        var cancelled = false
+
+        var canAcknowledgeInputs: Bool {
+            requiredReadsSucceeded
+                && requiredPersistenceSucceeded
+                && repairSucceeded
+                && !cancelled
+        }
+    }
+
+    struct AnalysisScanCoverage: Equatable, Sendable {
+        let startTs: Int64
+        let endTs: Int64
+
+        func covers(_ claim: AnalysisInputGenerationClaim) -> Bool {
+            guard startTs <= endTs,
+                  let affected = claim.affectedTimeRange else {
+                return false
+            }
+            return covers(affected)
+        }
+
+        func covers(_ affected: ClosedRange<Int64>) -> Bool {
+            guard startTs <= endTs else { return false }
+            return affected.lowerBound >= startTs && affected.upperBound <= endTs
+        }
+    }
+
+    struct AnalysisScoringPlan: Equatable, Sendable {
+        let referenceNow: Int
+        let maxDays: Int
+        let isHistoricalCatchUp: Bool
+    }
+
+    enum AnalysisReadFailurePoint: Hashable, Sendable {
+        case registryAll
+        case registryActiveDeviceId
+        case respiration
+    }
+
+    private struct InjectedAnalysisReadFailure: Error {}
+
+    #if DEBUG
+    private var analysisReadFailuresForTesting: Set<AnalysisReadFailurePoint> = []
+
+    func setAnalysisReadFailuresForTesting(_ failures: Set<AnalysisReadFailurePoint>) {
+        analysisReadFailuresForTesting = failures
+    }
+    #endif
+
+    private enum OptionalAnalysisEvidence: String, Hashable, Sendable {
+        case beatIntervals = "beat_intervals"
+        case respiration
+        case steps
+        case skinTemperature = "skin_temperature"
+        case bloodOxygen = "blood_oxygen"
+        case wristEvents = "wrist_events"
+        case daytimeHeartRate = "daytime_heart_rate"
+        case daytimeMotion = "daytime_motion"
+        case bandSleepState = "band_sleep_state"
+    }
+
+    private enum AnalysisPassStage: String {
+        case registrySnapshot = "registry_snapshot"
+        case generationSnapshot = "generation_snapshot"
+        case baselineRead = "baseline_read"
+        case habitualSleepRead = "habitual_sleep_read"
+        case historyScan = "history_scan"
+        case optionalEvidenceRead = "optional_evidence_read"
+        case editedSleepRepair = "edited_sleep_repair"
+        case importRead = "import_read"
+        case mergedHistoryRead = "merged_history_read"
+        case scorePersistence = "score_persistence"
+        case activeZonePersistence = "active_zone_persistence"
+        case ageMetricPersistence = "age_metric_persistence"
+        case stepsCalibrationRead = "steps_calibration_read"
+        case stepsPersistence = "steps_persistence"
+        case sleepPersistence = "sleep_persistence"
+        case sleepRepair = "sleep_repair"
+        case workoutRepair = "workout_repair"
+        case generationAcknowledgement = "generation_acknowledgement"
+    }
+
+    private func recordAnalysisPassFailure(
+        stage: AnalysisPassStage,
+        error: Error? = nil
+    ) {
+        var fields = [
+            "outcome": "failed",
+            "stage": stage.rawValue,
+        ]
+        if let error {
+            fields["failure_kind"] = AppDiagnosticsRecorder.failureKind(error)
+        }
+        AppDiagnosticsRecorder.shared.record("analysis.pass", fields: fields)
+    }
+
+    private func recordOptionalAnalysisEvidenceFailure(_ evidence: OptionalAnalysisEvidence) {
+        AppDiagnosticsRecorder.shared.record(
+            "analysis.pass",
+            fields: [
+                "outcome": "degraded",
+                "stage": AnalysisPassStage.optionalEvidenceRead.rawValue,
+                "evidence": evidence.rawValue,
+            ]
+        )
+    }
+
+    private func recordAnalysisPassCancellation(stage: AnalysisPassStage) {
+        AppDiagnosticsRecorder.shared.record(
+            "analysis.pass",
+            fields: [
+                "outcome": "cancelled",
+                "stage": stage.rawValue,
+            ]
+        )
+    }
+
     /// #899-A re-arm: a `force: true` recompute (a post-backfill rescore AppModel kicks off after a sync)
     /// that arrives while an idle-tick pass already holds the `computing` lock would otherwise be SILENTLY
     /// dropped, so a freshly-synced night intermittently never gets re-scored until the next cycle and Today
@@ -278,8 +404,11 @@ final class IntelligenceEngine: ObservableObject {
         let unchangedDeleteCount: Int
         let failedDeleteCount: Int
         let failedReadCount: Int
+        let cancelled: Bool
 
-        var hasFailures: Bool { failedDeleteCount > 0 || failedReadCount > 0 }
+        var hasFailures: Bool {
+            failedDeleteCount > 0 || failedReadCount > 0 || cancelled
+        }
     }
 
     /// Store-backed, source-local overlap repair used by `analyzeRecent` and its regression tests.
@@ -302,7 +431,17 @@ final class IntelligenceEngine: ObservableObject {
         var failedDeleteCount = 0
         var failedReadCount = 0
 
+        func result(cancelled: Bool = false) -> SleepHealResult {
+            SleepHealResult(
+                deleted: deleted,
+                unchangedDeleteCount: unchangedDeleteCount,
+                failedDeleteCount: failedDeleteCount,
+                failedReadCount: failedReadCount,
+                cancelled: cancelled)
+        }
+
         for deviceId in Set(deviceIds).sorted() {
+            guard !Task.isCancelled else { return result(cancelled: true) }
             let storedSessions: [CachedSleepSession]
             do {
                 storedSessions = try await store.sleepSessions(
@@ -311,6 +450,9 @@ final class IntelligenceEngine: ObservableObject {
                     to: windowEnd,
                     limit: 4000)
             } catch {
+                if error is CancellationError || Task.isCancelled {
+                    return result(cancelled: true)
+                }
                 failedReadCount += 1
                 continue
             }
@@ -320,6 +462,7 @@ final class IntelligenceEngine: ObservableObject {
             }
             let candidates = SleepSessionDedup.dedupe(healable, freshStarts: freshStarts).dropped
             for stale in candidates {
+                guard !Task.isCancelled else { return result(cancelled: true) }
                 do {
                     let changed: Int
                     if let deleteSession {
@@ -335,15 +478,14 @@ final class IntelligenceEngine: ObservableObject {
                         unchangedDeleteCount += 1
                     }
                 } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        return result(cancelled: true)
+                    }
                     failedDeleteCount += 1
                 }
             }
         }
-        return SleepHealResult(
-            deleted: deleted,
-            unchangedDeleteCount: unchangedDeleteCount,
-            failedDeleteCount: failedDeleteCount,
-            failedReadCount: failedReadCount)
+        return result()
     }
 
     /// The Saturday on-or-before a "yyyy-MM-dd" local-day string , the weekly key Fitness Age writes to.
@@ -419,19 +561,6 @@ final class IntelligenceEngine: ObservableObject {
         return rows
     }
 
-    /// Latest provenance marker across the same active∪canonical computed-source union every age-metric
-    /// read uses. A shared newest day keeps the active source (the first id), matching Repository's union.
-    private func latestComputedProfileToken(store: WhoopStore, key: String) async -> Double? {
-        var best: MetricPoint?
-        for id in repo.computedReadIds {
-            let rows = (try? await store.metricSeries(
-                deviceId: id, key: key, from: "0000-01-01", to: "9999-12-31")) ?? []
-            guard let row = rows.last else { continue }
-            if best == nil || row.day > best!.day { best = row }
-        }
-        return best?.value
-    }
-
     /// Strict counterpart used by the persisted reconciliation watermark. A failed read must leave the
     /// watermark unchanged so the next foreground pass retries instead of treating "unknown" as absent.
     private func latestComputedProfileTokenStrict(
@@ -439,6 +568,7 @@ final class IntelligenceEngine: ObservableObject {
     ) async throws -> Double? {
         var best: MetricPoint?
         for id in repo.computedReadIds {
+            try Task.checkCancellation()
             let rows = try await store.metricSeries(
                 deviceId: id, key: key, from: "0000-01-01", to: "9999-12-31")
             guard let row = rows.last else { continue }
@@ -447,46 +577,18 @@ final class IntelligenceEngine: ObservableObject {
         return best?.value
     }
 
-    /// Latest point before the current weekly key across the computed-source union. Excluding the current
-    /// key is what makes the movement bound idempotent during repeated refreshes in one week.
-    private func latestComputedMetricPoint(
-        store: WhoopStore, key: String, before day: String
-    ) async -> MetricPoint? {
-        var best: MetricPoint?
-        for id in repo.computedReadIds {
-            let rows = (try? await store.metricSeries(
-                deviceId: id, key: key, from: "0000-01-01", to: day)) ?? []
-            guard let row = rows.last(where: { $0.day < day }) else { continue }
-            if best == nil || row.day > best!.day { best = row }
-        }
-        return best
-    }
-
     private func latestComputedMetricPointStrict(
         store: WhoopStore, key: String, before day: String
     ) async throws -> MetricPoint? {
         var best: MetricPoint?
         for id in repo.computedReadIds {
+            try Task.checkCancellation()
             let rows = try await store.metricSeries(
                 deviceId: id, key: key, from: "0000-01-01", to: day)
             guard let row = rows.last(where: { $0.day < day }) else { continue }
             if best == nil || row.day > best!.day { best = row }
         }
         return best
-    }
-
-    /// Purge every computed-union copy, not just the current write id. This matters after a strap is
-    /// removed/re-added: an old canonical row can otherwise win a later union read after the active copy
-    /// is deleted.
-    private func purgeComputedMetricKeys(store: WhoopStore, keys: [String]) async {
-        var ids = repo.computedReadIds
-        let writeId = deviceId + "-noop"
-        if !ids.contains(writeId) { ids.append(writeId) }
-        // Key-major ordering lets callers remove every acceptance marker before any displayed value.
-        // A partial storage failure therefore leaves readers closed instead of blessing a stale sibling.
-        for key in keys {
-            for id in ids { _ = try? await store.deleteMetricSeries(deviceId: id, key: key) }
-        }
     }
 
     /// Strict counterpart used by the persisted reconciliation watermark. Key-major ordering preserves
@@ -499,6 +601,7 @@ final class IntelligenceEngine: ObservableObject {
         if !ids.contains(writeId) { ids.append(writeId) }
         for key in keys {
             for id in ids {
+                try Task.checkCancellation()
                 _ = try await store.deleteMetricSeries(deviceId: id, key: key)
             }
         }
@@ -548,6 +651,7 @@ final class IntelligenceEngine: ObservableObject {
         var newestToken: MetricPoint?
         var hasLegacyToken = false
         for id in computedIds {
+            if Task.isCancelled { return .failed }
             let rows: [MetricPoint]
             do {
                 rows = try await store.metricSeries(
@@ -589,6 +693,7 @@ final class IntelligenceEngine: ObservableObject {
             // any displayed value. A partial storage failure therefore still leaves every reader closed.
             for key in computedOnlyKeys {
                 for id in computedIds {
+                    if Task.isCancelled { return .failed }
                     do {
                         _ = try await store.deleteMetricSeries(deviceId: id, key: key)
                     } catch {
@@ -599,6 +704,7 @@ final class IntelligenceEngine: ObservableObject {
         }
 
         guard let result else { return .reconciled(wroteValue: false) }
+        if Task.isCancelled { return .failed }
         do {
             _ = try await store.upsertMetricSeries([
                 MetricPoint(day: saturdayKey, key: "vitality", value: result.vitality),
@@ -880,33 +986,98 @@ final class IntelligenceEngine: ObservableObject {
               let skinCfg = Baselines.metricCfg["skin_temp"],
               let restCfg = Baselines.metricCfg["rest_quality"] else { return nil }
 
+        #if DEBUG
+        let injectedReadFailures = analysisReadFailuresForTesting
+        #else
+        let injectedReadFailures: Set<AnalysisReadFailurePoint> = []
+        #endif
+        var passIntegrity = AnalysisPassIntegrity()
+
         // Snapshot the registry before the change gate and reuse it for per-day owner resolution below.
         // A removed/re-added band writes under a fresh "whoop-<uuid>" id while the canonical import/score
-        // target remains "my-whoop"; the watermark must therefore cover every live owner, not only the
-        // canonical id. Repository read ids are included as a fail-safe if the registry is temporarily
-        // unreadable during startup.
+        // target remains "my-whoop"; the dirty-source set must therefore cover every live owner, not only
+        // the canonical id. Repository read ids are included as a fail-safe if the registry is temporarily
+        // unreadable during startup. This metadata read does not scan score-bearing history.
         let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
-        let regDevices = (try? registry.all()) ?? []
-        let regActiveId = (try? registry.activeDeviceId()) ?? deviceId
-        let watermarkIds = Self.analysisFingerprintDeviceIds(
+        let regDevices: [PairedDevice]
+        do {
+            if injectedReadFailures.contains(.registryAll) {
+                throw InjectedAnalysisReadFailure()
+            }
+            regDevices = try registry.all()
+        } catch {
+            regDevices = []
+            passIntegrity.requiredReadsSucceeded = false
+            recordAnalysisPassFailure(stage: .registrySnapshot, error: error)
+        }
+        let regActiveId: String
+        do {
+            if injectedReadFailures.contains(.registryActiveDeviceId) {
+                throw InjectedAnalysisReadFailure()
+            }
+            regActiveId = try registry.activeDeviceId() ?? deviceId
+        } catch {
+            regActiveId = deviceId
+            passIntegrity.requiredReadsSucceeded = false
+            recordAnalysisPassFailure(stage: .registrySnapshot, error: error)
+        }
+        let analysisSourceIds = Self.analysisDirtySourceIds(
             registered: regDevices, readIds: repo.importedReadIds, fallbackDeviceId: deviceId)
 
-        // #836 (idle-tick gate): re-scoring a 21-day window re-reads ~21×54 h of raw HR and re-runs
-        // analyzeDay over it. After a big Apple Health import (a reporter's: 2.1 M rows, ~190 k HR/day) that
-        // is multi-second, memory-heavy work, and the 15-minute steady-state tick (AppModel) repeats it
-        // every tick even when NOTHING new landed — the ongoing lag/crash in #836. A cheap whole-history
-        // scoring-input fingerprint (count+maxTs per source, no rows materialized) lets a NON-forced caller
-        // short-circuit when no score-bearing stream changed since the last successful run. All-or-nothing: it
-        // never produces a PARTIAL pass, so the window-wide reconciliation (stale-day eviction, detected-
-        // workout delete) is untouched and no computed history is dropped. Every real update path (sync
-        // backfill, import, sleep/workout edit, baseline recalibrate, timestamp heal) calls with the default
-        // `force: true` and always rescores, so a skipped tick can never hide new data.
-        let wmKey = await Self.analysisFingerprintKey(
-            store: store, deviceIds: watermarkIds, from: 0, to: 9_999_999_999)
-        if !force, !wmKey.isEmpty,
-           UserDefaults.standard.string(forKey: Self.analyzeWatermarkKey) == wmKey {
+        // #836 (idle/resume gate): snapshot one durable generation per candidate source without changing
+        // store state. A crash or force-quit before acknowledgement therefore leaves the same generation
+        // pending. Ingestion that commits after this snapshot advances the generation; acknowledging this
+        // claim later leaves the newer generation pending. A failed snapshot fails open into a real analysis,
+        // while a clean non-forced pass with no claim returns in O(source count).
+        let claimedAnalysisInputs: [AnalysisInputGenerationClaim]
+        let generationSnapshotSucceeded: Bool
+        do {
+            claimedAnalysisInputs = try await store.pendingAnalysisInputGenerations(
+                deviceIds: analysisSourceIds
+            )
+            generationSnapshotSucceeded = true
+        } catch {
+            claimedAnalysisInputs = []
+            generationSnapshotSucceeded = false
+            recordAnalysisPassFailure(stage: .generationSnapshot, error: error)
+        }
+        if !Self.analysisRunNeeded(
+            force: force,
+            generationSnapshotSucceeded: generationSnapshotSucceeded,
+            claims: claimedAnalysisInputs
+        ) {
             return nil
         }
+
+        let actualNow = Int(Date().timeIntervalSince1970)
+        // Device wall-clock offset (seconds east of UTC) for the sleep detector's daytime
+        // false-sleep guard (#90): the stager places each window's center on the LOCAL clock
+        // so only genuinely-daytime windows face the stricter nap bar. (Computed once; a DST
+        // boundary inside the window is a negligible edge case for an hour-of-day band.)
+        let tzOffset = TimeZone.current.secondsFromGMT()
+        let scoringPlan = Self.analysisScoringPlan(
+            requestedMaxDays: maxDays,
+            force: force,
+            claims: claimedAnalysisInputs,
+            now: actualNow,
+            timezoneOffsetSeconds: tzOffset
+        )
+        let now = scoringPlan.referenceNow
+        let scoringMaxDays = scoringPlan.maxDays
+        let historicalCatchUp = scoringPlan.isHistoricalCatchUp
+        let analysisScanCoverage = Self.analysisScanCoverage(
+            plan: scoringPlan,
+            actualNow: actualNow,
+            timezoneOffsetSeconds: tzOffset
+        )
+        AppDiagnosticsRecorder.shared.record(
+            "analysis.pass",
+            fields: [
+                "outcome": "started",
+                "mode": historicalCatchUp ? "historical_catch_up" : "current",
+                "days": String(min(scoringMaxDays, 4_000)),
+            ]
+        )
 
         let up = UserProfile(weightKg: profile.weightKg, heightCm: profile.heightCm,
                              age: Double(profile.age), sex: profile.sex,
@@ -919,12 +1090,6 @@ final class IntelligenceEngine: ObservableObject {
                 : nil)
             return effectiveMaxHR.map { HRZones.zones(maxHR: $0) }
         }()
-        let now = Int(Date().timeIntervalSince1970)
-        // Device wall-clock offset (seconds east of UTC) for the sleep detector's daytime
-        // false-sleep guard (#90): the stager places each window's center on the LOCAL clock
-        // so only genuinely-daytime windows face the stricter nap bar. (Computed once; a DST
-        // boundary inside the window is a negligible edge case for an hour-of-day band.)
-        let tzOffset = TimeZone.current.secondsFromGMT()
 
         // ── Pass 1: analyse each offloaded night against the IMPORTED-ONLY baseline. For a BLE-only
         // user the imported daily rows are empty, so the HRV baseline isn't usable yet and recovery is
@@ -940,8 +1105,23 @@ final class IntelligenceEngine: ObservableObject {
         // Source-separation invariant: only non-outcome physiology (HRV / resting HR / respiration below)
         // and sleep timing (habitual midsleep) may seed local context. Imported Recovery, Strain and Sleep
         // Performance are never read by the raw-score formulas and are reference outcomes only.
-        let hist = ((try? await store.dailyMetrics(deviceId: deviceId, from: "0000-01-01", to: "9999-12-31")) ?? [])
-            .sorted { $0.day < $1.day }
+        let hist: [DailyMetric]
+        do {
+            hist = try await store.dailyMetrics(
+                deviceId: deviceId,
+                from: "0000-01-01",
+                to: "9999-12-31"
+            ).sorted { $0.day < $1.day }
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .baselineRead)
+                return nil
+            }
+            passIntegrity.requiredReadsSucceeded = false
+            recordAnalysisPassFailure(stage: .baselineRead, error: error)
+            return nil
+        }
         // HRV baseline honours the manual "Recalibrate baseline" epoch (noop.hrvBaselineEpoch); the
         // resting-HR baseline honours the Charge-wide sibling (noop.recoveryBaselineEpoch). Pass the
         // per-value "yyyy-MM-dd" day keys (parallel to the values) so foldHistory can drop every night
@@ -988,6 +1168,9 @@ final class IntelligenceEngine: ObservableObject {
         // west-of-UTC user's evening crosses midnight UTC; bucketing by UTC put it in the next UTC day,
         // which the local read never found (Toronto/UTC-4 report).
         let nowLocalMidnight = Self.midnightLocal(now, offsetSec: tzOffset)
+        let analysisWindowEnd = historicalCatchUp
+            ? nowLocalMidnight + 86_400 - 1
+            : actualNow
 
         // ── Learned habitual midsleep (#547) ──────────────────────────────────
         // Compute the user's habitual midsleep ONCE per run from the trailing sleep history so the
@@ -998,10 +1181,27 @@ final class IntelligenceEngine: ObservableObject {
         // Returns nil under `habitualMinDays` of history → cold-start: every `analyzeDay`/`sleepEditedDaily`
         // call below stays on the overnight-band bonus. The same value threads into both seams so analytics
         // and the Sleep tab resolve to the identical block. (#547)
-        let habitualMidsleepSec = await Self.computeHabitualMidsleep(
-            store: store, importedId: deviceId, computedId: deviceId + "-noop",
-            windowStart: nowLocalMidnight - maxDays * 86_400 - 30 * 3_600,
-            windowEnd: now, offsetSec: tzOffset)
+        let habitualMidsleepSec: Int?
+        do {
+            habitualMidsleepSec = try await Self.computeHabitualMidsleep(
+                store: store, importedId: deviceId, computedId: deviceId + "-noop",
+                windowStart: nowLocalMidnight - scoringMaxDays * 86_400 - 30 * 3_600,
+                windowEnd: analysisWindowEnd, offsetSec: tzOffset)
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .habitualSleepRead)
+                return nil
+            }
+            passIntegrity.requiredReadsSucceeded = false
+            recordAnalysisPassFailure(stage: .habitualSleepRead, error: error)
+            return nil
+        }
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .habitualSleepRead)
+            return nil
+        }
 
         // ── FIX 1 (main-actor jank): run the ENTIRE per-day enumeration OFF the main actor ───────────
         // Every `await store.…` read inside this loop has its continuation RESUME on the main actor
@@ -1036,21 +1236,31 @@ final class IntelligenceEngine: ObservableObject {
         // the 5/MG cumulative @57 series + wrap-aware deltas + dropped deltas, replayed below tagged `.steps`.
         // The trace recomputes the SAME wrap-aware sum analyzeDay already did, so the steps total is unchanged.
         let stepsTraceActive = TestCentre.active(.steps)
-        let (scanned, skippedDayLines, activeZoneByDay):
-            ([DayScan], [String], [String: ActiveZoneMinutes]) = await Task.detached(priority: .utility) {
+        let historyScanTask = Task.detached(priority: .utility) {
+            () throws -> (
+                [DayScan],
+                [String],
+                [String: ActiveZoneMinutes],
+                Set<OptionalAnalysisEvidence>,
+                Set<String>
+            ) in
             var out: [DayScan] = []
             // Days skipped below (too few HR samples) never get a DayScan, so this diagnostic can't ride
             // along on one; carried out alongside `out` and replayed through `diagnosticSink` on the main
             // actor below, same as `rhrLine`/the trace arrays. Mirrors the Kotlin `diag` sink.
             var skippedDayLines: [String] = []
             var activeZoneByDay: [String: ActiveZoneMinutes] = [:]
+            var optionalEvidenceFailures = Set<OptionalAnalysisEvidence>()
+            var consumedSourceIDs = Set<String>()
             // #938: the WHOOP 4.0 ADC offset is per-device, not per-night. Learn one anchor per owner
             // from the whole scan window and reuse it for every night so cross-night deviations survive.
-            let skinAnchorScanFrom = nowLocalMidnight - (maxDays - 1) * 86_400 - 30 * 3_600
+            let skinAnchorScanFrom =
+                nowLocalMidnight - (scoringMaxDays - 1) * 86_400 - 30 * 3_600
             let skinAnchorScanTo = nowLocalMidnight + 18 * 3_600
             var skinAnchorByOwner: [String: Double] = [:]
             var skinAnchorResolvedOwners = Set<String>()
-            for offset in 0..<maxDays {
+            for offset in 0..<scoringMaxDays {
+                try Task.checkCancellation()
                 let dayStart = nowLocalMidnight - offset * 86_400
                 let day = AnalyticsEngine.dayString(dayStart, offsetSec: tzOffset)
                 // Read a generous window around the night that ends on `day`; the stager finds the span.
@@ -1062,17 +1272,23 @@ final class IntelligenceEngine: ObservableObject {
                 // local midnight so the stager sees the whole night; TODAY keeps the 18:00 cap (the store
                 // clamps to `now` anyway, and an in-progress nap shouldn't be read as a finished night).
                 let nextMidnight = dayStart + 86_400
-                let to = (dayStart < nowLocalMidnight) ? nextMidnight : dayStart + 18 * 3_600
+                let to = (historicalCatchUp || dayStart < nowLocalMidnight)
+                    ? nextMidnight
+                    : dayStart + 18 * 3_600
 
                 // I2: pick the single device that owns this day, and read ITS streams below. With one device
                 // this resolves to `deviceId` (active strap, has data → priority 0), so nothing changes; with
                 // multiple sources the day is scored from exactly one (active strap > other live straps >
                 // imports, or a locked override). Falls back to `deviceId` if the registry is unreadable.
-                let owner = await Self.resolveDayOwner(day: day, from: from, to: to, store: store,
-                                                       devices: regDevices, activeId: regActiveId,
-                                                       registry: registry, fallbackDeviceId: ownerFallbackId)
+                let owner = try await Self.resolveDayOwner(
+                    day: day, from: from, to: to, store: store,
+                    devices: regDevices, activeId: regActiveId,
+                    registry: registry, fallbackDeviceId: ownerFallbackId)
+                consumedSourceIDs.insert(owner)
 
-                let hr = (try? await store.hrSamples(deviceId: owner, from: from, to: to, limit: 200_000)) ?? []
+                let hr = try await store.hrSamples(
+                    deviceId: owner, from: from, to: to, limit: 200_000)
+                try Task.checkCancellation()
                 // Active Minutes is a calendar-day activity measure, not a sleep output. Read and summarize
                 // the day's HR before the overnight eligibility gate so a daytime workout still counts when
                 // the band was not worn to bed.
@@ -1085,8 +1301,16 @@ final class IntelligenceEngine: ObservableObject {
                 ) {
                     dayHr = slice
                 } else {
-                    dayHr = (try? await store.hrSamples(
-                        deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
+                    do {
+                        dayHr = try await store.hrSamples(
+                            deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)
+                    } catch {
+                        if error is CancellationError || Task.isCancelled {
+                            throw CancellationError()
+                        }
+                        optionalEvidenceFailures.insert(.daytimeHeartRate)
+                        dayHr = []
+                    }
                 }
                 if let activeZoneSet,
                    let minutes = ActiveZoneMinutesCalculator.minutes(
@@ -1097,14 +1321,72 @@ final class IntelligenceEngine: ObservableObject {
                     skippedDayLines.append("sleep day=\(day) SKIPPED hrSamples=\(hr.count) (need ≥200)")
                     continue
                 }
-                let rr = (try? await store.rrIntervals(deviceId: owner, from: from, to: to, limit: 200_000)) ?? []
-                let resp = (try? await store.respSamples(deviceId: owner, from: from, to: to, limit: 200_000)) ?? []
-                let grav = (try? await store.gravitySamples(deviceId: owner, from: from, to: to, limit: 200_000)) ?? []
-                let steps = (try? await store.stepSamples(deviceId: owner, from: from, to: to, limit: 200_000)) ?? []
-                let skin = (try? await store.skinTempSamples(deviceId: owner, from: from, to: to, limit: 200_000)) ?? []
+                try Task.checkCancellation()
+                // Required scoring spine: ownership, a qualifying night HR window, and night gravity. The
+                // remaining streams refine HRV, respiration, wear, staging, temperature, oxygen, steps, and
+                // daytime load; failures there omit only that evidence and keep the input claim pending.
+                let grav = try await store.gravitySamples(
+                    deviceId: owner, from: from, to: to, limit: 200_000)
+                let rr: [RRInterval]
+                do {
+                    rr = try await store.rrIntervals(
+                        deviceId: owner, from: from, to: to, limit: 200_000)
+                } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    optionalEvidenceFailures.insert(.beatIntervals)
+                    rr = []
+                }
+                let resp: [RespSample]
+                do {
+                    if injectedReadFailures.contains(.respiration) {
+                        throw InjectedAnalysisReadFailure()
+                    }
+                    resp = try await store.respSamples(
+                        deviceId: owner, from: from, to: to, limit: 200_000)
+                } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    optionalEvidenceFailures.insert(.respiration)
+                    resp = []
+                }
+                let steps: [StepSample]
+                do {
+                    steps = try await store.stepSamples(
+                        deviceId: owner, from: from, to: to, limit: 200_000)
+                } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    optionalEvidenceFailures.insert(.steps)
+                    steps = []
+                }
+                let skin: [SkinTempSample]
+                do {
+                    skin = try await store.skinTempSamples(
+                        deviceId: owner, from: from, to: to, limit: 200_000)
+                } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    optionalEvidenceFailures.insert(.skinTemperature)
+                    skin = []
+                }
                 // #93: WHOOP 4.0 raw SpO2 PPG samples for the night; analyzeDay banks the nightly red/IR ADC
                 // means on the DailyMetric. Empty on a 5/MG (no v24 spo2 channels) → the raw means stay nil.
-                let spo2 = (try? await store.spo2Samples(deviceId: owner, from: from, to: to, limit: 200_000)) ?? []
+                let spo2: [SpO2Sample]
+                do {
+                    spo2 = try await store.spo2Samples(
+                        deviceId: owner, from: from, to: to, limit: 200_000)
+                } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    optionalEvidenceFailures.insert(.bloodOxygen)
+                    spo2 = []
+                }
                 // #938: the strap family that WROTE this owner's skin-temp rows, so analyzeDay converts the raw
                 // register on the right scale (5/MG banks centidegrees, a WHOOP 4.0 v24 banks a raw ADC). The
                 // registry knows each device's model; unknown/non-WHOOP owners fall back to `.whoop5` (the prior
@@ -1124,10 +1406,20 @@ final class IntelligenceEngine: ObservableObject {
                 let skinAnchorRaw: Double?
                 if skinFamily == .whoop4 {
                     if !skinAnchorResolvedOwners.contains(owner) {
-                        let windowSkin = (try? await store.skinTempSamples(deviceId: owner,
-                                                                           from: skinAnchorScanFrom,
-                                                                           to: skinAnchorScanTo,
-                                                                           limit: 200_000)) ?? []
+                        let windowSkin: [SkinTempSample]
+                        do {
+                            windowSkin = try await store.skinTempSamples(
+                                deviceId: owner,
+                                from: skinAnchorScanFrom,
+                                to: skinAnchorScanTo,
+                                limit: 200_000)
+                        } catch {
+                            if error is CancellationError || Task.isCancelled {
+                                throw CancellationError()
+                            }
+                            optionalEvidenceFailures.insert(.skinTemperature)
+                            windowSkin = []
+                        }
                         if let anchor = Whoop4SkinTemp.deviceAnchorRaw(windowSkin.map { $0.raw }) {
                             skinAnchorByOwner[owner] = anchor
                         }
@@ -1143,7 +1435,17 @@ final class IntelligenceEngine: ObservableObject {
                 // only when its off-wrist coverage reaches maxOffWristSleepFraction, so a real night with a
                 // short off-wrist tail survives. Pairing needs WRIST_ON too (to bound each interval); a span
                 // still open at the window end closes at `to`. Empty when the strap emitted no wrist events.
-                let wristEvents = (try? await store.events(deviceId: owner, from: from, to: to, limit: 50_000)) ?? []
+                let wristEvents: [WhoopEvent]
+                do {
+                    wristEvents = try await store.events(
+                        deviceId: owner, from: from, to: to, limit: 50_000)
+                } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    optionalEvidenceFailures.insert(.wristEvents)
+                    wristEvents = []
+                }
                 let wristOff = AnalyticsEngine.offWristIntervals(events: wristEvents, windowEnd: to)
 
                 // Calendar-day HR was loaded above for Active Minutes. Steps and gravity remain behind
@@ -1153,7 +1455,16 @@ final class IntelligenceEngine: ObservableObject {
                                                                  dayLo: dayMid, dayHi: dayEnd, ts: { $0.ts }) {
                     daySteps = slice
                 } else {
-                    daySteps = (try? await store.stepSamples(deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
+                    do {
+                        daySteps = try await store.stepSamples(
+                            deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)
+                    } catch {
+                        if error is CancellationError || Task.isCancelled {
+                            throw CancellationError()
+                        }
+                        optionalEvidenceFailures.insert(.steps)
+                        daySteps = []
+                    }
                 }
                 // Full calendar-day gravity for WORKOUT detection. The night window above ends at
                 // dayStart+12h (≈ noon), so an afternoon/evening workout sits outside it and was only
@@ -1165,7 +1476,16 @@ final class IntelligenceEngine: ObservableObject {
                                                                  dayLo: dayMid, dayHi: dayEnd, ts: { $0.ts }) {
                     dayGrav = slice
                 } else {
-                    dayGrav = (try? await store.gravitySamples(deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
+                    do {
+                        dayGrav = try await store.gravitySamples(
+                            deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)
+                    } catch {
+                        if error is CancellationError || Task.isCancelled {
+                            throw CancellationError()
+                        }
+                        optionalEvidenceFailures.insert(.daytimeMotion)
+                        dayGrav = []
+                    }
                 }
 
                 // CONSUME (#531 / #175): the strap's OWN band sleep_state for the night window as timestamped
@@ -1178,12 +1498,31 @@ final class IntelligenceEngine: ObservableObject {
                 // bar and no per-session state is persisted. Honest: only real banded epochs are ever surfaced.
                 // Fall back to the prior pass's persisted per-session state when the raw stream is absent (an
                 // older DB banded before the v21 stream landed), so a legacy install keeps the H7 confirm.
-                var bandSleepState = (try? await store.sleepStateSamples(deviceId: owner, from: from, to: to))?
-                    .map { (ts: $0.ts, state: $0.state) } ?? []
-                if bandSleepState.isEmpty {
-                    bandSleepState = await Self.bandSleepStateSamples(computedId: computedId,
-                                                                     from: from, to: to, store: store)
+                var bandSleepState: [(ts: Int, state: Int)]
+                do {
+                    bandSleepState = try await store.sleepStateSamples(
+                        deviceId: owner, from: from, to: to
+                    ).map { (ts: $0.ts, state: $0.state) }
+                } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    optionalEvidenceFailures.insert(.bandSleepState)
+                    bandSleepState = []
                 }
+                if bandSleepState.isEmpty {
+                    do {
+                        bandSleepState = try await Self.bandSleepStateSamples(
+                            computedId: computedId, from: from, to: to, store: store)
+                    } catch {
+                        if error is CancellationError || Task.isCancelled {
+                            throw CancellationError()
+                        }
+                        optionalEvidenceFailures.insert(.bandSleepState)
+                        bandSleepState = []
+                    }
+                }
+                try Task.checkCancellation()
 
                 // #690: read the experimental-V2 toggle ONCE here (off the detached executor, matching the
                 // Repository self-heal call site) and capture the Bool, so the Settings toggle now drives the
@@ -1320,8 +1659,47 @@ final class IntelligenceEngine: ObservableObject {
                                    hrvDiag: hrvDiag,
                                    restRawEvidence: restRawEvidence))
             }
-            return (out, skippedDayLines, activeZoneByDay)
-        }.value
+            return (
+                out,
+                skippedDayLines,
+                activeZoneByDay,
+                optionalEvidenceFailures,
+                consumedSourceIDs
+            )
+        }
+        let scanned: [DayScan]
+        let skippedDayLines: [String]
+        let activeZoneByDay: [String: ActiveZoneMinutes]
+        let optionalEvidenceFailures: Set<OptionalAnalysisEvidence>
+        let consumedAnalysisSourceIDs: Set<String>
+        do {
+            (
+                scanned,
+                skippedDayLines,
+                activeZoneByDay,
+                optionalEvidenceFailures,
+                consumedAnalysisSourceIDs
+            ) =
+                try await withTaskCancellationHandler(
+                    operation: { try await historyScanTask.value },
+                    onCancel: { historyScanTask.cancel() }
+                )
+        } catch {
+            passIntegrity.requiredReadsSucceeded = false
+            passIntegrity.cancelled = error is CancellationError || Task.isCancelled
+            if passIntegrity.cancelled {
+                recordAnalysisPassCancellation(stage: .historyScan)
+            } else {
+                recordAnalysisPassFailure(stage: .historyScan, error: error)
+            }
+            return nil
+        }
+        if !optionalEvidenceFailures.isEmpty {
+            passIntegrity.requiredReadsSucceeded = false
+            for evidence in optionalEvidenceFailures.sorted(by: { $0.rawValue < $1.rawValue }) {
+                recordOptionalAnalysisEvidenceFailure(evidence)
+            }
+        }
 
         // #714: replay each skipped day's diagnostic now that we're back on the main actor (diagnosticSink
         // is MainActor-bound). Always-on , not gated behind a test mode, mirroring the Kotlin `diag` sink.
@@ -1392,7 +1770,8 @@ final class IntelligenceEngine: ObservableObject {
         let hrvEpoch = Baselines.hrvBaselineEpoch()
         let recoveryEpoch = Baselines.recoveryBaselineEpoch()
 
-        let windowStart = now - maxDays * 86_400 - 30 * 3_600
+        let windowStart =
+            nowLocalMidnight - (scoringMaxDays - 1) * 86_400 - 30 * 3_600
 
         // ── Pass 2: re-score ONLY recovery against the now-seeded baseline (cheap, baseline-dependent);
         // every other field was computed once in pass 1. Recovery stays nil until the HRV baseline is
@@ -1427,7 +1806,23 @@ final class IntelligenceEngine: ObservableObject {
         // refreshed rows so the daily aggregate below scores the corrected breakdown. A no-op for nights
         // already staged from raw (idempotent) and for imported nights (raw never dense). This MUST run
         // before the scoring loop so the healed stages flow into Rest/recovery this same pass.
-        let editedRows = await repo.selfHealEditedStages(from: windowStart, to: now)
+        let editedRows: [CachedSleepSession]
+        do {
+            editedRows = try await repo.selfHealEditedStages(
+                from: windowStart,
+                to: analysisWindowEnd
+            )
+        } catch {
+            passIntegrity.requiredReadsSucceeded = false
+            passIntegrity.requiredPersistenceSucceeded = false
+            passIntegrity.cancelled = error is CancellationError || Task.isCancelled
+            if passIntegrity.cancelled {
+                recordAnalysisPassCancellation(stage: .editedSleepRepair)
+            } else {
+                recordAnalysisPassFailure(stage: .editedSleepRepair, error: error)
+            }
+            return nil
+        }
         // Bridge-before-wake-day edit attribution needs every detected continuation fragment, not only
         // the edited rows returned above. Replace detected twins with their persisted edits, then reuse
         // this complete computed-source timeline for every per-day edit lookup below.
@@ -1456,9 +1851,23 @@ final class IntelligenceEngine: ObservableObject {
         // The WHOLE apple-health daily history, chronological. Used both as a key-presence set for the
         // By-Day badge AND as the SDNN+RHR input for the Apple-Watch recovery fold below (a watch-only user
         // has these daily aggregates but no raw stream, so the raw-HR scoring loop never touched them).
-        let appleRows = ((try? await store.dailyMetrics(deviceId: Repository.appleHealthSource,
-                                                        from: "0000-01-01", to: "9999-12-31")) ?? [])
-            .sorted { $0.day < $1.day }
+        let appleRows: [DailyMetric]
+        do {
+            appleRows = try await store.dailyMetrics(
+                deviceId: Repository.appleHealthSource,
+                from: "0000-01-01",
+                to: "9999-12-31"
+            ).sorted { $0.day < $1.day }
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .importRead)
+                return nil
+            }
+            passIntegrity.requiredReadsSucceeded = false
+            recordAnalysisPassFailure(stage: .importRead, error: error)
+            return nil
+        }
         let appleHealthDays = Set(appleRows.map { $0.day })
 
         // Recovery (Charge) test mode (Group G): read the zero-cost gate ONCE here (a single Bool) before
@@ -1676,8 +2085,26 @@ final class IntelligenceEngine: ObservableObject {
                                 sleepMin: row.totalSleepMin, hrv: row.avgHrv, rhr: row.restingHr,
                                 source: .appleHealth, confidence: w.confidence))
         }
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .scorePersistence)
+            return nil
+        }
         if !appleRecoveryRows.isEmpty {
-            _ = try? await store.upsertDailyMetrics(appleRecoveryRows, deviceId: Repository.appleHealthSource)
+            do {
+                _ = try await store.upsertDailyMetrics(
+                    appleRecoveryRows,
+                    deviceId: Repository.appleHealthSource
+                )
+            } catch {
+                if error is CancellationError || Task.isCancelled {
+                    passIntegrity.cancelled = true
+                    recordAnalysisPassCancellation(stage: .scorePersistence)
+                    return nil
+                }
+                passIntegrity.requiredPersistenceSucceeded = false
+                recordAnalysisPassFailure(stage: .scorePersistence, error: error)
+            }
         }
 
         // #277 migration: the loop now keys days by the LOCAL calendar day. A prior run (before this
@@ -1694,7 +2121,8 @@ final class IntelligenceEngine: ObservableObject {
         // only , imported "my-whoop" rows are never touched (a BLE-only WHOOP 4.0 user has no import
         // fallback). Rows older than the window keep their old keys (cosmetic off-by-one, acceptable).
         // yyyy-MM-dd sorts chronologically, so the string range IS a date range.
-        let oldestDay = AnalyticsEngine.dayString(nowLocalMidnight - (maxDays - 1) * 86_400,
+        let oldestDay = AnalyticsEngine.dayString(
+            nowLocalMidnight - (scoringMaxDays - 1) * 86_400,
                                                   offsetSec: tzOffset)
         let newestDay = AnalyticsEngine.dayString(nowLocalMidnight, offsetSec: tzOffset)
 
@@ -1713,8 +2141,23 @@ final class IntelligenceEngine: ObservableObject {
         // computed reconcile below, so the fold's rows survive the stale-row eviction.
         var importScoredDays = Set(dailies.map { $0.day }).union(importedWhoopDays).union(appleHealthDays)
         for source in Repository.wearableImportSources {
-            let rows = ((try? await store.dailyMetrics(deviceId: source, from: oldestDay, to: newestDay)) ?? [])
-                .sorted { $0.day < $1.day }
+            let rows: [DailyMetric]
+            do {
+                rows = try await store.dailyMetrics(
+                    deviceId: source,
+                    from: oldestDay,
+                    to: newestDay
+                ).sorted { $0.day < $1.day }
+            } catch {
+                if error is CancellationError || Task.isCancelled {
+                    passIntegrity.cancelled = true
+                    recordAnalysisPassCancellation(stage: .importRead)
+                    return nil
+                }
+                passIntegrity.requiredReadsSucceeded = false
+                recordAnalysisPassFailure(stage: .importRead, error: error)
+                return nil
+            }
             guard !rows.isEmpty else { continue }
             let byDay = Dictionary(rows.map { ($0.day, $0) }, uniquingKeysWith: { a, _ in a })
             for w in Self.watchRecoveries(
@@ -1746,7 +2189,27 @@ final class IntelligenceEngine: ObservableObject {
         // accumulated view the readiness card + dashboard read (incl. IMPORTED Apple Health / Health Connect
         // resting HR, which the engine's computed-only `dailies` never carries). Captured here so the
         // Fitness Age gate can't be undercut by this pass's own scoring/eviction. Windowed to the range.
-        let faPriorDaily = await repo.dailyMetrics(fromDay: oldestDay, toDay: newestDay)
+        let faPriorDaily: [DailyMetric]
+        do {
+            faPriorDaily = try await repo.dailyMetricsForReconciliation(
+                fromDay: oldestDay,
+                toDay: newestDay
+            )
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .mergedHistoryRead)
+                return nil
+            }
+            passIntegrity.requiredReadsSucceeded = false
+            recordAnalysisPassFailure(stage: .mergedHistoryRead, error: error)
+            return nil
+        }
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .mergedHistoryRead)
+            return nil
+        }
 
         // Publish daily scores, stale-row eviction, and Rest evidence in one store transaction. Comparison
         // evidence is promoted only after that complete window commits: a freshly computed in-memory day
@@ -1767,10 +2230,22 @@ final class IntelligenceEngine: ObservableObject {
                     .intersection(persistedDays)
                 scorePersistenceSucceeded = true
             } catch {
+                if error is CancellationError || Task.isCancelled {
+                    passIntegrity.cancelled = true
+                    recordAnalysisPassCancellation(stage: .scorePersistence)
+                    return nil
+                }
+                passIntegrity.requiredPersistenceSucceeded = false
+                recordAnalysisPassFailure(stage: .scorePersistence, error: error)
                 diagnosticSink?(
                     "score persist failed; official-reference comparison receipt withheld; "
                         + "kind=\(AppDiagnosticsRecorder.failureKind(error))", nil)
             }
+        }
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .activeZonePersistence)
+            return nil
         }
         var activeZonePersisted = false
         var activeZonePersistenceSucceeded = activeZonePoints.isEmpty
@@ -1785,11 +2260,24 @@ final class IntelligenceEngine: ObservableObject {
                 activeZonePersisted = true
                 activeZonePersistenceSucceeded = true
             } catch {
+                if error is CancellationError || Task.isCancelled {
+                    passIntegrity.cancelled = true
+                    recordAnalysisPassCancellation(stage: .activeZonePersistence)
+                    return nil
+                }
+                passIntegrity.requiredPersistenceSucceeded = false
+                recordAnalysisPassFailure(stage: .activeZonePersistence, error: error)
                 diagnosticSink?(
                     "Active-minute series reconciliation failed; "
                         + "kind=\(AppDiagnosticsRecorder.failureKind(error))", nil)
             }
         }
+        if !historicalCatchUp {
+            guard !Task.isCancelled else {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .ageMetricPersistence)
+                return nil
+            }
 
         // ── Fitness Age (Phase 2) , weekly, keyed to the week's Saturday ────────────────────────────
         // Roll the last 7 computed days into the Nes/HUNT inputs and upsert a weekly Fitness Age (+ an
@@ -1811,72 +2299,91 @@ final class IntelligenceEngine: ObservableObject {
         let faHistory = Array(
             faGateByDay.values.sorted { $0.day < $1.day }
                 .suffix(FitnessAgeEngine.historyDaysNeeded))
-        let storedLegacyFitnessToken = await latestComputedProfileToken(
-            store: store, key: AgeMetricProfile.legacyFitnessAgeKey)
-        let storedFitnessToken = await latestComputedProfileToken(
-            store: store, key: AgeMetricProfile.fitnessAgeKey)
-        let storedLegacyVO2Token = await latestComputedProfileToken(
-            store: store, key: AgeMetricProfile.legacyVO2maxEstimateKey)
-        let storedVO2Token = await latestComputedProfileToken(
-            store: store, key: AgeMetricProfile.vo2maxEstimateKey)
-        let acceptsStoredFitness = storedLegacyFitnessToken == nil
-            && profile.acceptsFitnessAge(provenance: storedFitnessToken)
-        if !acceptsStoredFitness {
-            await purgeComputedMetricKeys(
-                store: store, keys: [
-                    AgeMetricProfile.fitnessAgeKey,
-                    AgeMetricProfile.legacyFitnessAgeKey,
-                    "fitness_age",
-                ])
-        }
-        if storedLegacyVO2Token != nil
-            || !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
-            await purgeComputedMetricKeys(
-                store: store, keys: [
-                    AgeMetricProfile.vo2maxEstimateKey,
-                    AgeMetricProfile.legacyVO2maxEstimateKey,
-                    "vo2max_est",
-                ])
-        }
+        do {
+            let storedLegacyFitnessToken = try await latestComputedProfileTokenStrict(
+                store: store, key: AgeMetricProfile.legacyFitnessAgeKey)
+            let storedFitnessToken = try await latestComputedProfileTokenStrict(
+                store: store, key: AgeMetricProfile.fitnessAgeKey)
+            let storedLegacyVO2Token = try await latestComputedProfileTokenStrict(
+                store: store, key: AgeMetricProfile.legacyVO2maxEstimateKey)
+            let storedVO2Token = try await latestComputedProfileTokenStrict(
+                store: store, key: AgeMetricProfile.vo2maxEstimateKey)
+            let acceptsStoredFitness = storedLegacyFitnessToken == nil
+                && profile.acceptsFitnessAge(provenance: storedFitnessToken)
+            if !acceptsStoredFitness {
+                try await purgeComputedMetricKeysStrict(
+                    store: store, keys: [
+                        AgeMetricProfile.fitnessAgeKey,
+                        AgeMetricProfile.legacyFitnessAgeKey,
+                        "fitness_age",
+                    ])
+            }
+            if storedLegacyVO2Token != nil
+                || !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
+                try await purgeComputedMetricKeysStrict(
+                    store: store, keys: [
+                        AgeMetricProfile.vo2maxEstimateKey,
+                        AgeMetricProfile.legacyVO2maxEstimateKey,
+                        "vo2max_est",
+                    ])
+            }
 
-        let faSatKey = IntelligenceEngine.saturdayKey(onOrBefore: newestDay)
-        let previousPublishedAge = acceptsStoredFitness
-            ? await latestComputedMetricPoint(
-                store: store, key: "fitness_age", before: faSatKey)?.value
-            : nil
-        var faPts = Self.fitnessAgeRows(
-            gateDays: faHistory, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
-            computedId: computedId,
-            satKey: faSatKey, ageConfirmed: profile.ageInputConfirmed,
-            sexConfirmed: profile.sexInputConfirmed,
-            previousPublishedAge: previousPublishedAge)
-        if faPts.contains(where: { $0.key == "fitness_age" }), let token = profile.fitnessAgeProfileToken {
-            faPts.append(MetricPoint(day: faSatKey, key: AgeMetricProfile.fitnessAgeKey, value: token))
-        }
-        if faPts.contains(where: { $0.key == "vo2max_est" }), let token = profile.vo2maxProfileToken {
-            faPts.append(MetricPoint(day: faSatKey, key: AgeMetricProfile.vo2maxEstimateKey, value: token))
-        } else {
-            await purgeComputedMetricKeys(
-                store: store, keys: [
-                    AgeMetricProfile.vo2maxEstimateKey,
-                    AgeMetricProfile.legacyVO2maxEstimateKey,
-                    "vo2max_est",
-                ])
-        }
-        if !faPts.isEmpty { _ = try? await store.upsertMetricSeries(faPts, deviceId: computedId) }
+            let faSatKey = IntelligenceEngine.saturdayKey(onOrBefore: newestDay)
+            let previousPublishedAge = acceptsStoredFitness
+                ? try await latestComputedMetricPointStrict(
+                    store: store, key: "fitness_age", before: faSatKey)?.value
+                : nil
+            var faPts = Self.fitnessAgeRows(
+                gateDays: faHistory, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
+                computedId: computedId,
+                satKey: faSatKey, ageConfirmed: profile.ageInputConfirmed,
+                sexConfirmed: profile.sexInputConfirmed,
+                previousPublishedAge: previousPublishedAge)
+            if faPts.contains(where: { $0.key == "fitness_age" }),
+               let token = profile.fitnessAgeProfileToken {
+                faPts.append(MetricPoint(
+                    day: faSatKey, key: AgeMetricProfile.fitnessAgeKey, value: token))
+            }
+            if faPts.contains(where: { $0.key == "vo2max_est" }),
+               let token = profile.vo2maxProfileToken {
+                faPts.append(MetricPoint(
+                    day: faSatKey, key: AgeMetricProfile.vo2maxEstimateKey, value: token))
+            } else {
+                try await purgeComputedMetricKeysStrict(
+                    store: store, keys: [
+                        AgeMetricProfile.vo2maxEstimateKey,
+                        AgeMetricProfile.legacyVO2maxEstimateKey,
+                        "vo2max_est",
+                    ])
+            }
+            if !faPts.isEmpty {
+                _ = try await store.upsertMetricSeries(faPts, deviceId: computedId)
+            }
 
-        let fitnessInputsUsable = profile.fitnessInputsConfirmed
-            && FitnessAgeEngine.supports(age: Double(profile.age))
-            && FitnessAgeEngine.supports(sex: profile.sex)
-        if !fitnessInputsUsable {
-            // Fitness Age uses the published binary-sex equation. Purge a stale headline after a
-            // reset/unsupported profile instead of showing an earlier value as if it still applied.
-            // Measured `vo2max` imports remain a separate, untouched series.
-            await purgeComputedMetricKeys(store: store, keys: [
-                AgeMetricProfile.fitnessAgeKey, AgeMetricProfile.legacyFitnessAgeKey,
-                AgeMetricProfile.vo2maxEstimateKey, AgeMetricProfile.legacyVO2maxEstimateKey,
-                "fitness_age", "vo2max_est",
-            ])
+            let fitnessInputsUsable = profile.fitnessInputsConfirmed
+                && FitnessAgeEngine.supports(age: Double(profile.age))
+                && FitnessAgeEngine.supports(sex: profile.sex)
+            if !fitnessInputsUsable {
+                // Fitness Age uses the published binary-sex equation. Purge a stale headline after a
+                // reset/unsupported profile instead of showing an earlier value as if it still applied.
+                // Measured `vo2max` imports remain a separate, untouched series.
+                try await purgeComputedMetricKeysStrict(store: store, keys: [
+                    AgeMetricProfile.fitnessAgeKey, AgeMetricProfile.legacyFitnessAgeKey,
+                    AgeMetricProfile.vo2maxEstimateKey, AgeMetricProfile.legacyVO2maxEstimateKey,
+                    "fitness_age", "vo2max_est",
+                ])
+            }
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .ageMetricPersistence)
+                return nil
+            }
+            // This block combines strict provenance reads with their purge/upsert writes. Conservatively
+            // poison both dimensions when the store cannot identify which operation failed.
+            passIntegrity.requiredReadsSucceeded = false
+            passIntegrity.requiredPersistenceSucceeded = false
+            recordAnalysisPassFailure(stage: .ageMetricPersistence, error: error)
         }
 
         // Wellness Age does not use sex, but it still must never treat the seeded age-30 editor value
@@ -1887,9 +2394,15 @@ final class IntelligenceEngine: ObservableObject {
         // 14 observed days for each factor before letting that factor enter, and require three independent
         // domains inside VitalityEngine. Missing values remain unavailable rather than being imputed.
         let v21 = Array(faGateByDay.values.sorted { $0.day < $1.day }.suffix(21))
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .ageMetricPersistence)
+            return nil
+        }
+        let vitalityOutcome: AgeMetricReconciliationOutcome
         #if DEBUG
         if !AppleDemoSeeder.requested {
-            _ = await Self.reconcileVitalityV2(
+            vitalityOutcome = await Self.reconcileVitalityV2Outcome(
                 store: store,
                 computedReadIds: repo.computedReadIds,
                 writeId: computedId,
@@ -1897,9 +2410,11 @@ final class IntelligenceEngine: ObservableObject {
                 age: profile.age,
                 inputsUsable: wellnessInputsUsable,
                 saturdayKey: IntelligenceEngine.saturdayKey(onOrBefore: newestDay))
+        } else {
+            vitalityOutcome = .reconciled(wroteValue: false)
         }
         #else
-        _ = await Self.reconcileVitalityV2(
+        vitalityOutcome = await Self.reconcileVitalityV2Outcome(
             store: store,
             computedReadIds: repo.computedReadIds,
             writeId: computedId,
@@ -1908,6 +2423,17 @@ final class IntelligenceEngine: ObservableObject {
             inputsUsable: wellnessInputsUsable,
             saturdayKey: IntelligenceEngine.saturdayKey(onOrBefore: newestDay))
         #endif
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .ageMetricPersistence)
+            return nil
+        }
+        if !vitalityOutcome.completed {
+            // The strict helper can fail on either required token reads or purge/upsert writes.
+            passIntegrity.requiredReadsSucceeded = false
+            passIntegrity.requiredPersistenceSucceeded = false
+            recordAnalysisPassFailure(stage: .ageMetricPersistence)
+        }
 
         // ── Steps ESTIMATE (WHOOP 4.0) , DAILY, keyed to each strap-only day ────────────────────────
         // A WHOOP 4.0 sends no step count over BLE, so for days the phone DIDN'T also count steps we
@@ -1926,6 +2452,11 @@ final class IntelligenceEngine: ObservableObject {
         let stepsCalDays = 60
         let calOldest = AnalyticsEngine.dayString(
             nowLocalMidnight - (stepsCalDays - 1) * 86_400, offsetSec: tzOffset)
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .stepsCalibrationRead)
+            return nil
+        }
         // ── FIX 2 (main-actor jank): hoist the 60-day steps-calibration STORE READS off the main actor ──
         // Same residual stall FIX 1 fixed, smaller scale: this class is `@MainActor`, so each `await store.…`
         // below resumes its continuation ON the main actor , the apple-health read + 60 per-day
@@ -1942,34 +2473,61 @@ final class IntelligenceEngine: ObservableObject {
         // on changes. Bind `deviceId` (a MainActor instance `let`) to a local Sendable `String` so the
         // @Sendable detached closure captures the VALUE, never `self`, exactly as FIX 1's `ownerFallbackId`.
         let stepsFallbackId = deviceId
-        let (refStepsByDay, motionByDay): ([String: Double], [String: Double]) =
-            await Task.detached(priority: .utility) {
+        let stepsCalibrationTask = Task.detached(priority: .utility) {
+            () throws -> ([String: Double], [String: Double]) in
+            try Task.checkCancellation()
             // Phone reference steps per day, from the apple-health daily rows (steps > 0 only).
             // #693: read `appleDaily`, NOT `dailyMetrics`. Apple-Health import writes the phone step count into
             // `appleDaily.steps` (Int?), never into a dailyMetric `steps` row , so the old `dailyMetrics` read
             // was always empty and the calibration never advanced past "Need 3 more days" (Android already reads
             // appleDaily here, IntelligenceEngine.kt:676). `store.appleDaily(deviceId:from:to:)` already exists.
-            let appleRows = (try? await store.appleDaily(deviceId: Repository.appleHealthSource,
-                                                         from: calOldest, to: newestDay)) ?? []
+            let appleRows = try await store.appleDaily(
+                deviceId: Repository.appleHealthSource,
+                from: calOldest,
+                to: newestDay)
             var refSteps: [String: Double] = [:]
             for r in appleRows { if let s = r.steps, s > 0 { refSteps[r.day] = Double(s) } }
             // Per-day motion volume over the calibration window, read from the owner-resolved strap streams.
             // (Owner resolution mirrors the scoring loop; one device installs resolve to `deviceId`.)
             var motion: [String: Double] = [:]
             for off in 0..<stepsCalDays {
+                try Task.checkCancellation()
                 let dayMid = Self.midnightLocal(nowLocalMidnight - off * 86_400, offsetSec: tzOffset)
                 let dayEnd = dayMid + 86_400 - 1
                 let dayKey = AnalyticsEngine.dayString(dayMid, offsetSec: tzOffset)
-                let owner = await Self.resolveDayOwner(day: dayKey, from: dayMid, to: dayEnd, store: store,
-                                                       devices: regDevices, activeId: regActiveId,
-                                                       registry: registry, fallbackDeviceId: stepsFallbackId)
-                let grav = (try? await store.gravitySamples(deviceId: owner, from: dayMid, to: dayEnd,
-                                                            limit: 200_000)) ?? []
+                let owner = try await Self.resolveDayOwner(
+                    day: dayKey, from: dayMid, to: dayEnd, store: store,
+                    devices: regDevices, activeId: regActiveId,
+                    registry: registry, fallbackDeviceId: stepsFallbackId)
+                let grav = try await store.gravitySamples(
+                    deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)
                 let m = StepsEstimateEngine.dayMotionIntensity(grav)
                 if m > 0 { motion[dayKey] = m }
             }
             return (refSteps, motion)
-        }.value
+        }
+        let refStepsByDay: [String: Double]
+        let motionByDay: [String: Double]
+        do {
+            (refStepsByDay, motionByDay) = try await withTaskCancellationHandler(
+                operation: { try await stepsCalibrationTask.value },
+                onCancel: { stepsCalibrationTask.cancel() }
+            )
+        } catch {
+            passIntegrity.requiredReadsSucceeded = false
+            passIntegrity.cancelled = error is CancellationError || Task.isCancelled
+            if passIntegrity.cancelled {
+                recordAnalysisPassCancellation(stage: .stepsCalibrationRead)
+            } else {
+                recordAnalysisPassFailure(stage: .stepsCalibrationRead, error: error)
+            }
+            return nil
+        }
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .stepsPersistence)
+            return nil
+        }
         // Build calibration points only for days with BOTH a motion volume and a real phone step count.
         let calPoints = motionByDay.compactMap { (day, motion) -> StepsEstimateEngine.CalibrationPoint? in
             guard let s = refStepsByDay[day] else { return nil }
@@ -1986,7 +2544,19 @@ final class IntelligenceEngine: ObservableObject {
                       let est = StepsEstimateEngine.estimate(motion: motion, calibration: cal) else { continue }
                 estPts.append(MetricPoint(day: dm.day, key: "steps_est", value: Double(est)))
             }
-            if !estPts.isEmpty { _ = try? await store.upsertMetricSeries(estPts, deviceId: computedId) }
+            if !estPts.isEmpty {
+                do {
+                    _ = try await store.upsertMetricSeries(estPts, deviceId: computedId)
+                } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        passIntegrity.cancelled = true
+                        recordAnalysisPassCancellation(stage: .stepsPersistence)
+                        return nil
+                    }
+                    passIntegrity.requiredPersistenceSucceeded = false
+                    recordAnalysisPassFailure(stage: .stepsPersistence, error: error)
+                }
+            }
             // Mirror the fit into ProfileStore so the Settings/Steps screen can show + adjust it.
             profile.stepsCalibrationCoefficient = cal.coefficient
             profile.stepsCalibrationSampleDays = cal.sampleDays
@@ -2026,6 +2596,7 @@ final class IntelligenceEngine: ObservableObject {
                 }
             }
         }
+        }
 
         // Drop any freshly-detected session that overlaps a night the user has already hand-corrected.
         // A detected onset can drift second-to-second as more raw data arrives, so without this the
@@ -2043,7 +2614,27 @@ final class IntelligenceEngine: ObservableObject {
         let cachedSleepKept = cachedSleep.filter { s in
             !skipWindows.contains { s.startTs < $0.end && $0.start < s.endTs }   // time-overlap test
         }
-        if !cachedSleepKept.isEmpty { _ = try? await store.upsertSleepSessions(cachedSleepKept, deviceId: computedId) }
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .sleepPersistence)
+            return nil
+        }
+        if !cachedSleepKept.isEmpty {
+            do {
+                _ = try await store.upsertSleepSessions(
+                    cachedSleepKept,
+                    deviceId: computedId
+                )
+            } catch {
+                if error is CancellationError || Task.isCancelled {
+                    passIntegrity.cancelled = true
+                    recordAnalysisPassCancellation(stage: .sleepPersistence)
+                    return nil
+                }
+                passIntegrity.requiredPersistenceSucceeded = false
+                recordAnalysisPassFailure(stage: .sleepPersistence, error: error)
+            }
+        }
         // ── Persist per-epoch motion (H8) beside each kept session's stagesJSON ──────────────────────────
         // The sleepSession rows exist now (just upserted), so the targeted motion UPDATE lands. Persist ONLY
         // for the sessions actually kept (not edited/dismissed), keyed by the detected start `analyzeDay`
@@ -2057,7 +2648,26 @@ final class IntelligenceEngine: ObservableObject {
             }
         }
         for (start, motion) in motionByStart {
-            _ = try? await store.persistSessionMotion(deviceId: computedId, sessionStart: start, motionEpochs: motion)
+            guard !Task.isCancelled else {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .sleepPersistence)
+                return nil
+            }
+            do {
+                _ = try await store.persistSessionMotion(
+                    deviceId: computedId,
+                    sessionStart: start,
+                    motionEpochs: motion
+                )
+            } catch {
+                if error is CancellationError || Task.isCancelled {
+                    passIntegrity.cancelled = true
+                    recordAnalysisPassCancellation(stage: .sleepPersistence)
+                    return nil
+                }
+                passIntegrity.requiredPersistenceSucceeded = false
+                recordAnalysisPassFailure(stage: .sleepPersistence, error: error)
+            }
         }
         // ── Persist per-epoch BAND sleep_state (#175) beside each kept session's stagesJSON ──────────────
         // This is the source `sessionSleepStateJSON` lacked (v7.7.0 finding: the write path had no producer
@@ -2072,7 +2682,31 @@ final class IntelligenceEngine: ObservableObject {
             }
         }
         for (start, states) in sleepStateByStart {
-            _ = try? await store.persistSessionSleepState(deviceId: computedId, sessionStart: start, states: states)
+            guard !Task.isCancelled else {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .sleepPersistence)
+                return nil
+            }
+            do {
+                _ = try await store.persistSessionSleepState(
+                    deviceId: computedId,
+                    sessionStart: start,
+                    states: states
+                )
+            } catch {
+                if error is CancellationError || Task.isCancelled {
+                    passIntegrity.cancelled = true
+                    recordAnalysisPassCancellation(stage: .sleepPersistence)
+                    return nil
+                }
+                passIntegrity.requiredPersistenceSucceeded = false
+                recordAnalysisPassFailure(stage: .sleepPersistence, error: error)
+            }
+        }
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .sleepRepair)
+            return nil
         }
         // ── Overlap-aware banked-sleep heal (#899) ────────────────────────────────────────────────────
         // An unstable strap clock re-banks the SAME night under a shifted timebase, so successive passes
@@ -2090,13 +2724,20 @@ final class IntelligenceEngine: ObservableObject {
             store: store,
             deviceIds: healIds,
             from: windowStart,
-            to: now,
+            to: analysisWindowEnd,
             oldestDay: oldestDay,
             newestDay: newestDay,
             timezoneOffsetSeconds: tzOffset,
             freshStarts: keptStarts)
+        if healResult.cancelled {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .sleepRepair)
+            return nil
+        }
         let healDropped = healResult.deleted
         if healResult.failedReadCount > 0 || healResult.failedDeleteCount > 0 {
+            passIntegrity.repairSucceeded = false
+            recordAnalysisPassFailure(stage: .sleepRepair)
             diagnosticSink?("Dedup(#899): repair incomplete; failed to read "
                 + "\(healResult.failedReadCount) source(s) and failed to delete "
                 + "\(healResult.failedDeleteCount) row(s). Failed rows were not counted as removed; "
@@ -2122,25 +2763,64 @@ final class IntelligenceEngine: ObservableObject {
         } else {
             healRearmedThisCycle = false
         }
+        guard !Task.isCancelled else {
+            passIntegrity.cancelled = true
+            recordAnalysisPassCancellation(stage: .workoutRepair)
+            return nil
+        }
         // Migration/repair: older builds silently persisted inferred rows despite the UI's suggestion-only
         // contract. Remove those computed rows and do not re-insert them. Confirmed manual/imported workouts
         // live under different sources and are untouched.
-        let inferredWorkoutsDeleted = (try? await store.deleteWorkouts(
-            deviceId: computedId, sport: "detected", from: windowStart, to: now
-        )) ?? 0
+        let inferredWorkoutsDeleted: Int
+        do {
+            inferredWorkoutsDeleted = try await store.deleteWorkouts(
+                deviceId: computedId,
+                sport: "detected",
+                from: windowStart,
+                to: analysisWindowEnd
+            )
+        } catch {
+            inferredWorkoutsDeleted = 0
+            if error is CancellationError || Task.isCancelled {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .workoutRepair)
+                return nil
+            }
+            passIntegrity.requiredPersistenceSucceeded = false
+            recordAnalysisPassFailure(stage: .workoutRepair, error: error)
+        }
 
         // #137: a manually-started workout is scored from sparse live HR at save time , near-zero
         // calories/strain on a 5/MG. Now that offloaded HR may cover the window, re-score the
         // under-sampled ones from that denser data.
-        let manualWorkoutsChanged = await rescoreManualWorkouts(store: store, profile: up)
+        let manualWorkoutsChanged: Bool
+        do {
+            manualWorkoutsChanged = try await rescoreManualWorkouts(
+                store: store,
+                profile: up
+            )
+        } catch {
+            manualWorkoutsChanged = false
+            if error is CancellationError || Task.isCancelled {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .workoutRepair)
+                return nil
+            }
+            // The helper performs strict workout/HR reads followed by one required upsert.
+            passIntegrity.requiredReadsSucceeded = false
+            passIntegrity.requiredPersistenceSucceeded = false
+            recordAnalysisPassFailure(stage: .workoutRepair, error: error)
+        }
         if inferredWorkoutsDeleted > 0 || manualWorkoutsChanged {
             repo.noteWorkoutsChanged()
         }
 
-        results = out
-        note = out.isEmpty
-            ? "No scored nights yet. Wear the strap with NOOP connected overnight and the engine will score your charge, effort and rest fully on device, with no provider cloud required."
-            : nil
+        if !historicalCatchUp {
+            results = out
+            note = out.isEmpty
+                ? String(localized: "appwide.intelligence.no_scored_nights")
+                : nil
+        }
 
         // Reload the dashboard caches so the freshly computed scores show up immediately. A heal-only
         // pass (#899 dedup deleted stale session rows but no daily changed) must refresh too, so the
@@ -2149,44 +2829,258 @@ final class IntelligenceEngine: ObservableObject {
             await repo.refresh()
         }
 
-        // #836: record the scoring-input fingerprint this run scored against, so a later NON-forced tick can
-        // short-circuit while it's unchanged. Written ONLY here at the end of a completed run (never on an
-        // early guard-return), so an interrupted/failed run can't advance the watermark past unscored data.
-        // A repair I/O failure leaves the input fingerprint unchanged. Clear even an older matching watermark
-        // so the next idle pass retries instead of treating the incomplete destructive repair as complete.
-        let canAdvanceWatermark = Self.analysisPassCanAdvanceWatermark(
-            scorePersistenceSucceeded: scorePersistenceSucceeded,
-            activeZonePersistenceSucceeded: activeZonePersistenceSucceeded,
-            repairHasFailures: healResult.hasFailures
-        )
-        if !canAdvanceWatermark {
-            UserDefaults.standard.removeObject(forKey: Self.analyzeWatermarkKey)
-        } else if !wmKey.isEmpty {
-            UserDefaults.standard.set(wmKey, forKey: Self.analyzeWatermarkKey)
+        passIntegrity.requiredPersistenceSucceeded =
+            passIntegrity.requiredPersistenceSucceeded
+                && scorePersistenceSucceeded
+                && activeZonePersistenceSucceeded
+        passIntegrity.repairSucceeded =
+            passIntegrity.repairSucceeded && !healResult.hasFailures
+        passIntegrity.cancelled = Task.isCancelled
+        if passIntegrity.cancelled {
+            recordAnalysisPassCancellation(stage: .generationAcknowledgement)
+            return nil
+        }
+        if generationSnapshotSucceeded {
+            do {
+                let finalization = try await Self.finalizeAnalysisInputClaims(
+                    store: store,
+                    claims: claimedAnalysisInputs,
+                    integrity: passIntegrity,
+                    coverage: analysisScanCoverage,
+                    consumedSourceIDs: consumedAnalysisSourceIDs,
+                    ownershipEvaluatedSourceIDs: Set(
+                        regDevices.lazy
+                            .filter { $0.status != .archived }
+                            .map(\.id)
+                    )
+                )
+                AppDiagnosticsRecorder.shared.record(
+                    "analysis.pass",
+                    fields: [
+                        "outcome": "completed",
+                        "mode": historicalCatchUp
+                            ? "historical_catch_up"
+                            : "current",
+                        "acknowledged": String(
+                            min(finalization.acknowledgedCount, 64)
+                        ),
+                        "advanced": String(
+                            min(finalization.advancedCount, 64)
+                        ),
+                    ]
+                )
+            } catch is CancellationError {
+                passIntegrity.cancelled = true
+                recordAnalysisPassCancellation(stage: .generationAcknowledgement)
+                return nil
+            } catch {
+                // The acknowledgement update is the last boundary. Its failure leaves generation state
+                // untouched, so a later non-forced pass retries. Keep the existing one-shot in-process
+                // forced retry as a latency optimization.
+                pendingForcedRescore = true
+                recordAnalysisPassFailure(stage: .generationAcknowledgement, error: error)
+            }
         }
         // Fitness Age, VO₂ estimate, Vitality, and Wellness Age live outside Repository.days. Publish one
         // focused revision after every completed scoring pass so their screens re-read persisted rows even
         // when the daily-cache diff is otherwise byte-identical.
-        repo.noteAgeMetricsChanged()
+        if !historicalCatchUp {
+            repo.noteAgeMetricsChanged()
+        }
         return ScoreRunReceipt(whoopStrapDays: persistedWhoopStrapDays)
     }
 
-    /// UserDefaults key for the #836 idle-tick gate: the scoring-input fingerprint the last completed
-    /// `analyzeRecent` scored against. A non-forced tick whose current fingerprint equals this skips the
-    /// 21-day rescore.
-    private static let analyzeWatermarkKey = "noop.analyzeWatermark"
-
-    nonisolated static func analysisPassCanAdvanceWatermark(
-        scorePersistenceSucceeded: Bool,
-        activeZonePersistenceSucceeded: Bool,
-        repairHasFailures: Bool
+    nonisolated static func analysisRunNeeded(
+        force: Bool,
+        generationSnapshotSucceeded: Bool,
+        claims: [AnalysisInputGenerationClaim]
     ) -> Bool {
-        scorePersistenceSucceeded && activeZonePersistenceSucceeded && !repairHasFailures
+        force || !generationSnapshotSucceeded || !claims.isEmpty
     }
 
-    /// Stable source set for the idle scoring watermark. Archived devices cannot own a new day; active and
+    @discardableResult
+    nonisolated static func finalizeAnalysisInputClaims(
+        store: WhoopStore,
+        claims: [AnalysisInputGenerationClaim],
+        integrity: AnalysisPassIntegrity,
+        coverage: AnalysisScanCoverage,
+        consumedSourceIDs: Set<String>,
+        ownershipEvaluatedSourceIDs: Set<String>
+    ) async throws -> AnalysisInputFinalizationResult {
+        try Task.checkCancellation()
+        guard integrity.canAcknowledgeInputs, !claims.isEmpty else {
+            return AnalysisInputFinalizationResult(
+                acknowledgedCount: 0,
+                advancedCount: 0
+            )
+        }
+        let eligibleClaims = claims.filter { claim in
+            if claim.deviceId == AnalysisInputSource.ownership {
+                return true
+            }
+            return consumedSourceIDs.contains(claim.deviceId)
+                || ownershipEvaluatedSourceIDs.contains(claim.deviceId)
+        }
+        guard !eligibleClaims.isEmpty else {
+            return AnalysisInputFinalizationResult(
+                acknowledgedCount: 0,
+                advancedCount: 0
+            )
+        }
+
+        let boundedClaims = eligibleClaims.filter { $0.affectedTimeRange != nil }
+        var noHistoryClaims: [AnalysisInputGenerationClaim] = []
+        for claim in eligibleClaims where claim.affectedTimeRange == nil {
+            try Task.checkCancellation()
+            let hasHistory = try await store.hasScoreBearingAnalysisHistory(
+                deviceId: claim.deviceId == AnalysisInputSource.ownership
+                    ? nil
+                    : claim.deviceId
+            )
+            if !hasHistory {
+                noHistoryClaims.append(claim)
+            }
+        }
+
+        if !noHistoryClaims.isEmpty {
+            try await store.acknowledgeAnalysisInputGenerations(noHistoryClaims)
+        }
+        let boundedResult = try await store.finalizeAnalysisInputGenerations(
+            boundedClaims,
+            coverageStartTs: coverage.startTs,
+            coverageEndTs: coverage.endTs
+        )
+        return AnalysisInputFinalizationResult(
+            acknowledgedCount:
+                noHistoryClaims.count + boundedResult.acknowledgedCount,
+            advancedCount: boundedResult.advancedCount
+        )
+    }
+
+    /// Select one bounded analysis window. Ordinary current data keeps the requested recent window.
+    /// A non-forced pass whose newest pending timestamp is older than that window anchors one historical
+    /// batch at the newest unprocessed day. The durable claim then moves backward only after that exact
+    /// batch succeeds, so even a multi-year migration never becomes one multi-thousand-day UI pass.
+    nonisolated static func analysisScoringPlan(
+        requestedMaxDays: Int,
+        force: Bool,
+        claims: [AnalysisInputGenerationClaim],
+        now: Int,
+        timezoneOffsetSeconds: Int
+    ) -> AnalysisScoringPlan {
+        let requested = max(1, requestedMaxDays)
+        let current = AnalysisScoringPlan(
+            referenceNow: now,
+            maxDays: requested,
+            isHistoricalCatchUp: false
+        )
+        guard !force else { return current }
+        let currentCoverage = analysisScanCoverage(
+            plan: current,
+            actualNow: now,
+            timezoneOffsetSeconds: timezoneOffsetSeconds
+        )
+        let oldRanges = claims.compactMap { claim -> ClosedRange<Int64>? in
+            guard let affected = claim.affectedTimeRange,
+                  affected.upperBound < currentCoverage.startTs,
+                  affected.upperBound <= Int64(now) else {
+                return nil
+            }
+            return affected
+        }
+        let newestOldTimestamp = oldRanges.map(\.upperBound).max()
+        guard let newestOldTimestamp,
+              let newestOldSecond = Int(exactly: newestOldTimestamp) else {
+            return current
+        }
+        let historicalMidnight = midnightLocal(
+            newestOldSecond,
+            offsetSec: timezoneOffsetSeconds
+        )
+        let earliestSelectedTimestamp = oldRanges
+            .filter { $0.upperBound == newestOldTimestamp }
+            .map(\.lowerBound)
+            .min() ?? newestOldTimestamp
+        let earliestSelectedSecond =
+            Int(exactly: earliestSelectedTimestamp) ?? newestOldSecond
+        let earliestSelectedMidnight = midnightLocal(
+            earliestSelectedSecond,
+            offsetSec: timezoneOffsetSeconds
+        )
+        let selectedSpanDays = max(
+            1,
+            (historicalMidnight - earliestSelectedMidnight) / 86_400 + 1
+        )
+        return AnalysisScoringPlan(
+            referenceNow: historicalMidnight + 12 * 3_600,
+            maxDays: min(requested, min(21, selectedSpanDays)),
+            isHistoricalCatchUp: true
+        )
+    }
+
+    /// Compatibility seam retained for focused tests and the Android parity contract.
+    nonisolated static func analysisScoringMaxDays(
+        requestedMaxDays: Int,
+        claims: [AnalysisInputGenerationClaim],
+        now: Int,
+        timezoneOffsetSeconds: Int
+    ) -> Int {
+        analysisScoringPlan(
+            requestedMaxDays: requestedMaxDays,
+            force: false,
+            claims: claims,
+            now: now,
+            timezoneOffsetSeconds: timezoneOffsetSeconds
+        ).maxDays
+    }
+
+    nonisolated static func analysisScanCoverage(
+        maxDays: Int,
+        now: Int,
+        timezoneOffsetSeconds: Int
+    ) -> AnalysisScanCoverage {
+        analysisScanCoverage(
+            plan: AnalysisScoringPlan(
+                referenceNow: now,
+                maxDays: maxDays,
+                isHistoricalCatchUp: false
+            ),
+            actualNow: now,
+            timezoneOffsetSeconds: timezoneOffsetSeconds
+        )
+    }
+
+    nonisolated static func analysisScanCoverage(
+        plan: AnalysisScoringPlan,
+        actualNow: Int,
+        timezoneOffsetSeconds: Int
+    ) -> AnalysisScanCoverage {
+        let boundedDays = max(1, plan.maxDays)
+        let localMidnight = Int64(
+            midnightLocal(
+                plan.referenceNow,
+                offsetSec: timezoneOffsetSeconds
+            )
+        )
+        let endTs: Int64
+        if plan.isHistoricalCatchUp {
+            endTs = localMidnight + Int64(86_400) - 1
+        } else {
+            endTs = min(
+                Int64(actualNow),
+                localMidnight + Int64(18 * 3_600)
+            )
+        }
+        return AnalysisScanCoverage(
+            startTs: localMidnight
+                - Int64(boundedDays - 1) * Int64(86_400),
+            endTs: endTs
+        )
+    }
+
+    /// Stable source set for the idle scoring dirty gate. Archived devices cannot own a new day; active and
     /// paired sources can. `readIds` keeps the active/canonical union covered even if the registry read fails.
-    nonisolated static func analysisFingerprintDeviceIds(
+    nonisolated static func analysisDirtySourceIds(
         registered: [PairedDevice], readIds: [String], fallbackDeviceId: String
     ) -> [String] {
         var ids = Set(
@@ -2195,28 +3089,12 @@ final class IntelligenceEngine: ObservableObject {
                 .map(\.id)
                 .filter { !$0.isEmpty }
         )
-        ids.formUnion(readIds.filter { !$0.isEmpty })
+        ids.formUnion(readIds.filter {
+            !$0.isEmpty && $0 != AnalysisInputSource.ownership
+        })
         if !fallbackDeviceId.isEmpty { ids.insert(fallbackDeviceId) }
-        return ids.sorted()
-    }
-
-    /// One cheap, deterministic token across every raw-stream owner the scorer may select. Include the id and
-    /// its length so a source switch cannot collide with an equal `(count,maxTs)` pair. Any failed source
-    /// read returns an empty key, which fails open into a real scoring pass instead of skipping unknown data.
-    nonisolated static func analysisFingerprintKey(
-        store: WhoopStore, deviceIds: [String], from: Int, to: Int
-    ) async -> String {
-        var parts: [String] = []
-        for id in Set(deviceIds.filter { !$0.isEmpty }).sorted() {
-            guard let fingerprint = try? await store.analysisFingerprint(
-                deviceId: id, from: from, to: to
-            ) else {
-                return ""
-            }
-            parts.append(
-                "\(id.utf8.count):\(id):\(fingerprint.count):\(fingerprint.maxTs)")
-        }
-        return parts.joined(separator: "|")
+        ids.remove(AnalysisInputSource.ownership)
+        return [AnalysisInputSource.ownership] + ids.sorted()
     }
 
     /// Whether a raw-stream owner is a WHOOP device eligible for official-reference comparison.
@@ -2274,9 +3152,9 @@ final class IntelligenceEngine: ObservableObject {
     nonisolated static func resolveDayOwner(day: String, from: Int, to: Int, store: WhoopStore,
                                             devices: [PairedDevice], activeId: String,
                                             registry: DeviceRegistryStore,
-                                            fallbackDeviceId: String) async -> String {
+                                            fallbackDeviceId: String) async throws -> String {
         // A locked override wins outright and skips the presence checks entirely.
-        if let locked = (try? registry.dayOwner(day))?.deviceId {
+        if let locked = try registry.dayOwner(day)?.deviceId {
             return locked
         }
         // No registry rows (shouldn't happen , v15 seeds one , but be safe): keep the legacy id.
@@ -2296,6 +3174,7 @@ final class IntelligenceEngine: ObservableObject {
 
         var candidates: [DayOwnerResolver.Candidate] = []
         for d in liveDevices {
+            try Task.checkCancellation()
             let isImport = d.sourceKind == .cloudImport || d.sourceKind == .fileImport
             // #137: an activity-file ride ranks BELOW whole-day imports (priority 3 vs 2), so a full-day
             // WHOOP CSV/cloud import keeps ownership of a day it has HR for; the ride only wins a day that
@@ -2307,7 +3186,9 @@ final class IntelligenceEngine: ObservableObject {
             else { priority = 1 }
             // Cheap presence check: a single HR row for this device in the night window is enough to
             // mark it a candidate. (LIMIT 1 , not the full pull the caller does once an owner is chosen.)
-            let hasData = !((try? await store.hrSamples(deviceId: d.id, from: from, to: to, limit: 1)) ?? []).isEmpty
+            let hasData = !(try await store.hrSamples(
+                deviceId: d.id, from: from, to: to, limit: 1
+            )).isEmpty
             candidates.append(DayOwnerResolver.Candidate(deviceId: d.id, priority: priority, hasData: hasData))
         }
         return DayOwnerResolver.resolve(day: day, lockedOwner: nil, candidates: candidates) ?? fallbackDeviceId
@@ -2326,11 +3207,14 @@ final class IntelligenceEngine: ObservableObject {
     /// window, recompute from it. Conservative + idempotent: only `manual` rows that look under-scored
     /// (negligible calories), and only when the recompute is a genuine improvement , so a well-scored
     /// 4.0 workout is never touched and a still-sparse window is a no-op.
-    private func rescoreManualWorkouts(store: WhoopStore, profile up: UserProfile) async -> Bool {
+    private func rescoreManualWorkouts(
+        store: WhoopStore,
+        profile up: UserProfile
+    ) async throws -> Bool {
         let now = Int(Date().timeIntervalSince1970)
         let since = now - 14 * 86_400
-        guard let rows = try? await store.workouts(deviceId: deviceId, from: since, to: now, limit: 200)
-        else { return false }
+        let rows = try await store.workouts(
+            deviceId: deviceId, from: since, to: now, limit: 200)
         let hrMax = Double(profile.hrMax)
         var updated: [WorkoutRow] = []
         // A manual row is eligible when it looks under-scored (negligible kcal, #137) OR it's missing
@@ -2338,9 +3222,11 @@ final class IntelligenceEngine: ObservableObject {
         // yet Effort stays blank forever). `improves` then accepts a strain-only gain for the latter.
         for row in rows where row.source == "manual"
             && (ManualWorkoutRescore.looksUnderScored(currentKcal: row.energyKcal) || row.strain == nil) {
-            guard let samples = try? await store.hrSamples(deviceId: deviceId, from: row.startTs,
-                                                           to: row.endTs, limit: 20_000),
-                  let s = ManualWorkoutRescore.scored(windowSamples: samples, profile: up, hrMax: hrMax),
+            try Task.checkCancellation()
+            let samples = try await store.hrSamples(
+                deviceId: deviceId, from: row.startTs, to: row.endTs, limit: 20_000)
+            guard let s = ManualWorkoutRescore.scored(
+                      windowSamples: samples, profile: up, hrMax: hrMax),
                   ManualWorkoutRescore.improves(s, over: row.energyKcal, currentStrain: row.strain,
                                                 allowStrainOnlyFill: true)
             else { continue }
@@ -2354,12 +3240,9 @@ final class IntelligenceEngine: ObservableObject {
                 strain: s.strain, distanceM: row.distanceM, zonesJSON: row.zonesJSON, notes: row.notes))
         }
         guard !updated.isEmpty else { return false }
-        do {
-            _ = try await store.upsertWorkouts(updated, deviceId: deviceId)
-            return true
-        } catch {
-            return false
-        }
+        try Task.checkCancellation()
+        _ = try await store.upsertWorkouts(updated, deviceId: deviceId)
+        return true
     }
 
     /// Re-score ONLY the recovery composite for a day against a (re-seeded) baseline. Every other field
@@ -2663,20 +3546,21 @@ final class IntelligenceEngine: ObservableObject {
     /// `nonisolated static` (FIX 1): touches only the `store` actor + value params, so the off-main scan
     /// loop calls it without hopping back to the main actor each iteration. Logic identical.
     nonisolated static func bandSleepStateSamples(computedId: String, from: Int, to: Int,
-                                                  store: WhoopStore) async -> [(ts: Int, state: Int)] {
+                                                  store: WhoopStore) async throws -> [(ts: Int, state: Int)] {
         let epochS = 30
         // #899: collapse overlapping timebase-shifted duplicates BEFORE consuming band state. A stale
         // re-banked copy of the night would otherwise feed "asleep" epochs at the OLD times into the H7
         // re-onset guard, letting the stale block keep confirming itself. Read-side only (no bank-recency
         // witness here); the store itself is healed post-upsert in analyzeRecent.
         let sessions = SleepSessionDedup.dedupe(
-            (try? await store.sleepSessions(deviceId: computedId, from: from, to: to,
-                                            limit: 4000)) ?? []).kept
+            try await store.sleepSessions(
+                deviceId: computedId, from: from, to: to, limit: 4000
+            )).kept
         // One range read of the window's banked band state, keyed by startTs, instead of a single-row SELECT
         // per kept session. We still expand ONLY the kept (deduped) sessions, in order, so the output is
         // identical to the old per-session loop — just without the N round-trips.
-        let stateByStart = (try? await store.sessionSleepStates(deviceId: computedId,
-                                                                from: from, to: to)) ?? [:]
+        let stateByStart = try await store.sessionSleepStates(
+            deviceId: computedId, from: from, to: to)
         var samples: [(ts: Int, state: Int)] = []
         for s in sessions {
             guard let states = stateByStart[s.startTs], !states.isEmpty else { continue }
@@ -2690,11 +3574,11 @@ final class IntelligenceEngine: ObservableObject {
     private static func computeHabitualMidsleep(
         store: WhoopStore, importedId: String, computedId: String,
         windowStart: Int, windowEnd: Int, offsetSec: Int
-    ) async -> Int? {
-        let imported = (try? await store.sleepSessions(deviceId: importedId, from: windowStart,
-                                                       to: windowEnd, limit: 4000)) ?? []
-        let computed = (try? await store.sleepSessions(deviceId: computedId, from: windowStart,
-                                                       to: windowEnd, limit: 4000)) ?? []
+    ) async throws -> Int? {
+        let imported = try await store.sleepSessions(
+            deviceId: importedId, from: windowStart, to: windowEnd, limit: 4000)
+        let computed = try await store.sleepSessions(
+            deviceId: computedId, from: windowStart, to: windowEnd, limit: 4000)
         // #899: collapse overlapping timebase-shifted duplicates BEFORE the learner sees the history.
         // A stale re-banked copy of a night lands on a DIFFERENT day key, so the per-day longest-block
         // de-dup below never caught it and the learned midsleep drifted toward the stale timing, which

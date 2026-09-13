@@ -97,8 +97,8 @@ final class ChargeBreakdownFormatTests: XCTestCase {
     func testChipLabelCarriesExplicitSignAndPluralizes() {
         XCTAssertEqual(ChargeBreakdownFormat.chipLabel(deltaPoints: 6), "+6 pts")
         XCTAssertEqual(ChargeBreakdownFormat.chipLabel(deltaPoints: 1), "+1 pt")   // singular
-        XCTAssertEqual(ChargeBreakdownFormat.chipLabel(deltaPoints: -3), "-3 pts")
-        XCTAssertEqual(ChargeBreakdownFormat.chipLabel(deltaPoints: -1), "-1 pt")  // singular
+        XCTAssertEqual(ChargeBreakdownFormat.chipLabel(deltaPoints: -3), "−3 pts")
+        XCTAssertEqual(ChargeBreakdownFormat.chipLabel(deltaPoints: -1), "−1 pt")  // singular
         XCTAssertEqual(ChargeBreakdownFormat.chipLabel(deltaPoints: 0), "0 pts")
     }
 
@@ -120,11 +120,11 @@ final class ChargeBreakdownFormatTests: XCTestCase {
 
     func testDriverAccessibilityLabelOmitsEmptyBaselineAndHandlesNegativeAndZero() {
         let neg = ChargeDriver(label: "Skin temperature", deltaPoints: -2,
-                               valueText: "+0.4 C vs baseline", baselineText: "",
+                               valueText: "+0.4 °C vs baseline", baselineText: "",
                                verdict: "warmer than baseline, limiting recovery")
         XCTAssertEqual(
             ChargeBreakdownFormat.driverAccessibilityLabel(neg),
-            "Skin temperature: down 2 points. +0.4 C vs baseline. warmer than baseline, limiting recovery.")
+            "Skin temperature: down 2 points. +0.4 °C vs baseline. warmer than baseline, limiting recovery.")
 
         let zero = ChargeDriver(label: "Respiratory rate", deltaPoints: 0,
                                 valueText: "14.0 br/min", baselineText: "14.0 br/min baseline",
@@ -157,10 +157,10 @@ final class ChargeBreakdownFormatTests: XCTestCase {
 
     // MARK: - A3: confidence tier chip (pure presentation of the EXISTING confidence)
 
-    func testTierTagMapsConfidenceToShortTag() {
-        XCTAssertEqual(ChargeBreakdownFormat.tierTag(.calibrating), "CALIBRATING")
-        XCTAssertEqual(ChargeBreakdownFormat.tierTag(.building), "EST.")
-        XCTAssertEqual(ChargeBreakdownFormat.tierTag(.solid), "REL.")
+    func testTierTagSpellsOutConfidence() {
+        XCTAssertEqual(ChargeBreakdownFormat.tierTag(.calibrating), "Calibrating")
+        XCTAssertEqual(ChargeBreakdownFormat.tierTag(.building), "Estimate")
+        XCTAssertEqual(ChargeBreakdownFormat.tierTag(.solid), "Reliable")
     }
 
     func testTierStateDotColorAgreesAndMapsLifecycleHues() {
@@ -200,13 +200,42 @@ final class ChargeBreakdownFormatTests: XCTestCase {
     func testSkinTempDeviationLabelSignsAndRoundsToOneDecimal() {
         XCTAssertEqual(
             ChargeBreakdownFormat.skinTempDeviationLabel(SkinTempRelative(deviationC: 0.34, tier: .warmer)),
-            "+0.3 C vs your normal")
+            "+0.3 °C vs your normal")
         XCTAssertEqual(
             ChargeBreakdownFormat.skinTempDeviationLabel(SkinTempRelative(deviationC: -0.42, tier: .cooler)),
-            "-0.4 C vs your normal")
+            "−0.4 °C vs your normal")
         XCTAssertEqual(
             ChargeBreakdownFormat.skinTempDeviationLabel(SkinTempRelative(deviationC: 0.0, tier: .typical)),
-            "+0.0 C vs your normal")
+            "+0.0 °C vs your normal")
+    }
+
+    func testSkinTempDeviationRowIsSuppressedWhenDriverAlreadyExists() {
+        let relative = SkinTempRelative(deviationC: 0.4, tier: .warmer)
+        let skinDriver = ChargeDriver(
+            label: "Skin temperature",
+            deltaPoints: -2,
+            valueText: "+0.4 °C vs baseline",
+            baselineText: "",
+            verdict: "warmer than baseline, limiting recovery"
+        )
+        XCTAssertFalse(
+            ChargeBreakdownFormat.showsSeparateSkinTemperatureDeviation(
+                drivers: [skinDriver],
+                relative: relative
+            )
+        )
+        XCTAssertTrue(
+            ChargeBreakdownFormat.showsSeparateSkinTemperatureDeviation(
+                drivers: [],
+                relative: relative
+            )
+        )
+        XCTAssertFalse(
+            ChargeBreakdownFormat.showsSeparateSkinTemperatureDeviation(
+                drivers: [],
+                relative: nil
+            )
+        )
     }
 
     func testSkinTempTierWord() {

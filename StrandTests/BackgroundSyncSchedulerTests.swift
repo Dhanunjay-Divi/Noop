@@ -14,6 +14,34 @@ final class BackgroundSyncSchedulerTests: XCTestCase {
         )
     }
 
+    func testPrivacySensitiveWakeCanAdvanceButNotDelayMaintenance() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        XCTAssertEqual(
+            BackgroundSyncPolicy.nextBeginDate(
+                afterSuccess: true,
+                now: now,
+                requestedWake: now.addingTimeInterval(15 * 60)
+            ),
+            now.addingTimeInterval(15 * 60)
+        )
+        XCTAssertEqual(
+            BackgroundSyncPolicy.nextBeginDate(
+                afterSuccess: true,
+                now: now,
+                requestedWake: now.addingTimeInterval(2 * 60 * 60)
+            ),
+            now.addingTimeInterval(60 * 60)
+        )
+        XCTAssertEqual(
+            BackgroundSyncPolicy.nextBeginDate(
+                afterSuccess: false,
+                now: now,
+                requestedWake: now.addingTimeInterval(-1)
+            ),
+            now.addingTimeInterval(60)
+        )
+    }
+
     func testDuplicateWakeIsDebounced() {
         let now = Date(timeIntervalSince1970: 10_000)
         XCTAssertTrue(BackgroundSyncPolicy.shouldStart(now: now, lastAttempt: nil))
