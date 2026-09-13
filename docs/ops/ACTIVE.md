@@ -23,6 +23,16 @@ Last updated: **2026-09-13**
 
 ### Current audited state
 
+An isolated Android-only parity fork based exactly on
+`f7baaddc0818b238b86962e60c5664eb6b746d34` is complete on
+`codex/android-ui-audit-parity-20260913`. It verifies P1-1 through P1-3 and
+every applicable P2-1 through P2-16, removes the remaining raw Sleep
+missing-value fallbacks, and pins the audited behavior with 60 passing focused
+JVM tests. P1-4 was excluded, Apple source was untouched, and the fork was not
+pushed or integrated. Physical TalkBack and OEM font rendering remain unrun.
+The evidence record is
+[`rounds/2026-09-13-android-ui-audit-parity.md`](rounds/2026-09-13-android-ui-audit-parity.md).
+
 The supplier-independent implementation and exact-current-tree local
 verification are complete on
 `codex/product-safety-quality-audit-20260911` at implementation commit

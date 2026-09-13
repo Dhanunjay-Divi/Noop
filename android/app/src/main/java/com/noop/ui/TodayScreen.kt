@@ -4977,6 +4977,14 @@ internal fun dailySignalHeaderFitsSingleRow(
     return fontScale <= 1.15f && requiredWidthPx <= availableWidthPx
 }
 
+@StringRes
+internal fun dailySignalStatusLabelRes(status: DailySignalStatus): Int = when (status) {
+    DailySignalStatus.STEADY -> R.string.appwide_daily_signal_status_aligned
+    DailySignalStatus.WATCH -> R.string.appwide_daily_signal_status_recheck
+    DailySignalStatus.ALERT -> R.string.appwide_daily_signal_status_check_in
+    DailySignalStatus.BUILDING -> R.string.appwide_daily_signal_status_building
+}
+
 @Composable
 private fun DailySignalHeader(
     status: DailySignalStatus,
@@ -4990,12 +4998,7 @@ private fun DailySignalHeader(
         DailySignalStatus.ALERT -> DAILY_SIGNAL_ALERT_TINT
         DailySignalStatus.BUILDING -> Palette.onDarkSecondary.copy(alpha = 0.72f)
     }
-    val label = when (status) {
-        DailySignalStatus.STEADY -> uiString(R.string.appwide_daily_signal_status_aligned)
-        DailySignalStatus.WATCH -> uiString(R.string.appwide_daily_signal_status_recheck)
-        DailySignalStatus.ALERT -> uiString(R.string.appwide_daily_signal_status_check_in)
-        DailySignalStatus.BUILDING -> uiString(R.string.appwide_daily_signal_status_building)
-    }
+    val label = uiString(dailySignalStatusLabelRes(status))
 
     BoxWithConstraints(
         modifier = Modifier

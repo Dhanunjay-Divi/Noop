@@ -109,8 +109,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-private const val SLEEP_MISSING_VALUE = "\u2014"
-
 /**
  * Sleep — Whoop-sleep clarity on the locked Noop component system. Mirrors the macOS
  * SleepView (Strand/Screens/SleepView.swift) section-for-section:
@@ -3333,12 +3331,12 @@ private fun DurationTrend(m: SleepModel) {
                         "Avg" to (
                             m.trendDebtHours.sleepAverageOrNull()
                                 ?.let { durationText(it * 60.0) }
-                                ?: SLEEP_MISSING_VALUE
+                                ?: NoopDisplayFormat.MISSING
                             ),
                         "Max" to (
                             m.trendDebtHours.maxOrNull()
                                 ?.let { durationText(it * 60.0) }
-                                ?: SLEEP_MISSING_VALUE
+                                ?: NoopDisplayFormat.MISSING
                             ),
                         "Days" to "${m.trendDebtHours.size}",
                     ),

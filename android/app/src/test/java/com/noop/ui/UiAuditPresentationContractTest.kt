@@ -27,6 +27,8 @@ class UiAuditPresentationContractTest {
             "src/main/java/com/noop/ui/HealthScreen.kt",
             "src/main/java/com/noop/ui/LiveScreen.kt",
             "src/main/java/com/noop/ui/ManagedFriendsScreen.kt",
+            "src/main/java/com/noop/ui/SleepFormatting.kt",
+            "src/main/java/com/noop/ui/SleepModelLogic.kt",
             "src/main/java/com/noop/ui/SleepScreen.kt",
             "src/main/java/com/noop/ui/StressScreen.kt",
             "src/main/java/com/noop/ui/TodayScreen.kt",
@@ -40,6 +42,8 @@ class UiAuditPresentationContractTest {
             "return \"–\"",
             "== \"-\"",
             "== \"–\"",
+            "SLEEP_MISSING_VALUE",
+            "vs typical -",
         )
 
         auditedPaths.forEach { path ->
@@ -54,10 +58,41 @@ class UiAuditPresentationContractTest {
 
         assertTrue(source("src/main/java/com/noop/ui/TodayScreen.kt").contains("NoopDisplayFormat.MISSING"))
         assertTrue(source("src/main/java/com/noop/ui/SleepScreen.kt").contains("NoopDisplayFormat.MISSING"))
+        assertTrue(source("src/main/java/com/noop/ui/SleepFormatting.kt").contains("NoopDisplayFormat.MISSING"))
+        assertTrue(source("src/main/java/com/noop/ui/SleepModelLogic.kt").contains("NoopDisplayFormat.MISSING"))
         assertTrue(
             source("src/main/java/com/noop/ui/LiveScreen.kt")
                 .contains("live.lastSyncAt?.let { relativeAgo(it) } ?: NoopDisplayFormat.MISSING"),
         )
+    }
+
+    @Test
+    fun recoveryAndDailySignalUseSeparateCentralizedPresentationContracts() {
+        val today = source("src/main/java/com/noop/ui/TodayScreen.kt")
+        val calendar = source("src/main/java/com/noop/ui/CalendarMonthScreen.kt")
+        val digest = source("src/main/java/com/noop/ui/WeeklyDigestCard.kt")
+
+        assertTrue(today.contains("return recoveryBandLabel(score)"))
+        assertTrue(calendar.contains("RecoveryBandPresentation.color(value)"))
+        assertTrue(digest.contains("RecoveryBandPresentation.color(value)"))
+        assertTrue(digest.contains("WeeklyDigestChipTone.RECOVERY_BAND"))
+        assertTrue(today.contains("dailySignalStatusLabelRes(status)"))
+        assertFalse(today.contains("DailySignalStatus.WATCH -> uiString("))
+    }
+
+    @Test
+    fun androidNavigationRetainsScaledLabelsAndTalkBackSelection() {
+        val root = source("src/main/java/com/noop/ui/AppRoot.kt")
+        val barSlot = root
+            .substringAfter("private fun BarSlot(")
+            .substringBefore("\n}\n\nprivate enum class QuickActionKind")
+
+        assertTrue(root.contains("rememberBottomBarLabelLayout("))
+        assertTrue(barSlot.contains("contentDescription = label"))
+        assertTrue(barSlot.contains("selected = active"))
+        assertTrue(barSlot.contains("maxLines = labelMaxLines"))
+        assertTrue(barSlot.contains("overflow = TextOverflow.Ellipsis"))
+        assertFalse(barSlot.contains("overflow = TextOverflow.Clip"))
     }
 
     @Test
@@ -98,17 +133,28 @@ class UiAuditPresentationContractTest {
 
     @Test
     fun auditedP2PresentationFixesRemainMounted() {
-        assertTrue(
-            source("src/main/java/com/noop/ui/DevicesScreen.kt")
-                .contains("if (profile.footnote.isNotEmpty())"),
-        )
-        assertTrue(
-            source("src/main/java/com/noop/ui/SettingsScreen.kt")
-                .contains("""accessibility = "Age, ${'$'}{profile.age} years""""),
-        )
+        val devices = source("src/main/java/com/noop/ui/DevicesScreen.kt")
+        assertTrue(devices.contains("shouldShowDeviceModel(customerName, profile.displayModel)"))
+        assertTrue(devices.contains("if (profile.footnote.isNotEmpty())"))
+
+        val settings = source("src/main/java/com/noop/ui/SettingsScreen.kt")
+        val ageRow = settings.substringAfter(
+            "FormRow(label = uiString(R.string.l10n_settings_screen_age_ff9f1ff3))",
+        ).substringBefore("RowDivider()")
+        assertTrue(ageRow.contains("value = profile.age.toString()"))
+        assertTrue(ageRow.contains("""accessibility = "Age, ${'$'}{profile.age} years""""))
+
         val stress = source("src/main/java/com/noop/ui/StressScreen.kt")
         assertTrue(stress.contains("appwide_stress_band_light_load"))
         assertTrue(stress.contains("appwide_common_vs_baseline"))
+        assertTrue(stress.contains("""caption = "of 3 · ${'$'}{model.band.title}""""))
+
+        val today = source("src/main/java/com/noop/ui/TodayScreen.kt")
+        assertTrue(today.contains("appwide_charge_confidence_reliable"))
+        assertTrue(today.contains("appwide_charge_confidence_estimate"))
+        assertTrue(today.contains("appwide_charge_confidence_calibrating"))
+        assertTrue(today.contains("chargeDriverPointLabel(driver.deltaPoints)"))
+
         assertTrue(
             source("src/main/java/com/noop/ui/JournalLog.kt")
                 .contains("contentPadding = PaddingValues(horizontal = Metrics.space16)"),
@@ -117,7 +163,9 @@ class UiAuditPresentationContractTest {
         assertTrue(health.contains("appwide_health_live_hr_disconnected"))
         assertTrue(health.contains("NoopDisplayFormat.MISSING"))
         val sleep = source("src/main/java/com/noop/ui/SleepScreen.kt")
+        assertTrue(sleep.contains("""SectionHeader("Sleep Score", overline = overline)"""))
         assertTrue(sleep.contains("appwide_sleep_imported_confidence_note"))
+        assertTrue(sleep.contains("tint = Palette.textTertiary"))
         assertTrue(
             source("src/main/java/com/noop/ui/ManagedCloudCard.kt")
                 .contains("ManagedCloudEvidenceRow("),
