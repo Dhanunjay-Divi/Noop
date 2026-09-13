@@ -15,7 +15,8 @@ enum RecoveryBandPresentation {
     }
 
     static func level(for score: Double) -> Level {
-        switch RecoveryScorer.band(score) {
+        let displayedScore = score.rounded(.toNearestOrAwayFromZero)
+        switch RecoveryScorer.band(displayedScore) {
         case "red": return .low
         case "yellow": return .steady
         default: return .strong

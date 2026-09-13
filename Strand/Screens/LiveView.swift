@@ -1501,7 +1501,7 @@ private struct LiveLogCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                Text("STRAP LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
+                Text("BAND LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.textSecondary)
                 Spacer()
                 // Export the log so people can attach it to a bug report (issue #17 — macOS users

@@ -65,6 +65,17 @@ claims.
 - Closed all four P1 and all sixteen P2 findings in the private audit without
   changing pinned Recovery thresholds or mixing imported provider scores into
   NOOP's local sleep composite.
+- A fresh independent reconciliation after the first closeout found three
+  residual mounted-surface defects: Recovery banding used the raw decimal while
+  the UI showed a rounded integer, two Apple log headings still said `STRAP
+  LOG`, and classic Today rendered missing HRV as `- ms`. Recovery presentation
+  now classifies the same rounded integer it displays on Apple and Android, the
+  mounted headings use the existing localized `BAND LOG` key, and missing HRV
+  uses the shared em-dash token. Boundary and source-contract tests pin all
+  three corrections.
+- Historical release-note entries retain the terminology that shipped in those
+  releases. They remain an explicit non-goal of the terminology closeout and
+  are not treated as current mounted product vocabulary.
 - Centralized Recovery word, colour, threshold, and direction presentation so
   Today, Calendar, Trends, and both phone implementations use one semantic
   contract. Daily Signal now keeps its own vocabulary instead of borrowing
@@ -174,6 +185,7 @@ claims.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Audit acceptance matrix | 20 of 20 actionable findings closed: 4 P1 and 16 P2 | Every reported misleading, inaccessible, blank, duplicated, malformed, or inconsistent state has a scoped cross-platform correction | That subjective redesign suggestions or external hardware behavior are complete |
+| Fresh residual presentation checks | Apple `ScreenStateContractTests` and `WeeklyDigestChipStyleTests`: 22 passed; Android `RecoveryBandPresentationTest`: Full and Demo passed | Display rounding and Recovery banding agree at both 34 and 67 boundaries; mounted Apple log labels and missing HRV remain corrected | Physical-device rendering or accessibility traversal |
 | Shared analytics | 1,479 tests passed | Recovery, Daily Signal, adaptive-day, planned-workout, and formatting contracts pass together | Clinical validity or individual physiology |
 | Complete Apple app suite | 1,919 tests passed, one external Xiaomi-fixture skip, zero failures | Current macOS/Apple source, persistence, UI contracts, accessibility, guidance, diagnostics, and lifecycle behavior pass together | Physical iOS background execution, BLE, haptics, or notification presentation |
 | Complete iPhone UI suite | The final exact-current-tree run executed 39 tests with one intentional private-pilot skip and zero failures. Its three-iteration simulator Today-scroll sample averaged 5.286 seconds, CPU 0.157 seconds, and about 38.9 MB peak physical memory. The prior complete run and three isolated five-iteration runs also passed; those independent samples averaged 5.313 and 5.099 seconds respectively. | Current simulator navigation, reporting, accessibility, loading, planner, and scrolling paths are responsive and reachable, and the fixed swipe workload remains repeatable across independent launches | VoiceOver traversal, physical-device frame pacing, thermal pressure, or memory pressure |

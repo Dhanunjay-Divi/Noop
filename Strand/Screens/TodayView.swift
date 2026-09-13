@@ -4986,7 +4986,8 @@ struct TodayView: View {
     }
 
     private func ringSupporting(_ d: DailyMetric?) -> String {
-        let hrv = d?.avgHrv.map { String(localized: "\(Int($0.rounded())) ms") } ?? " - ms"
+        let hrv = d?.avgHrv.map { String(localized: "\(Int($0.rounded())) ms") }
+            ?? StrandFormat.missing
         let rhr = d?.restingHr.map { "\($0)" } ?? StrandFormat.missing
         return String(localized: "HRV \(hrv) · RHR \(rhr)")
     }

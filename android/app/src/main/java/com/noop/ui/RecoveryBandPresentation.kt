@@ -7,6 +7,7 @@ import androidx.compose.ui.res.stringResource
 import com.noop.R
 import com.noop.analytics.RecoveryScorer
 import java.util.Locale
+import kotlin.math.roundToInt
 
 internal enum class RecoveryBandLevel {
     LOW,
@@ -19,7 +20,9 @@ internal enum class RecoveryBandLevel {
  * Summary surfaces use these three states so Today, Calendar, and Week in review cannot drift.
  */
 internal object RecoveryBandPresentation {
-    fun level(score: Double): RecoveryBandLevel = when (RecoveryScorer.band(score)) {
+    fun level(score: Double): RecoveryBandLevel = when (
+        RecoveryScorer.band(score.roundToInt().toDouble())
+    ) {
         "red" -> RecoveryBandLevel.LOW
         "yellow" -> RecoveryBandLevel.STEADY
         else -> RecoveryBandLevel.STRONG

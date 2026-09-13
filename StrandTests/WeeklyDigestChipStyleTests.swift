@@ -10,9 +10,11 @@ import StrandAnalytics
 final class WeeklyDigestChipStyleTests: XCTestCase {
 
     func testRecoveryPresentationUsesPinnedBandEdges() {
-        XCTAssertEqual(RecoveryBandPresentation.level(for: 33.999), .low)
+        XCTAssertEqual(RecoveryBandPresentation.level(for: 33.49), .low)
+        XCTAssertEqual(RecoveryBandPresentation.level(for: 33.5), .steady)
         XCTAssertEqual(RecoveryBandPresentation.level(for: 34), .steady)
-        XCTAssertEqual(RecoveryBandPresentation.level(for: 66.999), .steady)
+        XCTAssertEqual(RecoveryBandPresentation.level(for: 66.49), .steady)
+        XCTAssertEqual(RecoveryBandPresentation.level(for: 66.5), .strong)
         XCTAssertEqual(RecoveryBandPresentation.level(for: 67), .strong)
     }
 

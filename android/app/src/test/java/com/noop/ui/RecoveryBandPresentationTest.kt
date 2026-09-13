@@ -7,9 +7,11 @@ import org.junit.Test
 class RecoveryBandPresentationTest {
     @Test
     fun presentationUsesTheScoringEnginesPinnedBandEdges() {
-        assertEquals(RecoveryBandLevel.LOW, RecoveryBandPresentation.level(33.999))
+        assertEquals(RecoveryBandLevel.LOW, RecoveryBandPresentation.level(33.49))
+        assertEquals(RecoveryBandLevel.STEADY, RecoveryBandPresentation.level(33.5))
         assertEquals(RecoveryBandLevel.STEADY, RecoveryBandPresentation.level(34.0))
-        assertEquals(RecoveryBandLevel.STEADY, RecoveryBandPresentation.level(66.999))
+        assertEquals(RecoveryBandLevel.STEADY, RecoveryBandPresentation.level(66.49))
+        assertEquals(RecoveryBandLevel.STRONG, RecoveryBandPresentation.level(66.5))
         assertEquals(RecoveryBandLevel.STRONG, RecoveryBandPresentation.level(67.0))
     }
 

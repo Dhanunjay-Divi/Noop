@@ -148,10 +148,10 @@ final class ScreenStateContractTests: XCTestCase {
             }
         }
 
-        XCTAssertTrue(
-            try sourceText("Strand/Screens/TodayView.swift")
-                .contains("StrandFormat.missing")
-        )
+        let today = try sourceText("Strand/Screens/TodayView.swift")
+        XCTAssertTrue(today.contains("StrandFormat.missing"))
+        XCTAssertTrue(today.contains("?? StrandFormat.missing"))
+        XCTAssertFalse(today.contains(#"?? " - ms""#))
         XCTAssertTrue(
             try sourceText("StrandiOS/System/ManagedFriendsView.swift")
                 .contains("StrandFormat.missing")
@@ -236,6 +236,8 @@ final class ScreenStateContractTests: XCTestCase {
         XCTAssertTrue(live.contains("Refresh Noop Band battery"))
         XCTAssertFalse(live.contains("Wear Noop Band for scoring"))
         XCTAssertTrue(live.contains("Wear your wearable for scoring"))
+        XCTAssertFalse(live.contains(#"Text("STRAP LOG")"#))
+        XCTAssertTrue(live.contains(#"Text("BAND LOG")"#))
 
         let notifications = try sourceText(
             "Strand/Screens/NotificationSettingsView.swift"
@@ -301,6 +303,8 @@ final class ScreenStateContractTests: XCTestCase {
         let settings = try sourceText("Strand/Screens/SettingsView.swift")
         XCTAssertFalse(settings.contains("wear the strap, then tap Report"))
         XCTAssertFalse(settings.contains("the strap log together"))
+        XCTAssertFalse(settings.contains(#"Text("STRAP LOG")"#))
+        XCTAssertTrue(settings.contains(#"Text("BAND LOG")"#))
         XCTAssertTrue(settings.contains("appwide.ui_audit.settings.test_centre"))
         let settingsTestCentreCopy = try XCTUnwrap(
             appWide["appwide.ui_audit.settings.test_centre"]?["en"]

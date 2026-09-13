@@ -1217,10 +1217,10 @@ struct SettingsView: View {
                 }
 
                 Divider().overlay(StrandPalette.hairline)
-                // MARK: Strap log — a Settings shortcut so people don't have to hunt for it on the Live
+                // MARK: Band log — a Settings shortcut so people don't have to hunt for it on the Live
                 // screen (#507: couldn't find it on Mac; #509: same on iPhone). Same text as the Live card.
                 HStack(spacing: 12) {
-                    Text("STRAP LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
+                    Text("BAND LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer()
                     Button("Copy") { FileExport.copyDiagnosticText(live.exportableLogText()) }
