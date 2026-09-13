@@ -217,6 +217,40 @@ final class HydrationEntriesTests: XCTestCase {
         }
     }
 
+    func testQuickLogTimestampUsesNowForCurrentDayAndNoonForBackfilledDay() throws {
+        let zone = try XCTUnwrap(TimeZone(secondsFromGMT: -5 * 3_600))
+        let now = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-09-13T16:45:00Z")
+        )
+
+        XCTAssertEqual(
+            HydrationStore.quickLogDate(
+                forDayKey: "2026-09-13",
+                now: now,
+                timeZone: zone
+            ),
+            now
+        )
+
+        let backfilled = try XCTUnwrap(
+            HydrationStore.quickLogDate(
+                forDayKey: "2026-09-01",
+                now: now,
+                timeZone: zone
+            )
+        )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let components = calendar.dateComponents(
+            [.year, .month, .day, .hour],
+            from: backfilled
+        )
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 9)
+        XCTAssertEqual(components.day, 1)
+        XCTAssertEqual(components.hour, 12)
+    }
+
     func testLegacyScalarOnlyDayMaterializesAtRepresentedDayInsteadOfNow() async throws {
         let day = "2026-09-01"
         clearEntries(day: day)
@@ -240,6 +274,21 @@ final class HydrationEntriesTests: XCTestCase {
             Date(timeIntervalSince1970: 1_800_000_000),
             "A historical scalar must not be stamped with the migration/open time."
         )
+    }
+
+    func testHistoricalQuickLogPersistsTimestampInsideSelectedCivilDay() async throws {
+        let day = "2026-09-01"
+        clearEntries(day: day)
+        defer { clearEntries(day: day) }
+        let (repo, _) = try await makeRepository()
+
+        let result = await repo.logHydration(amountMl: 237, day: day)
+        let entries = try await repo.hydrationEntries(day: day)
+        let entry = try XCTUnwrap(entries.first)
+
+        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(Repository.localDayKey(entry.loggedAt), day)
+        XCTAssertNotEqual(Repository.localDayKey(entry.loggedAt), Repository.localDayKey(Date()))
     }
 
     func testHydrationRouteCarriesTheSelectedDay() {
@@ -469,6 +518,16 @@ final class HydrationEntriesTests: XCTestCase {
         } catch {
             XCTAssertTrue(true)
         }
+    }
+
+    func testTodayHydrationReadFailureRetainsOnlyTheRequestedDaysValue() {
+        let confirmed = HydrationDayTotalState(
+            dayKey: "2026-09-12",
+            valueML: 737
+        )
+
+        XCTAssertEqual(confirmed.retained(for: "2026-09-12"), confirmed)
+        XCTAssertNil(confirmed.retained(for: "2026-09-13"))
     }
 
     func testDetailModelLoadsOnlyTheSelectedDayAndHistoryEndsThere() async throws {

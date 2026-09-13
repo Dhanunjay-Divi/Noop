@@ -315,6 +315,15 @@ struct ActiveWorkoutIndicatorSection: View {
     }
 }
 
+struct HydrationDayTotalState: Equatable {
+    let dayKey: String
+    let valueML: Double?
+
+    func retained(for requestedDayKey: String) -> HydrationDayTotalState? {
+        dayKey == requestedDayKey ? self : nil
+    }
+}
+
 struct TodayView: View {
     @EnvironmentObject var repo: Repository
     // PERF (scroll stutter): TodayView deliberately does NOT observe `LiveState` directly. A connected
@@ -378,9 +387,14 @@ struct TodayView: View {
     // Hydration tracker (opt-in, default OFF). When off the hydration dashboard card is hidden even if a
     // user had it in their saved selection, the feature owns its own gate.
     @AppStorage(HydrationStore.enabledKey) private var hydrationEnabled = false
-    /// Today's hydration total + goal (ml), loaded in loadAll when the feature is on. nil hides the value.
-    @State private var hydrationTotalML: Double?
+    /// The selected day's hydration total is tagged with its owning day so a pending or failed read after
+    /// navigation can never display the previous day's confirmed value.
+    @State private var hydrationDayTotal: HydrationDayTotalState?
     @State private var hydrationGoalML: Int?
+    private var hydrationTotalML: Double? {
+        guard let state = hydrationDayTotal, state.dayKey == selectedDayKey else { return nil }
+        return state.valueML
+    }
     private var enabledDashboardCards: [DashboardCard] {
         // Opt-in gate (mirrors the Android TodayScreen filter `it != HYDRATION || hydrationEnabled`):
         // the hydration card only renders when the feature is on AND the user has added it via CUSTOMISE.
@@ -4370,15 +4384,20 @@ struct TodayView: View {
             ? readFitnessAge : nil
         let vitalityLocal = profile.acceptsVitality(provenance: vitalityProfileToken)
             ? readVitality : nil
-        let hydrationTotalLocal: Double?
+        let hydrationDayTotalLocal: HydrationDayTotalState?
         let hydrationGoalLocal: Int?
         if hydrationEnabled {
             do {
-                hydrationTotalLocal = try await repo.hydrationTotal(
-                    day: requestedHydrationDayKey
+                hydrationDayTotalLocal = HydrationDayTotalState(
+                    dayKey: requestedHydrationDayKey,
+                    valueML: try await repo.hydrationTotal(
+                        day: requestedHydrationDayKey
+                    )
                 )
             } catch {
-                hydrationTotalLocal = hydrationTotalML
+                hydrationDayTotalLocal = hydrationDayTotal?.retained(
+                    for: requestedHydrationDayKey
+                )
             }
             hydrationGoalLocal = repo.hydrationGoalML(
                 profileAge: requestedProfileAge,
@@ -4390,7 +4409,7 @@ struct TodayView: View {
                 day: requestedHydrationDayKey
             )
         } else {
-            hydrationTotalLocal = nil
+            hydrationDayTotalLocal = nil
             hydrationGoalLocal = nil
         }
         let xiaomiSleepsLocal: Int
@@ -4433,7 +4452,7 @@ struct TodayView: View {
         fitnessAgeToday = fitnessAgeLocal
         vitalityToday = vitalityLocal
         ageMetricsLoadedProfileState = requestedAgeMetricState
-        hydrationTotalML = hydrationTotalLocal
+        hydrationDayTotal = hydrationDayTotalLocal
         hydrationGoalML = hydrationGoalLocal
 
         // #849: snapshot everything just computed onto the long-lived `repo`, keyed by the seq we loaded for,
@@ -4491,9 +4510,13 @@ struct TodayView: View {
             do {
                 let loaded = try await repo.hydrationTotal(day: requestedDayKey)
                 guard requestedDayKey == selectedDayKey else { return }
-                hydrationTotalML = loaded
+                hydrationDayTotal = HydrationDayTotalState(
+                    dayKey: requestedDayKey,
+                    valueML: loaded
+                )
             } catch {
-                // Preserve the last confirmed value. The focused Hydration screen owns retry UI.
+                guard requestedDayKey == selectedDayKey else { return }
+                hydrationDayTotal = hydrationDayTotal?.retained(for: requestedDayKey)
             }
             guard requestedDayKey == selectedDayKey else { return }
             hydrationGoalML = repo.hydrationGoalML(
@@ -4506,7 +4529,7 @@ struct TodayView: View {
                 day: requestedDayKey
             )
         } else {
-            hydrationTotalML = nil
+            hydrationDayTotal = nil
             hydrationGoalML = nil
         }
     }

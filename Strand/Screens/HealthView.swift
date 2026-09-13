@@ -2189,10 +2189,19 @@ private struct BodyCompositionSection: View {
         return Reading(value: profile.weightKg, day: nil, source: "profile")
     }
 
+    private var canPresentBMI: Bool {
+        BodyProfilePolicy.canPresentAdultBMI(
+            age: profile.age,
+            currentWeightKg: profile.weightKg,
+            heightCm: profile.heightCm,
+            ageConfirmed: profile.ageInputConfirmed,
+            heightConfirmed: profile.heightInputConfirmed,
+            currentWeightConfirmed: profile.weightInputConfirmed
+        )
+    }
+
     private var bmi: Reading? {
-        guard profile.ageInputConfirmed, profile.age >= BodyProfilePolicy.adultMinimumAge else {
-            return nil
-        }
+        guard canPresentBMI else { return nil }
         if let measured = snapshot.bmi { return measured }
         guard profile.heightInputConfirmed, let weight else { return nil }
         let metres = profile.heightCm / 100

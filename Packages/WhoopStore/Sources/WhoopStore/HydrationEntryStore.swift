@@ -22,6 +22,10 @@ enum HydrationEntryStoreError: Error {
     case injectedFailure
 }
 
+private enum HydrationEntryLimits {
+    static let maximumML = 10_000
+}
+
 extension WhoopStore {
     public func hydrationLogEntries(
         deviceId: String,
@@ -58,15 +62,21 @@ extension WhoopStore {
         metricKey: String,
         failAfterMetricWriteForTesting: Bool = false
     ) async throws -> Double? {
-        guard entries.allSatisfy({
-            UUID(uuidString: $0.id) != nil
-                && $0.day == day
-                && $0.amountML > 0
-                && $0.loggedAt > 0
-        }) else {
-            throw HydrationEntryStoreError.invalidEntry
+        var totalML = 0
+        for entry in entries {
+            guard UUID(uuidString: entry.id) != nil,
+                  entry.day == day,
+                  (1...HydrationEntryLimits.maximumML).contains(entry.amountML),
+                  entry.loggedAt > 0 else {
+                throw HydrationEntryStoreError.invalidEntry
+            }
+            let (nextTotal, overflow) = totalML.addingReportingOverflow(entry.amountML)
+            guard !overflow, nextTotal <= HydrationEntryLimits.maximumML else {
+                throw HydrationEntryStoreError.invalidEntry
+            }
+            totalML = nextTotal
         }
-        let total = entries.reduce(0.0) { $0 + Double($1.amountML) }
+        let total = Double(totalML)
 
         return try syncWrite { db in
             try db.execute(

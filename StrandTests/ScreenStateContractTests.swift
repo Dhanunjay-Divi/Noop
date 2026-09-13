@@ -747,6 +747,32 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertFalse(health.contains(#"title: "Biological Age""#))
     }
 
+    func testImportedBodyCompositionBmiUsesTheConfirmedAdultPolicyGate() throws {
+        let health = try text("Strand/Screens/HealthView.swift")
+        let sectionStart = try XCTUnwrap(
+            health.range(of: "private struct BodyCompositionSection: View")
+        )
+        let sectionTail = health[sectionStart.lowerBound...]
+        let sectionEnd = try XCTUnwrap(
+            sectionTail.range(of: "\n/// Source-aware measured markers")
+        )
+        let section = String(sectionTail[..<sectionEnd.lowerBound])
+        let bmiStart = try XCTUnwrap(section.range(of: "private var bmi: Reading? {"))
+        let bmiTail = section[bmiStart.lowerBound...]
+        let bmiEnd = try XCTUnwrap(
+            bmiTail.range(of: "\n    private var latestMeasuredDay")
+        )
+        let bmiBody = String(bmiTail[..<bmiEnd.lowerBound])
+
+        XCTAssertTrue(section.contains("BodyProfilePolicy.canPresentAdultBMI("))
+        XCTAssertTrue(bmiBody.contains("guard canPresentBMI else { return nil }"))
+        XCTAssertTrue(bmiBody.contains("if let measured = snapshot.bmi { return measured }"))
+        XCTAssertLessThan(
+            try XCTUnwrap(bmiBody.range(of: "guard canPresentBMI")?.lowerBound),
+            try XCTUnwrap(bmiBody.range(of: "snapshot.bmi")?.lowerBound)
+        )
+    }
+
     func testFitnessCalendarAndReferenceDestinationsStayDiscoverable() throws {
         let fitness = try text("Strand/Screens/WorkoutsView.swift")
         let calendar = try text("Strand/Screens/CalendarMonthView.swift")

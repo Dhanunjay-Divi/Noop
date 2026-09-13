@@ -175,6 +175,35 @@ enum HydrationStore {
         }
         return date
     }
+
+    /// Timestamp for a quick log routed to an explicit civil day.
+    ///
+    /// A log for the current local day keeps its real time. A backfilled day uses noon in that day,
+    /// matching the legacy scalar migration: the actual drink time is unknown, but the entry must not
+    /// be stamped into the day on which the user happened to enter it.
+    static func quickLogDate(
+        forDayKey value: String,
+        now: Date = Date(),
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> Date? {
+        guard let representedDay = legacyEntryDate(
+            forDayKey: value,
+            timeZone: timeZone
+        ) else {
+            return nil
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let components = calendar.dateComponents([.year, .month, .day], from: now)
+        let currentDayKey = String(
+            format: "%04d-%02d-%02d",
+            locale: Locale(identifier: "en_US_POSIX"),
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+        return currentDayKey == value ? now : representedDay
+    }
 }
 
 enum HydrationReadingSource: Equatable, Hashable, Sendable {
@@ -369,8 +398,15 @@ extension Repository {
     /// Mirrors Android `HydrationStore.log`.
     @discardableResult
     func logHydration(amountMl: Int, day: String? = nil) async -> HydrationMutationResult {
-        let dayKey = day ?? Repository.localDayKey(Date())
-        guard amountMl > 0 else { return .failed }
+        let now = Date()
+        let dayKey = day ?? Repository.localDayKey(now)
+        guard amountMl > 0,
+              let loggedAt = HydrationStore.quickLogDate(
+                  forDayKey: dayKey,
+                  now: now
+              ) else {
+            return .failed
+        }
         return await performSerializedHydrationMutation { [self] in
             #if DEBUG
             if hydrationWriteFailureForTesting {
@@ -393,7 +429,8 @@ extension Repository {
             do {
                 let entries = HydrationEntries.adding(
                     try await hydrationEntries(day: dayKey),
-                    amountMl: amountMl
+                    amountMl: amountMl,
+                    at: loggedAt
                 )
                 let next = try await store.replaceHydrationLogEntries(
                     Self.storedHydrationEntries(entries, day: dayKey),
