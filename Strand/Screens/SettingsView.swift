@@ -1491,7 +1491,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "testtube.2",
             title: "Test Centre",
-            blurb: "Turn on a test for the thing that's wrong, wear the strap, then tap Report. Your strap log, recalibrate, scheduled export and experimental probes all live here too."
+            blurb: "appwide.ui_audit.settings.test_centre"
         ) {
             NavigationLink(destination: TestCentreView()) {
                 HStack {
@@ -1930,7 +1930,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
                 .toggleStyle(.noopSwitch)
-                Text("Saves every raw 5/MG frame (with a timestamp and the live heart rate) to a JSON file you can share to help map the biometric layout. This only records frames the strap already sent (it never writes to your strap), so it is safe to leave on. Export the file and attach it to a protocol-mapping issue.")
+                Text("appwide.ui_audit.settings.raw_capture_help")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1949,7 +1949,7 @@ struct SettingsView: View {
                         Spacer(minLength: 0)
                     }
                     // One-tap "matched pair" export (#510): hands a reporter BOTH the raw capture file
-                    // and the strap log together (timestamped, same minute) so a protocol-mapping issue
+                    // and the band log together (timestamped, same minute) so a protocol-mapping issue
                     // arrives with the frames AND the context that produced them.
                     NoopButton("Export raw + log", systemImage: "square.and.arrow.up.on.square", kind: .secondary) {
                         Task { await exportRawAndLog() }
@@ -1963,7 +1963,7 @@ struct SettingsView: View {
                                 .foregroundStyle(StrandPalette.textSecondary)
                         }
                     }
-                    Text("Saves the raw capture and the strap log together as a matched pair. Attach both to a protocol-mapping issue.")
+                    Text("Saves the raw capture and the band log together as a matched pair. Attach both to a protocol-mapping issue.")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1981,7 +1981,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "doc.text.magnifyingglass",
             title: "Diagnostics",
-            blurb: "A read-only export of the decoded sensor streams NOOP already stores. Works on any strap. Nothing is written to your device, and nothing is uploaded."
+            blurb: "appwide.ui_audit.settings.diagnostics_read_only"
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
                 // MARK: Export raw sensor data (CSV) — a read-only diagnostic over the decoded streams
@@ -2063,7 +2063,7 @@ struct SettingsView: View {
         }
     }
 
-    /// One-tap matched-pair export (#510): export the raw puffin capture AND the strap log together,
+    /// One-tap matched-pair export (#510): export the raw puffin capture AND the band log together,
     /// both stamped with the same `yyMMdd-HHmm` minute so they're obviously a pair. Reuses the existing
     /// export utilities — `FileExport.exportPair` shares both files in one iOS share sheet, and saves
     /// each via its own NSSavePanel on macOS (no new file plumbing).
@@ -2351,7 +2351,7 @@ struct SettingsView: View {
                             Text("About Apple Watch data")
                                 .font(StrandFont.body)
                                 .foregroundStyle(StrandPalette.textPrimary)
-                            Text("Use NOOP with just an Apple Watch. What it's great at, and where it's lighter than a strap.")
+                            Text("Use NOOP with just an Apple Watch. What it's great at, and where it differs from Noop Band.")
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -2706,7 +2706,7 @@ struct SettingsView: View {
                 iphoneExpectationLine(String(localized: "This build is delivered through Apple. TestFlight beta builds are available for up to 90 days; install the latest version when TestFlight prompts you."))
             }
             iphoneExpectationLine(String(localized: "After your iPhone reboots, unlock it once. Until you do, iOS keeps NOOP's files locked (Data Protection), so new history can't be written or synced."))
-            iphoneExpectationLine(String(localized: "Background Bluetooth has OS limits: iOS may pause NOOP when it's not in the foreground, so keep it open while syncing a fresh strap."))
+            iphoneExpectationLine(String(localized: "appwide.ui_audit.settings.background_bluetooth"))
             iphoneExpectationLine(String(localized: "On a beta version of iOS, things can break that work on the release build."))
 
             if let days = expiry {
@@ -3138,7 +3138,7 @@ struct StepsCalibrationSheet: View {
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("On the days your phone also counted steps, NOOP learns how much your motion maps to steps, then applies that to the strap-only days. The more matching days it has, the more it trusts the estimate.")
+                Text("appwide.ui_audit.settings.steps_calibration")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

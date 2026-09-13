@@ -3,9 +3,9 @@
     "compatibility": 1706,
     "core": 4977,
     "customer": 815,
-    "fixture": 5491,
+    "fixture": 5496,
     "generated": 20,
-    "historical": 3055,
+    "historical": 3057,
     "import": 870,
     "persisted": 667
   },
@@ -10632,8 +10632,8 @@
       "category": "core",
       "lineNumbers": [
         3,
-        39,
-        44
+        40,
+        45
       ],
       "occurrenceCount": 3,
       "path": "Strand/BLE/PuffinFrameRecorder.swift",
@@ -12378,89 +12378,89 @@
         114512,
         114513,
         115254,
-        116547,
-        116814,
-        119205,
-        122082,
-        132330,
-        132383,
-        132760,
-        132760,
-        132761,
-        133401,
-        133401,
-        136763,
-        136868,
-        137759,
-        138356,
-        138513,
-        138936,
-        139741,
-        139741,
-        139742,
-        139743,
-        139744,
-        139745,
-        139746,
-        139746,
-        139747,
-        139748,
-        139749,
-        139749,
-        139750,
-        139750,
-        139751,
-        139752,
-        139753,
-        139754,
-        139755,
-        139755,
-        139756,
-        139756,
-        139757,
-        139758,
-        139759,
-        141540,
-        144097,
-        144417,
-        144418,
-        147658,
-        147659,
-        147660,
-        148355,
-        148356,
-        159521,
-        162552,
-        162553,
-        162554,
-        163163,
-        163452,
-        163452,
-        163452,
-        163959,
-        164168,
-        164197,
-        164356,
-        164385,
-        164386,
-        167083,
-        168008,
-        169801,
-        170418,
-        170418,
-        171035,
-        171456,
-        171457,
-        171457,
-        171486,
-        171487,
-        172104,
-        172563,
-        172598,
-        172667,
-        172872,
-        173086,
-        173432
+        116436,
+        116703,
+        119094,
+        121971,
+        132219,
+        132272,
+        132649,
+        132649,
+        132650,
+        133290,
+        133290,
+        136652,
+        136757,
+        137648,
+        138245,
+        138402,
+        138825,
+        139630,
+        139630,
+        139631,
+        139632,
+        139633,
+        139634,
+        139635,
+        139635,
+        139636,
+        139637,
+        139638,
+        139638,
+        139639,
+        139639,
+        139640,
+        139641,
+        139642,
+        139643,
+        139644,
+        139644,
+        139645,
+        139645,
+        139646,
+        139647,
+        139648,
+        141429,
+        143986,
+        144306,
+        144307,
+        147547,
+        147548,
+        147549,
+        148244,
+        148245,
+        159410,
+        162441,
+        162442,
+        162443,
+        163052,
+        163341,
+        163341,
+        163341,
+        163848,
+        164057,
+        164086,
+        164245,
+        164274,
+        164275,
+        166972,
+        167897,
+        169690,
+        170307,
+        170307,
+        170924,
+        171345,
+        171346,
+        171346,
+        171375,
+        171376,
+        171993,
+        172452,
+        172487,
+        172556,
+        172761,
+        172975,
+        173321
       ],
       "occurrenceCount": 182,
       "path": "Strand/Resources/Localizable.xcstrings",
@@ -12875,12 +12875,10 @@
       "category": "customer",
       "lineNumbers": [
         236,
-        246,
         904,
         904,
         976,
         984,
-        1103,
         1306,
         1306,
         1306,
@@ -12891,11 +12889,11 @@
         1371,
         1371
       ],
-      "occurrenceCount": 16,
+      "occurrenceCount": 14,
       "path": "Strand/Screens/DevicesView.swift",
-      "sha256": "d0943b66a7de82892e2ddc42372ec4d292b018aa5e5e7cb9ea03c68ecd2ca503",
+      "sha256": "0ece4d463c269ecdb128e6ce5c42f8de57abe6715322fc00a501864cb1009d09",
       "tokenCounts": {
-        "whoop": 10,
+        "whoop": 8,
         "whoop-4d": 1,
         "whoop-5-refused": 1,
         "whoop-5-refused-solo": 1,
@@ -13556,8 +13554,8 @@
         5,
         46,
         46,
-        230,
-        619
+        237,
+        626
       ],
       "occurrenceCount": 5,
       "path": "Strand/Screens/TestCentreView.swift",
@@ -13574,14 +13572,12 @@
       "category": "customer",
       "lineNumbers": [
         36,
-        36,
-        248
+        36
       ],
-      "occurrenceCount": 3,
+      "occurrenceCount": 2,
       "path": "Strand/Screens/TestCentreView.swift",
-      "sha256": "4751b9cf4ff6d969a7db9557209390042074e33721defed7a93c1a881fecdd8d",
+      "sha256": "07d4aa99087de57386db115ed222253894c0901b2a60c89e967c4b271f3f75ca",
       "tokenCounts": {
-        "whoop": 1,
         "whoop4": 1,
         "whoopmodel": 1
       }
@@ -13631,31 +13627,31 @@
         3329,
         3335,
         3337,
-        3574,
-        3576,
-        3821,
-        3822,
-        3835,
-        3862,
-        4056,
-        4094,
-        4140,
-        4178,
-        4201,
-        4309,
-        4312,
-        4336,
-        4352,
-        4666,
-        4806,
-        4996,
-        4997,
-        4998,
+        3578,
+        3580,
+        3825,
+        3826,
+        3839,
+        3866,
+        4060,
+        4098,
+        4144,
+        4182,
+        4205,
+        4313,
+        4316,
+        4340,
+        4356,
+        4670,
+        4810,
         5000,
-        5076,
-        5255,
-        5685,
-        5686
+        5001,
+        5002,
+        5004,
+        5080,
+        5259,
+        5710,
+        5711
       ],
       "occurrenceCount": 67,
       "path": "Strand/Screens/TodayView.swift",
@@ -13680,8 +13676,8 @@
         1133,
         1814,
         3250,
-        4642,
-        4643
+        4646,
+        4647
       ],
       "occurrenceCount": 6,
       "path": "Strand/Screens/TodayView.swift",
@@ -13708,25 +13704,25 @@
         2517,
         2521,
         2694,
-        3681,
-        3682,
-        3683,
-        3684,
         3685,
         3686,
-        4314,
-        4315,
-        4316,
-        4317,
+        3687,
+        3688,
+        3689,
+        3690,
         4318,
         4319,
+        4320,
+        4321,
         4322,
-        4345,
-        4346,
-        4348,
+        4323,
+        4326,
+        4349,
         4350,
-        4641,
-        4701
+        4352,
+        4354,
+        4645,
+        4705
       ],
       "occurrenceCount": 32,
       "path": "Strand/Screens/TodayView.swift",
@@ -13855,7 +13851,7 @@
         59,
         113,
         134,
-        468
+        472
       ],
       "occurrenceCount": 6,
       "path": "Strand/Screens/WorkoutDetailView.swift",
@@ -13869,10 +13865,10 @@
     {
       "category": "customer",
       "lineNumbers": [
-        486,
-        493,
-        517,
-        681
+        490,
+        497,
+        521,
+        685
       ],
       "occurrenceCount": 4,
       "path": "Strand/Screens/WorkoutDetailView.swift",
@@ -15872,23 +15868,26 @@
       "category": "historical",
       "lineNumbers": [
         3,
-        400,
-        400,
-        403,
-        403
+        500,
+        500,
+        503,
+        503,
+        1056,
+        1165
       ],
-      "occurrenceCount": 5,
+      "occurrenceCount": 7,
       "path": "StrandTests/ScreenStateContractTests.swift",
-      "sha256": "d6d74fe3d344e8c3d58cc79934b5c82c10b60cf50bb4960dc45939a1ee62ec93",
+      "sha256": "b2ebc77bd0008ec99e684a527c217db54682dbf216006e17183c58af71dc3d6c",
       "tokenCounts": {
+        "whoop": 2,
         "whoopstore": 5
       }
     },
     {
       "category": "persisted",
       "lineNumbers": [
-        724,
-        1112
+        824,
+        1400
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -23617,7 +23616,7 @@
     {
       "category": "core",
       "lineNumbers": [
-        161
+        192
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/testcentre/TestModeRegistry.kt",
@@ -24507,7 +24506,7 @@
         412,
         420,
         428,
-        1075
+        1073
       ],
       "occurrenceCount": 21,
       "path": "android/app/src/main/java/com/noop/ui/DataSourcesScreen.kt",
@@ -24534,7 +24533,7 @@
         424,
         425,
         432,
-        884
+        882
       ],
       "occurrenceCount": 8,
       "path": "android/app/src/main/java/com/noop/ui/DataSourcesScreen.kt",
@@ -24597,19 +24596,19 @@
         856,
         866,
         870,
-        903,
-        942,
-        971,
-        1009,
-        1192,
-        1206,
-        1283,
-        1294,
-        1304
+        897,
+        936,
+        965,
+        1003,
+        1186,
+        1200,
+        1277,
+        1288,
+        1298
       ],
       "occurrenceCount": 41,
       "path": "android/app/src/main/java/com/noop/ui/DevicesScreen.kt",
-      "sha256": "ead3665e623b0911f7cafb03e00bc33ba75daefdf396d530e875eb9144d8a4b3",
+      "sha256": "bac7acc8235027e6e37946e3d7e59e634d1c1998ffa6498204a41d164f611f6c",
       "tokenCounts": {
         "whoop": 28,
         "whoop-first": 1,
@@ -24626,11 +24625,11 @@
       "lineNumbers": [
         214,
         217,
-        1180,
-        1181,
-        1210,
-        1210,
-        1276
+        1174,
+        1175,
+        1204,
+        1204,
+        1270
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/java/com/noop/ui/DevicesScreen.kt",
@@ -24834,7 +24833,7 @@
     {
       "category": "core",
       "lineNumbers": [
-        485
+        484
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/ui/HrvSnapshotScreen.kt",
@@ -25098,21 +25097,21 @@
     {
       "category": "import",
       "lineNumbers": [
-        21,
-        150,
-        150,
-        151,
-        151,
-        215,
-        215,
-        216,
-        216,
-        355,
-        358,
-        373,
-        377,
-        403,
-        413
+        22,
+        153,
+        153,
+        154,
+        154,
+        220,
+        220,
+        221,
+        221,
+        360,
+        362,
+        382,
+        386,
+        412,
+        422
       ],
       "occurrenceCount": 15,
       "path": "android/app/src/main/java/com/noop/ui/LogExport.kt",
@@ -25328,7 +25327,7 @@
       "category": "core",
       "lineNumbers": [
         170,
-        377
+        373
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ui/ScoringGuideScreen.kt",
@@ -25656,7 +25655,7 @@
         254,
         254,
         273,
-        488
+        496
       ],
       "occurrenceCount": 11,
       "path": "android/app/src/main/java/com/noop/ui/TestCentreScreen.kt",
@@ -26458,7 +26457,7 @@
       ],
       "occurrenceCount": 84,
       "path": "android/app/src/main/res/values-de/strings.xml",
-      "sha256": "a4eda37a4891f29ec9b70807c82e48c987ac10a2f5ccb9102b13dbeaefc84b5d",
+      "sha256": "2effffbeac20d3a327068fd8ae84c2955451b198ad7817d81a84ac76e2b25900",
       "tokenCounts": {
         "whoop": 1,
         "whoop5": 2,
@@ -26634,7 +26633,7 @@
       ],
       "occurrenceCount": 84,
       "path": "android/app/src/main/res/values-es/strings.xml",
-      "sha256": "a37daa2147d7d5a3b20b71e541af41c175cb2f8b18a84bc0bce78d4c0c9b5c09",
+      "sha256": "9f1599e73cd4c45da0991f7e7fe02ef998e7e7b49b926592bc1ffa1c26bfe520",
       "tokenCounts": {
         "whoop": 1,
         "whoop5": 2,
@@ -26810,7 +26809,7 @@
       ],
       "occurrenceCount": 84,
       "path": "android/app/src/main/res/values-fr/strings.xml",
-      "sha256": "5c1889ea60b327bcc883398d44ccfc868223708c1726ff159cda681962b94260",
+      "sha256": "f9e1058c7af38e489b7013b5e21f56c2d7410a817a0ec72dcd7172bd2f1adcb6",
       "tokenCounts": {
         "whoop": 1,
         "whoop5": 2,
@@ -26894,6 +26893,18 @@
         "whoop_style_hrv_warm_ups_counted_199aaa42": 1,
         "whoop_style_today_chart_clearer_9bdd13ff": 1,
         "whoop_you_can_still_continue_ec58d88d": 1
+      }
+    },
+    {
+      "category": "customer",
+      "lineNumbers": [
+        456
+      ],
+      "occurrenceCount": 1,
+      "path": "android/app/src/main/res/values-it/strings.xml",
+      "sha256": "90dea818b433c658fdb7f14c4d83166bc1549759f89836fd57f22d7497dc7b06",
+      "tokenCounts": {
+        "whoop_4_0_reboot_frame_690a8ff2": 1
       }
     },
     {
@@ -26986,7 +26997,7 @@
       ],
       "occurrenceCount": 84,
       "path": "android/app/src/main/res/values-pt-rPT/strings.xml",
-      "sha256": "d2fbc83a0a4d9c26c34de09afdea8eb336b68695d295c79048b5e9d8dbbe0f0d",
+      "sha256": "ca250b68f13d572850d75624e6a6de297901e3d758e686f52a0585d902d99bb0",
       "tokenCounts": {
         "whoop": 1,
         "whoop5": 2,
@@ -27070,6 +27081,30 @@
         "whoop_style_hrv_warm_ups_counted_199aaa42": 1,
         "whoop_style_today_chart_clearer_9bdd13ff": 1,
         "whoop_you_can_still_continue_ec58d88d": 1
+      }
+    },
+    {
+      "category": "customer",
+      "lineNumbers": [
+        456
+      ],
+      "occurrenceCount": 1,
+      "path": "android/app/src/main/res/values-ru/strings.xml",
+      "sha256": "99d106d7d3a6a91ca4252bbf6780f90b6884bac1d50cc00c480d19fbcf763fa4",
+      "tokenCounts": {
+        "whoop_4_0_reboot_frame_690a8ff2": 1
+      }
+    },
+    {
+      "category": "customer",
+      "lineNumbers": [
+        456
+      ],
+      "occurrenceCount": 1,
+      "path": "android/app/src/main/res/values-zh-rTW/strings.xml",
+      "sha256": "f6de431ae8e08b4cdabe2dd579788fc1f7e229ad7c56e79cf5c1f2ce3a3d5f8a",
+      "tokenCounts": {
+        "whoop_4_0_reboot_frame_690a8ff2": 1
       }
     },
     {
@@ -27162,7 +27197,7 @@
       ],
       "occurrenceCount": 84,
       "path": "android/app/src/main/res/values-zh/strings.xml",
-      "sha256": "2fc339dbb1f4ac2253c1152dee46fc93dca3548eac6e7cc20c2cd5b4ac1b4288",
+      "sha256": "c8f348ebf0bddf1c4f0bdd05f0b3721d1e5d5ca8d282a5ee4b55c609b546eb60",
       "tokenCounts": {
         "whoop": 1,
         "whoop5": 2,
@@ -27338,7 +27373,7 @@
       ],
       "occurrenceCount": 84,
       "path": "android/app/src/main/res/values/strings.xml",
-      "sha256": "5e92a6837b5e594dbd08bcee1a341a13aaa24d807361a78ded0fb60e7a250580",
+      "sha256": "d3f5e4649c6617fb92bdae57f6558860f726571216867f3f11147d3c08163df6",
       "tokenCounts": {
         "whoop": 1,
         "whoop5": 2,
@@ -32937,6 +32972,18 @@
     {
       "category": "fixture",
       "lineNumbers": [
+        120
+      ],
+      "occurrenceCount": 1,
+      "path": "android/app/src/test/java/com/noop/testcentre/TestModeRegistryParityTest.kt",
+      "sha256": "aeaf6481a3f69070bd034fc9e7092de2fa8ba9a9ccf90d4d434ed81c6d37cf9e",
+      "tokenCounts": {
+        "whoopappinstalled": 1
+      }
+    },
+    {
+      "category": "fixture",
+      "lineNumbers": [
         26,
         31,
         41,
@@ -32978,6 +33025,20 @@
       "tokenCounts": {
         "whoopbleclient": 5,
         "whooprepository": 2
+      }
+    },
+    {
+      "category": "fixture",
+      "lineNumbers": [
+        100,
+        178
+      ],
+      "occurrenceCount": 2,
+      "path": "android/app/src/test/java/com/noop/ui/AndroidLocalizationPolicyTest.kt",
+      "sha256": "80b5be7e799615eb9d5d3de8071e0ea14af5edd6e4fc9bdd128767d732be4d07",
+      "tokenCounts": {
+        "whoop": 1,
+        "whoop_4_0_reboot_frame_690a8ff2": 1
       }
     },
     {
@@ -33538,6 +33599,19 @@
         "my-whoop": 1,
         "whoop": 6,
         "whoopscale": 1
+      }
+    },
+    {
+      "category": "fixture",
+      "lineNumbers": [
+        174,
+        207
+      ],
+      "occurrenceCount": 2,
+      "path": "android/app/src/test/java/com/noop/ui/UiAuditPresentationContractTest.kt",
+      "sha256": "a44e201672049185bd70f1944078dcfa6b240eaff651f43fa30c29316dc53f65",
+      "tokenCounts": {
+        "whoop_4_0_reboot_frame_690a8ff2": 2
       }
     },
     {
@@ -35763,9 +35837,9 @@
     {
       "category": "historical",
       "lineNumbers": [
-        17,
-        53,
-        53
+        18,
+        54,
+        54
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/rounds/INDEX.md",
@@ -37988,7 +38062,7 @@
       }
     }
   ],
-  "occurrenceCount": 17601,
+  "occurrenceCount": 17608,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

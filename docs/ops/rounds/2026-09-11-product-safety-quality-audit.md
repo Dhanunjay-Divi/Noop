@@ -421,8 +421,8 @@ records. Concurrent development must remain isolated by worktree and branch.
   immutable migrations against isolated PostgreSQL engines, and Android run
   `34736975270`, including the complete production shell. Hosted Apple run
   `34736975319` built the macOS app and then exposed two stale test-contract
-  expectations rather than product defects: the generated app-wide catalog has
-  728 committed keys, and the breathing haptic help now correctly enters Swift
+  expectations rather than product defects: the generated app-wide catalog had
+  728 committed keys at that hosted head, and the breathing haptic help now correctly enters Swift
   through `appwide.breathe.test_buzz_help`. The contracts now assert the
   committed inventory and localized source boundary. Their focused tests pass,
   and the complete local macOS suite executes 1,919 tests with one expected

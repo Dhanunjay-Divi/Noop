@@ -127,7 +127,7 @@ final class TodayExplainabilityTests: XCTestCase {
 
     func testScoreState_carriedLastNight_stampsDate() {
         XCTAssertEqual(MetricTileState.carriedLastNight(date: "14 Jun", stale: false).accessibilityText,
-                       "Last night, 14 Jun. Tonight's lands after you sleep with Noop Band on.")
+                       "Last night, 14 Jun. Tonight’s score arrives after you sleep with Noop Band on.")
     }
 
     func testScoreState_needsStrap_copy() {

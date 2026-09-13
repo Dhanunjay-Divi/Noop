@@ -56,8 +56,12 @@ struct NotificationSettingsView: View {
                     }
                     .buttonStyle(NoopButtonStyle(.secondary))
                     .disabled(!live.bonded)
-                    .help(live.bonded ? "Fire a test buzz now" : "Connect your strap to test")
-                    .accessibilityHint(live.bonded ? "Fires a test buzz on your strap" : "Connect your strap to enable")
+                    .help(live.bonded
+                          ? String(localized: "appwide.ui_audit.notifications.test_buzz")
+                          : String(localized: "appwide.ui_audit.notifications.connect_to_test"))
+                    .accessibilityHint(live.bonded
+                                       ? String(localized: "appwide.ui_audit.notifications.test_buzz_hint")
+                                       : String(localized: "appwide.ui_audit.notifications.connect_to_enable"))
                 }
 
                 deliveryNote
@@ -213,9 +217,13 @@ struct NotificationSettingsView: View {
         .buttonStyle(.bordered)
         .tint(StrandPalette.accent)
         .disabled(!live.bonded)
-        .help(live.bonded ? "Test \(app.name) buzz" : "Connect your strap to test")
+        .help(live.bonded
+              ? String(format: String(localized: "appwide.ui_audit.notifications.test_app_buzz_format"), app.name)
+              : String(localized: "appwide.ui_audit.notifications.connect_to_test"))
         .accessibilityLabel("Test \(app.name) buzz")
-        .accessibilityHint(live.bonded ? "Fires a test buzz on your strap" : "Connect your strap to enable")
+        .accessibilityHint(live.bonded
+                           ? String(localized: "appwide.ui_audit.notifications.test_buzz_hint")
+                           : String(localized: "appwide.ui_audit.notifications.connect_to_enable"))
     }
 
     // MARK: - Behaviour

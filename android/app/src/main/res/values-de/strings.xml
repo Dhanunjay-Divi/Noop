@@ -527,8 +527,8 @@
     <string name="l10n_devices_screen_rename_device_ee233604">Gerät umbenennen</string>
     <string name="l10n_devices_screen_send_probe_read_only_36b318bc">Test senden (nur lesen)</string>
     <string name="l10n_devices_screen_save_efc007a3">Sichern</string>
-    <string name="l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2">Der Noop Band 4.0-Reboot-Frame wird nicht bestätigt - ein normaler Neustart wird ignoriert (# 235).</string>
-    <string name="l10n_devices_screen_waiting_for_the_straps_reply_5a06e7ac">Warte auf die Antwort des Bands…</string>
+    <string name="l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2">Der Neustartbefehl für das ältere Noop Band ist nicht bestätigt; ein normaler Neustart wird ignoriert (#235). Sende jeden Kandidaten einzeln und beobachte sowohl das Bandprotokoll als auch das Band. „Keine Trennung innerhalb von 12 Sekunden“ bedeutet, dass das Band den Befehl ignoriert hat. Die Meldung „Verbindung getrennt“ bedeutet, dass der Befehl das Band erreicht hat. Eine getrennte Verbindung allein ist jedoch noch kein Neustart: Bei einem echten Neustart erlischt das Sensorlicht des Bands für einige Sekunden. Bleibt das Licht an, wurde nur die Verbindung getrennt. Der Test löscht keine Daten. Teile bitte das Protokoll, damit wir den richtigen Befehl bestimmen können.</string>
+    <string name="l10n_devices_screen_waiting_for_the_straps_reply_5a06e7ac">Warte auf die Antwort von Noop Band…</string>
     <string name="l10n_devices_screen_whoop_4_0_reboot_probe_b51fb50f">Noop Band 4.0-Reboot-Sonde</string>
     <string name="l10n_devices_screen_whoop_is_noop_s_primary_fully_1c9e67fd">Noop Band ist das primäre, vollständig unterstützte Band von NOOP. Andere Herzfrequenzbänder sind eine frühe,</string>
     <string name="l10n_devices_screen_you_removed_your_active_strap_choose_2ac91d48">Du hast dein aktives Wearable entfernt. Wähle aus, welches gekoppelte Gerät deine Live-Daten liefert, oder </string>
@@ -580,7 +580,7 @@
     <string name="l10n_how_noop_works_screen_noop_never_shows_you_a_number_d1db9958">NOOP zeigt Ihnen nie eine Zahl, die es erfinden musste. Wenn ein Score nicht fertig ist,</string>
     <string name="l10n_how_noop_works_screen_section_title_section_body_efb1a999">%1$s. %2$s</string>
     <string name="l10n_how_noop_works_screen_sleep_scores_recording_where_your_numbers_1b3e981f">Schlaf · Werte · Aufzeichnung · woher deine Zahlen kommen</string>
-    <string name="l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff">Eine HRV-Lesung benötigt den Live-R-R-Stream. Öffnen Sie den Live-Bildschirm und verbinden Sie Ihren Gurt,</string>
+    <string name="l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff">Eine HRV-Messung benötigt den Live-R-R-Datenstrom. Öffne den Live-Bildschirm und verbinde Noop Band, </string>
     <string name="l10n_hrv_snapshot_screen_beats_12aafda0">Schläge</string>
     <string name="l10n_hrv_snapshot_screen_hrvdial_4c244c45">hrvDial</string>
     <string name="l10n_hrv_snapshot_screen_mean_hr_6c9272dd">Mittlere HF</string>
@@ -975,7 +975,7 @@
     <string name="l10n_test_centre_screen_experimental_algorithms_e09581e2">Experimentelle Algorithmen</string>
     <string name="l10n_test_centre_screen_export_f3e4fadb">Exportieren</string>
     <string name="l10n_test_centre_screen_export_time_2ca90c2e">Ausfuhrzeit</string>
-    <string name="l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69">Heads up: Dieser Testmodus ist ausgeschaltet, so dass der Bericht keine Erfassung dafür hat. Für a</string>
+    <string name="l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69">Hinweis: Dieser Testmodus ist ausgeschaltet, daher enthält der Bericht keine Aufzeichnung dafür. Schalte den Modus ein, stelle das Problem beim Tragen von Noop Band erneut nach und erstelle dann einen neuen Bericht.</string>
     <string name="l10n_test_centre_screen_hr_from_ppg_sub_lag_interpolation_a3ed1536">HR-from-PPG Sublag Interpolation (v26 gap-fill)</string>
     <string name="l10n_test_centre_screen_hrv_readiness_experimental_924f61bc">HRV-Bereitschaft (experimentell)</string>
     <string name="l10n_test_centre_screen_hrv_readiness_experimental_word_a471930e">HRV-Reife (experimentell): %1$s</string>
@@ -987,7 +987,7 @@
     <string name="l10n_test_centre_screen_report_ee45c303">Bericht</string>
     <string name="l10n_test_centre_screen_review_before_sharing_d7050383">Vor dem Teilen prüfen</string>
     <string name="l10n_test_centre_screen_share_09ca55ca">Teilen</string>
-    <string name="l10n_test_centre_screen_share_strap_log_for_bug_reports_b9802500">Share strap log (für bug-reports)</string>
+    <string name="l10n_test_centre_screen_share_strap_log_for_bug_reports_b9802500">Bandprotokoll teilen (für Fehlerberichte)</string>
     <string name="l10n_test_centre_screen_test_centre_37b36828">Testzentrum</string>
     <string name="l10n_test_centre_screen_test_modes_e21f1d3c">Prüfphasen</string>
     <string name="l10n_test_centre_screen_this_is_exactly_what_your_report_77278bdd">Genau das wird Ihr Bericht enthalten. Nichts verlässt dieses Telefon, bis Sie auf Teilen tippen.</string>
@@ -1601,7 +1601,7 @@
     <string name="l10n_settings_screen_sex_e301dd60">Geschlecht</string>
     <string name="l10n_settings_screen_share_5_mg_capture_for_the_e41ac6bd">Share 5/MG Capture (für den Dekodierungsaufwand)</string>
     <string name="l10n_settings_screen_share_on_device_signals_with_the_b3fd747e">Teile On-Device-Signale mit dem Coach</string>
-    <string name="l10n_settings_screen_share_strap_log_for_bug_reports_b9802500">Share strap log (für bug-reports)</string>
+    <string name="l10n_settings_screen_share_strap_log_for_bug_reports_b9802500">Bandprotokoll teilen (für Fehlerberichte)</string>
     <string name="l10n_settings_screen_shows_a_soft_sunrise_day_dusk_2d20b417">Zeigt eine sanfte Szene aus Sonnenaufgang, Tag, Dämmerung und Nacht hinter dem Heute-Bildschirm. Schalte es aus für eine schlichte dunkle Fläche. Deine Karten bleiben genauso lesbar.</string>
     <string name="l10n_settings_screen_sky_behind_cards_efbe5cb8">Himmel hinter Karten</string>
     <string name="l10n_settings_screen_sleep_sorting_scores_recording_and_where_832378b5">Schlaf-Einsortierung, Werte, Aufzeichnung und woher deine Zahlen kommen.</string>
@@ -1803,7 +1803,7 @@
     <string name="l10n_workouts_screen_hrr_bpm_516">bpm</string>
     <string name="l10n_workouts_screen_hrr_not_available_516">nicht verfügbar</string>
     <string name="l10n_workouts_screen_hrr_accessibility_516">Herzfrequenzerholung nach %1$s: %2$s Schläge pro Minute</string>
-    <string name="l10n_workouts_screen_hrr_explanation_516">Die Veränderung gegenüber deiner Herzfrequenz am Ende der Belastung. Positive Werte bedeuten, dass deine Herzfrequenz gesunken ist; ein Strich bedeutet, dass das Band um diese Minute herum nicht genügend Daten aufgezeichnet hat.</string>
+    <string name="l10n_workouts_screen_hrr_explanation_516">Die Veränderung gegenüber deiner Herzfrequenz am Ende der Belastung. Positive Werte bedeuten, dass deine Herzfrequenz gesunken ist; ein Strich bedeutet, dass das Wearable um diese Minute herum nicht genügend Daten aufgezeichnet hat.</string>
     <string name="l10n_workouts_screen_recovery_trend_516">Erholungstrend</string>
     <string name="l10n_workouts_screen_hrr_range_516">Herzfrequenzerholung · %1$s</string>
     <string name="l10n_workouts_screen_hrr_trend_explanation_516">Jede Linie zeigt, um wie viele Schläge pro Minute sich deine Herzfrequenz nach der Belastung verändert hat. Berücksichtigt werden nur hochintensive Workouts mit aufgezeichneter Herzfrequenz nach der Belastung.</string>

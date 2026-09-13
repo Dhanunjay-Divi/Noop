@@ -1591,7 +1591,7 @@ struct TodayView: View {
                     if !scoresBuildingDismissed {
                         DataPendingNote(
                             title: "Live now. Your scores are building.",
-                            message: "Your live heart rate is working from the strap, and Recovery, Effort and Sleep Score build from it over your next few nights of wear, sharpening as NOOP learns your baseline. Want your full history instantly? Import a wearable export in Data Sources and it backfills in about a minute."
+                            message: "appwide.ui_audit.today.score_building"
                         )
                         // A small × dismisses the card INTO the Updates inbox (restorable from there).
                         .overlay(alignment: .topTrailing) {
@@ -3449,13 +3449,17 @@ struct TodayView: View {
                     trailing: nil,
                     tint: StrandPalette.metricRose
                 ) {
-                    Text(selectedDayOffset == 0
-                        ? "Your curve fills in as the strap offloads its history."
-                        : "Step back to a day the strap was worn.")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .multilineTextAlignment(.center)
+                    Group {
+                        if selectedDayOffset == 0 {
+                            Text("Your curve fills in as Noop Band syncs its history.")
+                        } else {
+                            Text("Step back to a day Noop Band was worn.")
+                        }
+                    }
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
                 }
             }
         }
@@ -4286,7 +4290,7 @@ struct TodayView: View {
         }
     }
 
-    /// True while the strap is mid history-offload, the SAME signal the "Syncing strap history…" note
+    /// True while the band is mid history-offload, the SAME signal the "Syncing Noop Band history…" note
     /// reads (`LiveState.backfilling`, set across BLEManager.startBackfilling/exitBackfilling). Used to
     /// defer the bulk history-wide reads so they don't contend with the offload's bulk writes (#755).
     private var backfillActivelyWriting: Bool { historyReadsBlocked }
@@ -5266,13 +5270,19 @@ private struct SyncStatusChip: View {
         if live.backfilling {
             chip(system: "arrow.triangle.2.circlepath", text: "\(live.syncChunksThisSession)",
                  tint: StrandPalette.accent,
-                 a11y: "Syncing strap history, \(live.syncChunksThisSession) chunks")
+                 a11y: String(
+                    format: String(localized: "appwide.today.band_sync.progress_format"),
+                    live.syncChunksThisSession
+                 ))
         } else if let ts = live.lastSyncedAt {
             chip(system: "checkmark", text: Self.shortAgo(ts), tint: StrandPalette.textSecondary,
-                 a11y: "Strap history synced \(Self.shortAgo(ts)) ago")
+                 a11y: String(
+                    format: String(localized: "appwide.ui_audit.today.sync_synced_ago_format"),
+                    Self.shortAgo(ts)
+                 ))
         } else if live.historySyncExperimental {
             chip(system: "checkmark", text: "live", tint: StrandPalette.textSecondary,
-                 a11y: "Connected; strap history sync is experimental on this strap")
+                 a11y: String(localized: "appwide.ui_audit.today.sync_experimental"))
         }
         // else: cold start — render nothing; the building-scores SyncingHistoryNote covers it.
     }
@@ -5383,7 +5393,7 @@ private struct RecordingStatusLight: View {
     }
 }
 
-/// The "Syncing strap history…" note, shown only while a historical offload is running (#77). Owns the
+/// The "Syncing Noop Band history…" note, shown only while a historical offload is running (#77). Owns the
 /// `LiveState` observation so the chunk count ticks without re-rendering the rest of Today.
 private struct SyncingHistoryNoteIfBackfilling: View {
     @EnvironmentObject private var live: LiveState
@@ -5611,10 +5621,10 @@ enum MetricTileState: Equatable {
             // A fresh post-rollover carry tells you tonight's score is on its way; a stale carry (an older
             // import, #779) instead explains the number is from that earlier session, not today.
             return stale
-                ? "This is your last scored session. Wear the strap overnight for a fresh score."
-                : "Tonight's lands after you sleep with the strap on."
+                ? "appwide.ui_audit.today.metric_last_scored"
+                : "appwide.ui_audit.today.metric_tonight"
         case .needsStrap:
-            return "No data for today. Was your strap worn and connected overnight?"
+            return "appwide.ui_audit.today.metric_no_data"
         }
     }
 
@@ -5631,11 +5641,26 @@ enum MetricTileState: Equatable {
         case .baselineReady:
             return String(localized: "Baseline ready. \(Baselines.minNightsSeed) of \(Baselines.minNightsSeed) valid HRV nights complete. The next qualifying night can produce your first Recovery.")
         case .carriedLastNight(let date, let stale):
-            return stale
-                ? String(localized: "Latest sleep, \(date). This is your last scored session. Wear Noop Band overnight for a fresh score.")
-                : String(localized: "Last night, \(date). Tonight's lands after you sleep with Noop Band on.")
+            let title = stale
+                ? String(localized: "Latest sleep, \(date)")
+                : String(localized: "Last night, \(date)")
+            let detail: String
+            if stale {
+                detail = String(localized: "appwide.ui_audit.today.metric_last_scored")
+            } else {
+                detail = String(localized: "appwide.ui_audit.today.metric_tonight")
+            }
+            return String(
+                format: String(localized: "appwide.a11y.state_format"),
+                title,
+                detail
+            )
         case .needsStrap:
-            return String(localized: "Needs wearable data. No data for today. Was Noop Band worn and connected overnight?")
+            return String(
+                format: String(localized: "appwide.a11y.state_format"),
+                String(localized: "Needs wearable data"),
+                String(localized: "appwide.ui_audit.today.metric_no_data")
+            )
         }
     }
 
@@ -5703,9 +5728,9 @@ enum RecordingState: Equatable {
     /// The supporting detail line. Verbatim spec copy.
     var detail: LocalizedStringKey {
         switch self {
-        case .recording:           return "Your strap is connected and saving data."
+        case .recording:           return "appwide.ui_audit.today.recording_live"
         case .lastSynced:          return "Reconnect to pull the latest."
-        case .notRecording:        return "Strap not connected. Tap to connect."
+        case .notRecording:        return "appwide.ui_audit.today.recording_offline"
         case .historyExperimental: return "History sync is experimental on 5.0."
         case .connectedNoData:     return "No live heart rate or synced history yet this session."
         }
@@ -5715,11 +5740,19 @@ enum RecordingState: Equatable {
     var accessibilityText: String {
         switch self {
         case .recording:
-            return String(localized: "Recording. Noop Band is connected and saving data.")
+            return String(
+                format: String(localized: "appwide.a11y.state_format"),
+                String(localized: "Recording"),
+                String(localized: "appwide.ui_audit.today.recording_live")
+            )
         case .lastSynced(let mins):
             return String(localized: "Last synced \(mins) minutes ago. Reconnect to pull the latest.")
         case .notRecording:
-            return String(localized: "Not recording. Noop Band is not connected. Tap to connect.")
+            return String(
+                format: String(localized: "appwide.a11y.state_format"),
+                String(localized: "Not recording"),
+                String(localized: "appwide.ui_audit.today.recording_offline")
+            )
         case .historyExperimental:
             return String(localized: "Connected. History sync is experimental on 5.0.")
         case .connectedNoData:

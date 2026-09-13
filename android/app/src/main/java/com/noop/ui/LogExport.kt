@@ -6,6 +6,7 @@ import android.os.Build
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.noop.BuildConfig
+import com.noop.R
 import com.noop.ble.PuffinExperiment
 import com.noop.testcentre.ReportReviewGate
 import com.noop.testcentre.TestBundleAssembler
@@ -141,7 +142,9 @@ object LogExport {
                 for (line in dynamic) appendLine(line)
                 appendLine("─".repeat(40))
             }
-            val text = body.ifBlank { "(rolling strap-log buffer is empty; connect to your strap so lines accrue)" }
+            val text = body.ifBlank {
+                uiString(R.string.appwide_ui_audit_log_export_empty_scheduled)
+            }
             val inputs = arrayListOf("report.txt" to (header + "\n" + text).toByteArray())
 
             // The raw 5/MG capture (JSONL of every backfilled frame) copied alongside as a matching `.bin`
@@ -193,7 +196,9 @@ object LogExport {
             for (line in dynamic) appendLine(line)
             appendLine("─".repeat(40))
         }
-        val body = logText.ifBlank { "(strap log is empty; connect to your strap, reproduce the issue, then share again)" }
+        val body = logText.ifBlank {
+            uiString(R.string.appwide_ui_audit_log_export_empty_interactive)
+        }
 
         // Append the last captured crash (if any) so a device-specific crash like the Insights
         // tab (#224/#267) arrives with its real stack trace instead of being unreachable.
@@ -218,7 +223,7 @@ object LogExport {
         val header = buildString {
             appendLine("# NOOP 5/MG raw backfill capture (JSONL; one frame per line)")
             appendLine("# App: ${BuildConfig.VERSION_NAME} (${BuildConfig.TIER}) · Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}")
-            appendLine("# NOTE: contains raw biometric frames (heart rate, R-R, skin temp, motion) and the strap's console text. Share only if you're comfortable with that.")
+            appendLine("# ${uiString(R.string.appwide_ui_audit_log_export_raw_capture_privacy)}")
         }
         val dir = File(context.cacheDir, "logs").apply { mkdirs() }
         val out = File(dir, "noop-raw-capture-${timestamp()}.jsonl")
@@ -353,14 +358,18 @@ object LogExport {
      * if the toggle is already on, don't tell them to enable it again. `sharingLog` adds the log tail.
      */
     private fun noCaptureMsg(context: Context, whoop5Connected: Boolean, sharingLog: Boolean): String {
-        val tail = if (sharingLog) " Sharing the strap log." else ""
-        return when {
+        val body = when {
             !whoop5Connected ->
-                "Raw capture records newer-band history syncs and doesn't apply to legacy bands (already fully decoded).$tail"
+                uiString(R.string.appwide_ui_audit_log_export_raw_capture_unsupported)
             !PuffinExperiment.from(context).isCaptureEnabled ->
-                "No raw capture yet. Turn on \"Record 5/MG raw capture\" above, then let a history sync run.$tail"
+                uiString(R.string.appwide_ui_audit_log_export_raw_capture_enable)
             else ->
-                "Raw capture is on. Let a 5/MG history sync run, then try again.$tail"
+                uiString(R.string.appwide_ui_audit_log_export_raw_capture_wait)
+        }
+        return if (sharingLog) {
+            "$body ${uiString(R.string.appwide_ui_audit_log_export_sharing_band_log)}"
+        } else {
+            body
         }
     }
 

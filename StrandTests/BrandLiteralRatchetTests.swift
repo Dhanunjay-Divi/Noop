@@ -28,7 +28,7 @@ final class BrandLiteralRatchetTests: XCTestCase {
     /// The count measured when this ratchet was introduced (2026-08-23). LOWER THIS as strings are
     /// extracted; never raise it. Raising it means a user-visible English literal was shipped to eight
     /// locales and then hidden in the baseline.
-    private static let allowedBrandLiteralsInBaseline = 64
+    private static let allowedBrandLiteralsInBaseline = 61
 
     /// The brand name as users see it, kept in sync with `WhoopModel.customerName`.
     private static let brandName = "Noop Band"

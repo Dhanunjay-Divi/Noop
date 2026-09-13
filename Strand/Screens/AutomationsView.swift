@@ -1453,9 +1453,9 @@ struct AutomationsView: View {
 
     private var wearBlurb: String {
         #if os(macOS)
-        String(localized: "React when the strap comes off or goes on. Note: macOS reserves true auto-UNLOCK for Apple Watch, so this can lock, not unlock.")
+        String(localized: "appwide.ui_audit.automations.wear_mac")
         #else
-        String(localized: "React when Noop Band comes off or goes on. Run a Shortcut to set a Focus, pause media, or mark yourself away.")
+        String(localized: "appwide.ui_audit.automations.wear_mobile")
         #endif
     }
 

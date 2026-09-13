@@ -526,9 +526,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(uiString(R.string.l10n_data_sources_screen_auto_sync_periodically_5f3041e8), style = NoopType.subhead, color = Palette.textPrimary)
                         Text(
-                            uiString(R.string.l10n_data_sources_screen_re_pull_new_health_connect_data_3e9c3914) +
-                                "time you open NOOP, if it's been longer than the interval below. " +
-                                "Read-only; never overwrites strap data.",
+                            uiString(R.string.appwide_ui_audit_health_connect_auto_sync_detail),
                             style = NoopType.footnote,
                             color = Palette.textTertiary,
                         )

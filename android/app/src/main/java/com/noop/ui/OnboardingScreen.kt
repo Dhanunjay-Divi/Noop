@@ -1154,7 +1154,7 @@ private fun ConnectStep(viewModel: AppViewModel) {
                 icon = Icons.Filled.Lock,
                 tint = Palette.statusPositive,
                 title = uiString(R.string.l10n_onboarding_screen_this_can_run_while_you_finish_cd7ef783),
-                message = "If the strap is nearby, NOOP will keep the BLE link alive in the background. You can continue through profile and import while it bonds.",
+                message = uiString(R.string.appwide_ui_audit_onboarding_background_pairing),
             )
 
             // WHOOP is NOOP's primary band, so onboarding leads with it — but it isn't required.

@@ -448,4 +448,11 @@
     <string name="app_report_cancel_progress_label">Annullamento del feedback in corso</string>
     <string name="app_report_queued_progress_label">Il feedback è in coda</string>
     <string name="app_report_delivery_in_progress">Consegna del feedback in corso.</string>
+    <string name="l10n_devices_screen_waiting_for_the_straps_reply_5a06e7ac">In attesa della risposta di Noop Band…</string>
+    <string name="l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff">Una lettura HRV richiede il flusso R-R in tempo reale. Apri la schermata Live e connetti Noop Band, </string>
+    <string name="l10n_test_centre_screen_share_strap_log_for_bug_reports_b9802500">Condividi il registro del bracciale (per le segnalazioni di errori)</string>
+    <string name="l10n_settings_screen_share_strap_log_for_bug_reports_b9802500">Condividi il registro del bracciale (per le segnalazioni di errori)</string>
+    <string name="l10n_workouts_screen_hrr_explanation_516">La variazione rispetto alla frequenza cardiaca al termine dell’esercizio. I valori positivi indicano che la frequenza cardiaca è diminuita; un trattino indica che il dispositivo indossabile non ha registrato dati sufficienti intorno a quel minuto.</string>
+    <string name="l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2">Il comando di riavvio del Noop Band precedente non è confermato; il riavvio normale viene ignorato (#235). Invia ogni comando candidato separatamente e osserva sia il registro della band sia la band. «Nessuna disconnessione entro 12 secondi» significa che la band ha ignorato il comando. Una riga «connessione interrotta» significa che il comando ha raggiunto la band, ma una disconnessione da sola non prova un riavvio: durante un vero riavvio, la luce del sensore della band si spegne per alcuni secondi. Se la luce resta accesa, si è interrotta solo la connessione. Il test non elimina dati. Condividi il registro per aiutarci a identificare il comando corretto.</string>
+    <string name="l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69">Attenzione: questa modalità di test è disattivata, quindi il report non contiene una registrazione relativa al problema. Attiva la modalità, riproduci il problema mentre indossi Noop Band, quindi crea un nuovo report.</string>
 </resources>

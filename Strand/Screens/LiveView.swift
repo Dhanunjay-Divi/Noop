@@ -403,7 +403,7 @@ struct LiveView: View {
                 .foregroundStyle(StrandPalette.textPrimary)
             Text(liveHRConnection
                  ? "Start a workout when the stream matters. NOOP records the interval, HR, peak, average and effort from the same live feed."
-                 : "Connect the strap first, then mark a workout from the live stream.")
+                 : "Connect Noop Band first, then mark a workout from the live stream.")
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -424,7 +424,7 @@ struct LiveView: View {
                 model.getBattery()
             }
             .disabled(!activeConnection)
-            .help("Refresh strap battery and connection state.")
+            .help("Refresh Noop Band battery and connection state.")
 
             // Manual HRV snapshot (#127) — a still, seated 60s R-R reading. Needs the live R-R
             // stream, so it's gated on a bonded connection just like the workout/refresh actions.
@@ -434,7 +434,7 @@ struct LiveView: View {
             .disabled(!activeConnection)
             .help(activeConnection
                   ? "Take a 60-second seated HRV reading from the live R-R stream."
-                  : "Connect your strap first. The reading needs the live R-R stream.")
+                  : "Connect Noop Band first. The reading needs the live R-R stream.")
         }
     }
 
@@ -873,7 +873,7 @@ struct LiveView: View {
             model.buzzStrapOnce()
         }
         .disabled(!activeConnection)
-        .help("Fire a test haptic buzz on the strap (requires an active strap connection)")
+        .help("Fire a test haptic buzz on Noop Band (requires an active band connection)")
     }
 
     private var disconnectButton: some View {
@@ -1450,7 +1450,7 @@ private struct LiveSignalTrustRail: View {
             // Oura until its WEAR_EVENT is wired to `worn` (follow-up).
             .init(title: String(localized: "Wear state"),
                   value: liveLink ? (wornNow ? String(localized: "On wrist") : String(localized: "Off wrist")) : String(localized: "Unknown"),
-                  detail: liveLink ? (wornNow ? String(localized: "Eligible for live physiology") : String(localized: "Wear the strap for scoring")) : String(localized: "Connect to read wear state"),
+                  detail: liveLink ? (wornNow ? String(localized: "Eligible for live physiology") : String(localized: "Wear your wearable for scoring")) : String(localized: "Connect to read wear state"),
                   icon: "sensor.tag.radiowaves.forward",
                   tint: !liveLink ? StrandPalette.textTertiary : wornNow ? StrandPalette.accent : StrandPalette.statusWarning,
                   frac: !liveLink ? nil : (wornNow ? 1 : 0.25))

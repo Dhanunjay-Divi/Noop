@@ -448,4 +448,11 @@
     <string name="app_report_cancel_progress_label">正在取消意見</string>
     <string name="app_report_queued_progress_label">意見已排入佇列</string>
     <string name="app_report_delivery_in_progress">正在傳送意見。</string>
+    <string name="l10n_devices_screen_waiting_for_the_straps_reply_5a06e7ac">正在等待 Noop Band 回覆…</string>
+    <string name="l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff">HRV 快照需要即時 R-R 間期資料流。請開啟「即時心率」畫面並連接 Noop Band，</string>
+    <string name="l10n_test_centre_screen_share_strap_log_for_bug_reports_b9802500">分享手環連線日誌（用於錯誤回報）</string>
+    <string name="l10n_settings_screen_share_strap_log_for_bug_reports_b9802500">分享手環連線日誌（用於錯誤回報）</string>
+    <string name="l10n_workouts_screen_hrr_explanation_516">這是運動結束時心率與之後心率的變化。正值表示心率下降；破折號表示穿戴式裝置在該分鐘附近沒有記錄足夠的資料。</string>
+    <string name="l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2">舊版 Noop Band 的重新啟動指令尚未確認；一般重新啟動會被忽略 (#235)。請逐一傳送候選指令，並同時觀察手環連線日誌與手環本身。「12 秒內未中斷連線」表示手環忽略了該指令。「連線已中斷」表示指令已到達手環，但僅中斷連線並不能證明發生了重新啟動：真正重新啟動時，手環的感測器燈會熄滅幾秒。如果燈一直亮著，則只是連線中斷。此測試不會刪除資料。請分享日誌，協助我們確認正確的指令。</string>
+    <string name="l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69">請注意：此測試模式已關閉，因此報告中沒有相關記錄。請開啟該模式，佩戴 Noop Band 重現問題，然後再次產生報告。</string>
 </resources>

@@ -2749,7 +2749,7 @@ private struct SkinTempSection: View {
 
             if !hasTemperatureCard {
                 ComingSoon(
-                    what: "Wear the strap overnight and these read from your nightly skin temperature.",
+                    what: "appwide.cycle.health.missing_temperature",
                     symbol: "thermometer.medium"
                 )
             }

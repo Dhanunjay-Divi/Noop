@@ -173,7 +173,7 @@ struct WorkoutDetailView: View {
                             recoveryStat(String(localized: "5 min"), value: recovery.after5Minutes)
                         }
                         Divider().overlay(StrandPalette.hairline)
-                        Text("The change from your heart rate at the end of exercise. Positive values mean your heart rate fell; a dash means the strap did not record enough data around that minute.")
+                        Text("The change from your heart rate at the end of exercise. Positive values mean your heart rate fell; a dash means the wearable did not record enough data around that minute.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -428,11 +428,15 @@ struct WorkoutDetailView: View {
                                 zoneStat(i + 1, minutes: z[i], total: total)
                             }
                         }
-                        Text(zonesFromImport
-                             ? String(localized: "appwide.workouts.imported_zone_split")
-                             : "Time in each %HRmax zone, derived from the strap's heart rate over this window (approximate).")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textTertiary)
+                        Group {
+                            if zonesFromImport {
+                                Text("appwide.workouts.imported_zone_split")
+                            } else {
+                                Text("Time in each %HRmax zone, derived from the wearable's heart rate over this window (approximate).")
+                            }
+                        }
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
                     }
                 }
             }

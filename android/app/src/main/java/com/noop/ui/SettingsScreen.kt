@@ -2559,7 +2559,7 @@ fun SettingsScreen(
         SettingsSection(
             icon = Icons.Filled.Science,
             title = uiString(R.string.l10n_settings_screen_diagnostics_3af2279f),
-            blurb = "A read-only export of the decoded sensor streams NOOP already stores. Works on any strap. Nothing is written to your device, and nothing is uploaded.",
+            blurb = uiString(R.string.appwide_ui_audit_settings_diagnostics_read_only),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // --- Sleep staging (V2) — the DEFAULT engine after the 44-subject benchmark; toggle off to
@@ -2883,7 +2883,7 @@ fun SettingsScreen(
         SettingsSection(
             icon = Icons.Filled.BugReport,
             title = uiString(R.string.l10n_settings_screen_test_centre_37b36828),
-            blurb = "Turn on a test for the thing that's wrong, wear the strap, then tap Report. Your strap log, recalibrate, scheduled export and experimental probes all live here too.",
+            blurb = uiString(R.string.appwide_ui_audit_settings_test_centre),
         ) {
             NoopButton(
                 text = uiString(R.string.l10n_settings_screen_open_test_centre_a7fbe4e9),

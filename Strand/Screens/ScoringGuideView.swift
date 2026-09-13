@@ -299,7 +299,7 @@ struct ScoringGuideView: View {
     }
 
     private var footerNote: some View {
-        Text("These are independent approximations from a consumer strap, built on open science: not medical advice, and not provider scores.")
+        Text("These are independent approximations from a consumer wearable, built on open science: not medical advice, and not provider scores.")
             .font(StrandFont.footnote)
             .foregroundStyle(StrandPalette.textTertiary)
             .fixedSize(horizontal: false, vertical: true)

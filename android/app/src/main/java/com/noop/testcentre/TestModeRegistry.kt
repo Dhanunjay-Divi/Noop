@@ -1,5 +1,9 @@
 package com.noop.testcentre
 
+import androidx.annotation.StringRes
+import com.noop.NoopApplication
+import com.noop.R
+
 /** Whether a guided capture counts nights (Sleep) or days (Battery). */
 enum class CaptureUnit { NIGHTS, DAYS }
 
@@ -45,15 +49,22 @@ data class TestMode(
  *  TestModeRegistry; same ids/titles/captures, verified by [TestModeRegistryParityTest]. */
 object TestModeRegistry {
 
-    val all: List<TestMode> = listOf(
-        sleep(), connection(), workouts(), display(), dataImport(), steps(), battery(), recovery(), hrv(),
-    )
+    val all: List<TestMode>
+        get() = listOf(
+            sleep(), connection(), workouts(), display(), dataImport(), steps(), battery(), recovery(), hrv(),
+        )
 
     fun mode(d: TestDomain): TestMode? = all.firstOrNull { it.domain == d }
 
+    private fun text(@StringRes id: Int, fallback: String): String =
+        runCatching { NoopApplication.localizedString(id) }.getOrDefault(fallback)
+
     private fun sleep() = TestMode(
         domain = TestDomain.SLEEP, title = "Sleep",
-        blurb = "Wear it a few nights so we can see which gate kept or dropped each sleep run.",
+        blurb = text(
+            R.string.appwide_ui_audit_test_mode_sleep_blurb,
+            "Wear Noop Band for a few nights so we can see which gate kept or dropped each sleep run.",
+        ),
         icon = "ic_bed", priority = TestPriority.HIGH,
         // Only the captures the .sleep sink actually receives are kept. That sink only ever gets the
         // SleepStager gate-verdict ladder (SleepStagerTrace.runLine) plus the RestScorer.subScoreLine
@@ -69,7 +80,14 @@ object TestModeRegistry {
             Question("awakeStill", "Any awake-but-still windows in bed?", Question.Kind.TEXT),
             Question("naps", "Any naps?", Question.Kind.TEXT),
             Question("shiftWork", "Shift work or an unusual schedule?", Question.Kind.YES_NO),
-            Question("chargeTiming", "When did you charge the strap?", Question.Kind.TEXT),
+            Question(
+                "chargeTiming",
+                text(
+                    R.string.appwide_ui_audit_test_question_charge_timing,
+                    "When did you charge Noop Band?",
+                ),
+                Question.Kind.TEXT,
+            ),
             Question("healthSleep", "Is Apple Health / Health Connect also feeding sleep?", Question.Kind.YES_NO),
         ),
         liveReadout = listOf("hrDensityNow", "gravityCoverageNow", "lastNightGateFired"),
@@ -79,12 +97,22 @@ object TestModeRegistry {
 
     private fun connection() = TestMode(
         domain = TestDomain.CONNECTION, title = "Connection & Sync",
-        blurb = "Turn this on if the strap keeps dropping or won't finish a sync.",
+        blurb = text(
+            R.string.appwide_ui_audit_test_mode_connection_blurb,
+            "Turn this on if Noop Band keeps disconnecting or cannot finish a sync.",
+        ),
         icon = "ic_antenna", priority = TestPriority.HIGH,
         captures = listOf("connectTiming", "bondState", "frameTiming", "reconnectChurn", "offloadProgress",
             "offloadStalls", "firmwareDecode", "clockDrift", "otherCentral"),
         questionnaire = listOf(
-            Question("otherDevicePaired", "Is another phone or the other band app paired to the strap right now?", Question.Kind.YES_NO),
+            Question(
+                "otherDevicePaired",
+                text(
+                    R.string.appwide_ui_audit_test_question_other_app_paired,
+                    "Is another phone or the other band app paired to Noop Band right now?",
+                ),
+                Question.Kind.YES_NO,
+            ),
         ),
         liveReadout = listOf("connectionUptime", "reconnectCount", "lastOffloadResult"),
         capture = CaptureKind.Toggle,
@@ -152,14 +180,24 @@ object TestModeRegistry {
 
     private fun battery() = TestMode(
         domain = TestDomain.BATTERY, title = "Battery & Charging",
-        blurb = "Wear it a few days so we can fit your real discharge slope.",
+        blurb = text(
+            R.string.appwide_ui_audit_test_mode_battery_blurb,
+            "Wear Noop Band for a few days so we can fit your real discharge slope.",
+        ),
         icon = "ic_battery", priority = TestPriority.MED,
         // Dropped offWristGaps: nothing emits an off-wrist-gap line for the battery discharge run.
         captures = listOf("socSeries", "chargeSteps", "dischargeRun", "fittedSlope",
             "sourceMeasuredVsRated", "batteryGates"),
         questionnaire = listOf(
             Question("whoopAppInstalled", "Is the other band app installed?", Question.Kind.YES_NO),
-            Question("otherPhonePaired", "Is another phone paired to the strap?", Question.Kind.YES_NO),
+            Question(
+                "otherPhonePaired",
+                text(
+                    R.string.appwide_ui_audit_test_question_other_phone_paired,
+                    "Is another phone paired to Noop Band?",
+                ),
+                Question.Kind.YES_NO,
+            ),
             Question("chargedInWindow", "Did you charge during the capture?", Question.Kind.YES_NO),
             Question("batterySaverApps", "Any battery-saver apps running?", Question.Kind.TEXT),
         ),

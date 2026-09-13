@@ -509,8 +509,8 @@
     <string name="l10n_devices_screen_rename_device_ee233604">Renomear dispositivo</string>
     <string name="l10n_devices_screen_send_probe_read_only_36b318bc">Enviar sonda (apenas leitura)</string>
     <string name="l10n_devices_screen_save_efc007a3">Guardar</string>
-    <string name="l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2">O quadro de reinicialização do Noop Band 4.0 não foi confirmado - uma reinicialização normal é ignorada (#235). </string>
-    <string name="l10n_devices_screen_waiting_for_the_straps_reply_5a06e7ac">Aguardo a resposta da bracelete…</string>
+    <string name="l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2">O comando de reinício da versão anterior da Noop Band não está confirmado; o reinício normal é ignorado (#235). Envia cada comando candidato separadamente e observa tanto o registo da bracelete como a própria bracelete. «Sem desconexão durante 12 segundos» significa que a bracelete ignorou o comando. Uma linha «ligação interrompida» significa que o comando chegou à bracelete, mas uma desconexão isolada não prova um reinício: num reinício real, a luz do sensor da bracelete apaga-se durante alguns segundos. Se a luz permaneceu acesa, apenas a ligação foi interrompida. O teste não apaga dados. Partilha o registo para podermos identificar o comando correto.</string>
+    <string name="l10n_devices_screen_waiting_for_the_straps_reply_5a06e7ac">A aguardar a resposta da Noop Band…</string>
     <string name="l10n_devices_screen_whoop_4_0_reboot_probe_b51fb50f">Sonda de reinicialização do Noop Band 4.0</string>
     <string name="l10n_devices_screen_whoop_is_noop_s_primary_fully_1c9e67fd">Noop Band é a banda principal e totalmente suportada do NOOP. Outras tiras de frequência cardíaca são precoces, </string>
     <string name="l10n_devices_screen_you_removed_your_active_strap_choose_2ac91d48">Removeste o teu wearable ativo. Escolhe o dispositivo emparelhado que fornece os teus dados em direto ou </string>
@@ -562,7 +562,7 @@
     <string name="l10n_how_noop_works_screen_noop_never_shows_you_a_number_d1db9958">O NOOP nunca mostra um número que precisava de ser inventado. Se uma pontuação não estiver pronta, </string>
     <string name="l10n_how_noop_works_screen_section_title_section_body_efb1a999">%1$s. %2$s</string>
     <string name="l10n_how_noop_works_screen_sleep_scores_recording_where_your_numbers_1b3e981f">Dormir · pontuações · registar · de onde vêm os teus números</string>
-    <string name="l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff">Uma leitura HRV precisa da transmissão RR em direto. Abra o ecrã em direto e ligue a tua bracelete, </string>
+    <string name="l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff">Uma leitura de HRV precisa da transmissão R-R em direto. Abre o ecrã Em direto e liga a Noop Band, </string>
     <string name="l10n_hrv_snapshot_screen_beats_12aafda0">Batidas</string>
     <string name="l10n_hrv_snapshot_screen_hrvdial_4c244c45">hrvDial</string>
     <string name="l10n_hrv_snapshot_screen_mean_hr_6c9272dd">RH médio</string>
@@ -957,7 +957,7 @@
     <string name="l10n_test_centre_screen_experimental_algorithms_e09581e2">Algoritmos experimentais</string>
     <string name="l10n_test_centre_screen_export_f3e4fadb">Exportar</string>
     <string name="l10n_test_centre_screen_export_time_2ca90c2e">Tempo de exportação</string>
-    <string name="l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69">Atenção: este modo de teste está desativado, pelo que o relatório não tem captura para o mesmo. Por um </string>
+    <string name="l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69">Atenção: este modo de teste está desativado, por isso o relatório não inclui uma captura do problema. Ativa o modo, reproduz o problema enquanto usas a Noop Band e cria novamente o relatório.</string>
     <string name="l10n_test_centre_screen_hr_from_ppg_sub_lag_interpolation_a3ed1536">Interpolação de sublag HR-from-PPG (gap fill v26)</string>
     <string name="l10n_test_centre_screen_hrv_readiness_experimental_924f61bc">Prontidão HRV (experimental)</string>
     <string name="l10n_test_centre_screen_hrv_readiness_experimental_word_a471930e">Prontidão HRV (experimental): %1$s</string>
@@ -1781,7 +1781,7 @@
     <string name="l10n_workouts_screen_hrr_bpm_516">bpm</string>
     <string name="l10n_workouts_screen_hrr_not_available_516">não disponível</string>
     <string name="l10n_workouts_screen_hrr_accessibility_516">Recuperação da frequência cardíaca em %1$s, %2$s batimentos por minuto</string>
-    <string name="l10n_workouts_screen_hrr_explanation_516">A alteração da tua frequência cardíaca no final do exercício. Valores positivos significam que a tua frequência cardíaca desceu; um traço significa que a bracelete não registou dados suficientes nesse minuto.</string>
+    <string name="l10n_workouts_screen_hrr_explanation_516">A alteração da tua frequência cardíaca no final do exercício. Valores positivos significam que a tua frequência cardíaca desceu; um traço significa que o dispositivo wearable não registou dados suficientes nesse minuto.</string>
     <string name="l10n_workouts_screen_recovery_trend_516">Tendência de recuperação</string>
     <string name="l10n_workouts_screen_hrr_range_516">Recuperação da frequência cardíaca · %1$s</string>
     <string name="l10n_workouts_screen_hrr_trend_explanation_516">Cada linha mostra quantos batimentos por minuto a tua frequência cardíaca mudou após o exercício. Apenas estão incluídos treinos de alta intensidade com frequência cardíaca pós-treino registada.</string>

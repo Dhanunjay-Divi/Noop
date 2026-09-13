@@ -1478,12 +1478,12 @@
     },
     {
       "category": "customer",
-      "occurrenceCount": 16,
+      "occurrenceCount": 14,
       "owner": "project team",
       "path": "Strand/Screens/DevicesView.swift",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "d0943b66a7de82892e2ddc42372ec4d292b018aa5e5e7cb9ea03c68ecd2ca503"
+      "sha256": "0ece4d463c269ecdb128e6ce5c42f8de57abe6715322fc00a501864cb1009d09"
     },
     {
       "category": "core",
@@ -1766,12 +1766,12 @@
     },
     {
       "category": "customer",
-      "occurrenceCount": 3,
+      "occurrenceCount": 2,
       "owner": "project team",
       "path": "Strand/Screens/TestCentreView.swift",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "4751b9cf4ff6d969a7db9557209390042074e33721defed7a93c1a881fecdd8d"
+      "sha256": "07d4aa99087de57386db115ed222253894c0901b2a60c89e967c4b271f3f75ca"
     },
     {
       "category": "core",
@@ -3805,7 +3805,7 @@
       "path": "android/app/src/main/java/com/noop/ui/DevicesScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "ead3665e623b0911f7cafb03e00bc33ba75daefdf396d530e875eb9144d8a4b3"
+      "sha256": "bac7acc8235027e6e37946e3d7e59e634d1c1998ffa6498204a41d164f611f6c"
     },
     {
       "category": "customer",
@@ -4462,7 +4462,7 @@
       "path": "android/app/src/main/res/values-de/strings.xml",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "a4eda37a4891f29ec9b70807c82e48c987ac10a2f5ccb9102b13dbeaefc84b5d"
+      "sha256": "2effffbeac20d3a327068fd8ae84c2955451b198ad7817d81a84ac76e2b25900"
     },
     {
       "category": "customer",
@@ -4471,7 +4471,7 @@
       "path": "android/app/src/main/res/values-es/strings.xml",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "a37daa2147d7d5a3b20b71e541af41c175cb2f8b18a84bc0bce78d4c0c9b5c09"
+      "sha256": "9f1599e73cd4c45da0991f7e7fe02ef998e7e7b49b926592bc1ffa1c26bfe520"
     },
     {
       "category": "customer",
@@ -4480,7 +4480,16 @@
       "path": "android/app/src/main/res/values-fr/strings.xml",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "5c1889ea60b327bcc883398d44ccfc868223708c1726ff159cda681962b94260"
+      "sha256": "f9e1058c7af38e489b7013b5e21f56c2d7410a817a0ec72dcd7172bd2f1adcb6"
+    },
+    {
+      "category": "customer",
+      "occurrenceCount": 1,
+      "owner": "project team",
+      "path": "android/app/src/main/res/values-it/strings.xml",
+      "reason": "Existing customer wording pending reviewed provenance/localization migration.",
+      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
+      "sha256": "90dea818b433c658fdb7f14c4d83166bc1549759f89836fd57f22d7497dc7b06"
     },
     {
       "category": "customer",
@@ -4489,7 +4498,25 @@
       "path": "android/app/src/main/res/values-pt-rPT/strings.xml",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "d2fbc83a0a4d9c26c34de09afdea8eb336b68695d295c79048b5e9d8dbbe0f0d"
+      "sha256": "ca250b68f13d572850d75624e6a6de297901e3d758e686f52a0585d902d99bb0"
+    },
+    {
+      "category": "customer",
+      "occurrenceCount": 1,
+      "owner": "project team",
+      "path": "android/app/src/main/res/values-ru/strings.xml",
+      "reason": "Existing customer wording pending reviewed provenance/localization migration.",
+      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
+      "sha256": "99d106d7d3a6a91ca4252bbf6780f90b6884bac1d50cc00c480d19fbcf763fa4"
+    },
+    {
+      "category": "customer",
+      "occurrenceCount": 1,
+      "owner": "project team",
+      "path": "android/app/src/main/res/values-zh-rTW/strings.xml",
+      "reason": "Existing customer wording pending reviewed provenance/localization migration.",
+      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
+      "sha256": "f6de431ae8e08b4cdabe2dd579788fc1f7e229ad7c56e79cf5c1f2ce3a3d5f8a"
     },
     {
       "category": "customer",
@@ -4498,7 +4525,7 @@
       "path": "android/app/src/main/res/values-zh/strings.xml",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "2fc339dbb1f4ac2253c1152dee46fc93dca3548eac6e7cc20c2cd5b4ac1b4288"
+      "sha256": "c8f348ebf0bddf1c4f0bdd05f0b3721d1e5d5ca8d282a5ee4b55c609b546eb60"
     },
     {
       "category": "customer",
@@ -4507,7 +4534,7 @@
       "path": "android/app/src/main/res/values/strings.xml",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "5e92a6837b5e594dbd08bcee1a341a13aaa24d807361a78ded0fb60e7a250580"
+      "sha256": "d3f5e4649c6617fb92bdae57f6558860f726571216867f3f11147d3c08163df6"
     },
     {
       "category": "core",
