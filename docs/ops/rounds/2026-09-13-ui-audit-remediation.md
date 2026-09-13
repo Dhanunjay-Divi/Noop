@@ -3,8 +3,8 @@
 ## Status
 
 - State: `implementation and exact-current-tree local verification complete;
-  all three consolidated hosted cycles reviewed and locally corrected; final
-  hosted exact-SHA checks and protected integration pending`
+  hosted checks passed at 0aa7c86c, but protected integration is intentionally
+  withheld while twelve actionable review threads are corrected and reverified`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `ca79cc9c76b194691f93e8f2334ce38200639bde`
@@ -137,6 +137,16 @@ claims.
   corrected paths pass together, and the complete exact-current-tree iPhone UI
   suite passes 39 tests with one intentional private-pilot skip and zero
   failures.
+- Exact hosted head `0aa7c86c` passed all 35 executed checks with three
+  intentional skips. Branch protection then correctly withheld merge because
+  twelve review conversations remained unresolved. Their findings cover
+  historical-day hydration timestamps, cross-day hydration failure state,
+  Apple hydration bounds and BMI confirmation, feedback startup retry,
+  Android operational startup and settings-restore failure handling,
+  analysis-claim progress, Trends timeout cancellation, Safety migration
+  expand/rollback compatibility, feedback object retention, and
+  account-scoped managed-document generation. These are treated as release
+  defects, not administratively resolved.
 
 ## Data, privacy, and medical truth
 
@@ -221,13 +231,16 @@ claims.
 - The stale macOS WindowServer capture cannot prove the current Today surface;
   it is retained only as tooling evidence and will not be shipped or cited as a
   product result.
-- Protected exact-head checks and normal PR integration remain required after
-  the local verification wall.
+- The twelve protected-review findings require focused and complete local
+  verification, one consolidated replacement push, fresh exact-head checks,
+  and normal PR integration.
 
 ## Next round
 
-1. Create the bounded replacement commit, push once, require fresh hosted
-   exact-SHA checks, and integrate through the normal protected path.
+1. Integrate the twelve bounded review corrections, run the focused and full
+   local wall, push once, require fresh hosted exact-SHA checks, resolve only
+   demonstrably addressed conversations, and integrate through the normal
+   protected path.
 2. Run the recorded VoiceOver/TalkBack, background, BLE, notification, haptic,
    battery, and memory-pressure matrix on representative signed physical builds.
 

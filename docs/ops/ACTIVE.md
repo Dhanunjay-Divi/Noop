@@ -99,7 +99,7 @@ The GCP source remains default-off: public ingress, attestation, external abuse
 control, operator access, monitoring, legal retention, and physical-device
 background/cellular evidence are still launch gates.
 
-The exact local wall passes on the current source: `WhoopStore` 488 tests;
+The exact local wall passes on hosted head `0aa7c86c`: `WhoopStore` 488 tests;
 `NoopRemoteSync` 127; `StrandAnalytics` 1,479; Apple app 1,919 with one external
 Xiaomi-fixture skip; iPhone UI 39 with one intentional private-pilot skip and
 zero failures; Android Full and Demo unit suites plus both lint variants, APK
@@ -128,7 +128,14 @@ on physical devices. The two focused cases pass together, and the complete
 exact-current-tree iPhone suite passes 39 tests with one intentional
 private-pilot skip and zero failures. Its Today-scroll sample averaged 5.286
 seconds, 0.157 seconds CPU, and about 38.9 MB peak physical memory. A fresh
-hosted exact-SHA verdict is still required.
+hosted exact-SHA matrix then passed all 35 executed checks with three
+intentional skips. Protected integration remains withheld because twelve
+actionable review threads cover hydration correctness, body-profile
+confirmation, feedback retry, Android startup and restore failure handling,
+analysis progress, Trends timeout cancellation, Safety migration
+compatibility, feedback retention, and account-scoped sync generation. Those
+findings are being corrected and will receive a focused and complete local
+wall plus one consolidated replacement hosted run before merge.
 
 The exact iPhone visual matrix contains eleven nonblank states. Normal and
 accessibility collapsed-planned-workout states were manually checked for
