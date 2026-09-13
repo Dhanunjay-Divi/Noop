@@ -537,7 +537,7 @@ actor FeedbackUploadCoordinator {
     private let apiDelegate: FeedbackNoRedirectDelegate
     private let apiSession: URLSession
     private let backgroundSession: URLSession
-    private var started = false
+    private var startupRecoveryGate = FeedbackStartupRecoveryGate()
     private var pumping = Set<UUID>()
     private var activeUploadIDs = Set<UUID>()
     private var retryTasks: [UUID: Task<Void, Never>] = [:]
@@ -583,28 +583,36 @@ actor FeedbackUploadCoordinator {
     }
 
     func start() async {
-        guard !started else { return }
-        started = true
+        guard startupRecoveryGate.requestStart() else { return }
 
         #if DEBUG
         if Self.holdsDemoReportsQueued {
+            startupRecoveryGate.complete()
             try? await outbox.removeAllForUITesting()
             notifyChange()
             return
         }
         #endif
 
-        let records: [FeedbackOutboxRecord]
-        do {
-            records = try await outbox.recover()
-        } catch {
-            FeedbackDiagnostics.record(
-                state: .failed,
-                outcome: .failed,
-                failureKind: .archiveIntegrity
-            )
-            return
+        var recoveredRecords: [FeedbackOutboxRecord]?
+        while recoveredRecords == nil {
+            do {
+                recoveredRecords = try await outbox.recover()
+                startupRecoveryGate.complete()
+            } catch {
+                let retryImmediately = startupRecoveryGate.recoveryFailed()
+                FeedbackDiagnostics.record(
+                    state: .retryScheduled,
+                    outcome: .deferred,
+                    failureKind: .interrupted
+                )
+                guard retryImmediately,
+                      startupRecoveryGate.requestStart() else {
+                    return
+                }
+            }
         }
+        guard let records = recoveredRecords else { return }
 
         let tasks = await allBackgroundTasks()
         let recordsByID = Dictionary(

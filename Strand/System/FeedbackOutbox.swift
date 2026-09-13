@@ -206,6 +206,43 @@ struct FeedbackBackgroundCompletionGate {
     }
 }
 
+struct FeedbackStartupRecoveryGate {
+    private enum Phase {
+        case idle
+        case recovering
+        case started
+    }
+
+    private var phase = Phase.idle
+    private var retryRequested = false
+
+    mutating func requestStart() -> Bool {
+        switch phase {
+        case .idle:
+            phase = .recovering
+            return true
+        case .recovering:
+            retryRequested = true
+            return false
+        case .started:
+            return false
+        }
+    }
+
+    mutating func complete() {
+        guard phase == .recovering else { return }
+        phase = .started
+        retryRequested = false
+    }
+
+    mutating func recoveryFailed() -> Bool {
+        guard phase == .recovering else { return false }
+        phase = .idle
+        defer { retryRequested = false }
+        return retryRequested
+    }
+}
+
 enum FeedbackUploadStartPolicy {
     static func permitsResume(_ record: FeedbackOutboxRecord) -> Bool {
         record.state == .uploading

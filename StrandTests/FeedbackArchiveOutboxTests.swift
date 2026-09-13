@@ -1122,6 +1122,97 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
         )
     }
 
+    func testStartupRecoveryRetriesReadFailureAndPreservesOrphanUpload() async throws {
+        let root = temporaryDirectory("feedback-startup-retry")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await outbox.storeReservation(
+            id: source.id,
+            reportID: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            reportToken: String(repeating: "a", count: 40),
+            upload: nil,
+            retainedUntil: created.addingTimeInterval(86_400),
+            now: created.addingTimeInterval(2)
+        )
+        let uploading = try await outbox.markUploading(
+            id: source.id,
+            now: created.addingTimeInterval(3)
+        )
+        XCTAssertTrue(FeedbackUploadStartPolicy.permitsResume(uploading))
+
+        let stateURL = root
+            .appendingPathComponent(source.id.uuidString, isDirectory: true)
+            .appendingPathComponent("state.json")
+        let stateData = try Data(contentsOf: stateURL)
+        try FileManager.default.removeItem(at: stateURL)
+        try FileManager.default.createDirectory(
+            at: stateURL,
+            withIntermediateDirectories: false
+        )
+
+        var gate = FeedbackStartupRecoveryGate()
+        XCTAssertTrue(gate.requestStart())
+        do {
+            _ = try await outbox.recover(now: created.addingTimeInterval(4))
+            XCTFail("Protected-data or state-read failure must defer startup.")
+        } catch {
+            XCTAssertEqual(error as? FeedbackOutboxError, .persistence)
+            XCTAssertFalse(gate.recoveryFailed())
+        }
+
+        try FileManager.default.removeItem(at: stateURL)
+        try stateData.write(to: stateURL, options: .atomic)
+
+        XCTAssertTrue(gate.requestStart(), "Foreground/unlock must retry recovery.")
+        let recovered = try await outbox.recover(
+            now: created.addingTimeInterval(5)
+        )
+        gate.complete()
+
+        let orphan = try XCTUnwrap(recovered.first)
+        XCTAssertEqual(orphan.id, source.id)
+        XCTAssertEqual(orphan.state, .uploading)
+        XCTAssertTrue(FeedbackUploadStartPolicy.permitsResume(orphan))
+        XCTAssertFalse(gate.requestStart(), "Successful startup remains idempotent.")
+        XCTAssertEqual(
+            FeedbackDiagnostics.fields(
+                state: .retryScheduled,
+                outcome: .deferred,
+                failureKind: .interrupted
+            ),
+            [
+                "failure_kind": "interrupted",
+                "outcome": "deferred",
+                "state": "retry_scheduled",
+            ]
+        )
+    }
+
+    func testStartupRecoveryCoalescesUnlockWhileReadIsInFlight() {
+        var gate = FeedbackStartupRecoveryGate()
+
+        XCTAssertTrue(gate.requestStart())
+        XCTAssertFalse(gate.requestStart())
+        XCTAssertTrue(
+            gate.recoveryFailed(),
+            "An unlock request arriving during recovery must trigger one retry."
+        )
+        XCTAssertTrue(gate.requestStart())
+        gate.complete()
+        XCTAssertFalse(gate.requestStart())
+    }
+
     func testCorruptedArchiveNeverRecoversAsUploadable() async throws {
         let root = temporaryDirectory("feedback-integrity")
         defer { try? FileManager.default.removeItem(at: root) }
