@@ -2,6 +2,7 @@ package com.noop.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.noop.AppDiagnosticsRecorder
 import com.noop.alarm.SmartAlarmStore
 import com.noop.alarm.WindDownScheduler
 import com.noop.alarm.WindDownStore
@@ -489,7 +490,18 @@ object BackupSettingsBridge {
         val appContext = context.applicationContext
         AppearancePrefs.load(appContext)
         ChartStylePrefs.load(appContext)
-        runCatching { HydrationReminderScheduler.reconcile(appContext) }
+        try {
+            HydrationReminderScheduler.reconcile(appContext)
+        } catch (failure: Exception) {
+            AppDiagnosticsRecorder.record(
+                "database.restore_reconcile",
+                fields = mapOf(
+                    "outcome" to "failed",
+                    "component" to "hydration",
+                ),
+            )
+            throw IOException("Restored hydration reminders could not be reconciled.", failure)
+        }
         val windDownPrefs = appContext.getSharedPreferences(
             "noop_wind_down",
             Context.MODE_PRIVATE,
@@ -503,13 +515,28 @@ object BackupSettingsBridge {
                 ),
             )
         }
-        runCatching {
+        try {
             WindDownScheduler.reconcilePersisted(appContext, windDown)
-        }.onFailure {
+        } catch (failure: Exception) {
             if (!windDown.setEnabledDurably(false)) {
-                throw IOException("Restored wind-down state could not be disabled durably.")
+                throw IOException(
+                    "Restored wind-down state could not be disabled durably.",
+                    failure,
+                )
             }
-            WindDownScheduler.cancel(appContext)
+            try {
+                WindDownScheduler.cancel(appContext)
+            } catch (cancelFailure: Exception) {
+                failure.addSuppressed(cancelFailure)
+                throw IOException("Restored wind-down schedule could not be reconciled.", failure)
+            }
+            AppDiagnosticsRecorder.record(
+                "database.restore_reconcile",
+                fields = mapOf(
+                    "outcome" to "disabled",
+                    "component" to "wind_down",
+                ),
+            )
         }
     }
 

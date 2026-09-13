@@ -22,7 +22,7 @@ object PendingDatabaseRestore {
     private const val ROLLBACK_SUFFIX = ".restore-rollback"
     private const val MARKER_SUFFIX = ".restore-state"
 
-    enum class Phase { PENDING, APPLYING, APPLIED }
+    enum class Phase { PENDING, APPLYING, APPLIED, COMMITTED }
     data class Preparation(
         val applied: Boolean,
         val hadPreviousDatabase: Boolean,
@@ -30,7 +30,23 @@ object PendingDatabaseRestore {
         val liveFileIdentity: String? = null,
     )
 
-    internal enum class ResumeAction { APPLY_CANDIDATE, ACCEPT_LIVE, ROLLBACK, NONE }
+    internal enum class ResumeAction {
+        APPLY_CANDIDATE,
+        ACCEPT_LIVE,
+        CLEANUP_COMMITTED,
+        ROLLBACK,
+        NONE,
+    }
+
+    /**
+     * The replacement database has already passed Room's open/migration checks. A failure after that
+     * point must leave it in place and retry finalization; rolling the database back could pair the
+     * previous history with partially committed restored profile or reminder settings.
+     */
+    internal class FinalizationPendingException(
+        val failureKind: String,
+        cause: Throwable,
+    ) : IOException("Restore finalization remains pending.", cause)
 
     internal fun resumeAction(
         phase: Phase?,
@@ -47,8 +63,12 @@ object PendingDatabaseRestore {
         }
         Phase.APPLIED -> if (liveMatchesCandidate) ResumeAction.ACCEPT_LIVE
             else if (rollbackExists) ResumeAction.ROLLBACK else ResumeAction.NONE
+        Phase.COMMITTED -> ResumeAction.CLEANUP_COMMITTED
         null -> ResumeAction.NONE
     }
+
+    internal fun shouldRollbackDatabaseAfterOpenFailure(failure: Throwable): Boolean =
+        failure !is FinalizationPendingException
 
     @Synchronized
     @Throws(IOException::class)
@@ -87,20 +107,29 @@ object PendingDatabaseRestore {
             // Orphans can only come from a killed/failed stage before the marker's atomic publish.
             files.candidate.delete()
             files.settings.delete()
+            files.rollback.delete()
             return Preparation(false, files.db.exists())
         }
-        val marker = readMarker(files.marker) ?: return Preparation(false, false)
+        val marker = readMarker(files.marker)
+            ?: throw IOException("The pending restore state is unreadable; current data was not changed.")
         val liveMatches = files.db.exists() && runCatching { sha256(files.db) == marker.sha256 }.getOrDefault(false)
         return when (resumeAction(marker.phase, files.candidate.exists(), liveMatches, files.rollback.exists())) {
             ResumeAction.NONE -> {
-                cleanupStaging(files, keepRollback = true)
-                Preparation(false, files.db.exists())
+                if (marker.phase != Phase.PENDING) {
+                    throw IOException("A prior restore is incomplete and cannot be resumed safely.")
+                }
+                cleanupStaging(files, keepRollback = false)
+                Preparation(applied = false, hadPreviousDatabase = files.db.exists())
             }
             ResumeAction.ROLLBACK -> {
                 if (!rollbackFiles(files)) {
                     throw IOException("A prior restore was interrupted and the previous database could not be restored.")
                 }
                 Preparation(false, files.db.exists())
+            }
+            ResumeAction.CLEANUP_COMMITTED -> {
+                recordCommittedCleanup(cleanupCommitted(files))
+                Preparation(applied = false, hadPreviousDatabase = files.db.exists())
             }
             ResumeAction.ACCEPT_LIVE -> {
                 if (marker.phase != Phase.APPLIED) writeMarker(files.marker, marker.copy(phase = Phase.APPLIED))
@@ -115,41 +144,66 @@ object PendingDatabaseRestore {
     fun confirmOpened(context: Context) {
         val files = Fileset(context)
         val marker = readMarker(files.marker) ?: return
+        if (marker.phase == Phase.COMMITTED) {
+            recordCommittedCleanup(cleanupCommitted(files))
+            return
+        }
         if (marker.phase != Phase.APPLIED) return
         val appContext = context.applicationContext
-        try {
-            completeConfirmedRestore(
-                hasSettings = marker.hasSettings,
-                settingsExists = files.settings.exists(),
-                persistPreferences = {
-                    BackupSettingsBridge.applyRestoreDurably(
-                        appContext,
-                        files.settings.takeIf { marker.hasSettings }?.readText(),
-                    )
-                },
-                reconcile = {
-                    // Preference mirrors and OS schedulers may already have been initialized earlier
-                    // in this launch. Reconcile only after every restored value is durable.
-                    BackupSettingsBridge.reconcileAfterRestore(appContext)
-                },
-                persistCompletion = {
-                    val committed = com.noop.ui.NoopPrefs.of(appContext).edit()
-                        .putLong("backup.lastRestoreAt", System.currentTimeMillis() / 1000L)
-                        .commit()
-                    if (!committed) throw IOException("Restore completion could not be persisted.")
-                },
-                cleanup = {
-                    cleanupStaging(files, keepRollback = false)
-                },
-            )
-        } catch (error: Exception) {
+        if (marker.hasSettings && !files.settings.exists()) {
             com.noop.AppDiagnosticsRecorder.record(
                 "database.restore_settings",
                 fields = mapOf(
                     "outcome" to "failed",
-                    "failure_kind" to "durability_or_finalize",
+                    "failure_kind" to "settings_missing",
                 ),
             )
+            // No preference write has happened, so the database can still be rolled back safely.
+            throw IOException("Staged restore settings are missing.")
+        }
+        try {
+            val cleanupComplete = completeConfirmedRestore(
+                hasSettings = marker.hasSettings,
+                settingsExists = files.settings.exists(),
+                persistPreferences = {
+                    finalizationStage("preferences_commit") {
+                        BackupSettingsBridge.applyRestoreDurably(
+                            appContext,
+                            files.settings.takeIf { marker.hasSettings }?.readText(),
+                        )
+                    }
+                },
+                reconcile = {
+                    // Preference mirrors and OS schedulers may already have been initialized earlier
+                    // in this launch. Reconcile only after every restored value is durable.
+                    finalizationStage("schedule_reconcile") {
+                        BackupSettingsBridge.reconcileAfterRestore(appContext)
+                    }
+                },
+                persistCompletion = {
+                    finalizationStage("completion_commit") {
+                        val committed = com.noop.ui.NoopPrefs.of(appContext).edit()
+                            .putLong("backup.lastRestoreAt", System.currentTimeMillis() / 1000L)
+                            .commit()
+                        if (!committed) {
+                            throw IOException("Restore completion could not be persisted.")
+                        }
+                    }
+                },
+                persistAccepted = {
+                    finalizationStage("accept_marker") {
+                        // This state is the durable point of no return. Cleanup may be retried after a
+                        // process death, but the accepted database must never be rolled back again.
+                        writeMarker(files.marker, marker.copy(phase = Phase.COMMITTED))
+                    }
+                },
+                cleanup = {
+                    cleanupCommitted(files)
+                },
+            )
+            recordCommittedCleanup(cleanupComplete)
+        } catch (error: FinalizationPendingException) {
+            recordFinalizationFailure(error)
             throw error
         }
     }
@@ -160,15 +214,29 @@ object PendingDatabaseRestore {
         persistPreferences: () -> Unit,
         reconcile: () -> Unit,
         persistCompletion: () -> Unit,
-        cleanup: () -> Unit,
-    ) {
+        persistAccepted: () -> Unit,
+        cleanup: () -> Boolean,
+    ): Boolean {
         if (hasSettings && !settingsExists) {
             throw IOException("Staged restore settings are missing.")
         }
         persistPreferences()
         reconcile()
         persistCompletion()
-        cleanup()
+        persistAccepted()
+        return cleanup()
+    }
+
+    internal fun cleanupCommittedRestore(
+        deleteRollback: () -> Boolean,
+        deleteCandidate: () -> Boolean,
+        deleteSettings: () -> Boolean,
+        deleteMarker: () -> Boolean,
+    ): Boolean {
+        if (!deleteRollback()) return false
+        if (!deleteCandidate()) return false
+        if (!deleteSettings()) return false
+        return deleteMarker()
     }
 
     fun stillSameAppliedFile(context: Context, preparation: Preparation): Boolean {
@@ -269,6 +337,47 @@ object PendingDatabaseRestore {
         files.settings.delete()
         files.marker.delete()
         if (!keepRollback) files.rollback.delete()
+    }
+
+    private fun cleanupCommitted(files: Fileset): Boolean =
+        cleanupCommittedRestore(
+            deleteRollback = { deleteIfPresent(files.rollback) },
+            deleteCandidate = { deleteIfPresent(files.candidate) },
+            deleteSettings = { deleteIfPresent(files.settings) },
+            // The marker is deliberately last. If an earlier deletion fails, the next cold open sees
+            // COMMITTED and retries cleanup without ever attempting database rollback.
+            deleteMarker = { deleteIfPresent(files.marker) },
+        )
+
+    private fun deleteIfPresent(file: File): Boolean = !file.exists() || file.delete()
+
+    private inline fun finalizationStage(kind: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (failure: FinalizationPendingException) {
+            throw failure
+        } catch (failure: Exception) {
+            throw FinalizationPendingException(kind, failure)
+        }
+    }
+
+    private fun recordFinalizationFailure(failure: FinalizationPendingException) {
+        com.noop.AppDiagnosticsRecorder.record(
+            "database.restore_settings",
+            fields = mapOf(
+                "outcome" to "retry_pending",
+                "failure_kind" to failure.failureKind,
+            ),
+        )
+    }
+
+    private fun recordCommittedCleanup(complete: Boolean) {
+        com.noop.AppDiagnosticsRecorder.record(
+            "database.restore_settings",
+            fields = mapOf(
+                "outcome" to if (complete) "completed" else "cleanup_pending",
+            ),
+        )
     }
 
     private fun deleteLiveSidecars(db: File) {

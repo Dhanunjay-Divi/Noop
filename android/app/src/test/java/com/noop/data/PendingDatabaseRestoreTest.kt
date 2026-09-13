@@ -48,6 +48,27 @@ class PendingDatabaseRestoreTest {
         )
     }
 
+    @Test fun committedRestoreOnlyRetriesCleanup() {
+        assertEquals(
+            PendingDatabaseRestore.ResumeAction.CLEANUP_COMMITTED,
+            PendingDatabaseRestore.resumeAction(
+                PendingDatabaseRestore.Phase.COMMITTED,
+                candidateExists = false,
+                liveMatchesCandidate = true,
+                rollbackExists = true,
+            ),
+        )
+        assertEquals(
+            PendingDatabaseRestore.ResumeAction.CLEANUP_COMMITTED,
+            PendingDatabaseRestore.resumeAction(
+                PendingDatabaseRestore.Phase.COMMITTED,
+                candidateExists = false,
+                liveMatchesCandidate = false,
+                rollbackExists = false,
+            ),
+        )
+    }
+
     @Test fun missingCandidateRollsBackOnlyWhenSafeCopyExists() {
         assertEquals(
             PendingDatabaseRestore.ResumeAction.ROLLBACK,
@@ -99,7 +120,11 @@ class PendingDatabaseRestoreTest {
                 persistPreferences = { events += "persist" },
                 reconcile = { events += "reconcile" },
                 persistCompletion = { events += "completion" },
-                cleanup = { events += "cleanup" },
+                persistAccepted = { events += "accepted" },
+                cleanup = {
+                    events += "cleanup"
+                    true
+                },
             )
         }
 
@@ -126,7 +151,11 @@ class PendingDatabaseRestoreTest {
                 },
                 reconcile = { events += "reconcile" },
                 persistCompletion = { events += "completion" },
-                cleanup = { events += "cleanup" },
+                persistAccepted = { events += "accepted" },
+                cleanup = {
+                    events += "cleanup"
+                    true
+                },
             )
         }
 
@@ -151,14 +180,19 @@ class PendingDatabaseRestoreTest {
                 assertEquals(listOf("persist", "reconcile"), events)
                 events += "completion"
             },
-            cleanup = {
+            persistAccepted = {
                 assertEquals(listOf("persist", "reconcile", "completion"), events)
+                events += "accepted"
+            },
+            cleanup = {
+                assertEquals(listOf("persist", "reconcile", "completion", "accepted"), events)
                 events += "cleanup"
+                true
             },
         )
 
         assertEquals(
-            listOf("persist", "reconcile", "completion", "cleanup"),
+            listOf("persist", "reconcile", "completion", "accepted", "cleanup"),
             events,
         )
     }
@@ -177,11 +211,104 @@ class PendingDatabaseRestoreTest {
                     throw expected
                 },
                 persistCompletion = { events += "completion" },
-                cleanup = { events += "cleanup" },
+                persistAccepted = { events += "accepted" },
+                cleanup = {
+                    events += "cleanup"
+                    true
+                },
             )
         }
 
         assertSame(expected, thrown)
         assertEquals(listOf("persist", "reconcile"), events)
+    }
+
+    @Test fun finalizationFailureNeverRollsBackValidatedDatabase() {
+        val failure = PendingDatabaseRestore.FinalizationPendingException(
+            failureKind = "preferences_commit",
+            cause = IOException("commit failed"),
+        )
+
+        assertFalse(PendingDatabaseRestore.shouldRollbackDatabaseAfterOpenFailure(failure))
+        assertTrue(
+            PendingDatabaseRestore.shouldRollbackDatabaseAfterOpenFailure(
+                IOException("Room open failed"),
+            ),
+        )
+    }
+
+    @Test fun acceptedCleanupDeletesRollbackFirstAndMarkerLast() {
+        val events = mutableListOf<String>()
+
+        val complete = PendingDatabaseRestore.cleanupCommittedRestore(
+            deleteRollback = {
+                events += "rollback"
+                true
+            },
+            deleteCandidate = {
+                events += "candidate"
+                true
+            },
+            deleteSettings = {
+                events += "settings"
+                true
+            },
+            deleteMarker = {
+                events += "marker"
+                true
+            },
+        )
+
+        assertTrue(complete)
+        assertEquals(listOf("rollback", "candidate", "settings", "marker"), events)
+    }
+
+    @Test fun failedAcceptedCleanupLeavesMarkerForNextColdOpen() {
+        val events = mutableListOf<String>()
+
+        val complete = PendingDatabaseRestore.cleanupCommittedRestore(
+            deleteRollback = {
+                events += "rollback"
+                false
+            },
+            deleteCandidate = {
+                events += "candidate"
+                true
+            },
+            deleteSettings = {
+                events += "settings"
+                true
+            },
+            deleteMarker = {
+                events += "marker"
+                true
+            },
+        )
+
+        assertFalse(complete)
+        assertEquals(listOf("rollback"), events)
+    }
+
+    @Test fun acceptedMarkerPersistsEvenWhenCleanupMustRetry() {
+        val events = mutableListOf<String>()
+
+        val cleanupComplete = PendingDatabaseRestore.completeConfirmedRestore(
+            hasSettings = true,
+            settingsExists = true,
+            persistPreferences = { events += "persist" },
+            reconcile = { events += "reconcile" },
+            persistCompletion = { events += "completion" },
+            persistAccepted = { events += "accepted" },
+            cleanup = {
+                events += "cleanup"
+                false
+            },
+        )
+
+        assertFalse(cleanupComplete)
+        assertEquals(
+            listOf("persist", "reconcile", "completion", "accepted", "cleanup"),
+            events,
+        )
     }
 }
