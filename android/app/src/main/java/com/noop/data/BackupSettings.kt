@@ -2,6 +2,7 @@ package com.noop.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.noop.alarm.SmartAlarmStore
 import com.noop.alarm.WindDownScheduler
 import com.noop.alarm.WindDownStore
 import com.noop.notif.HydrationReminderScheduler
@@ -10,7 +11,9 @@ import com.noop.ui.ChartStylePrefs
 import com.noop.ui.NoopPrefs
 import com.noop.ui.ProfileStore
 import com.noop.ui.UnitPrefs
+import java.io.IOException
 import java.time.LocalDate
+import java.time.ZoneId
 import org.json.JSONObject
 
 /**
@@ -267,6 +270,26 @@ object BackupSettingsCodec {
  *    feature-owned preference files below.
  */
 object BackupSettingsBridge {
+    private const val PROFILE_PREFS = "noop_profile"
+    private const val PROFILE_DOB = "date_of_birth"
+    private const val PROFILE_AGE = "age"
+    private const val PROFILE_SEX = "sex"
+    private const val PROFILE_AGE_CONFIRMED = "age_input_confirmed"
+    private const val PROFILE_SEX_CONFIRMED = "sex_input_confirmed"
+    private const val PROFILE_WEIGHT = "weight_kg"
+    private const val PROFILE_WEIGHT_CONFIRMED = "weight_input_confirmed"
+    private const val PROFILE_TARGET_WEIGHT = "target_weight_kg"
+    private const val PROFILE_HEIGHT = "height_cm"
+    private const val PROFILE_HEIGHT_CONFIRMED = "height_input_confirmed"
+    private const val PROFILE_WAIST = "waist_cm"
+    private const val PROFILE_HR_MAX = "hr_max_override"
+    private const val PROFILE_FITNESS_AGE_PROVENANCE_REQUIRED =
+        "fitness_age_provenance_required"
+    private const val PROFILE_VO2_MAX_PROVENANCE_REQUIRED =
+        "vo2max_provenance_required"
+    private const val PROFILE_VITALITY_PROVENANCE_REQUIRED =
+        "vitality_provenance_required"
+
     private val NOOP_PREFS_KEYS = linkedMapOf(
         "units.system" to NoopPrefs.KEY_UNIT_SYSTEM,
         "units.mass" to NoopPrefs.KEY_MASS_UNIT,
@@ -330,6 +353,15 @@ object BackupSettingsBridge {
             addAll(WIND_DOWN_KEYS.keys)
         }
 
+    internal data class RestorePreferenceTargets(
+        val profile: SharedPreferences,
+        val noop: SharedPreferences,
+        val notifications: SharedPreferences,
+        val inactivity: SharedPreferences,
+        val hydrationReminders: SharedPreferences,
+        val windDown: SharedPreferences,
+    )
+
     /** The whitelisted, user-SET settings of this device as the `settings.json` string, or null. */
     fun snapshotJson(context: Context): String? {
         val values = LinkedHashMap<String, Any>()
@@ -359,12 +391,7 @@ object BackupSettingsBridge {
         return BackupSettingsCodec.encode(values)
     }
 
-    /**
-     * Re-apply a restored `settings.json` to this device. The caller ([DataBackup.importFrom]) invokes
-     * this only AFTER the DB swap succeeded — never on a failed or rolled-back restore. Keys absent
-     * from the payload leave the device's current values alone; the profile setters clamp to their
-     * normal ranges, so a hand-edited payload can't write absurd values.
-     */
+    /** Apply a validated live-sync payload. Database restore uses [applyRestoreDurably] instead. */
     fun apply(context: Context, json: String) {
         val values = BackupSettingsCodec.decode(json)
         if (values.isEmpty()) return
@@ -392,25 +419,69 @@ object BackupSettingsBridge {
         )
     }
 
+    /**
+     * Restore-only persistence boundary. Every preference file is changed with one synchronous
+     * [SharedPreferences.Editor.commit] batch. A false return fails the restore before its rollback
+     * database or staging files can be discarded.
+     */
+    @Throws(IOException::class)
+    fun applyRestoreDurably(context: Context, json: String?) {
+        val appContext = context.applicationContext
+        applyRestoreValuesDurably(
+            targets = RestorePreferenceTargets(
+                profile = appContext.getSharedPreferences(PROFILE_PREFS, Context.MODE_PRIVATE),
+                noop = NoopPrefs.of(appContext),
+                notifications = appContext.getSharedPreferences(
+                    "noop_notif_prefs",
+                    Context.MODE_PRIVATE,
+                ),
+                inactivity = appContext.getSharedPreferences(
+                    "noop_inactivity_prefs",
+                    Context.MODE_PRIVATE,
+                ),
+                hydrationReminders = appContext.getSharedPreferences(
+                    "noop_hydration_reminders",
+                    Context.MODE_PRIVATE,
+                ),
+                windDown = appContext.getSharedPreferences(
+                    "noop_wind_down",
+                    Context.MODE_PRIVATE,
+                ),
+            ),
+            values = json?.let(BackupSettingsCodec::decode).orEmpty(),
+        )
+    }
+
+    @Throws(IOException::class)
+    internal fun applyRestoreValuesDurably(
+        targets: RestorePreferenceTargets,
+        values: Map<String, Any>,
+    ) {
+        commitProfileRestore(targets.profile, values)
+        commitMappedRestore(targets.noop, NOOP_PREFS_KEYS, values)
+        commitMappedRestore(targets.notifications, NOTIFICATION_KEYS, values)
+        commitMappedRestore(targets.inactivity, INACTIVITY_KEYS, values)
+        commitMappedRestore(targets.hydrationReminders, HYDRATION_REMINDER_KEYS, values)
+
+        // Recovery minutes are derived from current evidence and must never survive a database
+        // restore. Remove them in the same durable batch as restored wind-down preferences.
+        val windDownEditor = targets.windDown.edit()
+        writeMapped(windDownEditor, WIND_DOWN_KEYS, values)
+        windDownEditor.remove(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY)
+        commitOrThrow(windDownEditor)
+    }
+
     internal fun applyWindDownSettings(
         prefs: SharedPreferences,
         values: Map<String, Any>,
         clearDerivedPlannerState: Boolean = false,
     ) {
-        apply(prefs, WIND_DOWN_KEYS, values)
+        val editor = prefs.edit()
+        writeMapped(editor, WIND_DOWN_KEYS, values)
         if (clearDerivedPlannerState) {
-            clearDerivedPlannerState(prefs)
+            editor.remove(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY)
         }
-    }
-
-    fun clearDerivedPlannerState(context: Context) {
-        clearDerivedPlannerState(
-            context.getSharedPreferences("noop_wind_down", Context.MODE_PRIVATE),
-        )
-    }
-
-    internal fun clearDerivedPlannerState(prefs: SharedPreferences) {
-        prefs.edit().remove(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY).apply()
+        editor.apply()
     }
 
     /** Refresh process mirrors and OS schedules after settings were committed with the restored DB. */
@@ -419,11 +490,25 @@ object BackupSettingsBridge {
         AppearancePrefs.load(appContext)
         ChartStylePrefs.load(appContext)
         runCatching { HydrationReminderScheduler.reconcile(appContext) }
+        val windDownPrefs = appContext.getSharedPreferences(
+            "noop_wind_down",
+            Context.MODE_PRIVATE,
+        )
+        val windDown = WindDownStore(windDownPrefs)
+        if (!windDown.hasExplicitWakeMinutes) {
+            commitOrThrow(
+                windDownPrefs.edit().putInt(
+                    WIND_DOWN_KEYS.getValue("sleepPlanner.wakeMinutes"),
+                    SmartAlarmStore.from(appContext).targetMinutes,
+                ),
+            )
+        }
         runCatching {
-            val windDown = WindDownStore.from(appContext)
             WindDownScheduler.reconcilePersisted(appContext, windDown)
         }.onFailure {
-            WindDownStore.from(appContext).enabled = false
+            if (!windDown.setEnabledDurably(false)) {
+                throw IOException("Restored wind-down state could not be disabled durably.")
+            }
             WindDownScheduler.cancel(appContext)
         }
     }
@@ -446,16 +531,114 @@ object BackupSettingsBridge {
         values: Map<String, Any>,
     ) {
         val editor = prefs.edit()
+        writeMapped(editor, mapping, values)
+        editor.apply()
+    }
+
+    private fun writeMapped(
+        editor: SharedPreferences.Editor,
+        mapping: Map<String, String>,
+        values: Map<String, Any>,
+    ): Boolean {
+        var changed = false
         for ((canonical, stored) in mapping) {
             when (val value = values[canonical]) {
-                is Boolean -> editor.putBoolean(stored, value)
-                is Int -> editor.putInt(stored, value)
+                is Boolean -> {
+                    editor.putBoolean(stored, value)
+                    changed = true
+                }
+                is Int -> {
+                    editor.putInt(stored, value)
+                    changed = true
+                }
                 is String -> {
                     if (canonical == "units.temperature" && value.isEmpty()) editor.remove(stored)
                     else editor.putString(stored, value)
+                    changed = true
                 }
             }
         }
-        editor.apply()
+        return changed
+    }
+
+    @Throws(IOException::class)
+    private fun commitMappedRestore(
+        prefs: SharedPreferences,
+        mapping: Map<String, String>,
+        values: Map<String, Any>,
+    ) {
+        val editor = prefs.edit()
+        if (writeMapped(editor, mapping, values)) commitOrThrow(editor)
+    }
+
+    @Throws(IOException::class)
+    private fun commitProfileRestore(
+        prefs: SharedPreferences,
+        values: Map<String, Any>,
+    ) {
+        val editor = prefs.edit()
+        var changed = false
+
+        val restoredDob = (values[BackupSettingsCodec.DATE_OF_BIRTH_KEY] as? String)?.let { raw ->
+            LocalDate.parse(raw)
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        } ?: (values["profile.age"] as? Number)?.let { age ->
+            ProfileStore.dobForAge(age.toInt())
+        }
+        if (restoredDob != null) {
+            editor
+                .putLong(PROFILE_DOB, restoredDob)
+                .putInt(PROFILE_AGE, ProfileStore.yearsFromDob(restoredDob).coerceIn(13, 100))
+                .putBoolean(PROFILE_AGE_CONFIRMED, true)
+                .putBoolean(PROFILE_FITNESS_AGE_PROVENANCE_REQUIRED, true)
+                .putBoolean(PROFILE_VO2_MAX_PROVENANCE_REQUIRED, true)
+                .putBoolean(PROFILE_VITALITY_PROVENANCE_REQUIRED, true)
+            changed = true
+        }
+        (values["profile.sex"] as? String)?.let { sex ->
+            editor
+                .putString(PROFILE_SEX, sex)
+                .putBoolean(PROFILE_SEX_CONFIRMED, true)
+                .putBoolean(PROFILE_FITNESS_AGE_PROVENANCE_REQUIRED, true)
+                .putBoolean(PROFILE_VO2_MAX_PROVENANCE_REQUIRED, true)
+            changed = true
+        }
+        (values["profile.weightKg"] as? Number)?.let { weight ->
+            editor
+                .putFloat(PROFILE_WEIGHT, weight.toFloat())
+                .putBoolean(PROFILE_WEIGHT_CONFIRMED, true)
+            changed = true
+        }
+        (values["profile.targetWeightKg"] as? Number)?.let { target ->
+            editor.putFloat(PROFILE_TARGET_WEIGHT, target.toFloat())
+            changed = true
+        }
+        (values["profile.heightCm"] as? Number)?.let { height ->
+            editor
+                .putFloat(PROFILE_HEIGHT, height.toFloat())
+                .putBoolean(PROFILE_HEIGHT_CONFIRMED, true)
+            changed = true
+        }
+        (values["profile.waistCm"] as? Number)?.let { waist ->
+            editor
+                .putFloat(PROFILE_WAIST, waist.toFloat())
+                .putBoolean(PROFILE_VO2_MAX_PROVENANCE_REQUIRED, true)
+            changed = true
+        }
+        (values["profile.hrMax"] as? Number)?.let { hrMax ->
+            editor.putInt(PROFILE_HR_MAX, hrMax.toInt())
+            changed = true
+        }
+
+        if (changed) commitOrThrow(editor)
+    }
+
+    @Throws(IOException::class)
+    private fun commitOrThrow(editor: SharedPreferences.Editor) {
+        if (!editor.commit()) {
+            throw IOException("Restored preferences could not be committed to durable storage.")
+        }
     }
 }

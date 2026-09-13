@@ -118,14 +118,28 @@ object PendingDatabaseRestore {
         if (marker.phase != Phase.APPLIED) return
         val appContext = context.applicationContext
         try {
-            restorePreferencesAfterConfirmedOpen(
+            completeConfirmedRestore(
                 hasSettings = marker.hasSettings,
                 settingsExists = files.settings.exists(),
-                applySettings = {
-                    BackupSettingsBridge.apply(appContext, files.settings.readText())
+                persistPreferences = {
+                    BackupSettingsBridge.applyRestoreDurably(
+                        appContext,
+                        files.settings.takeIf { marker.hasSettings }?.readText(),
+                    )
                 },
-                clearDerivedPlannerState = {
-                    BackupSettingsBridge.clearDerivedPlannerState(appContext)
+                reconcile = {
+                    // Preference mirrors and OS schedulers may already have been initialized earlier
+                    // in this launch. Reconcile only after every restored value is durable.
+                    BackupSettingsBridge.reconcileAfterRestore(appContext)
+                },
+                persistCompletion = {
+                    val committed = com.noop.ui.NoopPrefs.of(appContext).edit()
+                        .putLong("backup.lastRestoreAt", System.currentTimeMillis() / 1000L)
+                        .commit()
+                    if (!committed) throw IOException("Restore completion could not be persisted.")
+                },
+                cleanup = {
+                    cleanupStaging(files, keepRollback = false)
                 },
             )
         } catch (error: Exception) {
@@ -133,32 +147,28 @@ object PendingDatabaseRestore {
                 "database.restore_settings",
                 fields = mapOf(
                     "outcome" to "failed",
-                    "failure_kind" to error.javaClass.simpleName,
+                    "failure_kind" to "durability_or_finalize",
                 ),
             )
             throw error
         }
-        // Preference mirrors and OS schedulers may already have been initialized earlier in this
-        // launch. Reconcile only after Room accepted the replacement and settings were committed.
-        BackupSettingsBridge.reconcileAfterRestore(appContext)
-        cleanupStaging(files, keepRollback = false)
-        runCatching {
-            com.noop.ui.NoopPrefs.of(appContext).edit()
-                .putLong("backup.lastRestoreAt", System.currentTimeMillis() / 1000L).apply()
-        }
     }
 
-    internal fun restorePreferencesAfterConfirmedOpen(
+    internal fun completeConfirmedRestore(
         hasSettings: Boolean,
         settingsExists: Boolean,
-        applySettings: () -> Unit,
-        clearDerivedPlannerState: () -> Unit,
+        persistPreferences: () -> Unit,
+        reconcile: () -> Unit,
+        persistCompletion: () -> Unit,
+        cleanup: () -> Unit,
     ) {
         if (hasSettings && !settingsExists) {
             throw IOException("Staged restore settings are missing.")
         }
-        clearDerivedPlannerState()
-        if (hasSettings) applySettings()
+        persistPreferences()
+        reconcile()
+        persistCompletion()
+        cleanup()
     }
 
     fun stillSameAppliedFile(context: Context, preparation: Preparation): Boolean {

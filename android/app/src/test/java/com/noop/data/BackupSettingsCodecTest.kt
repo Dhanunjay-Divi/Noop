@@ -3,6 +3,7 @@ package com.noop.data
 import com.noop.alarm.WindDownScheduler
 import com.noop.alarm.WindDownStore
 import com.noop.testing.FakeSharedPreferences
+import com.noop.ui.ProfileStore
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -239,6 +240,66 @@ class BackupSettingsCodecTest {
         val restored = WindDownStore(prefs)
         assertEquals(0, restored.recoveryMinutes)
         assertFalse(prefs.contains("windDown.recoveryMinutes"))
+    }
+
+    @Test fun durableRestoreCommitsEachPreferenceFileAsOneBatch() {
+        fun singleCommitPrefs() = FakeSharedPreferences(commitResults = listOf(true, false))
+
+        val profile = singleCommitPrefs()
+        val noop = singleCommitPrefs()
+        val notifications = singleCommitPrefs()
+        val inactivity = singleCommitPrefs()
+        val hydrationReminders = singleCommitPrefs()
+        val windDown = singleCommitPrefs().also {
+            it.edit()
+                .putInt(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY, 45)
+                .apply()
+        }
+
+        BackupSettingsBridge.applyRestoreValuesDurably(
+            targets = BackupSettingsBridge.RestorePreferenceTargets(
+                profile = profile,
+                noop = noop,
+                notifications = notifications,
+                inactivity = inactivity,
+                hydrationReminders = hydrationReminders,
+                windDown = windDown,
+            ),
+            values = mapOf(
+                "profile.age" to 34,
+                "profile.sex" to "female",
+                "profile.weightKg" to 62.5,
+                "profile.targetWeightKg" to 60.0,
+                "profile.heightCm" to 168.0,
+                "profile.waistCm" to 71.0,
+                "profile.hrMax" to 191,
+                "units.system" to "metric",
+                "notif.masterEnabled" to true,
+                "inactivity.enabled" to true,
+                "hydrationReminders.enabled" to true,
+                "windDown.enabled" to true,
+                "windDown.sleepNeedMinutes" to 8 * 60,
+            ),
+        )
+
+        val restoredProfile = ProfileStore(profile)
+        assertEquals(34, restoredProfile.age)
+        assertEquals("female", restoredProfile.sex)
+        assertEquals(62.5, restoredProfile.weightKg, 0.001)
+        assertEquals(60.0, restoredProfile.targetWeightKg ?: 0.0, 0.001)
+        assertEquals(168.0, restoredProfile.heightCm, 0.001)
+        assertEquals(71.0, restoredProfile.waistCm, 0.001)
+        assertEquals(191, restoredProfile.hrMaxOverride)
+        assertTrue(restoredProfile.ageInputConfirmed)
+        assertTrue(restoredProfile.sexInputConfirmed)
+        assertTrue(restoredProfile.bodyInputsConfirmed)
+        assertEquals("metric", noop.getString("units.system", null))
+        assertTrue(notifications.getBoolean("notif.masterEnabled", false))
+        assertTrue(inactivity.getBoolean("inactivity.enabled", false))
+        assertTrue(hydrationReminders.getBoolean("hydration.reminders.enabled", false))
+        assertTrue(windDown.getBoolean("windDown.enabled", false))
+        assertEquals(8 * 60, windDown.getInt("windDown.sleepNeedMinutes", 0))
+        assertFalse(windDown.contains(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY))
     }
 
     // ── Codec: whitelist + type enforcement ──────────────────────────────────────

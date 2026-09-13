@@ -10,6 +10,22 @@ import org.junit.Test
 import java.io.IOException
 
 class PendingDatabaseRestoreTest {
+    private fun restoreTargets(
+        profile: FakeSharedPreferences = FakeSharedPreferences(),
+        noop: FakeSharedPreferences = FakeSharedPreferences(),
+        notifications: FakeSharedPreferences = FakeSharedPreferences(),
+        inactivity: FakeSharedPreferences = FakeSharedPreferences(),
+        hydrationReminders: FakeSharedPreferences = FakeSharedPreferences(),
+        windDown: FakeSharedPreferences = FakeSharedPreferences(),
+    ) = BackupSettingsBridge.RestorePreferenceTargets(
+        profile = profile,
+        noop = noop,
+        notifications = notifications,
+        inactivity = inactivity,
+        hydrationReminders = hydrationReminders,
+        windDown = windDown,
+    )
+
     @Test fun pendingRequiresCandidate() {
         assertEquals(
             PendingDatabaseRestore.ResumeAction.APPLY_CANDIDATE,
@@ -44,98 +60,128 @@ class PendingDatabaseRestoreTest {
     }
 
     @Test fun databaseOnlyRestoreClearsDerivedPlannerStateAfterConfirmedOpen() {
-        val prefs = FakeSharedPreferences()
+        val prefs = FakeSharedPreferences(commitResults = listOf(true, false))
         prefs.edit()
             .putInt(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY, 45)
-            .commit()
-        var settingsApplied = false
+            .apply()
 
-        PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
-            hasSettings = false,
-            settingsExists = false,
-            applySettings = { settingsApplied = true },
-            clearDerivedPlannerState = {
-                BackupSettingsBridge.clearDerivedPlannerState(prefs)
-            },
+        BackupSettingsBridge.applyRestoreValuesDurably(
+            restoreTargets(windDown = prefs),
+            emptyMap(),
         )
 
-        assertFalse(settingsApplied)
         assertFalse(prefs.contains(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY))
     }
 
     @Test fun settingsRestoreClearsDerivedStateBeforeUnknownOnlyPayloadNoOp() {
-        val prefs = FakeSharedPreferences()
+        val prefs = FakeSharedPreferences(commitResults = listOf(true, false))
         prefs.edit()
             .putInt(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY, 45)
-            .commit()
+            .apply()
         val decoded = BackupSettingsCodec.decode("""{"unknown.setting":true}""")
-        var settingsApplied = false
 
-        PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
-            hasSettings = true,
-            settingsExists = true,
-            applySettings = {
-                settingsApplied = true
-                assertTrue(decoded.isEmpty())
-                assertFalse(prefs.contains(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY))
-            },
-            clearDerivedPlannerState = {
-                BackupSettingsBridge.clearDerivedPlannerState(prefs)
-            },
+        BackupSettingsBridge.applyRestoreValuesDurably(
+            restoreTargets(windDown = prefs),
+            decoded,
         )
 
-        assertTrue(settingsApplied)
+        assertTrue(decoded.isEmpty())
         assertFalse(prefs.contains(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY))
     }
 
     @Test fun declaredSettingsRestoreFailsBeforeChangingPreferencesWhenPayloadIsMissing() {
-        var clearedDerivedState = false
-        var settingsApplied = false
+        val events = mutableListOf<String>()
 
         assertThrows(IOException::class.java) {
-            PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
+            PendingDatabaseRestore.completeConfirmedRestore(
                 hasSettings = true,
                 settingsExists = false,
-                applySettings = { settingsApplied = true },
-                clearDerivedPlannerState = { clearedDerivedState = true },
+                persistPreferences = { events += "persist" },
+                reconcile = { events += "reconcile" },
+                persistCompletion = { events += "completion" },
+                cleanup = { events += "cleanup" },
             )
         }
 
-        assertFalse(clearedDerivedState)
-        assertFalse(settingsApplied)
+        assertTrue(events.isEmpty())
     }
 
-    @Test fun derivedStateClearFailurePropagatesBeforeSettingsApply() {
-        val expected = IllegalStateException("clear failed")
-        var settingsApplied = false
+    @Test fun failedCommitAbortsAcrossProcessBoundaryAndPreservesRollbackCleanup() {
+        val noop = FakeSharedPreferences(
+            commitResult = false,
+            applyFailedCommitsToMemory = true,
+        )
+        val events = mutableListOf<String>()
 
-        val thrown = assertThrows(IllegalStateException::class.java) {
-            PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
+        assertThrows(IOException::class.java) {
+            PendingDatabaseRestore.completeConfirmedRestore(
                 hasSettings = true,
                 settingsExists = true,
-                applySettings = { settingsApplied = true },
-                clearDerivedPlannerState = { throw expected },
+                persistPreferences = {
+                    events += "persist"
+                    BackupSettingsBridge.applyRestoreValuesDurably(
+                        restoreTargets(noop = noop),
+                        mapOf("units.system" to "metric"),
+                    )
+                },
+                reconcile = { events += "reconcile" },
+                persistCompletion = { events += "completion" },
+                cleanup = { events += "cleanup" },
+            )
+        }
+
+        // A failed SharedPreferences commit may already be visible in this process. It is still not
+        // durable, so the restore must fail and leave the database rollback/staging files untouched.
+        assertEquals("metric", noop.getString("units.system", null))
+        assertEquals(listOf("persist"), events)
+    }
+
+    @Test fun successfulRestoreCleansUpOnlyAfterDurabilityAndReconciliation() {
+        val events = mutableListOf<String>()
+
+        PendingDatabaseRestore.completeConfirmedRestore(
+            hasSettings = true,
+            settingsExists = true,
+            persistPreferences = { events += "persist" },
+            reconcile = {
+                assertEquals(listOf("persist"), events)
+                events += "reconcile"
+            },
+            persistCompletion = {
+                assertEquals(listOf("persist", "reconcile"), events)
+                events += "completion"
+            },
+            cleanup = {
+                assertEquals(listOf("persist", "reconcile", "completion"), events)
+                events += "cleanup"
+            },
+        )
+
+        assertEquals(
+            listOf("persist", "reconcile", "completion", "cleanup"),
+            events,
+        )
+    }
+
+    @Test fun reconciliationFailurePropagatesBeforeCompletionOrCleanup() {
+        val expected = IllegalStateException("reconcile failed")
+        val events = mutableListOf<String>()
+
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            PendingDatabaseRestore.completeConfirmedRestore(
+                hasSettings = true,
+                settingsExists = true,
+                persistPreferences = { events += "persist" },
+                reconcile = {
+                    events += "reconcile"
+                    throw expected
+                },
+                persistCompletion = { events += "completion" },
+                cleanup = { events += "cleanup" },
             )
         }
 
         assertSame(expected, thrown)
-        assertFalse(settingsApplied)
-    }
-
-    @Test fun settingsApplyFailurePropagatesAfterDerivedStateClear() {
-        val expected = IllegalStateException("apply failed")
-        var clearedDerivedState = false
-
-        val thrown = assertThrows(IllegalStateException::class.java) {
-            PendingDatabaseRestore.restorePreferencesAfterConfirmedOpen(
-                hasSettings = true,
-                settingsExists = true,
-                applySettings = { throw expected },
-                clearDerivedPlannerState = { clearedDerivedState = true },
-            )
-        }
-
-        assertSame(expected, thrown)
-        assertTrue(clearedDerivedState)
+        assertEquals(listOf("persist", "reconcile"), events)
     }
 }
