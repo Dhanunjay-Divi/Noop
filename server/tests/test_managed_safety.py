@@ -1234,6 +1234,7 @@ async def test_safety_incident_creation_has_durable_owner_quota() -> None:
                 principal=owner,
                 request=ManagedSafetyIncidentCreate(
                     request_id=request_id,
+                    trigger="band_sos" if index == 0 else "manual_sos",
                     duration_hours=8,
                     share_location=False,
                 ),
@@ -1279,6 +1280,21 @@ async def test_safety_incident_creation_has_durable_owner_quota() -> None:
                 owner.account_id,
             )
             == 4
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_page_quota_events quota
+                JOIN managed_safety_incidents incident
+                  ON incident.incident_id = quota.incident_id
+                WHERE quota.owner_account_id = $1
+                  AND quota.trigger = incident.trigger
+                  AND quota.trigger = 'band_sos'
+                """,
+                owner.account_id,
+            )
+            == 1
         )
 
         await pool.execute(

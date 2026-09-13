@@ -166,7 +166,9 @@ change. Each successful step is evidence required by the next:
     it before accepting reports, and leave it enabled while
     `enable_feedback_ingestion = false` whenever new submissions are paused or
     retired so cancellation and retention rows continue draining. Feedback
-    retention is always bounded to 1 through 28 days.
+    retention is always bounded to 1 through 28 days. The lifecycle worker owns
+    deletion at the exact `retained_until` timestamp; the bucket lifecycle rule
+    is intentionally one day later and acts only as a coarse safety ceiling.
 
     Keep `managed_push_token_write_version = "v1"` for the first deployment
     containing the dual-version token reader. Confirm every prior API revision

@@ -187,6 +187,9 @@ def test_gcp_managed_identity_is_attested_and_uses_restricted_keys() -> None:
 
 
 def test_gcp_feedback_lifecycle_is_independent_and_retention_bounded() -> None:
+    foundation = (REPOSITORY_ROOT / "infra" / "gcp" / "foundation.tf").read_text(
+        encoding="utf-8"
+    )
     runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
         encoding="utf-8"
     )
@@ -218,6 +221,8 @@ def test_gcp_feedback_lifecycle_is_independent_and_retention_bounded() -> None:
     assert "tostring(var.enable_feedback_ingestion)" not in lifecycle
     assert "var.feedback_retention_days <= 28" in variables
     assert "var.feedback_retention_days <= 90" not in variables
+    assert "age = var.feedback_retention_days + 1" in foundation
+    assert "Exact retained_until" in foundation
     assert "&& var.enable_feedback_lifecycle" in variables
     assert "enable_feedback_lifecycle = false" in staging
     assert "enable_feedback_ingestion = false" in staging

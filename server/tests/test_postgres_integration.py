@@ -905,6 +905,7 @@ async def test_managed_safety_band_sos_migration_enforces_provenance() -> None:
     profile_b = uuid4()
     manual_incident = uuid4()
     band_incident = uuid4()
+    legacy_writer_incident = uuid4()
     mismatch_incident = uuid4()
     now = datetime.now(UTC).replace(microsecond=0)
 
@@ -1010,6 +1011,18 @@ async def test_managed_safety_band_sos_migration_enforces_provenance() -> None:
                     )
                     is None
                 )
+                assert (
+                    await connection.fetchval(
+                        """
+                        SELECT NOT attribute.attnotnull
+                        FROM pg_attribute attribute
+                        WHERE attribute.attrelid =
+                              'managed_safety_page_quota_events'::regclass
+                          AND attribute.attname = 'trigger'
+                        """
+                    )
+                    is True
+                )
                 constraints = {
                     row["conname"]: row["convalidated"]
                     for row in await connection.fetch(
@@ -1040,6 +1053,7 @@ async def test_managed_safety_band_sos_migration_enforces_provenance() -> None:
                     """,
                     [
                         (band_incident, profile_a),
+                        (legacy_writer_incident, profile_a),
                         (mismatch_incident, profile_a),
                     ],
                 )
@@ -1060,24 +1074,33 @@ async def test_managed_safety_band_sos_migration_enforces_provenance() -> None:
                     now,
                 )
 
-                with pytest.raises(Exception) as missing_trigger:
-                    await connection.execute(
-                        """
-                        INSERT INTO managed_safety_page_quota_events (
-                            owner_account_id, client_request_id, incident_id,
-                            duration_hours, share_location, created_at, purge_after
-                        ) VALUES (
-                            $1, $2, $3, 8, true,
-                            $4::timestamptz,
-                            $4::timestamptz + interval '30 days'
-                        )
-                        """,
-                        account_a,
-                        uuid4(),
-                        mismatch_incident,
-                        now,
+                await connection.execute(
+                    """
+                    INSERT INTO managed_safety_page_quota_events (
+                        owner_account_id, client_request_id, incident_id,
+                        duration_hours, share_location, created_at, purge_after
+                    ) VALUES (
+                        $1, $2, $3, 8, true,
+                        $4::timestamptz,
+                        $4::timestamptz + interval '30 days'
                     )
-                assert getattr(missing_trigger.value, "sqlstate", None) == "23502"
+                    """,
+                    account_a,
+                    uuid4(),
+                    legacy_writer_incident,
+                    now,
+                )
+                assert (
+                    await connection.fetchval(
+                        """
+                        SELECT trigger
+                        FROM managed_safety_page_quota_events
+                        WHERE incident_id = $1
+                        """,
+                        legacy_writer_incident,
+                    )
+                    == "band_sos"
+                )
 
                 with pytest.raises(Exception) as mismatched_provenance:
                     await connection.execute(
@@ -1421,14 +1444,16 @@ def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> Non
     assert "REFERENCES managed_safety_requests" not in request_quota
     assert "ON CONFLICT DO NOTHING" in request_quota
     assert "managed_safety_incident_trigger_v2" in band_sos
-    assert band_sos.count("NOT VALID") == 3
-    assert band_sos.count("VALIDATE CONSTRAINT") == 3
+    assert band_sos.count("NOT VALID") == 2
+    assert band_sos.count("VALIDATE CONSTRAINT") == 2
     assert "ALTER COLUMN trigger DROP DEFAULT" in band_sos
     assert "ALTER COLUMN trigger SET DEFAULT" not in band_sos
+    assert "ALTER COLUMN trigger SET NOT NULL" not in band_sos
     assert "managed Safety quota owner does not match incident owner account" in (
         band_sos
     )
     assert "SET trigger = 'manual_sos'" in band_sos
+    assert "NEW.trigger := incident_trigger" in band_sos
     assert "noop_managed_safety_quota_incident_consistent" in band_sos
     assert "noop_managed_safety_incident_quota_immutable" in band_sos
 

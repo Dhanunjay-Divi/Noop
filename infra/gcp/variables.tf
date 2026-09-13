@@ -60,7 +60,7 @@ variable "raw_bucket_name" {
 }
 
 variable "feedback_retention_days" {
-  description = "Age at which explicitly submitted synthetic feedback archives are deleted."
+  description = "Exact lifecycle-worker retention for synthetic feedback archives; the bucket safety ceiling is one day later."
   type        = number
   default     = 28
 

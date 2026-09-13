@@ -139,6 +139,9 @@ the object. This prevents rejected work from bypassing the concurrency ceiling.
   digest/size, consent flags, state, object generation, and lifecycle times.
 - The default retention window is 28 days and is deployment-configurable from
   1 through 28 days, below Identity Platform's anonymous-account cleanup edge.
+- The lifecycle worker owns deletion at the exact `retained_until` timestamp.
+  The bucket age rule is one day later and is only a coarse safety ceiling, not
+  the primary retention mechanism.
 - Object cleanup uses a deletion pass followed by a delayed absence-confirmation
   pass. Metadata is not finalized as deleted from one ambiguous object-store
   response.

@@ -21,6 +21,21 @@ Last updated: **2026-09-13**
 
 ## Active work
 
+### PR 15 server and infrastructure review fixes
+
+A narrow local correction based exactly on `0aa7c86c` keeps migration `038`
+safe for migration-first deployment and application rollback while the prior
+Safety writer omits the quota-event trigger. The expand migration leaves the
+column nullable, and its provenance trigger derives an omitted value from the
+referenced incident while continuing to reject owner or explicit-trigger
+mismatches. The feedback bucket lifecycle is now one day later than the exact
+application retention window, leaving exact `retained_until` deletion with the
+lifecycle worker. Focused PostgreSQL, repository, backup/deployment-contract,
+OpenTofu, formatting, and manifest checks pass against synthetic local state.
+No service was deployed, no cloud plan was applied, no real data was touched,
+and the local correction is tracked in
+[`rounds/2026-09-13-pr15-server-infra-review-fixes.md`](rounds/2026-09-13-pr15-server-infra-review-fixes.md).
+
 ### Trends loading handoff
 
 UI audit P1-4 has a completed local handoff from branch

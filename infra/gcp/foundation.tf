@@ -121,7 +121,10 @@ resource "google_storage_bucket" "feedback" {
       type = "Delete"
     }
     condition {
-      age = var.feedback_retention_days
+      # Cloud Storage age is a coarse UTC-day boundary. Exact retained_until
+      # deletion belongs to the lifecycle worker; this is a later safety
+      # ceiling that cannot race the application deadline.
+      age = var.feedback_retention_days + 1
     }
   }
 

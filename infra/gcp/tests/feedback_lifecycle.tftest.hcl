@@ -20,9 +20,14 @@ run "feedback_is_disabled_and_bounded_by_default" {
       !var.enable_feedback_ingestion
       && !var.enable_feedback_lifecycle
       && var.feedback_retention_days == 28
+      && contains(flatten([
+        for rule in google_storage_bucket.feedback.lifecycle_rule : [
+          for condition in rule.condition : condition.age
+        ]
+      ]), 29)
       && !output.feedback_public_ready
     )
-    error_message = "Feedback must remain disabled, bounded, and not publicly ready by default."
+    error_message = "Feedback must remain disabled, bounded by a later bucket safety ceiling, and not publicly ready by default."
   }
 }
 

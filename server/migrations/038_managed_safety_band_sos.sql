@@ -44,10 +44,6 @@ SET trigger = 'manual_sos'
 WHERE trigger IS NULL;
 
 ALTER TABLE managed_safety_page_quota_events
-    ADD CONSTRAINT managed_safety_page_quota_trigger_required_v2
-        CHECK (trigger IS NOT NULL) NOT VALID;
-
-ALTER TABLE managed_safety_page_quota_events
     ADD CONSTRAINT managed_safety_page_quota_trigger_v2
         CHECK (trigger IN ('manual_sos', 'band_sos')) NOT VALID;
 
@@ -55,16 +51,13 @@ ALTER TABLE managed_safety_incidents
     VALIDATE CONSTRAINT managed_safety_incident_trigger_v2;
 
 ALTER TABLE managed_safety_page_quota_events
-    VALIDATE CONSTRAINT managed_safety_page_quota_trigger_required_v2;
-
-ALTER TABLE managed_safety_page_quota_events
     VALIDATE CONSTRAINT managed_safety_page_quota_trigger_v2;
 
-ALTER TABLE managed_safety_page_quota_events
-    ALTER COLUMN trigger SET NOT NULL;
-
--- A default would silently misclassify a future writer that forgot the new
--- column. New quota writes must provide the incident trigger explicitly.
+-- Keep the column nullable through the expand window. The compatibility
+-- trigger below derives omitted values from the referenced incident so a
+-- migration-first rollout and an application rollback remain safe while the
+-- pre-038 writer is still active. A later contract migration may set NOT NULL
+-- only after every prior writer has drained.
 ALTER TABLE managed_safety_page_quota_events
     ALTER COLUMN trigger DROP DEFAULT;
 
@@ -82,9 +75,6 @@ ALTER TABLE managed_safety_page_quota_events
     RENAME CONSTRAINT managed_safety_page_quota_trigger_v2
         TO managed_safety_page_quota_trigger;
 
-ALTER TABLE managed_safety_page_quota_events
-    DROP CONSTRAINT managed_safety_page_quota_trigger_required_v2;
-
 CREATE OR REPLACE FUNCTION noop_managed_safety_quota_incident_consistent()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -93,12 +83,6 @@ DECLARE
     incident_trigger text;
     incident_account_id uuid;
 BEGIN
-    -- Leave omitted values to the explicit NOT NULL contract. This preserves a
-    -- clear writer failure instead of silently inventing manual_sos.
-    IF NEW.trigger IS NULL THEN
-        RETURN NEW;
-    END IF;
-
     SELECT incident.trigger, owner.account_id
     INTO incident_trigger, incident_account_id
     FROM managed_safety_incidents incident
@@ -109,6 +93,9 @@ BEGIN
     IF NOT FOUND THEN
         RAISE EXCEPTION 'managed Safety quota incident was not found'
             USING ERRCODE = '23503';
+    END IF;
+    IF NEW.trigger IS NULL THEN
+        NEW.trigger := incident_trigger;
     END IF;
     IF incident_account_id IS DISTINCT FROM NEW.owner_account_id
        OR incident_trigger IS DISTINCT FROM NEW.trigger
