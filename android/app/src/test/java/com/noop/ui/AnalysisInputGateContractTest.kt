@@ -145,9 +145,30 @@ class AnalysisInputGateContractTest {
         )
 
         assertTrue(scheduler!!.contains("OneTimeWorkRequestBuilder<PostBackfillAnalysisRetryWorker>()"))
-        assertTrue(scheduler.contains("ExistingWorkPolicy.APPEND_OR_REPLACE"))
+        assertTrue(scheduler.contains("ExistingWorkPolicy.REPLACE"))
+        assertFalse(scheduler.contains("ExistingWorkPolicy.APPEND_OR_REPLACE"))
         assertTrue(scheduler.contains("app.ble.retryPersistedHistoryFromScheduler()"))
         assertFalse(scheduler.contains("AppViewModel"))
+
+        val workerStart = scheduler.indexOf("class PostBackfillAnalysisRetryWorker(")
+        val workerEnd = scheduler.indexOf(
+            "/** Replaces the pending boundary",
+            workerStart,
+        )
+        assertTrue(workerStart >= 0 && workerEnd > workerStart)
+        val worker = scheduler.substring(workerStart, workerEnd)
+        val entryDecision = worker.indexOf("postBackfillRetryWorkerEntryDecision(")
+        val legacyExit = worker.indexOf("return Result.success()", entryDecision)
+        val runtimeLookup = worker.indexOf("applicationContext as? NoopApplication")
+        val analysis = worker.indexOf("retryPersistedHistoryFromScheduler()")
+        assertTrue(
+            entryDecision >= 0 &&
+                legacyExit > entryDecision &&
+                runtimeLookup > legacyExit &&
+                analysis > runtimeLookup,
+        )
+        assertTrue(worker.contains("outcome = \"legacy_rejected\""))
+        assertFalse(worker.contains("legacy_\$outcome"))
     }
 
     @Test

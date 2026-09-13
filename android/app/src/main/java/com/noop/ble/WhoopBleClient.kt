@@ -941,6 +941,30 @@ class WhoopBleClient(
         private const val POST_BACKFILL_RETRY_DELAY_MS = 2_000L
         private const val POST_BACKFILL_PENDING_PREFS = "noop_post_backfill_analysis"
         private const val POST_BACKFILL_PENDING_SOURCES = "pending_sources"
+        internal fun readPersistedPostBackfillSources(
+            context: Context,
+        ): PostBackfillPendingSourcesRead = classifyPersistedPostBackfillSources {
+            context.getSharedPreferences(POST_BACKFILL_PENDING_PREFS, Context.MODE_PRIVATE)
+                .getStringSet(POST_BACKFILL_PENDING_SOURCES, emptySet())
+        }
+
+        internal fun readPersistedPostBackfillSourceState(
+            context: Context,
+        ): PostBackfillPendingSourceRead = readPersistedPostBackfillSources(context).state()
+
+        internal fun classifyPersistedPostBackfillSources(
+            readSources: () -> Set<String>?,
+        ): PostBackfillPendingSourcesRead = try {
+            PostBackfillPendingSourcesRead.Available(
+                readSources()
+                    .orEmpty()
+                    .asSequence()
+                    .filter(String::isNotBlank)
+                    .toCollection(linkedSetOf()),
+            )
+        } catch (_: Throwable) {
+            PostBackfillPendingSourcesRead.Failed
+        }
         /** #174: window after the last offload frame/HISTORY_COMPLETE during which a type-0x2F frame is
          *  treated as trailing-historical, not live. Mirrors macOS deepPacketLiveCooldownSeconds (10s). */
         private const val DEEP_PACKET_LIVE_COOLDOWN_MS = 10_000L
@@ -2313,7 +2337,21 @@ class WhoopBleClient(
      */
     fun reconcilePersistedHistory() {
         val activeSourceId = deviceId
-        val pending = persistedPostBackfillSourceIds()
+        val sourceRead = persistedPostBackfillSources()
+        if (sourceRead is PostBackfillPendingSourcesRead.Failed) {
+            AppDiagnosticsRecorder.record(
+                "analysis.post_backfill_retry",
+                fields = mapOf("outcome" to "source_read_failed"),
+            )
+            ioScope.launch {
+                PostBackfillAnalysisRetryScheduler.schedule(
+                    context = context,
+                    retryAtEpochMillis = System.currentTimeMillis(),
+                )
+            }
+            return
+        }
+        val pending = (sourceRead as PostBackfillPendingSourcesRead.Available).sourceIds
             .asSequence()
             .filter { it != activeSourceId }
             .sorted()
@@ -2329,7 +2367,11 @@ class WhoopBleClient(
     internal suspend fun retryPersistedHistoryFromScheduler():
         List<BackfillAnalysisProcessResult> {
         val activeSourceId = deviceId
-        val pending = persistedPostBackfillSourceIds()
+        val pending = when (val sourceRead = persistedPostBackfillSources()) {
+            PostBackfillPendingSourcesRead.Failed ->
+                return listOf(BackfillAnalysisProcessResult.RetryRequired)
+            is PostBackfillPendingSourcesRead.Available -> sourceRead.sourceIds
+        }
         if (pending.isEmpty()) return emptyList()
         val ordered = pending
             .asSequence()
@@ -2339,22 +2381,19 @@ class WhoopBleClient(
         return postBackfillAnalysisWorker.resumeAndAwait(ordered)
     }
 
-    private fun persistedPostBackfillSourceIds(): Set<String> =
-        try {
+    private fun persistedPostBackfillSources(): PostBackfillPendingSourcesRead =
+        classifyPersistedPostBackfillSources {
             postBackfillPrefs
                 .getStringSet(POST_BACKFILL_PENDING_SOURCES, emptySet())
-                .orEmpty()
-                .filterTo(linkedSetOf()) { it.isNotBlank() }
-        } catch (failure: Throwable) {
-            log(
-                "Backfill: could not read pending post-sync sources " +
-                    "(${failure.javaClass.simpleName})",
-            )
-            emptySet()
         }
 
     private fun markPostBackfillSourceDirty(sourceId: String) {
-        val pending = persistedPostBackfillSourceIds().toMutableSet()
+        val pending = when (val sourceRead = persistedPostBackfillSources()) {
+            PostBackfillPendingSourcesRead.Failed ->
+                throw IllegalStateException("Pending post-sync source state is unavailable.")
+            is PostBackfillPendingSourcesRead.Available ->
+                sourceRead.sourceIds.toMutableSet()
+        }
         if (!pending.add(sourceId)) return
         check(
             postBackfillPrefs.edit()
@@ -2364,7 +2403,12 @@ class WhoopBleClient(
     }
 
     private fun clearPostBackfillSourceDirty(sourceId: String) {
-        val pending = persistedPostBackfillSourceIds().toMutableSet()
+        val pending = when (val sourceRead = persistedPostBackfillSources()) {
+            PostBackfillPendingSourcesRead.Failed ->
+                throw IllegalStateException("Pending post-sync source state is unavailable.")
+            is PostBackfillPendingSourcesRead.Available ->
+                sourceRead.sourceIds.toMutableSet()
+        }
         if (!pending.remove(sourceId)) return
         check(
             postBackfillPrefs.edit()

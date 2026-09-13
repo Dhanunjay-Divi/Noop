@@ -272,6 +272,8 @@ object BackupSettingsCodec {
  */
 object BackupSettingsBridge {
     private const val PROFILE_PREFS = "noop_profile"
+    internal const val RESTORE_MAINTENANCE_PREFS = "noop_restore_maintenance"
+    internal const val HYDRATION_RETRY_NEEDED = "hydration_reconcile_retry_needed"
     private const val PROFILE_DOB = "date_of_birth"
     private const val PROFILE_AGE = "age"
     private const val PROFILE_SEX = "sex"
@@ -490,18 +492,24 @@ object BackupSettingsBridge {
         val appContext = context.applicationContext
         AppearancePrefs.load(appContext)
         ChartStylePrefs.load(appContext)
-        try {
-            HydrationReminderScheduler.reconcile(appContext)
-        } catch (failure: Exception) {
-            AppDiagnosticsRecorder.record(
-                "database.restore_reconcile",
-                fields = mapOf(
-                    "outcome" to "failed",
-                    "component" to "hydration",
-                ),
-            )
-            throw IOException("Restored hydration reminders could not be reconciled.", failure)
-        }
+        reconcileHydrationForConfirmedRestore(
+            operation = { HydrationReminderScheduler.reconcile(appContext) },
+            onFailure = {
+                AppDiagnosticsRecorder.record(
+                    "database.restore_reconcile",
+                    fields = mapOf(
+                        "outcome" to "failed",
+                        "component" to "hydration",
+                    ),
+                )
+            },
+            persistRetryNeeded = { needed ->
+                persistHydrationRestoreRetryNeeded(
+                    preferences = restoreMaintenancePreferences(appContext),
+                    needed = needed,
+                )
+            },
+        )
         val windDownPrefs = appContext.getSharedPreferences(
             "noop_wind_down",
             Context.MODE_PRIVATE,
@@ -539,6 +547,128 @@ object BackupSettingsBridge {
             )
         }
     }
+
+    internal enum class HydrationRestoreRetryOutcome(val wireValue: String) {
+        RETRY_COMPLETED("retry_completed"),
+        RETRY_FAILED("retry_failed"),
+        STATE_READ_FAILED("state_read_failed"),
+        STATE_CLEAR_FAILED("state_clear_failed"),
+    }
+
+    internal fun persistHydrationRestoreRetryNeeded(
+        preferences: SharedPreferences,
+        needed: Boolean,
+    ) {
+        val editor = preferences.edit()
+        if (needed) {
+            editor.putBoolean(HYDRATION_RETRY_NEEDED, true)
+        } else {
+            editor.remove(HYDRATION_RETRY_NEEDED)
+        }
+        if (!editor.commit()) {
+            throw IOException("Restore maintenance retry state could not be persisted.")
+        }
+    }
+
+    internal fun runHydrationMaintenanceAfterDatabaseReady(
+        ensureDatabaseReady: () -> Unit,
+        retryNeeded: () -> Boolean,
+        reconcile: () -> Unit,
+        clearRetryNeeded: () -> Unit,
+        onRetryOutcome: (HydrationRestoreRetryOutcome) -> Unit,
+    ): Boolean {
+        ensureDatabaseReady()
+        val pendingRetry = try {
+            retryNeeded()
+        } catch (_: Exception) {
+            onRetryOutcome(HydrationRestoreRetryOutcome.STATE_READ_FAILED)
+            return false
+        }
+        val reconciled = runBestEffortReconcile(
+            operation = reconcile,
+            onFailure = {
+                if (pendingRetry) {
+                    onRetryOutcome(HydrationRestoreRetryOutcome.RETRY_FAILED)
+                }
+            },
+        )
+        if (!reconciled || !pendingRetry) return reconciled
+        return try {
+            clearRetryNeeded()
+            onRetryOutcome(HydrationRestoreRetryOutcome.RETRY_COMPLETED)
+            true
+        } catch (_: Exception) {
+            onRetryOutcome(HydrationRestoreRetryOutcome.STATE_CLEAR_FAILED)
+            false
+        }
+    }
+
+    internal fun reconcileHydrationAfterDatabaseReady(
+        context: Context,
+        ensureDatabaseReady: () -> Unit,
+    ): Boolean {
+        val appContext = context.applicationContext
+        val preferences = restoreMaintenancePreferences(appContext)
+        return runHydrationMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = ensureDatabaseReady,
+            retryNeeded = {
+                preferences.getBoolean(HYDRATION_RETRY_NEEDED, false)
+            },
+            reconcile = {
+                HydrationReminderScheduler.reconcile(appContext)
+            },
+            clearRetryNeeded = {
+                persistHydrationRestoreRetryNeeded(preferences, needed = false)
+            },
+            onRetryOutcome = { outcome ->
+                AppDiagnosticsRecorder.record(
+                    "database.restore_reconcile",
+                    fields = hydrationRestoreRetryDiagnosticFields(outcome),
+                )
+            },
+        )
+    }
+
+    internal fun hydrationRestoreRetryDiagnosticFields(
+        outcome: HydrationRestoreRetryOutcome,
+    ): Map<String, String> = mapOf(
+        "outcome" to outcome.wireValue,
+        "component" to "hydration",
+    )
+
+    /**
+     * OS scheduling is repairable process maintenance, not part of database acceptance. A failed
+     * scheduler is recorded and retried by [com.noop.NoopApplication.deferProcessMaintenance]
+     * without trapping the restored health database behind an unbounded startup loop.
+     */
+    internal fun runBestEffortReconcile(
+        operation: () -> Unit,
+        onFailure: () -> Unit,
+    ): Boolean = try {
+        operation()
+        true
+    } catch (_: Exception) {
+        try {
+            onFailure()
+        } catch (_: Throwable) {
+            // Diagnostics are best effort and must not turn a repairable scheduler failure into
+            // another restore-finalization failure.
+        }
+        false
+    }
+
+    internal fun reconcileHydrationForConfirmedRestore(
+        operation: () -> Unit,
+        onFailure: () -> Unit,
+        persistRetryNeeded: (Boolean) -> Unit,
+    ): Boolean {
+        val reconciled = runBestEffortReconcile(operation, onFailure)
+        persistRetryNeeded(!reconciled)
+        return reconciled
+    }
+
+    private fun restoreMaintenancePreferences(context: Context): SharedPreferences =
+        context.getSharedPreferences(RESTORE_MAINTENANCE_PREFS, Context.MODE_PRIVATE)
 
     private fun snapshot(
         prefs: SharedPreferences,

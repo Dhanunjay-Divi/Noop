@@ -8,6 +8,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -300,6 +301,163 @@ class BackupSettingsCodecTest {
         assertTrue(windDown.getBoolean("windDown.enabled", false))
         assertEquals(8 * 60, windDown.getInt("windDown.sleepNeedMinutes", 0))
         assertFalse(windDown.contains(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY))
+    }
+
+    @Test fun repairableSchedulerFailureDoesNotRejectRestoredDatabase() {
+        var failureRecorded = false
+
+        val succeeded = BackupSettingsBridge.runBestEffortReconcile(
+            operation = { throw IllegalStateException("scheduler unavailable") },
+            onFailure = { failureRecorded = true },
+        )
+
+        assertFalse(succeeded)
+        assertTrue(failureRecorded)
+        assertFalse(
+            BackupSettingsBridge.runBestEffortReconcile(
+                operation = { throw IllegalStateException("scheduler unavailable") },
+                onFailure = { throw AssertionError("diagnostics unavailable") },
+            ),
+        )
+        assertTrue(
+            BackupSettingsBridge.runBestEffortReconcile(
+                operation = {},
+                onFailure = { throw AssertionError("success must not record failure") },
+            ),
+        )
+    }
+
+    @Test fun hydrationMaintenanceWaitsForDatabaseBeforeReadingOrRetryingState() {
+        val events = mutableListOf<String>()
+        val outcomes = mutableListOf<BackupSettingsBridge.HydrationRestoreRetryOutcome>()
+
+        val succeeded = BackupSettingsBridge.runHydrationMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = { events += "database" },
+            retryNeeded = {
+                events += "read"
+                true
+            },
+            reconcile = { events += "reconcile" },
+            clearRetryNeeded = { events += "clear" },
+            onRetryOutcome = { outcomes += it },
+        )
+
+        assertTrue(succeeded)
+        assertEquals(listOf("database", "read", "reconcile", "clear"), events)
+        assertEquals(
+            listOf(BackupSettingsBridge.HydrationRestoreRetryOutcome.RETRY_COMPLETED),
+            outcomes,
+        )
+    }
+
+    @Test fun successfulHydrationMaintenanceClearsPersistedRetryState() {
+        val preferences = FakeSharedPreferences().also {
+            BackupSettingsBridge.persistHydrationRestoreRetryNeeded(it, needed = true)
+        }
+
+        val succeeded = BackupSettingsBridge.runHydrationMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = {},
+            retryNeeded = {
+                preferences.getBoolean(BackupSettingsBridge.HYDRATION_RETRY_NEEDED, false)
+            },
+            reconcile = {},
+            clearRetryNeeded = {
+                BackupSettingsBridge.persistHydrationRestoreRetryNeeded(
+                    preferences,
+                    needed = false,
+                )
+            },
+            onRetryOutcome = {},
+        )
+
+        assertTrue(succeeded)
+        assertFalse(preferences.contains(BackupSettingsBridge.HYDRATION_RETRY_NEEDED))
+    }
+
+    @Test fun failedHydrationMaintenanceRetainsPersistedRetryState() {
+        val preferences = FakeSharedPreferences().also {
+            BackupSettingsBridge.persistHydrationRestoreRetryNeeded(it, needed = true)
+        }
+        val outcomes = mutableListOf<BackupSettingsBridge.HydrationRestoreRetryOutcome>()
+
+        val succeeded = BackupSettingsBridge.runHydrationMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = {},
+            retryNeeded = {
+                preferences.getBoolean(BackupSettingsBridge.HYDRATION_RETRY_NEEDED, false)
+            },
+            reconcile = { throw IllegalStateException("scheduler unavailable") },
+            clearRetryNeeded = {
+                BackupSettingsBridge.persistHydrationRestoreRetryNeeded(
+                    preferences,
+                    needed = false,
+                )
+            },
+            onRetryOutcome = { outcomes += it },
+        )
+
+        assertFalse(succeeded)
+        assertTrue(preferences.getBoolean(BackupSettingsBridge.HYDRATION_RETRY_NEEDED, false))
+        assertEquals(
+            listOf(BackupSettingsBridge.HydrationRestoreRetryOutcome.RETRY_FAILED),
+            outcomes,
+        )
+    }
+
+    @Test fun hydrationRetryStateMustBeDurableBeforeRestoreCleanup() {
+        val preferences = FakeSharedPreferences(commitResult = false)
+
+        assertThrows(java.io.IOException::class.java) {
+            BackupSettingsBridge.persistHydrationRestoreRetryNeeded(
+                preferences,
+                needed = true,
+            )
+        }
+        assertFalse(preferences.contains(BackupSettingsBridge.HYDRATION_RETRY_NEEDED))
+    }
+
+    @Test fun confirmedRestorePersistsHydrationFailureBeforeAdvancing() {
+        val events = mutableListOf<String>()
+        var retryNeeded: Boolean? = null
+
+        val reconciled = BackupSettingsBridge.reconcileHydrationForConfirmedRestore(
+            operation = {
+                events += "reconcile"
+                throw IllegalStateException("scheduler unavailable")
+            },
+            onFailure = { events += "diagnostic" },
+            persistRetryNeeded = { needed ->
+                events += "persist"
+                retryNeeded = needed
+            },
+        )
+
+        assertFalse(reconciled)
+        assertEquals(true, retryNeeded)
+        assertEquals(listOf("reconcile", "diagnostic", "persist"), events)
+    }
+
+    @Test fun hydrationRetryDiagnosticsContainOnlyFixedCategories() {
+        val expectedOutcomes = listOf(
+            "retry_completed",
+            "retry_failed",
+            "state_read_failed",
+            "state_clear_failed",
+        )
+        assertEquals(
+            expectedOutcomes,
+            BackupSettingsBridge.HydrationRestoreRetryOutcome.entries.map { it.wireValue },
+        )
+        BackupSettingsBridge.HydrationRestoreRetryOutcome.entries.forEach { outcome ->
+            val fields = BackupSettingsBridge.hydrationRestoreRetryDiagnosticFields(outcome)
+            assertEquals(setOf("outcome", "component"), fields.keys)
+            assertEquals("hydration", fields["component"])
+            assertTrue(fields.getValue("outcome").matches(Regex("[a-z_]+")))
+            val serialized = fields.entries.joinToString("|") { "${it.key}=${it.value}" }
+            assertFalse(serialized.contains("device", ignoreCase = true))
+            assertFalse(serialized.contains("source", ignoreCase = true))
+            assertFalse(serialized.contains("member", ignoreCase = true))
+            assertFalse(serialized.contains("value", ignoreCase = true))
+        }
     }
 
     // ── Codec: whitelist + type enforcement ──────────────────────────────────────

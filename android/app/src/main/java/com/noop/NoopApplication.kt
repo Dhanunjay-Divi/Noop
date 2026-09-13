@@ -12,6 +12,7 @@ import com.noop.analytics.RegistryDayOwnerSource
 import com.noop.ble.SourceCoordinator
 import com.noop.ble.WhoopBleClient
 import com.noop.ble.WhoopModel
+import com.noop.data.BackupSettingsBridge
 import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
@@ -26,7 +27,6 @@ import com.noop.notif.AdaptiveDayOperationalResumeResult
 import com.noop.notif.AdaptiveDayNotifier
 import com.noop.notif.AdaptiveDayTimeZoneStore
 import com.noop.notif.DailyReviewReminders
-import com.noop.notif.HydrationReminderScheduler
 import com.noop.ownership.OwnershipService
 import com.noop.safety.SafetyContactSetupReminderScheduler
 import com.noop.safety.SafetyIncidentStatusMonitor
@@ -411,7 +411,14 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(this@NoopApplication) }
             runCatching { HealthConnectSyncScheduler.reconcile(this@NoopApplication) }
             runCatching { DailyReviewReminders.reconcile(this@NoopApplication) }
-            runCatching { HydrationReminderScheduler.reconcile(this@NoopApplication) }
+            runCatching {
+                BackupSettingsBridge.reconcileHydrationAfterDatabaseReady(
+                    context = this@NoopApplication,
+                    ensureDatabaseReady = {
+                        WhoopDatabase.get(this@NoopApplication)
+                    },
+                )
+            }
             runCatching {
                 SafetyLiveLocationSession.initialize(this@NoopApplication)
                 ManagedSafetyLiveLocationSession.initialize(this@NoopApplication)

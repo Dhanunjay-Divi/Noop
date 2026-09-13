@@ -116,7 +116,11 @@ abstract class WhoopDatabase : RoomDatabase() {
                 opened
             } catch (restoreFailure: Throwable) {
                 runCatching { candidate?.close() }
-                if (!PendingDatabaseRestore.shouldRollbackDatabaseAfterOpenFailure(restoreFailure)) {
+                if (!PendingDatabaseRestore.shouldRollbackDatabaseAfterOpenFailure(
+                        appContext,
+                        restoreFailure,
+                    )
+                ) {
                     throw restoreFailure
                 }
                 if (!PendingDatabaseRestore.rollbackAfterOpenFailure(appContext)) throw restoreFailure
