@@ -2,13 +2,24 @@ package com.noop.ble
 
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+internal sealed interface BackfillAnalysisProcessResult {
+    data object Completed : BackfillAnalysisProcessResult
+
+    data class Deferred(
+        val retryAtEpochMillis: Long,
+        val retryScheduled: Boolean = false,
+    ) : BackfillAnalysisProcessResult
+}
 
 /**
  * Source-bound dirty-work queue for post-backfill analysis.
@@ -91,6 +102,18 @@ internal class BackfillAnalysisRevisionLatch {
     }
 
     /**
+     * Releases a revision that remains durably dirty outside this in-memory queue. A later service-level
+     * retry calls [noteCommitAndClaimWorker] again after its evaluable boundary; the source must not be
+     * requeued here or this sole worker would immediately spin on the same deferred claim.
+     */
+    fun defer(claim: WorkerClaim, revision: Revision): Boolean = synchronized(lock) {
+        check(owner == claim && ownerStarted) { "post-backfill worker does not own this claim" }
+        check(inFlight == revision) { "post-backfill worker deferred a revision it does not own" }
+        inFlight = null
+        pendingByDevice.isNotEmpty()
+    }
+
+    /**
      * Cancellation/unexpected-exit edge. The in-flight source is requeued unless a newer revision for that
      * source already exists. The claim token ensures an old worker cannot clear a replacement owner.
      */
@@ -138,13 +161,21 @@ internal class BackfillAnalysisWorker(
     private val debounceMillis: Long,
     private val retryDelayMillis: Long,
     private val maxRetryDelayMillis: Long = 60_000L,
-    private val processRevision: suspend (BackfillAnalysisRevisionLatch.Revision) -> Unit,
+    private val processRevision:
+        suspend (BackfillAnalysisRevisionLatch.Revision) -> BackfillAnalysisProcessResult,
+    private val scheduleDeferredRetry: (Long) -> Boolean = { false },
     private val markDurablyDirty: (String) -> Unit = {},
     private val clearDurablyDirty: (String) -> Unit = {},
     private val onFailure: (String, Throwable) -> Unit = { _, _ -> },
     private val latch: BackfillAnalysisRevisionLatch = BackfillAnalysisRevisionLatch(),
 ) {
+    private data class CompletionWaiter(
+        val revisionValue: Long,
+        val result: CompletableDeferred<BackfillAnalysisProcessResult>,
+    )
+
     private val coordinationLock = Any()
+    private val completionWaiters = mutableMapOf<String, MutableList<CompletionWaiter>>()
 
     init {
         require(debounceMillis >= 0L)
@@ -188,7 +219,47 @@ internal class BackfillAnalysisWorker(
         return revisions
     }
 
+    /**
+     * Re-enqueues durable sources and waits until each submitted revision either completes or is
+     * durably rearmed for a later evaluable boundary. WorkManager uses this so it cannot report success
+     * while the application-owned worker is still only queued in another coroutine.
+     */
+    suspend fun resumeAndAwait(
+        deviceIds: Collection<String>,
+    ): List<BackfillAnalysisProcessResult> {
+        val registered = mutableListOf<Pair<String, CompletionWaiter>>()
+        var claim: BackfillAnalysisRevisionLatch.WorkerClaim? = null
+        synchronized(coordinationLock) {
+            deviceIds.asSequence().filter { it.isNotBlank() }.distinct().forEach { deviceId ->
+                val enqueue = latch.noteCommitAndClaimWorker(deviceId)
+                val waiter = CompletionWaiter(
+                    revisionValue = enqueue.revision.value,
+                    result = CompletableDeferred(),
+                )
+                completionWaiters.getOrPut(deviceId) { mutableListOf() }.add(waiter)
+                registered += deviceId to waiter
+                if (claim == null) claim = enqueue.workerClaim
+            }
+            if (claim == null) claim = latch.claimPendingWorker()
+        }
+        claim?.let(::launchClaim)
+
+        return try {
+            registered.map { it.second.result }.awaitAll()
+        } finally {
+            synchronized(coordinationLock) {
+                registered.forEach { (deviceId, waiter) ->
+                    completionWaiters[deviceId]?.let { waiters ->
+                        waiters.remove(waiter)
+                        if (waiters.isEmpty()) completionWaiters.remove(deviceId)
+                    }
+                }
+            }
+        }
+    }
+
     internal fun pendingDeviceIds(): Set<String> = latch.pendingDeviceIds()
+    internal fun hasWorkerClaim(): Boolean = latch.hasWorkerClaim()
 
     private fun launchClaim(claim: BackfillAnalysisRevisionLatch.WorkerClaim) {
         val entered = AtomicBoolean(false)
@@ -237,9 +308,10 @@ internal class BackfillAnalysisWorker(
 
             val revision = latch.nextRevisionOrRelease(claim) ?: return
             var attempt = 0
+            lateinit var processResult: BackfillAnalysisProcessResult
             while (true) {
                 try {
-                    processRevision(revision)
+                    processResult = processRevision(revision)
                     break
                 } catch (cancelled: CancellationException) {
                     // A timeout or dependency may use CancellationException without cancelling this
@@ -256,8 +328,24 @@ internal class BackfillAnalysisWorker(
                 }
             }
 
+            if (processResult is BackfillAnalysisProcessResult.Deferred) {
+                val deferred = processResult
+                val retryScheduled = try {
+                    scheduleDeferredRetry(deferred.retryAtEpochMillis)
+                } catch (_: Throwable) {
+                    false
+                }
+                val completedResult = deferred.copy(retryScheduled = retryScheduled)
+                val (hasPendingWork, waiters) = synchronized(coordinationLock) {
+                    latch.defer(claim, revision) to takeCompletionWaitersLocked(revision)
+                }
+                waiters.forEach { it.complete(completedResult) }
+                shouldDebounce = hasPendingWork
+                continue
+            }
+
             var clearFailure: Throwable? = null
-            val completion = synchronized(coordinationLock) {
+            val (completion, waiters) = synchronized(coordinationLock) {
                 val completed = latch.complete(claim, revision)
                 if (!completed.deviceStillPending) {
                     try {
@@ -266,11 +354,24 @@ internal class BackfillAnalysisWorker(
                         clearFailure = t
                     }
                 }
-                completed
+                completed to takeCompletionWaitersLocked(revision)
             }
             clearFailure?.let { reportFailure(revision.deviceId, it) }
+            waiters.forEach { it.complete(BackfillAnalysisProcessResult.Completed) }
             shouldDebounce = completion.hasPendingWork
         }
+    }
+
+    private fun takeCompletionWaitersLocked(
+        revision: BackfillAnalysisRevisionLatch.Revision,
+    ): List<CompletableDeferred<BackfillAnalysisProcessResult>> {
+        val waiters = completionWaiters[revision.deviceId] ?: return emptyList()
+        val completed = waiters
+            .filter { it.revisionValue <= revision.value }
+            .map(CompletionWaiter::result)
+        waiters.removeAll { it.revisionValue <= revision.value }
+        if (waiters.isEmpty()) completionWaiters.remove(revision.deviceId)
+        return completed
     }
 
     private fun requestPendingWorker() {

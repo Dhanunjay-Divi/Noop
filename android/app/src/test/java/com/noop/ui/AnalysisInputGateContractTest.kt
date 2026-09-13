@@ -92,6 +92,8 @@ class AnalysisInputGateContractTest {
         assertFalse(pass.contains("delay(waitSeconds * 1_000L)"))
         assertTrue(pass.contains("if (!analysisPlan.shouldAnalyze)"))
         assertTrue(pass.contains("The database claim remains unacknowledged"))
+        assertTrue(pass.contains("BackfillAnalysisProcessResult.Deferred("))
+        assertTrue(pass.contains("retryAtEpochMillis = retryAtSeconds * 1_000L"))
         assertTrue(pass.contains("repository.runClaimedAnalysis(analysisLease)"))
         assertTrue(pass.contains("IntelligenceEngine.analysisScoringPlan("))
         assertTrue(pass.contains("claims = analysisLease.claims"))
@@ -110,6 +112,42 @@ class AnalysisInputGateContractTest {
         assertFalse(pass.contains("analyzeWatermark("))
         assertFalse(pass.contains("setAnalyzeWatermark("))
         assertFalse(pass.contains("failure.message"))
+    }
+
+    @Test
+    fun postBackfillDeferredRetryIsDurableAndDoesNotDependOnViewModel() {
+        val ble = sourceFile("com/noop/ble/WhoopBleClient.kt")
+        val queue = sourceFile("com/noop/ble/BackfillAnalysisRevisionLatch.kt")
+        val scheduler = sourceFile("com/noop/ble/PostBackfillAnalysisRetryScheduler.kt")
+        assumeTrue(
+            "post-backfill retry sources unavailable",
+            ble != null && queue != null && scheduler != null,
+        )
+
+        assertTrue(
+            ble!!.contains(
+                "scheduleDeferredRetry = { retryAtEpochMillis ->\n" +
+                    "            PostBackfillAnalysisRetryScheduler.schedule(context, retryAtEpochMillis)",
+            ),
+        )
+        assertTrue(ble.contains("retryPersistedHistoryFromScheduler()"))
+        assertTrue(ble.contains("postBackfillAnalysisWorker.resumeAndAwait(ordered)"))
+
+        assertTrue(queue!!.contains("latch.defer(claim, revision)"))
+        assertTrue(queue.contains("scheduleDeferredRetry(deferred.retryAtEpochMillis)"))
+        assertTrue(queue.contains("waiters.forEach { it.complete(completedResult) }"))
+        assertFalse(
+            "a deferred revision must not clear its durable source marker",
+            queue.substring(
+                queue.indexOf("if (processResult is BackfillAnalysisProcessResult.Deferred)"),
+                queue.indexOf("var clearFailure", queue.indexOf("if (processResult is")),
+            ).contains("clearDurablyDirty"),
+        )
+
+        assertTrue(scheduler!!.contains("OneTimeWorkRequestBuilder<PostBackfillAnalysisRetryWorker>()"))
+        assertTrue(scheduler.contains("ExistingWorkPolicy.APPEND_OR_REPLACE"))
+        assertTrue(scheduler.contains("app.ble.retryPersistedHistoryFromScheduler()"))
+        assertFalse(scheduler.contains("AppViewModel"))
     }
 
     @Test

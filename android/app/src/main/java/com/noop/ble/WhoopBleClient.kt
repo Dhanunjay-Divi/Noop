@@ -2195,6 +2195,9 @@ class WhoopBleClient(
         debounceMillis = POST_BACKFILL_ANALYZE_DELAY_MS,
         retryDelayMillis = POST_BACKFILL_RETRY_DELAY_MS,
         processRevision = { revision -> runPostBackfillAnalysisPass(revision.deviceId) },
+        scheduleDeferredRetry = { retryAtEpochMillis ->
+            PostBackfillAnalysisRetryScheduler.schedule(context, retryAtEpochMillis)
+        },
         markDurablyDirty = ::markPostBackfillSourceDirty,
         clearDurablyDirty = ::clearPostBackfillSourceDirty,
         onFailure = { _, failure ->
@@ -2318,6 +2321,24 @@ class WhoopBleClient(
         postBackfillAnalysisWorker.resume(pending + activeSourceId)
     }
 
+    /**
+     * WorkManager entry point for a previously deferred late-only claim. Unlike the foreground-service
+     * fire-and-forget path, this waits for every durable source to complete or rearm before the platform
+     * worker reports success.
+     */
+    internal suspend fun retryPersistedHistoryFromScheduler():
+        List<BackfillAnalysisProcessResult> {
+        val activeSourceId = deviceId
+        val pending = persistedPostBackfillSourceIds()
+        if (pending.isEmpty()) return emptyList()
+        val ordered = pending
+            .asSequence()
+            .filter { it != activeSourceId }
+            .sorted()
+            .toList() + listOfNotNull(activeSourceId.takeIf(pending::contains))
+        return postBackfillAnalysisWorker.resumeAndAwait(ordered)
+    }
+
     private fun persistedPostBackfillSourceIds(): Set<String> =
         try {
             postBackfillPrefs
@@ -2357,14 +2378,16 @@ class WhoopBleClient(
      * until this whole analysis/notification/writeback sequence succeeds and the exact generation is
      * acknowledged.
      */
-    private suspend fun runPostBackfillAnalysisPass(sourceId: String) {
+    private suspend fun runPostBackfillAnalysisPass(
+        sourceId: String,
+    ): BackfillAnalysisProcessResult {
         val analysisLease = repository.claimAnalysisInput(
             sourceIds = listOf(sourceId),
             force = false,
         )
         if (analysisLease == null) {
             log("re-score: trigger=post-offload newData=no - skipping (empty/duplicate offload)")
-            return
+            return BackfillAnalysisProcessResult.Completed
         }
         val analysisNowSeconds = System.currentTimeMillis() / 1_000L
         val analysisPlan = IntelligenceEngine.analysisScoringPlan(
@@ -2383,10 +2406,12 @@ class WhoopBleClient(
                 ),
             )
             log("Backfill: post-sync scoring deferred until the next local-day window")
-            // The database claim remains unacknowledged. Release this single-source worker instead of
-            // holding every queued source until midnight; the normal durable scorer retries after the
-            // next local-day boundary or app resume.
-            return
+            val retryAtSeconds = analysisPlan.deferUntilSeconds ?: (analysisNowSeconds + 900L)
+            // The database claim remains unacknowledged. The explicit deferred outcome preserves the
+            // durable source marker, releases this single worker, and arms the process-independent retry.
+            return BackfillAnalysisProcessResult.Deferred(
+                retryAtEpochMillis = retryAtSeconds * 1_000L,
+            )
         }
 
         // Any exception escapes only to BackfillAnalysisWorker, which retains this immutable source
@@ -2570,6 +2595,7 @@ class WhoopBleClient(
 
             log("Backfill: post-sync scoring pass done")
         }
+        return BackfillAnalysisProcessResult.Completed
     }
 
     /** True while a historical offload is in progress (offload frames route to the Backfiller). */
