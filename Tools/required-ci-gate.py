@@ -70,10 +70,10 @@ RELEASE_SOURCE_DIGESTS = {
         "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
-        "c04da9970817d1aff853a5f2e9b9385b133138e8ddd875b2e0139a7a91e11203"
+        "e426850d0578eb4a173f276ecb031335751eebc8dd9a3f19ca89d23d6a84200d"
     ),
     "release/terminology/legacy-inventory.json": (
-        "f880bcaa5e52ef216af1ab8d592577221453ffbe41a6ea85f5fa35d2f920ce9e"
+        "509364290ff137ae046055c07266a9ce6b11107b1db23669b65351e7cbfa930d"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"

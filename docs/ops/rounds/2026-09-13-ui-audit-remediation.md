@@ -90,10 +90,20 @@ claims.
   generated an eleven-state deterministic iPhone matrix. The normal and
   accessibility collapsed-planned-workout captures were manually checked for
   clipping, overlap, hidden actions, and unstable layout.
-- Excluded stale macOS WindowServer surfaces from evidence. Source, object, and
-  built-resource inspection prove the corrected evidence-aware coach copy, and
-  the complete exact-tree macOS test suite passes, but this round does not claim
-  a fresh macOS Today screenshot.
+- Integrated the audited Apple content correction, Android parity correction,
+  bounded Trends preparation, and deterministic primary-tab test as commits
+  `0672d6f8`, `80ca5875`, `c04ec57c`, and `d3da4e58` after the
+  calibration/empty-state correction in `b37a0a3d`.
+- Made additive DEBUG-fixture repair honor the caller's fixture-device key for
+  both metric rows and profile markers. The regression test uses a neutral
+  synthetic key, catches the prior hard-coded-key split, and passes
+  idempotently.
+- Excluded stale macOS WindowServer surfaces from evidence. A fresh window-only
+  capture from the exact current build, kept outside Git, shows Recovery 34 as
+  amber `Low`, Sleep 94, Effort 73, and the matching 34% Recovery key metric.
+  Source, object, built-resource, fixture, and presentation tests establish the
+  calibrating and unavailable-Recovery coach states that are not visible in
+  that scored-state capture.
 - Hosted head `48eec068` found one Apple tooltip and one Android
   workout-zone explanation outside the shared localization catalog. Both now
   use generated app-wide keys across all nine supported locales. The same
@@ -111,7 +121,7 @@ claims.
   test-only expectations: the committed generated catalog contains 728 keys,
   and the localized breathing haptic help is mounted by key rather than an
   English Swift literal. The corrected contracts pass focused tests and the
-  complete local 1,913-test macOS suite with one expected external-fixture skip
+  complete local 1,919-test macOS suite with one expected external-fixture skip
   and zero failures.
 
 ## Data, privacy, and medical truth
@@ -141,11 +151,12 @@ claims.
 |---|---|---|---|
 | Audit acceptance matrix | 20 of 20 actionable findings closed: 4 P1 and 16 P2 | Every reported misleading, inaccessible, blank, duplicated, malformed, or inconsistent state has a scoped cross-platform correction | That subjective redesign suggestions or external hardware behavior are complete |
 | Shared analytics | 1,479 tests passed | Recovery, Daily Signal, adaptive-day, planned-workout, and formatting contracts pass together | Clinical validity or individual physiology |
-| Complete Apple app suite | 1,913 tests passed, one external Xiaomi-fixture skip, zero failures | Current macOS/Apple source, persistence, UI contracts, accessibility, guidance, diagnostics, and lifecycle behavior pass together | Physical iOS background execution, BLE, haptics, or notification presentation |
-| Complete iPhone UI suite | 39 tests executed, one intentional private-pilot skip, zero failures; Today scroll averaged 5.411 seconds, CPU 0.190 seconds, and peak memory about 63.3 MB | Current simulator navigation, reporting, accessibility, loading, planner, and scrolling paths are responsive and reachable | VoiceOver traversal or physical-device memory pressure |
+| Complete Apple app suite | 1,919 tests passed, one external Xiaomi-fixture skip, zero failures | Current macOS/Apple source, persistence, UI contracts, accessibility, guidance, diagnostics, and lifecycle behavior pass together | Physical iOS background execution, BLE, haptics, or notification presentation |
+| Complete iPhone UI suite | 39 tests executed, one intentional private-pilot skip, zero failures; the suite Today-scroll sample averaged 5.313 seconds, CPU 0.186 seconds, and peak physical memory about 68.1 MB. Three additional isolated five-iteration runs all passed and averaged 5.099 seconds clock time and 0.164 seconds CPU, with 35.6-41.8 MB peak physical memory. | Current simulator navigation, reporting, accessibility, loading, planner, and scrolling paths are responsive and reachable, and the fixed swipe workload remains repeatable across independent launches | VoiceOver traversal, physical-device frame pacing, thermal pressure, or memory pressure |
 | Android exact-source matrix | Full and Demo unit suites, both lint variants, both APK assemblies, and both instrumentation Kotlin compilations passed; Gradle finished 137 tasks successfully. The authoritative final API 35 XML records 97 production-shell cases with 95 passes, two intentional private-pilot skips, and zero failures. | Both Android variants compile and retain the matched UI, accessibility, loading, privacy, screenshot-consent, and guidance contracts | OEM rendering, TalkBack traversal, background delivery, or signed physical installs |
-| Deterministic iPhone captures | Eleven nonblank states generated; collapsed planned-workout normal and accessibility captures manually reviewed | Current planner states preserve hierarchy, readable text, and stable controls at tested simulator sizes | macOS visual freshness or physical display behavior |
-| Repository policy wall | After the first hosted-head correction, feedback localization, differential and full strict i18n, Ruff check and format, 230 Tools tests, 54 operations records, the 1,246-file health-claims scan, calibration parity, private-data, terminology, required-CI, release-control, legal, distribution, and diff gates pass locally | The implementation remains localized, canonically formatted, claim-bounded, privacy-checked, and release-controlled | Corrected hosted exact-SHA status or legal/clinical approval |
+| Additive demo-fixture repair | `AppleDemoSeederTests` executed 6 tests with zero failures after the repair was changed to use a caller-supplied synthetic device key | Existing screenshot databases receive missing age series and profile markers on one coherent device namespace, and a second repair is idempotent | Participant data migration, physical collection, or non-DEBUG runtime behavior |
+| Deterministic visual captures | Eleven nonblank iPhone states generated; collapsed planned-workout normal and accessibility captures manually reviewed. A fresh window-only exact-build macOS capture shows Recovery 34 as amber `Low`, Sleep 94, Effort 73, and the matching 34% Recovery key metric. | Current planner states preserve hierarchy, readable text, and stable controls at tested simulator sizes; the current scored macOS Today state agrees across hero and key metric. | Calibrating-state macOS rendering, physical display behavior, or hardware |
+| Repository policy wall | After the first hosted-head correction, feedback localization, differential and full strict i18n, Ruff check and format, 230 Tools tests, 57 operations records, the 1,246-file health-claims scan, calibration parity, private-data, terminology, required-CI, release-control, legal, distribution, and diff gates pass locally | The implementation remains localized, canonically formatted, claim-bounded, privacy-checked, and release-controlled | Corrected hosted exact-SHA status or legal/clinical approval |
 
 ## Physical device and deployment
 
@@ -163,8 +174,11 @@ claims.
   focused tests, and these operations records
 - Commits: implementation `156937fc`; first consolidated record head
   `48eec068`; pushed i18n/Ruff correction `6cd1a932`; pushed server/Android
-  correction `b3659ddc`; bounded Apple contract correction containing this
-  entry
+  correction `b3659ddc`; Apple contract correction `f7baaddc`; calibration and
+  empty-state correction `b37a0a3d`; Apple content correction `0672d6f8`;
+  Android parity correction `80ca5875`; bounded Trends preparation
+  `c04ec57c`; deterministic tab test `d3da4e58`; fixture/policy/record closeout
+  included in this final local commit
 - Branch and remote state: isolated pull request `#15`; hosted head `b3659ddc`
   passes server and Android, while Apple run `34736975319` exposed two stale
   source-contract expectations after the macOS app built successfully. The

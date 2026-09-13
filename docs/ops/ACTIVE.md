@@ -68,7 +68,7 @@ exposed two stale source-contract expectations: the committed localization
 inventory now contains 728 keys rather than 726, and the breathing haptic help
 is intentionally referenced by localization key rather than embedded as an
 English literal in Swift. The corrected contracts pass focused tests and the
-complete local 1,913-test macOS suite with zero failures and one expected
+complete local 1,919-test macOS suite with zero failures and one expected
 external Xiaomi-fixture skip.
 
 The private 61-file UI audit is closed locally: all four P1 and sixteen P2
@@ -83,6 +83,13 @@ metric-first hierarchy, concise private prompts, and explainable day
 adjustments. Third-party branding, copy, images, event details, fixed times, and
 unsupported performance claims were not copied.
 
+The UI closeout is integrated locally as `b37a0a3d`, `0672d6f8`,
+`80ca5875`, `c04ec57c`, and `d3da4e58`. A final additive DEBUG-fixture
+correction now keeps age-series and profile-marker repair on the caller's
+synthetic device namespace; its six focused tests pass and the active
+terminology footprint in `AppleDemoSeeder.swift` decreases rather than
+expands.
+
 The explicit **Send feedback** flow is also implemented on both phones. It uses
 reviewed optional attachments, durable local queues, progress, cancellation,
 retry, screenshot sanitization, and bounded redacted diagnostics. The server
@@ -93,14 +100,15 @@ control, operator access, monitoring, legal retention, and physical-device
 background/cellular evidence are still launch gates.
 
 The exact local wall passes on the current source: `WhoopStore` 488 tests;
-`NoopRemoteSync` 127; `StrandAnalytics` 1,479; Apple app 1,913 with one external
+`NoopRemoteSync` 127; `StrandAnalytics` 1,479; Apple app 1,919 with one external
 Xiaomi-fixture skip; iPhone UI 39 with one intentional private-pilot skip and
 zero failures; Android Full and Demo unit suites plus both lint variants, APK
 assemblies, and instrumentation Kotlin compilation with 137 successful Gradle
 tasks; server 433 passed with 106 external/configuration skips; focused
 feedback/backend 25 passed with nine external/configuration skips; eight
-OpenTofu lifecycle tests; and 230 Tools tests plus 34 subtests. The policy wall
-passes feedback localization, strict i18n, 54 operations records, the
+OpenTofu lifecycle tests; 230 `Tools/tests` cases; and 49 top-level Tools cases.
+The policy wall
+passes feedback localization, strict i18n, 57 operations records, the
 1,246-file health-claims scan, calibration parity, private-data, terminology,
 required-CI, release-control, legal, distribution, dependency, and diff gates.
 The final hosted-failure corrections additionally pass the complete Android
@@ -108,16 +116,20 @@ API 35 production shell with 95 passing tests and two intentional private-pilot
 skips, plus the full server suite with 541 passing tests, one
 provider/environment skip, and separate disposable primary and
 PostgreSQL-overlay databases. The final Apple contract correction passes the
-complete 1,913-test macOS suite locally; a fresh hosted exact-SHA verdict is
+complete 1,919-test macOS suite locally; a fresh hosted exact-SHA verdict is
 still required.
 
 The exact iPhone visual matrix contains eleven nonblank states. Normal and
 accessibility collapsed-planned-workout states were manually checked for
-clipping and overlap. Today scroll averaged 5.411 seconds with 0.190 seconds of
-CPU and peak memory of about 63.3 MB in the simulator suite. Old macOS
-WindowServer surfaces are explicitly excluded from UI evidence; current source,
-objects, resources, and the complete macOS suite prove the corrected logic, but
-no fresh macOS Today screenshot is claimed.
+clipping and overlap. The complete simulator suite sample averaged 5.313
+seconds with 0.186 seconds of CPU and about 68.1 MB peak physical memory. Three
+additional isolated five-iteration scroll runs all passed and averaged 5.099
+seconds with 0.164 seconds CPU and 35.6-41.8 MB peak physical memory. Old macOS
+WindowServer surfaces are explicitly excluded. A fresh window-only capture from
+the exact current macOS build, kept outside Git, shows Recovery 34 as amber
+`Low`, Sleep 94, Effort 73, and the matching 34% Recovery key metric. The
+calibrating and unavailable-Recovery coach states remain established by direct
+fixture and presentation tests rather than that scored-state capture.
 
 Physical phones and bands remain unavailable on this laptop. VoiceOver,
 TalkBack, BLE, background/force-quit behavior, notification presentation,

@@ -1010,12 +1010,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 36,
+      "occurrenceCount": 31,
       "owner": "project team",
       "path": "Strand/Data/AppleDemoSeeder.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "ac448fe0c97e6f9c10aa93d5b5353eaf510df1f9204fb49b6a5e7c6d55e1b07f"
+      "sha256": "bf222f7532dbf7a69aae97205764d873e1b307cbc2120c4468a89ff1db435993"
     },
     {
       "category": "core",

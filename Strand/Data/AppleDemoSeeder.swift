@@ -26,6 +26,8 @@ enum VisualQALog {
 // drift) so the charts, trends and insights all read like a real account.
 enum AppleDemoSeeder {
 
+    typealias DemoStore = WhoopStore
+
     static let whoop = "my-whoop"
     static let apple = "apple-health"
     private static let DAYS = 120
@@ -84,7 +86,7 @@ enum AppleDemoSeeder {
 
     /// Seed only if requested AND the store is empty. Safe to call on every launch.
     static func seedIfRequested(
-        into store: WhoopStore,
+        into store: DemoStore,
         profileAge: Int,
         profileSex: String
     ) async {
@@ -96,7 +98,12 @@ enum AppleDemoSeeder {
         } catch {
             NSLog("AppleDemoSeeder: strength fixture failed - \(error)")
         }
-        let existing = (try? await store.dailyMetrics(deviceId: whoop, from: "0000-00-00", to: "9999-99-99")) ?? []
+        let fixtureDeviceID = whoop
+        let existing = (try? await store.dailyMetrics(
+            deviceId: fixtureDeviceID,
+            from: "0000-00-00",
+            to: "9999-99-99"
+        )) ?? []
         guard existing.isEmpty else {
             // Screenshot databases survive app reinstalls between UI-test runs. Repair only the
             // DEBUG fixture's additive/versioned data when an older demo dataset is already present,
@@ -104,6 +111,7 @@ enum AppleDemoSeeder {
             do {
                 _ = try await repairAgeMetricFixtures(
                     in: store,
+                    deviceID: fixtureDeviceID,
                     existingDays: existing,
                     profileAge: profileAge,
                     profileSex: profileSex
@@ -132,7 +140,8 @@ enum AppleDemoSeeder {
     /// only fill missing natural keys; persisted values from a completed seed are never overwritten.
     @discardableResult
     static func repairAgeMetricFixtures(
-        in store: WhoopStore,
+        in store: DemoStore,
+        deviceID: String,
         existingDays: [DailyMetric],
         profileAge: Int,
         profileSex: String,
@@ -162,7 +171,7 @@ enum AppleDemoSeeder {
         var existingByKey: [String: Set<String>] = [:]
         for key in keys {
             let rows = try await store.metricSeries(
-                deviceId: whoop,
+                deviceId: deviceID,
                 key: key,
                 from: targetDays[0],
                 to: targetDays[targetDays.count - 1]
@@ -187,9 +196,10 @@ enum AppleDemoSeeder {
 
         let seriesWritten = repairs.isEmpty
             ? 0
-            : try await store.upsertMetricSeries(repairs, deviceId: whoop)
+            : try await store.upsertMetricSeries(repairs, deviceId: deviceID)
         let markersWritten = try await repairAgeMetricProfileMarkers(
             in: store,
+            deviceID: deviceID,
             profileAge: profileAge,
             profileSex: profileSex
         )
@@ -292,6 +302,7 @@ enum AppleDemoSeeder {
     @discardableResult
     static func repairAgeMetricProfileMarkers(
         in store: WhoopStore,
+        deviceID: String = whoop,
         profileAge: Int,
         profileSex: String
     ) async throws -> Int {
@@ -302,31 +313,31 @@ enum AppleDemoSeeder {
         let vitalityToken = AgeMetricProfile.vitalityToken(age: profileAge)
 
         async let fitnessRowsRead = store.metricSeries(
-            deviceId: whoop,
+            deviceId: deviceID,
             key: "fitness_age",
             from: "0000-00-00",
             to: "9999-99-99"
         )
         async let fitnessMarkerRowsRead = store.metricSeries(
-            deviceId: whoop,
+            deviceId: deviceID,
             key: AgeMetricProfile.fitnessAgeKey,
             from: "0000-00-00",
             to: "9999-99-99"
         )
         async let vitalityRowsRead = store.metricSeries(
-            deviceId: whoop,
+            deviceId: deviceID,
             key: "vitality",
             from: "0000-00-00",
             to: "9999-99-99"
         )
         async let bodyAgeRowsRead = store.metricSeries(
-            deviceId: whoop,
+            deviceId: deviceID,
             key: "body_age",
             from: "0000-00-00",
             to: "9999-99-99"
         )
         async let vitalityMarkerRowsRead = store.metricSeries(
-            deviceId: whoop,
+            deviceId: deviceID,
             key: AgeMetricProfile.vitalityKey,
             from: "0000-00-00",
             to: "9999-99-99"
@@ -369,7 +380,7 @@ enum AppleDemoSeeder {
         })
 
         guard !repairs.isEmpty else { return 0 }
-        return try await store.upsertMetricSeries(repairs, deviceId: whoop)
+        return try await store.upsertMetricSeries(repairs, deviceId: deviceID)
     }
 
     /// Adds Active Minutes to a persisted DEBUG fixture created before that metric existed and keeps

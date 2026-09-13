@@ -96,6 +96,7 @@ final class AppleDemoSeederTests: XCTestCase {
 
     func testExistingDailyFixtureRepairsMissingAgeSeriesAndMarkersIdempotently() async throws {
         let store = try await WhoopStore.inMemory()
+        let deviceID = "demo-band"
         let days = ["2026-08-01", "2026-08-08"].map { day in
             DailyMetric(
                 day: day,
@@ -112,11 +113,12 @@ final class AppleDemoSeederTests: XCTestCase {
                 exerciseCount: 1
             )
         }
-        try await store.upsertDailyMetrics(days, deviceId: AppleDemoSeeder.whoop)
+        try await store.upsertDailyMetrics(days, deviceId: deviceID)
         let utc = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
 
         let firstRepair = try await AppleDemoSeeder.repairAgeMetricFixtures(
             in: store,
+            deviceID: deviceID,
             existingDays: days,
             profileAge: 30,
             profileSex: "female",
@@ -126,7 +128,7 @@ final class AppleDemoSeederTests: XCTestCase {
 
         for key in ["fitness_age", "vo2max_est", "vitality", "body_age"] {
             let rows = try await store.metricSeries(
-                deviceId: AppleDemoSeeder.whoop,
+                deviceId: deviceID,
                 key: key,
                 from: days[0].day,
                 to: days[1].day
@@ -135,14 +137,14 @@ final class AppleDemoSeederTests: XCTestCase {
         }
 
         let fitnessMarkers = try await store.metricSeries(
-            deviceId: AppleDemoSeeder.whoop,
+            deviceId: deviceID,
             key: AgeMetricProfile.fitnessAgeKey,
             from: days[0].day,
             to: days[1].day
         )
         XCTAssertEqual(fitnessMarkers.map(\.value), [302, 302])
         let vitalityMarkers = try await store.metricSeries(
-            deviceId: AppleDemoSeeder.whoop,
+            deviceId: deviceID,
             key: AgeMetricProfile.vitalityKey,
             from: days[0].day,
             to: days[1].day
@@ -151,6 +153,7 @@ final class AppleDemoSeederTests: XCTestCase {
 
         let secondRepair = try await AppleDemoSeeder.repairAgeMetricFixtures(
             in: store,
+            deviceID: deviceID,
             existingDays: days,
             profileAge: 30,
             profileSex: "female",

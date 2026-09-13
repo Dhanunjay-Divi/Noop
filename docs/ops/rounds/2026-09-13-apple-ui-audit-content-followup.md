@@ -1,60 +1,125 @@
-# Apple UI Audit Content Follow-up
+# Round: 2026-09-13 - Apple UI audit content follow-up
 
-Date: 2026-09-13
-Base: `f7baaddc0818b238b86962e60c5664eb6b746d34`
-Branch: `codex/apple-ui-audit-content-20260913`
+## Status
+
+- State: `completed in an isolated local fork and integrated into the active
+  audit branch; physical accessibility evidence remains`
+- Owner: project team
+- Branch: `codex/apple-ui-audit-content-20260913`
+- Start commit: `f7baaddc0818b238b86962e60c5664eb6b746d34`
+- End implementation commit: `0672d6f8`
+- Record commit or PR: integrated into pull request `#15`
+
+## Objective
+
+Recheck the Apple/shared implementation of P1-1 through P1-3 and every
+applicable P2 item in the private UI audit. Close remaining content defects
+without changing Recovery thresholds, Trends loading, Android source, or the
+iPhone UI test target.
 
 ## Scope
 
-- Recheck Apple/shared P1-1, P1-2, P1-3 and P2-1 through P2-16 from
-  `/tmp/audit_shots/UI-AUDIT-REPORT.md`.
-- Exclude P1-4 Trends loading/performance, Android sources, and
-  `NOOPiOSUITests.swift`.
-- Preserve metric thresholds, missing-data honesty, localization, and
-  product-health safety.
+### In scope
 
-## Findings
+- Recovery, Daily Signal, missing-value, digest, device, Stress, Journal,
+  NOOP+, Health Monitor, and Sleep presentation contracts on Apple.
+- Focused source tests for the corrected call sites.
 
-- The supplied base already contains the requested Recovery-band, Daily
-  Signal, tab accessibility, digest, device, stress, Journal layout, NOOP+,
-  Health copy, and Sleep naming remediations.
-- Four Apple placeholders still used a raw hyphen instead of the shared
-  missing-value token: three in the Health live-HR card and one in the
-  Journal numeric field.
-- The supplied macOS screenshot shows an older workout-coach sentence that is
-  absent from this source. The current entry uses the unavailable-Recovery copy
-  unless the selected day has its own scored Recovery; carried, calibrating,
-  baseline-ready, and no-data states cannot select the scored copy.
+### Non-goals
 
-## Changes
+- P1-4 Trends loading or aggregation.
+- Android parity.
+- Physical VoiceOver, notification, BLE, haptic, or background validation.
+- Bulk deletion of unreferenced translation history or low-level diagnostic
+  terminology.
 
-- Route the remaining Health and Journal placeholders through
+## Starting evidence
+
+- The private audit report and its screenshot set were reviewed outside Git.
+- The base already contained the intended Recovery, Daily Signal, tab
+  accessibility, digest, device, Stress, NOOP+, Health, and Sleep corrections.
+- Three Health live-HR placeholders and one Journal numeric placeholder still
+  rendered a raw hyphen instead of the shared missing-value token.
+- The supplied macOS screenshot showed stale workout-coach copy. Current source
+  already selected unavailable-Recovery copy unless the chosen day owned a
+  scored Recovery.
+
+## Delivered
+
+- Routed the four remaining Health and Journal placeholders through
   `StrandFormat.missing`.
-- Extend focused source contracts to pin the missing token and the audited
-  Recovery, Daily Signal, and workout-coach call sites.
+- Extended focused contracts for the shared missing token, Recovery
+  presentation, Daily Signal vocabulary, and workout-coach copy selection.
+- Kept Trends, Android, and `NOOPiOSUITests.swift` outside this isolated change.
 
-## Intentionally unchanged
+## Data, privacy, and medical truth
 
-- P1-4 Trends loading/performance and `NOOPiOSUITests.swift` were excluded by
-  the task.
-- Android files remain untouched.
-- Unreferenced legacy literal keys remain in the Apple string catalog, and
-  legitimate `heart-rate strap`, `strap log`, and low-level protocol wording
-  remains where it names a distinct device type or diagnostic artifact. The
-  cited product UI no longer mounts the legacy Charge/strap copy; bulk-deleting
-  translation history or renaming protocol terminology would add unrelated
-  localization risk.
+- Schema or migration impact: none.
+- Existing-data retention impact: none.
+- Source/provenance or formula impact: presentation only; no score, threshold,
+  or provenance change.
+- Permissions/network disclosure impact: none.
+- Health/medical claim impact and limitations: unavailable Recovery remains
+  unavailable and cannot shape the coach subtitle; no new claim was added.
 
-## Verification
+## Observability
 
-- `xcodebuild` focused Apple/shared selection: 21 tests passed, 0 failures.
-  This covered localization, Recovery presentation, Daily Signal copy,
-  Dynamic Type/Large Content Viewer contracts, weekly digest presentation,
-  Charge breakdown formatting, device naming, and the changed missing-value
-  call sites.
-- `LiquidChargeCarryTests/testOnlyTodaysOwnScoreCanShapeLiveSessionCopy`:
-  1 test passed, 0 failures.
-- `git diff --check`: passed.
-- Scope check: no Android source, Trends implementation, or
-  `NOOPiOSUITests.swift` change.
-- Full suites were intentionally not run.
+- Existing evidence reused: deterministic presentation/source contracts.
+- New bounded events or operation spans: none; no operational boundary changed.
+- Redaction, retention, and high-frequency controls: no diagnostics or payload
+  recording changed.
+- Remaining blind spots: physical VoiceOver rendering and notification or
+  background behavior.
+
+## Evidence
+
+| Evidence | Result | What it proves | What it does not prove |
+|---|---|---|---|
+| Focused Apple/shared selection | 21 tests passed with zero failures | Localization, Recovery, Daily Signal, Dynamic Type/Large Content Viewer, digest, breakdown, device naming, and missing-value contracts pass together | Full app regression or physical accessibility |
+| Live-session copy selection | `LiquidChargeCarryTests/testOnlyTodaysOwnScoreCanShapeLiveSessionCopy` passed | Carried, calibrating, baseline-ready, and no-data states cannot claim today's Recovery | Physical workout coaching or band cues |
+| Scope and diff checks | `git diff --check` passed; no Android, Trends, or iPhone UI-test source changed | The isolated correction stayed within its assigned ownership | Integration compatibility, later covered by the active branch wall |
+
+## Physical device and deployment
+
+- Install/update action: not run
+- Generalized device and OS class: local macOS test target only
+- Data-preservation result: no participant or owner data changed
+- BLE/background/haptic/battery scenarios exercised: not run
+- Unrun hardware gates: VoiceOver, BLE, notification presentation, background
+  execution, haptics, battery, and sensor behavior
+
+## Git and release state
+
+- Changed paths: `Strand/Screens/HealthView.swift`,
+  `Strand/Screens/JournalLogCard.swift`, focused Apple source contracts, and
+  this operations record
+- Commits: `0672d6f8`
+- Branch and remote state: isolated local fork integrated into the active audit
+  branch; protected exact-head verification remains owned by pull request `#15`
+- Repository visibility verified: unchanged by this sub-round
+- Version/build impact: no schema or marketing-version change
+- Release or distribution impact: none
+
+## Decisions
+
+- Durable decision added or changed: shared missing-value formatting and
+  unavailable-Recovery copy are acceptance requirements across Apple surfaces.
+- Decision-log entry: no new global decision number.
+
+## Open risks and honest limitations
+
+- Unreferenced catalog history can still contain legacy words without being
+  mounted by current product UI.
+- Physical VoiceOver and macOS/iPhone rendering were not established by this
+  focused sub-round.
+
+## Next round
+
+1. Complete exact-current Apple/Android integration and protected verification
+   in the parent UI-audit round.
+
+## Privacy check
+
+- [x] Private screenshots and owner paths are not committed.
+- [x] No credentials, health values, raw sensor data, or user content were
+      added.
