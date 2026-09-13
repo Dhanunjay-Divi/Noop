@@ -39,10 +39,19 @@ final class DailyActionPlannerTests: XCTestCase {
         .init(day: day, startSec: startSec, endSec: endSec)
     }
 
-    private func usualSleep(todayMinutes: Double = 360) -> [DailyActionPlanner.SleepDay] {
+    private func usualSleep(
+        todayMinutes: Double = 360,
+        observedAtSec: Int? = 999_000,
+        observedSessionDurationMinutes: Double? = 420
+    ) -> [DailyActionPlanner.SleepDay] {
         (14...20).map {
             .init(day: String(format: "2026-08-%02d", $0), minutes: 450)
-        } + [.init(day: today, minutes: todayMinutes)]
+        } + [.init(
+            day: today,
+            minutes: todayMinutes,
+            observedAtSec: observedAtSec,
+            observedSessionDurationMinutes: observedSessionDurationMinutes
+        )]
     }
 
     func testReadyRangeUsesPersonalHistoryAndNeverRisesForPrimed() {
@@ -186,7 +195,12 @@ final class DailyActionPlannerTests: XCTestCase {
             readiness: readiness(),
             checkIn: .unanswered,
             recentEffort: [],
-            recentSleep: [.init(day: today, minutes: 410)],
+            recentSleep: [.init(
+                day: today,
+                minutes: 410,
+                observedAtSec: 999_000,
+                observedSessionDurationMinutes: 480
+            )],
             sleepTargetMinutes: 480,
             sleepTargetIsExplicit: true,
             plannedWorkout: plannedWorkout(),
@@ -206,8 +220,93 @@ final class DailyActionPlannerTests: XCTestCase {
             readiness: readiness(),
             checkIn: .unanswered,
             recentEffort: [],
-            recentSleep: [.init(day: today, minutes: 360)],
+            recentSleep: [.init(
+                day: today,
+                minutes: 360,
+                observedAtSec: 999_000,
+                observedSessionDurationMinutes: 420
+            )],
             sleepTargetMinutes: 480,
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertNil(plan.workoutAdjustment)
+    }
+
+    func testSleepAdjustmentRequiresFreshCurrentSessionEvidence() {
+        let missing = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            recentSleep: usualSleep(observedAtSec: nil),
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+        let stale = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            recentSleep: usualSleep(
+                observedAtSec: 1_000_000 -
+                    DailyActionPlanner.currentSleepMaximumAgeSeconds - 1
+            ),
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertNil(missing.workoutAdjustment)
+        XCTAssertNil(stale.workoutAdjustment)
+    }
+
+    func testSleepAggregateMatcherRejectsShortNapAndHonorsBoundaries() {
+        XCTAssertEqual(
+            DailyActionPlanner.matchedSleepObservationEndSec(
+                aggregateMinutes: 360,
+                sessionDurationMinutes: 345,
+                sessionEndSec: 999_000,
+                nowSec: 1_000_000
+            ),
+            999_000
+        )
+        XCTAssertNil(DailyActionPlanner.matchedSleepObservationEndSec(
+            aggregateMinutes: 360,
+            sessionDurationMinutes: 344,
+            sessionEndSec: 999_000,
+            nowSec: 1_000_000
+        ))
+        XCTAssertNil(DailyActionPlanner.matchedSleepObservationEndSec(
+            aggregateMinutes: 360,
+            sessionDurationMinutes: 30,
+            sessionEndSec: 999_000,
+            nowSec: 1_000_000
+        ))
+        XCTAssertEqual(
+            DailyActionPlanner.matchedSleepObservationEndSec(
+                aggregateMinutes: 360,
+                sessionDurationMinutes: 540,
+                sessionEndSec: 999_000,
+                nowSec: 1_000_000
+            ),
+            999_000
+        )
+        XCTAssertNil(DailyActionPlanner.matchedSleepObservationEndSec(
+            aggregateMinutes: 360,
+            sessionDurationMinutes: 541,
+            sessionEndSec: 999_000,
+            nowSec: 1_000_000
+        ))
+    }
+
+    func testFreshNapTimestampCannotCreateSleepDeficitAdjustment() {
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            recentSleep: usualSleep(observedSessionDurationMinutes: 30),
             plannedWorkout: plannedWorkout(),
             nowSec: 1_000_000
         )

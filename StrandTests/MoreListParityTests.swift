@@ -326,8 +326,12 @@ final class MoreListParityTests: XCTestCase {
                       "The glass island needs an opaque accessibility fallback.")
         XCTAssertTrue(shell.contains("compact && !dynamicTypeSize.isAccessibilitySize"),
                       "Accessibility Dynamic Type must retain visible labels.")
-        XCTAssertTrue(shell.contains(".font(.system(size: 11,"),
-                      "Tab labels need a native-sized fixed font so the longest title never ellipsizes.")
+        XCTAssertTrue(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxxLarge)"),
+                      "Tab labels must scale through the largest stable five-tab size.")
+        XCTAssertTrue(shell.contains(".font(StrandFont.footnote.weight("),
+                      "Tab labels must use semantic Dynamic Type rather than a fixed point size.")
+        XCTAssertFalse(shell.contains(".font(.system(size: 11,"),
+                       "The custom tab bar must not bypass Dynamic Type with a fixed label size.")
         // The rail used to shorten Workouts to a hard-coded "Train". That literal had no String Catalog
         // entry, so it rendered untranslated in all nine locales; it was removed. The rail now draws the
         // LOCALIZED title and stays whole via lineLimit + minimumScaleFactor. Pin that, and pin the
@@ -340,6 +344,10 @@ final class MoreListParityTests: XCTestCase {
                        "An untranslated English tab label must not be reintroduced; add a catalog key instead.")
         XCTAssertTrue(shell.contains(".accessibilityLabel(item.title)"),
                       "The concise activity label must not replace the full spoken destination name.")
+        XCTAssertTrue(shell.contains("Label(item.title, systemImage: item.icon)"),
+                      "Each destination must expose its full label and icon in the Large Content Viewer.")
+        XCTAssertTrue(shell.contains("Label(currentItem.title, systemImage: currentItem.icon)"),
+                      "Compact navigation must retain a Large Content Viewer representation.")
         XCTAssertTrue(shell.contains(".frame(minHeight: 44)"))
     }
 

@@ -107,6 +107,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.Instant
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlin.math.roundToInt
 
@@ -138,6 +140,11 @@ internal data class TodayRestCompositeCacheKey(
     val dailyDataSignature: Int,
     val activeStrapId: String,
     val restDataVersion: Long,
+)
+
+internal data class MatchedSleepObservation(
+    val endSec: Long,
+    val durationMinutes: Double,
 )
 
 /** Stable live fields the Today root is allowed to observe. Sensor values and sync counters stay in leaves. */
@@ -824,6 +831,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // Vitality windows) keeps its data. Same oldest-first ordering as before.
         selectedDeviceId.flatMapLatest { repository.recentDaysMergedFlow(it) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    internal suspend fun matchedSleepObservation(
+        dayKey: String,
+        aggregateMinutes: Double?,
+        nowSec: Long = System.currentTimeMillis() / 1_000L,
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): MatchedSleepObservation? {
+        val sessions = repository.sleepSessionsMerged(
+            deviceId = selectedDeviceId.value,
+            from = nowSec - DailyActionPlanner.CURRENT_SLEEP_MAXIMUM_AGE_SECONDS,
+            to = nowSec,
+            limit = 64,
+        )
+        for (session in sessions.sortedByDescending { it.endTs }) {
+            val end = Instant.ofEpochSecond(session.endTs).atZone(zoneId)
+            if (
+                maxOf(logicalDay(end).toString(), end.toLocalDate().toString()) == dayKey
+            ) {
+                val durationMinutes =
+                    (session.endTs - session.effectiveStartTs) / 60.0
+                if (
+                    DailyActionPlanner.matchedSleepObservationEndSec(
+                        aggregateMinutes = aggregateMinutes,
+                        sessionDurationMinutes = durationMinutes,
+                        sessionEndSec = session.endTs,
+                        nowSec = nowSec,
+                    ) != null
+                ) {
+                    return MatchedSleepObservation(
+                        endSec = session.endTs,
+                        durationMinutes = durationMinutes,
+                    )
+                }
+            }
+        }
+        return null
+    }
 
     /**
      * #386 self-heal: a "kick" the app-resume hook sends to wake the 15-min analyze loop early, so an
@@ -2291,8 +2335,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _workouts.value = sorted
             // Post-workout summary (#517) — opt-in, default OFF. The newest session (by start) drives a
             // one-shot Effort + duration + avg-HR notification when it's strictly newer than the last one
-            // summarised, so a re-sync of the same backlog never re-fires. Honest timing: a strap-only
-            // workout only surfaces on the next history offload, so the copy says "after your strap synced".
+            // summarised, so a re-sync of the same backlog never re-fires. Honest timing: a band-only
+            // workout only surfaces on the next history offload, so the copy says "after your band synced".
             sorted.firstOrNull()?.let { maybeNotifyWorkout(it) }
         }
     }
@@ -2320,7 +2364,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 row.avgHr?.let { add("avg $it bpm") }
             }
             "Workout logged: ${WorkoutEditing.displaySport(row.sport)}" to
-                (pieces.joinToString(" · ") + ". Summarised after your strap synced.")
+                (pieces.joinToString(" · ") + ". Summarised after your band synced.")
         }
         ScheduledReportNotifier.onWorkout(appContext, row.startTs, title, body)
     }

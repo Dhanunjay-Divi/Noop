@@ -12,6 +12,7 @@ raw_retention_days = 30
 feedback_retention_days = 28
 enable_feedback_lifecycle = false
 enable_feedback_ingestion = false
+feedback_external_abuse_gate_approved = false
 
 # Keep these false/null through the foundation apply. Enable the database only
 # after the standard-PostgreSQL integration suite passes.

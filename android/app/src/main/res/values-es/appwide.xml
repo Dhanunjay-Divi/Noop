@@ -67,6 +67,12 @@
     <string name="appwide_calendar_summary_overline">ESTE MES</string>
     <string name="appwide_calendar_summary_scored_format">%1$d días registrados · media %2$s</string>
     <string name="appwide_calendar_your_month">Tu mes</string>
+    <string name="appwide_charge_confidence_calibrating">Calibrando</string>
+    <string name="appwide_charge_confidence_estimate">Estimación</string>
+    <string name="appwide_charge_confidence_reliable">Fiable</string>
+    <string name="appwide_coach_recovery_prompt">¿Cómo evoluciona mi Recuperación?</string>
+    <string name="appwide_coach_subtitle">Pregunta sobre Recuperación, Esfuerzo, Puntuación de sueño y entrenamientos usando tus propios datos.</string>
+    <string name="appwide_common_vs_baseline">vs. referencia</string>
     <string name="appwide_cycle_action_set_up">Configurar</string>
     <string name="appwide_cycle_health_missing_temperature">Usa Noop Band durante la noche para crear observaciones de temperatura cutánea y reloj corporal.</string>
     <string name="appwide_cycle_health_overline">Privado y en el dispositivo</string>
@@ -114,10 +120,10 @@
     <string name="appwide_daily_signal_alert_title">Las señales cambiaron</string>
     <string name="appwide_daily_signal_alert_unwell_title">Revísalo ahora</string>
     <string name="appwide_daily_signal_label">Señal diaria</string>
-    <string name="appwide_daily_signal_status_aligned">Alineado</string>
+    <string name="appwide_daily_signal_status_aligned">Estable</string>
     <string name="appwide_daily_signal_status_building">Aprendiendo</string>
     <string name="appwide_daily_signal_status_check_in">Revisar</string>
-    <string name="appwide_daily_signal_status_recheck">Revisar</string>
+    <string name="appwide_daily_signal_status_recheck">Vigilar</string>
     <string name="appwide_day_overview_active_time">Tiempo activo</string>
     <string name="appwide_day_overview_activity">Actividad</string>
     <string name="appwide_day_overview_blood_oxygen">Oxígeno en sangre</string>
@@ -182,6 +188,7 @@
     <string name="appwide_fitness_age_younger_many_profile_age">%1$d años menos que tu edad de perfil</string>
     <string name="appwide_fitness_age_younger_one_profile_age">1 año menos que tu edad de perfil</string>
     <string name="appwide_fitness_age_younger_this_week">%1$s menos esta semana</string>
+    <string name="appwide_friends_data_boundary">Solo se pueden compartir Recuperación, Effort, Puntuación de sueño, duración del sueño, VFC y frecuencia cardíaca en reposo. Se excluyen flujos sin procesar, ubicaciones, diarios, rutas, entrenamientos y fases del sueño.</string>
     <string name="appwide_friends_invite_instructions">En Noop, abre Más → Amigos e introduce la dirección del servidor y el código de un solo uso.</string>
     <string name="appwide_gym_add_first_exercise">Añade el primer ejercicio</string>
     <string name="appwide_gym_add_first_exercise_body">Cada ejercicio puede usar su propio objetivo, descanso y regla de progresión.</string>
@@ -369,6 +376,9 @@
     <string name="appwide_health_body_composition_title">Composición corporal</string>
     <string name="appwide_health_body_composition_weight">PESO</string>
     <string name="appwide_health_body_composition_whole_body">CUERPO COMPLETO</string>
+    <string name="appwide_health_live_activity_lock_screen">Mostrar FC en directo en la pantalla bloqueada</string>
+    <string name="appwide_health_live_activity_recovery_indicator">Indicador de recuperación</string>
+    <string name="appwide_health_live_hr_disconnected">Noop Band no está conectado. Conéctalo antes de iniciar la FC en directo.</string>
     <string name="appwide_hydration_a11y_day_format">Hidratación %1$s</string>
     <string name="appwide_hydration_clear_day">Borrar %1$s</string>
     <string name="appwide_hydration_delete_entry_accessibility_format">Eliminar entrada de agua de %1$s</string>
@@ -397,6 +407,9 @@
     <string name="appwide_hydration_subtitle_health_connect_format">Ingesta registrada disponible de NOOP y Health Connect · %1$s.</string>
     <string name="appwide_hydration_target_unavailable">Confirma los datos de tu perfil adulto para ver un objetivo personalizado.</string>
     <string name="appwide_hydration_unavailable">No disponible</string>
+    <string name="appwide_insights_behaviour_history_help">Registra comportamientos arriba. Tras unos días, NOOP ordena cómo se relaciona cada uno con Recuperación, VFC y Puntuación de sueño. Una exportación del wearable puede completar el historial.</string>
+    <string name="appwide_intelligence_no_scored_nights">Aún no hay noches puntuadas. Lleva la pulsera durante la noche con NOOP conectado. Esfuerzo y Puntuación de sueño pueden aparecer tras una noche; Recuperación necesita unas cuatro noches válidas para aprender tu referencia.</string>
+    <string name="appwide_intelligence_subtitle">NOOP calcula Recuperación, Esfuerzo y Puntuación de sueño en tu dispositivo, sin cálculos en la nube.</string>
     <string name="appwide_journal_editing_help">Cambia el nombre, el grupo o elimina un elemento para ordenar la lista. Al cambiarle el nombre, la pregunta original se conserva internamente para que las referencias importadas sigan coincidiendo. Los elementos personalizados se eliminan; los integrados se ocultan y se pueden restaurar abajo.</string>
     <string name="appwide_legal_summary">Términos del proyecto y licencia del código fuente. Disponible sin conexión.</string>
     <string name="appwide_live_session_band_required">Conecta y ponte una pulsera compatible vinculada antes de empezar.</string>
@@ -417,6 +430,7 @@
     <string name="appwide_live_session_start_accessibility">Iniciar coach de entrenamiento. Beta. Coaching con frecuencia cardiaca en directo según la Recuperación de hoy. Las señales en la muñeca requieren una pulsera conectada y puesta.</string>
     <string name="appwide_live_session_start_coaching">Iniciar coaching</string>
     <string name="appwide_live_session_start_detail">Coaching con frecuencia cardiaca en directo según la Recuperación de hoy. Las señales en la muñeca requieren una pulsera preparada.</string>
+    <string name="appwide_live_session_start_detail_unavailable">La guía de frecuencia cardiaca en directo usa tu frecuencia cardiaca mientras la Recuperación de hoy no está disponible.</string>
     <string name="appwide_live_session_summary_title">Resumen de Silent Guardian</string>
     <string name="appwide_live_session_title">Silent Guardian</string>
     <string name="appwide_live_session_wrist_ready">La frecuencia cardiaca en directo y las señales en la muñeca están listas.</string>
@@ -498,6 +512,10 @@
     <string name="appwide_metric_education_spo2_what">El oxígeno en sangre, o SpO₂, estima el porcentaje de hemoglobina que transporta oxígeno.</string>
     <string name="appwide_metric_education_spo2_why">Las mediciones repetidas y fiables pueden aportar contexto sobre la oxigenación nocturna y la respuesta a la altitud.</string>
     <string name="appwide_metric_education_title">Entender esta métrica</string>
+    <string name="appwide_morning_recap_body_both">Abre NOOP para revisar tu Recuperación y Puntuación de sueño.</string>
+    <string name="appwide_morning_recap_body_recovery">Abre NOOP para revisar tu Recuperación.</string>
+    <string name="appwide_morning_recap_body_sleep">Abre NOOP para revisar tu Puntuación de sueño.</string>
+    <string name="appwide_morning_recap_title">Tu resumen matutino está listo</string>
     <string name="appwide_notifications_effort_permission_message">Permite las notificaciones en Ajustes para recibir el marcador de Esfuerzo opcional. NOOP sigue funcionando con normalidad sin él.</string>
     <string name="appwide_notifications_recap_privacy">La pantalla de bloqueo solo indica que el resumen está listo. Los valores de Recuperación y Puntuación de sueño permanecen dentro de NOOP.</string>
     <string name="appwide_notifications_system_disabled">Las notificaciones están desactivadas en los ajustes del sistema.</string>
@@ -522,11 +540,14 @@
     <string name="appwide_rhythm_methodology">NOOP solo analiza periodos nocturnos tranquilos fuera de entrenamientos registrados. Se omiten, en vez de interpretarse, el movimiento, el ejercicio, una frecuencia cardiaca elevada fuera del reposo y los periodos con ruido. Representa el tiempo entre latidos en un diagrama de dispersión de Poincaré y calcula estadísticas descriptivas publicadas. Ritmo es una vista opcional de los tiempos, nunca un diagnóstico, y no envía alertas.</string>
     <string name="appwide_shell_updates_unread_format">Actualizaciones, %1$d sin leer</string>
     <string name="appwide_sleep_edit_conflict">Esta noche cambió antes de que se pudiera guardar la edición. Se restauraron los datos más recientes.</string>
+    <string name="appwide_sleep_empty_history_help">Aún no hay noches aquí. Importa una exportación del wearable en Fuentes de datos para ver cada noche, tus fases de sueño y tendencias de inmediato. O abre Inteligencia para ver la noche anterior calculada desde la pulsera después de llevarla puesta al dormir.</string>
+    <string name="appwide_sleep_imported_confidence_note">La confianza del proveedor no se incluyó con esta Puntuación de sueño importada.</string>
     <string name="appwide_sleep_recovery_added_format">El balance reciente añade %1$s esta noche. El máximo es 1 hora y nunca reduce tu objetivo.</string>
     <string name="appwide_sleep_recovery_none">Esta noche no se añade tiempo de recuperación. NOOP nunca recomienda menos que tu objetivo por un excedente reciente.</string>
     <string name="appwide_sleep_reminder_around_format">Recordatorio programado aproximadamente para las %1$s.</string>
     <string name="appwide_sleep_reminder_off">El plan sigue disponible con los recordatorios desactivados. Activa el aviso inferior si quieres una notificación suave.</string>
     <string name="appwide_sleep_reminder_scheduled_format">Recordatorio programado para las %1$s; se entrega como notificación suave, no como alarma garantizada.</string>
+    <string name="appwide_sleep_score_a11y_format">Puntuación de sueño %1$d de 100</string>
     <string name="appwide_sleep_tonights_goal">Objetivo de esta noche</string>
     <string name="appwide_sleep_stress_band_high">Alto</string>
     <string name="appwide_sleep_stress_band_low">Bajo</string>
@@ -559,6 +580,7 @@
     <string name="appwide_strength_reps_format">%1$d repeticiones</string>
     <string name="appwide_strength_sessions_goal">Sesiones de fuerza</string>
     <string name="appwide_strength_sets_format">%1$d series</string>
+    <string name="appwide_stress_band_light_load">Carga ligera</string>
     <string name="appwide_stress_checkin_channel_description">Avisos opcionales de respiración sin detalles tras una señal válida en reposo.</string>
     <string name="appwide_stress_checkin_channel_name">Chequeos privados de respiración</string>
     <string name="appwide_stress_checkin_detect_help">Requiere intervalos R-R y frecuencia cardiaca recientes, una banda cifrada puesta y movimiento denso de muñeca con marcas de tiempo coincidentes. Los datos ausentes o en movimiento nunca activan una sugerencia.</string>
@@ -606,6 +628,9 @@
     <string name="appwide_today_greeting_morning">Buenos días</string>
     <string name="appwide_today_greeting_format">%1$s, %2$s</string>
     <string name="appwide_today_local_refresh_refreshing">Actualizando datos locales</string>
+    <string name="appwide_today_recovery_detail_format">Recuperación: %1$s.</string>
+    <string name="appwide_today_recovery_detail_unavailable">La Recuperación aún no está disponible.</string>
+    <string name="appwide_today_recovery_no_data">Sin datos</string>
     <string name="appwide_trend_baseline_format">%1$s %2$s%3$s frente a la referencia, %4$s</string>
     <string name="appwide_trend_direction_down">baja</string>
     <string name="appwide_trend_direction_up">sube</string>
@@ -623,14 +648,27 @@
     <string name="appwide_trends_last_6_months">Últimos 6 meses</string>
     <string name="appwide_trends_last_7_days">Últimos 7 días</string>
     <string name="appwide_trends_last_year">Último año</string>
+    <string name="appwide_trends_load_failed_body">NOOP no pudo leer tu historial local. Tus datos no se modificaron.</string>
+    <string name="appwide_trends_load_failed_title">Tendencias no disponibles</string>
     <string name="appwide_trends_metric_trio">Recuperación · Esfuerzo · Sueño</string>
+    <string name="appwide_trends_partial_body">No se pudo leer parte del historial local. Se muestran los datos recientes disponibles.</string>
+    <string name="appwide_trends_partial_title">Mostrando el historial disponible</string>
+    <string name="appwide_trends_prepare_failed_body">Tu historial local sigue disponible. Intenta preparar los gráficos de nuevo.</string>
+    <string name="appwide_trends_prepare_failed_title">No se pudieron preparar las tendencias</string>
     <string name="appwide_trends_range_averages">Promedios diarios</string>
     <string name="appwide_trends_recovery_coverage_format">Puntuaciones de recuperación: %1$d de %2$d días. Se usa una puntuación por día en el promedio.</string>
     <string name="appwide_trends_recovery_descriptor">Estimación diaria de preparación a partir de la VFC nocturna, la frecuencia cardiaca en reposo, el sueño, la respiración y la temperatura de la piel. De 0 a 100; más alto significa mayor recuperación.</string>
     <string name="appwide_trends_recovery_history_coverage_format">Días con puntuación de recuperación: %1$d. Se usa una puntuación por día en el promedio.</string>
     <string name="appwide_trends_recovery_no_scores">Todavía no hay puntuaciones de recuperación disponibles.</string>
     <string name="appwide_trends_recovery_older_coverage_format">El intervalo seleccionado no tiene puntuaciones de recuperación. Se muestran %1$d días anteriores con puntuación.</string>
+    <string name="appwide_trends_report_explainer">Cómo leer esto: la VFC, la frecuencia cardíaca en reposo, la duración del sueño, la frecuencia respiratoria y la temperatura de la piel se miden desde la pulsera. La temperatura de la piel se muestra como la desviación de tu propia referencia. Entrenamientos es el número de actividades que registraste o que fueron detectadas. Recuperación, Effort y Stress son puntuaciones propias de NOOP en el dispositivo, no medidas clínicas. Recuperación es un compuesto diario de VFC, frecuencia cardíaca en reposo, sueño y tendencia de temperatura de la piel. Effort es la carga cardiovascular derivada de la frecuencia cardíaca. Stress es un índice de carga autonómica de 0 a 3 basado en la frecuencia cardíaca en reposo y la VFC.</string>
+    <string name="appwide_trends_report_no_data_format">No hubo lecturas de entrenamiento, estrés, recuperación, sueño, VFC, frecuencia cardíaca en reposo, esfuerzo, frecuencia respiratoria ni temperatura de la piel dentro de %1$s. Lleva tu pulsera unos días más o elige un rango más amplio y vuelve a exportar.</string>
+    <string name="appwide_trends_retry">Intentar de nuevo</string>
     <string name="appwide_trends_sleep_descriptor">Calidad del sueño según la duración, la eficiencia, las fases y la regularidad disponibles. De 0 a 100; cuanto más alto, mejor.</string>
+    <string name="appwide_trends_updating_body">La última vista disponible permanece visible mientras se actualiza el historial local.</string>
+    <string name="appwide_trends_updating_title">Actualizando tendencias</string>
+    <string name="appwide_trends_weekly_digest_failed_body">El resto de Tendencias está disponible. Vuelve a intentar este resumen.</string>
+    <string name="appwide_trends_weekly_digest_failed_title">Resumen semanal no disponible</string>
     <string name="appwide_unit_grams_format">%1$s g</string>
     <string name="appwide_v2_demo_month">AGOSTO DE 2026</string>
     <string name="appwide_v2_trend_average">discontinuo = tu media</string>
@@ -656,6 +694,8 @@
     <string name="appwide_wake_events_needs_evidence">Necesita datos verificados de las fases</string>
     <string name="appwide_wake_events_title">Despertares</string>
     <string name="appwide_wake_events_unavailable_a11y">Despertares no disponibles</string>
+    <string name="appwide_weekly_digest_history_help">Un resumen semanal necesita unos días de historial. Usa tu pulsera o importa una exportación del wearable en Fuentes de datos.</string>
+    <string name="appwide_weekly_digest_imported_sleep_not_included">Sueño importado no incluido</string>
     <string name="appwide_workout_guidance_channel_description">Avisos opcionales tras un esfuerzo alto sostenido en un entrenamiento registrado.</string>
     <string name="appwide_workout_guidance_channel_name">Orientación sobre el esfuerzo de entrenamiento</string>
     <string name="appwide_workout_guidance_help">Durante un entrenamiento registrado o una sesión en directo, las muestras de frecuencia cardiaca aceptadas deben mantenerse altas antes de que Noop Band te indique que reduzcas el ritmo o pauses. Un pico aislado nunca lo activa. La frecuencia cardiaca máxima es una referencia de esfuerzo, no un límite médico.</string>
@@ -684,6 +724,7 @@
     <string name="appwide_workouts_activity_calendar_recorded_activities">%1$d actividades registradas</string>
     <string name="appwide_workouts_activity_calendar_three_or_more">3 actividades o más</string>
     <string name="appwide_workouts_activity_calendar_title">Calendario de actividad</string>
+    <string name="appwide_workouts_band_hr">Desde la frecuencia cardíaca de la pulsera</string>
     <string name="appwide_workouts_imported_zone_split">Distribución importada por zonas para esta sesión.</string>
     <string name="appwide_workouts_imported_zones">Zonas importadas</string>
 </resources>

@@ -126,11 +126,23 @@ internal fun ManagedCloudBackupCard() {
                 )
                 ManagedCloudStatePill(state.phase)
             }
-            Text(
-                text = stringResource(R.string.managed_cloud_summary),
-                style = NoopType.footnote,
-                color = Palette.textTertiary,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ManagedCloudEvidenceRow(
+                    icon = Icons.Filled.Watch,
+                    title = stringResource(R.string.managed_cloud_backed_up_title),
+                    detail = stringResource(R.string.managed_cloud_backed_up_detail),
+                )
+                ManagedCloudEvidenceRow(
+                    icon = Icons.Filled.Devices,
+                    title = stringResource(R.string.managed_cloud_used_for_title),
+                    detail = stringResource(R.string.managed_cloud_used_for_detail),
+                )
+                ManagedCloudEvidenceRow(
+                    icon = Icons.Filled.CloudOff,
+                    title = stringResource(R.string.managed_cloud_local_first_title),
+                    detail = stringResource(R.string.managed_cloud_local_first_detail_android),
+                )
+            }
             if (state.status.isNotBlank()) {
                 Text(
                     text = state.status,

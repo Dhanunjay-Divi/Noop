@@ -56,6 +56,19 @@ enum WeeklyDigestSource {
     private static func restScore(for d: DailyMetric) -> Double? {
         AnalyticsEngine.Rest.composite(daily: d)
     }
+
+    static func hasImportedRestScore(
+        _ imported: [String: ImportedSleepFigures],
+        anchorDay: String
+    ) -> Bool {
+        guard let weekStart = WeeklyDigestEngine.mondayOfWeek(containing: anchorDay) else {
+            return false
+        }
+        let weekEnd = WeeklyDigestEngine.addDays(weekStart, 6)
+        return imported.contains { day, figures in
+            day >= weekStart && day <= weekEnd && figures.performancePct != nil
+        }
+    }
 }
 
 // MARK: - Embeddable card
@@ -66,14 +79,22 @@ struct WeeklyDigestCard: View {
     @EnvironmentObject var repo: Repository
 
     var body: some View {
-        let digest = WeeklyDigestSource.digest(from: repo.days, anchorDay: Repository.localDayKey(Date()))
+        let anchorDay = Repository.localDayKey(Date())
+        let digest = WeeklyDigestSource.digest(from: repo.days, anchorDay: anchorDay)
         if digest.isEmpty {
             EmptyView()
         } else {
             // Content owns its own frosted cards (the domain score row + the signals
             // card), so it's no longer wrapped in an outer NoopCard — that would double
             // the frost. The compact flag trims it to the three headline scores.
-            WeeklyDigestContent(digest: digest, compact: true)
+            WeeklyDigestContent(
+                digest: digest,
+                compact: true,
+                importedRestAvailable: WeeklyDigestSource.hasImportedRestScore(
+                    repo.importedSleep,
+                    anchorDay: anchorDay
+                )
+            )
         }
     }
 }
@@ -95,17 +116,25 @@ struct WeeklyDigestView: View {
                        lazy: true) {
             if repo.days.isEmpty {
                 ComingSoon(what: repo.loaded
-                    ? "A weekly digest needs a few days of history. Wear your strap or import your wearable export in Data Sources."
+                    ? LocalizedStringKey("appwide.weekly_digest.history_help")
                     : "Loading your history…")
             } else {
-                let digest = WeeklyDigestSource.digest(from: repo.days, anchorDay: Repository.localDayKey(Date()))
+                let anchorDay = Repository.localDayKey(Date())
+                let digest = WeeklyDigestSource.digest(from: repo.days, anchorDay: anchorDay)
                 if digest.isEmpty {
                     DataPendingNote(
                         title: "No readings this week yet",
                         message: "Once this week has a day or two of data, your week-in-review appears here.")
                 } else {
                     VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
-                        WeeklyDigestContent(digest: digest, compact: false)
+                        WeeklyDigestContent(
+                            digest: digest,
+                            compact: false,
+                            importedRestAvailable: WeeklyDigestSource.hasImportedRestScore(
+                                repo.importedSleep,
+                                anchorDay: anchorDay
+                            )
+                        )
                     }
                 }
             }
@@ -120,6 +149,7 @@ struct WeeklyDigestView: View {
 struct WeeklyDigestContent: View {
     let digest: WeeklyDigest
     var compact: Bool = false
+    var importedRestAvailable: Bool = false
 
     /// The Effort display scale (#268), so the Week-in-review Effort gauge matches the Today tile
     /// and the Trends small-multiple instead of being stuck on "of 100". Charge/Rest stay 0–100.
@@ -280,6 +310,7 @@ struct WeeklyDigestContent: View {
                         deltaText: deltaText(summary),
                         deltaTone: chipTone(summary),
                         accessibility: rowAccessibility(summary, effortScale: effortScale),
+                        importedRestAvailable: summary.metric == .rest && importedRestAvailable,
                         effortScale: effortScale,
                         presentation: presentation)
     }
@@ -371,7 +402,9 @@ struct WeeklyDigestContent: View {
 
     private func deltaChip(_ s: WeeklyMetricSummary) -> some View {
         let tone = chipTone(s)
-        let arrow = s.wowDelta > 0 ? "arrow.up" : (s.wowDelta < 0 ? "arrow.down" : "minus")
+        let arrow = !WeeklyDigestChipStyle.hasDefinedPercent(s)
+            ? "minus"
+            : (s.wowDelta > 0 ? "arrow.up" : (s.wowDelta < 0 ? "arrow.down" : "minus"))
         return HStack(spacing: 3) {
             Image(systemName: arrow)
                 .font(.system(size: 9, weight: .bold))
@@ -435,7 +468,7 @@ struct WeeklyDigestContent: View {
     }
 
     private func meanText(_ s: WeeklyMetricSummary, effortScale: EffortScale) -> String {
-        guard s.thisWeek.n > 0 else { return "-" }
+        guard s.thisWeek.n > 0 else { return StrandFormat.missing }
         // #463/#268: Effort is STORED 0-100; render it on the user's chosen display scale WITH the
         // denominator ("4.6 / 21", "21.6 / 100") so VoiceOver never speaks a different number than the
         // visible gauge. Mirrors Android meanText(s, effortScale) byte-for-byte.
@@ -447,14 +480,7 @@ struct WeeklyDigestContent: View {
     }
 
     private func deltaText(_ s: WeeklyMetricSummary) -> String {
-        guard s.weekOverWeek.current.n > 0, s.weekOverWeek.previous.n > 0 else { return String(localized: "new") }
-        // Always speak in percent so the chip's ↑/↓ + sign reads as a delta. A sub-1% mover
-        // used to fall back to a bare "0.1" which, once the card prepended "−", looked like a
-        // truncated number rather than a change.
-        if let pct = s.weekOverWeek.pctChange {
-            return abs(pct) >= 1 ? "\(Int(abs(pct).rounded()))%" : "<1%"
-        }
-        return "<1%"
+        WeeklyDigestChipStyle.deltaText(for: s)
     }
 
     /// Tone: good moves green, bad moves rose, flat/uncomparable grey — folding in
@@ -463,11 +489,15 @@ struct WeeklyDigestContent: View {
     /// grey regardless of direction, so the chip can't frame a verdict off 1-2 days. Mirrors the
     /// Android WeeklyDigestCard.chipTone gate byte-for-byte.
     private func chipTone(_ s: WeeklyMetricSummary) -> Color {
-        if WeeklyDigestChipStyle.neutralizesTone(s) { return StrandPalette.textTertiary }
-        switch s.wowGoodness {
-        case 1:  return StrandPalette.statusPositive
-        case -1: return StrandPalette.statusCritical
-        default: return StrandPalette.textTertiary
+        switch WeeklyDigestChipStyle.tone(for: s) {
+        case .neutral:
+            return StrandPalette.textTertiary
+        case .recoveryBand:
+            return RecoveryBandPresentation.color(for: s.thisWeek.mean)
+        case .positive:
+            return StrandPalette.statusPositive
+        case .critical:
+            return StrandPalette.statusCritical
         }
     }
 
@@ -475,6 +505,9 @@ struct WeeklyDigestContent: View {
         let mean = meanText(s, effortScale: effortScale)
         guard s.weekOverWeek.current.n > 0, s.weekOverWeek.previous.n > 0 else {
             return String(localized: "\(s.metric.label): \(mean) this week, no comparison.")
+        }
+        guard WeeklyDigestChipStyle.hasDefinedPercent(s) else {
+            return String(localized: "\(s.metric.label): \(mean) this week, not comparable with last week.")
         }
         // Whole-phrase variants per direction, then a whole-key wrapper per goodness frame, so
         // VoiceOver never hears a stitched half-English fragment.
@@ -506,12 +539,46 @@ struct WeeklyDigestContent: View {
 /// pinned by a test without exposing the whole View: `chipTone`/`rowAccessibility` above delegate to
 /// these, exactly as the Android WeeklyDigestCard chipTone/rowAccessibility gate on the same flag.
 enum WeeklyDigestChipStyle {
+    enum Tone: Equatable {
+        case neutral
+        case recoveryBand
+        case positive
+        case critical
+    }
+
+    /// A zero previous mean has no meaningful percentage denominator. It is a new
+    /// non-comparable baseline, not a sub-1% change.
+    static func hasDefinedPercent(_ s: WeeklyMetricSummary) -> Bool {
+        s.weekOverWeek.pctChange != nil
+    }
+
+    static func deltaText(for s: WeeklyMetricSummary) -> String {
+        guard s.weekOverWeek.current.n > 0, s.weekOverWeek.previous.n > 0 else {
+            return String(localized: "new")
+        }
+        // Magnitude and direction render separately. Keeping the magnitude unsigned
+        // prevents the old malformed "−<1%" presentation.
+        guard let pct = s.weekOverWeek.pctChange else { return String(localized: "new") }
+        return abs(pct) >= 1 ? "\(Int(abs(pct).rounded()))%" : "<1%"
+    }
+
     /// A rough comparison keeps its arrow + % but the chip stays grey regardless of direction, so it
     /// can't frame a green/rose verdict off 1-2 days (the #463 complaint).
-    static func neutralizesTone(_ s: WeeklyMetricSummary) -> Bool { s.isRoughComparison }
+    static func neutralizesTone(_ s: WeeklyMetricSummary) -> Bool {
+        s.isRoughComparison || !hasDefinedPercent(s)
+    }
     /// A rough comparison also drops the ", a good sign."/", worth a look." VoiceOver frame so the
     /// spoken row matches the neutral chip.
-    static func dropsVerdictFrame(_ s: WeeklyMetricSummary) -> Bool { s.isRoughComparison }
+    static func dropsVerdictFrame(_ s: WeeklyMetricSummary) -> Bool {
+        s.isRoughComparison || !hasDefinedPercent(s)
+    }
+
+    static func tone(for s: WeeklyMetricSummary) -> Tone {
+        if neutralizesTone(s) { return .neutral }
+        if s.metric == .charge { return .recoveryBand }
+        return s.wowGoodness == 1 ? .positive
+            : (s.wowGoodness == -1 ? .critical : .neutral)
+    }
 }
 
 // MARK: - Digest score summary (one headline domain: gauge + week-over-week chip)
@@ -531,6 +598,7 @@ private struct DigestScoreCard: View {
     let deltaText: String
     let deltaTone: Color
     let accessibility: String
+    let importedRestAvailable: Bool
     /// The Effort display scale (#268). Only consulted for the Effort card; Charge/Rest are genuine
     /// 0–100 scores and ignore it, keeping their "of 100" caption and integer mean.
     var effortScale: EffortScale = .hundred
@@ -551,8 +619,20 @@ private struct DigestScoreCard: View {
         guard summary.thisWeek.n > 0 else { return 0 }
         return min(max(summary.thisWeek.mean / 100.0, 0), 1)
     }
+    private var accentColor: Color {
+        guard summary.metric == .charge, summary.thisWeek.n > 0 else { return domain.color }
+        return RecoveryBandPresentation.color(for: summary.thisWeek.mean)
+    }
+    private var gaugeStops: [Gradient.Stop] {
+        guard summary.metric == .charge, summary.thisWeek.n > 0 else { return domain.gradient.stops }
+        return RecoveryBandPresentation.gaugeStops(for: summary.thisWeek.mean)
+    }
+    private var gaugeTipColor: Color {
+        guard summary.metric == .charge, summary.thisWeek.n > 0 else { return domain.bright }
+        return accentColor
+    }
     private var numberText: String {
-        guard summary.thisWeek.n > 0 else { return "-" }
+        guard summary.thisWeek.n > 0 else { return StrandFormat.missing }
         return isEffort
             ? UnitFormatter.effortDisplay(summary.thisWeek.mean, scale: effortScale)
             : "\(Int(summary.thisWeek.mean.rounded()))"
@@ -569,7 +649,7 @@ private struct DigestScoreCard: View {
                 content
                     .padding(.horizontal, NoopMetrics.space1)
             } else {
-                NoopCard(padding: 14, tint: domain.color) {
+                NoopCard(padding: 14, tint: accentColor) {
                     content
                 }
             }
@@ -578,7 +658,7 @@ private struct DigestScoreCard: View {
             withAnimation(StrandMotion.drawIn(reduced: reduceMotion)) { animatedFraction = fraction }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibility)
+        .accessibilityLabel(effectiveAccessibility)
     }
 
     private var content: some View {
@@ -588,7 +668,7 @@ private struct DigestScoreCard: View {
                     .font(StrandFont.overline)
                     .tracking(StrandFont.overlineTracking)
                     .textCase(.uppercase)
-                    .foregroundStyle(domain.color)
+                    .foregroundStyle(accentColor)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -597,14 +677,14 @@ private struct DigestScoreCard: View {
                     metricLabel
                     Spacer(minLength: 0)
                     if hasComparison {
-                        TrendChip(text: deltaSigned, color: deltaTone)
+                        TrendChip(text: deltaText, color: deltaTone, direction: deltaDirection)
                     }
                 }
             }
             BevelGauge(
                 fraction: fraction,
-                stops: domain.gradient.stops,
-                tipColor: domain.bright,
+                stops: gaugeStops,
+                tipColor: gaugeTipColor,
                 numberText: numberText,
                 // The 82pt embedded gauge would reduce its proportional caption to
                 // roughly 7pt. Render that caption below with the scalable footnote role.
@@ -613,7 +693,7 @@ private struct DigestScoreCard: View {
                 supporting: nil,
                 diameter: gaugeDiameter,
                 lineWidth: isEmbedded && !dynamicTypeSize.isAccessibilitySize ? NoopMetrics.space2 : 11,
-                showsLabel: summary.thisWeek.n > 0,
+                showsLabel: summary.thisWeek.n > 0 || importedRestAvailable,
                 animatedFraction: animatedFraction
             )
             .frame(maxWidth: .infinity)
@@ -623,8 +703,15 @@ private struct DigestScoreCard: View {
                     .foregroundStyle(StrandPalette.textTertiary)
                     .lineLimit(1)
             }
+            if importedRestAvailable {
+                Text("appwide.weekly_digest.imported_sleep_not_included")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if isEmbedded && hasComparison {
-                TrendChip(text: deltaSigned, color: deltaTone)
+                TrendChip(text: deltaText, color: deltaTone, direction: deltaDirection)
             }
         }
         .frame(maxWidth: .infinity)
@@ -635,18 +722,24 @@ private struct DigestScoreCard: View {
             .font(StrandFont.overline)
             .tracking(StrandFont.overlineTracking)
             .textCase(.uppercase)
-            .foregroundStyle(domain.color)
+            .foregroundStyle(accentColor)
     }
 
     private var hasComparison: Bool {
         summary.weekOverWeek.current.n > 0 && summary.weekOverWeek.previous.n > 0
     }
 
-    /// The week-over-week delta carrying a +/− so the TrendChip infers its arrow.
-    private var deltaSigned: String {
-        guard summary.weekOverWeek.current.n > 0, summary.weekOverWeek.previous.n > 0 else { return deltaText }
-        let sign = summary.wowDelta > 0 ? "+" : (summary.wowDelta < 0 ? "−" : "")
-        return "\(sign)\(deltaText)"
+    private var effectiveAccessibility: String {
+        guard importedRestAvailable else { return accessibility }
+        return "\(accessibility) " +
+            String(localized: "appwide.weekly_digest.imported_sleep_not_included") + "."
+    }
+
+    private var deltaDirection: TrendChipDirection {
+        guard WeeklyDigestChipStyle.hasDefinedPercent(summary) else { return .flat }
+        if summary.wowDelta > 0 { return .up }
+        if summary.wowDelta < 0 { return .down }
+        return .flat
     }
 }
 

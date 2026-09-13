@@ -113,11 +113,13 @@ class AdaptiveDayNotifierTest {
             AdaptiveDayTimeZoneState(
                 currentOffsetSec = travel.currentOffsetSec,
                 pending = travel.pending,
+                routineHistoryStartSec = travel.routineHistoryStartSec,
             ),
             offsetSec = 3 * 60 * 60,
             nowSec = 4_000,
         )
         assertEquals(travel.pending, afterRestart.pending)
+        assertEquals(3_000L, afterRestart.routineHistoryStartSec)
     }
 
     @Test fun operationalAccessResumeRebasesTimezoneWithoutReplayingBlockedTravel() {
@@ -132,10 +134,12 @@ class AdaptiveDayNotifierTest {
                 pending = pending,
             ),
             offsetSec = 5 * 60 * 60 + 30 * 60,
+            nowSec = 2_500,
         )
 
         assertEquals(5 * 60 * 60 + 30 * 60, resumed.currentOffsetSec)
         assertNull(resumed.pending)
+        assertEquals(2_500L, resumed.routineHistoryStartSec)
     }
 
     @Test fun operationalAccessResumePersistsRebaseAndConsumesItsMarkerOnce() {
@@ -152,7 +156,11 @@ class AdaptiveDayNotifierTest {
         val resumedOffset = 5 * 60 * 60 + 30 * 60
         assertEquals(
             AdaptiveDayOperationalResumeResult.REBASED,
-            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, resumedOffset),
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+                prefs,
+                resumedOffset,
+                nowSec = 2_500,
+            ),
         )
         assertNull(
             AdaptiveDayTimeZoneStore.observe(
@@ -163,8 +171,13 @@ class AdaptiveDayNotifierTest {
         )
         assertEquals(
             AdaptiveDayOperationalResumeResult.NOT_REQUIRED,
-            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, resumedOffset),
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+                prefs,
+                resumedOffset,
+                nowSec = 3_000,
+            ),
         )
+        assertEquals(2_500L, AdaptiveDayTimeZoneStore.load(prefs).routineHistoryStartSec)
 
         val laterTravel = AdaptiveDayTimeZoneStore.observe(
             prefs,
@@ -181,15 +194,27 @@ class AdaptiveDayNotifierTest {
         assertTrue(AdaptiveDayTimeZoneStore.markOperationalAccessBlocked(prefs))
         assertEquals(
             AdaptiveDayOperationalResumeResult.FAILED,
-            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, offsetSec = 3_600),
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+                prefs,
+                offsetSec = 3_600,
+                nowSec = 2_000,
+            ),
         )
         assertEquals(
             AdaptiveDayOperationalResumeResult.REBASED,
-            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, offsetSec = 3_600),
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+                prefs,
+                offsetSec = 3_600,
+                nowSec = 2_100,
+            ),
         )
         assertEquals(
             AdaptiveDayOperationalResumeResult.NOT_REQUIRED,
-            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, offsetSec = 3_600),
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+                prefs,
+                offsetSec = 3_600,
+                nowSec = 2_200,
+            ),
         )
     }
 
@@ -395,17 +420,17 @@ class AdaptiveDayNotifierTest {
         assertEquals(start.toInstant().toEpochMilli(), planned.observedAtMillis + planned.maximumAgeMillis)
     }
 
-    @Test fun plannedWorkoutNotificationExpiresAtTheWorkoutStartFromActualPostTime() {
+    @Test fun adaptiveNotificationExpiresAtItsEvidenceBoundaryFromActualPostTime() {
         assertEquals(
             4_000L,
-            AdaptiveDayNotifier.plannedWorkoutRemainingLifetimeMillis(
+            AdaptiveDayNotifier.remainingLifetimeMillis(
                 observedAtMillis = 1_000L,
                 maximumAgeMillis = 10_000L,
                 postAtMillis = 7_000L,
             ),
         )
         assertNull(
-            AdaptiveDayNotifier.plannedWorkoutRemainingLifetimeMillis(
+            AdaptiveDayNotifier.remainingLifetimeMillis(
                 observedAtMillis = 1_000L,
                 maximumAgeMillis = 10_000L,
                 postAtMillis = 11_000L,
@@ -419,10 +444,10 @@ class AdaptiveDayNotifierTest {
             File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
         ).firstOrNull(File::isFile)?.readText()
         val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
-        val remaining = text.indexOf("val plannedWorkoutTimeoutMillis =")
+        val remaining = text.indexOf("val notificationTimeoutMillis = remainingLifetimeMillis(")
         val builder = text.indexOf("val notificationBuilder = NotificationCompat.Builder")
         val timeout = text.indexOf(
-            "notificationBuilder.setTimeoutAfter(plannedWorkoutTimeoutMillis)",
+            "notificationBuilder.setTimeoutAfter(notificationTimeoutMillis)",
             builder,
         )
         val build = text.indexOf("val notification = notificationBuilder.build()", timeout)
@@ -436,6 +461,10 @@ class AdaptiveDayNotifierTest {
         assertTrue(timeout > builder)
         assertTrue(build > timeout)
         assertFalse(text.substring(builder, timeout).contains("candidate.maximumAgeMillis"))
+        assertFalse(
+            text.substring(remaining, builder)
+                .contains("candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT"),
+        )
     }
 
     @Test fun movingWorkoutWithinThirtyMinutesChangesItsFingerprint() {
@@ -586,7 +615,7 @@ class AdaptiveDayNotifierTest {
         val observe = method.indexOf("AdaptiveDayTimeZoneStore.observe(")
         val invalidate = method.indexOf("AdaptiveDayEvaluationGate.invalidate()")
         val cancel = method.indexOf(
-            "AdaptivePlannedWorkoutScheduler.cancel(context)",
+            "AdaptivePlannedWorkoutScheduler.cancelBoundary(context)",
             invalidate,
         )
         val reconcile = method.indexOf("reconcilePlannedWorkoutArtifacts(", cancel)
@@ -1043,6 +1072,31 @@ class AdaptiveDayNotifierTest {
         assertTrue(repository > diagnostic)
     }
 
+    @Test fun calendarFailureRetryIsBoundedAndStopsAtWorkoutStart() {
+        assertTrue(
+            AdaptivePlannedWorkoutSchedulePolicy.shouldRetryCalendarFailure(
+                expectedStartSec = 2_000,
+                nowSec = 1_000,
+                runAttemptCount = 0,
+            ),
+        )
+        assertFalse(
+            AdaptivePlannedWorkoutSchedulePolicy.shouldRetryCalendarFailure(
+                expectedStartSec = 1_000,
+                nowSec = 1_000,
+                runAttemptCount = 0,
+            ),
+        )
+        assertFalse(
+            AdaptivePlannedWorkoutSchedulePolicy.shouldRetryCalendarFailure(
+                expectedStartSec = 2_000,
+                nowSec = 1_000,
+                runAttemptCount =
+                    AdaptivePlannedWorkoutSchedulePolicy.MAX_CALENDAR_RETRY_ATTEMPTS,
+            ),
+        )
+    }
+
     @Test fun adaptiveEvaluatorRequiresCurrentTermsBeforeStateOrDataAccess() {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val source = listOf(
@@ -1067,7 +1121,7 @@ class AdaptiveDayNotifierTest {
         assertTrue(calendar > repository)
     }
 
-    @Test fun failedCalendarRefreshCannotReconcileAValidWorkoutAsMissing() {
+    @Test fun failedCalendarRefreshPreservesWorkoutAndStillDeliversIndependentGuidance() {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val source = listOf(
             File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
@@ -1083,7 +1137,15 @@ class AdaptiveDayNotifierTest {
             "PlannedWorkoutCalendarRefreshOutcome.Failed",
             refresh,
         )
-        val abort = evaluatorSource.indexOf("-> return recommendation", failure)
+        val delivery = evaluatorSource.indexOf(
+            "AdaptiveDayNotifier.onRecommendation(",
+            failure,
+        )
+        val retry = evaluatorSource.indexOf(
+            "throw AdaptiveDayCalendarRefreshRetry()",
+            delivery,
+        )
+        val abort = evaluatorSource.indexOf("return recommendation", retry)
         val plan = evaluatorSource.indexOf("val plan = DailyActionPlanner.plan", abort)
         val reconcileMissing = evaluatorSource.indexOf(
             "reconcileMissingPlannedWorkoutArtifacts",
@@ -1092,9 +1154,67 @@ class AdaptiveDayNotifierTest {
 
         assertTrue(refresh >= 0)
         assertTrue(failure > refresh)
-        assertTrue(abort > failure)
+        assertTrue(delivery > failure)
+        assertTrue(retry > delivery)
+        assertTrue(abort > retry)
         assertTrue(plan > abort)
         assertTrue(reconcileMissing > plan)
+    }
+
+    @Test fun plannedWorkoutSchedulerWatchesCalendarChangesWhileAppIsInactive() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val watcher = text.indexOf("fun scheduleCalendarChangeWatcher(")
+        val uriTrigger = text.indexOf(
+            "addContentUriTrigger(CalendarContract.Events.CONTENT_URI, true)",
+            watcher,
+        )
+        val uniqueWork = text.indexOf("CALENDAR_WATCH_WORK_NAME", uriTrigger)
+        val evaluatorStart = text.indexOf("object AdaptiveDayEvaluator")
+        val evaluator = text.indexOf(
+            "AdaptivePlannedWorkoutScheduler.scheduleCalendarChangeWatcher(",
+            evaluatorStart,
+        )
+        val refresh = text.indexOf(
+            "val calendarRefresh = PlannedWorkoutCalendarStore.refresh(",
+            evaluatorStart,
+        )
+        val plan = text.indexOf(
+            "val plan = DailyActionPlanner.plan(",
+            evaluatorStart,
+        )
+        val noAdjustment = text.indexOf(
+            "AdaptivePlannedWorkoutScheduler.cancelBoundary(appContext)",
+            plan,
+        )
+        val worker = text.indexOf("class AdaptivePlannedWorkoutWorker")
+        val contentTrigger = text.indexOf(
+            "CALENDAR_CHANGE_TRIGGER_KEY",
+            worker,
+        )
+        val invalidate = text.indexOf(
+            "PlannedWorkoutCalendarStore.invalidate()",
+            contentTrigger,
+        )
+
+        assertTrue(watcher >= 0)
+        assertTrue(uriTrigger > watcher)
+        assertTrue(uniqueWork > uriTrigger)
+        assertTrue(evaluator > uniqueWork)
+        assertTrue(refresh > evaluator)
+        assertTrue(plan > refresh)
+        assertTrue(noAdjustment > plan)
+        assertTrue(contentTrigger > worker)
+        assertTrue(invalidate > contentTrigger)
+        assertTrue(
+            text.substring(plan, noAdjustment + 80)
+                .contains("AdaptivePlannedWorkoutScheduler.cancelBoundary(appContext)"),
+        )
     }
 
     @Test fun termsLockedStartupRebasesTimezoneBeforeOperationalWorkResumes() {

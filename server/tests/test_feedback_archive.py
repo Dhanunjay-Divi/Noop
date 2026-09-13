@@ -273,7 +273,7 @@ def test_feedback_archive_accepts_bounded_metrickit_payload() -> None:
 @pytest.mark.parametrize(
     "addition",
     [
-        {"whoop.sqlite": b"database"},
+        {"wearable.sqlite": b"database"},
         {"raw-capture.jsonl": b'{"hr":120}'},
         {"../report.txt": b"path traversal"},
     ],
@@ -364,6 +364,57 @@ def test_feedback_archive_rejects_credential_in_plain_report() -> None:
                 )
             )
         )
+
+
+@pytest.mark.parametrize(
+    "phone_number",
+    ["415-555-0100", "(415) 555-0100"],
+)
+@pytest.mark.parametrize("evidence_name", ["report", "jsonl"])
+def test_feedback_archive_rejects_formatted_phone_in_generated_evidence(
+    phone_number: str,
+    evidence_name: str,
+) -> None:
+    if evidence_name == "report":
+        payload = _archive(
+            report=(
+                f"NOOP app runtime report\ncallback target: {phone_number}\n"
+            ).encode("utf-8")
+        )
+    else:
+        event = {
+            "schema": 1,
+            "at": "2026-09-12T12:00:00Z",
+            "event": "operation.end",
+            "fields": {"outcome": f"callback target {phone_number}"},
+        }
+        payload = _archive(
+            additions={
+                "app-session-current.jsonl": (json.dumps(event).encode("utf-8") + b"\n")
+            }
+        )
+
+    with pytest.raises(FeedbackArchiveRejectedError):
+        _validate(payload)
+
+
+@pytest.mark.parametrize(
+    "phone_number",
+    ["415-555-0100", "(415) 555-0100"],
+)
+def test_feedback_archive_keeps_intentional_user_note_exempt_from_phone_scan(
+    phone_number: str,
+) -> None:
+    summary = _validate(
+        _archive(
+            note=(
+                f"User-provided context (optional)\n\nPlease call {phone_number}.\n"
+            ).encode("utf-8")
+        ),
+        note=True,
+    )
+
+    assert summary.includes_user_note is True
 
 
 @pytest.mark.parametrize(

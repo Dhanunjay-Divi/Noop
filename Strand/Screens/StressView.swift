@@ -262,7 +262,7 @@ struct StressView: View {
             // 2. Today's numbers — uniform tiles in one grid.
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                 SectionHeader("Latest Read", overline: "Markers",
-                              trailing: String(localized: "vs prior baseline"))
+                              trailing: String(localized: "appwide.common.vs_baseline"))
                 tileGrid(model)
             }
             .staggeredAppear(index: 1)
@@ -539,7 +539,7 @@ struct StressView: View {
             // Resting HR — an INCREASE is the stressful direction.
             markerTile(
                 label: "Resting HR",
-                value: model.rhrToday.map { String(localized: "\($0) bpm") } ?? "-",
+                value: model.rhrToday.map { String(localized: "\($0) bpm") } ?? StrandFormat.missing,
                 systemImage: "heart.text.square.fill",
                 delta: model.rhrDelta,
                 accent: StrandPalette.metricRose,
@@ -548,7 +548,7 @@ struct StressView: View {
             // HRV — a DECREASE is the stressful direction.
             markerTile(
                 label: "HRV",
-                value: model.hrvToday.map { String(localized: "\(Int($0.rounded())) ms") } ?? "-",
+                value: model.hrvToday.map { String(localized: "\(Int($0.rounded())) ms") } ?? StrandFormat.missing,
                 systemImage: "waveform.path.ecg",
                 delta: model.hrvDelta,
                 accent: StrandPalette.metricPurple,
@@ -692,7 +692,7 @@ struct StressView: View {
                 }
                 Divider().overlay(StrandPalette.hairline)
                 HStack(spacing: 0) {
-                    bandLegend("0-1", String(localized: "LOW"), StressRamp.calm)
+                    bandLegend("0-1", StressBand.low.title, StressRamp.calm)
                     bandLegend("1-2", String(localized: "MEDIUM"), StressRamp.steady)
                     bandLegend("2-3", String(localized: "HIGH"), StressRamp.tense)
                 }
@@ -822,6 +822,12 @@ private struct StressHeroGauge: View {
                 Text("of 3")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.onDarkSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        StrandPalette.surfaceBase.opacity(0.74),
+                        in: Capsule(style: .continuous)
+                    )
             }
             .allowsHitTesting(false)   // taps fall through to the vessel → splash
         }
@@ -845,7 +851,7 @@ enum StressBand {
 
     var title: String {
         switch self {
-        case .low:    return String(localized: "LOW")
+        case .low:    return String(localized: "appwide.stress.band.light_load")
         case .medium: return String(localized: "MEDIUM")
         case .high:   return String(localized: "HIGH")
         }
@@ -1019,7 +1025,7 @@ struct StressModel {
         // Share of the last 30 independently scorable causal points in the LOW band.
         let recent = Array(pts.suffix(30))
         if recent.isEmpty {
-            self.calmTimeValue = "-"
+            self.calmTimeValue = StrandFormat.missing
             self.calmTimeCaption = String(localized: "needs history")
         } else {
             let calm = recent.filter { $0.value < 1.0 }.count
@@ -1432,9 +1438,9 @@ struct StressTotalsBar: View {
         )
     }
 
-    /// "-" when a band had no scored hours, else "Nh" (each scored bucket is one hour).
+    /// A zero-hour band is measured zero, not missing data.
     private func durationLabel(_ hours: Int) -> String {
-        hours <= 0 ? "-" : String(localized: "\(hours)h")
+        String(localized: "\(max(0, hours))h")
     }
 }
 

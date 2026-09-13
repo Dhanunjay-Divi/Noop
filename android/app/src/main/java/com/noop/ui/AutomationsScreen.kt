@@ -58,7 +58,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -86,14 +85,7 @@ private enum class AutomationReportKind {
 }
 
 private fun automationReportsCanNotify(context: Context): Boolean {
-    val runtimePermissionGranted =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
-    return runtimePermissionGranted &&
-        NotificationManagerCompat.from(context).areNotificationsEnabled()
+    return ScheduledReportNotifier.canNotify(context)
 }
 
 @Composable
@@ -265,7 +257,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         val kind = pendingReportPermission
         pendingReportPermission = null
         if (kind != null) {
-            val allowed = granted && NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+            val allowed = granted && automationReportsCanNotify(ctx)
             applyReportPreference(kind, allowed)
             reportNotificationsUnavailable = !allowed
         }
@@ -295,6 +287,9 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                dailyReviewEnabled = DailyReviewReminders.isEnabled(ctx)
+                dailyReviewNotificationsUnavailable =
+                    dailyReviewEnabled && !DailyReviewReminders.canNotify(ctx)
                 reportNotificationsUnavailable =
                     !automationReportsCanNotify(ctx) &&
                         (morningRecapEnabled || postWorkoutSummaryEnabled)

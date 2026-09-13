@@ -55,9 +55,9 @@
         <item quantity="one">1 weight value skipped (add kg or lb to the column).</item>
         <item quantity="other">%d weight values skipped (add kg or lb to the column).</item>
     </plurals>
-    <string name="widget_description">Today\'s Sleep, Recovery and Effort, with live heart rate and strap battery at a glance.</string>
+    <string name="widget_description">Today\'s Sleep, Recovery and Effort, with live heart rate and band battery at a glance.</string>
     <string name="widget_compact_name">NOOP Compact</string>
-    <string name="widget_compact_description">Compact Sleep, Recovery and Effort widget, with live heart rate and strap battery.</string>
+    <string name="widget_compact_description">Compact Sleep, Recovery and Effort widget, with live heart rate and band battery.</string>
     <string name="widget_error">NOOP widget couldn\'t draw - it will recover on the next update.</string>
     <string name="widget_wide_name">NOOP Daily Signal</string>
     <string name="widget_wide_description">Recovery, Sleep and Effort with HRV, resting heart rate, sleep duration, live heart rate and battery.</string>
@@ -242,7 +242,7 @@
     <string name="explore_vs_prev_window">vs prev %1$s</string>
     <string name="explore_all_history">all history</string>
     <string name="explore_no_prior_window">no prior %1$s</string>
-    <string name="explore_empty_metric">No %1$s recorded yet. Sync your strap to populate this trend.</string>
+    <string name="explore_empty_metric">No %1$s recorded yet. Sync your band to populate this trend.</string>
     <string name="explore_single_reading">Only one reading in range - widen the window to see a trend.</string>
     <string name="explore_chart_window">Window</string>
     <string name="explore_chart_points">Points</string>
@@ -264,20 +264,20 @@
 
     <!-- Power saving (#477) -->
     <string name="fast_link_phy">Faster Bluetooth link (experimental)</string>
-    <string name="fast_link_phy_desc">Ask for a faster Bluetooth radio mode while your strap hands over its stored history. Sends the same data in less airtime, so it may sync sooner and use a little less strap battery - but your strap has to support it, and it trades some range for speed. New and unproven: if syncing gets flaky when your phone is further away, turn it back off.</string>
+    <string name="fast_link_phy_desc">Ask for a faster Bluetooth radio mode while your band hands over its stored history. Sends the same data in less airtime, so it may sync sooner and use a little less band battery - but your band has to support it, and it trades some range for speed. New and unproven: if syncing gets flaky when your phone is further away, turn it back off.</string>
     <string name="fast_history_sync">Faster history sync (experimental)</string>
-    <string name="fast_history_sync_desc">Ask Android for a faster Bluetooth link while your strap hands over its stored history, so a big backlog catches up sooner. Only during the sync itself - your live heart rate and the overnight stream are untouched. New and unproven: if it doesn\'t help, or costs more battery than it\'s worth, turn it back off and say so on the issue tracker.</string>
+    <string name="fast_history_sync_desc">Ask Android for a faster Bluetooth link while your band hands over its stored history, so a big backlog catches up sooner. Only during the sync itself - your live heart rate and the overnight stream are untouched. New and unproven: if it doesn\'t help, or costs more battery than it\'s worth, turn it back off and say so on the issue tracker.</string>
     <string name="keep_alive_allowed">Allowed - your phone won\'t stop NOOP\'s overnight sync to save battery. The permission itself uses no battery; what uses it is the overnight sync you switched on above.</string>
     <string name="keep_alive_needed_vendor">Your phone (%1$s) can stop background apps to save battery, which can make NOOP miss overnight sleep and recovery data. Turn this on to whitelist NOOP.\n\nAndroid will ask “Stop optimising battery usage?” and warn that NOOP may drain your battery - that\'s its standard wording for any app allowed to run in the background. Tap Allow. The battery goes on the overnight sync you already switched on above; this only stops Android cutting it short.</string>
     <string name="keep_alive_needed_generic">Some phones can stop background apps to save battery, which can make NOOP miss overnight sleep and recovery data. Turn this on to whitelist NOOP.\n\nAndroid will ask “Stop optimising battery usage?” and warn that NOOP may drain your battery - that\'s its standard wording for any app allowed to run in the background. Tap Allow. The battery goes on the overnight sync you already switched on above; this only stops Android cutting it short.</string>
     <string name="power_saving">Power saving</string>
-    <string name="power_saving_blurb">Ease the load on your strap when its battery is running low. The strap keeps banking data on its own, so nothing is lost - NOOP just talks to it less often to help it last until you can charge it.</string>
+    <string name="power_saving_blurb">Ease the load on your band when its battery is running low. The band keeps banking data on its own, so nothing is lost - NOOP just talks to it less often to help it last until you can charge it.</string>
     <string name="power_saving_mode">Power saving mode</string>
-    <string name="power_saving_mode_desc">Slows background strap-sync (every 45 min instead of 15) while your strap\'s battery is low. No data loss - the strap banks everything, so sync just batches into larger, less frequent pulls.</string>
-    <string name="power_saving_kick_in">Kick in at (strap battery)</string>
+    <string name="power_saving_mode_desc">Slows background band sync (every 45 min instead of 15) while your band\'s battery is low. No data loss - the band banks everything, so sync just batches into larger, less frequent pulls.</string>
+    <string name="power_saving_kick_in">Kick in at (band battery)</string>
     <string name="power_saving_pct">%1$d%%</string>
     <string name="power_saving_hrv_pause">Pause HRV capture</string>
-    <string name="power_saving_hrv_pause_desc">While your strap\'s battery is low, stop the always-on background HRV stream - the biggest continuous drain on the strap. A Live screen still shows heart rate, and it re-arms automatically once the strap is charged.</string>
+    <string name="power_saving_hrv_pause_desc">While your band\'s battery is low, stop the always-on background HRV stream - the biggest continuous drain on the band. A Live screen still shows heart rate, and it re-arms automatically once the band is charged.</string>
 
     <!-- #453 generated Compose literal migration -->
     <string name="l10n_add_device_wizard_0123456789abcdef0123456789abcdef_b1775a78">0123456789abcdef0123456789abcdef</string>
@@ -671,7 +671,7 @@
     <string name="l10n_intelligence_screen_how_this_works_b895a8c3">How this works</string>
     <string name="l10n_intelligence_screen_intelligence_c698f940">Intelligence</string>
     <string name="l10n_intelligence_screen_no_scored_days_in_this_window_03f1165b">No scored days in this window. Widen the range or import more history.</string>
-    <string name="l10n_intelligence_screen_no_scored_days_yet_sync_your_cdd47684">No scored days yet. Sync your strap to collect raw streams. Effort and Sleep Score are </string>
+    <string name="l10n_intelligence_screen_no_scored_days_yet_sync_your_cdd47684">No scored days yet. Sync your band to collect raw streams. Effort and Sleep Score are </string>
     <string name="l10n_intelligence_screen_you_ll_likely_wake_around_charge_ed3abe2e">You\'ll likely wake around %1$s ± %2$s Recovery if you sleep about </string>
     <string name="l10n_intervals_screen_bond_your_strap_on_the_live_d799cbc2">Connect Noop Band on the Live screen to feel the transitions hands-free.</string>
     <string name="l10n_intervals_screen_interval_timer_1d703deb">Interval Timer</string>
@@ -771,7 +771,7 @@
     <string name="l10n_noop_compact_glance_widget_charge_49a8cb83">RECOVERY</string>
     <string name="l10n_noop_compact_glance_widget_effort_660752e7">EFFORT</string>
     <string name="l10n_noop_compact_glance_widget_rest_cbaaa181">SLEEP</string>
-    <string name="l10n_noop_compact_glance_widget_strap_battery_a6c7f09c">Strap battery</string>
+    <string name="l10n_noop_compact_glance_widget_strap_battery_a6c7f09c">Band battery</string>
     <string name="l10n_noop_glance_widget_charge_49a8cb83">RECOVERY</string>
     <string name="l10n_noop_glance_widget_effort_660752e7">EFFORT</string>
     <string name="l10n_noop_glance_widget_rest_cbaaa181">SLEEP</string>
@@ -893,7 +893,7 @@
     <string name="l10n_sleep_screen_nap_window_durationtext_durmin_bbc35167">Nap %1$s, %2$s</string>
     <string name="l10n_sleep_screen_no_movement_detail_for_this_night_a6f9736a">No movement detail for this night.</string>
     <string name="l10n_sleep_screen_no_nights_here_yet_607248f5">No nights here yet</string>
-    <string name="l10n_sleep_screen_no_nights_with_sleep_data_yet_fa71b6b3">No nights with sleep data yet. Your ledger fills in as you wear the strap to bed.</string>
+    <string name="l10n_sleep_screen_no_nights_with_sleep_data_yet_fa71b6b3">No nights with sleep data yet. Your ledger fills in as you wear the band to bed.</string>
     <string name="l10n_sleep_screen_not_enough_history_in_this_range_7e2fd640">Not enough history in this range. Try 3M, 6M, or ALL.</string>
     <string name="l10n_sleep_screen_not_enough_history_yet_0e2f93b6">Not enough history yet</string>
     <string name="l10n_sleep_screen_per_night_sleep_balance_ledger_nightcount_f339d0ab">Per-night sleep balance: %1$s nights, net %2$s</string>
@@ -1066,7 +1066,7 @@
     <string name="l10n_wheel_picker_done_e9b450d1">Done</string>
     <string name="l10n_whoop_model_comparison_screen_4_0_vs_5_0_mg_56099a02">4.0 vs 5.0/MG</string>
     <string name="l10n_whoop_model_comparison_screen_5_mg_62eaa522">5/MG</string>
-    <string name="l10n_whoop_model_comparison_screen_both_straps_are_supported_8545557a">Both straps are supported</string>
+    <string name="l10n_whoop_model_comparison_screen_both_straps_are_supported_8545557a">Both bands are supported</string>
     <string name="l10n_whoop_model_comparison_screen_cap_feature_whoop_4_0_cap_bc142cb8">%1$s. legacy band: %2$s. newer band or MG: %3$s.</string>
     <string name="l10n_whoop_model_comparison_screen_close_bbfa773e">Close</string>
     <string name="l10n_whoop_model_comparison_screen_done_e9b450d1">Done</string>
@@ -1700,7 +1700,7 @@
     <string name="l10n_stress_screen_baevsky_stress_index_296cf7c0">Baevsky Stress Index</string>
     <string name="l10n_stress_screen_daily_0_3_proxy_63247929">Daily 0-3 proxy</string>
     <string name="l10n_stress_screen_hf_power_3a9fd8c9">HF power</string>
-    <string name="l10n_stress_screen_not_enough_recent_days_to_chart_c072bade">Not enough recent days to chart a trend yet. Keep wearing your strap to populate it.</string>
+    <string name="l10n_stress_screen_not_enough_recent_days_to_chart_c072bade">Not enough recent days to chart a trend yet. Keep wearing your band to populate it.</string>
     <string name="l10n_stress_screen_of_3_46203495">of 3</string>
     <string name="l10n_stress_screen_on_demand_today_s_r_r_17d716e1">on demand · today\'s R-R</string>
     <string name="l10n_stress_screen_on_the_0_3_autonomic_load_8a0d5107">on the 0-3 autonomic-load scale</string>
@@ -2694,7 +2694,7 @@
     <string name="app_report_subtitle">Private evidence from this phone</string>
     <string name="app_report_close_content_description">Close app report</string>
     <string name="app_report_capture_title">Capture what happened</string>
-    <string name="app_report_capture_detail">NOOP will package evidence already on this phone. Nothing uploads automatically.</string>
+    <string name="app_report_capture_detail">NOOP will package evidence already on this phone. Nothing uploads until you review it and tap Send feedback.</string>
     <string name="app_report_evidence_performance_title">Performance</string>
     <string name="app_report_evidence_performance_detail">Frame hitches, main-thread stalls, memory pressure, storage and thermal state</string>
     <string name="app_report_evidence_recent_path_title">Recent path</string>
@@ -2704,7 +2704,7 @@
     <string name="app_report_evidence_band_status_title">Band status</string>
     <string name="app_report_evidence_band_status_detail">The existing redacted connection and history-sync log</string>
     <string name="app_report_evidence_android_title">Android diagnostics</string>
-    <string name="app_report_evidence_android_detail">Recent OS exit reason and ANR trace, when Android provides one</string>
+    <string name="app_report_evidence_android_detail">Bounded Android exit reasons, without raw system traces or exception messages</string>
     <string name="app_report_user_note_title">What felt buggy? (optional)</string>
     <string name="app_report_user_note_detail">Say what you tapped, what you expected, and what happened. Avoid names or contact details.</string>
     <string name="app_report_user_note_placeholder">Example: Health paused after I opened a metric</string>
@@ -2712,16 +2712,17 @@
     <string name="app_report_include_snapshot">Include screen snapshot</string>
     <string name="app_report_snapshot_available_detail">Shows the screen before this report opened. It may contain health values.</string>
     <string name="app_report_snapshot_unavailable_detail">A screen snapshot is not available yet.</string>
-    <string name="app_report_privacy_detail">Never included: your health database, raw sensor history, account credentials or API keys. The temporary screen snapshot is discarded when this report closes.</string>
+    <string name="app_report_privacy_detail">Never included: your health database, raw sensor history, account credentials, API keys or raw Android traces. A note or screen snapshot is included only when shown in your review.</string>
     <string name="app_report_build">Build report</string>
     <string name="app_report_cancel">Cancel</string>
     <string name="app_report_preparing_title">Preparing a private ZIP</string>
     <string name="app_report_preparing_detail">Reading bounded logs, file size and the latest saved heart-rate timestamp. Your health database stays on this phone.</string>
     <string name="app_report_ready_title">Report ready</string>
-    <string name="app_report_ready_detail">Review the attachment list, then choose where to send or save the ZIP.</string>
+    <string name="app_report_ready_detail">Review the exact attachment list and preview. Send feedback only when you are comfortable uploading these files to NOOP support.</string>
+    <string name="app_report_snapshot_preview_title">SCREEN SNAPSHOT</string>
+    <string name="app_report_snapshot_preview_content_description">Preview of the screen snapshot included with this feedback report</string>
     <string name="app_report_redacted_preview">REDACTED PREVIEW</string>
     <string name="app_report_preparing_zip">Preparing ZIP</string>
-    <string name="app_report_share_zip">Share ZIP</string>
     <string name="app_report_remove_snapshot">Remove screen snapshot</string>
     <string name="app_report_not_ready_title">Report not ready</string>
     <string name="app_report_prepare_zip_fallback">NOOP could not prepare the ZIP.</string>
@@ -2729,10 +2730,38 @@
     <string name="app_report_close">Close</string>
     <string name="app_report_error_prepare">NOOP could not prepare the report. Reopen the app and try again.</string>
     <string name="app_report_status_snapshot_removed">Screen snapshot removed from this report.</string>
-    <string name="app_report_error_share">The ZIP could not be created. No report was shared.</string>
-    <string name="app_report_status_share_opened">Share sheet opened for %1$s</string>
     <string name="app_report_preview_shortened">Preview shortened. The complete bounded files are listed above.</string>
     <string name="app_report_open_button">Report an app problem</string>
+    <string name="app_report_send_feedback">Send feedback</string>
+    <string name="app_report_error_queue">NOOP could not seal this report in the private outbox. Nothing was uploaded.</string>
+    <string name="app_report_status_queued">Queued securely on this phone. Upload starts when a network is available.</string>
+    <string name="app_report_status_queued_reopen">Queued securely. Close and reopen NOOP to retry the background worker.</string>
+    <string name="app_report_status_uploading">Uploading the reviewed ZIP. You can close this sheet while it continues.</string>
+    <string name="app_report_status_retry_scheduled">The last attempt did not complete. NOOP scheduled a background retry.</string>
+    <string name="app_report_status_canceling">Requesting cancellation and removal of any server copy. An upload that already started may finish before deletion is confirmed.</string>
+    <string name="app_report_status_cancel_retry_scheduled">NOOP has not confirmed deletion yet. The reviewed ZIP may already have reached the server; another deletion check is scheduled.</string>
+    <string name="app_report_status_sent">Feedback sent. The sealed local ZIP was removed.</string>
+    <string name="app_report_status_canceled">Feedback canceled and deletion confirmed. The sealed local ZIP was removed.</string>
+    <string name="app_report_error_cancel_failed">NOOP could not confirm cancellation. Retry so the server copy can be removed.</string>
+    <string name="app_report_error_archive_invalid">The sealed report changed or failed validation. It will not be uploaded.</string>
+    <string name="app_report_error_configuration">Feedback is not configured in this build. The report remains private on this phone.</string>
+    <string name="app_report_error_rejected">NOOP support rejected this report. Cancel it to remove any retained server copy.</string>
+    <string name="app_report_error_delivery">Feedback did not reach a final state after bounded retries. The reviewed ZIP may already have reached the server; retry or cancel to recover it.</string>
+    <string name="app_report_queued_title">Queued</string>
+    <string name="app_report_uploading_title">Uploading</string>
+    <string name="app_report_retry_scheduled_title">Retry scheduled</string>
+    <string name="app_report_canceling_title">Canceling</string>
+    <string name="app_report_cancel_retry_title">Cancellation retry scheduled</string>
+    <string name="app_report_sent_title">Sent</string>
+    <string name="app_report_canceled_title">Canceled</string>
+    <string name="app_report_send_failed_title">Feedback needs attention</string>
+    <string name="app_report_progress_percent">%1$d%%</string>
+    <string name="app_report_receipt">Receipt: %1$s</string>
+    <string name="app_report_receipt_confirmed">Receipt confirmed by NOOP support</string>
+    <string name="app_report_retry_now">Retry now</string>
+    <string name="app_report_cancel_send">Cancel feedback</string>
+    <string name="app_report_continue_background">Continue in background</string>
+    <string name="app_report_error_action">NOOP could not update this feedback report. Reopen the report and try again.</string>
     <string name="changelog_clearer_updates_and_reports_9_2_1">Clearer updates and reports that help us fix problems</string>
     <string name="whats_new_welcome_version">Welcome to version %1$s</string>
     <string name="managed_friends_source_noop_plus">NOOP+</string>
@@ -2778,9 +2807,9 @@
     <string name="managed_friends_sharing_settings">Sharing settings</string>
     <string name="managed_friends_no_shared_details">Shared details appear only when this friend allows them.</string>
     <string name="managed_friends_poke_action">Poke</string>
-    <string name="managed_friends_charge">Charge</string>
+    <string name="managed_friends_charge">Recovery</string>
     <string name="managed_friends_effort">Effort</string>
-    <string name="managed_friends_rest">Rest</string>
+    <string name="managed_friends_rest">Sleep Score</string>
     <string name="managed_friends_sleep_duration">Sleep duration</string>
     <string name="managed_friends_hrv">HRV</string>
     <string name="managed_friends_rhr">Resting heart rate</string>
@@ -2793,7 +2822,7 @@
     <string name="managed_friends_quiet_start">Quiet starts</string>
     <string name="managed_friends_quiet_end">Quiet ends</string>
     <string name="managed_friends_save_settings">Save Friends settings</string>
-    <string name="managed_friends_data_boundary">Only Charge, Effort, Rest, sleep duration, HRV, and resting heart rate can be shared. Raw streams, locations, journals, routes, workouts, and sleep stages are excluded.</string>
+    <string name="managed_friends_data_boundary">Only Recovery, Effort, Sleep Score, sleep duration, HRV, and resting heart rate can be shared. Raw streams, locations, journals, routes, workouts, and sleep stages are excluded.</string>
     <string name="managed_friends_directional_sharing">Choose exactly what this friend can see. Their choices for you are separate.</string>
     <string name="managed_friends_allow_friend_poke">Allow this friend to poke me</string>
     <string name="managed_friends_save_sharing">Save sharing choices</string>
@@ -2887,4 +2916,18 @@
     <string name="compare_reference_export_ready">Comparison ZIP ready in the system share sheet.</string>
     <string name="compare_reference_export_failed">The comparison ZIP could not be created.</string>
     <string name="compare_reference_units">0-100 score</string>
+    <string name="app_report_evidence_apple_title">Apple diagnostics</string>
+    <string name="app_report_evidence_apple_detail">Delayed system hang or crash reports, when iOS has made them available</string>
+    <string name="app_report_privacy_detail_apple">Never included: your health database, raw sensor history, account credentials or API keys. A note or screen snapshot is included only when shown in your review.</string>
+    <string name="app_report_status_securing">Securing the reviewed report in the private feedback outbox.</string>
+    <string name="app_report_status_cancel_before_queue">Feedback canceled before it was queued.</string>
+    <string name="app_report_status_cancel_queueing">Canceling before the feedback report finishes queuing.</string>
+    <string name="app_report_status_confirming">Confirming delivery with NOOP support.</string>
+    <string name="app_report_status_sent_cleanup_pending">Feedback sent. Local ZIP cleanup will retry.</string>
+    <string name="app_report_status_canceled_cleanup_pending">Feedback canceled. Local ZIP cleanup will retry when NOOP next opens.</string>
+    <string name="app_report_send_disclosure">Send feedback uploads exactly this reviewed ZIP to NOOP support. A note or screen snapshot is included only when it appears above. Closing this sheet does not cancel a queued upload.</string>
+    <string name="app_report_upload_progress_label">Feedback upload progress</string>
+    <string name="app_report_cancel_progress_label">Feedback cancellation in progress</string>
+    <string name="app_report_queued_progress_label">Feedback is queued</string>
+    <string name="app_report_delivery_in_progress">Feedback delivery is in progress.</string>
 </resources>

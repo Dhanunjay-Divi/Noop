@@ -839,6 +839,18 @@ final class DailyReviewNotificationsTests: XCTestCase {
         DailyReviewNotifications.completedJournalDaysKey,
         DailyReviewNotifications.scheduledEveningIDsKey,
         NotificationRouteBridge.pendingRouteKey,
+        HydrationReminders.enabledKey,
+        HydrationReminders.intervalMinutesKey,
+        HydrationReminders.activeStartMinutesKey,
+        HydrationReminders.activeEndMinutesKey,
+        HydrationReminders.strapBuzzEnabledKey,
+        HydrationReminders.adaptiveEnabledKey,
+        HydrationReminders.doubleTapConfirmEnabledKey,
+        HydrationReminders.bandFirstEnabledKey,
+        "hydrationReminders.scheduledRequestIDs",
+        "hydrationReminders.adaptiveIntervalMinutes",
+        "hydrationReminders.adaptiveReason",
+        "hydrationReminders.adaptiveDay",
         AutoWorkoutNotifications.enabledKey,
         MorningRecapNotifications.enabledKey,
         MorningRecapNotifications.lastReportDayKey,
@@ -1297,30 +1309,58 @@ final class MorningRecapNotificationsTests: XCTestCase {
         XCTAssertTrue(MorningRecapNotifications.shouldNotify(
             enabled: true,
             materializedAfterSync: true,
-            chargeOrRestPresent: true,
+            recoveryOrSleepScorePresent: true,
             reportDay: "2026-08-28",
             lastReportDay: "2026-08-27"
         ))
         XCTAssertFalse(MorningRecapNotifications.shouldNotify(
             enabled: true,
             materializedAfterSync: false,
-            chargeOrRestPresent: true,
+            recoveryOrSleepScorePresent: true,
             reportDay: "2026-08-28",
             lastReportDay: nil
         ))
         XCTAssertFalse(MorningRecapNotifications.shouldNotify(
             enabled: true,
             materializedAfterSync: true,
-            chargeOrRestPresent: false,
+            recoveryOrSleepScorePresent: false,
             reportDay: "2026-08-28",
             lastReportDay: nil
         ))
         XCTAssertFalse(MorningRecapNotifications.shouldNotify(
             enabled: true,
             materializedAfterSync: true,
-            chargeOrRestPresent: true,
+            recoveryOrSleepScorePresent: true,
             reportDay: "2026-08-28",
             lastReportDay: "2026-08-28"
+        ))
+    }
+
+    func testCopyNamesOnlyAvailableMetrics() throws {
+        let both = try XCTUnwrap(MorningRecapNotifications.copy(
+            recoveryPresent: true,
+            sleepScorePresent: true
+        ))
+        XCTAssertTrue(both.body.contains("Recovery"))
+        XCTAssertTrue(both.body.contains("Sleep Score"))
+
+        let recovery = try XCTUnwrap(MorningRecapNotifications.copy(
+            recoveryPresent: true,
+            sleepScorePresent: false
+        ))
+        XCTAssertTrue(recovery.body.contains("Recovery"))
+        XCTAssertFalse(recovery.body.contains("Sleep Score"))
+
+        let sleep = try XCTUnwrap(MorningRecapNotifications.copy(
+            recoveryPresent: false,
+            sleepScorePresent: true
+        ))
+        XCTAssertFalse(sleep.body.contains("Recovery"))
+        XCTAssertTrue(sleep.body.contains("Sleep Score"))
+
+        XCTAssertNil(MorningRecapNotifications.copy(
+            recoveryPresent: false,
+            sleepScorePresent: false
         ))
     }
 
@@ -1341,13 +1381,15 @@ final class MorningRecapNotificationsTests: XCTestCase {
 
         await MorningRecapNotifications.postIfAuthorized(
             reportDay: "2026-08-28",
-            chargeOrRestPresent: true,
+            recoveryPresent: true,
+            sleepScorePresent: true,
             materializedAfterSync: true,
             client: notifications.client
         )
         await MorningRecapNotifications.postIfAuthorized(
             reportDay: "2026-08-28",
-            chargeOrRestPresent: true,
+            recoveryPresent: true,
+            sleepScorePresent: true,
             materializedAfterSync: true,
             client: notifications.client
         )
@@ -1396,7 +1438,8 @@ final class MorningRecapNotificationsTests: XCTestCase {
 
         await MorningRecapNotifications.postIfAuthorized(
             reportDay: "2026-09-11",
-            chargeOrRestPresent: true,
+            recoveryPresent: true,
+            sleepScorePresent: false,
             client: notifications.client,
             budget: exhausted
         )
@@ -1409,7 +1452,8 @@ final class MorningRecapNotificationsTests: XCTestCase {
         let laterSync = PostSyncRoutineNotificationBudget()
         await MorningRecapNotifications.postIfAuthorized(
             reportDay: "2026-09-11",
-            chargeOrRestPresent: true,
+            recoveryPresent: true,
+            sleepScorePresent: false,
             client: notifications.client,
             budget: laterSync
         )

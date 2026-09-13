@@ -22,7 +22,12 @@ object DailyActionPlanner {
             fun fromStoredValue(raw: String?): CheckIn? = entries.firstOrNull { it.storedValue == raw }
         }
     }
-    data class SleepDay(val day: String, val minutes: Double?)
+    data class SleepDay(
+        val day: String,
+        val minutes: Double?,
+        val observedAtSec: Long? = null,
+        val observedSessionDurationMinutes: Double? = null,
+    )
     data class PlannedWorkout(val day: String, val startSec: Long, val endSec: Long)
     enum class WorkoutAdjustmentReason { SLEEP_DEFICIT, RECOVERY_SHIFT, SLEEP_AND_RECOVERY }
     enum class SleepReference { PERSONAL_USUAL, EXPLICIT_TARGET }
@@ -65,6 +70,11 @@ object DailyActionPlanner {
     const val MINIMUM_USUAL_SLEEP_NIGHTS = 5
     const val SOLID_USUAL_SLEEP_NIGHTS = 7
     const val WORKOUT_SLEEP_DEFICIT_THRESHOLD_MINUTES = 45
+    const val CURRENT_SLEEP_MAXIMUM_AGE_SECONDS = 30L * 60L * 60L
+    const val MINIMUM_MATCHED_SLEEP_SESSION_MINUTES = 3 * 60
+    const val MAXIMUM_MATCHED_SLEEP_SESSION_MINUTES = 14 * 60
+    const val AGGREGATE_SESSION_ROUNDING_TOLERANCE_MINUTES = 15
+    const val MAXIMUM_SESSION_EXCESS_MINUTES = 3 * 60
     const val MINIMUM_PLANNED_WORKOUT_MINUTES = 10
     const val MAXIMUM_PLANNED_WORKOUT_MINUTES = 6 * 60
     // A same-civil-day workout can be up to 25 elapsed hours away across a DST fall-back day.
@@ -72,6 +82,37 @@ object DailyActionPlanner {
 
     private const val planningLimitation =
         "This is a personal planning range, not a safety limit, diagnosis, or medical clearance."
+
+    /**
+     * Associate an asleep-minute aggregate with one fresh session without accepting a short nap as proof
+     * that an unrelated aggregate is current. Missing, stale, or implausibly different evidence fails closed.
+     */
+    fun matchedSleepObservationEndSec(
+        aggregateMinutes: Double?,
+        sessionDurationMinutes: Double?,
+        sessionEndSec: Long?,
+        nowSec: Long,
+        maximumAgeSeconds: Int = CURRENT_SLEEP_MAXIMUM_AGE_SECONDS.toInt(),
+    ): Long? {
+        if (
+            aggregateMinutes == null ||
+            !aggregateMinutes.isFinite() ||
+            aggregateMinutes !in 120.0..900.0 ||
+            sessionDurationMinutes == null ||
+            !sessionDurationMinutes.isFinite() ||
+            sessionDurationMinutes !in
+            MINIMUM_MATCHED_SLEEP_SESSION_MINUTES.toDouble()..
+                MAXIMUM_MATCHED_SLEEP_SESSION_MINUTES.toDouble() ||
+            sessionEndSec == null ||
+            nowSec - sessionEndSec !in (-5 * 60L)..maximumAgeSeconds.toLong() ||
+            aggregateMinutes >
+            sessionDurationMinutes + AGGREGATE_SESSION_ROUNDING_TOLERANCE_MINUTES ||
+            sessionDurationMinutes > aggregateMinutes + MAXIMUM_SESSION_EXCESS_MINUTES
+        ) {
+            return null
+        }
+        return sessionEndSec
+    }
 
     fun plan(
         today: String,
@@ -232,6 +273,7 @@ object DailyActionPlanner {
         val sleep = sleepContext(
             recentSleep,
             today,
+            nowSec,
             sleepTargetMinutes,
             sleepTargetIsExplicit,
         )
@@ -282,11 +324,30 @@ object DailyActionPlanner {
     private fun sleepContext(
         days: List<SleepDay>,
         today: String,
+        nowSec: Long,
         sleepTargetMinutes: Int,
         sleepTargetIsExplicit: Boolean,
     ): SleepContext? {
         val grouped = validSleepByDay(days, today)
-        val current = grouped[today] ?: return null
+        val currentValues = days.mapNotNull { row ->
+            val minutes = row.minutes
+            if (
+                row.day != today ||
+                minutes == null ||
+                matchedSleepObservationEndSec(
+                    aggregateMinutes = minutes,
+                    sessionDurationMinutes = row.observedSessionDurationMinutes,
+                    sessionEndSec = row.observedAtSec,
+                    nowSec = nowSec,
+                ) == null
+            ) {
+                null
+            } else {
+                minutes
+            }
+        }
+        if (currentValues.isEmpty()) return null
+        val current = currentValues.average()
         val prior = grouped
             .filterKeys { it < today }
             .toSortedMap()

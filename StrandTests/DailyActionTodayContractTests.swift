@@ -43,6 +43,11 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(today.contains(#""daily_plan.target.withheld""#))
         XCTAssertTrue(today.contains("@Environment(\\.dynamicTypeSize)"))
         XCTAssertTrue(today.contains("if !dynamicTypeSize.isAccessibilitySize"))
+        XCTAssertTrue(today.contains("let compactAdjustment = todayDetailsExpanded"))
+        XCTAssertTrue(today.contains("if let compactAdjustment"))
+        XCTAssertTrue(today.contains("dailyPlanWorkoutAdjustment(compactAdjustment)"))
+        XCTAssertTrue(today.contains("--demo-daily-plan-collapsed"))
+        XCTAssertTrue(today.contains("if dynamicTypeSize.isAccessibilitySize"))
 
         for state in ["checkInNeeded", "calibrating", "recoveryShift", "stop", "ready"] {
             XCTAssertTrue(today.contains("case .\(state):"), "Missing \(state) presentation")
@@ -71,6 +76,11 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(today.contains("DailyPlanTargetSection("))
         XCTAssertTrue(today.contains("TodaySection.WATCH -> TodayDetailSection("))
         XCTAssertTrue(today.contains("DailyPlanWatchSection("))
+        XCTAssertTrue(today.contains(
+            "compactAdjustment = dailyActionPlan.workoutAdjustment"
+        ))
+        XCTAssertTrue(today.contains("if (!expanded && compactAdjustment != null)"))
+        XCTAssertTrue(today.contains("LocalDensity.current.fontScale >= 1.3f"))
         XCTAssertTrue(today.contains("dailyPlanTargetStatusResource(plan)"))
         XCTAssertTrue(today.contains("R.string.daily_plan_target_withheld"))
         XCTAssertTrue(today.contains(
@@ -130,6 +140,7 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(script.contains("*.png(N)"))
         XCTAssertTrue(script.contains("signalstats"))
         XCTAssertTrue(script.contains("capture planned-workout"))
+        XCTAssertTrue(script.contains("capture accessibility-planned-workout"))
     }
 
     func testGeneratedDailyPlanCopyCoversNineLocalesAndBothPlatforms() throws {

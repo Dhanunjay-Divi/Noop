@@ -39,6 +39,13 @@ class DailyActionTodayContractTest {
         assertTrue(today.contains("DailyPlanWatchSection("))
         assertTrue(
             today.contains(
+                "compactAdjustment = dailyActionPlan.workoutAdjustment",
+            ),
+        )
+        assertTrue(today.contains("if (!expanded && compactAdjustment != null)"))
+        assertTrue(today.contains("LocalDensity.current.fontScale >= 1.3f"))
+        assertTrue(
+            today.contains(
                 "it.flag == ReadinessEngine.Flag.WATCH || it.flag == ReadinessEngine.Flag.BAD"
             )
         )

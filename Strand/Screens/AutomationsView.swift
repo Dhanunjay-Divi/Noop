@@ -985,10 +985,7 @@ struct AutomationsView: View {
                     adaptiveDayGuidance = false
                     #if os(iOS)
                     PlannedWorkoutCalendarStore.shared.clear()
-                    AdaptivePlannedWorkoutScheduler.cancelPending()
-                    ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
-                        keepingFingerprint: nil
-                    )
+                    ContextualInterventionCenter.clearAdaptiveDayArtifacts()
                     #endif
                     model.reevaluateContextualInterventions()
                     return
@@ -1002,12 +999,12 @@ struct AutomationsView: View {
                         model.reevaluateContextualInterventions()
                     case .denied:
                         adaptiveDayGuidance = false
-                        AdaptivePlannedWorkoutScheduler.cancelPending()
+                        ContextualInterventionCenter.clearAdaptiveDayArtifacts()
                         notificationPermissionDenied = true
                         showNotificationPermissionAlert = true
                     case .off:
                         adaptiveDayGuidance = false
-                        AdaptivePlannedWorkoutScheduler.cancelPending()
+                        ContextualInterventionCenter.clearAdaptiveDayArtifacts()
                     }
                 }
             }

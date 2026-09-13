@@ -447,7 +447,7 @@ private fun BodyCompositionSection(
                         Text(
                             currentWeight?.let {
                                 UnitFormatter.massFromKilograms(it.value, massUnit)
-                            } ?: "-",
+                            } ?: NoopDisplayFormat.MISSING,
                             style = NoopType.number(30f),
                             color = Palette.textPrimary,
                             maxLines = 1,
@@ -537,7 +537,7 @@ private fun BodyCompositionVisual(bodyFatPct: Double?) {
                 modifier = Modifier.size(31.dp),
             )
             Text(
-                bodyFatPct?.let(::formatBodyFatPct) ?: "-",
+                bodyFatPct?.let(::formatBodyFatPct) ?: NoopDisplayFormat.MISSING,
                 style = NoopType.captionNumber,
                 color = Palette.textPrimary,
             )
@@ -567,13 +567,14 @@ private fun BodyCompositionMetrics(
         val content: @Composable (Modifier) -> Unit = { metricModifier ->
             BodyCompositionMetric(
                 label = uiString(R.string.appwide_health_body_composition_bmi),
-                value = bmi?.let { String.format(Locale.US, "%.1f", it.value) } ?: "-",
+                value = bmi?.let { String.format(Locale.US, "%.1f", it.value) }
+                    ?: NoopDisplayFormat.MISSING,
                 detail = bmi?.let(::bodyCompositionCaption) ?: bmiUnavailable,
                 modifier = metricModifier,
             )
             BodyCompositionMetric(
                 label = uiString(R.string.appwide_health_body_composition_body_fat),
-                value = bodyFat?.let { formatBodyFatPct(it.value) } ?: "-",
+                value = bodyFat?.let { formatBodyFatPct(it.value) } ?: NoopDisplayFormat.MISSING,
                 detail = bodyFat?.let(::bodyCompositionCaption)
                     ?: uiString(R.string.appwide_health_body_composition_no_measurement),
                 modifier = metricModifier,
@@ -582,7 +583,7 @@ private fun BodyCompositionMetrics(
                 label = uiString(R.string.appwide_health_body_composition_lean_mass),
                 value = leanMass?.let {
                     UnitFormatter.massFromKilograms(it.value, massUnit)
-                } ?: "-",
+                } ?: NoopDisplayFormat.MISSING,
                 detail = leanMass?.let(::bodyCompositionCaption)
                     ?: uiString(R.string.appwide_health_body_composition_no_measurement),
                 modifier = metricModifier,
@@ -1284,28 +1285,29 @@ private fun HealthContributorsSection(day: DailyMetric?) {
                 // a staggered fade+rise, mirroring iOS `.staggeredAppear(index:)`.
                 ContributorBar(
                     label = "HRV",
-                    readout = hrv?.let { "${it.roundToInt()} ms" } ?: "-",
+                    readout = hrv?.let { "${it.roundToInt()} ms" } ?: NoopDisplayFormat.MISSING,
                     fraction = hrv?.let { (it - 20.0) / 100.0 },
                     color = Palette.metricCyan,
                     modifier = Modifier.staggeredAppear(0),
                 )
                 ContributorBar(
                     label = uiString(R.string.l10n_health_screen_resting_hr_26677094),
-                    readout = rhr?.let { "${it.roundToInt()} bpm" } ?: "-",
+                    readout = rhr?.let { "${it.roundToInt()} bpm" } ?: NoopDisplayFormat.MISSING,
                     fraction = rhr?.let { 1.0 - ((it - 40.0) / 40.0) },
                     color = Palette.chargeColor,
                     modifier = Modifier.staggeredAppear(1),
                 )
                 ContributorBar(
                     label = uiString(R.string.l10n_health_screen_sleep_3cac34e6),
-                    readout = sleepMin?.let { sleepHoursText(it) } ?: "-",
+                    readout = sleepMin?.let { sleepHoursText(it) } ?: NoopDisplayFormat.MISSING,
                     fraction = sleepMin?.let { (it / 60.0) / 8.0 },
                     color = Palette.sleepLight,
                     modifier = Modifier.staggeredAppear(2),
                 )
                 ContributorBar(
                     label = uiString(R.string.l10n_health_screen_respiratory_1cd8c175),
-                    readout = resp?.let { String.format(Locale.US, "%.1f rpm", it) } ?: "-",
+                    readout = resp?.let { String.format(Locale.US, "%.1f rpm", it) }
+                        ?: NoopDisplayFormat.MISSING,
                     fraction = resp?.let { 1.0 - ((it - 12.0) / 8.0) },
                     color = Palette.sleepLight,
                     modifier = Modifier.staggeredAppear(3),
@@ -2296,8 +2298,10 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                             stringResource(
                                 if (liveTrackingOptedIn) {
                                     R.string.health_live_hr_on_detail
-                                } else {
+                                } else if (live.connected) {
                                     R.string.health_live_hr_off_detail
+                                } else {
+                                    R.string.appwide_health_live_hr_disconnected
                                 },
                             ),
                             style = NoopType.subhead,
@@ -2666,7 +2670,7 @@ private fun VitalsSection(
                             ) { onVitalClick(v.key) }
                             .semantics { contentDescription = v.accessibilityText },
                         vital = v,
-                        value = v.formattedValue ?: "-",
+                        value = v.formattedValue ?: NoopDisplayFormat.MISSING,
                         caption = when (captionMode) {
                             VitalCaptionMode.AS_OF -> v.asOfLabel ?: v.stateCaption
                             VitalCaptionMode.RANGE -> v.rangeCaption ?: v.stateCaption
@@ -2796,7 +2800,7 @@ private fun HealthMonitorSignal(vital: Vital, modifier: Modifier = Modifier) {
 private fun VitalTile(
     vital: Vital,
     modifier: Modifier = Modifier,
-    value: String = vital.formattedValue ?: "-",
+    value: String = vital.formattedValue ?: NoopDisplayFormat.MISSING,
     caption: String = vital.stateCaption,
     accent: Color = vital.accent,
 ) {
@@ -3171,7 +3175,9 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                         Column(modifier = Modifier.weight(1f)) {
                             Overline(label, color = Palette.textTertiary)
                             Text(
-                                text = metric?.let { "${detail.format(it)} ${detail.unit}".trim() } ?: "-",
+                                text = metric?.let {
+                                    "${detail.format(it)} ${detail.unit}".trim()
+                                } ?: NoopDisplayFormat.MISSING,
                                 style = NoopType.bodyNumber,
                                 color = Palette.textPrimary,
                             )

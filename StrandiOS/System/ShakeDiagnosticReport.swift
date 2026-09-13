@@ -3,17 +3,37 @@ import SwiftUI
 import StrandDesign
 import UIKit
 
-/// Owns the shake-created app report from consent through native ZIP sharing.
+private func appReportText(_ key: String.LocalizationValue) -> String {
+    String(localized: key)
+}
+
+private func appReportFormat(
+    _ key: String.LocalizationValue,
+    _ arguments: CVarArg...
+) -> String {
+    String(
+        format: appReportText(key),
+        locale: Locale.current,
+        arguments: arguments
+    )
+}
+
+/// Owns the shake-created app report from consent through durable feedback delivery.
 ///
-/// This is intentionally separate from TestCentreReport: a shake report should offer a file to any
-/// support channel the user chooses, not automatically open a GitHub issue after the share sheet closes.
+/// This is intentionally separate from TestCentreReport: a shake report goes only through the
+/// reviewed feedback channel and never opens a GitHub issue after delivery.
 @MainActor
 final class ShakeDiagnosticReportController: ObservableObject {
     enum Phase: Equatable {
         case explanation
         case building
         case review
-        case sharing
+        case queued
+        case uploading
+        case retryScheduled
+        case sent
+        case cancelling
+        case cancelled
         case failed
     }
 
@@ -22,16 +42,42 @@ final class ShakeDiagnosticReportController: ObservableObject {
     @Published private(set) var entries: [FileExport.BundleEntry] = []
     @Published private(set) var statusMessage: String?
     @Published private(set) var userNote = ""
-    @Published var includeScreenshot = false
+    @Published private(set) var includeScreenshot = false
+    @Published private(set) var isScreenshotCaptureInProgress = false
+    @Published private(set) var uploadProgress = 0.0
+    @Published private(set) var receipt: String?
 
     private var lastShakeUptime: TimeInterval?
     private var capturedScreenPNG: Data?
+    private var screenshotCaptureTask: Task<Void, Never>?
+    private var screenshotCaptureGuard = FeedbackScreenshotCaptureGuard()
+    private var feedbackID: UUID?
+    private var deliveryAttempted = false
+    private var enqueueTask: Task<Void, Never>?
+    private var cancelRequestedBeforeQueue = false
     #if DEBUG
     private var didRequestDemo = false
     #endif
 
+    init() {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let record = try? await FeedbackOutbox.shared.latestActionable(),
+                  !self.isPresented,
+                  self.feedbackID == nil,
+                  self.phase == .explanation else { return }
+            self.feedbackID = record.id
+            self.deliveryAttempted = true
+            self.apply(record)
+        }
+    }
+
     var preventsDismissal: Bool {
-        phase == .building || phase == .sharing
+        phase == .building
+    }
+
+    var isDeliveryFailure: Bool {
+        deliveryAttempted
     }
 
     var attachmentRows: [(name: String, size: String)] {
@@ -52,6 +98,15 @@ final class ShakeDiagnosticReportController: ObservableObject {
 
     var includesScreenAttachment: Bool {
         entries.contains { $0.name == DisplayScreenshot.bundleName }
+    }
+
+    var screenPreviewImage: UIImage? {
+        guard let entry = entries.first(where: {
+            $0.name == DisplayScreenshot.bundleName
+        }) else {
+            return nil
+        }
+        return UIImage(data: entry.data)
     }
 
     var userNoteCountLabel: String {
@@ -83,24 +138,18 @@ final class ShakeDiagnosticReportController: ObservableObject {
             "report.shake_detected",
             includeResourceSnapshot: true
         )
+        if feedbackID != nil {
+            isPresented = true
+            refreshFeedbackState()
+            return
+        }
 
-        // Capture the frame before presenting this sheet, otherwise the report UI itself would obscure the
-        // screen the user is trying to explain. The bytes stay transient in memory, default to excluded,
-        // and are discarded on dismissal unless the user explicitly turns the attachment on and shares.
-        capturedScreenPNG = TestBundleAssembler.appReportScreenshotEntry(
-            DisplayScreenshot.capturePNG()
-        )?.data
+        invalidateScreenshotCapture(clearSelection: true)
         phase = .explanation
         entries = []
         statusMessage = nil
         userNote = ""
-        includeScreenshot = false
-        AppDiagnosticsRecorder.shared.record(
-            "report.screen_snapshot_captured",
-            fields: [
-                "available": capturedScreenPNG == nil ? "false" : "true",
-            ]
-        )
+        AppDiagnosticsRecorder.shared.record("report.capture_prepared")
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         isPresented = true
     }
@@ -123,19 +172,69 @@ final class ShakeDiagnosticReportController: ObservableObject {
         userNote = TestBundleAssembler.boundedUserNoteInput(value)
     }
 
+    func updateScreenshotInclusion(_ isIncluded: Bool) {
+        guard phase == .explanation
+                || (phase == .failed && !deliveryAttempted) else {
+            return
+        }
+        invalidateScreenshotCapture(clearSelection: false)
+        includeScreenshot = isIncluded
+        guard isIncluded else { return }
+
+        let token = screenshotCaptureGuard.begin()
+        isScreenshotCaptureInProgress = true
+        AppDiagnosticsRecorder.shared.record("report.screen_snapshot_requested")
+        screenshotCaptureTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self,
+                  !Task.isCancelled,
+                  self.screenshotCaptureGuard.accepts(
+                      token,
+                      isPresented: self.isPresented,
+                      isOptedIn: self.includeScreenshot
+                  ) else {
+                return
+            }
+
+            let rawPNG = DisplayScreenshot.captureFeedbackPNG()
+            let sanitized = await Task.detached(priority: .userInitiated) {
+                TestBundleAssembler.appReportScreenshotEntry(rawPNG)?.data
+            }.value
+            guard !Task.isCancelled,
+                  self.screenshotCaptureGuard.accepts(
+                      token,
+                      isPresented: self.isPresented,
+                      isOptedIn: self.includeScreenshot
+                  ) else {
+                return
+            }
+
+            self.screenshotCaptureTask = nil
+            self.isScreenshotCaptureInProgress = false
+            self.capturedScreenPNG = sanitized
+            if sanitized == nil {
+                self.includeScreenshot = false
+            }
+            AppDiagnosticsRecorder.shared.record(
+                "report.screen_snapshot_captured",
+                fields: [
+                    "available": sanitized == nil ? "false" : "true",
+                ]
+            )
+        }
+    }
+
     func build(live: LiveState, repo: Repository) {
-        guard phase == .explanation || phase == .failed else { return }
+        guard (phase == .explanation || phase == .failed),
+              !isScreenshotCaptureInProgress else {
+            return
+        }
         phase = .building
         statusMessage = nil
         let note = userNote
         let screenshot = includeScreenshot ? capturedScreenPNG : nil
         AppDiagnosticsRecorder.shared.record(
             "report.build_requested",
-            fields: [
-                "user_context_provided":
-                    note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "false" : "true",
-                "screen_snapshot_included": screenshot == nil ? "false" : "true",
-            ],
             includeResourceSnapshot: true
         )
 
@@ -200,7 +299,7 @@ final class ShakeDiagnosticReportController: ObservableObject {
             )
             guard !assembled.isEmpty else {
                 self.phase = .failed
-                self.statusMessage = "NOOP could not prepare the report. Try again after reopening the app."
+                self.statusMessage = appReportText("app_report_error_prepare")
                 AppDiagnosticsRecorder.shared.record(
                     "report.build_failed",
                     fields: ["reason": "empty_bundle"],
@@ -210,57 +309,110 @@ final class ShakeDiagnosticReportController: ObservableObject {
             }
             self.entries = assembled
             self.phase = .review
-            AppDiagnosticsRecorder.shared.record(
-                "report.build_completed",
-                fields: ["file_count": String(assembled.count)]
-            )
+            AppDiagnosticsRecorder.shared.record("report.build_completed")
         }
     }
 
     func removeScreenAttachment() {
         guard phase == .review, includesScreenAttachment else { return }
         entries.removeAll { $0.name == DisplayScreenshot.bundleName }
-        includeScreenshot = false
-        statusMessage = "Screen snapshot removed from this report."
-        AppDiagnosticsRecorder.shared.record("report.screen_snapshot_removed")
+        invalidateScreenshotCapture(clearSelection: true)
+        statusMessage = appReportText("app_report_status_snapshot_removed")
+        AppDiagnosticsRecorder.shared.record("report.review_updated")
     }
 
-    func share() {
+    func sendFeedback() {
         guard phase == .review, !entries.isEmpty else { return }
-        phase = .sharing
-        statusMessage = nil
+        deliveryAttempted = true
+        phase = .queued
+        statusMessage = appReportText("app_report_status_securing")
+        uploadProgress = 0
+        receipt = nil
+        cancelRequestedBeforeQueue = false
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        let name = FileExport.bundleName(
-            profile: "app-report",
-            platform: "ios",
-            version: version
-        )
         let reportEntries = entries
-        AppDiagnosticsRecorder.shared.record(
-            "report.share_requested",
-            fields: ["file_count": String(reportEntries.count)]
-        )
-        Task { @MainActor [weak self] in
-            let result = await FileExport.exportBundle(
-                entries: reportEntries,
-                suggestedName: name
-            )
+        enqueueTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            if result == nil {
-                self.phase = .failed
-                self.statusMessage = "The ZIP could not be created. No report was shared."
-                AppDiagnosticsRecorder.shared.record(
-                    "report.share_completed",
-                    fields: ["outcome": "archive_failed"]
+            defer { self.enqueueTask = nil }
+            do {
+                let record = try await FeedbackUploadCoordinator.shared.enqueue(
+                    entries: reportEntries,
+                    appVersion: version
                 )
-            } else {
-                self.phase = .review
-                self.statusMessage = "Share sheet opened for \(name)"
-                AppDiagnosticsRecorder.shared.record(
-                    "report.share_completed",
-                    fields: ["outcome": "share_sheet_opened"]
+                self.feedbackID = record.id
+                if self.cancelRequestedBeforeQueue || Task.isCancelled {
+                    self.phase = .cancelling
+                    self.statusMessage = appReportText(
+                        "app_report_status_canceling"
+                    )
+                    await FeedbackUploadCoordinator.shared.cancel(id: record.id)
+                    if let latest = await FeedbackUploadCoordinator.shared.record(
+                        id: record.id
+                    ) {
+                        self.apply(latest)
+                    }
+                    return
+                }
+                self.apply(record)
+            } catch {
+                if self.cancelRequestedBeforeQueue || Task.isCancelled {
+                    self.phase = .cancelled
+                    self.statusMessage = appReportText(
+                        "app_report_status_cancel_before_queue"
+                    )
+                    return
+                }
+                self.phase = .failed
+                self.statusMessage = appReportText("app_report_error_queue")
+                FeedbackDiagnostics.record(
+                    state: .failed,
+                    outcome: .failed,
+                    failureKind: .archiveIntegrity
                 )
             }
+        }
+    }
+
+    func refreshFeedbackState() {
+        guard let feedbackID else { return }
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let record = await FeedbackUploadCoordinator.shared.record(
+                      id: feedbackID
+                  ) else { return }
+            self.apply(record)
+        }
+    }
+
+    func retryFeedback() {
+        guard deliveryAttempted else { return }
+        phase = .queued
+        statusMessage = appReportText("app_report_status_queued")
+        uploadProgress = 0
+        if let feedbackID {
+            Task {
+                await FeedbackUploadCoordinator.shared.retry(id: feedbackID)
+            }
+        } else {
+            phase = .review
+            sendFeedback()
+        }
+    }
+
+    func cancelFeedback() {
+        guard let feedbackID else {
+            cancelRequestedBeforeQueue = true
+            enqueueTask?.cancel()
+            phase = enqueueTask == nil ? .cancelled : .cancelling
+            statusMessage = enqueueTask == nil
+                ? appReportText("app_report_status_cancel_before_queue")
+                : appReportText("app_report_status_cancel_queueing")
+            return
+        }
+        phase = .cancelling
+        statusMessage = appReportText("app_report_status_canceling")
+        Task {
+            await FeedbackUploadCoordinator.shared.cancel(id: feedbackID)
         }
     }
 
@@ -270,12 +422,74 @@ final class ShakeDiagnosticReportController: ObservableObject {
     }
 
     func didDismiss() {
-        phase = .explanation
         entries = []
-        statusMessage = nil
         userNote = ""
-        includeScreenshot = false
+        invalidateScreenshotCapture(clearSelection: true)
+        let retainsDelivery =
+            feedbackID != nil && phase != .sent && phase != .cancelled
+        if retainsDelivery {
+            return
+        }
+        phase = .explanation
+        statusMessage = nil
+        feedbackID = nil
+        if enqueueTask == nil {
+            cancelRequestedBeforeQueue = false
+        }
+        deliveryAttempted = false
+        uploadProgress = 0
+        receipt = nil
+    }
+
+    private func invalidateScreenshotCapture(clearSelection: Bool) {
+        screenshotCaptureGuard.invalidate()
+        screenshotCaptureTask?.cancel()
+        screenshotCaptureTask = nil
+        isScreenshotCaptureInProgress = false
         capturedScreenPNG = nil
+        if clearSelection {
+            includeScreenshot = false
+        }
+    }
+
+    private func apply(_ record: FeedbackOutboxRecord) {
+        uploadProgress = record.uploadProgress
+        receipt = record.receipt
+        switch record.state {
+        case .queued, .reserving:
+            phase = .queued
+            statusMessage = appReportText("app_report_status_queued")
+        case .uploading:
+            phase = .uploading
+            statusMessage = appReportText("app_report_status_uploading")
+        case .completing:
+            phase = .uploading
+            uploadProgress = 1
+            statusMessage = appReportText("app_report_status_confirming")
+        case .retryScheduled:
+            phase = .retryScheduled
+            statusMessage = record.cancelRequested
+                ? appReportText("app_report_status_cancel_retry_scheduled")
+                : appReportText("app_report_status_retry_scheduled")
+        case .sent:
+            phase = .sent
+            statusMessage = record.localArchiveIsRemoved
+                ? appReportText("app_report_status_sent")
+                : appReportText("app_report_status_sent_cleanup_pending")
+        case .failed:
+            phase = .failed
+            statusMessage = record.cancelRequested
+                ? appReportText("app_report_error_cancel_failed")
+                : appReportText("app_report_error_delivery")
+        case .cancelling:
+            phase = .cancelling
+            statusMessage = appReportText("app_report_status_canceling")
+        case .cancelled:
+            phase = .cancelled
+            statusMessage = record.localArchiveIsRemoved
+                ? appReportText("app_report_status_canceled")
+                : appReportText("app_report_status_canceled_cleanup_pending")
+        }
     }
 }
 
@@ -369,8 +583,11 @@ struct ShakeDiagnosticReportSheet: View {
                             explanation
                         case .building:
                             building
-                        case .review, .sharing:
+                        case .review:
                             review
+                        case .queued, .uploading, .retryScheduled, .sent,
+                                .cancelling, .cancelled:
+                            delivery
                         case .failed:
                             failure
                         }
@@ -379,7 +596,7 @@ struct ShakeDiagnosticReportSheet: View {
                     .padding(.vertical, NoopMetrics.space5)
                 }
             }
-            .navigationTitle("App report")
+            .navigationTitle(appReportText("app_report_title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -390,68 +607,100 @@ struct ShakeDiagnosticReportSheet: View {
                         Image(systemName: "xmark")
                     }
                     .disabled(controller.preventsDismissal)
-                    .accessibilityLabel("Close app report")
+                    .accessibilityLabel(
+                        appReportText("app_report_close_content_description")
+                    )
                 }
             }
         }
         .interactiveDismissDisabled(controller.preventsDismissal)
         .presentationDragIndicator(.visible)
         .presentationDetents([.large])
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .feedbackOutboxDidChange
+            )
+        ) { _ in
+            controller.refreshFeedbackState()
+        }
+        .task {
+            controller.refreshFeedbackState()
+        }
     }
 
     private var explanation: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
             reportHeader(
                 symbol: "waveform.path.ecg.rectangle",
-                title: "Capture what happened",
-                detail: "NOOP will package the evidence already on this iPhone. Nothing is uploaded automatically."
+                title: appReportText("app_report_capture_title"),
+                detail: appReportText("app_report_capture_detail")
             )
 
             NoopCard {
                 VStack(alignment: .leading, spacing: 0) {
                     evidenceRow(
                         symbol: "speedometer",
-                        title: "Performance",
-                        detail: "Scroll hitches, main-thread stalls, memory pressure, storage size and thermal state"
+                        title: appReportText(
+                            "app_report_evidence_performance_title"
+                        ),
+                        detail: appReportText(
+                            "app_report_evidence_performance_detail"
+                        )
                     )
                     Divider().overlay(StrandPalette.hairline)
                     evidenceRow(
                         symbol: "rectangle.stack",
-                        title: "Recent path",
-                        detail: "App lifecycle and fixed screen names from this and the previous launch"
+                        title: appReportText(
+                            "app_report_evidence_recent_path_title"
+                        ),
+                        detail: appReportText(
+                            "app_report_evidence_recent_path_detail"
+                        )
                     )
                     Divider().overlay(StrandPalette.hairline)
                     evidenceRow(
                         symbol: "cylinder",
-                        title: "Data pipeline",
-                        detail: "Database open and refresh timing, saved heart-rate freshness, and bounded sync outcomes"
+                        title: appReportText(
+                            "app_report_evidence_data_pipeline_title"
+                        ),
+                        detail: appReportText(
+                            "app_report_evidence_data_pipeline_detail"
+                        )
                     )
                     Divider().overlay(StrandPalette.hairline)
                     evidenceRow(
                         symbol: "waveform.path.ecg",
-                        title: "Band status",
-                        detail: "The existing redacted connection and sync log"
+                        title: appReportText(
+                            "app_report_evidence_band_status_title"
+                        ),
+                        detail: appReportText(
+                            "app_report_evidence_band_status_detail"
+                        )
                     )
                     Divider().overlay(StrandPalette.hairline)
                     evidenceRow(
                         symbol: "apple.logo",
-                        title: "Apple diagnostics",
-                        detail: "Delayed system hang or crash reports, when iOS has made them available"
+                        title: appReportText(
+                            "app_report_evidence_apple_title"
+                        ),
+                        detail: appReportText(
+                            "app_report_evidence_apple_detail"
+                        )
                     )
                 }
             }
 
             NoopCard {
                 VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-                    Text("What felt buggy? (optional)")
+                    Text(appReportText("app_report_user_note_title"))
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text("Briefly say what you tapped, what you expected, and what happened. Avoid names or contact details.")
+                    Text(appReportText("app_report_user_note_detail"))
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                     TextField(
-                        "Example: scrolling Health paused after I opened a metric",
+                        appReportText("app_report_user_note_placeholder"),
                         text: Binding(
                             get: { controller.userNote },
                             set: { controller.updateUserNote($0) }
@@ -482,17 +731,21 @@ struct ShakeDiagnosticReportSheet: View {
                 Toggle(
                     isOn: Binding(
                         get: { controller.includeScreenshot },
-                        set: { controller.includeScreenshot = $0 }
+                        set: { controller.updateScreenshotInclusion($0) }
                     )
                 ) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Include screen snapshot")
+                        Text(appReportText("app_report_include_snapshot"))
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textPrimary)
                         Text(
                             controller.hasCapturedScreen
-                                ? "Shows the screen from just before this report opened. It may contain health values."
-                                : "A screen snapshot was not available for this report."
+                                ? appReportText(
+                                    "app_report_snapshot_available_detail"
+                                )
+                                : appReportText(
+                                    "app_report_snapshot_unavailable_detail"
+                                )
                         )
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
@@ -500,12 +753,11 @@ struct ShakeDiagnosticReportSheet: View {
                     }
                 }
                 .tint(StrandPalette.statusPositive)
-                .disabled(!controller.hasCapturedScreen)
                 .accessibilityIdentifier("noop.app-report.include-screenshot")
             }
 
             Label {
-                Text("Never included: your health database, raw sensor history, account credentials or API keys. The temporary screen snapshot is discarded when you close this report.")
+                Text(appReportText("app_report_privacy_detail_apple"))
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -516,15 +768,16 @@ struct ShakeDiagnosticReportSheet: View {
 
             VStack(spacing: NoopMetrics.space3) {
                 NoopButton(
-                    "Build report",
+                    "app_report_build",
                     systemImage: "doc.zipper",
                     kind: .primary,
                     fullWidth: true
                 ) {
                     controller.build(live: live, repo: repo)
                 }
+                .disabled(controller.isScreenshotCaptureInProgress)
                 NoopButton(
-                    "Cancel",
+                    "app_report_cancel",
                     systemImage: "xmark",
                     kind: .secondary,
                     fullWidth: true
@@ -541,10 +794,10 @@ struct ShakeDiagnosticReportSheet: View {
             ProgressView()
                 .controlSize(.large)
                 .tint(StrandPalette.accent)
-            Text("Preparing a private ZIP")
+            Text(appReportText("app_report_preparing_title"))
                 .font(StrandFont.title2)
                 .foregroundStyle(StrandPalette.textPrimary)
-            Text("Reading bounded logs, file size and the latest saved heart-rate timestamp. Your health database stays on this iPhone.")
+            Text(appReportText("app_report_preparing_detail"))
                 .font(StrandFont.body)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .multilineTextAlignment(.center)
@@ -558,8 +811,8 @@ struct ShakeDiagnosticReportSheet: View {
         VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
             reportHeader(
                 symbol: "checkmark.circle",
-                title: "Report ready",
-                detail: "Review the attachment list, then choose where to send or save the ZIP."
+                title: appReportText("app_report_ready_title"),
+                detail: appReportText("app_report_ready_detail")
             )
 
             NoopCard {
@@ -584,9 +837,39 @@ struct ShakeDiagnosticReportSheet: View {
                 }
             }
 
+            if let image = controller.screenPreviewImage {
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    Text(appReportText("app_report_snapshot_preview_title"))
+                        .font(StrandFont.overline)
+                        .tracking(StrandFont.overlineTracking)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .background(StrandPalette.surfaceBase)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(
+                                    StrandPalette.hairline,
+                                    lineWidth: 1
+                                )
+                        }
+                        .accessibilityLabel(
+                            appReportText(
+                                "app_report_snapshot_preview_content_description"
+                            )
+                        )
+                        .accessibilityIdentifier(
+                            "noop.app-report.screenshot-preview"
+                        )
+                }
+            }
+
             if !controller.reviewPreview.isEmpty {
                 VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-                    Text("REDACTED PREVIEW")
+                    Text(appReportText("app_report_redacted_preview"))
                         .font(StrandFont.overline)
                         .tracking(StrandFont.overlineTracking)
                         .foregroundStyle(StrandPalette.textSecondary)
@@ -610,19 +893,31 @@ struct ShakeDiagnosticReportSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Label {
+                Text(
+                    appReportText("app_report_send_disclosure")
+                )
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "lock.shield")
+                    .foregroundStyle(StrandPalette.statusPositive)
+            }
+
             NoopButton(
-                controller.phase == .sharing ? "Preparing ZIP" : "Share ZIP",
-                systemImage: "square.and.arrow.up",
+                "app_report_send_feedback",
+                systemImage: "paperplane.fill",
                 kind: .primary,
                 fullWidth: true
             ) {
-                controller.share()
+                controller.sendFeedback()
             }
-            .disabled(controller.phase == .sharing)
+            .accessibilityIdentifier("noop.app-report.send")
 
             if controller.includesScreenAttachment {
                 NoopButton(
-                    "Remove screen snapshot",
+                    "app_report_remove_snapshot",
                     systemImage: "photo.badge.minus",
                     kind: .secondary,
                     fullWidth: true
@@ -633,23 +928,171 @@ struct ShakeDiagnosticReportSheet: View {
         }
     }
 
+    private var delivery: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
+            reportHeader(
+                symbol: deliverySymbol,
+                title: deliveryTitle,
+                detail: controller.statusMessage
+                    ?? appReportText("app_report_delivery_in_progress")
+            )
+
+            NoopCard {
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    if controller.phase == .uploading {
+                        ProgressView(value: controller.uploadProgress)
+                            .progressViewStyle(.linear)
+                            .tint(StrandPalette.accent)
+                            .accessibilityLabel(
+                                appReportText("app_report_upload_progress_label")
+                            )
+                            .accessibilityValue(
+                                appReportFormat(
+                                    "app_report_progress_percent",
+                                    Int(
+                                        (controller.uploadProgress * 100)
+                                            .rounded()
+                                    )
+                                )
+                            )
+                            .accessibilityIdentifier(
+                                "noop.app-report.upload-progress"
+                            )
+                        Text(
+                            appReportFormat(
+                                "app_report_progress_percent",
+                                Int(
+                                    (controller.uploadProgress * 100)
+                                        .rounded()
+                                )
+                            )
+                        )
+                        .font(StrandFont.mono)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    } else if controller.phase == .queued
+                                || controller.phase == .cancelling {
+                        ProgressView()
+                            .tint(StrandPalette.accent)
+                            .accessibilityLabel(
+                                controller.phase == .cancelling
+                                    ? appReportText(
+                                        "app_report_cancel_progress_label"
+                                    )
+                                    : appReportText(
+                                        "app_report_queued_progress_label"
+                                    )
+                            )
+                    }
+
+                    if controller.phase == .sent,
+                       let receipt = controller.receipt {
+                        Text(
+                            appReportFormat(
+                                "app_report_receipt",
+                                receipt
+                            )
+                        )
+                            .font(StrandFont.mono)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier(
+                                "noop.app-report.receipt"
+                            )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            switch controller.phase {
+            case .retryScheduled:
+                NoopButton(
+                    "app_report_retry_now",
+                    systemImage: "arrow.clockwise",
+                    kind: .primary,
+                    fullWidth: true
+                ) {
+                    controller.retryFeedback()
+                }
+                NoopButton(
+                    "app_report_cancel_send",
+                    systemImage: "xmark",
+                    kind: .destructive,
+                    fullWidth: true
+                ) {
+                    controller.cancelFeedback()
+                }
+            case .sent, .cancelled:
+                NoopButton(
+                    "app_report_close",
+                    systemImage: "xmark",
+                    kind: .primary,
+                    fullWidth: true
+                ) {
+                    controller.close()
+                    dismiss()
+                }
+            case .queued, .uploading:
+                NoopButton(
+                    "app_report_cancel_send",
+                    systemImage: "xmark",
+                    kind: .destructive,
+                    fullWidth: true
+                ) {
+                    controller.cancelFeedback()
+                }
+            case .cancelling:
+                NoopButton(
+                    "app_report_canceling_title",
+                    systemImage: "hourglass",
+                    kind: .secondary,
+                    fullWidth: true
+                ) {}
+                .disabled(true)
+            default:
+                EmptyView()
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.updatesFrequently)
+        .accessibilityIdentifier("noop.app-report.delivery")
+    }
+
     private var failure: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
             reportHeader(
                 symbol: "exclamationmark.triangle",
-                title: "Report not ready",
-                detail: controller.statusMessage ?? "NOOP could not prepare the ZIP."
+                title: controller.isDeliveryFailure
+                    ? appReportText("app_report_send_failed_title")
+                    : appReportText("app_report_not_ready_title"),
+                detail: controller.statusMessage
+                    ?? appReportText("app_report_prepare_zip_fallback")
             )
             NoopButton(
-                "Try again",
+                controller.isDeliveryFailure
+                    ? "app_report_retry_now"
+                    : "app_report_try_again",
                 systemImage: "arrow.clockwise",
                 kind: .primary,
                 fullWidth: true
             ) {
-                controller.build(live: live, repo: repo)
+                if controller.isDeliveryFailure {
+                    controller.retryFeedback()
+                } else {
+                    controller.build(live: live, repo: repo)
+                }
+            }
+            if controller.isDeliveryFailure {
+                NoopButton(
+                    "app_report_cancel_send",
+                    systemImage: "xmark",
+                    kind: .destructive,
+                    fullWidth: true
+                ) {
+                    controller.cancelFeedback()
+                }
             }
             NoopButton(
-                "Close",
+                "app_report_close",
                 systemImage: "xmark",
                 kind: .secondary,
                 fullWidth: true
@@ -657,6 +1100,37 @@ struct ShakeDiagnosticReportSheet: View {
                 controller.close()
                 dismiss()
             }
+        }
+    }
+
+    private var deliveryTitle: String {
+        switch controller.phase {
+        case .queued:
+            return appReportText("app_report_queued_title")
+        case .uploading:
+            return appReportText("app_report_uploading_title")
+        case .retryScheduled:
+            return appReportText("app_report_retry_scheduled_title")
+        case .sent:
+            return appReportText("app_report_sent_title")
+        case .cancelling:
+            return appReportText("app_report_canceling_title")
+        case .cancelled:
+            return appReportText("app_report_canceled_title")
+        default:
+            return appReportText("app_report_title")
+        }
+    }
+
+    private var deliverySymbol: String {
+        switch controller.phase {
+        case .queued: return "tray.and.arrow.up"
+        case .uploading: return "arrow.up.circle"
+        case .retryScheduled: return "clock.arrow.circlepath"
+        case .sent: return "checkmark.circle.fill"
+        case .cancelling: return "hourglass"
+        case .cancelled: return "xmark.circle"
+        default: return "paperplane"
         }
     }
 

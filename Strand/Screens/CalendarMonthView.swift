@@ -93,6 +93,11 @@ struct CalendarMonthView: View {
         var legendWords: [String] {
             switch valence {
             case .higherIsBetter:
+                if self == .recovery {
+                    return [String(localized: "Low"),
+                            String(localized: "Steady"),
+                            String(localized: "Strong")]
+                }
                 return [String(localized: "appwide.calendar.legend.low"),
                         String(localized: "appwide.calendar.legend.middling"),
                         String(localized: "appwide.calendar.legend.strong")]
@@ -434,6 +439,9 @@ struct CalendarMonthView: View {
     /// red/amber at all — it is a quantity, and a rest day must not be painted as an alarm.
     private static func stepColor(_ pct: Double, metric: Metric) -> Color {
         let v = min(100, max(0, pct))
+        if metric == .recovery {
+            return RecoveryBandPresentation.color(for: v).opacity(0.9)
+        }
         let low = v < RecoveryScorer.bandRedMax
         let mid = v < RecoveryScorer.bandYellowMax
 

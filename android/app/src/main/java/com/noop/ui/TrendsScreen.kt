@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -25,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -38,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,12 +48,22 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.R
+import com.noop.analytics.WeeklyDigest
 import com.noop.analytics.WeeklyDigestEngine
 import com.noop.data.DailyMetric
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import kotlin.math.roundToInt
 
 // MARK: - Trends
@@ -82,21 +95,250 @@ import kotlin.math.roundToInt
 private val LIQUID_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
 private val LIQUID_HERO_RADIUS: Dp = 26.dp
 
+internal data class TrendsHistoryRequest(
+    val deviceId: String,
+    val metricRevision: Long,
+    val restRevision: Long,
+    val retryToken: Int,
+)
+
+internal enum class TrendsHistoryMode {
+    FULL,
+    RECENT_FALLBACK,
+}
+
+internal enum class TrendsHistoryIssue {
+    FULL_HISTORY,
+    RESOLVED_SLEEP,
+    IMPORTED_SLEEP,
+}
+
+internal data class TrendsHistoryPayload(
+    val days: List<DailyMetric>,
+    val resolvedSleep: Map<String, Double>,
+    val importedSleep: Map<String, Double>,
+    val mode: TrendsHistoryMode,
+    val issues: Set<TrendsHistoryIssue>,
+)
+
+internal sealed interface TrendsHistoryLoadResult {
+    data class Content(val payload: TrendsHistoryPayload) : TrendsHistoryLoadResult
+    data object Failed : TrendsHistoryLoadResult
+    data object TimedOut : TrendsHistoryLoadResult
+}
+
+private sealed interface TrendsHistoryUiState {
+    data class Loading(val previous: TrendsHistoryPayload? = null) : TrendsHistoryUiState
+    data class Content(val payload: TrendsHistoryPayload) : TrendsHistoryUiState
+    data class Failed(val timedOut: Boolean) : TrendsHistoryUiState
+}
+
+internal const val TRENDS_LOAD_TIMEOUT_MILLIS = 12_000L
+
+internal suspend fun loadTrendsHistory(
+    loadFullHistory: suspend () -> List<DailyMetric>,
+    loadRecentHistory: suspend () -> List<DailyMetric>,
+    loadResolvedSleep: suspend () -> Map<String, Double>,
+    loadImportedSleep: suspend () -> Map<String, Double>,
+    timeoutMillis: Long = TRENDS_LOAD_TIMEOUT_MILLIS,
+): TrendsHistoryLoadResult {
+    return try {
+        withTimeout(timeoutMillis) {
+            loadTrendsHistoryUnbounded(
+                loadFullHistory,
+                loadRecentHistory,
+                loadResolvedSleep,
+                loadImportedSleep,
+            )
+        }
+    } catch (_: TimeoutCancellationException) {
+        TrendsHistoryLoadResult.TimedOut
+    }
+}
+
+private suspend fun loadTrendsHistoryUnbounded(
+    loadFullHistory: suspend () -> List<DailyMetric>,
+    loadRecentHistory: suspend () -> List<DailyMetric>,
+    loadResolvedSleep: suspend () -> Map<String, Double>,
+    loadImportedSleep: suspend () -> Map<String, Double>,
+): TrendsHistoryLoadResult {
+    val issues = linkedSetOf<TrendsHistoryIssue>()
+    val fullHistory = try {
+        loadFullHistory()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        issues += TrendsHistoryIssue.FULL_HISTORY
+        null
+    }
+
+    val mode: TrendsHistoryMode
+    val days = if (fullHistory != null) {
+        mode = TrendsHistoryMode.FULL
+        fullHistory
+    } else {
+        mode = TrendsHistoryMode.RECENT_FALLBACK
+        try {
+            loadRecentHistory()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return TrendsHistoryLoadResult.Failed
+        }
+    }
+
+    val resolvedSleep = try {
+        loadResolvedSleep()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        issues += TrendsHistoryIssue.RESOLVED_SLEEP
+        emptyMap()
+    }
+    val importedSleep = try {
+        loadImportedSleep()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        issues += TrendsHistoryIssue.IMPORTED_SLEEP
+        emptyMap()
+    }
+
+    return TrendsHistoryLoadResult.Content(
+        TrendsHistoryPayload(
+            days = days,
+            resolvedSleep = resolvedSleep,
+            importedSleep = importedSleep,
+            mode = mode,
+            issues = issues,
+        ),
+    )
+}
+
+private fun trendsDayCountBucket(count: Int): String = when (count) {
+    0 -> "0"
+    in 1..7 -> "1_7"
+    in 8..30 -> "8_30"
+    in 31..90 -> "31_90"
+    in 91..365 -> "91_365"
+    else -> "366_plus"
+}
+
 @Composable
 fun TrendsScreen(vm: AppViewModel) {
-    // Reactive cache (oldest → newest) as the immediate backing.
-    val reactiveDays by vm.recentDays.collectAsStateWithLifecycle()
-
-    // Full history loaded once for the long (1Y / ALL) ranges; falls back to the flow
-    // until it lands so the screen is populated on first frame when any data exists.
-    var fullHistory by remember { mutableStateOf<List<DailyMetric>?>(null) }
-    LaunchedEffect(Unit) {
-        // Merged: imported WHOOP days win; on-device computed days gap-fill the trends. Reads the registry's
-        // ACTIVE strap id so daysMerged resolves the active-id ∪ canonical "my-whoop" union (SPINE / #814) ,
-        // a re-added strap's data and the canonical import both surface; a single-WHOOP install is unchanged.
-        fullHistory = vm.repo.daysMerged(vm.activeStrapId)
+    val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
+    val metricDataVersion by vm.metricDataVersion.collectAsStateWithLifecycle()
+    val restDataVersion by vm.restDataVersion.collectAsStateWithLifecycle()
+    var retryToken by remember(activeDeviceId) { mutableIntStateOf(0) }
+    val historyRequest = remember(
+        activeDeviceId,
+        metricDataVersion,
+        restDataVersion,
+        retryToken,
+    ) {
+        TrendsHistoryRequest(
+            deviceId = activeDeviceId,
+            metricRevision = metricDataVersion,
+            restRevision = restDataVersion,
+            retryToken = retryToken,
+        )
     }
-    val days = fullHistory ?: reactiveDays
+    var historyState by remember(activeDeviceId) {
+        mutableStateOf<TrendsHistoryUiState>(TrendsHistoryUiState.Loading())
+    }
+    LaunchedEffect(historyRequest) {
+        val previous = when (val state = historyState) {
+            is TrendsHistoryUiState.Content -> state.payload
+            is TrendsHistoryUiState.Loading -> state.previous
+            is TrendsHistoryUiState.Failed -> null
+        }
+        historyState = TrendsHistoryUiState.Loading(previous)
+
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("trends.history_load")
+        var outcome = "failed"
+        var diagnosticFields = mapOf(
+            "history_mode" to "none",
+            "day_count_bucket" to "0",
+            "resolved_sleep_status" to "not_loaded",
+            "imported_sleep_status" to "not_loaded",
+            "issue_count" to "0",
+        )
+        try {
+            val result = loadTrendsHistory(
+                loadFullHistory = { vm.repo.daysMerged(historyRequest.deviceId) },
+                loadRecentHistory = {
+                    vm.repo.recentDaysMergedFlow(historyRequest.deviceId).first()
+                },
+                loadResolvedSleep = {
+                    vm.repo.resolvedSeries(
+                        "sleep_performance",
+                        "my-whoop",
+                        "0000-00-00",
+                        "9999-99-99",
+                        strapDeviceId = historyRequest.deviceId,
+                    ).values.associate { it.first to it.second }
+                },
+                loadImportedSleep = {
+                    vm.repo.metricSeries(
+                        "my-whoop",
+                        "sleep_performance",
+                        "0000-00-00",
+                        "9999-99-99",
+                    ).associate { it.day to it.value }
+                },
+            )
+            currentCoroutineContext().ensureActive()
+            when (result) {
+                is TrendsHistoryLoadResult.Content -> {
+                    val payload = result.payload
+                    historyState = TrendsHistoryUiState.Content(payload)
+                    outcome = if (payload.issues.isEmpty()) "completed" else "partial"
+                    diagnosticFields = mapOf(
+                        "history_mode" to when (payload.mode) {
+                            TrendsHistoryMode.FULL -> "full"
+                            TrendsHistoryMode.RECENT_FALLBACK -> "recent_fallback"
+                        },
+                        "day_count_bucket" to trendsDayCountBucket(payload.days.size),
+                        "resolved_sleep_status" to if (
+                            TrendsHistoryIssue.RESOLVED_SLEEP in payload.issues
+                        ) "failed" else "completed",
+                        "imported_sleep_status" to if (
+                            TrendsHistoryIssue.IMPORTED_SLEEP in payload.issues
+                        ) "failed" else "completed",
+                        "issue_count" to payload.issues.size.coerceAtMost(3).toString(),
+                    )
+                }
+                TrendsHistoryLoadResult.Failed -> {
+                    historyState = TrendsHistoryUiState.Failed(timedOut = false)
+                    outcome = "failed"
+                }
+                TrendsHistoryLoadResult.TimedOut -> {
+                    historyState = TrendsHistoryUiState.Failed(timedOut = true)
+                    outcome = "timed_out"
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            outcome = "canceled"
+            throw cancelled
+        } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = outcome,
+                fields = diagnosticFields,
+            )
+        }
+    }
+
+    val historyPayload = when (val state = historyState) {
+        is TrendsHistoryUiState.Content -> state.payload
+        is TrendsHistoryUiState.Loading -> state.previous
+        is TrendsHistoryUiState.Failed -> null
+    }
+    val historyRefreshing = historyState is TrendsHistoryUiState.Loading && historyPayload != null
+    val historyFailed = historyState is TrendsHistoryUiState.Failed
+    val days = historyPayload?.days.orEmpty()
+    val sleepPerfByDay = historyPayload?.resolvedSleep.orEmpty()
+    val importedSleepPerfByDay = historyPayload?.importedSleep.orEmpty()
 
     // Effort display scale (#268) , routes the Effort small-multiple's numbers + unit. Display-only.
     val effortScale = UnitPrefs.effortScale(LocalContext.current)
@@ -115,39 +357,117 @@ fun TrendsScreen(vm: AppViewModel) {
     // #710 , browse previous weeks in the Week-in-review digest. 0 = the week containing today; each step
     // back is one Mon–Sun week earlier, clamped so it never runs past the earliest day we hold. The Trends
     // RANGE control above scopes the long charts; this only moves the weekly digest at the top.
-    var weekOffset by remember { mutableStateOf(0) }
-    // Re-clamp the offset whenever the loaded history changes (e.g. an import lands more weeks), so a
-    // stored offset can never point past the new earliest week. Mirrors the iOS minWeekOffset clamp.
-    val minWeekOffset = remember(days) { minWeekOffset(days) }
-    LaunchedEffect(minWeekOffset) { weekOffset = weekOffset.coerceIn(minWeekOffset, 0) }
-
-    // Resolve each metric's window ONCE per composition and reuse below , mirrors the macOS resolve(_:)
-    // so caption / widened / points aren't recomputed per use. HOISTED above the lazy scaffold: these
-    // are @Composable `remember` hooks, which can't run inside the LazyListScope content lambda. They're
-    // cheap memoized resolves (no-ops over an empty `days`), so the empty branch below simply ignores
-    // them , same as Intelligence's hoisted range/filter. Mirrors the eager body's per-composition resolve.
-    val recovery = remember(days, range) { resolveMetric(days, range) { it.recovery } }
-    val hrv = remember(days, range) { resolveMetric(days, range) { it.avgHrv } }
-    val rhr = remember(days, range) { resolveMetric(days, range) { it.restingHr?.toDouble() } }
-    val strain = remember(days, range) { resolveMetric(days, range) { it.strain } }
+    var weekOffset by remember(activeDeviceId) { mutableStateOf(0) }
     // Rest = the sleep_performance COMPOSITE (0–100) , the SAME metric the Today Rest score/tile and the
     // Sleep Rest-detail plot (#614 follow-up), NOT raw efficiency, which is a different number under the
     // same "Rest" label and made the Trends Rest graph disagree with the Today Rest score (#732).
-    // sleep_performance is a metricSeries (imported-wins resolved), not a DailyMetric column, so fetch the
-    // resolved series and key it by day for the existing windowing/widening below. Mirrors the source
-    // TodayScreen's restScore reads, so the two screens now plot the same number.
-    var sleepPerfByDay by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
-    LaunchedEffect(days) {
-        sleepPerfByDay = runCatching {
-            vm.repo.resolvedSeries("sleep_performance", "my-whoop", "0000-00-00", "9999-99-99",
-                strapDeviceId = vm.activeStrapId)
-                .values.associate { it.first to it.second }
-        }.getOrDefault(emptyMap())
+    // sleep_performance is a metricSeries (imported-wins resolved), not a DailyMetric column.
+    // It is loaded in the device/revision-aware history request above so Rest cannot lag behind a
+    // background import or survive a selected-band switch.
+
+    var trendsSnapshot by remember(activeDeviceId) { mutableStateOf<TrendsSnapshot?>(null) }
+    var trendsSnapshotLoading by remember(activeDeviceId) { mutableStateOf(false) }
+    var trendsSnapshotFailed by remember(activeDeviceId) { mutableStateOf(false) }
+    LaunchedEffect(historyRequest, historyPayload, range) {
+        trendsSnapshot = null
+        trendsSnapshotFailed = false
+        if (historyPayload == null || days.isEmpty()) {
+            trendsSnapshotLoading = false
+            return@LaunchedEffect
+        }
+        trendsSnapshotLoading = true
+
+        // Let Compose commit the static skeleton before any multi-year filtering starts.
+        yield()
+        currentCoroutineContext().ensureActive()
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("trends.aggregate_prepare")
+        var outcome = "completed"
+        try {
+            val inputDays = days.toList()
+            val inputSleep = sleepPerfByDay.toMap()
+            val loadContext = currentCoroutineContext()
+            val prepared = withTimeout(TRENDS_LOAD_TIMEOUT_MILLIS) {
+                withContext(Dispatchers.Default) {
+                    buildTrendsSnapshot(
+                        days = inputDays,
+                        selected = range,
+                        sleepPerfByDay = inputSleep,
+                        today = LocalDate.now(),
+                        cancellationCheck = { loadContext.ensureActive() },
+                    )
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            trendsSnapshot = prepared
+        } catch (_: TimeoutCancellationException) {
+            outcome = "timed_out"
+            trendsSnapshotFailed = true
+        } catch (cancelled: CancellationException) {
+            outcome = "canceled"
+            throw cancelled
+        } catch (_: Exception) {
+            outcome = "failed"
+            trendsSnapshotFailed = true
+        } finally {
+            trendsSnapshotLoading = false
+            com.noop.AppDiagnosticsRecorder.endOperation(diagnostic, outcome = outcome)
+        }
     }
-    val rest = remember(days, range, sleepPerfByDay) {
-        resolveMetric(days, range) { d -> sleepPerfByDay[d.day] }
+
+    var weeklyDigest by remember(activeDeviceId) { mutableStateOf<WeeklyDigest?>(null) }
+    var weeklyDigestLoading by remember(activeDeviceId) { mutableStateOf(false) }
+    var weeklyDigestFailed by remember(activeDeviceId) { mutableStateOf(false) }
+    val weeklyAnchorDay = WeeklyDigestEngine.addDays(logicalDayKeyNow(), weekOffset * 7)
+    val selectedWeekHasImportedRest = remember(importedSleepPerfByDay, weeklyAnchorDay) {
+        hasImportedRestScore(importedSleepPerfByDay, weeklyAnchorDay)
     }
-    val recAvg = recovery.values.averageOrNull()
+    LaunchedEffect(historyRequest, historyPayload, weeklyAnchorDay, effortScale) {
+        weeklyDigest = null
+        weeklyDigestFailed = false
+        if (historyPayload == null || days.isEmpty()) {
+            weeklyDigestLoading = false
+            return@LaunchedEffect
+        }
+        weeklyDigestLoading = true
+
+        yield()
+        currentCoroutineContext().ensureActive()
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("trends.weekly_digest_prepare")
+        var outcome = "completed"
+        try {
+            val inputDays = days.toList()
+            val factor = effortDisplayFactor(effortScale)
+            val loadContext = currentCoroutineContext()
+            val prepared = withTimeout(TRENDS_LOAD_TIMEOUT_MILLIS) {
+                withContext(Dispatchers.Default) {
+                    buildWeeklyDigest(
+                        inputDays,
+                        weeklyAnchorDay,
+                        effortDisplayFactor = factor,
+                        cancellationCheck = { loadContext.ensureActive() },
+                    )
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            weeklyDigest = prepared
+        } catch (_: TimeoutCancellationException) {
+            outcome = "timed_out"
+            weeklyDigestFailed = true
+        } catch (cancelled: CancellationException) {
+            outcome = "canceled"
+            throw cancelled
+        } catch (_: Exception) {
+            outcome = "failed"
+            weeklyDigestFailed = true
+        } finally {
+            weeklyDigestLoading = false
+            com.noop.AppDiagnosticsRecorder.endOperation(diagnostic, outcome = outcome)
+        }
+    }
+
+    val prepared = trendsSnapshot
+    val minWeekOffset = prepared?.minWeekOffset ?: 0
+    LaunchedEffect(minWeekOffset) { weekOffset = weekOffset.coerceIn(minWeekOffset, 0) }
 
     LazyScreenScaffold(
         title = stringResource(R.string.nav_trends),
@@ -161,22 +481,97 @@ fun TrendsScreen(vm: AppViewModel) {
         // (Today / metric-detail parity — the same two prefs drive the same two behaviours everywhere).
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
+        if (historyPayload == null && historyState is TrendsHistoryUiState.Loading) {
+            item { TrendsLoadingSkeleton() }
+            return@LazyScreenScaffold
+        }
+        if (historyFailed) {
+            item {
+                ScreenStateCard(
+                    kind = ScreenStateKind.Error,
+                    title = stringResource(R.string.appwide_trends_load_failed_title),
+                    body = stringResource(R.string.appwide_trends_load_failed_body),
+                    actionLabel = stringResource(R.string.appwide_trends_retry),
+                    onAction = { retryToken += 1 },
+                )
+            }
+            return@LazyScreenScaffold
+        }
         if (days.isEmpty()) {
             item { EmptyTrends() }
             return@LazyScreenScaffold
         }
+        if (trendsSnapshotFailed) {
+            item {
+                ScreenStateCard(
+                    kind = ScreenStateKind.Error,
+                    title = stringResource(R.string.appwide_trends_prepare_failed_title),
+                    body = stringResource(R.string.appwide_trends_prepare_failed_body),
+                    actionLabel = stringResource(R.string.appwide_trends_retry),
+                    onAction = { retryToken += 1 },
+                )
+            }
+            return@LazyScreenScaffold
+        }
+        if (prepared == null && trendsSnapshotLoading) {
+            item { TrendsLoadingSkeleton() }
+            return@LazyScreenScaffold
+        }
+        if (prepared == null) {
+            item {
+                ScreenStateCard(
+                    kind = ScreenStateKind.Error,
+                    title = stringResource(R.string.appwide_trends_prepare_failed_title),
+                    body = stringResource(R.string.appwide_trends_prepare_failed_body),
+                    actionLabel = stringResource(R.string.appwide_trends_retry),
+                    onAction = { retryToken += 1 },
+                )
+            }
+            return@LazyScreenScaffold
+        }
+
+        val recovery = prepared.recovery
+        val hrv = prepared.hrv
+        val rhr = prepared.rhr
+        val strain = prepared.strain
+        val rest = prepared.rest
+        val recAvg = recovery.values.averageOrNull()
 
         // The main card list ripples in once on appear (Reduce-Motion safe), mirroring the iOS
         // staggeredAppear sequence , each top-level section is one staggered child.
+
+        if (historyRefreshing) {
+            item {
+                ScreenStateCard(
+                    kind = ScreenStateKind.Loading,
+                    title = stringResource(R.string.appwide_trends_updating_title),
+                    body = stringResource(R.string.appwide_trends_updating_body),
+                )
+            }
+        } else if (historyPayload?.issues?.isNotEmpty() == true) {
+            item {
+                ScreenStateCard(
+                    kind = ScreenStateKind.Partial,
+                    title = stringResource(R.string.appwide_trends_partial_title),
+                    body = stringResource(R.string.appwide_trends_partial_body),
+                    actionLabel = stringResource(R.string.appwide_trends_retry),
+                    onAction = { retryToken += 1 },
+                )
+            }
+        }
 
         // --- Week-in-review digest (#208) with prev/next week browsing (#710). Past weeks render in the
         // same format; the chevrons stay visible on an empty PAST week so the user can step on. ---
         item {
             Column(modifier = Modifier.staggeredAppear(index = 0)) {
                 WeeklyDigestNav(
-                    days = days,
+                    digest = weeklyDigest,
                     weekOffset = weekOffset,
                     minWeekOffset = minWeekOffset,
+                    importedRestAvailable = selectedWeekHasImportedRest,
+                    loading = weeklyDigestLoading,
+                    failed = weeklyDigestFailed,
+                    onRetry = { retryToken += 1 },
                     onStep = { delta -> weekOffset = (weekOffset + delta).coerceIn(minWeekOffset, 0) },
                 )
             }
@@ -310,6 +705,49 @@ fun TrendsScreen(vm: AppViewModel) {
     }
 }
 
+@Composable
+private fun TrendsLoadingSkeleton() {
+    val loadingDescription = stringResource(R.string.l10n_health_screen_loading_33ce4174)
+    Column(
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = loadingDescription
+        },
+        verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap),
+    ) {
+        TrendsSkeletonCard(chartHeight = 132.dp)
+        TrendsSkeletonCard(chartHeight = Metrics.chartHeight)
+    }
+}
+
+@Composable
+private fun TrendsSkeletonCard(chartHeight: Dp) {
+    NoopCard(padding = Metrics.cardPadding) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
+            Box(
+                Modifier
+                    .width(116.dp)
+                    .height(Metrics.space8)
+                    .clip(RoundedCornerShape(Metrics.cornerPill))
+                    .background(Palette.textTertiary.copy(alpha = 0.18f)),
+            )
+            Box(
+                Modifier
+                    .width(176.dp)
+                    .height(Metrics.space12)
+                    .clip(RoundedCornerShape(Metrics.cornerPill))
+                    .background(Palette.textTertiary.copy(alpha = 0.12f)),
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(chartHeight)
+                    .clip(RoundedCornerShape(Metrics.space8))
+                    .background(Palette.surfaceInset.copy(alpha = 0.72f)),
+            )
+        }
+    }
+}
+
 // MARK: - Week-in-review digest with prev/next week browsing (#710)
 
 /**
@@ -317,14 +755,20 @@ fun TrendsScreen(vm: AppViewModel) {
  * hold and this week. Beyond it there's no data to digest, so the back chevron disables. 0 when history
  * is empty or unparseable (so we stay on this week). `days` is oldest → newest. Mirrors iOS minWeekOffset.
  */
-private fun minWeekOffset(days: List<DailyMetric>): Int {
+private fun minWeekOffset(
+    days: List<DailyMetric>,
+    todayKey: String,
+    cancellationCheck: () -> Unit = {},
+): Int {
+    cancellationCheck()
     val earliest = days.firstOrNull()?.day ?: return 0
     val earliestMon = WeeklyDigestEngine.mondayOfWeek(earliest) ?: return 0
-    val thisMon = WeeklyDigestEngine.mondayOfWeek(logicalDayKeyNow()) ?: return 0
+    val thisMon = WeeklyDigestEngine.mondayOfWeek(todayKey) ?: return 0
     var off = 0
     var mon = thisMon
     // Walk weeks back until we pass the earliest week. Hard cap ~10 years so a bad date can't spin.
     while (mon > earliestMon && off > -520) {
+        cancellationCheck()
         mon = WeeklyDigestEngine.addDays(mon, -7)
         off -= 1
     }
@@ -340,32 +784,46 @@ private fun minWeekOffset(days: List<DailyMetric>): Int {
  */
 @Composable
 private fun WeeklyDigestNav(
-    days: List<DailyMetric>,
+    digest: WeeklyDigest?,
     weekOffset: Int,
     minWeekOffset: Int,
+    importedRestAvailable: Boolean,
+    loading: Boolean,
+    failed: Boolean,
+    onRetry: () -> Unit,
     onStep: (Int) -> Unit,
 ) {
-    if (days.isEmpty()) return
-    // Anchor day for this offset = today shifted back by weekOffset whole weeks; the engine snaps it to
-    // that week's Monday. Memoised so the (cheap but non-trivial) digest rebuild only runs on a real change.
-    val anchorDay = remember(weekOffset) {
-        WeeklyDigestEngine.addDays(logicalDayKeyNow(), weekOffset * 7)
-    }
-    // #268/#463: past weeks quote Effort on the user's display scale too, same as the live card.
-    val factor = effortDisplayFactor(UnitPrefs.effortScale(LocalContext.current))
-    val digest = remember(days, anchorDay, factor) {
-        buildWeeklyDigest(days, anchorDay, effortDisplayFactor = factor)
-    }
-
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         WeekNavBar(weekOffset = weekOffset, minWeekOffset = minWeekOffset, onStep = onStep)
-        if (digest.isEmpty) {
+        if (failed) {
+            ScreenStateCard(
+                kind = ScreenStateKind.Error,
+                title = stringResource(R.string.appwide_trends_weekly_digest_failed_title),
+                body = stringResource(R.string.appwide_trends_weekly_digest_failed_body),
+                actionLabel = stringResource(R.string.appwide_trends_retry),
+                onAction = onRetry,
+            )
+        } else if (digest == null && loading) {
+            TrendsSkeletonCard(chartHeight = 156.dp)
+        } else if (digest == null) {
+            ScreenStateCard(
+                kind = ScreenStateKind.Error,
+                title = stringResource(R.string.appwide_trends_weekly_digest_failed_title),
+                body = stringResource(R.string.appwide_trends_weekly_digest_failed_body),
+                actionLabel = stringResource(R.string.appwide_trends_retry),
+                onAction = onRetry,
+            )
+        } else if (digest.isEmpty) {
             DataPendingNote(
                 title = stringResource(R.string.trends_no_readings_this_week),
                 body = stringResource(R.string.trends_no_readings_body),
             )
         } else {
-            WeeklyDigestContent(digest = digest, compact = true)
+            WeeklyDigestContent(
+                digest = digest,
+                compact = true,
+                importedRestAvailable = importedRestAvailable,
+            )
         }
     }
 }
@@ -551,7 +1009,7 @@ private fun PipScoreRow(
 // MARK: - Range control model (ported from TrendsView.Range)
 
 /** W(7) / M(30) / 3M(90) / 6M(180) / 1Y(365) / ALL. */
-private enum class TrendsRange(val days: Int?, val label: String) {
+internal enum class TrendsRange(val days: Int?, val label: String) {
     Week(7, "W"),
     Month(30, "M"),
     Quarter(90, "3M"),
@@ -568,25 +1026,56 @@ private enum class TrendsRange(val days: Int?, val label: String) {
 
 /** A metric's window: its plotted values, the day string for each point, its effective range,
  *  and whether the selection was widened to find data. */
-private data class ResolvedMetric(
+internal data class ResolvedMetric(
     val values: List<Double>,
     val dates: List<String>,
     val effective: TrendsRange,
     val widened: Boolean,
 )
 
+internal data class TrendsSnapshot(
+    val recovery: ResolvedMetric,
+    val hrv: ResolvedMetric,
+    val rhr: ResolvedMetric,
+    val strain: ResolvedMetric,
+    val rest: ResolvedMetric,
+    val minWeekOffset: Int,
+)
+
+internal fun buildTrendsSnapshot(
+    days: List<DailyMetric>,
+    selected: TrendsRange,
+    sleepPerfByDay: Map<String, Double>,
+    today: LocalDate,
+    cancellationCheck: () -> Unit = {},
+): TrendsSnapshot {
+    cancellationCheck()
+    val todayKey = today.toString()
+    return TrendsSnapshot(
+        recovery = resolveMetric(days, selected, today, cancellationCheck) { it.recovery },
+        hrv = resolveMetric(days, selected, today, cancellationCheck) { it.avgHrv },
+        rhr = resolveMetric(days, selected, today, cancellationCheck) { it.restingHr?.toDouble() },
+        strain = resolveMetric(days, selected, today, cancellationCheck) { it.strain },
+        rest = resolveMetric(days, selected, today, cancellationCheck) { sleepPerfByDay[it.day] },
+        minWeekOffset = minWeekOffset(days, todayKey, cancellationCheck),
+    )
+}
+
 /**
  * Walk the widening order once: take the smallest range ≥ selected whose window holds
  * ≥1 non-null point for [value]; if none do, fall back to ALL. Windows are taken
  * relative to the LATEST recorded day, exactly like the macOS `days(for:)`.
  */
-private fun resolveMetric(
+internal fun resolveMetric(
     days: List<DailyMetric>,
     selected: TrendsRange,
+    today: LocalDate = LocalDate.now(),
+    cancellationCheck: () -> Unit = {},
     value: (DailyMetric) -> Double?,
 ): ResolvedMetric {
     for (r in selected.widening) {
-        val pts = windowPoints(days, r, value)
+        cancellationCheck()
+        val pts = windowPoints(days, r, today, cancellationCheck, value)
         if (pts.isNotEmpty()) {
             return ResolvedMetric(
                 values = pts.map { it.second },
@@ -596,7 +1085,8 @@ private fun resolveMetric(
             )
         }
     }
-    val pts = windowPoints(days, TrendsRange.All, value)
+    cancellationCheck()
+    val pts = windowPoints(days, TrendsRange.All, today, cancellationCheck, value)
     return ResolvedMetric(
         values = pts.map { it.second },
         dates = pts.map { it.first },
@@ -614,21 +1104,26 @@ private fun resolveMetric(
 private fun windowPoints(
     days: List<DailyMetric>,
     range: TrendsRange,
+    today: LocalDate,
+    cancellationCheck: () -> Unit,
     value: (DailyMetric) -> Double?,
 ): List<Pair<String, Double>> {
     if (days.isEmpty()) return emptyList()
-    val sliced = when (val n = range.days) {
-        null -> days
-        // Trailing N CALENDAR days ending today , anchored to the phone's date, NOT the last N rows
-        // (which on a stale import made months-old data fill the W/M/3M windows, looking current , #23).
-        // ISO yyyy-MM-dd sorts chronologically. Empty short windows auto-widen via resolveMetric, so old
-        // imports surface under a wider range / All history rather than masquerading as recent.
-        else -> {
-            val cutoff = LocalDate.now().minusDays((n - 1).toLong()).toString()
-            days.filter { it.day >= cutoff }
+    val cutoff = range.days?.let { n ->
+        // Trailing N calendar days ending today, anchored to the phone's date rather than the last N rows.
+        today.minusDays((n - 1).toLong()).toString()
+    }
+    val points = ArrayList<Pair<String, Double>>(days.size)
+    days.forEachIndexed { index, day ->
+        if (index % 256 == 0) {
+            cancellationCheck()
+        }
+        if (cutoff == null || day.day >= cutoff) {
+            value(day)?.let { points += day.day to it }
         }
     }
-    return sliced.mapNotNull { d -> value(d)?.let { d.day to it } }
+    cancellationCheck()
+    return points
 }
 
 @Composable
@@ -1138,7 +1633,7 @@ private fun EmptyTrends() {
 
 // MARK: - Small numeric helpers
 
-private const val EM_DASH = ","
+private const val EM_DASH = NoopDisplayFormat.MISSING
 
 private fun List<Double>.averageOrNull(): Double? =
     if (isEmpty()) null else sum() / size

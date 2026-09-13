@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/noop-mark-master.png" alt="NOOP mark" width="92">
+  <img src="docs/assets/readme/noop-mark.png" alt="NOOP Obsidian app mark" width="92">
 </p>
 
 <h1 align="center">NOOP</h1>
@@ -14,6 +14,7 @@
 </p>
 
 <p align="center">
+  <a href="#product-surfaces">Visuals</a> |
   <a href="#product">Product</a> |
   <a href="#build-and-run">Build</a> |
   <a href="#architecture">Architecture</a> |
@@ -28,6 +29,50 @@
 > clinical validity, signing, or store readiness. See
 > [Production readiness](docs/PRODUCTION_READINESS.md) and
 > [Release blockers](docs/handoff/RELEASE-BLOCKERS.md).
+
+## Product Surfaces
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/readme/ios-today.png">
+        <img src="docs/assets/readme/ios-today.png" alt="NOOP Today screen with deterministic synthetic demo data" width="100%">
+      </a>
+      <br>
+      <sub><strong>Today.</strong> Deterministic synthetic demo data shows the daily signal, source labels, confidence, and key metrics.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/readme/ios-today-calibrating.png">
+        <img src="docs/assets/readme/ios-today-calibrating.png" alt="NOOP Today screen with deterministic synthetic empty-state demo data" width="100%">
+      </a>
+      <br>
+      <sub><strong>Honest states.</strong> Deterministic synthetic empty-state demo data intentionally retains Building, Calibrating, and missing values.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/readme/ios-sleep.png">
+        <img src="docs/assets/readme/ios-sleep.png" alt="NOOP Sleep screen with deterministic synthetic demo data" width="100%">
+      </a>
+      <br>
+      <sub><strong>Sleep detail.</strong> A bottom-scroll capture with deterministic synthetic demo data visualizes stage context, sleep debt, and a 30-day trend without implying clinical validation.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/readme/ios-trends.png">
+        <img src="docs/assets/readme/ios-trends.png" alt="NOOP Trends screen with deterministic synthetic demo data" width="100%">
+      </a>
+      <br>
+      <sub><strong>Trends detail.</strong> A bottom-scroll capture from the deterministic 120-day fixture shows range controls, calendar context, and export affordances.</sub>
+    </td>
+  </tr>
+</table>
+
+These are unretouched, full-resolution captures from the audited base commit
+recorded in the [visual manifest](docs/assets/readme/manifest.json), not a claim
+about the current dirty worktree. Android and macOS are not pictured because
+this documentation slice did not produce deterministic captures for those
+clients. The manifest records generalized capture commands, fixtures,
+checksums, dimensions, and limitations.
 
 ## Product
 
@@ -347,7 +392,7 @@ ledger and exact release commit prove every applicable gate.
 - [Current operations handoff](docs/ops/ACTIVE.md)
 
 For an app problem, use the in-app shake-to-report flow when available. Review
-the attachment list before sharing and never post credentials, raw health
+the attachment list before sending and never post credentials, raw health
 exports, precise location, or another person's data in a public issue.
 
 ## Documentation

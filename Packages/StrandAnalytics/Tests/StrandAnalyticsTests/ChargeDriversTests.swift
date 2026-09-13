@@ -109,8 +109,8 @@ final class ChargeDriversTests: XCTestCase {
         let coldRow = cold.first { $0.label == "Skin temperature" }!
         XCTAssertLessThanOrEqual(warmRow.deltaPoints, 0)
         XCTAssertLessThanOrEqual(coldRow.deltaPoints, 0)
-        XCTAssertTrue(warmRow.valueText.contains("+0.8"))
-        XCTAssertTrue(coldRow.valueText.contains("-0.8"))
+        XCTAssertEqual(warmRow.valueText, "+0.8 °C vs baseline")
+        XCTAssertEqual(coldRow.valueText, "−0.8 °C vs baseline")
     }
 
     func testAbsoluteSkinTemperatureDoesNotCreateDeviationDriverOrRelativeMarker() {

@@ -512,7 +512,14 @@ internal fun plannedWorkoutTodayDemoContext(
     val now = day.atTime(9, 41).atZone(zoneId)
     val start = day.atTime(17, 30).atZone(zoneId)
     val recentSleep = buildList {
-        add(DailyActionPlanner.SleepDay(dayKey, 6.0 * 60.0 + 12.0))
+        add(
+            DailyActionPlanner.SleepDay(
+                day = dayKey,
+                minutes = 6.0 * 60.0 + 12.0,
+                observedAtSec = now.toEpochSecond() - 2L * 60L * 60L,
+                observedSessionDurationMinutes = 6.0 * 60.0 + 12.0,
+            ),
+        )
         for (offset in 1L..7L) {
             add(
                 DailyActionPlanner.SleepDay(
@@ -731,6 +738,29 @@ fun TodayScreen(
     ) {
         plannedWorkoutDemo?.nowSec ?: System.currentTimeMillis() / 1_000L
     }
+    var currentSleepObservation by remember(activeStrapId, selectedDayKey) {
+        mutableStateOf<MatchedSleepObservation?>(null)
+    }
+    LaunchedEffect(
+        activeStrapId,
+        selectedDayKey,
+        selectedDayOffset,
+        displayMetric?.totalSleepMin,
+        planningNowSec,
+        plannedWorkoutDemo,
+    ) {
+        currentSleepObservation = when {
+            plannedWorkoutDemo != null -> null
+            selectedDayOffset != 0 -> null
+            else -> runCatching {
+                viewModel.matchedSleepObservation(
+                    dayKey = selectedDayKey,
+                    aggregateMinutes = displayMetric?.totalSleepMin,
+                    nowSec = planningNowSec,
+                )
+            }.getOrNull()
+        }
+    }
 
     fun buildDailyActionPlan(checkIn: DailyActionPlanner.CheckIn): DailyActionPlanner.Plan =
         DailyActionPlanner.plan(
@@ -741,7 +771,20 @@ fun TodayScreen(
                 DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
             },
             recentSleep = plannedWorkoutDemo?.recentSleep ?: days.map {
-                DailyActionPlanner.SleepDay(day = it.day, minutes = it.totalSleepMin)
+                DailyActionPlanner.SleepDay(
+                    day = it.day,
+                    minutes = it.totalSleepMin,
+                    observedAtSec = if (it.day == selectedDayKey) {
+                        currentSleepObservation?.endSec
+                    } else {
+                        null
+                    },
+                    observedSessionDurationMinutes = if (it.day == selectedDayKey) {
+                        currentSleepObservation?.durationMinutes
+                    } else {
+                        null
+                    },
+                )
             },
             sleepTargetMinutes = sleepTargetMinutes,
             sleepTargetIsExplicit =
@@ -803,6 +846,7 @@ fun TodayScreen(
         plannedWorkoutSnapshot?.revision,
         sleepTargetMinutes,
         planningNowSec,
+        currentSleepObservation,
     ) {
         buildDailyActionPlan(dailyActionCheckIn)
     }
@@ -2247,6 +2291,7 @@ fun TodayScreen(
                         // at the loop level (sectionVisible) so a gated-off section emits no item.
                         TodaySection.LIVE_SESSION -> LiveSessionEntryCard(
                             live = liveSnap,
+                            hasCurrentRecovery = displayMetric?.recovery != null,
                             onOpen = {
                                 // Opening a new coach shows its pre-session guide first. An existing
                                 // runner still resumes directly, including an unseen end summary.
@@ -2259,6 +2304,7 @@ fun TodayScreen(
                             availability = dailyActionPlan.availability,
                             summaryAction = dailyActionSummary,
                             supportingSources = dailyActionSummarySources,
+                            compactAdjustment = dailyActionPlan.workoutAdjustment,
                             onToggle = { todayDetailsExpanded = !todayDetailsExpanded },
                         ) {
                             DailyPlanWhySection(
@@ -2272,6 +2318,7 @@ fun TodayScreen(
                             availability = dailyActionPlan.availability,
                             summaryAction = dailyActionSummary,
                             supportingSources = dailyActionSummarySources,
+                            compactAdjustment = dailyActionPlan.workoutAdjustment,
                             onToggle = { todayDetailsExpanded = !todayDetailsExpanded },
                         ) {
                             DailyPlanTargetSection(
@@ -2321,6 +2368,7 @@ fun TodayScreen(
                             availability = dailyActionPlan.availability,
                             summaryAction = dailyActionSummary,
                             supportingSources = dailyActionSummarySources,
+                            compactAdjustment = dailyActionPlan.workoutAdjustment,
                             onToggle = { todayDetailsExpanded = !todayDetailsExpanded },
                         ) {
                             DailyPlanWatchSection(
@@ -2336,6 +2384,7 @@ fun TodayScreen(
                             availability = dailyActionPlan.availability,
                             summaryAction = dailyActionSummary,
                             supportingSources = dailyActionSummarySources,
+                            compactAdjustment = dailyActionPlan.workoutAdjustment,
                             onToggle = { todayDetailsExpanded = !todayDetailsExpanded },
                         ) {
                             Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
@@ -2658,6 +2707,7 @@ private fun TodayDetailSection(
     availability: DailyActionPlanner.Availability,
     summaryAction: String,
     supportingSources: List<DailyActionPlanner.EvidenceSource>,
+    compactAdjustment: DailyActionPlanner.WorkoutAdjustment?,
     onToggle: () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -2690,10 +2740,9 @@ private fun TodayDetailSection(
                 DailyActionPlanner.Availability.STOP -> Palette.statusCritical
             }
             NoopCard(padding = 0.dp) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 48.dp)
                         .semantics {
                             stateDescription = disclosureState
                         }
@@ -2701,50 +2750,70 @@ private fun TodayDetailSection(
                             role = Role.Button,
                             onClickLabel = label,
                             onClick = onToggle,
-                        )
-                        .padding(horizontal = Metrics.space16),
-                    horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
-                    verticalAlignment = Alignment.Top,
+                        ),
                 ) {
-                    Icon(
-                        summaryIcon,
-                        contentDescription = null,
-                        tint = summaryTint,
+                    Row(
                         modifier = Modifier
-                            .padding(top = 2.dp)
-                            .size(Metrics.iconSmall),
-                    )
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = Metrics.space16),
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        Text(
-                            summaryAction,
-                            style = NoopType.subhead,
-                            color = Palette.textPrimary,
+                        Icon(
+                            summaryIcon,
+                            contentDescription = null,
+                            tint = summaryTint,
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .size(Metrics.iconSmall),
                         )
-                        supportingSources.take(2).forEach { source ->
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                        ) {
                             Text(
-                                stringResource(dailyPlanEvidenceResource(source)),
-                                style = NoopType.footnote,
-                                color = Palette.textSecondary,
+                                summaryAction,
+                                style = NoopType.subhead,
+                                color = Palette.textPrimary,
+                            )
+                            supportingSources.take(2).forEach { source ->
+                                Text(
+                                    stringResource(dailyPlanEvidenceResource(source)),
+                                    style = NoopType.footnote,
+                                    color = Palette.textSecondary,
+                                )
+                            }
+                            Text(
+                                label,
+                                style = NoopType.caption,
+                                color = Palette.textTertiary,
                             )
                         }
-                        Text(
-                            label,
-                            style = NoopType.caption,
-                            color = Palette.textTertiary,
+                        Icon(
+                            if (expanded) Icons.Filled.KeyboardArrowUp
+                            else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = Palette.textSecondary,
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .size(Metrics.iconSmall),
                         )
                     }
-                    Icon(
-                        if (expanded) Icons.Filled.KeyboardArrowUp
-                        else Icons.Filled.KeyboardArrowDown,
-                        contentDescription = null,
-                        tint = Palette.textSecondary,
-                        modifier = Modifier
-                            .padding(top = 4.dp)
-                            .size(Metrics.iconSmall),
-                    )
+                    if (!expanded && compactAdjustment != null) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = Metrics.space16),
+                            color = Palette.hairline,
+                        )
+                        Box(
+                            modifier = Modifier.padding(
+                                horizontal = Metrics.space16,
+                                vertical = Metrics.space14,
+                            ),
+                        ) {
+                            DailyPlanWorkoutAdjustment(compactAdjustment)
+                        }
+                    }
                 }
             }
         }
@@ -3063,6 +3132,7 @@ private fun DailyPlanTargetSection(
 private fun DailyPlanWorkoutAdjustment(
     adjustment: DailyActionPlanner.WorkoutAdjustment,
 ) {
+    val stackMetrics = LocalDensity.current.fontScale >= 1.3f
     val startTime = remember(adjustment.startSec) {
         DateTimeFormatter
             .ofLocalizedTime(FormatStyle.SHORT)
@@ -3089,24 +3159,41 @@ private fun DailyPlanWorkoutAdjustment(
                 color = Palette.textPrimary,
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
-        ) {
-            adjustment.measuredSleepMinutes?.let { minutes ->
+        if (stackMetrics) {
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
+                adjustment.measuredSleepMinutes?.let { minutes ->
+                    DailyPlanWorkoutMetric(
+                        icon = Icons.Filled.Bedtime,
+                        label = stringResource(R.string.daily_plan_workout_adjustment_sleep_label),
+                        value = dailyPlanDuration(minutes),
+                    )
+                }
                 DailyPlanWorkoutMetric(
-                    icon = Icons.Filled.Bedtime,
-                    label = stringResource(R.string.daily_plan_workout_adjustment_sleep_label),
-                    value = dailyPlanDuration(minutes),
+                    icon = Icons.Filled.AccessTime,
+                    label = stringResource(R.string.daily_plan_workout_adjustment_workout_label),
+                    value = startTime,
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+            ) {
+                adjustment.measuredSleepMinutes?.let { minutes ->
+                    DailyPlanWorkoutMetric(
+                        icon = Icons.Filled.Bedtime,
+                        label = stringResource(R.string.daily_plan_workout_adjustment_sleep_label),
+                        value = dailyPlanDuration(minutes),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                DailyPlanWorkoutMetric(
+                    icon = Icons.Filled.AccessTime,
+                    label = stringResource(R.string.daily_plan_workout_adjustment_workout_label),
+                    value = startTime,
                     modifier = Modifier.weight(1f),
                 )
             }
-            DailyPlanWorkoutMetric(
-                icon = Icons.Filled.AccessTime,
-                label = stringResource(R.string.daily_plan_workout_adjustment_workout_label),
-                value = startTime,
-                modifier = Modifier.weight(1f),
-            )
         }
         dailyPlanSleepDeficit(adjustment)?.let { deficit ->
             Text(
@@ -3727,6 +3814,7 @@ private fun WorkoutInProgressCard(
 @Composable
 private fun LiveSessionEntryCard(
     live: DashboardLiveSnapshot,
+    hasCurrentRecovery: Boolean,
     onOpen: () -> Unit,
 ) {
     val active by LiveSessionRunner.active.collectAsStateWithLifecycle()
@@ -3747,8 +3835,11 @@ private fun LiveSessionEntryCard(
         else R.string.appwide_live_session_connect_band,
     )
     val startDetail = stringResource(
-        if (bandReady) R.string.appwide_live_session_start_detail
-        else R.string.appwide_live_session_band_required,
+        when {
+            !bandReady -> R.string.appwide_live_session_band_required
+            !hasCurrentRecovery -> R.string.appwide_live_session_start_detail_unavailable
+            else -> R.string.appwide_live_session_start_detail
+        },
     )
     val title = when {
         running -> "Silent Guardian running"
@@ -5443,7 +5534,7 @@ private fun V2HeroArc(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
-                text = value?.roundToInt()?.toString() ?: "-",
+                text = value?.roundToInt()?.toString() ?: NoopDisplayFormat.MISSING,
                 style = NoopType.number(
                     if (value == null) 48f else 56f,
                     weight = FontWeight.Bold,
@@ -5544,7 +5635,7 @@ private fun V2SatelliteRing(
                 }
             }
             Text(
-                text = value?.let { formatSatelliteValue(it, decimals) } ?: "-",
+                text = value?.let { formatSatelliteValue(it, decimals) } ?: NoopDisplayFormat.MISSING,
                 style = NoopType.number(
                     if (value == null) 18f else 21f,
                     weight = FontWeight.Bold,
@@ -7396,9 +7487,12 @@ private fun RecoveryDriversSection(
 @Composable
 private fun ChargeConfidencePill(tier: ScoreConfidence) {
     val (label, tone) = when (tier) {
-        ScoreConfidence.SOLID -> "SOLID" to StrandTone.Accent
-        ScoreConfidence.BUILDING -> "BUILDING" to StrandTone.Warning
-        ScoreConfidence.CALIBRATING -> "CALIBRATING" to StrandTone.Neutral
+        ScoreConfidence.SOLID ->
+            uiString(R.string.appwide_charge_confidence_reliable) to StrandTone.Accent
+        ScoreConfidence.BUILDING ->
+            uiString(R.string.appwide_charge_confidence_estimate) to StrandTone.Warning
+        ScoreConfidence.CALIBRATING ->
+            uiString(R.string.appwide_charge_confidence_calibrating) to StrandTone.Neutral
     }
     StatePill(title = label, tone = tone)
 }
@@ -7414,7 +7508,7 @@ private fun DriverRow(driver: ChargeDriver) {
         driver.deltaPoints < 0 -> Palette.statusCritical
         else -> Palette.textTertiary
     }
-    val signed = if (driver.deltaPoints > 0) "+${driver.deltaPoints}" else "${driver.deltaPoints}"
+    val signed = chargeDriverPointLabel(driver.deltaPoints)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -7452,6 +7546,12 @@ private fun DriverRow(driver: ChargeDriver) {
             Text(driver.baselineText, style = NoopType.footnote, color = Palette.textTertiary)
         }
     }
+}
+
+internal fun chargeDriverPointLabel(deltaPoints: Int): String = when {
+    deltaPoints > 0 -> "+$deltaPoints"
+    deltaPoints < 0 -> "−${kotlin.math.abs(deltaPoints)}"
+    else -> "0"
 }
 
 // MARK: - Recovery contributors (README screen #5), labelled progress bars
@@ -9548,29 +9648,20 @@ private fun greetingWord(): String {
     }
 }
 
+@Composable
 private fun synthesisWord(score: Double?): String {
-    if (score == null) return "No Data"
-    return when {
-        score < 25 -> "Depleted"
-        score < 50 -> "Low"
-        score < 70 -> "Steady"
-        score < 88 -> "Primed"
-        else -> "Peak"
-    }
+    if (score == null) return stringResource(R.string.appwide_today_recovery_no_data)
+    return recoveryBandLabel(score)
 }
 
+@Composable
 private fun synthesisDetail(d: DailyMetric?): String {
     val rec = d?.recovery
-        ?: return "No metrics yet. Import a wearable export or wear Noop Band to begin."
-    val recPart = when {
-        rec < 50 -> "Recovery is low"
-        rec < 70 -> "Recovery is steady"
-        else -> "Recovery is strong"
-    }
-    val sleepPart = d.totalSleepMin?.let { mins ->
-        if (mins / 60.0 >= 7) " and sleep was consistent" else " but sleep ran short"
-    } ?: ""
-    return "$recPart$sleepPart."
+        ?: return stringResource(R.string.appwide_today_recovery_detail_unavailable)
+    return stringResource(
+        R.string.appwide_today_recovery_detail_format,
+        recoveryBandLabel(rec),
+    )
 }
 
 private fun sleepValue(d: DailyMetric?): String {

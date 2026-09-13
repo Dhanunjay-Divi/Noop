@@ -88,6 +88,20 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
 
     func application(
         _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        _ = application
+        Task {
+            await FeedbackUploadCoordinator.shared.handleBackgroundEvents(
+                identifier: identifier,
+                completionHandler: completionHandler
+            )
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
@@ -286,6 +300,9 @@ struct StrandiOSApp: App {
 
     init() {
         AppDiagnosticsRecorder.shared.start()
+        Task {
+            await FeedbackUploadCoordinator.shared.start()
+        }
         let launchTrace = AppDiagnosticsRecorder.shared.beginOperation("ios.launch.bootstrap")
         _ = Self._quietMotionTierDefault
         // 9.2 data-truth migration: clear a legacy Shortcuts file that may contain WHOOP @57 motion
@@ -407,6 +424,7 @@ struct StrandiOSApp: App {
         // The injected operation preserves each feature's existing privacy gate: Health reads require a
         // prior explicit grant, self-hosted upload remains opt-in, and Friends needs an enrolled member.
         BackgroundSyncScheduler.register { [weak model, weak bridge] in
+            _ = await FeedbackUploadCoordinator.shared.retryDueReports()
             guard await MainActor.run(body: { access.isUnlocked }),
                   UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
                     == Terms.currentVersion,
@@ -819,6 +837,9 @@ struct StrandiOSApp: App {
             }
             model.setRealtimeForeground(phase == .active)
             if phase == .active {
+                Task {
+                    _ = await FeedbackUploadCoordinator.shared.retryDueReports()
+                }
                 BandSyncStaleReminder.cancel()
                 model.refreshAgeMetricsIfProfileChanged()
                 model.reevaluateContextualInterventions()

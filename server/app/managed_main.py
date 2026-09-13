@@ -9,6 +9,9 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 from app.config import Settings
+from app.feedback_api import feedback_router
+from app.feedback_capability import FeedbackCapabilityCodec
+from app.feedback_repository import PostgresFeedbackRepository
 from app.main import (
     RateLimitMiddleware,
     RequestSizeLimitMiddleware,
@@ -76,6 +79,30 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
         bucket=runtime_settings.managed_raw_bucket or "",
         signer=IAMBlobSigner(runtime_settings.managed_signer_email or ""),
     )
+    feedback_repository = PostgresFeedbackRepository(primary)
+    feedback_object_store = GCSV4ObjectStore(
+        bucket=runtime_settings.feedback_bucket or "feedback-disabled",
+        signer=IAMBlobSigner(runtime_settings.managed_signer_email or ""),
+    )
+    feedback_capability_codec = (
+        FeedbackCapabilityCodec(
+            runtime_settings.feedback_capability_secret or "",
+            secret_version=(runtime_settings.feedback_capability_primary_key_version),
+            previous_secrets=(
+                (runtime_settings.feedback_capability_previous_secret,)
+                if runtime_settings.feedback_capability_previous_secret
+                else ()
+            ),
+            previous_secret_versions=(
+                (runtime_settings.feedback_capability_previous_key_version,)
+                if runtime_settings.feedback_capability_previous_key_version
+                else ()
+            ),
+            write_version=runtime_settings.feedback_capability_write_version,
+        )
+        if runtime_settings.feedback_enabled
+        else None
+    )
     identity_deletion_ticket_codec = ManagedIdentityDeletionTicketCodec(
         runtime_settings.managed_replay_secret or ""
     )
@@ -133,6 +160,8 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
     app.state.settings = runtime_settings
     app.state.repository = repository
     app.state.object_store = object_store
+    app.state.feedback_repository = feedback_repository
+    app.state.feedback_object_store = feedback_object_store
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_bytes=runtime_settings.max_request_bytes,
@@ -194,6 +223,17 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
             safety_push_service=safety_push_service,
         )
     )
+    if runtime_settings.feedback_enabled and feedback_capability_codec is not None:
+        app.include_router(
+            feedback_router(
+                settings=runtime_settings,
+                repository=feedback_repository,
+                app_check_verifier=app_check_verifier,
+                token_verifier=verifier,
+                object_store=feedback_object_store,
+                capability_codec=feedback_capability_codec,
+            )
+        )
     return app
 
 

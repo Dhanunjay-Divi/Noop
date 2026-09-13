@@ -49,7 +49,7 @@ RELEASE_SOURCE_DIGESTS = {
         "98f9b95510411d6c84aa3e78233c73cb8e2263b2b0d798c23104b775f1b876ce"
     ),
     ".github/workflows/release.yml": (
-        "c79dbea991420931a246e7874b663f257fb99c53e9718a7a9d33313cc25dfc82"
+        "08751fb8e82e0c14fdb4630f45262892077b42e644d740219e7750494c34c01b"
     ),
     ".github/workflows/testing-build.yml": (
         "44cd2ac7ad024429fd885b02236267604207ff6e54f4199f7ae116d755041c10"
@@ -70,10 +70,10 @@ RELEASE_SOURCE_DIGESTS = {
         "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
-        "03bde03621b02ba34c353e6c5473805fb6c5d8abdfc3f23454bf67182a86532c"
+        "c04da9970817d1aff853a5f2e9b9385b133138e8ddd875b2e0139a7a91e11203"
     ),
     "release/terminology/legacy-inventory.json": (
-        "78cc99f2df68c5b58df588a55eb812c41ce260a27f51e2e5382ff91acb750399"
+        "18962a5c03394a89f4245facf9a6f7f14eb1afe0335341ecd9560706c65fe731"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"

@@ -60,6 +60,23 @@ class AppWideLocalizationContractTest {
         )
         assertEquals("Clear %1\$s", base["appwide_hydration_clear_day"])
         assertEquals("Logged %1\$s", base["appwide_hydration_logged_day"])
+        assertEquals("Steady", base["appwide_daily_signal_status_aligned"])
+        assertEquals("Watch", base["appwide_daily_signal_status_recheck"])
+        assertEquals(
+            "Imported sleep not included",
+            base["appwide_weekly_digest_imported_sleep_not_included"],
+        )
+        assertEquals(
+            "Live heart-rate coaching uses heart rate while today\\'s Recovery is unavailable.",
+            base["appwide_live_session_start_detail_unavailable"],
+        )
+        assertTrue("Removed key must not remain generated", "appwide_live_session_start_detail_calibrating" !in base)
+        assertEquals(
+            "Only Recovery, Effort, Sleep Score, sleep duration, HRV, and resting heart rate " +
+                "can be shared. Raw streams, locations, journals, routes, workouts, and sleep " +
+                "stages are excluded.",
+            base["appwide_friends_data_boundary"],
+        )
         assertEquals(
             "NOOP and Apple Health records may overlap and cannot be matched reliably. " +
                 "The displayed total uses the larger source total instead of adding them.",

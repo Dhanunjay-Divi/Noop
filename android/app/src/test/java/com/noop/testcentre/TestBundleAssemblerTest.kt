@@ -1,5 +1,6 @@
 package com.noop.testcentre
 
+import com.noop.feedback.FeedbackScreenshotFixture
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -61,9 +62,11 @@ class TestBundleAssemblerTest {
     @Test fun appReportScreenshotFailsClosedUnlessPngIsValidAndBounded() {
         val signature =
             byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
-        val valid = signature + byteArrayOf(0, 1)
-        assertTrue(
-            TestBundleAssembler.appReportScreenshotEntry(valid)?.second.contentEquals(valid) == true,
+        assertArrayEquals(
+            FeedbackScreenshotFixture.sanitized,
+            TestBundleAssembler.appReportScreenshotEntry(
+                FeedbackScreenshotFixture.rawMetadataBearing,
+            )?.second,
         )
         assertEquals(
             null,
@@ -102,6 +105,8 @@ class TestBundleAssemblerTest {
         )
 
         assertTrue(report.contains(TestBundleAssembler.APP_RUNTIME_REPORT_TEXT))
+        assertTrue(report.startsWith("NOOP app runtime report\n"))
+        assertFalse(report.contains("safe header"))
         assertFalse(report.contains("bpm=137"))
         assertFalse(report.contains("hrv=42"))
         assertFalse(report.contains("1788000123"))

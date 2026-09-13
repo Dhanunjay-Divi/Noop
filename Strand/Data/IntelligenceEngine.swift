@@ -2818,7 +2818,7 @@ final class IntelligenceEngine: ObservableObject {
         if !historicalCatchUp {
             results = out
             note = out.isEmpty
-                ? "No scored nights yet. Wear the strap with NOOP connected overnight and the engine will score your charge, effort and rest fully on device, with no provider cloud required."
+                ? String(localized: "appwide.intelligence.no_scored_nights")
                 : nil
         }
 

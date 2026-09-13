@@ -58,7 +58,8 @@ class PrimaryNavigationContractTest {
 
         assertTrue(barSlot.contains("contentDescription = label"))
         assertTrue(barSlot.contains("maxLines = labelMaxLines"))
-        assertTrue(barSlot.contains("overflow = TextOverflow.Clip"))
+        assertTrue(barSlot.contains("overflow = TextOverflow.Ellipsis"))
+        assertFalse(barSlot.contains("overflow = TextOverflow.Clip"))
         assertFalse(barSlot.contains("if (showLabel)"))
     }
 

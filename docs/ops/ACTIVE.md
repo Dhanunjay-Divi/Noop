@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-12**
+Last updated: **2026-09-13**
 
 ## Repository
 
@@ -22,6 +22,79 @@ Last updated: **2026-09-12**
 ## Active work
 
 ### Current audited state
+
+The supplier-independent implementation and exact-current-tree local
+verification are complete on
+`codex/product-safety-quality-audit-20260911`. Pull request `#15` remains the
+protected integration path. The branch has not received its final consolidated
+push, so the old hosted Apple failure/cancellation on the prior head is not
+evidence about the current source.
+
+The private 61-file UI audit is closed locally: all four P1 and sixteen P2
+findings have scoped Apple/Android corrections. Recovery presentation and Daily
+Signal vocabulary are separated and consistent; tabs scale accessibly; Trends
+has explicit loading, partial, failure, retry, refresh, supersession, and
+cancellation states; and the audited imported-sleep, missing-value, coach,
+device, age, vocabulary, Stress, Charge, Journal, NOOP+, Health Monitor, and
+Sleep-copy defects are corrected. The supplied desktop, notification, and
+adaptive-day images were used only as interaction benchmarks for compact
+metric-first hierarchy, concise private prompts, and explainable day
+adjustments. Third-party branding, copy, images, event details, fixed times, and
+unsupported performance claims were not copied.
+
+The explicit **Send feedback** flow is also implemented on both phones. It uses
+reviewed optional attachments, durable local queues, progress, cancellation,
+retry, screenshot sanitization, and bounded redacted diagnostics. The server
+adds fail-closed capability/principal validation, tenant isolation,
+PostgreSQL/object lifecycle, quotas, cleanup, and payload-free observability.
+The GCP source remains default-off: public ingress, attestation, external abuse
+control, operator access, monitoring, legal retention, and physical-device
+background/cellular evidence are still launch gates.
+
+The exact local wall passes on the current source: `WhoopStore` 488 tests;
+`NoopRemoteSync` 127; `StrandAnalytics` 1,479; Apple app 1,913 with one external
+Xiaomi-fixture skip; iPhone UI 39 with one intentional private-pilot skip and
+zero failures; Android Full and Demo unit suites plus both lint variants, APK
+assemblies, and instrumentation Kotlin compilation with 137 successful Gradle
+tasks; server 433 passed with 106 external/configuration skips; focused
+feedback/backend 25 passed with nine external/configuration skips; eight
+OpenTofu lifecycle tests; and 230 Tools tests plus 34 subtests. The policy wall
+passes feedback localization, strict i18n, 54 operations records, the
+1,246-file health-claims scan, calibration parity, private-data, terminology,
+required-CI, release-control, legal, distribution, dependency, and diff gates.
+
+The exact iPhone visual matrix contains eleven nonblank states. Normal and
+accessibility collapsed-planned-workout states were manually checked for
+clipping and overlap. Today scroll averaged 5.411 seconds with 0.190 seconds of
+CPU and peak memory of about 63.3 MB in the simulator suite. Old macOS
+WindowServer surfaces are explicitly excluded from UI evidence; current source,
+objects, resources, and the complete macOS suite prove the corrected logic, but
+no fresh macOS Today screenshot is claimed.
+
+Physical phones and bands remain unavailable on this laptop. VoiceOver,
+TalkBack, BLE, background/force-quit behavior, notification presentation,
+haptics, battery, sensor accuracy, signed background feedback transfer,
+providers/carriers, client encryption/key recovery, public traffic, legal,
+24/7 operations, signing, stores, participants, and media licensing remain
+external gates. After the final bounded commits, the branch must be pushed once,
+pass fresh exact-SHA hosted checks, merge normally, return the repository to
+private visibility, and remove only round-owned temporary resources.
+
+### Superseded 2026-09-12 snapshot
+
+The snapshot below is retained as chronological evidence. Its pending language
+and test totals are superseded by the current audited state above.
+
+The owner has added a follow-up round for direct feedback ingestion and visual
+README evidence. It is tracked in
+[`rounds/2026-09-12-feedback-ingestion-readme-visuals.md`](rounds/2026-09-12-feedback-ingestion-readme-visuals.md).
+The separate `Dhanunjay-Divi/NoopBandSDK` repository is verified private and
+non-archived at `ee82cc0`. The new source work must keep feedback explicitly
+user-initiated, replace the share-first action with durable queued/uploading/
+sent/failed progress on both phones, and store only a reviewed redacted report.
+The owner-supplied comparison screenshot remains private context and cannot be
+used as README artwork. The prior exact-head Apple workflow was cancelled after
+the request changed so hosted compute is not spent on a superseded tree.
 
 The supplier-independent product, safety, and quality audit remains active on
 `codex/product-safety-quality-audit-20260911` and is tracked by protected pull
@@ -163,9 +236,9 @@ Actions cost during this audit. It must return to private visibility after the
 corrected head passes required checks and merges normally; visibility must not
 change in the middle of required-check evaluation.
 
-The detailed paragraphs below are chronological progress notes. Where they
-describe an earlier dirty-tree total or a pending source correction, the
-current audited state above and the active round record supersede them.
+The remaining paragraphs are chronological progress notes. Where they describe
+an earlier dirty-tree total or a pending source correction, the current audited
+state above and the active round records supersede them.
 
 The product, safety, and quality audit is active on
 `codex/product-safety-quality-audit-20260911`. Its verified body slice makes

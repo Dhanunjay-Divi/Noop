@@ -1,5 +1,7 @@
 package com.noop.analytics
 
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -16,6 +18,7 @@ object AdaptiveDayGuidance {
     const val SHORT_SLEEP_THRESHOLD_MINUTES = 60
     const val LATE_ROUTINE_THRESHOLD_MINUTES = 90
     const val ROUTINE_DURATION_DROP_MINUTES = 45
+    const val MAXIMUM_FRAGMENT_GAP_SECONDS = 90L * 60L
     const val TRAVEL_THRESHOLD_SECONDS = 2 * 60 * 60
     const val TRAVEL_MAXIMUM_AGE_SECONDS = 36 * 60 * 60
 
@@ -35,9 +38,11 @@ object AdaptiveDayGuidance {
         val nowSec: Long,
         val currentTimeZoneOffsetSec: Int,
         val sleepTargetMinutes: Int,
+        val sleepTargetIsExplicit: Boolean,
         val sleepDays: List<SleepDay>,
         val sleepWindows: List<SleepWindow>,
         val timeZoneChange: TimeZoneChange?,
+        val routineHistoryStartSec: Long? = null,
     )
 
     data class Recommendation(
@@ -91,35 +96,59 @@ object AdaptiveDayGuidance {
         return ((raw + halfDay) % day + day) % day - halfDay
     }
 
-    private fun eligibleWindows(input: Input): List<SleepWindow> {
+    private data class SleepObservation(
+        val primaryStartSec: Long,
+        val endSec: Long,
+        val totalDurationSeconds: Long,
+    )
+
+    private fun eligibleWindows(input: Input): List<SleepObservation> {
         val oldest = input.nowSec - ROUTINE_LOOKBACK_DAYS * 24L * 60L * 60L
         val seen = mutableSetOf<String>()
-        val eligible = input.sleepWindows
+        val candidates = input.sleepWindows
             .filter { window ->
                 val duration = window.endSec - window.startSec
                 window.startSec >= oldest &&
+                    (input.routineHistoryStartSec?.let { window.startSec >= it } != false) &&
                     window.endSec <= input.nowSec &&
-                    duration in (3 * 60 * 60L)..(14 * 60 * 60L) &&
-                    isOvernightOnset(window.startSec, input.currentTimeZoneOffsetSec) &&
+                    duration in 1L..(14 * 60 * 60L) &&
                     seen.add("${window.startSec}:${window.endSec}")
             }
-            .sortedBy { it.endSec }
+            .sortedWith(compareBy<SleepWindow> { it.startSec }.thenBy { it.endSec })
 
-        // Split or duplicated blocks from one night are one routine observation, not several.
-        return eligible
+        // Merge short, nearby fragments before the three-hour night threshold. Distant sleep remains a
+        // separate cluster, and only one cluster can represent a noon-to-noon sleep night.
+        return candidates
             .groupBy { sleepNightKey(it.startSec, input.currentTimeZoneOffsetSec) }
             .values
-            .map { windows ->
-                windows.maxWithOrNull(
-                    compareBy<SleepWindow> { it.endSec - it.startSec }.thenBy { it.endSec },
-                )!!
+            .mapNotNull { windows ->
+                fragmentClusters(windows)
+                    .mapNotNull { cluster ->
+                        val startSec = cluster.minOfOrNull { it.startSec }
+                            ?: return@mapNotNull null
+                        if (!isOvernightOnset(startSec, input.currentTimeZoneOffsetSec)) {
+                            return@mapNotNull null
+                        }
+                        val totalDuration = mergedDurationSeconds(cluster)
+                        if (totalDuration !in (3L * 60L * 60L)..(14L * 60L * 60L)) {
+                            return@mapNotNull null
+                        }
+                        SleepObservation(
+                            primaryStartSec = startSec,
+                            endSec = cluster.maxOf { it.endSec },
+                            totalDurationSeconds = totalDuration,
+                        )
+                    }
+                    .maxWithOrNull(
+                        compareBy<SleepObservation> { it.totalDurationSeconds }.thenBy { it.endSec },
+                    )
             }
             .sortedBy { it.endSec }
     }
 
     private fun routineRecommendation(
         input: Input,
-        windows: List<SleepWindow>,
+        windows: List<SleepObservation>,
     ): Recommendation? {
         val latest = windows.lastOrNull() ?: return null
         if (input.nowSec - latest.endSec > LATEST_SLEEP_MAXIMUM_AGE_SECONDS) return null
@@ -127,16 +156,18 @@ object AdaptiveDayGuidance {
         if (history.size < MINIMUM_ROUTINE_NIGHTS) return null
 
         val baselineOnset = median(
-            history.map { bedtimeCoordinate(it.startSec, input.currentTimeZoneOffsetSec) },
+            history.map {
+                bedtimeCoordinate(it.primaryStartSec, input.currentTimeZoneOffsetSec)
+            },
         )
-        val latestOnset = bedtimeCoordinate(latest.startSec, input.currentTimeZoneOffsetSec)
+        val latestOnset = bedtimeCoordinate(
+            latest.primaryStartSec,
+            input.currentTimeZoneOffsetSec,
+        )
         val delay = latestOnset - baselineOnset
-        val baselineDuration = median(history.map { (it.endSec - it.startSec) / 60.0 })
-        val latestDuration = (latest.endSec - latest.startSec) / 60.0
-        val target = input.sleepTargetMinutes.coerceIn(5 * 60, 11 * 60).toDouble()
-        val shortened =
-            latestDuration <= baselineDuration - ROUTINE_DURATION_DROP_MINUTES ||
-                latestDuration <= target - SHORT_SLEEP_THRESHOLD_MINUTES
+        val baselineDuration = median(history.map { it.totalDurationSeconds / 60.0 })
+        val latestDuration = latest.totalDurationSeconds / 60.0
+        val shortened = latestDuration <= baselineDuration - ROUTINE_DURATION_DROP_MINUTES
         if (delay < LATE_ROUTINE_THRESHOLD_MINUTES || !shortened) return null
 
         return Recommendation(
@@ -148,31 +179,51 @@ object AdaptiveDayGuidance {
             } else {
                 Confidence.BUILDING
             },
-            fingerprint = "routine:${latest.startSec / 900L}:${latest.endSec / 900L}",
+            fingerprint =
+                "routine:${latest.primaryStartSec / 900L}:${latest.endSec / 900L}:" +
+                    "${latest.totalDurationSeconds / 900L}",
             evidence = listOf("personal-sleep-timing", "later-onset", "shorter-sleep"),
         )
     }
 
     private fun sleepRecommendation(
         input: Input,
-        windows: List<SleepWindow>,
+        windows: List<SleepObservation>,
     ): Recommendation? {
+        if (!input.sleepTargetIsExplicit) return null
         val target = input.sleepTargetMinutes.coerceIn(5 * 60, 11 * 60).toDouble()
+        val freshWindows = windows.asReversed().filter { window ->
+            input.nowSec - window.endSec in
+                (-5 * 60L)..LATEST_SLEEP_MAXIMUM_AGE_SECONDS.toLong() &&
+                localDayKey(window.endSec, input.currentTimeZoneOffsetSec) == input.today
+        }
         val current = input.sleepDays.lastOrNull { it.day == input.today }
         val minutes = current?.totalSleepMinutes
-        if (
+        val matchedWindow = if (
             minutes != null &&
             minutes.isFinite() &&
             minutes in 120.0..900.0 &&
             target - minutes >= SHORT_SLEEP_THRESHOLD_MINUTES
         ) {
-            val observedAt = windows.lastOrNull()?.endSec?.takeIf { endSec ->
-                input.nowSec - endSec in
-                    (-5 * 60L)..LATEST_SLEEP_MAXIMUM_AGE_SECONDS.toLong()
-            } ?: input.nowSec
+            freshWindows.firstOrNull { window ->
+                DailyActionPlanner.matchedSleepObservationEndSec(
+                    aggregateMinutes = minutes,
+                    sessionDurationMinutes = window.totalDurationSeconds / 60.0,
+                    sessionEndSec = window.endSec,
+                    nowSec = input.nowSec,
+                    maximumAgeSeconds = LATEST_SLEEP_MAXIMUM_AGE_SECONDS,
+                ) != null
+            }
+        } else {
+            null
+        }
+        if (
+            minutes != null &&
+            matchedWindow != null
+        ) {
             return Recommendation(
                 kind = Kind.SLEEP_RECOVERY,
-                observedAtSec = observedAt,
+                observedAtSec = matchedWindow.endSec,
                 maximumAgeSeconds = 18 * 60 * 60,
                 confidence = Confidence.STRONG,
                 fingerprint = "sleep:${input.today}:${minutes.roundToInt()}",
@@ -180,19 +231,61 @@ object AdaptiveDayGuidance {
             )
         }
 
-        val latest = windows.lastOrNull() ?: return null
-        if (input.nowSec - latest.endSec > LATEST_SLEEP_MAXIMUM_AGE_SECONDS) return null
-        val duration = (latest.endSec - latest.startSec) / 60.0
+        val latest = freshWindows.firstOrNull() ?: return null
+        val duration = latest.totalDurationSeconds / 60.0
         if (target - duration < SHORT_SLEEP_THRESHOLD_MINUTES) return null
         return Recommendation(
             kind = Kind.SLEEP_RECOVERY,
             observedAtSec = latest.endSec,
             maximumAgeSeconds = 18 * 60 * 60,
             confidence = Confidence.BUILDING,
-            fingerprint = "sleep-window:${latest.startSec / 900L}:${latest.endSec / 900L}",
+            fingerprint =
+                "sleep-window:${latest.primaryStartSec / 900L}:${latest.endSec / 900L}:" +
+                    "${latest.totalDurationSeconds / 900L}",
             evidence = listOf("recent-sleep-window", "below-explicit-target"),
         )
     }
+
+    private fun fragmentClusters(windows: List<SleepWindow>): List<List<SleepWindow>> {
+        val sorted = windows.sortedWith(compareBy<SleepWindow> { it.startSec }.thenBy { it.endSec })
+        val clusters = mutableListOf<MutableList<SleepWindow>>()
+        for (window in sorted) {
+            val last = clusters.lastOrNull()
+            val clusterEnd = last?.maxOfOrNull { it.endSec }
+            if (last == null || clusterEnd == null ||
+                window.startSec - clusterEnd > MAXIMUM_FRAGMENT_GAP_SECONDS
+            ) {
+                clusters += mutableListOf(window)
+            } else {
+                last += window
+            }
+        }
+        return clusters
+    }
+
+    private fun mergedDurationSeconds(windows: List<SleepWindow>): Long {
+        val sorted = windows.sortedWith(compareBy<SleepWindow> { it.startSec }.thenBy { it.endSec })
+        val first = sorted.firstOrNull() ?: return 0L
+        var currentStart = first.startSec
+        var currentEnd = first.endSec
+        var total = 0L
+        for (window in sorted.drop(1)) {
+            if (window.startSec <= currentEnd) {
+                currentEnd = maxOf(currentEnd, window.endSec)
+            } else {
+                total += currentEnd - currentStart
+                currentStart = window.startSec
+                currentEnd = window.endSec
+            }
+        }
+        return total + currentEnd - currentStart
+    }
+
+    private fun localDayKey(epochSec: Long, offsetSec: Int): String =
+        Instant.ofEpochSecond(epochSec + offsetSec)
+            .atOffset(ZoneOffset.UTC)
+            .toLocalDate()
+            .toString()
 
     private fun isOvernightOnset(epochSec: Long, offsetSec: Int): Boolean {
         val minute = localMinute(epochSec, offsetSec)

@@ -1,5 +1,6 @@
 package com.noop.notif
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -53,6 +54,20 @@ class ScheduledReportPolicyTest {
         )
     }
 
+    @Test fun morningSuppressedWhenEvidenceDayIsBlank() {
+        for (reportDay in listOf("", "   ")) {
+            assertFalse(
+                ScheduledReportPolicy.shouldNotifyMorning(
+                    enabled = true,
+                    materializedAfterSync = true,
+                    chargeOrRestPresent = true,
+                    lastNotifiedDay = null,
+                    reportDay = reportDay,
+                ),
+            )
+        }
+    }
+
     /** #567: after midnight a late-nighter's row still resolves to LAST night (reportDay stays that
      *  night's day) even though the calendar day has rolled. Keyed on reportDay (not the calendar day),
      *  the recap must NOT re-fire — it was already posted for that night. Guards the fix against a
@@ -73,6 +88,23 @@ class ScheduledReportPolicyTest {
             ScheduledReportPolicy.shouldNotifyMorning(
                 enabled = true, materializedAfterSync = false, chargeOrRestPresent = true,
                 lastNotifiedDay = null, reportDay = "2026-06-21",
+            ),
+        )
+    }
+
+    @Test fun disabledOsChannelBlocksReportDelivery() {
+        assertFalse(
+            ScheduledReportPolicy.deliveryAvailable(
+                runtimePermissionGranted = true,
+                appNotificationsEnabled = true,
+                channelDisabled = true,
+            ),
+        )
+        assertTrue(
+            ScheduledReportPolicy.deliveryAvailable(
+                runtimePermissionGranted = true,
+                appNotificationsEnabled = true,
+                channelDisabled = false,
             ),
         )
     }
@@ -101,31 +133,38 @@ class ScheduledReportPolicyTest {
         assertTrue(ScheduledReportPolicy.shouldNotifyWorkout(enabled = true, newestWorkoutTs = 1L, lastWorkoutTs = 0L))
     }
 
-    // MARK: - morningCopy (privacy-safe lock-screen reminder)
+    // MARK: - morningCopyKind (privacy-safe lock-screen reminder)
 
-    @Test fun morningCopyNeverShowsScores() {
-        val (title, body) = ScheduledReportPolicy.morningCopy(chargePct = 72, restPct = 88)!!
-        val copy = "$title $body"
-        assertEquals("Your morning recap is ready", title)
-        assertTrue(body.contains("Recovery"))
-        assertTrue(body.contains("Sleep Score"))
-        assertFalse(copy.contains("72"))
-        assertFalse(copy.contains("88"))
-        assertFalse(copy.contains("Charge"))
-    }
-
-    @Test fun morningCopyStaysGenericWhenOnlyOneScoreExists() {
-        val copy = ScheduledReportPolicy.morningCopy(chargePct = 60, restPct = null)!!
+    @Test fun morningCopyKindMatchesAvailableMetrics() {
         assertEquals(
-            ScheduledReportPolicy.morningCopy(chargePct = null, restPct = 91),
-            copy,
+            ScheduledReportPolicy.MorningCopyKind.BOTH,
+            ScheduledReportPolicy.morningCopyKind(chargePct = 72, restPct = 88),
         )
-        assertFalse("${copy.first} ${copy.second}".contains("60"))
-        assertFalse("${copy.first} ${copy.second}".contains("91"))
+        assertEquals(
+            ScheduledReportPolicy.MorningCopyKind.RECOVERY,
+            ScheduledReportPolicy.morningCopyKind(chargePct = 60, restPct = null),
+        )
+        assertEquals(
+            ScheduledReportPolicy.MorningCopyKind.SLEEP,
+            ScheduledReportPolicy.morningCopyKind(chargePct = null, restPct = 91),
+        )
     }
 
-    @Test fun morningCopyNullWhenNeitherPresent() {
-        assertNull(ScheduledReportPolicy.morningCopy(chargePct = null, restPct = null))
+    @Test fun morningCopyKindNullWhenNeitherPresent() {
+        assertNull(ScheduledReportPolicy.morningCopyKind(chargePct = null, restPct = null))
+    }
+
+    @Test fun morningRecapUsesLocalizedAvailabilityCopyAndSleepRoute() {
+        val source = locateNotifierSource().readText()
+
+        assertTrue(source.contains("R.string.appwide_morning_recap_body_both"))
+        assertTrue(source.contains("R.string.appwide_morning_recap_body_recovery"))
+        assertTrue(source.contains("R.string.appwide_morning_recap_body_sleep"))
+        assertTrue(source.contains("NoopNotificationRoute.SLEEP"))
+        assertTrue(source.contains("NotificationRouteBridge.launchIntent(context, route)"))
+        assertTrue(source.contains("manager.getNotificationChannel(CHANNEL_ID)?.importance"))
+        assertTrue(source.contains("if (!canNotify(context))"))
+        assertFalse(source.contains("appLaunchIntent(context)"))
     }
 
     // MARK: - workoutCopy
@@ -164,5 +203,15 @@ class ScheduledReportPolicyTest {
         assertEquals("1 h", ScheduledReportPolicy.durationLabel(60))
         assertEquals("1 h 8 min", ScheduledReportPolicy.durationLabel(68))
         assertEquals("2 h", ScheduledReportPolicy.durationLabel(120))
+    }
+
+    private fun locateNotifierSource(): File {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        return listOf(
+            File(root, "src/main/java/com/noop/notif/ScheduledReportNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/ScheduledReportNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/ScheduledReportNotifier.kt"),
+        ).firstOrNull(File::isFile)
+            ?: error("Could not locate ScheduledReportNotifier.kt from $root")
     }
 }

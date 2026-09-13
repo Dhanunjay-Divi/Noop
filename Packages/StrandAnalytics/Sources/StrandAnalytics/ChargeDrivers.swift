@@ -287,7 +287,7 @@ extension RecoveryScorer {
     }
 
     static func skinTempDevText(_ dev: Double) -> String {
-        let sign = dev >= 0 ? "+" : ""
-        return "\(sign)\(String(format: "%.1f", dev)) C vs baseline"
+        let sign = dev < 0 ? "−" : "+"
+        return "\(sign)\(String(format: "%.1f", abs(dev))) °C vs baseline"
     }
 }

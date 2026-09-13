@@ -479,8 +479,7 @@ struct SleepView: View {
         let assessment = restAssessment(for: night)
         let isProviderScore = isImportedPerformance(for: night)
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Sleep performance", overline: nightRelativeLabel,
-                          trailing: String(localized: "Sleep Score"))
+            SectionHeader("Sleep Score", overline: nightRelativeLabel)
             // A subtle night atmosphere sits behind the sleep hero ONLY (the Rest world's whisper:
             // faint indigo wash + crescent moon over the near-black canvas, no glow), clipped to the
             // card. Replaces the now-flat ScenicHeroBackground here.
@@ -514,7 +513,12 @@ struct SleepView: View {
                     }
                     .padding(.top, NoopMetrics.space1)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Sleep performance \(Int(score.rounded())) of 100")
+                    .accessibilityLabel(
+                        String.localizedStringWithFormat(
+                            String(localized: "appwide.sleep.score_a11y_format"),
+                            Int(score.rounded())
+                        )
+                    )
                 } else {
                     // No 0–100 score for the night — lead with hours slept as a big rounded headline
                     // whose minutes tick up on appear (the same count-up the scored hero gets).
@@ -547,12 +551,12 @@ struct SleepView: View {
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.onDarkTertiary)
                 if let limitation = isProviderScore
-                    ? String(localized: "The imported score did not include provider confidence metadata.")
+                    ? String(localized: "appwide.sleep.imported_confidence_note")
                     : Self.restLimitationText(assessment.limitations.first) {
                     HStack(alignment: .top, spacing: NoopMetrics.space2) {
                         Image(systemName: "info.circle")
                             .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.statusWarning)
+                            .foregroundStyle(StrandPalette.onDarkTertiary)
                             .accessibilityHidden(true)
                         Text(limitation)
                             .font(StrandFont.footnote)
@@ -882,7 +886,7 @@ struct SleepView: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                 }
                 Spacer(minLength: 8)
-                Text(count.map(String.init) ?? "-")
+                Text(count.map(String.init) ?? StrandFormat.missing)
                     .font(StrandFont.number(30))
                     .foregroundStyle(StrandPalette.textPrimary)
                     .monospacedDigit()
@@ -2095,7 +2099,7 @@ struct SleepView: View {
             // full two-column width. The remaining six peer metrics keep the established 2 × 3 grid.
             StatTile(
                 label: "Sleep Debt",
-                value: debt.latest.map { durationText($0) } ?? "-",
+                value: debt.latest.map { durationText($0) } ?? StrandFormat.missing,
                 systemImage: "exclamationmark.circle",
                 caption: debtCaption(debt.latest),
                 accent: debtColor(debt.latest),
@@ -2167,7 +2171,7 @@ struct SleepView: View {
                 // phone-width summary tile across an unbounded desktop detail pane.
                 StatTile(
                     label: "Sleep Debt",
-                    value: debt.latest.map { durationText($0) } ?? "-",
+                    value: debt.latest.map { durationText($0) } ?? StrandFormat.missing,
                     systemImage: "exclamationmark.circle",
                     caption: debtCaption(debt.latest),
                     accent: debtColor(debt.latest),
@@ -2401,9 +2405,9 @@ struct SleepView: View {
                 },
                 footer: {
                     ChartFooter([
-                        ("Avg",    avg.map { String(format: "%.1f h", $0) } ?? "-"),
-                        ("Min",    pts.map(\.value).min().map { String(format: "%.1f h", $0) } ?? "-"),
-                        ("Max",    pts.map(\.value).max().map { String(format: "%.1f h", $0) } ?? "-"),
+                        ("Avg",    avg.map { String(format: "%.1f h", $0) } ?? StrandFormat.missing),
+                        ("Min",    pts.map(\.value).min().map { String(format: "%.1f h", $0) } ?? StrandFormat.missing),
+                        ("Max",    pts.map(\.value).max().map { String(format: "%.1f h", $0) } ?? StrandFormat.missing),
                         ("Nights", "\(pts.count)"),
                     ])
                 }
@@ -3082,7 +3086,7 @@ struct SleepView: View {
         // SleepView (scroll-stutter isolation; identical output to the prior inline check).
         SleepSyncingNote()
         if repo.loaded {
-            ComingSoon(what: "No nights here yet. Import a wearable export in Data Sources to see every night, your sleep stages and trends straight away. Or open Intelligence to see last night computed from the strap after you wear it to bed.")
+            ComingSoon(what: LocalizedStringKey("appwide.sleep.empty_history_help"))
         } else {
             ComingSoon(what: "Loading your sleep history…")
         }
@@ -3113,11 +3117,11 @@ struct SleepView: View {
     }
 
     private func pctValue(_ v: Double?) -> String {
-        v.map { "\(Int($0.rounded()))%" } ?? "-"
+        v.map { "\(Int($0.rounded()))%" } ?? StrandFormat.missing
     }
 
     private func rrValue(_ v: Double?) -> String {
-        v.map { String(format: "%.1f", $0) } ?? "-"
+        v.map { String(format: "%.1f", $0) } ?? StrandFormat.missing
     }
 
     /// "+12% vs typical" / "−0.4 rpm vs typical" - the latest-vs-mean caption every tile carries.
@@ -3202,7 +3206,7 @@ struct SleepView: View {
 
     private func efficiencyText(_ night: Night) -> String {
         let e = efficiencyPct(night)
-        return e.map { "\(Int($0.rounded()))%" } ?? "-"
+        return e.map { "\(Int($0.rounded()))%" } ?? StrandFormat.missing
     }
 
     /// Efficiency in percent. Prefer the stored session value, else asleep / time-in-bed.

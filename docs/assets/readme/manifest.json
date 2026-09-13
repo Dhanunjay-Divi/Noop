@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-12",
+  "source": {
+    "commit": "2a94bb5e8916f40004cfd1a938df2f2cf72d2824",
+    "branch": "codex/product-safety-quality-audit-20260911",
+    "xcode": "26.6 (17F113)",
+    "project": "Strand.xcodeproj",
+    "scheme": "NOOPiOS",
+    "configuration": "Debug",
+    "materializationCommand": "mkdir -p <capture-root>/source && git archive 2a94bb5e8916f40004cfd1a938df2f2cf72d2824 | tar -x -C <capture-root>/source",
+    "materialization": "Isolated archive of the recorded commit; concurrent working-tree changes were not present.",
+    "projectGenerationCommand": "xcodegen generate",
+    "projectGenerationResult": "Created Strand.xcodeproj from the archived project.yml"
+  },
+  "build": {
+    "workingDirectory": "<capture-root>/source",
+    "command": "xcodebuild -project Strand.xcodeproj -scheme NOOPiOS -configuration Debug -destination 'platform=iOS Simulator,id=<simulator-udid>' -derivedDataPath <capture-root>/DerivedData -clonedSourcePackagesDirPath <capture-root>/SourcePackages CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ONLY_ACTIVE_ARCH=YES build",
+    "result": "BUILD SUCCEEDED",
+    "app": "<capture-root>/DerivedData/Build/Products/Debug-iphonesimulator/NOOP Staging.app"
+  },
+  "captureEnvironment": {
+    "platform": "iOS Simulator 26.5",
+    "device": "iPhone 17 Pro",
+    "pixels": {
+      "width": 1206,
+      "height": 2622
+    },
+    "statusBar": "Fixed at 9:41, Wi-Fi active, battery 100%",
+    "rendering": "Full-resolution PNG copies with no crop, compositing, retouching, or color correction"
+  },
+  "fixtures": {
+    "seeded": {
+      "name": "AppleDemoSeeder",
+      "source": "Strand/Data/AppleDemoSeeder.swift",
+      "arguments": "--demo-seed",
+      "description": "DEBUG-only deterministic 120-day synthetic health and fitness fixture. It contains no real biometric data."
+    },
+    "empty": {
+      "name": "Fresh local store",
+      "arguments": "--demo-screen liquidtoday",
+      "description": "Brand-new disposable simulator with no seed and no imported or real health data. Used to preserve Building, Calibrating, and missing-value states."
+    }
+  },
+  "matrix": {
+    "workingDirectory": "<capture-root>/source",
+    "command": "Tools/ios-tab-shell-visual-qa.sh --app '<capture-root>/DerivedData/Build/Products/Debug-iphonesimulator/NOOP Staging.app' --output <capture-root>/captures --device-type com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+    "result": "21 scenario artifacts launched and captured; the harness manifest contained 21 unique device/scenario rows",
+    "sourceManifest": "<capture-root>/captures/manifest.tsv"
+  },
+  "assets": [
+    {
+      "path": "docs/assets/readme/noop-mark.png",
+      "kind": "canonical app icon",
+      "source": "<capture-root>/source/StrandiOS/Resources/Assets.xcassets/AppIcon-Obsidian.appiconset/icon_1024.png",
+      "command": "cp <capture-root>/source/StrandiOS/Resources/Assets.xcassets/AppIcon-Obsidian.appiconset/icon_1024.png docs/assets/readme/noop-mark.png",
+      "fixture": null,
+      "dimensions": {
+        "width": 1024,
+        "height": 1024
+      },
+      "sha256": "80887d51486ceac07684b4af51f308ad006f9e84531f1d40736817899a2e7f21"
+    },
+    {
+      "path": "docs/assets/readme/ios-today.png",
+      "kind": "iOS simulator capture",
+      "source": "<capture-root>/captures/iphone-17-pro/today-top.png",
+      "commandRef": "matrix.command",
+      "scenario": "today-top",
+      "route": "-theme.appearance dark --demo-seed --demo-tab today",
+      "fixture": "seeded",
+      "dimensions": {
+        "width": 1206,
+        "height": 2622
+      },
+      "sha256": "59c56eb74a6449ecd1de65b6ecb0a6fb9f6a32a8a38c7a9c9e50decf10dd3bc9"
+    },
+    {
+      "path": "docs/assets/readme/ios-today-calibrating.png",
+      "kind": "iOS simulator capture",
+      "source": "<capture-root>/captures/iphone-17-pro/today-empty.png",
+      "command": "xcrun simctl launch --terminate-running-process <fresh-simulator-udid> com.noopapp.noop -theme.appearance dark --demo-screen liquidtoday",
+      "captureDelaySeconds": 10,
+      "captureCommand": "xcrun simctl io <fresh-simulator-udid> screenshot <capture-root>/captures/iphone-17-pro/today-empty.png",
+      "setup": "Created a disposable iPhone 17 Pro on the newest installed iOS runtime, booted it to completion, fixed the status bar, and installed the exact-head DEBUG app before launch; the simulator was deleted after capture.",
+      "route": "-theme.appearance dark --demo-screen liquidtoday",
+      "fixture": "empty",
+      "dimensions": {
+        "width": 1206,
+        "height": 2622
+      },
+      "sha256": "a9c31a411230a207b139f4140f11a25741543d5236360faa5f56ad240b5a9ebd"
+    },
+    {
+      "path": "docs/assets/readme/ios-sleep.png",
+      "kind": "iOS simulator capture",
+      "source": "<capture-root>/captures/iphone-17-pro/sleep-bottom.png",
+      "commandRef": "matrix.command",
+      "scenario": "sleep-bottom",
+      "route": "-theme.appearance light --demo-seed --demo-tab sleep --demo-scroll-bottom",
+      "fixture": "seeded",
+      "dimensions": {
+        "width": 1206,
+        "height": 2622
+      },
+      "sha256": "20b2321554daf099b05a4674738cc3bef561665acfc7c4ee14ec9124345aaf9d"
+    },
+    {
+      "path": "docs/assets/readme/ios-trends.png",
+      "kind": "iOS simulator capture",
+      "source": "<capture-root>/captures/iphone-17-pro/trends-bottom.png",
+      "commandRef": "matrix.command",
+      "scenario": "trends-bottom",
+      "route": "-theme.appearance light --demo-seed --demo-tab trends --demo-scroll-bottom",
+      "fixture": "seeded",
+      "dimensions": {
+        "width": 1206,
+        "height": 2622
+      },
+      "sha256": "48a4d7a8c1630920777b1d7d13ac2b0c953343c41a8b7ce82d0b943758057dd5"
+    }
+  ],
+  "limitations": [
+    "Simulator captures do not validate physical-band BLE behavior, background execution, haptics, battery behavior, firmware, or sensor accuracy.",
+    "Synthetic fixture values and charts demonstrate rendering and navigation only; they are not clinical evidence or production-user results.",
+    "The empty-state capture intentionally preserves Building, Calibrating, dashes, and missing values instead of replacing them with idealized scores.",
+    "Android and macOS are omitted because this slice did not run an exact-head deterministic capture exporter for those platforms.",
+    "No owner comparison image, visible terminal, competitor visual, real health data, provisional marketing screenshot, old docs/assets shot-* asset, or hero-v8 asset was used."
+  ]
+}

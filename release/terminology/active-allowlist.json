@@ -4331,12 +4331,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 7,
+      "occurrenceCount": 5,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/TrendsScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "ec79dc869b0b11645c02428a80510180191906ad91967ff0c148c8deaca6f689"
+      "sha256": "0abaf8639f5526386419f495cf06f09b5c86ee94adaeda98da9e53b78830d58d"
     },
     {
       "category": "core",
@@ -4498,7 +4498,7 @@
       "path": "android/app/src/main/res/values/strings.xml",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "36f36e0f8d5892d8a360c0ef5f65e18df7fad05194b6dab34fe270431af2150c"
+      "sha256": "5e92a6837b5e594dbd08bcee1a341a13aaa24d807361a78ded0fb60e7a250580"
     },
     {
       "category": "core",

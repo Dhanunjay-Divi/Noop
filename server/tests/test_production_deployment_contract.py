@@ -126,11 +126,11 @@ def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
     assert "image   = local.migration_image" in runtime
     assert 'resource "terraform_data" "migration_execution"' in runtime
     assert "triggers_replace = [local.migration_release_marker]" in runtime
-    assert runtime.count("terraform_data.migration_execution,") == 5
+    assert runtime.count("terraform_data.migration_execution,") == 6
     assert "NOOP_MIGRATION_RELEASE_MARKER" in runtime
-    assert runtime.count('name  = "NOOP_RUNTIME_RELEASE"') == 6
+    assert runtime.count('name  = "NOOP_RUNTIME_RELEASE"') == 7
     assert "value = local.migration_release_marker" in runtime
-    assert runtime.count("value = local.runtime_release_marker") == 5
+    assert runtime.count("value = local.runtime_release_marker") == 6
     assert 'output "migration_release_marker"' in outputs
     assert "successful migration execution" in verifier
     assert "Managed API has a broad invoker grant." in verifier
@@ -193,27 +193,50 @@ def test_gcp_feedback_lifecycle_is_independent_and_retention_bounded() -> None:
     variables = (REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf").read_text(
         encoding="utf-8"
     )
-    staging = (
-        REPOSITORY_ROOT / "infra" / "gcp" / "staging.tfvars.example"
-    ).read_text(encoding="utf-8")
-    lifecycle = runtime.split(
+    staging = (REPOSITORY_ROOT / "infra" / "gcp" / "staging.tfvars.example").read_text(
+        encoding="utf-8"
+    )
+    managed_lifecycle = runtime.split(
         'resource "google_cloud_run_v2_job" "managed_lifecycle"',
         maxsplit=1,
     )[1].split(
-        'resource "google_cloud_run_v2_job_iam_member" '
-        '"managed_lifecycle_scheduler"',
+        'resource "google_cloud_run_v2_job_iam_member" "managed_lifecycle_scheduler"',
+        maxsplit=1,
+    )[0]
+    lifecycle = runtime.split(
+        'resource "google_cloud_run_v2_job" "feedback_lifecycle"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_job_iam_member" "feedback_lifecycle_scheduler"',
         maxsplit=1,
     )[0]
 
     assert 'variable "enable_feedback_lifecycle"' in variables
     assert "var.enable_feedback_lifecycle" in variables
     assert "var.enable_feedback_lifecycle" in lifecycle
+    assert "NOOP_FEEDBACK_" not in managed_lifecycle
     assert "tostring(var.enable_feedback_ingestion)" not in lifecycle
     assert "var.feedback_retention_days <= 28" in variables
     assert "var.feedback_retention_days <= 90" not in variables
     assert "&& var.enable_feedback_lifecycle" in variables
     assert "enable_feedback_lifecycle = false" in staging
     assert "enable_feedback_ingestion = false" in staging
+    assert lifecycle.count('name  = "NOOP_FEEDBACK_LIFECYCLE_BATCH_SIZE"') == 1
+    assert 'value = "20"' in lifecycle
+    assert (
+        lifecycle.count('name  = "NOOP_FEEDBACK_CLEANUP_CONFIRMATION_DELAY_SECONDS"')
+        == 1
+    )
+    assert 'timeout         = "600s"' in lifecycle
+    assert "NOOP_FEEDBACK_RETENTION_BATCH_SIZE" not in runtime
+    assert (
+        runtime.count('name  = "NOOP_FEEDBACK_UPLOAD_FINALIZATION_GRACE_SECONDS"') == 1
+    )
+    assert (
+        runtime.count('name  = "NOOP_FEEDBACK_CLEANUP_CONFIRMATION_DELAY_SECONDS"') == 2
+    )
+    assert runtime.count('name  = "NOOP_FEEDBACK_VALIDATION_MAX_CONCURRENCY"') == 1
+    assert runtime.count('name  = "NOOP_FEEDBACK_VALIDATION_TIMEOUT_SECONDS"') == 1
 
 
 def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
@@ -458,10 +481,7 @@ def test_gcp_managed_runtime_cannot_list_health_objects() -> None:
     assert "storage.objects.list" not in lifecycle
     assert "roles/storage.objectViewer" not in iam
     assert iam.count("google_project_iam_custom_role.managed_object_reader.id") == 3
-    assert (
-        iam.count("google_project_iam_custom_role.managed_object_deleter.id")
-        == 3
-    )
+    assert iam.count("google_project_iam_custom_role.managed_object_deleter.id") == 3
 
 
 def test_gcp_database_has_staging_recovery_and_encryption_guards() -> None:

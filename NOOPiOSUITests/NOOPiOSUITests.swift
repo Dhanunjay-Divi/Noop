@@ -4,6 +4,7 @@ final class NOOPiOSUITests: XCTestCase {
     private enum PreferredContentSize {
         static let standard = "UICTContentSizeCategoryL"
         static let accessibilityLarge = "UICTContentSizeCategoryAccessibilityL"
+        static let accessibilityXXXL = "UICTContentSizeCategoryAccessibilityXXXL"
     }
 
     private func launchApp(
@@ -205,7 +206,12 @@ final class NOOPiOSUITests: XCTestCase {
     }
 
     func testAppReportRequiresConsentAndBuildsPrivateAttachmentReview() {
-        let app = launchApp(extraArguments: ["--demo-app-report"])
+        let app = launchApp(
+            extraArguments: [
+                "--demo-app-report",
+                "--demo-feedback-hold-queued",
+            ]
+        )
 
         XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["Capture what happened"].exists)
@@ -213,7 +219,7 @@ final class NOOPiOSUITests: XCTestCase {
             app.staticTexts.matching(
                 NSPredicate(
                     format: "label CONTAINS[c] %@",
-                    "Nothing is uploaded automatically"
+                    "Nothing uploads until you review"
                 )
             ).firstMatch.exists
         )
@@ -230,14 +236,102 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["meta.json"].exists)
         XCTAssertFalse(app.staticTexts["raw-capture.jsonl"].exists)
         XCTAssertFalse(app.staticTexts["screenshot.png"].exists)
-        XCTAssertTrue(app.buttons["Share ZIP"].exists)
-        keepScreenshot(app, name: "app-report-review")
-
-        app.buttons["Share ZIP"].tap()
+        XCTAssertTrue(app.buttons["Send feedback"].exists)
+        XCTAssertFalse(app.buttons["Share ZIP"].exists)
         XCTAssertTrue(
             app.staticTexts.matching(
-                NSPredicate(format: "label BEGINSWITH %@", "Share sheet opened for noop-app-report")
-            ).firstMatch.waitForExistence(timeout: 10)
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "uploads exactly this reviewed ZIP"
+                )
+            ).firstMatch.exists
+        )
+        keepScreenshot(app, name: "app-report-review")
+
+        app.buttons["Send feedback"].tap()
+        XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Cancel feedback"].exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "Queued securely on this phone"
+                )
+            ).firstMatch.exists
+        )
+        XCTAssertTrue(app.buttons["Close app report"].isEnabled)
+        app.buttons["Close app report"].tap()
+        XCTAssertFalse(app.navigationBars["App report"].exists)
+    }
+
+    func testAppReportScreenSnapshotIsReviewableAndRemovable() {
+        let app = launchApp(
+            extraArguments: [
+                "--demo-app-report",
+                "--demo-feedback-hold-queued",
+            ]
+        )
+
+        XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
+        let screenToggle = app.switches[
+            "noop.app-report.include-screenshot"
+        ]
+        XCTAssertTrue(screenToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(screenToggle.isEnabled)
+        XCTAssertEqual(screenToggle.value as? String, "0")
+        screenToggle.tap()
+        XCTAssertTrue(waitForSwitch(screenToggle, on: true))
+        XCTAssertTrue(
+            waitUntil(timeout: 10) {
+                app.buttons["Build report"].isEnabled
+                    && screenToggle.value as? String == "1"
+            }
+        )
+
+        app.buttons["Build report"].tap()
+        XCTAssertTrue(app.staticTexts["Report ready"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["screenshot.png"].exists)
+        XCTAssertTrue(
+            app.images["noop.app-report.screenshot-preview"]
+                .waitForExistence(timeout: 5)
+        )
+
+        app.buttons["Remove screen snapshot"].tap()
+        XCTAssertFalse(app.staticTexts["screenshot.png"].exists)
+        XCTAssertFalse(app.images["noop.app-report.screenshot-preview"].exists)
+    }
+
+    func testAppReportCancellationUsesAccurateRemovalCopy() {
+        let app = launchApp(
+            extraArguments: [
+                "--demo-app-report",
+                "--demo-feedback-hold-queued",
+            ]
+        )
+
+        XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
+        app.buttons["Build report"].tap()
+        XCTAssertTrue(app.staticTexts["Report ready"].waitForExistence(timeout: 20))
+        app.buttons["Send feedback"].tap()
+        XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 10))
+
+        app.buttons["Cancel feedback"].tap()
+        XCTAssertTrue(app.staticTexts["Canceled"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "sealed local ZIP was removed"
+                )
+            ).firstMatch.exists
+        )
+        XCTAssertFalse(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "Nothing was uploaded"
+                )
+            ).firstMatch.exists
         )
     }
 
@@ -424,6 +518,41 @@ final class NOOPiOSUITests: XCTestCase {
         app.swipeUp()
         assertExpandedNavigationLabels(selectedTab: 2, in: app)
         keepScreenshot(app, name: "se-accessibility-workouts-clear-navigation")
+    }
+
+    func testPrimaryNavigationRemainsVisibleAndOperableAtAccessibilityXXXL() {
+        let app = launchApp(
+            preferredContentSize: PreferredContentSize.accessibilityXXXL
+        )
+        let tabs = (0...4).map { app.buttons["noop.tab.\($0)"] }
+        XCTAssertTrue(tabs[0].waitForExistence(timeout: 20))
+        for (index, tab) in tabs.enumerated() {
+            XCTAssertTrue(tab.exists)
+            XCTAssertGreaterThan(tab.frame.width, 0)
+            XCTAssertGreaterThan(tab.frame.height, 0)
+            XCTAssertTrue(tab.frame.intersects(app.frame))
+            tab.tap()
+            XCTAssertTrue(tab.isSelected, "Tab \(index) must remain operable at AX-XXXL.")
+        }
+    }
+
+    func testTrendsTimeoutShowsRetryAndRetryLeavesTheTerminalFailure() {
+        let app = launchApp(
+            tab: "trends",
+            extraArguments: ["--demo-trends-timeout"]
+        )
+        let failure = app.descendants(matching: .any)["noop.trends.failure"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 20))
+
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 5))
+        retry.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["noop.trends.range-label"]
+                .waitForExistence(timeout: 20)
+        )
+        XCTAssertFalse(failure.exists)
     }
 
     func testActiveMinutesCardExplainsCreditAndCoverageAtLargeText() {

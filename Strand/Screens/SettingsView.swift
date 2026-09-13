@@ -449,10 +449,16 @@ struct SettingsView: View {
                 rowDivider
                 FormRow(label: "Date of birth") {
                     HStack(spacing: 12) {
-                        Text("\(profile.age)")
-                            .font(StrandFont.bodyNumber)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                            .frame(minWidth: 28, alignment: .trailing)
+                        HStack(spacing: 4) {
+                            Text("Age")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                            Text("\(profile.age)")
+                                .font(StrandFont.bodyNumber)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .accessibilityHidden(true)
                         // #146: age is derived from the date of birth, so it advances on its own.
                         DatePicker("Date of birth",
                                    selection: $profile.dateOfBirth,
@@ -2778,7 +2784,7 @@ struct LiveActivityPreferenceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: $liveActivityEnabled) {
-                Text("Live HR Live Activity")
+                Text("appwide.health.live_activity.lock_screen")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
             }
@@ -2794,7 +2800,10 @@ struct LiveActivityPreferenceRow: View {
 
             if liveActivityEnabled {
                 Toggle(isOn: $showCharge) {
-                    Label("Charge indicator", systemImage: "bolt.heart.fill")
+                    Label(
+                        "appwide.health.live_activity.recovery_indicator",
+                        systemImage: "bolt.heart.fill"
+                    )
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }

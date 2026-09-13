@@ -17,6 +17,13 @@ class AutomationsScreenContractTest {
         assertTrue(source.contains("R.string.automation_morning_recap_help"))
         assertTrue(source.contains("R.string.automation_post_workout_summary_help"))
         assertTrue(source.contains("Lifecycle.Event.ON_RESUME"))
+        assertTrue(source.contains("dailyReviewEnabled = DailyReviewReminders.isEnabled(ctx)"))
+        assertTrue(
+            source.contains(
+                "dailyReviewEnabled && !DailyReviewReminders.canNotify(ctx)",
+            ),
+        )
+        assertTrue(source.contains("ScheduledReportNotifier.canNotify(context)"))
     }
 
     private fun source(): File {

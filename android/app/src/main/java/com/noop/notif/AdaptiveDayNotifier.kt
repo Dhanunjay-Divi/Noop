@@ -8,10 +8,12 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.CalendarContract
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
+import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -258,6 +260,7 @@ internal object AdaptiveDayDeliveryPolicy {
 internal data class AdaptiveDayTimeZoneState(
     val currentOffsetSec: Int? = null,
     val pending: AdaptiveDayGuidance.TimeZoneChange? = null,
+    val routineHistoryStartSec: Long? = null,
 )
 
 internal enum class AdaptiveDayOperationalResumeResult {
@@ -290,15 +293,27 @@ internal object AdaptiveDayTimeZonePolicy {
         } else {
             state.pending
         }
-        return AdaptiveDayTimeZoneState(currentOffsetSec = offsetSec, pending = pending)
+        return AdaptiveDayTimeZoneState(
+            currentOffsetSec = offsetSec,
+            pending = pending,
+            routineHistoryStartSec = if (
+                abs(shift) >= AdaptiveDayGuidance.TRAVEL_THRESHOLD_SECONDS
+            ) {
+                nowSec
+            } else {
+                state.routineHistoryStartSec
+            },
+        )
     }
 
     fun resumeAfterOperationalBlock(
         state: AdaptiveDayTimeZoneState,
         offsetSec: Int,
+        nowSec: Long,
     ): AdaptiveDayTimeZoneState = state.copy(
         currentOffsetSec = offsetSec,
         pending = null,
+        routineHistoryStartSec = nowSec,
     )
 }
 
@@ -309,6 +324,7 @@ object AdaptiveDayTimeZoneStore {
     private const val KEY_CHANGE_FROM = "change.from.sec"
     private const val KEY_CHANGE_TO = "change.to.sec"
     private const val KEY_CHANGE_AT = "change.at.sec"
+    private const val KEY_ROUTINE_HISTORY_START = "routine.history.start.sec"
     private const val KEY_REBASE_AFTER_OPERATIONAL_BLOCK = "rebase.after.operational.block"
     private val lock = Any()
 
@@ -327,14 +343,16 @@ object AdaptiveDayTimeZoneStore {
     internal fun resumeAfterOperationalAccess(
         context: Context,
         offsetSec: Int,
+        nowSec: Long,
     ): AdaptiveDayOperationalResumeResult = synchronized(lock) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
-        resumeAfterOperationalAccess(prefs, offsetSec)
+        resumeAfterOperationalAccess(prefs, offsetSec, nowSec)
     }
 
     internal fun resumeAfterOperationalAccess(
         prefs: android.content.SharedPreferences,
         offsetSec: Int,
+        nowSec: Long,
     ): AdaptiveDayOperationalResumeResult {
         if (!prefs.getBoolean(KEY_REBASE_AFTER_OPERATIONAL_BLOCK, false)) {
             return AdaptiveDayOperationalResumeResult.NOT_REQUIRED
@@ -342,12 +360,14 @@ object AdaptiveDayTimeZoneStore {
         val next = AdaptiveDayTimeZonePolicy.resumeAfterOperationalBlock(
             state = load(prefs),
             offsetSec = offsetSec,
+            nowSec = nowSec,
         )
         val persisted = prefs.edit()
             .putInt(KEY_CURRENT_OFFSET, checkNotNull(next.currentOffsetSec))
             .remove(KEY_CHANGE_FROM)
             .remove(KEY_CHANGE_TO)
             .remove(KEY_CHANGE_AT)
+            .putLong(KEY_ROUTINE_HISTORY_START, checkNotNull(next.routineHistoryStartSec))
             .remove(KEY_REBASE_AFTER_OPERATIONAL_BLOCK)
             .commit()
         return if (persisted) {
@@ -379,6 +399,9 @@ object AdaptiveDayTimeZoneStore {
                 .putInt(KEY_CHANGE_TO, it.currentOffsetSec)
                 .putLong(KEY_CHANGE_AT, it.observedAtSec)
         }
+        next.routineHistoryStartSec?.let {
+            editor.putLong(KEY_ROUTINE_HISTORY_START, it)
+        }
         editor.apply()
         return next.pending
     }
@@ -386,6 +409,11 @@ object AdaptiveDayTimeZoneStore {
     fun pending(context: Context): AdaptiveDayGuidance.TimeZoneChange? = synchronized(lock) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
         load(prefs).pending
+    }
+
+    fun routineHistoryStartSec(context: Context): Long? = synchronized(lock) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        load(prefs).routineHistoryStartSec
     }
 
     fun discardPending(context: Context) = synchronized(lock) {
@@ -413,12 +441,15 @@ object AdaptiveDayTimeZoneStore {
         } else {
             null
         }
-        return AdaptiveDayTimeZoneState(current, pending)
+        val routineHistoryStart = prefs.getLong(KEY_ROUTINE_HISTORY_START, 0L)
+            .takeIf { prefs.contains(KEY_ROUTINE_HISTORY_START) }
+        return AdaptiveDayTimeZoneState(current, pending, routineHistoryStart)
     }
 }
 
 internal object AdaptivePlannedWorkoutSchedulePolicy {
     const val LEAD_SECONDS = 2L * 60L * 60L
+    const val MAX_CALENDAR_RETRY_ATTEMPTS = 3
 
     fun boundaryDelayMillis(startSec: Long, nowMillis: Long): Long? {
         val boundaryMillis = (startSec - LEAD_SECONDS) * 1_000L
@@ -434,6 +465,14 @@ internal object AdaptivePlannedWorkoutSchedulePolicy {
         if (retryAtMillis >= startMillis) return null
         return (retryAtMillis - nowMillis).takeIf { it > 0L }
     }
+
+    fun shouldRetryCalendarFailure(
+        expectedStartSec: Long,
+        nowSec: Long,
+        runAttemptCount: Int,
+    ): Boolean =
+        expectedStartSec > nowSec &&
+            runAttemptCount < MAX_CALENDAR_RETRY_ATTEMPTS
 }
 
 internal object AdaptiveDayEvaluationGate {
@@ -463,7 +502,10 @@ internal object AdaptiveDayEvaluationGate {
 /** Durable two-hour boundary reevaluation. WorkManager survives process death and app dismissal. */
 internal object AdaptivePlannedWorkoutScheduler {
     private const val WORK_NAME = "noop_adaptive_planned_workout_boundary"
+    private const val CALENDAR_WATCH_WORK_NAME =
+        "noop_adaptive_planned_workout_calendar_watch"
     internal const val EXPECTED_START_SEC_KEY = "expected_start_sec"
+    internal const val CALENDAR_CHANGE_TRIGGER_KEY = "calendar_change_trigger"
 
     fun schedule(
         context: Context,
@@ -474,7 +516,7 @@ internal object AdaptivePlannedWorkoutScheduler {
             startSec = startSec,
             nowMillis = nowMillis,
         ) ?: run {
-            cancel(context)
+            cancelBoundary(context)
             return false
         }
         val request = OneTimeWorkRequestBuilder<AdaptivePlannedWorkoutWorker>()
@@ -491,6 +533,58 @@ internal object AdaptivePlannedWorkoutScheduler {
             fields = mapOf("outcome" to "enqueue_requested"),
         )
         return true
+    }
+
+    fun scheduleCalendarChangeWatcher(
+        context: Context,
+    ): Boolean {
+        val appContext = context.applicationContext
+        if (!calendarWatchAllowed(appContext)) {
+            cancelCalendarChangeWatcher(appContext)
+            return false
+        }
+        val constraints = Constraints.Builder()
+            .addContentUriTrigger(CalendarContract.Events.CONTENT_URI, true)
+            .build()
+        val request = OneTimeWorkRequestBuilder<AdaptivePlannedWorkoutWorker>()
+            .setInputData(workDataOf(CALENDAR_CHANGE_TRIGGER_KEY to true))
+            .setConstraints(constraints)
+            .build()
+        WorkManager.getInstance(appContext).enqueueUniqueWork(
+            CALENDAR_WATCH_WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
+        AppDiagnosticsRecorder.record(
+            "adaptive_day.planned_workout_boundary",
+            fields = mapOf("outcome" to "calendar_watch_enqueued"),
+        )
+        return true
+    }
+
+    internal fun rearmCalendarChangeWatcherAfterCurrent(context: Context) {
+        val appContext = context.applicationContext
+        if (!calendarWatchAllowed(appContext)) {
+            cancelCalendarChangeWatcher(appContext)
+            return
+        }
+        val request = OneTimeWorkRequestBuilder<AdaptivePlannedWorkoutWorker>()
+            .setInputData(workDataOf(CALENDAR_CHANGE_TRIGGER_KEY to true))
+            .setConstraints(
+                Constraints.Builder()
+                    .addContentUriTrigger(CalendarContract.Events.CONTENT_URI, true)
+                    .build(),
+            )
+            .build()
+        WorkManager.getInstance(appContext).enqueueUniqueWork(
+            CALENDAR_WATCH_WORK_NAME,
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            request,
+        )
+        AppDiagnosticsRecorder.record(
+            "adaptive_day.planned_workout_boundary",
+            fields = mapOf("outcome" to "calendar_watch_rearmed"),
+        )
     }
 
     fun scheduleRetry(
@@ -521,9 +615,33 @@ internal object AdaptivePlannedWorkoutScheduler {
     }
 
     fun cancel(context: Context) {
-        WorkManager.getInstance(context.applicationContext).cancelUniqueWork(WORK_NAME)
+        WorkManager.getInstance(context.applicationContext).run {
+            cancelUniqueWork(WORK_NAME)
+            cancelUniqueWork(CALENDAR_WATCH_WORK_NAME)
+        }
     }
+
+    fun cancelBoundary(context: Context) {
+        WorkManager.getInstance(context.applicationContext)
+            .cancelUniqueWork(WORK_NAME)
+    }
+
+    private fun cancelCalendarChangeWatcher(context: Context) {
+        WorkManager.getInstance(context.applicationContext)
+            .cancelUniqueWork(CALENDAR_WATCH_WORK_NAME)
+    }
+
+    private fun calendarWatchAllowed(context: Context): Boolean =
+        ManagedRuntimeGate.isAuthorized(context) &&
+            AdaptiveDayConsentGate.guidance(context) &&
+            AdaptiveDayConsentGate.plannedWorkoutCalendar(context) &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CALENDAR,
+            ) == PackageManager.PERMISSION_GRANTED
 }
+
+private class AdaptiveDayCalendarRefreshRetry : RuntimeException()
 
 class AdaptivePlannedWorkoutWorker(
     appContext: Context,
@@ -555,14 +673,20 @@ class AdaptivePlannedWorkoutWorker(
             AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "disabled")
             return Result.success()
         }
-        if (
-            inputData.getLong(
-                AdaptivePlannedWorkoutScheduler.EXPECTED_START_SEC_KEY,
-                Long.MIN_VALUE,
-            ) == Long.MIN_VALUE
-        ) {
+        val expectedStartSec = inputData.getLong(
+            AdaptivePlannedWorkoutScheduler.EXPECTED_START_SEC_KEY,
+            Long.MIN_VALUE,
+        )
+        val calendarChangeTriggered = inputData.getBoolean(
+            AdaptivePlannedWorkoutScheduler.CALENDAR_CHANGE_TRIGGER_KEY,
+            false,
+        )
+        if (!calendarChangeTriggered && expectedStartSec == Long.MIN_VALUE) {
             AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "invalid_input")
             return Result.failure()
+        }
+        if (calendarChangeTriggered) {
+            PlannedWorkoutCalendarStore.invalidate()
         }
         return try {
             val app = applicationContext as? NoopApplication
@@ -575,15 +699,48 @@ class AdaptivePlannedWorkoutWorker(
                 context = applicationContext,
                 repository = WhoopRepository.from(applicationContext),
                 deviceId = activeDeviceId,
+                retryOnCalendarFailure =
+                    !calendarChangeTriggered &&
+                    AdaptivePlannedWorkoutSchedulePolicy.shouldRetryCalendarFailure(
+                        expectedStartSec = expectedStartSec,
+                        nowSec = System.currentTimeMillis() / 1_000L,
+                        runAttemptCount = runAttemptCount,
+                    ),
             )
-            AppDiagnosticsRecorder.endOperation(diagnostic)
+            if (calendarChangeTriggered) {
+                AdaptivePlannedWorkoutScheduler.rearmCalendarChangeWatcherAfterCurrent(
+                    applicationContext,
+                )
+            }
+            AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = if (calendarChangeTriggered) {
+                    "calendar_change_completed"
+                } else {
+                    "completed"
+                },
+            )
             Result.success()
         } catch (cancelled: CancellationException) {
             AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "cancelled")
             throw cancelled
-        } catch (_: Exception) {
-            AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "retry")
+        } catch (_: AdaptiveDayCalendarRefreshRetry) {
+            AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "calendar_retry")
             Result.retry()
+        } catch (_: Exception) {
+            if (calendarChangeTriggered) {
+                AdaptivePlannedWorkoutScheduler.rearmCalendarChangeWatcherAfterCurrent(
+                    applicationContext,
+                )
+                AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "calendar_change_failed_rearmed",
+                )
+                Result.success()
+            } else {
+                AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "retry")
+                Result.retry()
+            }
         }
     }
 }
@@ -603,17 +760,26 @@ object AdaptiveDayEvaluator {
         sleepTargetMinutes: Int = WindDownStore.from(context).sleepNeedMinutes,
         sleepTargetIsExplicit: Boolean = WindDownStore.from(context).hasExplicitSleepNeed,
         notificationBudget: PostSyncRoutineNotificationBudget? = null,
+        retryOnCalendarFailure: Boolean = false,
     ): AdaptiveDayGuidance.Recommendation? {
         val appContext = context.applicationContext
         if (!ManagedRuntimeGate.isAuthorized(appContext)) return null
         val evaluationToken = AdaptiveDayEvaluationGate.begin()
         val nowSec = now.toEpochSecond()
         val offsetSec = now.offset.totalSeconds
+        val priorRoutineHistoryStart = AdaptiveDayTimeZoneStore.routineHistoryStartSec(appContext)
         val timeZoneChange = AdaptiveDayTimeZoneStore.observe(
             appContext,
             offsetSec = offsetSec,
             nowSec = nowSec,
         )
+        val routineHistoryStart = AdaptiveDayTimeZoneStore.routineHistoryStartSec(appContext)
+        if (routineHistoryStart != priorRoutineHistoryStart) {
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.time_zone_baseline",
+                fields = mapOf("outcome" to "routine_history_reset"),
+            )
+        }
         if (!AdaptiveDayConsentGate.guidance(appContext)) {
             AdaptiveDayTimeZoneStore.discardPending(appContext)
             AdaptivePlannedWorkoutScheduler.cancel(appContext)
@@ -624,6 +790,7 @@ object AdaptiveDayEvaluator {
             )
             return null
         }
+        AdaptivePlannedWorkoutScheduler.scheduleCalendarChangeWatcher(appContext)
 
         val resolvedDays = days ?: try {
             repository.daysMerged(
@@ -638,7 +805,7 @@ object AdaptiveDayEvaluator {
         } catch (_: Throwable) {
             emptyList()
         }
-        val sleepWindows = try {
+        val sleepSessions = try {
             repository.sleepSessionsMerged(
                 deviceId = deviceId,
                 from = now.minusDays(
@@ -646,18 +813,42 @@ object AdaptiveDayEvaluator {
                 ).toEpochSecond(),
                 to = nowSec,
                 limit = 1_000,
-            ).map {
-                AdaptiveDayGuidance.SleepWindow(
-                    startSec = it.effectiveStartTs,
-                    endSec = it.endTs,
-                )
-            }
+            )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
             emptyList()
         }
+        val sleepWindows = sleepSessions.map {
+            AdaptiveDayGuidance.SleepWindow(
+                startSec = it.effectiveStartTs,
+                endSec = it.endTs,
+            )
+        }
         val today = maxOf(logicalDay(now).toString(), now.toLocalDate().toString())
+        val currentSleepAggregate = resolvedDays
+            .lastOrNull { it.day == today }
+            ?.totalSleepMin
+        val currentSleepObservation = sleepSessions
+            .sortedByDescending { it.endTs }
+            .firstNotNullOfOrNull { session ->
+                val end = Instant.ofEpochSecond(session.endTs).atZone(now.zone)
+                if (
+                    maxOf(logicalDay(end).toString(), end.toLocalDate().toString()) != today
+                ) {
+                    return@firstNotNullOfOrNull null
+                }
+                val durationMinutes =
+                    (session.endTs - session.effectiveStartTs) / 60.0
+                DailyActionPlanner.matchedSleepObservationEndSec(
+                    aggregateMinutes = currentSleepAggregate,
+                    sessionDurationMinutes = durationMinutes,
+                    sessionEndSec = session.endTs,
+                    nowSec = nowSec,
+                )?.let {
+                    it to durationMinutes
+                }
+            }
         if (!AdaptiveDayEvaluationGate.isCurrent(evaluationToken)) return null
         val recommendation = AdaptiveDayGuidance.recommendation(
             AdaptiveDayGuidance.Input(
@@ -665,6 +856,7 @@ object AdaptiveDayEvaluator {
                 nowSec = nowSec,
                 currentTimeZoneOffsetSec = offsetSec,
                 sleepTargetMinutes = sleepTargetMinutes,
+                sleepTargetIsExplicit = sleepTargetIsExplicit,
                 sleepDays = resolvedDays.map {
                     AdaptiveDayGuidance.SleepDay(
                         day = it.day,
@@ -673,11 +865,12 @@ object AdaptiveDayEvaluator {
                 },
                 sleepWindows = sleepWindows,
                 timeZoneChange = timeZoneChange,
+                routineHistoryStartSec = routineHistoryStart,
             ),
         )
         if (recommendation?.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT) {
             AdaptiveDayEvaluationGate.commitIfCurrent(evaluationToken) {
-                AdaptivePlannedWorkoutScheduler.cancel(appContext)
+                AdaptivePlannedWorkoutScheduler.cancelBoundary(appContext)
                 AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
                     appContext,
                     currentFingerprint = null,
@@ -699,9 +892,23 @@ object AdaptiveDayEvaluator {
         if (!AdaptiveDayEvaluationGate.isCurrent(evaluationToken)) return recommendation
         val plannedWorkout = when (calendarRefresh) {
             is PlannedWorkoutCalendarRefreshOutcome.Completed -> calendarRefresh.snapshot
-            PlannedWorkoutCalendarRefreshOutcome.Failed,
-            PlannedWorkoutCalendarRefreshOutcome.Superseded,
-            -> return recommendation
+            PlannedWorkoutCalendarRefreshOutcome.Failed -> {
+                val committed = AdaptiveDayEvaluationGate.commitIfCurrent(evaluationToken) {
+                    recommendation?.let {
+                        AdaptiveDayNotifier.onRecommendation(
+                            appContext,
+                            it,
+                            notificationBudget,
+                        )
+                    }
+                    true
+                }
+                if (retryOnCalendarFailure && committed) {
+                    throw AdaptiveDayCalendarRefreshRetry()
+                }
+                return recommendation
+            }
+            PlannedWorkoutCalendarRefreshOutcome.Superseded -> return recommendation
         }
         val plan = DailyActionPlanner.plan(
             today = today,
@@ -711,7 +918,20 @@ object AdaptiveDayEvaluator {
                 DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
             },
             recentSleep = resolvedDays.map {
-                DailyActionPlanner.SleepDay(day = it.day, minutes = it.totalSleepMin)
+                DailyActionPlanner.SleepDay(
+                    day = it.day,
+                    minutes = it.totalSleepMin,
+                    observedAtSec = if (it.day == today) {
+                        currentSleepObservation?.first
+                    } else {
+                        null
+                    },
+                    observedSessionDurationMinutes = if (it.day == today) {
+                        currentSleepObservation?.second
+                    } else {
+                        null
+                    },
+                )
             },
             sleepTargetMinutes = sleepTargetMinutes,
             sleepTargetIsExplicit = sleepTargetIsExplicit,
@@ -732,7 +952,7 @@ object AdaptiveDayEvaluator {
                 )
                 val leadSeconds = adjustment.startSec - nowSec
                 if (leadSeconds <= 0L) {
-                    AdaptivePlannedWorkoutScheduler.cancel(appContext)
+                    AdaptivePlannedWorkoutScheduler.cancelBoundary(appContext)
                     AdaptiveDayNotifier.expirePlannedWorkoutArtifacts(
                         appContext,
                         fingerprint = fingerprint,
@@ -765,7 +985,7 @@ object AdaptiveDayEvaluator {
                     }
                 }
             } ?: run {
-                AdaptivePlannedWorkoutScheduler.cancel(appContext)
+                AdaptivePlannedWorkoutScheduler.cancelBoundary(appContext)
                 AdaptiveDayNotifier.reconcileMissingPlannedWorkoutArtifacts(
                     context = appContext,
                     nowSec = nowSec,
@@ -1168,6 +1388,16 @@ object AdaptiveDayNotifier {
         observedAtMillis: Long,
         maximumAgeMillis: Long,
         postAtMillis: Long,
+    ): Long? = remainingLifetimeMillis(
+        observedAtMillis = observedAtMillis,
+        maximumAgeMillis = maximumAgeMillis,
+        postAtMillis = postAtMillis,
+    )
+
+    internal fun remainingLifetimeMillis(
+        observedAtMillis: Long,
+        maximumAgeMillis: Long,
+        postAtMillis: Long,
     ): Long? {
         if (maximumAgeMillis <= 0L) return null
         val expiresAtMillis = observedAtMillis + maximumAgeMillis
@@ -1211,7 +1441,7 @@ object AdaptiveDayNotifier {
             candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
             !plannedWorkoutDeliveryCurrent(context, candidate)
         ) {
-            AdaptivePlannedWorkoutScheduler.cancel(context)
+            AdaptivePlannedWorkoutScheduler.cancelBoundary(context)
             suppress(context)
             return
         }
@@ -1320,7 +1550,7 @@ object AdaptiveDayNotifier {
 
             val manager = NotificationManagerCompat.from(context)
             var calendarConsentLost = false
-            var plannedWorkoutExpired = false
+            var candidateExpired = false
             var notificationBudgetLost = false
             val budgetLane = PostSyncRoutineNotificationBudget.Lane.ADAPTIVE_DAY
             var notificationBudgetReserved = false
@@ -1350,19 +1580,14 @@ object AdaptiveDayNotifier {
                     calendarConsentLost = true
                     return@postIfAllowed false
                 }
-                val plannedWorkoutTimeoutMillis =
-                    if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
-                        plannedWorkoutRemainingLifetimeMillis(
-                            observedAtMillis = candidate.observedAtMillis,
-                            maximumAgeMillis = candidate.maximumAgeMillis,
-                            postAtMillis = System.currentTimeMillis(),
-                        ) ?: run {
-                            plannedWorkoutExpired = true
-                            return@postIfAllowed false
-                        }
-                    } else {
-                        null
-                    }
+                val notificationTimeoutMillis = remainingLifetimeMillis(
+                    observedAtMillis = candidate.observedAtMillis,
+                    maximumAgeMillis = candidate.maximumAgeMillis,
+                    postAtMillis = System.currentTimeMillis(),
+                ) ?: run {
+                    candidateExpired = true
+                    return@postIfAllowed false
+                }
                 val openDestination = NotificationPlatformIdentity.activityPendingIntent(
                     context,
                     NotificationPlatformIdentity.ActivityIntent.ADAPTIVE_DAY,
@@ -1378,9 +1603,7 @@ object AdaptiveDayNotifier {
                     .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .protectPrivateContent(context, CHANNEL_ID)
-                if (plannedWorkoutTimeoutMillis != null) {
-                    notificationBuilder.setTimeoutAfter(plannedWorkoutTimeoutMillis)
-                }
+                notificationBuilder.setTimeoutAfter(notificationTimeoutMillis)
                 val notification = notificationBuilder.build()
                 val posted = NotificationLifecycleLedger.posted(
                     context,
@@ -1396,7 +1619,7 @@ object AdaptiveDayNotifier {
                     candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
                     !plannedWorkoutDeliveryCurrent(context, candidate)
                 ) {
-                    AdaptivePlannedWorkoutScheduler.cancel(context)
+                    AdaptivePlannedWorkoutScheduler.cancelBoundary(context)
                     suppress(context)
                     return
                 }
@@ -1413,7 +1636,7 @@ object AdaptiveDayNotifier {
                 )
                 return
             }
-            if (plannedWorkoutExpired) {
+            if (candidateExpired) {
                 releaseNotificationBudget()
                 onRejected(AdaptiveDayDeliveryReason.STALE)
                 suppress(context)
@@ -1470,7 +1693,7 @@ object AdaptiveDayNotifier {
                         ),
                     )
                 }
-                AdaptivePlannedWorkoutScheduler.cancel(context)
+                AdaptivePlannedWorkoutScheduler.cancelBoundary(context)
                 suppress(context)
                 return
             }
@@ -1528,7 +1751,7 @@ object AdaptiveDayNotifier {
                         ),
                     )
                 }
-                AdaptivePlannedWorkoutScheduler.cancel(context)
+                AdaptivePlannedWorkoutScheduler.cancelBoundary(context)
                 suppress(context)
                 return
             }
@@ -1683,13 +1906,16 @@ object AdaptiveDayNotifier {
                 nowSec = nowSec,
                 currentTimeZoneOffsetSec = now.offset.totalSeconds,
                 sleepTargetMinutes = 8 * 60,
+                sleepTargetIsExplicit = false,
                 sleepDays = emptyList(),
                 sleepWindows = emptyList(),
                 timeZoneChange = change,
+                routineHistoryStartSec = AdaptiveDayTimeZoneStore
+                    .routineHistoryStartSec(context.applicationContext),
             ),
         )?.let {
             AdaptiveDayEvaluationGate.invalidate()
-            AdaptivePlannedWorkoutScheduler.cancel(context)
+            AdaptivePlannedWorkoutScheduler.cancelBoundary(context)
             reconcilePlannedWorkoutArtifacts(
                 context = context,
                 currentFingerprint = null,

@@ -472,7 +472,9 @@ private struct HeartRateSection: View {
                             .foregroundStyle(StrandPalette.textPrimary)
                         Text(liveTrackingOptedIn
                              ? "Showing the high-rate foreground stream on this screen."
-                             : "Your wearable stays connected and stored history continues to sync.")
+                             : live.connected
+                             ? "Your wearable stays connected and stored history continues to sync."
+                             : String(localized: "appwide.health.live_hr.disconnected"))
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -559,7 +561,7 @@ private struct HeartRateSection: View {
                                     color: hasLiveHR ? StrandPalette.hrZoneColor(zone) : StrandPalette.textTertiary)
                             .tracking(StrandFont.displayTracking(72))
                     } else {
-                        Text("-")
+                        Text(StrandFormat.missing)
                             .font(StrandFont.display(72))
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
@@ -748,25 +750,25 @@ private struct RecoveryContributorsSection: View {
                 label: "HRV",
                 strength: higherIsBetter(latest?.avgHrv, base: hrvBase),
                 word: word(higherIsBetter(latest?.avgHrv, base: hrvBase)),
-                detail: latest?.avgHrv.map { "\(Int($0.rounded())) ms" } ?? "-",
+                detail: latest?.avgHrv.map { "\(Int($0.rounded())) ms" } ?? StrandFormat.missing,
                 tint: StrandPalette.metricCyan),       // HRV = teal
             Contributor(
                 label: "Resting HR",
                 strength: lowerIsBetter(latest?.restingHr.map(Double.init), base: rhrBase),
                 word: word(lowerIsBetter(latest?.restingHr.map(Double.init), base: rhrBase)),
-                detail: latest?.restingHr.map { "\($0) bpm" } ?? "-",
+                detail: latest?.restingHr.map { "\($0) bpm" } ?? StrandFormat.missing,
                 tint: StrandPalette.chargeColor),       // recovery contributor = WHOOP green
             Contributor(
                 label: "Sleep",
                 strength: higherIsBetter(latest?.totalSleepMin, base: sleepBase),
                 word: word(higherIsBetter(latest?.totalSleepMin, base: sleepBase)),
-                detail: latest?.totalSleepMin.map { sleepText($0) } ?? "-",
+                detail: latest?.totalSleepMin.map { sleepText($0) } ?? StrandFormat.missing,
                 tint: StrandPalette.sleepLight),       // sleep = blue
             Contributor(
                 label: "Respiratory",
                 strength: lowerIsBetter(latest?.respRateBpm, base: respBase),
                 word: word(lowerIsBetter(latest?.respRateBpm, base: respBase)),
-                detail: latest?.respRateBpm.map { String(format: "%.1f rpm", $0) } ?? "-",
+                detail: latest?.respRateBpm.map { String(format: "%.1f rpm", $0) } ?? StrandFormat.missing,
                 tint: StrandPalette.sleepLight),       // respiratory shares the blue world
         ]
     }
@@ -796,7 +798,7 @@ private struct RecoveryContributorsSection: View {
 
     /// The qualitative word under the bar's right edge — banded like the contributor strengths.
     private func word(_ strength: Double?) -> String {
-        guard let s = strength else { return "-" }
+        guard let s = strength else { return StrandFormat.missing }
         switch s {
         case ..<40:  return String(localized: "Low")
         case ..<60:  return String(localized: "Fair")
@@ -1797,7 +1799,9 @@ private struct LiquidVitalTile: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                     } else {
-                        Text("-").font(StrandFont.number(24)).foregroundStyle(reading.accent)
+                        Text(StrandFormat.missing)
+                            .font(StrandFont.number(24))
+                            .foregroundStyle(reading.accent)
                     }
                     Spacer(minLength: 0)
                 }
@@ -2220,7 +2224,7 @@ private struct BodyCompositionSection: View {
                             Text("appwide.health.body_composition.weight").strandOverline()
                             Text(weight.map {
                                 UnitFormatter.massFromKilograms($0.value, unit: massUnit)
-                            } ?? "-")
+                            } ?? StrandFormat.missing)
                                 .font(StrandFont.number(30))
                                 .foregroundStyle(StrandPalette.textPrimary)
                                 .lineLimit(1)
@@ -2242,13 +2246,13 @@ private struct BodyCompositionSection: View {
                     ) {
                         compositionMetric(
                             label: String(localized: "appwide.health.body_composition.bmi"),
-                            value: bmi.map { String(format: "%.1f", $0.value) } ?? "-",
+                    value: bmi.map { String(format: "%.1f", $0.value) } ?? StrandFormat.missing,
                             detail: bmi.map(readingCaption)
                                 ?? bmiUnavailableText
                         )
                         compositionMetric(
                             label: String(localized: "appwide.health.body_composition.body_fat"),
-                            value: snapshot.bodyFat.map { String(format: "%.0f%%", $0.value) } ?? "-",
+                    value: snapshot.bodyFat.map { String(format: "%.0f%%", $0.value) } ?? StrandFormat.missing,
                             detail: snapshot.bodyFat.map(readingCaption)
                                 ?? String(localized: "appwide.health.body_composition.no_measurement")
                         )
@@ -2256,7 +2260,7 @@ private struct BodyCompositionSection: View {
                             label: String(localized: "appwide.health.body_composition.lean_mass"),
                             value: snapshot.leanMass.map {
                                 UnitFormatter.massFromKilograms($0.value, unit: massUnit)
-                            } ?? "-",
+                    } ?? StrandFormat.missing,
                             detail: snapshot.leanMass.map(readingCaption)
                                 ?? String(localized: "appwide.health.body_composition.no_measurement")
                         )
@@ -2296,7 +2300,7 @@ private struct BodyCompositionSection: View {
                     .font(.system(size: 30, weight: .medium))
                     .foregroundStyle(StrandPalette.metricCyan)
                     .accessibilityHidden(true)
-                Text(bodyFat.map { String(format: "%.0f%%", $0) } ?? "-")
+                Text(bodyFat.map { String(format: "%.0f%%", $0) } ?? StrandFormat.missing)
                     .font(StrandFont.captionNumber)
                     .foregroundStyle(StrandPalette.textPrimary)
                 Text("appwide.health.body_composition.whole_body")

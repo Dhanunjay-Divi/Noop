@@ -37,6 +37,15 @@ from pydantic import ValidationError
 
 from app import __version__
 from app.config import Settings
+from app.feedback_api import feedback_router
+from app.feedback_archive import FeedbackArchiveValidating
+from app.feedback_capability import FeedbackCapabilityCodec
+from app.feedback_lifecycle import feedback_lifecycle_worker
+from app.feedback_repository import (
+    FeedbackRepository,
+    MemoryFeedbackRepository,
+    PostgresFeedbackRepository,
+)
 from app.managed_api import managed_router
 from app.managed_app_check import (
     FirebaseAppCheckTokenVerifier,
@@ -1004,6 +1013,10 @@ def create_app(
     ) = None,
     managed_safety_repository: (PostgresManagedSafetyRepository | None) = None,
     managed_safety_push_service: ManagedSafetyPushService | None = None,
+    feedback_repository: FeedbackRepository | None = None,
+    feedback_object_store: ManagedObjectStoring | None = None,
+    feedback_capability_codec: FeedbackCapabilityCodec | None = None,
+    feedback_archive_validator: FeedbackArchiveValidating | None = None,
 ) -> FastAPI:
     runtime_settings = settings or Settings.from_env()
     runtime_repository: Repository
@@ -1048,6 +1061,9 @@ def create_app(
     )
     runtime_managed_safety_repository = managed_safety_repository
     runtime_managed_safety_push_service = managed_safety_push_service
+    runtime_feedback_repository = feedback_repository
+    runtime_feedback_object_store = feedback_object_store
+    runtime_feedback_capability_codec = feedback_capability_codec
     if runtime_settings.managed_storage_enabled:
         if runtime_managed_repository is None:
             if not isinstance(runtime_repository, PostgresRepository):
@@ -1132,6 +1148,46 @@ def create_app(
                     runtime_settings.managed_replay_secret or ""
                 )
             )
+        if (
+            runtime_settings.feedback_enabled
+            or runtime_settings.feedback_lifecycle_enabled
+        ):
+            if runtime_feedback_repository is None:
+                runtime_feedback_repository = (
+                    PostgresFeedbackRepository(runtime_repository)
+                    if isinstance(runtime_repository, PostgresRepository)
+                    else MemoryFeedbackRepository()
+                )
+            if runtime_feedback_object_store is None:
+                runtime_feedback_object_store = GCSV4ObjectStore(
+                    bucket=runtime_settings.feedback_bucket or "",
+                    signer=IAMBlobSigner(
+                        runtime_settings.managed_signer_email or "",
+                    ),
+                )
+            if runtime_feedback_capability_codec is None:
+                if runtime_settings.feedback_enabled:
+                    runtime_feedback_capability_codec = FeedbackCapabilityCodec(
+                        runtime_settings.feedback_capability_secret or "",
+                        secret_version=(
+                            runtime_settings.feedback_capability_primary_key_version
+                        ),
+                        previous_secrets=(
+                            (runtime_settings.feedback_capability_previous_secret,)
+                            if runtime_settings.feedback_capability_previous_secret
+                            else ()
+                        ),
+                        previous_secret_versions=(
+                            (runtime_settings.feedback_capability_previous_key_version,)
+                            if (
+                                runtime_settings.feedback_capability_previous_key_version
+                            )
+                            else ()
+                        ),
+                        write_version=(
+                            runtime_settings.feedback_capability_write_version
+                        ),
+                    )
 
     runtime_twilio_callback_url: str | None = None
     if paging_provider is not None:
@@ -1196,6 +1252,7 @@ def create_app(
         await runtime_repository.startup()
         retention_task: asyncio.Task[None] | None = None
         safety_retention_task: asyncio.Task[None] | None = None
+        feedback_retention_task: asyncio.Task[None] | None = None
         safety_task: asyncio.Task[None] | None = None
         if runtime_settings.retention_days is not None:
             retention_task = asyncio.create_task(
@@ -1212,6 +1269,25 @@ def create_app(
                     runtime_settings,
                 ),
                 name="noop-safety-retention",
+            )
+        if (
+            runtime_settings.feedback_lifecycle_enabled
+            and runtime_feedback_repository is not None
+            and runtime_feedback_object_store is not None
+        ):
+            feedback_retention_task = asyncio.create_task(
+                feedback_lifecycle_worker(
+                    repository=runtime_feedback_repository,
+                    object_store=runtime_feedback_object_store,
+                    interval_seconds=(
+                        runtime_settings.feedback_lifecycle_interval_seconds
+                    ),
+                    batch_size=runtime_settings.feedback_lifecycle_batch_size,
+                    confirmation_delay_seconds=(
+                        runtime_settings.feedback_cleanup_confirmation_delay_seconds
+                    ),
+                ),
+                name="noop-feedback-lifecycle",
             )
         if runtime_paging_provider.available and runtime_settings.safety_worker_enabled:
             await runtime_safety_repository.record_worker_heartbeat(
@@ -1238,6 +1314,10 @@ def create_app(
                 safety_retention_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await safety_retention_task
+            if feedback_retention_task is not None:
+                feedback_retention_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await feedback_retention_task
             await runtime_repository.shutdown()
 
     app = FastAPI(
@@ -1262,6 +1342,8 @@ def create_app(
     )
     app.state.managed_safety_repository = runtime_managed_safety_repository
     app.state.managed_safety_push_service = runtime_managed_safety_push_service
+    app.state.feedback_repository = runtime_feedback_repository
+    app.state.feedback_object_store = runtime_feedback_object_store
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_bytes=runtime_settings.max_request_bytes,
@@ -3767,6 +3849,25 @@ def create_app(
                 ),
                 safety_repository=runtime_managed_safety_repository,
                 safety_push_service=runtime_managed_safety_push_service,
+            )
+        )
+    if (
+        runtime_settings.feedback_enabled
+        and runtime_feedback_repository is not None
+        and runtime_managed_app_check_verifier is not None
+        and runtime_managed_token_verifier is not None
+        and runtime_feedback_object_store is not None
+        and runtime_feedback_capability_codec is not None
+    ):
+        app.include_router(
+            feedback_router(
+                settings=runtime_settings,
+                repository=runtime_feedback_repository,
+                app_check_verifier=runtime_managed_app_check_verifier,
+                token_verifier=runtime_managed_token_verifier,
+                object_store=runtime_feedback_object_store,
+                capability_codec=runtime_feedback_capability_codec,
+                archive_validator=feedback_archive_validator,
             )
         )
 

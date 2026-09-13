@@ -54,7 +54,7 @@
     <string name="friends_waiting_shared_day">Waiting for a shared day</string>
     <string name="friends_scores_waiting">Scores will appear after %1$s uploads a daily summary.</string>
     <string name="friends_open_sharing_named">Open sharing controls for %1$s</string>
-    <string name="friends_score_charge">Charge</string>
+    <string name="friends_score_charge">Recovery</string>
     <string name="friends_score_effort">Effort</string>
     <string name="friends_score_rest">Rest</string>
     <string name="friends_detail_sleep">Sleep %1$s</string>
@@ -84,7 +84,7 @@
     <string name="friends_server_address">Server address</string>
     <string name="friends_invite_code">Invite code</string>
     <string name="friends_join_default_title">Shared by default</string>
-    <string name="friends_join_default_body">Charge, Effort, and Rest</string>
+    <string name="friends_join_default_body">Recovery, Effort, and Sleep Score</string>
     <string name="friends_join_never_title">Never sent to Friends</string>
     <string name="friends_join_never_body">Raw HR and R-R, sleep stages, journal, workouts, routes, exports, and device identifiers</string>
     <string name="friends_join_trust_title">Operator trust</string>

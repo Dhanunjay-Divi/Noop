@@ -68,7 +68,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -243,14 +242,7 @@ private enum class ReportNotificationKind {
 }
 
 internal fun reportNotificationsAvailable(context: Context): Boolean {
-    val runtimePermissionGranted =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
-    return runtimePermissionGranted &&
-        NotificationManagerCompat.from(context).areNotificationsEnabled()
+    return ScheduledReportNotifier.canNotify(context)
 }
 
 @Composable
@@ -344,11 +336,11 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
         val kind = pendingReportPermission
         pendingReportPermission = null
         if (kind != null) {
+            val allowed = granted && reportNotificationsAvailable(context)
             applyReportPermission(
                 kind,
-                granted && NotificationManagerCompat.from(context).areNotificationsEnabled(),
-                permissionDenied = !granted ||
-                    !NotificationManagerCompat.from(context).areNotificationsEnabled(),
+                allowed,
+                permissionDenied = !allowed,
             )
         }
     }

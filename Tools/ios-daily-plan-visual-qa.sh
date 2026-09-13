@@ -162,6 +162,7 @@ capture() {
     local contrast="$5"
     local expected="$6"
     local planned_workout="${7:-0}"
+    local collapsed="${8:-0}"
     local screenshot="$output_dir/$name.png"
     local stdout_log="$output_dir/$name.stdout.log"
     local stderr_log="$output_dir/$name.stderr.log"
@@ -184,6 +185,9 @@ capture() {
     )
     if (( planned_workout == 1 )); then
         launch_args+=(--demo-planned-workout)
+    fi
+    if (( collapsed == 1 )); then
+        launch_args+=(--demo-daily-plan-collapsed)
     fi
     result=$(
         xcrun simctl launch \
@@ -245,6 +249,10 @@ capture accessibility-stop painOrUnwell light accessibility-large disabled stop 
 capture accessibility5-stop painOrUnwell light accessibility-extra-extra-extra-large disabled stop || exit 1
 capture dark-contrast-ready asUsual dark large enabled ready || exit 1
 capture planned-workout asUsual light large disabled ready 1 || exit 1
+capture accessibility-planned-workout asUsual light accessibility-large disabled ready 1 || exit 1
+capture collapsed-planned-workout asUsual light large disabled ready 1 1 || exit 1
+capture accessibility-collapsed-planned-workout \
+    asUsual light accessibility-large disabled ready 1 1 || exit 1
 
 if cmp -s "$output_dir/check-in-needed.png" "$output_dir/stop.png"; then
     print -u2 -r -- "Distinct planner states produced identical captures."

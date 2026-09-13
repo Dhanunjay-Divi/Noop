@@ -386,6 +386,150 @@ def test_retention_is_explicitly_opt_in(monkeypatch: pytest.MonkeyPatch) -> None
     assert enabled.safety_contact_retention_days == 45
 
 
+def test_feedback_ingestion_is_fail_closed_and_bounded() -> None:
+    common = {
+        "api_token": "a" * 32,
+        "database_url": None,
+        "managed_storage_enabled": True,
+        "managed_project_id": "noop-test-project",
+        "managed_project_number": "123456789012",
+        "managed_identity_api_key": "identity-api-key",
+        "managed_apple_app_id": "1:123456789012:ios:0123456789abcdef",
+        "managed_android_app_id": "1:123456789012:android:fedcba9876543210",
+        "managed_raw_bucket": "noop-managed-private",
+        "managed_signer_email": "noop@example.iam.gserviceaccount.com",
+        "managed_replay_secret": "managed-replay-secret-at-least-32-bytes",
+        "managed_consent_policy_version": "staging-v1",
+        "managed_consent_policy_sha256": "a" * 64,
+        "feedback_enabled": True,
+        "feedback_bucket": "noop-feedback-private",
+        "feedback_capability_secret": "feedback-secret-at-least-32-bytes",
+    }
+
+    Settings(**common).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="EXTERNAL_ABUSE_GATE_APPROVED"):
+        Settings(
+            **{
+                **common,
+                "feedback_accepting_reservations": True,
+            }
+        ).validate_for_startup(needs_database=False)
+
+    Settings(
+        **{
+            **common,
+            "feedback_accepting_reservations": True,
+            "feedback_external_abuse_gate_approved": True,
+        }
+    ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="requires managed storage"):
+        Settings(**{**common, "managed_storage_enabled": False}).validate_for_startup(
+            needs_database=False
+        )
+
+    with pytest.raises(RuntimeError, match="NOOP_FEEDBACK_BUCKET"):
+        Settings(**{**common, "feedback_bucket": None}).validate_for_startup(
+            needs_database=False
+        )
+
+    with pytest.raises(RuntimeError, match="at least 32 bytes"):
+        Settings(
+            **{**common, "feedback_capability_secret": "short"}
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="between 1 and 28"):
+        Settings(**{**common, "feedback_retention_days": 29}).validate_for_startup(
+            needs_database=False
+        )
+
+    with pytest.raises(RuntimeError, match="must differ"):
+        Settings(
+            **{
+                **common,
+                "feedback_capability_previous_secret": (
+                    "feedback-secret-at-least-32-bytes"
+                ),
+            }
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="configured together"):
+        Settings(
+            **{
+                **common,
+                "feedback_capability_previous_secret": (
+                    "previous-feedback-secret-at-least-32-bytes"
+                ),
+            }
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="WRITE_VERSION"):
+        Settings(
+            **{
+                **common,
+                "feedback_capability_write_version": "v2",
+            }
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="between 1 and 20971520"):
+        Settings(
+            **{**common, "feedback_max_archive_bytes": 20 * 1024 * 1024 + 1}
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="LIFECYCLE_BATCH_SIZE"):
+        Settings(
+            **{**common, "feedback_lifecycle_batch_size": 31}
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="FINALIZATION_GRACE"):
+        Settings(
+            **{**common, "feedback_upload_finalization_grace_seconds": 59}
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="CONFIRMATION_DELAY"):
+        Settings(
+            **{**common, "feedback_cleanup_confirmation_delay_seconds": 29}
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="VALIDATION_MAX_CONCURRENCY"):
+        Settings(
+            **{**common, "feedback_validation_max_concurrency": 5}
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="VALIDATION_TIMEOUT_SECONDS"):
+        Settings(
+            **{**common, "feedback_validation_timeout_seconds": 31}
+        ).validate_for_startup(needs_database=False)
+
+
+def test_feedback_reservations_default_closed_when_controls_are_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NOOP_FEEDBACK_ENABLED", "true")
+    monkeypatch.delenv("NOOP_FEEDBACK_ACCEPTING_RESERVATIONS", raising=False)
+
+    drain_only = Settings.from_env()
+
+    assert drain_only.feedback_enabled
+    assert not drain_only.feedback_accepting_reservations
+
+    monkeypatch.setenv("NOOP_FEEDBACK_ACCEPTING_RESERVATIONS", "true")
+
+    assert Settings.from_env().feedback_accepting_reservations
+
+
+def test_feedback_lifecycle_can_run_without_managed_api_configuration() -> None:
+    Settings(
+        api_token=None,
+        database_url="postgresql://synthetic@localhost/noop",
+        managed_storage_enabled=False,
+        managed_signer_email="feedback@example.iam.gserviceaccount.com",
+        feedback_lifecycle_enabled=True,
+        feedback_bucket="noop-feedback-private",
+    ).validate_for_startup(needs_database=True, needs_api_token=False)
+
+
 @pytest.mark.parametrize(
     "trusted_proxies",
     ("*", "0.0.0.0/0", "::/0", "", "127.0.0.1,", "10.20.0.1/24"),

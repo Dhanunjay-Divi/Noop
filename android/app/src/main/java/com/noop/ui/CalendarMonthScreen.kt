@@ -728,28 +728,33 @@ private fun CalendarDayCell(
 
 @Composable
 private fun CalendarLegend(metric: CalendarMetric) {
-    val labels = when (metric.valence) {
-        CalendarMetricValence.HIGHER_IS_BETTER -> listOf(
-            R.string.appwide_calendar_legend_low,
-            R.string.appwide_calendar_legend_middling,
-            R.string.appwide_calendar_legend_strong,
+    val labels = when {
+        metric == CalendarMetric.RECOVERY -> listOf(
+            recoveryBandLabel(0.0),
+            recoveryBandLabel(50.0),
+            recoveryBandLabel(100.0),
         )
-        CalendarMetricValence.HIGHER_IS_WORSE -> listOf(
-            R.string.appwide_calendar_legend_calm,
-            R.string.appwide_calendar_legend_elevated,
-            R.string.appwide_calendar_legend_high,
+        metric.valence == CalendarMetricValence.HIGHER_IS_BETTER -> listOf(
+            stringResource(R.string.appwide_calendar_legend_low),
+            stringResource(R.string.appwide_calendar_legend_middling),
+            stringResource(R.string.appwide_calendar_legend_strong),
         )
-        CalendarMetricValence.NEUTRAL_QUANTITY -> if (metric == CalendarMetric.EFFORT) {
+        metric.valence == CalendarMetricValence.HIGHER_IS_WORSE -> listOf(
+            stringResource(R.string.appwide_calendar_legend_calm),
+            stringResource(R.string.appwide_calendar_legend_elevated),
+            stringResource(R.string.appwide_calendar_legend_high),
+        )
+        else -> if (metric == CalendarMetric.EFFORT) {
             listOf(
-                R.string.appwide_calendar_legend_easy,
-                R.string.appwide_calendar_legend_moderate,
-                R.string.appwide_calendar_legend_hard,
+                stringResource(R.string.appwide_calendar_legend_easy),
+                stringResource(R.string.appwide_calendar_legend_moderate),
+                stringResource(R.string.appwide_calendar_legend_hard),
             )
         } else {
             listOf(
-                R.string.appwide_calendar_legend_low,
-                R.string.appwide_calendar_legend_middling,
-                R.string.appwide_calendar_legend_high,
+                stringResource(R.string.appwide_calendar_legend_low),
+                stringResource(R.string.appwide_calendar_legend_middling),
+                stringResource(R.string.appwide_calendar_legend_high),
             )
         }
     }
@@ -772,7 +777,7 @@ private fun CalendarLegend(metric: CalendarMetric) {
         ) {
             labels.forEachIndexed { index, label ->
                 CalendarLegendChip(
-                    label = stringResource(label),
+                    label = label,
                     color = calendarStepColor(listOf(10.0, 50.0, 90.0)[index], metric),
                 )
             }
@@ -873,6 +878,9 @@ private fun calendarStepColor(
     metric: CalendarMetric,
 ): Color {
     val value = progress.coerceIn(0.0, 100.0)
+    if (metric == CalendarMetric.RECOVERY) {
+        return RecoveryBandPresentation.color(value).copy(alpha = 0.9f)
+    }
     val low = value < RecoveryScorer.bandRedMax
     val middle = value < RecoveryScorer.bandYellowMax
     return when (metric.valence) {

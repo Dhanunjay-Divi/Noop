@@ -55,6 +55,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
 
     enum RefreshOutcome: Equatable, Sendable {
         case completed(PlannedWorkoutCalendarSnapshot?)
+        case failed
         case superseded
     }
 
@@ -150,6 +151,8 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
         switch await refreshOutcome(now: now, force: force) {
         case .completed(let snapshot):
             return snapshot
+        case .failed:
+            return nil
         case .superseded:
             return nil
         }
@@ -199,7 +202,14 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
         )
 
         #if os(iOS)
-        let result = await Self.query(now: now)
+        guard let result = await Self.query(now: now) else {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "failed",
+                fields: ["candidate_bucket": "zero"]
+            )
+            return .failed
+        }
         guard request == requestGeneration else {
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -285,13 +295,13 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
         let candidateBucket: String
     }
 
-    private static func query(now: Date) async -> QueryResult {
+    private static func query(now: Date) async -> QueryResult? {
         await Task.detached(priority: .utility) {
             let store = EKEventStore()
             let calendar = Calendar.autoupdatingCurrent
             let startOfDay = calendar.startOfDay(for: now)
             guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
-                return QueryResult(window: nil, candidateBucket: "zero")
+                return nil
             }
             let events = store.events(
                 matching: store.predicateForEvents(

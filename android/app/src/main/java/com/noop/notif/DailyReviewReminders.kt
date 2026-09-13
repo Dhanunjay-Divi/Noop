@@ -384,25 +384,14 @@ internal object DailyReviewReminderNotifier {
                 notification,
             )
         }
-        if (posted) {
+        if (posted && kind == DailyReviewKind.EVENING) {
             val fingerprint = "${kind.name.lowercase()}:${java.time.LocalDate.now()}"
-            when (kind) {
-                DailyReviewKind.MORNING -> ContextualActionCenter.presentRecovery(
-                    context = context,
-                    title = title,
-                    detail = body,
-                    fingerprint = fingerprint,
-                    evidence = listOf("current-sleep"),
-                    observedAtMillis = System.currentTimeMillis(),
-                    maximumAgeMillis = 8L * 60L * 60L * 1_000L,
-                )
-                DailyReviewKind.EVENING -> ContextualActionCenter.presentJournal(
-                    context = context,
-                    fingerprint = fingerprint,
-                    title = title,
-                    detail = body,
-                )
-            }
+            ContextualActionCenter.presentJournal(
+                context = context,
+                fingerprint = fingerprint,
+                title = title,
+                detail = body,
+            )
         }
         posted
     }.getOrElse {

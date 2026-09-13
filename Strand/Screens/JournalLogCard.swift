@@ -100,7 +100,7 @@ struct JournalLogCard: View {
                                 dayPill(journalDayLabel(off), offset: off).id(off)
                             }
                         }
-                        .padding(.horizontal, 1)   // don't clip the selected pill's ring
+                        .padding(.horizontal, NoopMetrics.space4)
                     }
                     // Defer the initial scroll a tick: scrollTo in onAppear can no-op before the pills lay
                     // out, which would leave the picker on the oldest day instead of the selected one.

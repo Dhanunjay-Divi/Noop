@@ -1508,7 +1508,7 @@ private fun BarSlot(
             ),
             color = tint,
             maxLines = labelMaxLines,
-            overflow = TextOverflow.Clip,
+            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()

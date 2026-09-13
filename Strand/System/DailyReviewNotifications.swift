@@ -611,15 +611,36 @@ enum MorningRecapNotifications {
     static func shouldNotify(
         enabled: Bool,
         materializedAfterSync: Bool,
-        chargeOrRestPresent: Bool,
+        recoveryOrSleepScorePresent: Bool,
         reportDay: String,
         lastReportDay: String?
     ) -> Bool {
         enabled
             && materializedAfterSync
-            && chargeOrRestPresent
+            && recoveryOrSleepScorePresent
             && !reportDay.isEmpty
             && reportDay != lastReportDay
+    }
+
+    static func copy(
+        recoveryPresent: Bool,
+        sleepScorePresent: Bool
+    ) -> (title: String, body: String)? {
+        guard recoveryPresent || sleepScorePresent else { return nil }
+        let body = switch (recoveryPresent, sleepScorePresent) {
+        case (true, true):
+            String(localized: "appwide.morning_recap.body.both")
+        case (true, false):
+            String(localized: "appwide.morning_recap.body.recovery")
+        case (false, true):
+            String(localized: "appwide.morning_recap.body.sleep")
+        case (false, false):
+            preconditionFailure("Guarded above")
+        }
+        return (
+            String(localized: "appwide.morning_recap.title"),
+            body
+        )
     }
 
     static func setEnabled(
@@ -672,13 +693,15 @@ enum MorningRecapNotifications {
 
     static func postIfAuthorized(
         reportDay: String,
-        chargeOrRestPresent: Bool,
+        recoveryPresent: Bool,
+        sleepScorePresent: Bool,
         materializedAfterSync: Bool = true,
         budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         await postIfAuthorized(
             reportDay: reportDay,
-            chargeOrRestPresent: chargeOrRestPresent,
+            recoveryPresent: recoveryPresent,
+            sleepScorePresent: sleepScorePresent,
             materializedAfterSync: materializedAfterSync,
             client: .system,
             budget: budget
@@ -687,15 +710,20 @@ enum MorningRecapNotifications {
 
     static func postIfAuthorized(
         reportDay: String,
-        chargeOrRestPresent: Bool,
+        recoveryPresent: Bool,
+        sleepScorePresent: Bool,
         materializedAfterSync: Bool = true,
         client: NotificationClient,
         budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
+        guard let copy = copy(
+            recoveryPresent: recoveryPresent,
+            sleepScorePresent: sleepScorePresent
+        ) else { return }
         guard shouldNotify(
             enabled: isEnabled,
             materializedAfterSync: materializedAfterSync,
-            chargeOrRestPresent: chargeOrRestPresent,
+            recoveryOrSleepScorePresent: recoveryPresent || sleepScorePresent,
             reportDay: reportDay,
             lastReportDay: UserDefaults.standard.string(forKey: lastReportDayKey)
         ), activeReportDay != reportDay else { return }
@@ -723,8 +751,8 @@ enum MorningRecapNotifications {
 
         let content = UNMutableNotificationContent()
         content.applyProminence(.ambient)
-        content.title = String(localized: "Your morning recap is ready")
-        content.body = String(localized: "Open NOOP to review your Recovery and Sleep Score.")
+        content.title = copy.title
+        content.body = copy.body
         content.sound = .default
         content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
         content.threadIdentifier = "noop.morning-recap"

@@ -145,6 +145,25 @@ final class ContextualInterventionsTests: XCTestCase {
         XCTAssertEqual(quiet.reason, .quietHours)
     }
 
+    func testAdaptiveNotificationCopyKeepsHealthContextInsideNOOP() {
+        let adaptive = candidate(
+            kind: .adaptivePlannedWorkout,
+            observedAt: date(),
+            maximumAge: 2 * 60 * 60,
+            fingerprint: "planned-private"
+        )
+        let delivered = ContextualNotificationCopy.delivered(for: adaptive)
+
+        XCTAssertEqual(delivered.title, String(localized: "Private NOOP check-in"))
+        XCTAssertEqual(delivered.body, String(localized: "Open NOOP to review it."))
+
+        let ordinary = candidate(observedAt: date(), fingerprint: "stress-copy")
+        XCTAssertEqual(
+            ContextualNotificationCopy.delivered(for: ordinary),
+            .init(title: ordinary.title, body: ordinary.body)
+        )
+    }
+
     func testDeliveryStateRoundTripsAcrossRestart() {
         let suiteName = "contextual-interventions.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -352,6 +371,109 @@ final class ContextualInterventionsTests: XCTestCase {
 
         XCTAssertEqual(candidate.maximumAge, 15 * 60, accuracy: 0.001)
         XCTAssertEqual(candidate.route, .workouts)
+    }
+
+    func testAdaptiveDeliveredNotificationExpiryCoversEveryAdaptiveKind() {
+        let observedAt = date(2026, 8, 22, 9)
+        let maximumAge: TimeInterval = 90 * 60
+        let expectedExpiry = observedAt.addingTimeInterval(maximumAge)
+        let expectedIdentifiers: [ContextualInterventionKind: String] = [
+            .adaptiveTravel: "contextual-adaptiveTravel",
+            .adaptiveRoutineRecovery: "contextual-adaptiveRoutineRecovery",
+            .adaptiveSleepRecovery: "contextual-adaptiveSleepRecovery",
+            .adaptivePlannedWorkout: ContextualInterventionCenter.plannedWorkoutRequestID,
+        ]
+        XCTAssertEqual(
+            AdaptiveDeliveredNotificationExpiryPolicy.plannedWorkoutRequestIdentifier,
+            ContextualInterventionCenter.plannedWorkoutRequestID
+        )
+
+        for kind in AdaptiveDeliveredNotificationExpiryPolicy.supportedKinds {
+            XCTAssertEqual(
+                AdaptiveDeliveredNotificationExpiryPolicy.expirationDate(
+                    for: candidate(
+                        kind: kind,
+                        observedAt: observedAt,
+                        maximumAge: maximumAge,
+                        fingerprint: "\(kind.rawValue)-expiry"
+                    )
+                ),
+                expectedExpiry
+            )
+            XCTAssertEqual(
+                AdaptiveDeliveredNotificationExpiryPolicy.requestIdentifier(for: kind),
+                expectedIdentifiers[kind]
+            )
+        }
+
+        XCTAssertNil(AdaptiveDeliveredNotificationExpiryPolicy.expirationDate(
+            for: candidate(
+                kind: .stressBreathing,
+                observedAt: observedAt,
+                maximumAge: maximumAge
+            )
+        ))
+        XCTAssertNil(AdaptiveDeliveredNotificationExpiryPolicy.expirationDate(
+            for: candidate(
+                kind: .adaptiveSleepRecovery,
+                observedAt: observedAt,
+                maximumAge: 0
+            )
+        ))
+        XCTAssertNil(AdaptiveDeliveredNotificationExpiryPolicy.expirationDate(
+            for: candidate(
+                kind: .adaptiveSleepRecovery,
+                observedAt: observedAt,
+                maximumAge: .infinity
+            )
+        ))
+    }
+
+    func testAdaptiveDeliveredNotificationExpiryPlanIsDeterministic() {
+        let now = date(2026, 8, 22, 12)
+        let entries: [(String, TimeInterval)] = [
+            (
+                ContextualInterventionKind.adaptiveSleepRecovery.rawValue,
+                now.addingTimeInterval(2 * 60).timeIntervalSince1970
+            ),
+            (
+                ContextualInterventionKind.adaptiveTravel.rawValue,
+                now.addingTimeInterval(-60).timeIntervalSince1970
+            ),
+            (
+                ContextualInterventionKind.adaptivePlannedWorkout.rawValue,
+                now.addingTimeInterval(60).timeIntervalSince1970
+            ),
+            (
+                ContextualInterventionKind.adaptiveRoutineRecovery.rawValue,
+                now.timeIntervalSince1970
+            ),
+            (ContextualInterventionKind.stressBreathing.rawValue, now.timeIntervalSince1970),
+            ("unknown-adaptive-kind", now.addingTimeInterval(30).timeIntervalSince1970),
+            ("invalid-expiry", .nan),
+        ]
+        let forward = AdaptiveDeliveredNotificationExpiryPolicy.plan(
+            persistedExpirations: Dictionary(uniqueKeysWithValues: entries),
+            now: now
+        )
+        let reversed = AdaptiveDeliveredNotificationExpiryPolicy.plan(
+            persistedExpirations: Dictionary(uniqueKeysWithValues: entries.reversed()),
+            now: now
+        )
+
+        XCTAssertEqual(forward, reversed)
+        XCTAssertEqual(
+            forward.expired.map(\.kind),
+            [.adaptiveTravel, .adaptiveRoutineRecovery]
+        )
+        XCTAssertEqual(
+            forward.active.map(\.kind),
+            [.adaptivePlannedWorkout, .adaptiveSleepRecovery]
+        )
+        XCTAssertEqual(
+            forward.nextExpiry,
+            now.addingTimeInterval(60)
+        )
     }
 
     func testPlannedWorkoutBoundaryUsesAdaptiveDayDiagnosticIdentity() {
@@ -629,8 +751,16 @@ final class ContextualInterventionsTests: XCTestCase {
         XCTAssertEqual(travel?.previousOffsetSec, 60 * 60)
         XCTAssertEqual(travel?.currentOffsetSec, 3 * 60 * 60)
         XCTAssertEqual(AdaptiveDayTimeZoneStore.pending(defaults: defaults), travel)
+        XCTAssertEqual(
+            AdaptiveDayTimeZoneStore.routineHistoryStartSec(defaults: defaults),
+            3_000
+        )
         AdaptiveDayTimeZoneStore.discardPending(defaults: defaults)
         XCTAssertNil(AdaptiveDayTimeZoneStore.pending(defaults: defaults))
+        XCTAssertEqual(
+            AdaptiveDayTimeZoneStore.routineHistoryStartSec(defaults: defaults),
+            3_000
+        )
     }
 
     func testOperationalAccessResumeRebasesWithoutReplayingBlockedTravel() {
@@ -647,11 +777,17 @@ final class ContextualInterventionsTests: XCTestCase {
 
         XCTAssertTrue(AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
             offsetSec: 5 * 60 * 60 + 30 * 60,
+            nowSec: 2_500,
             defaults: defaults
         ))
         XCTAssertNil(AdaptiveDayTimeZoneStore.pending(defaults: defaults))
+        XCTAssertEqual(
+            AdaptiveDayTimeZoneStore.routineHistoryStartSec(defaults: defaults),
+            2_500
+        )
         XCTAssertFalse(AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
             offsetSec: 5 * 60 * 60 + 30 * 60,
+            nowSec: 2_600,
             defaults: defaults
         ))
 
@@ -662,6 +798,42 @@ final class ContextualInterventionsTests: XCTestCase {
         )
         XCTAssertEqual(laterTravel?.previousOffsetSec, 5 * 60 * 60 + 30 * 60)
         XCTAssertEqual(laterTravel?.currentOffsetSec, 8 * 60 * 60 + 30 * 60)
+        XCTAssertEqual(
+            AdaptiveDayTimeZoneStore.routineHistoryStartSec(defaults: defaults),
+            3_000
+        )
+    }
+
+    func testDeliveredWorkoutRequestsPeriodicBestEffortRevalidation() {
+        let now = date(2026, 8, 22, 9)
+        let start = now.addingTimeInterval(3 * 60 * 60)
+        XCTAssertEqual(
+            AdaptivePlannedWorkoutScheduler.requestedWakeDate(
+                now: now,
+                pendingEvaluation: nil,
+                deliveredStart: start
+            ),
+            now.addingTimeInterval(
+                AdaptivePlannedWorkoutScheduler.deliveryRevalidationInterval
+            )
+        )
+        XCTAssertEqual(
+            AdaptivePlannedWorkoutScheduler.requestedWakeDate(
+                now: now,
+                pendingEvaluation: now.addingTimeInterval(5 * 60),
+                deliveredStart: start
+            ),
+            now.addingTimeInterval(5 * 60)
+        )
+        XCTAssertEqual(
+            AdaptivePlannedWorkoutScheduler.requestedWakeDate(
+                now: now,
+                pendingEvaluation: nil,
+                deliveredStart: now.addingTimeInterval(5 * 60),
+                deliveredNotificationExpiry: now.addingTimeInterval(2 * 60)
+            ),
+            now.addingTimeInterval(2 * 60)
+        )
     }
 
     func testAdaptiveRecommendationMapsToPrivateSleepRoute() {

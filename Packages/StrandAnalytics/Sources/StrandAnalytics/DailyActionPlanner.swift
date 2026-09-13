@@ -50,10 +50,19 @@ public enum DailyActionPlanner {
     public struct SleepDay: Equatable, Sendable {
         public let day: String
         public let minutes: Double?
+        public let observedAtSec: Int?
+        public let observedSessionDurationMinutes: Double?
 
-        public init(day: String, minutes: Double?) {
+        public init(
+            day: String,
+            minutes: Double?,
+            observedAtSec: Int? = nil,
+            observedSessionDurationMinutes: Double? = nil
+        ) {
             self.day = day
             self.minutes = minutes
+            self.observedAtSec = observedAtSec
+            self.observedSessionDurationMinutes = observedSessionDurationMinutes
         }
     }
 
@@ -171,6 +180,11 @@ public enum DailyActionPlanner {
     public static let minimumUsualSleepNights = 5
     public static let solidUsualSleepNights = 7
     public static let workoutSleepDeficitThresholdMinutes = 45
+    public static let currentSleepMaximumAgeSeconds = 30 * 60 * 60
+    public static let minimumMatchedSleepSessionMinutes = 3 * 60
+    public static let maximumMatchedSleepSessionMinutes = 14 * 60
+    public static let aggregateSessionRoundingToleranceMinutes = 15
+    public static let maximumSessionExcessMinutes = 3 * 60
     public static let minimumPlannedWorkoutMinutes = 10
     public static let maximumPlannedWorkoutMinutes = 6 * 60
     // A same-civil-day workout can be up to 25 elapsed hours away across a DST fall-back day.
@@ -178,6 +192,33 @@ public enum DailyActionPlanner {
 
     private static let planningLimitation =
         "This is a personal planning range, not a safety limit, diagnosis, or medical clearance."
+
+    /// Associate a daily asleep-minute aggregate with one fresh session without accepting a short nap as
+    /// proof that an unrelated aggregate is current. Missing, stale, or implausibly different evidence
+    /// fails closed; callers remain responsible for same-day/source selection.
+    public static func matchedSleepObservationEndSec(
+        aggregateMinutes: Double?,
+        sessionDurationMinutes: Double?,
+        sessionEndSec: Int?,
+        nowSec: Int,
+        maximumAgeSeconds: Int = currentSleepMaximumAgeSeconds
+    ) -> Int? {
+        guard let aggregateMinutes,
+              aggregateMinutes.isFinite,
+              (120...900).contains(aggregateMinutes),
+              let sessionDurationMinutes,
+              sessionDurationMinutes.isFinite,
+              sessionDurationMinutes >= Double(minimumMatchedSleepSessionMinutes),
+              sessionDurationMinutes <= Double(maximumMatchedSleepSessionMinutes),
+              let sessionEndSec,
+              (-5 * 60...maximumAgeSeconds).contains(nowSec - sessionEndSec),
+              aggregateMinutes <= sessionDurationMinutes
+                  + Double(aggregateSessionRoundingToleranceMinutes),
+              sessionDurationMinutes <= aggregateMinutes
+                  + Double(maximumSessionExcessMinutes)
+        else { return nil }
+        return sessionEndSec
+    }
 
     public static func plan(
         today: String,
@@ -355,6 +396,7 @@ public enum DailyActionPlanner {
         let sleep = sleepContext(
             days: recentSleep,
             today: today,
+            nowSec: nowSec,
             sleepTargetMinutes: sleepTargetMinutes,
             sleepTargetIsExplicit: sleepTargetIsExplicit
         )
@@ -405,11 +447,24 @@ public enum DailyActionPlanner {
     private static func sleepContext(
         days: [SleepDay],
         today: String,
+        nowSec: Int,
         sleepTargetMinutes: Int,
         sleepTargetIsExplicit: Bool
     ) -> SleepContext? {
         let grouped = validSleepByDay(days, through: today)
-        guard let current = grouped[today] else { return nil }
+        let currentValues = days.compactMap { row -> Double? in
+            guard row.day == today,
+                  let minutes = row.minutes,
+                  matchedSleepObservationEndSec(
+                      aggregateMinutes: minutes,
+                      sessionDurationMinutes: row.observedSessionDurationMinutes,
+                      sessionEndSec: row.observedAtSec,
+                      nowSec: nowSec
+                  ) != nil else { return nil }
+            return minutes
+        }
+        guard !currentValues.isEmpty else { return nil }
+        let current = currentValues.reduce(0, +) / Double(currentValues.count)
 
         let prior = grouped
             .filter { $0.key < today }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
@@ -9,11 +10,15 @@ import struct
 import zipfile
 import zlib
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, Protocol
 
 
 class FeedbackArchiveRejectedError(ValueError):
     """The uploaded archive does not match the narrow app-report contract."""
+
+
+class FeedbackArchiveValidationUnavailableError(RuntimeError):
+    """Bounded archive validation could not start or finish in time."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +27,148 @@ class FeedbackArchiveSummary:
     uncompressed_bytes: int
     includes_user_note: bool
     includes_screenshot: bool
+
+
+class FeedbackArchiveValidating(Protocol):
+    async def acquire(self) -> FeedbackArchiveValidationAdmission: ...
+
+
+class FeedbackArchiveValidationAdmission(Protocol):
+    async def __aenter__(self) -> FeedbackArchiveValidationAdmission: ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> None: ...
+
+    async def validate(
+        self,
+        payload: bytes,
+        *,
+        expected_platform: str,
+        expected_app_version: str,
+        includes_user_note: bool,
+        includes_screenshot: bool,
+    ) -> FeedbackArchiveSummary: ...
+
+
+class BoundedFeedbackArchiveValidator:
+    def __init__(
+        self,
+        *,
+        max_concurrency: int,
+        timeout_seconds: float,
+        validator: Callable[..., FeedbackArchiveSummary] | None = None,
+    ) -> None:
+        if not 1 <= max_concurrency <= 16:
+            raise ValueError("max_concurrency must be between 1 and 16")
+        if not 0 < timeout_seconds <= 120:
+            raise ValueError(
+                "timeout_seconds must be greater than zero and at most 120"
+            )
+        self._slots = asyncio.BoundedSemaphore(max_concurrency)
+        self._timeout_seconds = timeout_seconds
+        self._validator = validator or validate_feedback_archive
+
+    async def acquire(self) -> FeedbackArchiveValidationAdmission:
+        try:
+            await asyncio.wait_for(
+                self._slots.acquire(),
+                timeout=self._timeout_seconds,
+            )
+        except TimeoutError:
+            raise FeedbackArchiveValidationUnavailableError(
+                "feedback archive validation capacity is unavailable"
+            ) from None
+        return _BoundedFeedbackArchiveValidationAdmission(self)
+
+    async def validate(
+        self,
+        payload: bytes,
+        *,
+        expected_platform: str,
+        expected_app_version: str,
+        includes_user_note: bool,
+        includes_screenshot: bool,
+    ) -> FeedbackArchiveSummary:
+        admission = await self.acquire()
+        async with admission:
+            return await admission.validate(
+                payload,
+                expected_platform=expected_platform,
+                expected_app_version=expected_app_version,
+                includes_user_note=includes_user_note,
+                includes_screenshot=includes_screenshot,
+            )
+
+    def _release_slot(self, worker: asyncio.Task[FeedbackArchiveSummary]) -> None:
+        try:
+            worker.exception()
+        except (asyncio.CancelledError, Exception):
+            pass
+        self._slots.release()
+
+
+class _BoundedFeedbackArchiveValidationAdmission:
+    def __init__(self, owner: BoundedFeedbackArchiveValidator) -> None:
+        self._owner = owner
+        self._entered = False
+        self._release_on_exit = True
+
+    async def __aenter__(self) -> _BoundedFeedbackArchiveValidationAdmission:
+        if self._entered:
+            raise RuntimeError("feedback archive admission cannot be reused")
+        self._entered = True
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> None:
+        del exc_type, exc, traceback
+        if self._release_on_exit:
+            self._owner._slots.release()
+
+    async def validate(
+        self,
+        payload: bytes,
+        *,
+        expected_platform: str,
+        expected_app_version: str,
+        includes_user_note: bool,
+        includes_screenshot: bool,
+    ) -> FeedbackArchiveSummary:
+        if not self._entered:
+            raise RuntimeError("feedback archive admission is not active")
+        worker = asyncio.create_task(
+            asyncio.to_thread(
+                self._owner._validator,
+                payload,
+                expected_platform=expected_platform,
+                expected_app_version=expected_app_version,
+                includes_user_note=includes_user_note,
+                includes_screenshot=includes_screenshot,
+            )
+        )
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(worker),
+                timeout=self._owner._timeout_seconds,
+            )
+        except TimeoutError:
+            self._release_on_exit = False
+            worker.add_done_callback(self._owner._release_slot)
+            raise FeedbackArchiveValidationUnavailableError(
+                "feedback archive validation timed out"
+            ) from None
+        except asyncio.CancelledError:
+            self._release_on_exit = False
+            worker.add_done_callback(self._owner._release_slot)
+            raise
 
 
 _REQUIRED_NAMES = frozenset({"report.txt", "meta.json"})
@@ -251,6 +398,11 @@ _LOCATION_VALUE_PATTERNS = (
 _CONTACT_PATTERNS = (
     re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
     re.compile(r"(?<![\w+])\+\d{8,15}\b"),
+    re.compile(
+        r"(?<!\d)(?:\+?1[\s.-]?)?"
+        r"(?:\([2-9]\d{2}\)|[2-9]\d{2})"
+        r"[\s.-][2-9]\d{2}[\s.-]\d{4}(?!\d)"
+    ),
 )
 _DYNAMIC_PATH_PATTERNS = (
     re.compile(
@@ -1065,13 +1217,21 @@ def _validate_png(payload: bytes) -> None:
             "feedback screenshot image data is truncated"
         )
 
-    previous = bytearray(row_bytes)
     offset = 0
+    previous = bytearray(row_bytes) if color_type == 3 else None
     for _ in range(height):
         filter_type = decoded[offset]
         offset += 1
         source = decoded[offset : offset + row_bytes]
         offset += row_bytes
+        if filter_type > 4:
+            raise FeedbackArchiveRejectedError(
+                "feedback screenshot uses an invalid PNG filter"
+            )
+        if color_type != 3:
+            continue
+
+        assert previous is not None
         current = bytearray(row_bytes)
         for index, byte in enumerate(source):
             left = current[index - channels] if index >= channels else 0
@@ -1087,15 +1247,9 @@ def _validate_png(payload: bytes) -> None:
                 value = byte + ((left + above) // 2)
             elif filter_type == 4:
                 value = byte + _paeth_predictor(left, above, upper_left)
-            else:
-                raise FeedbackArchiveRejectedError(
-                    "feedback screenshot uses an invalid PNG filter"
-                )
             current[index] = value & 0xFF
-        if (
-            color_type == 3
-            and palette_entries is not None
-            and any(index >= palette_entries for index in current)
+        if palette_entries is not None and any(
+            index >= palette_entries for index in current
         ):
             raise FeedbackArchiveRejectedError(
                 "feedback screenshot contains an invalid palette index"

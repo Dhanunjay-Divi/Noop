@@ -161,21 +161,74 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         let refresh = try XCTUnwrap(
             tail.range(of: "await PlannedWorkoutCalendarStore.shared.refreshOutcome")
         )
-        let completed = try XCTUnwrap(
+        let refreshSwitch = try XCTUnwrap(
             tail.range(
-                of: "guard case .completed(let plannedWorkout) = calendarRefresh else",
+                of: "switch calendarRefresh",
                 range: refresh.upperBound..<tail.endIndex
+            )
+        )
+        let superseded = try XCTUnwrap(
+            tail.range(
+                of: "case .superseded:",
+                range: refreshSwitch.upperBound..<tail.endIndex
+            )
+        )
+        let supersededReturn = try XCTUnwrap(
+            tail.range(
+                of: "return",
+                range: superseded.upperBound..<tail.endIndex
             )
         )
         let missingReconciliation = try XCTUnwrap(
             tail.range(
                 of: "reconcileMissingPlannedWorkoutArtifacts",
-                range: completed.upperBound..<tail.endIndex
+                range: supersededReturn.upperBound..<tail.endIndex
             )
         )
 
-        XCTAssertLessThan(refresh.lowerBound, completed.lowerBound)
-        XCTAssertLessThan(completed.lowerBound, missingReconciliation.lowerBound)
+        XCTAssertLessThan(refresh.lowerBound, refreshSwitch.lowerBound)
+        XCTAssertLessThan(refreshSwitch.lowerBound, superseded.lowerBound)
+        XCTAssertLessThan(superseded.lowerBound, supersededReturn.lowerBound)
+        XCTAssertLessThan(supersededReturn.lowerBound, missingReconciliation.lowerBound)
+    }
+
+    func testAdaptiveEvaluationStillPostsIndependentGuidanceWhenCalendarRefreshFails() throws {
+        let source = try source("Strand/App/AppModel.swift")
+        let method = try XCTUnwrap(
+            source.range(of: "private func evaluateAdaptiveDayGuidance")
+        )
+        let tail = source[method.lowerBound...]
+        let refresh = try XCTUnwrap(
+            tail.range(of: "await PlannedWorkoutCalendarStore.shared.refreshOutcome")
+        )
+        let failed = try XCTUnwrap(
+            tail.range(
+                of: "case .failed:",
+                range: refresh.upperBound..<tail.endIndex
+            )
+        )
+        let delivery = try XCTUnwrap(
+            tail.range(
+                of: "await postAdaptiveIntervention(",
+                range: failed.upperBound..<tail.endIndex
+            )
+        )
+        let failureReturn = try XCTUnwrap(
+            tail.range(
+                of: "return",
+                range: delivery.upperBound..<tail.endIndex
+            )
+        )
+        let plan = try XCTUnwrap(
+            tail.range(
+                of: "let plan = DailyActionPlanner.plan",
+                range: failureReturn.upperBound..<tail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(failed.lowerBound, delivery.lowerBound)
+        XCTAssertLessThan(delivery.lowerBound, failureReturn.lowerBound)
+        XCTAssertLessThan(failureReturn.lowerBound, plan.lowerBound)
     }
 
     func testAdaptiveEvaluationRejectsSupersededCalendarRefreshBeforePlanning() throws {

@@ -688,7 +688,8 @@ final class AppModel: ObservableObject {
         }
         let now = Date()
         let resumedAfterBlock = AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
-            offsetSec: TimeZone.autoupdatingCurrent.secondsFromGMT(for: now)
+            offsetSec: TimeZone.autoupdatingCurrent.secondsFromGMT(for: now),
+            nowSec: Int(now.timeIntervalSince1970)
         )
         if resumedAfterBlock {
             AppDiagnosticsRecorder.shared.record(
@@ -697,6 +698,7 @@ final class AppModel: ObservableObject {
             )
         }
         operationalWorkStarted = true
+        AdaptiveDeliveredNotificationExpiryScheduler.reconcile(now: now)
 
         AppModel.shared = self   // publish for App Intents only after the launch gate is open
         // An unfinished GPS workout resumes location + realtime hardware, so restoration belongs on the
@@ -1173,7 +1175,8 @@ final class AppModel: ObservableObject {
         let sleepScore = Repository.dailyColumn(key: "sleep_performance", day: row)
         await MorningRecapNotifications.postIfAuthorized(
             reportDay: row.day,
-            chargeOrRestPresent: row.recovery != nil || sleepScore != nil,
+            recoveryPresent: row.recovery != nil,
+            sleepScorePresent: sleepScore != nil,
             budget: notificationBudget
         )
     }
@@ -2918,16 +2921,21 @@ final class AppModel: ObservableObject {
         let evaluationGeneration = adaptiveDayEvaluationGate.begin()
         let nowSec = Int(now.timeIntervalSince1970)
         let offset = TimeZone.autoupdatingCurrent.secondsFromGMT(for: now)
+        let priorRoutineHistoryStart = AdaptiveDayTimeZoneStore.routineHistoryStartSec()
         let change = AdaptiveDayTimeZoneStore.observe(
             offsetSec: offset,
             nowSec: nowSec
         )
+        let routineHistoryStart = AdaptiveDayTimeZoneStore.routineHistoryStartSec()
+        if routineHistoryStart != priorRoutineHistoryStart {
+            AppDiagnosticsRecorder.shared.record(
+                "adaptive_day.time_zone_baseline",
+                fields: ["outcome": "routine_history_reset"]
+            )
+        }
         guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled else {
             AdaptiveDayTimeZoneStore.discardPending()
-            AdaptivePlannedWorkoutScheduler.cancelPending()
-            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
-                keepingFingerprint: nil
-            )
+            ContextualInterventionCenter.clearAdaptiveDayArtifacts()
             return
         }
         let today = max(Repository.logicalDayKey(now), Repository.localDayKey(now))
@@ -2936,13 +2944,15 @@ final class AppModel: ObservableObject {
             nowSec: nowSec,
             currentTimeZoneOffsetSec: offset,
             sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed,
             sleepDays: repo.days.map {
                 .init(day: $0.day, totalSleepMinutes: $0.totalSleepMin)
             },
             sleepWindows: repo.sleeps.map {
                 .init(startSec: $0.effectiveStartTs, endSec: $0.endTs)
             },
-            timeZoneChange: change
+            timeZoneChange: change,
+            routineHistoryStartSec: routineHistoryStart
         ))
         if let recommendation, recommendation.kind == .travelAdjustment {
             guard !Task.isCancelled else { return }
@@ -2960,7 +2970,48 @@ final class AppModel: ObservableObject {
         let calendarRefresh = await PlannedWorkoutCalendarStore.shared.refreshOutcome(now: now)
         guard !Task.isCancelled else { return }
         guard adaptiveDayEvaluationGate.isCurrent(evaluationGeneration) else { return }
-        guard case .completed(let plannedWorkout) = calendarRefresh else { return }
+        let plannedWorkout: PlannedWorkoutCalendarSnapshot?
+        switch calendarRefresh {
+        case .completed(let snapshot):
+            plannedWorkout = snapshot
+        case .superseded:
+            return
+        case .failed:
+            if let recommendation {
+                await postAdaptiveIntervention(
+                    AdaptiveDayInterventionFactory.candidate(from: recommendation),
+                    notificationBudget: notificationBudget
+                )
+            }
+            return
+        }
+        let currentSleepAggregate = repo.days
+            .last(where: { $0.day == today })?
+            .totalSleepMin
+        let currentSleepObservation: (endSec: Int, durationMinutes: Double)? =
+            repo.sleeps
+            .sorted { $0.endTs > $1.endTs }
+            .compactMap { session in
+                let end = Date(timeIntervalSince1970: TimeInterval(session.endTs))
+                return max(
+                    Repository.logicalDayKey(end),
+                    Repository.localDayKey(end)
+                ) == today
+                    ? session
+                    : nil
+            }
+            .compactMap { session in
+                let durationMinutes =
+                    Double(session.endTs - session.effectiveStartTs) / 60.0
+                guard DailyActionPlanner.matchedSleepObservationEndSec(
+                    aggregateMinutes: currentSleepAggregate,
+                    sessionDurationMinutes: durationMinutes,
+                    sessionEndSec: session.endTs,
+                    nowSec: nowSec
+                ) != nil else { return nil }
+                return (session.endTs, durationMinutes)
+            }
+            .first
         let plan = DailyActionPlanner.plan(
             today: today,
             readiness: ReadinessEngine.evaluate(days: repo.days, today: today),
@@ -2969,7 +3020,16 @@ final class AppModel: ObservableObject {
                 DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
             },
             recentSleep: repo.days.map {
-                DailyActionPlanner.SleepDay(day: $0.day, minutes: $0.totalSleepMin)
+                DailyActionPlanner.SleepDay(
+                    day: $0.day,
+                    minutes: $0.totalSleepMin,
+                    observedAtSec: $0.day == today
+                        ? currentSleepObservation?.endSec
+                        : nil,
+                    observedSessionDurationMinutes: $0.day == today
+                        ? currentSleepObservation?.durationMinutes
+                        : nil
+                )
             },
             sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
             sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed,

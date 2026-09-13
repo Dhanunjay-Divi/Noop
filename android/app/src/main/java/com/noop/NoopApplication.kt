@@ -15,6 +15,7 @@ import com.noop.ble.WhoopModel
 import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
+import com.noop.feedback.FeedbackScheduler
 import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.location.GpsSession
 import com.noop.managed.ManagedCloudScheduler
@@ -191,9 +192,11 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
      */
     fun startOperationalRuntime() {
         if (operationalRuntime.get()) return
+        val now = ZonedDateTime.now()
         val resumeResult = AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
             context = this,
-            offsetSec = ZonedDateTime.now().offset.totalSeconds,
+            offsetSec = now.offset.totalSeconds,
+            nowSec = now.toEpochSecond(),
         )
         when (resumeResult) {
             AdaptiveDayOperationalResumeResult.FAILED -> {
@@ -380,6 +383,17 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             runCatching { managedCloud.bootstrap() }
             runCatching { ManagedCloudScheduler.reconcile(this@NoopApplication) }
             runCatching { ManagedCloudScheduler.enqueueCatchUpIfDue(this@NoopApplication) }
+            // App reports are account-free and user-staged. Repair only already-consented outbox work;
+            // this never creates a report or reads health data on its own.
+            val feedbackRecovery = runCatching {
+                FeedbackScheduler.reconcile(this@NoopApplication)
+            }
+            AppDiagnosticsRecorder.record(
+                "feedback.startup_recovery",
+                fields = mapOf(
+                    "outcome" to if (feedbackRecovery.isSuccess) "completed" else "failed",
+                ),
+            )
             // Account state reconciliation is local unless this build explicitly enables the
             // ownership authority. It never starts BLE, uploads health data, or grants NOOP+.
             runCatching { ownership.bootstrap() }

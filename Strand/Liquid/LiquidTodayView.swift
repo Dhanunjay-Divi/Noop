@@ -389,11 +389,13 @@ struct LiquidTodayView: View {
     private static let topAnchorID = "liquidToday.top"
     private static let bottomAnchorID = "liquidToday.bottom"
     private static let patternsAnchorID = "liquidToday.patterns"
+    private static let dailyPlanDisclosureAnchorID = "liquidToday.dailyPlanDisclosure"
     private static let dailyPlanAnchorID = "liquidToday.dailyPlan"
     private static let keyMetricsAnchorID = "liquidToday.keyMetrics"
     private static var initialTodayDetailsExpanded: Bool {
         #if DEBUG
-        CommandLine.arguments.contains("--demo-daily-plan")
+        CommandLine.arguments.contains("--demo-daily-plan") &&
+            !CommandLine.arguments.contains("--demo-daily-plan-collapsed")
         #else
         false
         #endif
@@ -559,12 +561,15 @@ struct LiquidTodayView: View {
                     x: 0.5,
                     y: dynamicTypeSize.isAccessibilitySize ? 0.12 : 0.08
                 )
+                let framingID = CommandLine.arguments.contains("--demo-daily-plan-collapsed")
+                    ? Self.dailyPlanDisclosureAnchorID
+                    : Self.dailyPlanAnchorID
                 for delay in [0, 300_000_000, 600_000_000] as [UInt64] {
                     if delay > 0 {
                         try? await Task.sleep(nanoseconds: delay)
                     }
                     guard !Task.isCancelled else { return }
-                    proxy.scrollTo(Self.dailyPlanAnchorID, anchor: framingAnchor)
+                    proxy.scrollTo(framingID, anchor: framingAnchor)
                 }
             } else if CommandLine.arguments.contains("--demo-key-metrics") {
                 proxy.scrollTo(Self.keyMetricsAnchorID, anchor: .top)
@@ -1017,43 +1022,56 @@ struct LiquidTodayView: View {
 
     private var todayDetailsDisclosure: some View {
         let evidenceLabels = dailyPlanSummaryEvidenceLabels
+        let compactAdjustment = todayDetailsExpanded
+            ? nil
+            : dailyActionPlan.workoutAdjustment
         return Button {
             withAnimation(StrandMotion.interactive) {
                 todayDetailsExpanded.toggle()
             }
         } label: {
-            HStack(alignment: .top, spacing: NoopMetrics.space3) {
-                Image(systemName: dailyPlanSummarySymbol)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(dailyPlanSummaryTint)
-                    .padding(.top, 2)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(dailyPlanActionLabel(dailyActionPlan.action))
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if !evidenceLabels.isEmpty {
-                        Text(evidenceLabels.joined(separator: " / "))
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textSecondary)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                    Image(systemName: dailyPlanSummarySymbol)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(dailyPlanSummaryTint)
+                        .padding(.top, 2)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(dailyPlanActionLabel(dailyActionPlan.action))
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
+                        if !evidenceLabels.isEmpty {
+                            Text(evidenceLabels.joined(separator: " / "))
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Text(todayDetailsExpanded
+                             ? "daily_plan.details.hide"
+                             : "daily_plan.details.show")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
                     }
-                    Text(todayDetailsExpanded
-                         ? "daily_plan.details.hide"
-                         : "daily_plan.details.show")
-                        .font(StrandFont.caption)
-                        .foregroundStyle(StrandPalette.textTertiary)
+                    Spacer(minLength: NoopMetrics.space2)
+                    Image(systemName: todayDetailsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .padding(.top, 4)
+                        .accessibilityHidden(true)
                 }
-                Spacer(minLength: NoopMetrics.space2)
-                Image(systemName: todayDetailsExpanded ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .padding(.top, 4)
-                    .accessibilityHidden(true)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 48)
+
+                if let compactAdjustment {
+                    dailyPlanDivider
+                        .padding(.horizontal, 16)
+                    dailyPlanWorkoutAdjustment(compactAdjustment)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                }
             }
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, minHeight: 48)
             .background(FrostedCardSurface(cornerRadius: NoopMetrics.cardRadius))
             .contentShape(Rectangle())
         }
@@ -1064,6 +1082,7 @@ struct LiquidTodayView: View {
                  ? "appwide.a11y.expanded"
                  : "appwide.a11y.collapsed")
         )
+        .id(Self.dailyPlanDisclosureAnchorID)
     }
 
     /// Live Session entry (silent guardian, beta). It opens an explicit pre-session explanation; no
@@ -1078,7 +1097,11 @@ struct LiquidTodayView: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(StrandPalette.metricCyan)
                                 .padding(.top, 3)
-                            LiveSessionEntryCopy(live: ble.state, kind: .title)
+                            LiveSessionEntryCopy(
+                                live: ble.state,
+                                hasCurrentRecovery: chargeDisplay.hasCurrentRecovery,
+                                kind: .title
+                            )
                                 .font(StrandFont.subhead)
                                 .foregroundStyle(StrandPalette.onDarkPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1095,7 +1118,11 @@ struct LiquidTodayView: View {
                             .background(Capsule().fill(.white.opacity(0.05))
                                 .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
                             .fixedSize()
-                        LiveSessionEntryCopy(live: ble.state, kind: .detail)
+                        LiveSessionEntryCopy(
+                            live: ble.state,
+                            hasCurrentRecovery: chargeDisplay.hasCurrentRecovery,
+                            kind: .detail
+                        )
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.onDarkSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1108,7 +1135,11 @@ struct LiquidTodayView: View {
 
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 8) {
-                                LiveSessionEntryCopy(live: ble.state, kind: .title)
+                                LiveSessionEntryCopy(
+                                    live: ble.state,
+                                    hasCurrentRecovery: chargeDisplay.hasCurrentRecovery,
+                                    kind: .title
+                                )
                                     .font(StrandFont.subhead)
                                     .foregroundStyle(StrandPalette.onDarkPrimary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -1120,7 +1151,11 @@ struct LiquidTodayView: View {
                                     .background(Capsule().fill(.white.opacity(0.05))
                                         .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
                             }
-                            LiveSessionEntryCopy(live: ble.state, kind: .detail)
+                            LiveSessionEntryCopy(
+                                live: ble.state,
+                                hasCurrentRecovery: chargeDisplay.hasCurrentRecovery,
+                                kind: .detail
+                            )
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.onDarkSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1418,7 +1453,7 @@ struct LiquidTodayView: View {
                      value: stressText, symbol: card.icon, tint: StrandPalette.accent, frac: fracOver(stress, 3))
         case .fitnessAge:
             cardLink(.metric("fitness_age"), title: card.title, sub: card.subtitle,
-                     value: visibleFitnessAge.map(FitnessAgePresentation.value) ?? "–", symbol: card.icon,
+                     value: visibleFitnessAge.map(FitnessAgePresentation.value) ?? StrandFormat.missing, symbol: card.icon,
                      tint: StrandPalette.chargeColor, frac: 0.5)
         case .vitality:
             cardLink(.metric("vitality"), title: card.title, sub: card.subtitle,
@@ -1450,13 +1485,13 @@ struct LiquidTodayView: View {
             let value = liquidSpo2
             cardLink(.metricSourced(key: "spo2", source: "my-whoop"), title: card.title,
                      sub: value == nil ? card.subtitle : String(localized: "Latest available reading"),
-                     value: value.map { String(format: "%.0f%%", $0) } ?? "–", symbol: card.icon,
+                     value: value.map { String(format: "%.0f%%", $0) } ?? StrandFormat.missing, symbol: card.icon,
                      tint: StrandPalette.metricCyan, frac: fracOver(value, 100))
         case .skinTemp:
             let value = liquidSkinTemperature
             cardLink(.metricSourced(key: "skin_temp", source: "my-whoop"), title: card.title,
                      sub: value == nil ? card.subtitle : String(localized: "Latest available reading"),
-                     value: value.map(skinTemperatureText) ?? "–", symbol: card.icon,
+                     value: value.map(skinTemperatureText) ?? StrandFormat.missing, symbol: card.icon,
                      tint: StrandPalette.metricAmber, frac: nil)
         case .calories:
             energyCardLink(card)
@@ -1468,7 +1503,7 @@ struct LiquidTodayView: View {
             cardLink(.hydration(day: selectedDayKey), title: card.title, sub: card.subtitle,
                      value: hydrationGoalML.map {
                          HydrationStore.cardValue(totalML: hydrationTotalML, goalML: $0)
-                     } ?? "-",
+                     } ?? StrandFormat.missing,
                      symbol: card.icon, tint: StrandPalette.metricCyan,
                      frac: hydrationGoalML.flatMap { goal in
                          hydrationTotalML.map { HydrationGoal.fraction(totalML: $0, goalML: goal) }
@@ -2207,20 +2242,40 @@ struct LiquidTodayView: View {
                     .foregroundStyle(StrandPalette.accent)
             }
 
-            HStack(alignment: .top, spacing: 12) {
-                if let measuredSleepMinutes = adjustment.measuredSleepMinutes {
-                    dailyPlanWorkoutMetric(
-                        symbol: "bed.double.fill",
-                        label: "daily_plan.workout_adjustment.sleep_label",
-                        value: dailyPlanDuration(minutes: measuredSleepMinutes)
-                    )
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let measuredSleepMinutes = adjustment.measuredSleepMinutes {
+                            dailyPlanWorkoutMetric(
+                                symbol: "bed.double.fill",
+                                label: "daily_plan.workout_adjustment.sleep_label",
+                                value: dailyPlanDuration(minutes: measuredSleepMinutes)
+                            )
+                        }
+                        dailyPlanWorkoutMetric(
+                            symbol: "clock.fill",
+                            label: "daily_plan.workout_adjustment.workout_label",
+                            value: Date(timeIntervalSince1970: TimeInterval(adjustment.startSec))
+                                .formatted(date: .omitted, time: .shortened)
+                        )
+                    }
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        if let measuredSleepMinutes = adjustment.measuredSleepMinutes {
+                            dailyPlanWorkoutMetric(
+                                symbol: "bed.double.fill",
+                                label: "daily_plan.workout_adjustment.sleep_label",
+                                value: dailyPlanDuration(minutes: measuredSleepMinutes)
+                            )
+                        }
+                        dailyPlanWorkoutMetric(
+                            symbol: "clock.fill",
+                            label: "daily_plan.workout_adjustment.workout_label",
+                            value: Date(timeIntervalSince1970: TimeInterval(adjustment.startSec))
+                                .formatted(date: .omitted, time: .shortened)
+                        )
+                    }
                 }
-                dailyPlanWorkoutMetric(
-                    symbol: "clock.fill",
-                    label: "daily_plan.workout_adjustment.workout_label",
-                    value: Date(timeIntervalSince1970: TimeInterval(adjustment.startSec))
-                        .formatted(date: .omitted, time: .shortened)
-                )
             }
 
             if let sleepDeficit = dailyPlanSleepDeficit(adjustment) {
@@ -2638,7 +2693,7 @@ struct LiquidTodayView: View {
                   trend: keyMetricTrends[.bloodOxygen], symbol: metric.icon, key: "spo2")
         case .respiratory:
             let resp = displayDay?.respRateBpm ?? vitalsDay?.respRateBpm
-            ktile(String(localized: "Respiratory"), resp.map { String(format: "%.1f", $0) } ?? "-",
+            ktile(String(localized: "Respiratory"), resp.map { String(format: "%.1f", $0) } ?? StrandFormat.missing,
                   "rpm", StrandPalette.effortColor, nil, trend: keyMetricTrends[.respiratory],
                   symbol: metric.icon, key: "resp_rate")
         case .steps:
@@ -2646,7 +2701,7 @@ struct LiquidTodayView: View {
                   nil, trend: keyMetricTrends[.steps], symbol: metric.icon, key: stepsDetailKey,
                   detailMetric: stepsDetailMetric)
         case .weight:
-            ktile(String(localized: "Weight"), importedWeightKg.map(weightText) ?? "-", "",
+            ktile(String(localized: "Weight"), importedWeightKg.map(weightText) ?? StrandFormat.missing, "",
                   StrandPalette.metricAmber, nil, trend: keyMetricTrends[.weight],
                   symbol: metric.icon, key: "weight")
         case .calories:
@@ -3597,7 +3652,12 @@ struct LiquidTodayView: View {
         else { return nil }
 
         var recentSleep = [
-            DailyActionPlanner.SleepDay(day: dayKey, minutes: 6 * 60 + 12)
+            DailyActionPlanner.SleepDay(
+                day: dayKey,
+                minutes: 6 * 60 + 12,
+                observedAtSec: Int(now.timeIntervalSince1970) - 2 * 60 * 60,
+                observedSessionDurationMinutes: 6 * 60 + 12
+            )
         ]
         for offset in 1...7 {
             guard let prior = calendar.date(byAdding: .day, value: -offset, to: day) else {
@@ -3633,8 +3693,44 @@ struct LiquidTodayView: View {
         now: Date = Date()
     ) -> DailyActionPlanner.Plan {
         var planningNow = now
+        let currentSleepAggregate = repo.days
+            .last(where: { $0.day == selectedDayKey })?
+            .totalSleepMin
+        let currentSleepObservation: (endSec: Int, durationMinutes: Double)? =
+            repo.sleeps
+            .sorted { $0.endTs > $1.endTs }
+            .compactMap { session in
+                let end = Date(timeIntervalSince1970: TimeInterval(session.endTs))
+                return max(
+                    Repository.logicalDayKey(end),
+                    Repository.localDayKey(end)
+                ) == selectedDayKey
+                    ? session
+                    : nil
+            }
+            .compactMap { session in
+                let durationMinutes =
+                    Double(session.endTs - session.effectiveStartTs) / 60.0
+                guard DailyActionPlanner.matchedSleepObservationEndSec(
+                    aggregateMinutes: currentSleepAggregate,
+                    sessionDurationMinutes: durationMinutes,
+                    sessionEndSec: session.endTs,
+                    nowSec: Int(planningNow.timeIntervalSince1970)
+                ) != nil else { return nil }
+                return (session.endTs, durationMinutes)
+            }
+            .first
         var recentSleep = repo.days.map {
-            DailyActionPlanner.SleepDay(day: $0.day, minutes: $0.totalSleepMin)
+            DailyActionPlanner.SleepDay(
+                day: $0.day,
+                minutes: $0.totalSleepMin,
+                observedAtSec: $0.day == selectedDayKey
+                    ? currentSleepObservation?.endSec
+                    : nil,
+                observedSessionDurationMinutes: $0.day == selectedDayKey
+                    ? currentSleepObservation?.durationMinutes
+                    : nil
+            )
         }
         var plannedWorkout = selectedDayOffset == 0
             ? (plannedWorkoutSnapshot ?? plannedWorkoutCalendar.snapshot)?
@@ -3879,16 +3975,18 @@ struct LiquidTodayView: View {
 
     private func frac(_ v: Double?) -> Double? { v.map { max(0, min(1, $0 / 100)) } }
     private func fracOver(_ v: Double?, _ over: Double) -> Double? { v.map { max(0, min(1, $0 / over)) } }
-    private func intText(_ v: Double?) -> String { v.map { String(Int($0.rounded())) } ?? "–" }
+    private func intText(_ v: Double?) -> String {
+        v.map { String(Int($0.rounded())) } ?? StrandFormat.missing
+    }
 
     private func kcalText(_ v: Double?, includesUnit: Bool = true) -> String {
-        guard let v else { return "–" }
+        guard let v else { return StrandFormat.missing }
         let n = v.formatted(.number.grouping(.automatic).precision(.fractionLength(0)))
         return includesUnit ? "\(n) kcal" : n
     }
 
     private func unitText(_ v: Double?, _ unit: String, decimals: Int = 0) -> String {
-        guard let v else { return "–" }
+        guard let v else { return StrandFormat.missing }
         let n = decimals > 0 ? String(format: "%.\(decimals)f", v) : String(Int(v.rounded()))
         return unit.isEmpty ? n : "\(n) \(unit)"
     }
@@ -3896,12 +3994,12 @@ struct LiquidTodayView: View {
     private var stressText: String { stress.map { String(Int($0.rounded())) } ?? "Calibrating" }
 
     private var sleepText: String {
-        guard let m = displayDay?.totalSleepMin else { return "–" }
+        guard let m = displayDay?.totalSleepMin else { return StrandFormat.missing }
         return "\(Int(m) / 60)h \(Int(m) % 60)m"
     }
 
     private var stepsText: String {
-        guard let s = stepCount else { return "–" }
+        guard let s = stepCount else { return StrandFormat.missing }
         let f = NumberFormatter()
         f.numberStyle = .decimal
         return f.string(from: NSNumber(value: Int(s))) ?? "\(Int(s))"
@@ -3913,7 +4011,7 @@ struct LiquidTodayView: View {
     private var effortScale: EffortScale { UnitPrefs.resolveEffortScale(effortScaleRaw) }
 
     private func effortText(_ s: Double?) -> String {
-        guard let s else { return "–" }
+        guard let s else { return StrandFormat.missing }
         // Route through the shared formatter instead of hardcoding *21: a default (0–100) user was shown the
         // WHOOP-scaled number here while the hero + Workouts table showed 0–100, two numbers for one workout.
         return UnitFormatter.effortDisplay(s, scale: effortScale)
@@ -4506,7 +4604,7 @@ private struct HeroScoreCell: View {
     /// This fills the vessel without inventing a provisional Recovery number.
     var fillFraction: Double? = nil
     /// Honest non-score readout shown inside the vessel, e.g. "2/4" calibration nights.
-    var emptyText: String = "–"
+    var emptyText: String = StrandFormat.missing
     var accessibilityValueOverride: String? = nil
 
     @State private var shown: Double = 0
@@ -4536,7 +4634,7 @@ private struct HeroScoreCell: View {
         if score != nil {
             CountUpNumber(value: shown, font: StrandFont.rounded(26), decimals: decimals)
         } else {
-            let size: CGFloat = emptyText == "–" ? 26 : 19
+            let size: CGFloat = emptyText == StrandFormat.missing ? 26 : 19
             Text(emptyText).font(StrandFont.rounded(size))
         }
     }
@@ -5448,6 +5546,7 @@ private struct LiveSessionEntryCopy: View {
     }
 
     @ObservedObject var live: LiveState
+    let hasCurrentRecovery: Bool
     let kind: Kind
 
     @ViewBuilder
@@ -5461,7 +5560,11 @@ private struct LiveSessionEntryCopy: View {
             }
         case .detail:
             if liveSessionBandReady(live) {
-                Text("appwide.live_session.start_detail")
+                if hasCurrentRecovery {
+                    Text("appwide.live_session.start_detail")
+                } else {
+                    Text("appwide.live_session.start_detail_unavailable")
+                }
             } else {
                 Text("appwide.live_session.band_required")
             }
@@ -5550,7 +5653,7 @@ private struct LiquidLiveHR: View {
     private func stat(_ label: String, _ v: Double?) -> some View {
         HStack(spacing: 5) {
             Text(label).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
-            Text(v.map { String(Int($0.rounded())) } ?? "–")
+            Text(v.map { String(Int($0.rounded())) } ?? StrandFormat.missing)
                 .font(StrandFont.captionNumber).foregroundStyle(StrandPalette.textSecondary)
         }
     }
@@ -5669,6 +5772,13 @@ extension LiquidTodayView {
             case .carried(let p, _): return p
             case .calibrating, .baselineReady, .noData: return nil
             }
+        }
+
+        var hasCurrentRecovery: Bool {
+            if case .scored = self {
+                return true
+            }
+            return false
         }
 
         /// The short Charge-state pill beside the greeting. It shares a row with the greeting under a
