@@ -141,6 +141,24 @@ final class ScreenStateContractTests: XCTestCase {
             try sourceText("StrandiOS/System/ManagedFriendsView.swift")
                 .contains("StrandFormat.missing")
         )
+
+        let health = try sourceText("Strand/Screens/HealthView.swift")
+        XCTAssertTrue(health.contains(
+            #"trailing: hasLiveHR ? "\(displayHR!) bpm" : StrandFormat.missing"#
+        ))
+        XCTAssertTrue(health.contains(
+            #"("Zone", hasLiveHR ? "Z\(zone)" : StrandFormat.missing)"#
+        ))
+        XCTAssertTrue(health.contains(
+            #"("% Max", hasLiveHR ? "\(Int((fraction * 100).rounded()))%" : StrandFormat.missing)"#
+        ))
+        XCTAssertFalse(health.contains(
+            #"trailing: hasLiveHR ? "\(displayHR!) bpm" : "-""#
+        ))
+
+        let journal = try sourceText("Strand/Screens/JournalLogCard.swift")
+        XCTAssertTrue(journal.contains("placeholder: StrandFormat.missing"))
+        XCTAssertFalse(journal.contains(#"placeholder: "-""#))
     }
 
     func testAuditedSocialAndBandCopyUsesCurrentVocabulary() throws {
@@ -213,6 +231,47 @@ final class ScreenStateContractTests: XCTestCase {
         let managed = try sourceText("StrandiOS/System/ManagedCloudViews.swift")
         XCTAssertTrue(managed.contains("managedBenefit("))
         XCTAssertTrue(managed.contains(#"title: "Stays local-first""#))
+    }
+
+    func testAuditedRecoveryAndDailySignalCallSitesUseSharedPresentation() throws {
+        let today = try sourceText("Strand/Screens/TodayView.swift")
+        let calendar = try sourceText("Strand/Screens/CalendarMonthView.swift")
+        let digest = try sourceText("Strand/Screens/WeeklyDigestView.swift")
+        let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+
+        XCTAssertTrue(today.contains("RecoveryBandPresentation.label(for: score)"))
+        XCTAssertTrue(calendar.contains(
+            "RecoveryBandPresentation.color(for: v).opacity(0.9)"
+        ))
+        XCTAssertTrue(digest.contains(
+            "RecoveryBandPresentation.gaugeStops(for: summary.thisWeek.mean)"
+        ))
+        XCTAssertTrue(digest.contains(
+            "RecoveryBandPresentation.color(for: s.thisWeek.mean)"
+        ))
+
+        XCTAssertTrue(liquidToday.contains(
+            #"case .steady: return String(localized: "appwide.daily_signal.status.aligned")"#
+        ))
+        XCTAssertTrue(liquidToday.contains(
+            #"case .watch: return String(localized: "appwide.daily_signal.status.recheck")"#
+        ))
+        XCTAssertTrue(liquidToday.contains(
+            #"case .alert: return String(localized: "appwide.daily_signal.status.check_in")"#
+        ))
+    }
+
+    func testWorkoutCoachEntryBranchesOnBandAndCurrentRecovery() throws {
+        let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+
+        XCTAssertTrue(liquidToday.contains("if liveSessionBandReady(live)"))
+        XCTAssertTrue(liquidToday.contains("if hasCurrentRecovery"))
+        XCTAssertTrue(liquidToday.contains(
+            #"Text("appwide.live_session.start_detail_unavailable")"#
+        ))
+        XCTAssertTrue(liquidToday.contains(
+            #"Text("appwide.live_session.band_required")"#
+        ))
     }
 }
 

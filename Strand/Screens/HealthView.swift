@@ -405,15 +405,15 @@ private struct HeartRateSection: View {
                     : (hasLiveHR ? String(localized: "Streaming live")
                        : (liveTrackingOptedIn ? String(localized: "Awaiting wearable")
                           : String(localized: "Live display paused"))),
-                trailing: hasLiveHR ? "\(displayHR!) bpm" : "-",
+                trailing: hasLiveHR ? "\(displayHR!) bpm" : StrandFormat.missing,
                 tint: StrandPalette.metricRose
             ) {
                 heroChart(displayHR: displayHR, hasLiveHR: hasLiveHR,
                           fraction: fraction, zone: zone, series: series)
             } footer: {
                 ChartFooter([
-                    ("Zone", hasLiveHR ? "Z\(zone)" : "-"),
-                    ("% Max", hasLiveHR ? "\(Int((fraction * 100).rounded()))%" : "-"),
+                    ("Zone", hasLiveHR ? "Z\(zone)" : StrandFormat.missing),
+                    ("% Max", hasLiveHR ? "\(Int((fraction * 100).rounded()))%" : StrandFormat.missing),
                     ("Max HR", "\(profile.hrMax)"),
                     ("State", hasLiveHR ? String(localized: "STREAMING")
                      : (liveTrackingOptedIn ? String(localized: "WAITING") : String(localized: "PAUSED"))),
