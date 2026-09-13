@@ -9,7 +9,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.repository import PostgresRepository
+from app import migrate
+from app.config import Settings
+from app.repository import (
+    SCHEMA_MIGRATION_LOCK_NAME,
+    MigrationManifestMismatchError,
+    PostgresRepository,
+)
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +37,25 @@ class _ReadyPool:
 
     async def fetch(self, _: str) -> list[dict[str, str]]:
         return self.rows
+
+
+class _StaleMigrationJobRepository:
+    def __init__(self) -> None:
+        self.started = False
+        self.shutdown_called = False
+        self.manifest_checked = False
+
+    async def startup(self) -> None:
+        self.started = True
+
+    async def require_current_migration_manifest(self) -> None:
+        self.manifest_checked = True
+        raise MigrationManifestMismatchError(
+            "database migration manifest does not match this build"
+        )
+
+    async def shutdown(self) -> None:
+        self.shutdown_called = True
 
 
 def _repository() -> PostgresRepository:
@@ -249,6 +274,34 @@ def test_safety_writer_compatibility_bundle_precedes_interleaved_migrations() ->
 
 
 @pytest.mark.asyncio
+async def test_migration_job_requires_exact_manifest_after_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        api_token=None,
+        database_url="postgresql://synthetic.invalid/noop",
+    )
+    repository = _StaleMigrationJobRepository()
+    monkeypatch.setattr(
+        migrate.Settings,
+        "from_env",
+        classmethod(lambda cls: settings),
+    )
+    monkeypatch.setattr(
+        migrate,
+        "PostgresRepository",
+        lambda *args, **kwargs: repository,
+    )
+
+    with pytest.raises(MigrationManifestMismatchError):
+        await migrate.run()
+
+    assert repository.started is True
+    assert repository.manifest_checked is True
+    assert repository.shutdown_called is True
+
+
+@pytest.mark.asyncio
 async def test_readiness_rejects_an_exact_prior_image_after_forward_migration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -269,9 +322,321 @@ async def test_readiness_rejects_an_exact_prior_image_after_forward_migration(
         ]
     )
     assert await repository.ready() is False
+    with pytest.raises(MigrationManifestMismatchError):
+        await repository.require_current_migration_manifest()
 
     repository._pool = _ReadyPool([{"version": migration.name, "checksum": checksum}])
     assert await repository.ready() is True
+    await repository.require_current_migration_manifest()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="a PostgreSQL test URL is required for managed Safety migration tests",
+)
+@pytest.mark.asyncio
+async def test_migration_runner_rejects_unknown_forward_version_before_ddl() -> None:
+    repository = _repository()
+    schema = f"managed_safety_forward_{uuid4().hex}"
+
+    await repository.startup()
+    pool = repository._require_pool()
+    try:
+        async with pool.acquire() as connection:
+            await connection.execute(f'CREATE SCHEMA "{schema}"')
+            await connection.execute(f'SET search_path TO "{schema}", public')
+            try:
+                await connection.execute(
+                    """
+                    CREATE TABLE noop_schema_migrations (
+                        version text PRIMARY KEY,
+                        checksum char(64) NOT NULL,
+                        applied_at timestamptz NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO noop_schema_migrations (version, checksum)
+                    VALUES ('999_forward.sql', $1)
+                    """,
+                    hashlib.sha256(b"SELECT 999;\n").hexdigest(),
+                )
+
+                with pytest.raises(MigrationManifestMismatchError):
+                    await repository._run_migrations(connection)
+
+                assert (
+                    await connection.fetchval(
+                        "SELECT count(*) FROM noop_schema_migrations"
+                    )
+                    == 1
+                )
+                assert await connection.fetchval(
+                    "SELECT to_regclass($1) IS NULL",
+                    f"{schema}.devices",
+                )
+            finally:
+                await connection.execute("RESET search_path")
+                await connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    finally:
+        await repository.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="a PostgreSQL test URL is required for managed Safety migration tests",
+)
+@pytest.mark.asyncio
+async def test_concurrent_fresh_bootstrap_serializes_before_ledger_create() -> None:
+    repository = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=3,
+        run_migrations=True,
+        database_engine="postgresql",
+    )
+    schema = f"managed_safety_bootstrap_{uuid4().hex}"
+    first_task = None
+    second_task = None
+    lock_held = False
+
+    await repository.startup()
+    pool = repository._require_pool()
+    try:
+        async with (
+            pool.acquire() as lock_connection,
+            pool.acquire() as first_connection,
+            pool.acquire() as second_connection,
+        ):
+            for connection in (
+                lock_connection,
+                first_connection,
+                second_connection,
+            ):
+                await connection.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+                await connection.execute(f'SET search_path TO "{schema}", public')
+            try:
+                assert await lock_connection.fetchval(
+                    "SELECT to_regclass($1) IS NULL",
+                    f"{schema}.noop_schema_migrations",
+                )
+                await lock_connection.execute(
+                    "SELECT pg_advisory_lock(hashtext('noop_schema_migrations'))"
+                )
+                lock_held = True
+
+                first_task = asyncio.create_task(
+                    repository._run_migrations(first_connection)
+                )
+                second_task = asyncio.create_task(
+                    repository._run_migrations(second_connection)
+                )
+                await _wait_for_backend_lock(
+                    lock_connection,
+                    first_connection.get_server_pid(),
+                )
+                await _wait_for_backend_lock(
+                    lock_connection,
+                    second_connection.get_server_pid(),
+                )
+
+                assert await lock_connection.fetchval(
+                    "SELECT to_regclass($1) IS NULL",
+                    f"{schema}.noop_schema_migrations",
+                )
+
+                await lock_connection.execute(
+                    "SELECT pg_advisory_unlock(hashtext('noop_schema_migrations'))"
+                )
+                lock_held = False
+                await asyncio.wait_for(
+                    asyncio.gather(first_task, second_task),
+                    timeout=60,
+                )
+
+                assert await lock_connection.fetchval(
+                    "SELECT count(*) FROM noop_schema_migrations"
+                ) == len(repository._migration_files())
+            finally:
+                if lock_held:
+                    await lock_connection.execute(
+                        "SELECT pg_advisory_unlock(hashtext('noop_schema_migrations'))"
+                    )
+                pending = [
+                    task
+                    for task in (first_task, second_task)
+                    if task is not None and not task.done()
+                ]
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                for connection in (
+                    first_connection,
+                    second_connection,
+                    lock_connection,
+                ):
+                    await connection.execute("RESET search_path")
+                await lock_connection.execute(
+                    f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'
+                )
+    finally:
+        await repository.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="a PostgreSQL test URL is required for managed Safety migration tests",
+)
+@pytest.mark.asyncio
+async def test_maintenance_guard_blocks_the_schema_migration_lock() -> None:
+    repository = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=2,
+        run_migrations=True,
+        database_engine="postgresql",
+    )
+    migration_lock_task = None
+
+    await repository.startup()
+    pool = repository._require_pool()
+    try:
+        async with (
+            pool.acquire() as migration_connection,
+            pool.acquire() as observer_connection,
+        ):
+            try:
+                async with repository.maintenance_guard():
+                    migration_lock_task = asyncio.create_task(
+                        migration_connection.execute(
+                            "SELECT pg_advisory_lock(hashtext($1))",
+                            SCHEMA_MIGRATION_LOCK_NAME,
+                        )
+                    )
+                    await _wait_for_backend_lock(
+                        observer_connection,
+                        migration_connection.get_server_pid(),
+                    )
+                    assert migration_lock_task.done() is False
+
+                await asyncio.wait_for(migration_lock_task, timeout=5)
+            finally:
+                if migration_lock_task is not None and not migration_lock_task.done():
+                    migration_lock_task.cancel()
+                    await asyncio.gather(
+                        migration_lock_task,
+                        return_exceptions=True,
+                    )
+                await migration_connection.execute(
+                    "SELECT pg_advisory_unlock(hashtext($1))",
+                    SCHEMA_MIGRATION_LOCK_NAME,
+                )
+    finally:
+        await repository.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="a PostgreSQL test URL is required for managed Safety migration tests",
+)
+@pytest.mark.asyncio
+async def test_maintenance_guard_preserves_a_size_one_operation_pool() -> None:
+    repository = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=1,
+        run_migrations=True,
+        database_engine="postgresql",
+    )
+
+    await repository.startup()
+    try:
+        async with repository.maintenance_guard():
+            assert (
+                await asyncio.wait_for(
+                    repository._require_pool().fetchval("SELECT 1"),
+                    timeout=5,
+                )
+                == 1
+            )
+    finally:
+        await repository.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="a PostgreSQL test URL is required for managed Safety migration tests",
+)
+@pytest.mark.asyncio
+async def test_migration_checksum_uses_exact_crlf_file_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository()
+    schema = f"managed_safety_crlf_{uuid4().hex}"
+    migration = tmp_path / "001_crlf.sql"
+    payload = b"SELECT 1;\r\n"
+    migration.write_bytes(payload)
+    raw_checksum = hashlib.sha256(payload).hexdigest()
+    normalized_checksum = hashlib.sha256(
+        migration.read_text(encoding="utf-8").encode("utf-8")
+    ).hexdigest()
+    assert raw_checksum != normalized_checksum
+
+    monkeypatch.setattr(repository, "_migration_files", lambda: [migration])
+    monkeypatch.setattr(
+        repository,
+        "_migration_batches",
+        lambda migrations, applied: (
+            [] if migration.name in applied else [(migration,)]
+        ),
+    )
+
+    await repository.startup()
+    pool = repository._require_pool()
+    try:
+        async with pool.acquire() as connection:
+            await connection.execute(f'CREATE SCHEMA "{schema}"')
+            await connection.execute(f'SET search_path TO "{schema}", public')
+            try:
+                await repository._run_migrations(connection)
+                row = await connection.fetchrow(
+                    """
+                    SELECT version, checksum
+                    FROM noop_schema_migrations
+                    WHERE version = $1
+                    """,
+                    migration.name,
+                )
+                assert row["checksum"].strip() == raw_checksum
+
+                await repository._run_migrations(connection)
+                assert (
+                    await connection.fetchval(
+                        "SELECT count(*) FROM noop_schema_migrations"
+                    )
+                    == 1
+                )
+
+                repository._pool = _ReadyPool(
+                    [
+                        {
+                            "version": row["version"],
+                            "checksum": row["checksum"],
+                        }
+                    ]
+                )
+                assert await repository.ready() is True
+                await repository.require_current_migration_manifest()
+            finally:
+                repository._pool = pool
+                await connection.execute("RESET search_path")
+                await connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    finally:
+        repository._pool = pool
+        await repository.shutdown()
 
 
 @pytest.mark.skipif(

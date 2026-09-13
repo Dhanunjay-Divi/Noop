@@ -499,8 +499,13 @@ Compose also starts an encrypted backup worker. It performs a custom-format
 AES-256 using the mounted secret file, publishes it atomically with a SHA-256
 manifest, and prunes only archives it owns. The worker fails before invoking
 `pg_dump` when the secret is missing, unreadable, empty, or shorter than 32
-bytes. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md) for off-host copies and the
-required disposable restore drill.
+bytes. Restore application smoke selects the immutable migration manifest using
+the same `NOOP_DATABASE_ENGINE`: `migration-manifest.sha256` for TimescaleDB and
+`migration-manifest-postgresql.sha256` for standard PostgreSQL. An override is
+accepted only when it is byte-identical to the selected engine manifest, so a
+mixed-engine restore fails closed. See
+[TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md) for off-host copies and the required
+disposable restore drill.
 
 ## Development and tests
 
@@ -513,23 +518,47 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The production repository validates every applied checksum before changing the
-database, applies ordinary immutable SQL files in lexical order, and records
-each checksum in `noop_schema_migrations`. The explicit Safety writer
-compatibility bundle applies migrations `038` and `041` in one transaction
-before the independent `039` and `040` migrations. A prior writer therefore
-cannot observe `038`'s trigger `NOT NULL` contract without `041`'s derivation
-trigger. `NOOP_DATABASE_ENGINE=timescaledb` uses `migrations/` and makes the
-metric-sample table a hypertable.
+The production repository hashes the exact raw bytes that it decodes and
+executes, validates every applied checksum before changing the database, and
+rejects applied versions that are absent from the running image. It records the
+same raw-byte SHA-256 in `noop_schema_migrations`; each engine-specific backup
+manifest and restore check uses that identical byte contract.
+
+On a fresh database, the explicit Safety writer compatibility bundle applies
+migrations `038` and `041` in one transaction before the independent `039` and
+`040` migrations. A prior writer therefore cannot observe a committed
+fresh-install schema containing `038` without `041`. An existing database that
+already committed immutable migration `038` necessarily takes a different
+upgrade path: the runner validates `038`, obtains an `ACCESS EXCLUSIVE` lock on
+the quota table, and applies only pending migration `041` transactionally.
+Admission and in-flight prior writers must be drained before that upgrade; the
+lock protects the transition but cannot erase the historical committed
+`038`-only state.
+
+`NOOP_DATABASE_ENGINE=timescaledb` uses `migrations/` and makes the metric-sample
+table a hypertable.
 `NOOP_DATABASE_ENGINE=postgresql` substitutes only
 `migrations-postgresql/001_init.sql`, which removes the Timescale extension and
 hypertable calls; all later migrations remain canonical. The two initial
 migrations intentionally have different checksums, so changing engines under an
 existing database fails rather than silently changing its storage contract.
 Readiness requires the database migration set to exactly equal the running
-image's set. A code rollback must therefore be rebuilt with the current
-immutable migration directory and manifest; redeploying an exact older image is
-not a supported database rollback.
+image's set. The migration command verifies exact equality after applying
+pending files, and the managed-storage and feedback lifecycle commands verify it
+before constructing mutation-capable dependencies. The API process performs the
+same check before starting its embedded retention and feedback lifecycle tasks.
+Missing, changed, and forward/unknown versions all fail closed. A code rollback
+must therefore be rebuilt with the current immutable migration directory and
+manifest; redeploying an exact older image is not a supported database rollback.
+
+Bounded destructive maintenance acquires the shared
+`noop_schema_migrations` advisory lock, validates the exact manifest while that
+lock is held, and only then acquires operation-specific retention or lifecycle
+locks. A dedicated short-lived connection holds the schema guard, so a
+size-one operation pool remains usable. The migration runner takes the exclusive
+form of the schema lock. Database mutations retain their existing short
+transactions; object deletion and identity-provider calls do not run inside one
+giant database transaction.
 
 Migration `002_row_provenance.sql` preserves `sync_batch_id`,
 `source_platform`, and the full `source_metadata` object on each metric, event,

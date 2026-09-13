@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 
+from app import feedback_lifecycle
+from app.config import Settings
 from app.feedback_lifecycle import (
     feedback_lifecycle_worker,
     run_feedback_cleanup_once,
@@ -25,6 +28,7 @@ from app.managed_object_store import (
     ManagedObjectNotFoundError,
     ManagedObjectStoreError,
 )
+from app.repository import MigrationManifestMismatchError
 
 
 CONFIRMATION_DELAY_SECONDS = 60
@@ -69,6 +73,162 @@ class TrackingStore:
 class FailingCleanupRepository(MemoryFeedbackRepository):
     async def claim_cleanup(self, **_kwargs):
         raise RuntimeError("synthetic cleanup stage failure")
+
+
+class TrackingLifecycleRepository(MemoryFeedbackRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cleanup_claimed = False
+        self.retention_claimed = False
+
+    async def claim_cleanup(self, **kwargs):
+        self.cleanup_claimed = True
+        return await super().claim_cleanup(**kwargs)
+
+    async def claim_expired(self, **kwargs):
+        self.retention_claimed = True
+        return await super().claim_expired(**kwargs)
+
+
+class StaleMigrationPrimary:
+    def __init__(self) -> None:
+        self.started = False
+        self.shutdown_called = False
+
+    async def startup(self) -> None:
+        self.started = True
+
+    @asynccontextmanager
+    async def maintenance_guard(self):
+        raise MigrationManifestMismatchError(
+            "database migration manifest does not match this build"
+        )
+        yield
+
+    async def shutdown(self) -> None:
+        self.shutdown_called = True
+
+
+async def test_feedback_lifecycle_rejects_forward_schema_before_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        api_token=None,
+        database_url="postgresql://synthetic.invalid/noop",
+        feedback_lifecycle_enabled=True,
+        feedback_bucket="synthetic-feedback-bucket",
+        managed_signer_email="feedback@synthetic.invalid",
+    )
+    primary = StaleMigrationPrimary()
+
+    monkeypatch.setattr(
+        feedback_lifecycle.Settings,
+        "from_env",
+        classmethod(lambda cls: settings),
+    )
+    monkeypatch.setattr(
+        feedback_lifecycle,
+        "PostgresRepository",
+        lambda *args, **kwargs: primary,
+    )
+
+    def reject_mutating_dependency(*args, **kwargs):
+        raise AssertionError("mutating feedback dependency was constructed")
+
+    monkeypatch.setattr(
+        feedback_lifecycle,
+        "PostgresFeedbackRepository",
+        reject_mutating_dependency,
+    )
+
+    with pytest.raises(MigrationManifestMismatchError):
+        await feedback_lifecycle._run()
+
+    assert primary.started is True
+    assert primary.shutdown_called is True
+
+
+async def test_feedback_cycle_revalidates_manifest_before_claiming_data() -> None:
+    repository = TrackingLifecycleRepository()
+
+    @asynccontextmanager
+    async def reject_stale_manifest():
+        raise MigrationManifestMismatchError(
+            "database migration manifest does not match this build"
+        )
+        yield
+
+    with pytest.raises(MigrationManifestMismatchError):
+        await run_feedback_lifecycle_once(
+            repository=repository,
+            object_store=TrackingStore(),  # type: ignore[arg-type]
+            batch_size=10,
+            confirmation_delay_seconds=CONFIRMATION_DELAY_SECONDS,
+            maintenance_guard=reject_stale_manifest,
+        )
+
+    assert repository.cleanup_claimed is False
+    assert repository.retention_claimed is False
+
+
+async def test_feedback_worker_retries_manifest_failure_with_bounded_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = TrackingLifecycleRepository()
+    events: list[tuple[str, dict[str, object]]] = []
+    manifest_calls = 0
+    retried = asyncio.Event()
+    hold_third_check = asyncio.Event()
+
+    @asynccontextmanager
+    async def flaky_manifest_guard():
+        nonlocal manifest_calls
+        manifest_calls += 1
+        if manifest_calls == 1:
+            raise RuntimeError("private synthetic database detail")
+        if manifest_calls == 2:
+            retried.set()
+        else:
+            await hold_third_check.wait()
+        yield
+
+    monkeypatch.setattr(
+        feedback_lifecycle,
+        "emit_operational_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    task = asyncio.create_task(
+        feedback_lifecycle_worker(
+            repository=repository,
+            object_store=TrackingStore(),  # type: ignore[arg-type]
+            interval_seconds=0,
+            batch_size=10,
+            confirmation_delay_seconds=CONFIRMATION_DELAY_SECONDS,
+            maintenance_guard=flaky_manifest_guard,
+        )
+    )
+    try:
+        await asyncio.wait_for(retried.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert task.done() is False
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    manifest_events = [
+        fields
+        for event, fields in events
+        if event == "feedback.lifecycle_manifest_check"
+    ]
+    assert len(manifest_events) == 1
+    assert manifest_events[0]["service"] == "noop-feedback-lifecycle"
+    assert manifest_events[0]["severity"] == "ERROR"
+    assert manifest_events[0]["outcome"] == "failed"
+    assert manifest_events[0]["failure_kind"] == "RuntimeError"
+    assert isinstance(manifest_events[0]["duration_ms"], int)
+    assert "private synthetic database detail" not in repr(events)
+    assert manifest_calls >= 2
 
 
 def _report(

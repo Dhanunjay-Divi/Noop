@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -213,8 +215,18 @@ async def run_feedback_lifecycle_once(
     object_store: ManagedObjectStoring,
     batch_size: int,
     confirmation_delay_seconds: int,
+    maintenance_guard: (Callable[[], AbstractAsyncContextManager[None]] | None) = None,
     now: datetime | None = None,
 ) -> FeedbackLifecycleResult:
+    if maintenance_guard is not None:
+        async with maintenance_guard():
+            return await run_feedback_lifecycle_once(
+                repository=repository,
+                object_store=object_store,
+                batch_size=batch_size,
+                confirmation_delay_seconds=confirmation_delay_seconds,
+                now=now,
+            )
     cleanup = {"claimed": 0, "deleted": 0, "rescheduled": 0, "failed": 0}
     retention = {"claimed": 0, "deleted": 0, "rescheduled": 0, "failed": 0}
     stage_failures = 0
@@ -276,14 +288,29 @@ async def feedback_lifecycle_worker(
     interval_seconds: int,
     batch_size: int,
     confirmation_delay_seconds: int,
+    maintenance_guard: (Callable[[], AbstractAsyncContextManager[None]] | None) = None,
 ) -> None:
     while True:
-        await run_feedback_lifecycle_once(
-            repository=repository,
-            object_store=object_store,
-            batch_size=batch_size,
-            confirmation_delay_seconds=confirmation_delay_seconds,
-        )
+        started = time.monotonic()
+        try:
+            await run_feedback_lifecycle_once(
+                repository=repository,
+                object_store=object_store,
+                batch_size=batch_size,
+                confirmation_delay_seconds=confirmation_delay_seconds,
+                maintenance_guard=maintenance_guard,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            emit_operational_event(
+                "feedback.lifecycle_manifest_check",
+                service="noop-feedback-lifecycle",
+                severity="ERROR",
+                outcome="failed",
+                failure_kind=type(error).__name__,
+                duration_ms=max(0, int((time.monotonic() - started) * 1_000)),
+            )
         await asyncio.sleep(interval_seconds)
 
 
@@ -300,21 +327,22 @@ async def _run() -> FeedbackLifecycleResult:
         run_migrations=False,
         database_engine=settings.database_engine,
     )
-    repository = PostgresFeedbackRepository(primary)
-    object_store = GCSV4ObjectStore(
-        bucket=settings.feedback_bucket or "",
-        signer=IAMBlobSigner(settings.managed_signer_email or ""),
-    )
     await primary.startup()
     try:
-        return await run_feedback_lifecycle_once(
-            repository=repository,
-            object_store=object_store,
-            batch_size=settings.feedback_lifecycle_batch_size,
-            confirmation_delay_seconds=(
-                settings.feedback_cleanup_confirmation_delay_seconds
-            ),
-        )
+        async with primary.maintenance_guard():
+            repository = PostgresFeedbackRepository(primary)
+            object_store = GCSV4ObjectStore(
+                bucket=settings.feedback_bucket or "",
+                signer=IAMBlobSigner(settings.managed_signer_email or ""),
+            )
+            return await run_feedback_lifecycle_once(
+                repository=repository,
+                object_store=object_store,
+                batch_size=settings.feedback_lifecycle_batch_size,
+                confirmation_delay_seconds=(
+                    settings.feedback_cleanup_confirmation_delay_seconds
+                ),
+            )
     finally:
         await primary.shutdown()
 

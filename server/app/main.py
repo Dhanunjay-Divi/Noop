@@ -10,7 +10,7 @@ import re
 import secrets
 import time
 from collections import deque
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -803,10 +803,40 @@ def _safety_response_page(
 </html>"""
 
 
+async def _require_runtime_migration_manifest(repository: Repository) -> None:
+    if isinstance(repository, PostgresRepository):
+        await repository.require_current_migration_manifest()
+
+
+@asynccontextmanager
+async def _runtime_maintenance_guard(repository: Repository):
+    if isinstance(repository, PostgresRepository):
+        async with repository.maintenance_guard():
+            yield
+        return
+    yield
+
+
+async def _cancel_background_tasks(
+    tasks: tuple[asyncio.Task[None] | None, ...],
+) -> list[BaseException]:
+    active = [task for task in tasks if task is not None]
+    for task in active:
+        task.cancel()
+    outcomes = await asyncio.gather(*active, return_exceptions=True)
+    return [
+        outcome
+        for outcome in outcomes
+        if isinstance(outcome, BaseException)
+        and not isinstance(outcome, asyncio.CancelledError)
+    ]
+
+
 async def _run_retention_once(
     repository: Repository,
     settings: Settings,
     *,
+    device_id: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, int]:
     """Apply the configured global retention window exactly once.
@@ -822,7 +852,12 @@ async def _run_retention_once(
     replay_guard_until = reference + timedelta(
         days=settings.idempotency_replay_guard_days
     )
-    return await repository.purge_before(cutoff, None, replay_guard_until)
+    async with _runtime_maintenance_guard(repository):
+        return await repository.purge_before(
+            cutoff,
+            device_id,
+            replay_guard_until,
+        )
 
 
 async def _retention_worker(repository: Repository, settings: Settings) -> None:
@@ -860,6 +895,7 @@ async def _run_safety_retention_once(
     repository: SafetyRepository,
     settings: Settings,
     *,
+    manifest_repository: Repository | None = None,
     now: datetime | None = None,
 ) -> dict[str, int]:
     if (
@@ -883,32 +919,55 @@ async def _run_safety_retention_once(
     )
     totals: dict[str, int] = {}
     batch_size = settings.safety_maintenance_batch_size
-    for _ in range(settings.safety_retention_max_batches_per_run):
-        counts = await repository.purge_retained_data(
-            incident_cutoff=incident_cutoff,
-            contact_cutoff=contact_cutoff,
-            replay_guard_until=replay_guard_until,
-            now=reference,
-            limit=batch_size,
-        )
-        for key, value in counts.items():
-            totals[key] = totals.get(key, 0) + int(value)
-        if all(int(counts.get(key, 0)) < batch_size for key in counts):
-            break
-        await asyncio.sleep(0)
+    guard_repository = manifest_repository
+    if guard_repository is None:
+        for _ in range(settings.safety_retention_max_batches_per_run):
+            counts = await repository.purge_retained_data(
+                incident_cutoff=incident_cutoff,
+                contact_cutoff=contact_cutoff,
+                replay_guard_until=replay_guard_until,
+                now=reference,
+                limit=batch_size,
+            )
+            for key, value in counts.items():
+                totals[key] = totals.get(key, 0) + int(value)
+            if all(int(counts.get(key, 0)) < batch_size for key in counts):
+                break
+            await asyncio.sleep(0)
+        return totals
+    async with _runtime_maintenance_guard(guard_repository):
+        for _ in range(settings.safety_retention_max_batches_per_run):
+            counts = await repository.purge_retained_data(
+                incident_cutoff=incident_cutoff,
+                contact_cutoff=contact_cutoff,
+                replay_guard_until=replay_guard_until,
+                now=reference,
+                limit=batch_size,
+            )
+            for key, value in counts.items():
+                totals[key] = totals.get(key, 0) + int(value)
+            if all(int(counts.get(key, 0)) < batch_size for key in counts):
+                break
+            await asyncio.sleep(0)
     return totals
 
 
 async def _safety_retention_worker(
     repository: SafetyRepository,
     settings: Settings,
+    *,
+    manifest_repository: Repository | None = None,
 ) -> None:
     interval_seconds = settings.safety_retention_interval_hours * 60 * 60
     while True:
         await asyncio.sleep(interval_seconds)
         started = time.monotonic()
         try:
-            counts = await _run_safety_retention_once(repository, settings)
+            counts = await _run_safety_retention_once(
+                repository,
+                settings,
+                manifest_repository=manifest_repository,
+            )
             emit_operational_event(
                 "safety_retention.run",
                 service="noop-api",
@@ -1254,71 +1313,90 @@ def create_app(
         safety_retention_task: asyncio.Task[None] | None = None
         feedback_retention_task: asyncio.Task[None] | None = None
         safety_task: asyncio.Task[None] | None = None
-        if runtime_settings.retention_days is not None:
-            retention_task = asyncio.create_task(
-                _retention_worker(runtime_repository, runtime_settings),
-                name="noop-retention",
-            )
-        if (
-            runtime_settings.safety_incident_retention_days is not None
-            or runtime_settings.safety_contact_retention_days is not None
-        ):
-            safety_retention_task = asyncio.create_task(
-                _safety_retention_worker(
-                    runtime_safety_repository,
-                    runtime_settings,
-                ),
-                name="noop-safety-retention",
-            )
-        if (
-            runtime_settings.feedback_lifecycle_enabled
-            and runtime_feedback_repository is not None
-            and runtime_feedback_object_store is not None
-        ):
-            feedback_retention_task = asyncio.create_task(
-                feedback_lifecycle_worker(
-                    repository=runtime_feedback_repository,
-                    object_store=runtime_feedback_object_store,
-                    interval_seconds=(
-                        runtime_settings.feedback_lifecycle_interval_seconds
-                    ),
-                    batch_size=runtime_settings.feedback_lifecycle_batch_size,
-                    confirmation_delay_seconds=(
-                        runtime_settings.feedback_cleanup_confirmation_delay_seconds
-                    ),
-                ),
-                name="noop-feedback-lifecycle",
-            )
-        if runtime_paging_provider.available and runtime_settings.safety_worker_enabled:
-            await runtime_safety_repository.record_worker_heartbeat(
-                worker_id=runtime_safety_worker.worker_id,
-                now=await runtime_safety_repository.coordination_now(),
-                worker_version=__version__,
-            )
-            safety_task = asyncio.create_task(
-                runtime_safety_worker.run(),
-                name="noop-safety-delivery",
-            )
+        lifespan_completed = False
         try:
+            try:
+                await _require_runtime_migration_manifest(runtime_repository)
+            except Exception as error:
+                emit_operational_event(
+                    "runtime.startup",
+                    severity="ERROR",
+                    service="noop-api",
+                    outcome="rejected",
+                    failure_kind=type(error).__name__,
+                )
+                raise
+            if runtime_settings.retention_days is not None:
+                retention_task = asyncio.create_task(
+                    _retention_worker(runtime_repository, runtime_settings),
+                    name="noop-retention",
+                )
+            if (
+                runtime_settings.safety_incident_retention_days is not None
+                or runtime_settings.safety_contact_retention_days is not None
+            ):
+                safety_retention_task = asyncio.create_task(
+                    _safety_retention_worker(
+                        runtime_safety_repository,
+                        runtime_settings,
+                        manifest_repository=runtime_repository,
+                    ),
+                    name="noop-safety-retention",
+                )
+            if (
+                runtime_settings.feedback_lifecycle_enabled
+                and runtime_feedback_repository is not None
+                and runtime_feedback_object_store is not None
+            ):
+                feedback_retention_task = asyncio.create_task(
+                    feedback_lifecycle_worker(
+                        repository=runtime_feedback_repository,
+                        object_store=runtime_feedback_object_store,
+                        interval_seconds=(
+                            runtime_settings.feedback_lifecycle_interval_seconds
+                        ),
+                        batch_size=runtime_settings.feedback_lifecycle_batch_size,
+                        confirmation_delay_seconds=(
+                            runtime_settings.feedback_cleanup_confirmation_delay_seconds
+                        ),
+                        maintenance_guard=(
+                            runtime_repository.maintenance_guard
+                            if isinstance(runtime_repository, PostgresRepository)
+                            else None
+                        ),
+                    ),
+                    name="noop-feedback-lifecycle",
+                )
+            if (
+                runtime_paging_provider.available
+                and runtime_settings.safety_worker_enabled
+            ):
+                await runtime_safety_repository.record_worker_heartbeat(
+                    worker_id=runtime_safety_worker.worker_id,
+                    now=await runtime_safety_repository.coordination_now(),
+                    worker_version=__version__,
+                )
+                safety_task = asyncio.create_task(
+                    runtime_safety_worker.run(),
+                    name="noop-safety-delivery",
+                )
             yield
+            lifespan_completed = True
         finally:
-            if safety_task is not None:
-                safety_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await safety_task
-            if retention_task is not None:
-                retention_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await retention_task
-            if safety_retention_task is not None:
-                safety_retention_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await safety_retention_task
-            if feedback_retention_task is not None:
-                feedback_retention_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await feedback_retention_task
-            await runtime_repository.shutdown()
+            task_failures: list[BaseException] = []
+            try:
+                task_failures = await _cancel_background_tasks(
+                    (
+                        safety_task,
+                        retention_task,
+                        safety_retention_task,
+                        feedback_retention_task,
+                    )
+                )
+            finally:
+                await runtime_repository.shutdown()
+            if lifespan_completed and task_failures:
+                raise task_failures[0]
 
     app = FastAPI(
         title="Noop Self-Hosted",
@@ -3763,12 +3841,13 @@ def create_app(
             )
         if body.device_id is not None:
             _device_id(body.device_id)
-        cutoff = datetime.now(UTC) - timedelta(days=runtime_settings.retention_days)
-        counts = await runtime_repository.purge_before(
-            cutoff,
-            body.device_id,
-            datetime.now(UTC)
-            + timedelta(days=runtime_settings.idempotency_replay_guard_days),
+        now = datetime.now(UTC)
+        cutoff = now - timedelta(days=runtime_settings.retention_days)
+        counts = await _run_retention_once(
+            runtime_repository,
+            runtime_settings,
+            device_id=body.device_id,
+            now=now,
         )
         return {
             "status": "purged",
@@ -3809,6 +3888,7 @@ def create_app(
         counts = await _run_safety_retention_once(
             runtime_safety_repository,
             runtime_settings,
+            manifest_repository=runtime_repository,
             now=now,
         )
         return {

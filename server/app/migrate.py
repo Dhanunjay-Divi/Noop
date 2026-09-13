@@ -18,7 +18,10 @@ async def run() -> None:
         database_engine=settings.database_engine,
     )
     await repository.startup()
-    await repository.shutdown()
+    try:
+        await repository.require_current_migration_manifest()
+    finally:
+        await repository.shutdown()
 
 
 if __name__ == "__main__":

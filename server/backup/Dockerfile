@@ -8,7 +8,7 @@ RUN apt-get update \
 
 COPY backup.sh backup-loop.sh backup-healthcheck.sh restore.sh restore-drill.sh \
     restore-application-smoke.sh restore-application-smoke.sql \
-    migration-manifest.sha256 /opt/noop/
+    migration-manifest.sha256 migration-manifest-postgresql.sha256 /opt/noop/
 COPY NOTICE /usr/share/doc/noop/NOTICE
 COPY LICENSE /usr/share/doc/noop/LICENSE
 

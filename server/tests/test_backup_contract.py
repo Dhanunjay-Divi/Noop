@@ -134,6 +134,8 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "restore-application-smoke.sh" in backup_image
     assert "restore-application-smoke.sql" in backup_image
     assert "migration-manifest.sha256" in backup_image
+    assert "migration-manifest-postgresql.sha256" in backup_image
+    assert "NOOP_DATABASE_ENGINE" in compose
     smoke_script = (BACKUP_ROOT / "restore-application-smoke.sh").read_text(
         encoding="utf-8"
     )
@@ -170,20 +172,35 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "orphaned Safety replay tombstone was restored" in smoke
 
 
-def test_restore_manifest_matches_every_immutable_migration() -> None:
-    entries = {}
-    manifest = BACKUP_ROOT / "migration-manifest.sha256"
-    for line in manifest.read_text(encoding="utf-8").splitlines():
-        checksum, version = line.split()
-        entries[version] = checksum
+def _manifest_entries(path: Path) -> dict[str, str]:
+    return {
+        version: checksum
+        for checksum, version in (
+            line.split()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+    }
 
+
+def test_restore_manifests_match_each_database_engine() -> None:
     migrations = SERVER_ROOT / "migrations"
-    expected = {
+    canonical = {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(migrations.glob("*.sql"))
     }
+    overlays = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (SERVER_ROOT / "migrations-postgresql").glob("*.sql")
+    }
+    postgresql = canonical | overlays
 
-    assert entries == expected
+    assert _manifest_entries(BACKUP_ROOT / "migration-manifest.sha256") == canonical
+    assert (
+        _manifest_entries(BACKUP_ROOT / "migration-manifest-postgresql.sha256")
+        == postgresql
+    )
+    assert canonical["001_init.sql"] != postgresql["001_init.sql"]
 
 
 def test_restore_smoke_rejects_an_applied_checksum_mismatch(tmp_path: Path) -> None:
@@ -219,10 +236,75 @@ esac
         "restore-application-smoke.sh",
         "restored_test",
         env={
-            "NOOP_MIGRATION_MANIFEST": str(manifest),
+            "NOOP_MIGRATION_MANIFEST_DIRECTORY": str(tmp_path),
             "PATH": f"{binary_directory}:{os.environ['PATH']}",
         },
     )
 
     assert result.returncode == 65
     assert "restored migration checksum mismatch: 001_init.sql" in result.stderr
+
+
+def test_restore_smoke_selects_postgresql_overlay_manifest(tmp_path: Path) -> None:
+    binary_directory = tmp_path / "bin"
+    binary_directory.mkdir()
+    calls = tmp_path / "psql-calls"
+    fake_psql = binary_directory / "psql"
+    fake_psql.write_text(
+        f"""#!/bin/sh
+printf '%s\\n' "$*" >>"{calls}"
+case "$*" in
+  *"SELECT count(*) FROM noop_schema_migrations;"*)
+    printf '41\\n'
+    ;;
+  *"--file=-"*)
+    cat >/dev/null
+    printf '1\\n'
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_psql.chmod(0o755)
+
+    result = _run_script(
+        "restore-application-smoke.sh",
+        "restored_test",
+        env={
+            "NOOP_DATABASE_ENGINE": "postgresql",
+            "NOOP_MIGRATION_MANIFEST_DIRECTORY": str(BACKUP_ROOT),
+            "PATH": f"{binary_directory}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    invoked = calls.read_text(encoding="utf-8")
+    postgresql_checksum = hashlib.sha256(
+        (SERVER_ROOT / "migrations-postgresql" / "001_init.sql").read_bytes()
+    ).hexdigest()
+    canonical_checksum = hashlib.sha256(
+        (SERVER_ROOT / "migrations" / "001_init.sql").read_bytes()
+    ).hexdigest()
+    assert postgresql_checksum in invoked
+    assert canonical_checksum not in invoked
+
+
+def test_restore_smoke_rejects_manifest_from_other_engine() -> None:
+    result = _run_script(
+        "restore-application-smoke.sh",
+        "restored_test",
+        env={
+            "NOOP_DATABASE_ENGINE": "postgresql",
+            "NOOP_MIGRATION_MANIFEST_DIRECTORY": str(BACKUP_ROOT),
+            "NOOP_MIGRATION_MANIFEST": str(BACKUP_ROOT / "migration-manifest.sha256"),
+        },
+    )
+
+    assert result.returncode == 66
+    assert (
+        "migration manifest does not match NOOP_DATABASE_ENGINE=postgresql"
+        in result.stderr
+    )
