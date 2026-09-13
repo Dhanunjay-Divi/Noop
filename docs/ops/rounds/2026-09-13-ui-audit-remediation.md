@@ -3,8 +3,8 @@
 ## Status
 
 - State: `implementation and exact-current-tree local verification complete;
-  both consolidated hosted cycles reviewed and locally corrected; final hosted
-  exact-SHA checks and protected integration pending`
+  all three consolidated hosted cycles reviewed and locally corrected; final
+  hosted exact-SHA checks and protected integration pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `ca79cc9c76b194691f93e8f2334ce38200639bde`
@@ -123,6 +123,20 @@ claims.
   English Swift literal. The corrected contracts pass focused tests and the
   complete local 1,919-test macOS suite with one expected external-fixture skip
   and zero failures.
+- Hosted Apple run `34743871046` then built the complete iOS production shell
+  and executed all 39 UI cases. Its only failures were six assertions
+  concentrated in two test-harness paths: the report-snapshot switch was below
+  the visible viewport when the test issued a raw tap, and the iOS 26 simulator
+  starved XCTest's event-loop observer after four consecutive measured scroll
+  round trips. The product report flow, Today rendering, and scroll gestures
+  completed before those assertions failed.
+- The UI harness now scrolls interactive report controls into a hittable
+  position, taps the visible trailing switch control, waits for review/removal
+  state transitions, and uses three simulator process-metric iterations while
+  retaining five scrolling-signpost iterations on physical devices. Both
+  corrected paths pass together, and the complete exact-current-tree iPhone UI
+  suite passes 39 tests with one intentional private-pilot skip and zero
+  failures.
 
 ## Data, privacy, and medical truth
 
@@ -152,7 +166,7 @@ claims.
 | Audit acceptance matrix | 20 of 20 actionable findings closed: 4 P1 and 16 P2 | Every reported misleading, inaccessible, blank, duplicated, malformed, or inconsistent state has a scoped cross-platform correction | That subjective redesign suggestions or external hardware behavior are complete |
 | Shared analytics | 1,479 tests passed | Recovery, Daily Signal, adaptive-day, planned-workout, and formatting contracts pass together | Clinical validity or individual physiology |
 | Complete Apple app suite | 1,919 tests passed, one external Xiaomi-fixture skip, zero failures | Current macOS/Apple source, persistence, UI contracts, accessibility, guidance, diagnostics, and lifecycle behavior pass together | Physical iOS background execution, BLE, haptics, or notification presentation |
-| Complete iPhone UI suite | 39 tests executed, one intentional private-pilot skip, zero failures; the suite Today-scroll sample averaged 5.313 seconds, CPU 0.186 seconds, and peak physical memory about 68.1 MB. Three additional isolated five-iteration runs all passed and averaged 5.099 seconds clock time and 0.164 seconds CPU, with 35.6-41.8 MB peak physical memory. | Current simulator navigation, reporting, accessibility, loading, planner, and scrolling paths are responsive and reachable, and the fixed swipe workload remains repeatable across independent launches | VoiceOver traversal, physical-device frame pacing, thermal pressure, or memory pressure |
+| Complete iPhone UI suite | The final exact-current-tree run executed 39 tests with one intentional private-pilot skip and zero failures. Its three-iteration simulator Today-scroll sample averaged 5.286 seconds, CPU 0.157 seconds, and about 38.9 MB peak physical memory. The prior complete run and three isolated five-iteration runs also passed; those independent samples averaged 5.313 and 5.099 seconds respectively. | Current simulator navigation, reporting, accessibility, loading, planner, and scrolling paths are responsive and reachable, and the fixed swipe workload remains repeatable across independent launches | VoiceOver traversal, physical-device frame pacing, thermal pressure, or memory pressure |
 | Android exact-source matrix | Full and Demo unit suites, both lint variants, both APK assemblies, and both instrumentation Kotlin compilations passed; Gradle finished 137 tasks successfully. The authoritative final API 35 XML records 97 production-shell cases with 95 passes, two intentional private-pilot skips, and zero failures. | Both Android variants compile and retain the matched UI, accessibility, loading, privacy, screenshot-consent, and guidance contracts | OEM rendering, TalkBack traversal, background delivery, or signed physical installs |
 | Additive demo-fixture repair | `AppleDemoSeederTests` executed 6 tests with zero failures after the repair was changed to use a caller-supplied synthetic device key | Existing screenshot databases receive missing age series and profile markers on one coherent device namespace, and a second repair is idempotent | Participant data migration, physical collection, or non-DEBUG runtime behavior |
 | Deterministic visual captures | Eleven nonblank iPhone states generated; collapsed planned-workout normal and accessibility captures manually reviewed. A fresh window-only exact-build macOS capture shows Recovery 34 as amber `Low`, Sleep 94, Effort 73, and the matching 34% Recovery key metric. | Current planner states preserve hierarchy, readable text, and stable controls at tested simulator sizes; the current scored macOS Today state agrees across hero and key metric. | Calibrating-state macOS rendering, physical display behavior, or hardware |
@@ -179,11 +193,11 @@ claims.
   Android parity correction `80ca5875`; bounded Trends preparation
   `c04ec57c`; deterministic tab test `d3da4e58`; fixture/policy/record closeout
   included in this final local commit
-- Branch and remote state: isolated pull request `#15`; hosted head `b3659ddc`
-  passes server and Android, while Apple run `34736975319` exposed two stale
-  source-contract expectations after the macOS app built successfully. The
-  corrected complete local suite passes; final exact-SHA checks and protected
-  integration remain required.
+- Branch and remote state: isolated pull request `#15`; hosted head `d8d0c315`
+  passes every required job except Apple, where run `34743871046` built the
+  complete iOS shell and exposed only the two deterministic UI-harness defects
+  recorded above. The corrected focused and complete local UI suites pass;
+  final exact-SHA checks and protected integration remain required.
 - Repository visibility verified: not changed by this round
 - Version/build impact: no schema or marketing-version change
 - Release or distribution impact: no artifact released

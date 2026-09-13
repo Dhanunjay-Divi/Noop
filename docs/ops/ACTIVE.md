@@ -116,8 +116,19 @@ API 35 production shell with 95 passing tests and two intentional private-pilot
 skips, plus the full server suite with 541 passing tests, one
 provider/environment skip, and separate disposable primary and
 PostgreSQL-overlay databases. The final Apple contract correction passes the
-complete 1,919-test macOS suite locally; a fresh hosted exact-SHA verdict is
-still required.
+complete 1,919-test macOS suite locally. Hosted Apple run `34743871046` then
+built the complete iOS production shell and executed all 39 UI cases. Its six
+assertion failures were confined to two deterministic test-harness paths: an
+off-screen report-snapshot switch received a raw tap, and the iOS 26 simulator
+starved XCTest's event-loop observer after four consecutive measured scroll
+round trips. The harness now scrolls report controls into a hittable position,
+waits for review/removal state transitions, and uses three simulator
+process-metric iterations while retaining five scrolling-signpost iterations
+on physical devices. The two focused cases pass together, and the complete
+exact-current-tree iPhone suite passes 39 tests with one intentional
+private-pilot skip and zero failures. Its Today-scroll sample averaged 5.286
+seconds, 0.157 seconds CPU, and about 38.9 MB peak physical memory. A fresh
+hosted exact-SHA verdict is still required.
 
 The exact iPhone visual matrix contains eleven nonblank states. Normal and
 accessibility collapsed-planned-workout states were manually checked for

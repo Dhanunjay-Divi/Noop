@@ -279,16 +279,20 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(screenToggle.waitForExistence(timeout: 5))
         XCTAssertTrue(screenToggle.isEnabled)
         XCTAssertEqual(screenToggle.value as? String, "0")
-        screenToggle.tap()
-        XCTAssertTrue(waitForSwitch(screenToggle, on: true))
+        XCTAssertTrue(
+            setSwitch(screenToggle, on: true, in: app),
+            "The screen snapshot switch must become enabled through a visible user tap."
+        )
+        let buildReport = app.buttons["Build report"]
         XCTAssertTrue(
             waitUntil(timeout: 10) {
-                app.buttons["Build report"].isEnabled
+                buildReport.isEnabled
                     && screenToggle.value as? String == "1"
             }
         )
+        XCTAssertTrue(scrollToHittable(buildReport, in: app))
 
-        app.buttons["Build report"].tap()
+        buildReport.tap()
         XCTAssertTrue(app.staticTexts["Report ready"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["screenshot.png"].exists)
         XCTAssertTrue(
@@ -296,9 +300,16 @@ final class NOOPiOSUITests: XCTestCase {
                 .waitForExistence(timeout: 5)
         )
 
-        app.buttons["Remove screen snapshot"].tap()
-        XCTAssertFalse(app.staticTexts["screenshot.png"].exists)
-        XCTAssertFalse(app.images["noop.app-report.screenshot-preview"].exists)
+        let removeSnapshot = app.buttons["Remove screen snapshot"]
+        XCTAssertTrue(removeSnapshot.waitForExistence(timeout: 5))
+        XCTAssertTrue(scrollToHittable(removeSnapshot, in: app))
+        removeSnapshot.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 5) {
+                !app.staticTexts["screenshot.png"].exists
+                    && !app.images["noop.app-report.screenshot-preview"].exists
+            }
+        )
     }
 
     func testAppReportCancellationUsesAccurateRemovalCopy() {
@@ -1236,11 +1247,12 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
 
         let options = XCTMeasureOptions()
-        options.iterationCount = 5
         #if targetEnvironment(simulator)
         // The iOS 26 simulator currently throws NSInternalInconsistencyException while decoding the
-        // scrolling signpost payload. Keep CI useful with process metrics; real devices retain Apple's
-        // hitch/deceleration metric below.
+        // scrolling signpost payload and can starve XCTest's event-loop observer after four consecutive
+        // measured round trips. Three process-metric iterations keep hosted CI deterministic; real
+        // devices retain five iterations of Apple's hitch/deceleration metric below.
+        options.iterationCount = 3
         measure(
             metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()],
             options: options
@@ -1249,6 +1261,7 @@ final class NOOPiOSUITests: XCTestCase {
             scroll.swipeDown()
         }
         #else
+        options.iterationCount = 5
         measure(
             metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric],
             options: options
@@ -1375,6 +1388,36 @@ final class NOOPiOSUITests: XCTestCase {
         waitUntil(timeout: timeout) {
             self.switchIsOn(element) == on
         }
+    }
+
+    private func setSwitch(
+        _ element: XCUIElement,
+        on: Bool,
+        in app: XCUIApplication,
+        attempts: Int = 3
+    ) -> Bool {
+        if switchIsOn(element) == on { return true }
+        for _ in 0..<attempts {
+            guard scrollToHittable(element, in: app) else { return false }
+            element.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)
+            ).tap()
+            if waitForSwitch(element, on: on, timeout: 5) { return true }
+        }
+        return switchIsOn(element) == on
+    }
+
+    private func scrollToHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        attempts: Int = 6
+    ) -> Bool {
+        if element.exists && element.isHittable { return true }
+        for _ in 0..<attempts {
+            app.swipeUp()
+            if element.exists && element.isHittable { return true }
+        }
+        return element.exists && element.isHittable
     }
 
     private func waitForElementDisabled(
