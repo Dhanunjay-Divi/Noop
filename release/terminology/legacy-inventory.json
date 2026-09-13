@@ -15872,10 +15872,10 @@
       "category": "historical",
       "lineNumbers": [
         3,
-        321,
-        321,
-        324,
-        324
+        326,
+        326,
+        329,
+        329
       ],
       "occurrenceCount": 5,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -15887,8 +15887,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        645,
-        1007
+        650,
+        1012
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -35442,8 +35442,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        66,
-        129
+        74,
+        139
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/ACTIVE.md",
@@ -35657,8 +35657,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        530,
-        571
+        541,
+        582
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-11-product-safety-quality-audit.md",

@@ -38,9 +38,17 @@ overlay initial-migration checksum there; production migration
 `server/migrations/001_init.sql` is unchanged from `main`. Hosted Android run
 `34736217114` independently exposed a report-screenshot test race: the test
 tapped the correctly disabled build action before capture finished and asserted
-the asynchronously decoded preview without waiting. The bounded local
-correction gives the overlay tests their dedicated database variable and waits
-for both capture completion and preview composition.
+the asynchronously decoded preview without waiting. Pushed correction
+`b3659ddc` gives the overlay tests their dedicated database variable and waits
+for both capture completion and preview composition. Its hosted server run
+`34736975271` and Android run `34736975270` pass, including the complete
+production shell. Hosted Apple run `34736975319` built the macOS app, then
+exposed two stale source-contract expectations: the committed localization
+inventory now contains 728 keys rather than 726, and the breathing haptic help
+is intentionally referenced by localization key rather than embedded as an
+English literal in Swift. The corrected contracts pass focused tests and the
+complete local 1,913-test macOS suite with zero failures and one expected
+external Xiaomi-fixture skip.
 
 The private 61-file UI audit is closed locally: all four P1 and sixteen P2
 findings have scoped Apple/Android corrections. Recovery presentation and Daily
@@ -78,7 +86,9 @@ The final hosted-failure corrections additionally pass the complete Android
 API 35 production shell with 95 passing tests and two intentional private-pilot
 skips, plus the full server suite with 541 passing tests, one
 provider/environment skip, and separate disposable primary and
-PostgreSQL-overlay databases.
+PostgreSQL-overlay databases. The final Apple contract correction passes the
+complete 1,913-test macOS suite locally; a fresh hosted exact-SHA verdict is
+still required.
 
 The exact iPhone visual matrix contains eleven nonblank states. Normal and
 accessibility collapsed-planned-workout states were manually checked for

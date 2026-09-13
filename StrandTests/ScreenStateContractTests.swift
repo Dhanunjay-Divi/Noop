@@ -176,7 +176,12 @@ final class ScreenStateContractTests: XCTestCase {
         XCTAssertFalse(today.contains(#""Strap sync""#))
         XCTAssertTrue(today.contains(#""Band sync""#))
         XCTAssertFalse(breathing.contains("pulse on the strap"))
-        XCTAssertTrue(breathing.contains("pulse on the band"))
+        XCTAssertTrue(breathing.contains("appwide.breathe.test_buzz_help"))
+        XCTAssertTrue(
+            canonicalCopy.contains(
+                "Send one test vibration to the band. A bonded connection is required."
+            )
+        )
         XCTAssertFalse(androidModel.contains("after your strap synced"))
         XCTAssertTrue(androidModel.contains("after your band synced"))
     }
@@ -814,7 +819,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 726)
+        XCTAssertEqual(source.count, 728)
         XCTAssertEqual(source["appwide.daily_signal.status.aligned"]?["en"], "Steady")
         XCTAssertEqual(source["appwide.daily_signal.status.recheck"]?["en"], "Watch")
         XCTAssertEqual(

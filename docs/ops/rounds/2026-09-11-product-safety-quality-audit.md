@@ -14,9 +14,10 @@
   exact-current local implementation and closeout are
   `156937fc642980286355cb663b9f3840af7e4923`; record head `48eec068` received
   the first consolidated hosted run; pushed correction `6cd1a932` received the
-  second hosted run; the bounded correction carrying this record isolates the
+  second hosted run; pushed correction `b3659ddc` isolates the
   PostgreSQL-overlay test database and makes screenshot instrumentation wait
-  for its real asynchronous boundaries
+  for its real asynchronous boundaries; the bounded correction carrying this
+  record updates two stale Apple source-contract expectations
 - Record commit or PR: pull request `#15`
 
 ## Objective
@@ -406,6 +407,16 @@ records. Concurrent development must remain isolated by worktree and branch.
   correctly keeps **Build report** disabled during capture. The test now waits
   for the enabled build action and the composed preview node. The focused path
   and complete local API 35 production shell pass.
+- Pushed correction `b3659ddc` passed hosted server run `34736975271`, including
+  immutable migrations against isolated PostgreSQL engines, and Android run
+  `34736975270`, including the complete production shell. Hosted Apple run
+  `34736975319` built the macOS app and then exposed two stale test-contract
+  expectations rather than product defects: the generated app-wide catalog has
+  728 committed keys, and the breathing haptic help now correctly enters Swift
+  through `appwide.breathe.test_buzz_help`. The contracts now assert the
+  committed inventory and localized source boundary. Their focused tests pass,
+  and the complete local macOS suite executes 1,913 tests with one expected
+  external Xiaomi-fixture skip and zero failures.
 
 ## Data, privacy, and medical truth
 
@@ -579,15 +590,15 @@ remain required before this round can be closed.
   consolidated correction `142eeec5`; latest pushed production-shell
   correction `66c2b0a9`; final exact-current implementation `156937fc`; first
   consolidated record head `48eec068`; pushed i18n/Ruff correction
-  `6cd1a932`; bounded hosted-failure correction containing this refreshed
-  evidence entry
+  `6cd1a932`; pushed server/Android correction `b3659ddc`; bounded Apple
+  contract correction containing this refreshed evidence entry
 - Branch and remote state: protected pull request `#15` evaluated pushed head
-  `6cd1a932`. Hosted server run `34736217134` exposed the cross-engine test
-  database collision, and Android run `34736217114` exposed the screenshot
-  test's two missing asynchronous waits. Both are corrected and pass complete
-  local regressions. Fresh hosted corrected-head review, every required
-  exact-SHA check, and normal integration remain pending; failed hosted heads
-  are not reused as proof.
+  `b3659ddc`. Hosted server run `34736975271` and Android run `34736975270`
+  pass. Apple run `34736975319` built the macOS app but its test step exposed
+  two stale source-contract expectations; both are corrected and pass the
+  complete local 1,913-test suite. Fresh hosted corrected-head review, every
+  required exact-SHA check, and normal integration remain pending; failed
+  hosted heads are not reused as proof.
 - Repository visibility verified: `PUBLIC` before final protected integration;
   the owner-requested return to `PRIVATE` occurs only after the merge is
   verified so required checks are not silently disrupted mid-review

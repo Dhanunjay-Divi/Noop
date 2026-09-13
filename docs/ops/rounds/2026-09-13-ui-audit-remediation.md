@@ -106,6 +106,13 @@ claims.
   review preview asynchronously. The test now waits for both boundaries. Its
   focused path and the complete API 35 production shell pass locally with 95
   passes and two intentional private-pilot skips.
+- Pushed correction `b3659ddc` passed the hosted server and Android matrices.
+  Hosted Apple run `34736975319` built the macOS app and then found two stale
+  test-only expectations: the committed generated catalog contains 728 keys,
+  and the localized breathing haptic help is mounted by key rather than an
+  English Swift literal. The corrected contracts pass focused tests and the
+  complete local 1,913-test macOS suite with one expected external-fixture skip
+  and zero failures.
 
 ## Data, privacy, and medical truth
 
@@ -155,12 +162,14 @@ claims.
   notification/guidance copy, accessibility, localization, visual-QA tooling,
   focused tests, and these operations records
 - Commits: implementation `156937fc`; first consolidated record head
-  `48eec068`; pushed i18n/Ruff correction `6cd1a932`; bounded screenshot-test
-  correction containing this entry
-- Branch and remote state: isolated pull request `#15`; hosted head `6cd1a932`
-  exposed one deterministic Android screenshot-test race after the prior
-  catalog/format findings were closed. The full local production shell passes;
-  final exact-SHA checks and protected integration remain required.
+  `48eec068`; pushed i18n/Ruff correction `6cd1a932`; pushed server/Android
+  correction `b3659ddc`; bounded Apple contract correction containing this
+  entry
+- Branch and remote state: isolated pull request `#15`; hosted head `b3659ddc`
+  passes server and Android, while Apple run `34736975319` exposed two stale
+  source-contract expectations after the macOS app built successfully. The
+  corrected complete local suite passes; final exact-SHA checks and protected
+  integration remain required.
 - Repository visibility verified: not changed by this round
 - Version/build impact: no schema or marketing-version change
 - Release or distribution impact: no artifact released
