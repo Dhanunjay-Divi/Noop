@@ -7,7 +7,7 @@
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `2a94bb5e8916f40004cfd1a938df2f2cf72d2824`
-- End implementation commit: pending
+- End implementation commit: `156937fc642980286355cb663b9f3840af7e4923`
 - Record commit or PR: pull request `#15`
 
 ## Objective
@@ -166,7 +166,7 @@ identifiers, or arbitrary exception text.
   localization; server API, capability, principal, lifecycle, repository,
   migration and tests; GCP source/tests; README and owned visual assets;
   feedback architecture and operations records
-- Commits: pending
+- Commits: implementation `156937fc`; record follow-up containing this entry
 - Branch and remote state: PR `#15` remains open; the superseded exact-head
   Apple workflow was cancelled before further source changes
 - Repository visibility verified: app repository public temporarily for the

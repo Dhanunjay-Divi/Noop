@@ -11,8 +11,9 @@
 - Start commit: `2efd5e89999bd54b3fd6e316322b39d7e953ee8f`
 - End implementation commits: first consolidated hosted correction head
   `142eeec5`; latest pushed production-shell correction `66c2b0a9`; the
-  locally verified iPhone, Safety, backup, context, durable-record, and policy
-  corrections will form the replacement PR head
+  exact-current local implementation and closeout are
+  `156937fc642980286355cb663b9f3840af7e4923`; its record follow-up forms the
+  replacement PR head
 - Record commit or PR: pull request `#15`
 
 ## Objective
@@ -550,8 +551,8 @@ remain required before this round can be closed.
   wind-down privacy `83ec8598`; durable handoff `6b78df33`; current mobile
   reliability/accessibility `99a51b80`; Safety lifecycle `e35d1d37`; first
   consolidated correction `142eeec5`; latest pushed production-shell
-  correction `66c2b0a9`; final iPhone correction and this evidence record in
-  the replacement commit
+  correction `66c2b0a9`; final exact-current implementation `156937fc`; this
+  evidence entry in the record follow-up
 - Branch and remote state: protected pull request `#15` previously evaluated
   pushed head `66c2b0a9`. Its exact-SHA run passed Android, server, Swift-package,
   repository-control, and macOS jobs but exposed the iOS Today scroll stall and

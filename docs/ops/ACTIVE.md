@@ -25,7 +25,8 @@ Last updated: **2026-09-13**
 
 The supplier-independent implementation and exact-current-tree local
 verification are complete on
-`codex/product-safety-quality-audit-20260911`. Pull request `#15` remains the
+`codex/product-safety-quality-audit-20260911` at implementation commit
+`156937fc642980286355cb663b9f3840af7e4923`. Pull request `#15` remains the
 protected integration path. The branch has not received its final consolidated
 push, so the old hosted Apple failure/cancellation on the prior head is not
 evidence about the current source.
