@@ -18,8 +18,8 @@ from app.feedback_repository import (
 from app.repository import PostgresRepository
 
 
-DATABASE_URL = os.getenv("NOOP_TEST_DATABASE_URL")
-DATABASE_ENGINE = os.getenv("NOOP_TEST_DATABASE_ENGINE", "postgresql")
+DATABASE_URL = os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL")
+DATABASE_ENGINE = "postgresql"
 FINALIZATION_GRACE = timedelta(minutes=5)
 
 
@@ -191,7 +191,10 @@ async def _insert_report(
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "feedback tests"
+    ),
 )
 async def test_postgres_concurrent_same_key_replays_before_quota() -> None:
     primary = _primary()
@@ -238,7 +241,10 @@ async def test_postgres_concurrent_same_key_replays_before_quota() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "feedback tests"
+    ),
 )
 async def test_postgres_same_subject_different_tenant_principals_are_isolated() -> None:
     primary = _primary()
@@ -279,7 +285,10 @@ async def test_postgres_same_subject_different_tenant_principals_are_isolated() 
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "feedback tests"
+    ),
 )
 async def test_postgres_v0_row_is_not_replayed_or_counted_for_v1_principal() -> None:
     primary = _primary()
@@ -343,7 +352,10 @@ async def test_postgres_v0_row_is_not_replayed_or_counted_for_v1_principal() -> 
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "feedback tests"
+    ),
 )
 async def test_postgres_activation_updates_expiry_and_cleanup_atomically() -> None:
     primary = _primary()
@@ -380,7 +392,10 @@ async def test_postgres_activation_updates_expiry_and_cleanup_atomically() -> No
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "feedback tests"
+    ),
 )
 async def test_postgres_mark_sent_cannot_race_cleanup_claim() -> None:
     primary = _primary()
@@ -415,7 +430,10 @@ async def test_postgres_mark_sent_cannot_race_cleanup_claim() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "feedback tests"
+    ),
 )
 async def test_postgres_cleanup_requires_confirm_absent_phase() -> None:
     primary = _primary()
@@ -467,7 +485,10 @@ async def test_postgres_cleanup_requires_confirm_absent_phase() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "feedback tests"
+    ),
 )
 async def test_postgres_retention_confirmation_cannot_be_claimed_early() -> None:
     primary = _primary()
@@ -511,7 +532,10 @@ async def test_postgres_retention_confirmation_cannot_be_claimed_early() -> None
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "feedback tests"
+    ),
 )
 async def test_postgres_cleanup_claim_lease_exceeds_twenty_minutes() -> None:
     primary = _primary()

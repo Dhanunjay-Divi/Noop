@@ -31,9 +31,16 @@ protected integration record. Its first consolidated evidence head,
 `48eec068`, exposed only two deterministic repository-hygiene findings:
 i18n run `34735775033` found one Apple and one Android literal outside the
 shared catalog, and server run `34735775028` required Ruff formatting in two
-feedback tests. The bounded local correction uses generated nine-locale
-resources, applies canonical formatting, rebuilds Apple and Android, and reruns
-the local policy wall.
+feedback tests. Pushed correction `6cd1a932` closed those findings. Its hosted
+server run `34736217134` then proved that the PostgreSQL-overlay feedback tests
+were incorrectly reusing the primary Timescale test database and recording the
+overlay initial-migration checksum there; production migration
+`server/migrations/001_init.sql` is unchanged from `main`. Hosted Android run
+`34736217114` independently exposed a report-screenshot test race: the test
+tapped the correctly disabled build action before capture finished and asserted
+the asynchronously decoded preview without waiting. The bounded local
+correction gives the overlay tests their dedicated database variable and waits
+for both capture completion and preview composition.
 
 The private 61-file UI audit is closed locally: all four P1 and sixteen P2
 findings have scoped Apple/Android corrections. Recovery presentation and Daily
@@ -67,6 +74,11 @@ OpenTofu lifecycle tests; and 230 Tools tests plus 34 subtests. The policy wall
 passes feedback localization, strict i18n, 54 operations records, the
 1,246-file health-claims scan, calibration parity, private-data, terminology,
 required-CI, release-control, legal, distribution, dependency, and diff gates.
+The final hosted-failure corrections additionally pass the complete Android
+API 35 production shell with 95 passing tests and two intentional private-pilot
+skips, plus the full server suite with 541 passing tests, one
+provider/environment skip, and separate disposable primary and
+PostgreSQL-overlay databases.
 
 The exact iPhone visual matrix contains eleven nonblank states. Normal and
 accessibility collapsed-planned-workout states were manually checked for

@@ -279,6 +279,9 @@ class AppShellInstrumentedTest {
                 compose.onNodeWithTag("noop.app-report.include-screenshot")
                     .performScrollTo()
                     .assertIsOn()
+                compose.onNodeWithText("Build report")
+                    .performScrollTo()
+                    .assertIsEnabled()
                 true
             }.getOrDefault(false)
         }
@@ -294,6 +297,11 @@ class AppShellInstrumentedTest {
         compose.onNodeWithText("screenshot.png")
             .performScrollTo()
             .assertIsDisplayed()
+        compose.waitUntil(timeoutMillis = 20_000) {
+            compose.onAllNodesWithTag("noop.app-report.snapshot-preview")
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
         compose.onNodeWithTag("noop.app-report.snapshot-preview")
             .performScrollTo()
             .assertIsDisplayed()

@@ -3,8 +3,8 @@
 ## Status
 
 - State: `implementation and exact-current-tree local verification complete;
-  first consolidated head reviewed; local i18n/Ruff correction complete;
-  corrected hosted exact-SHA checks and protected integration pending`
+  both consolidated hosted cycles reviewed and locally corrected; final hosted
+  exact-SHA checks and protected integration pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `ca79cc9c76b194691f93e8f2334ce38200639bde`
@@ -99,6 +99,13 @@ claims.
   use generated app-wide keys across all nine supported locales. The same
   hosted cycle required canonical Ruff formatting in two feedback tests; that
   formatting-only correction is included with this record.
+- Pushed correction `6cd1a932` closed those findings. Hosted Android run
+  `34736217114` then exposed a deterministic timing defect in the screenshot
+  instrumentation test, not the product flow: the product keeps **Build
+  report** disabled while explicit-opt-in capture is active and decodes the
+  review preview asynchronously. The test now waits for both boundaries. Its
+  focused path and the complete API 35 production shell pass locally with 95
+  passes and two intentional private-pilot skips.
 
 ## Data, privacy, and medical truth
 
@@ -129,7 +136,7 @@ claims.
 | Shared analytics | 1,479 tests passed | Recovery, Daily Signal, adaptive-day, planned-workout, and formatting contracts pass together | Clinical validity or individual physiology |
 | Complete Apple app suite | 1,913 tests passed, one external Xiaomi-fixture skip, zero failures | Current macOS/Apple source, persistence, UI contracts, accessibility, guidance, diagnostics, and lifecycle behavior pass together | Physical iOS background execution, BLE, haptics, or notification presentation |
 | Complete iPhone UI suite | 39 tests executed, one intentional private-pilot skip, zero failures; Today scroll averaged 5.411 seconds, CPU 0.190 seconds, and peak memory about 63.3 MB | Current simulator navigation, reporting, accessibility, loading, planner, and scrolling paths are responsive and reachable | VoiceOver traversal or physical-device memory pressure |
-| Android exact-source matrix | Full and Demo unit suites, both lint variants, both APK assemblies, and both instrumentation Kotlin compilations passed; Gradle finished 137 tasks successfully | Both Android variants compile and retain the matched UI, accessibility, loading, privacy, and guidance contracts | OEM rendering, TalkBack traversal, background delivery, or signed physical installs |
+| Android exact-source matrix | Full and Demo unit suites, both lint variants, both APK assemblies, and both instrumentation Kotlin compilations passed; Gradle finished 137 tasks successfully. The authoritative final API 35 XML records 97 production-shell cases with 95 passes, two intentional private-pilot skips, and zero failures. | Both Android variants compile and retain the matched UI, accessibility, loading, privacy, screenshot-consent, and guidance contracts | OEM rendering, TalkBack traversal, background delivery, or signed physical installs |
 | Deterministic iPhone captures | Eleven nonblank states generated; collapsed planned-workout normal and accessibility captures manually reviewed | Current planner states preserve hierarchy, readable text, and stable controls at tested simulator sizes | macOS visual freshness or physical display behavior |
 | Repository policy wall | After the first hosted-head correction, feedback localization, differential and full strict i18n, Ruff check and format, 230 Tools tests, 54 operations records, the 1,246-file health-claims scan, calibration parity, private-data, terminology, required-CI, release-control, legal, distribution, and diff gates pass locally | The implementation remains localized, canonically formatted, claim-bounded, privacy-checked, and release-controlled | Corrected hosted exact-SHA status or legal/clinical approval |
 
@@ -148,10 +155,12 @@ claims.
   notification/guidance copy, accessibility, localization, visual-QA tooling,
   focused tests, and these operations records
 - Commits: implementation `156937fc`; first consolidated record head
-  `48eec068`; bounded i18n/Ruff correction containing this entry
-- Branch and remote state: isolated pull request `#15`; hosted head `48eec068`
-  exposed the two deterministic catalog/format findings now closed locally;
-  corrected exact-SHA checks and protected integration remain required
+  `48eec068`; pushed i18n/Ruff correction `6cd1a932`; bounded screenshot-test
+  correction containing this entry
+- Branch and remote state: isolated pull request `#15`; hosted head `6cd1a932`
+  exposed one deterministic Android screenshot-test race after the prior
+  catalog/format findings were closed. The full local production shell passes;
+  final exact-SHA checks and protected integration remain required.
 - Repository visibility verified: not changed by this round
 - Version/build impact: no schema or marketing-version change
 - Release or distribution impact: no artifact released

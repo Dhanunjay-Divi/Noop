@@ -4,8 +4,8 @@
 
 - State: `supplier-independent implementation, exact-current-tree local wall,
   UI-audit and feedback-ingestion closeout, and independent review complete;
-  local correction for the first consolidated head's i18n and Ruff findings
-  complete; corrected exact-SHA checks and normal PR #15 integration pending`
+  local corrections for both consolidated hosted cycles complete; final
+  exact-SHA checks and normal PR #15 integration pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `2efd5e89999bd54b3fd6e316322b39d7e953ee8f`
@@ -13,8 +13,10 @@
   `142eeec5`; latest pushed production-shell correction `66c2b0a9`; the
   exact-current local implementation and closeout are
   `156937fc642980286355cb663b9f3840af7e4923`; record head `48eec068` received
-  the first consolidated hosted run; the bounded correction carrying this
-  record localizes its two new literals and applies Ruff's canonical formatting
+  the first consolidated hosted run; pushed correction `6cd1a932` received the
+  second hosted run; the bounded correction carrying this record isolates the
+  PostgreSQL-overlay test database and makes screenshot instrumentation wait
+  for its real asynchronous boundaries
 - Record commit or PR: pull request `#15`
 
 ## Objective
@@ -388,6 +390,22 @@ records. Concurrent development must remain isolated by worktree and branch.
   Ruff formatting in two feedback tests. Both strings now use generated
   nine-locale app-wide resources, both tests are canonically formatted, and
   Apple, Android, server, localization, and repository gates pass locally.
+- Pushed correction `6cd1a932` closed those two findings. The next hosted
+  server run `34736217134` exposed test-database contamination rather than a
+  production migration change: PostgreSQL-overlay feedback tests selected
+  `NOOP_TEST_DATABASE_URL`, wrote the standard-PostgreSQL initial checksum into
+  the primary Timescale test database, and made later immutable-migration
+  checks fail. They now require `NOOP_TEST_POSTGRESQL_DATABASE_URL` and a fixed
+  `postgresql` engine, matching the workflow's already-created isolated
+  database. The canonical Timescale `001_init.sql` remains byte-for-byte
+  unchanged from `main`.
+- Hosted Android run `34736217114` passed build/unit/lint and recorded 94
+  passing production-shell cases plus two intentional private-pilot skips, but
+  exposed one deterministic screenshot-flow test failure. Screenshot opt-in
+  turns on before capture and PNG preview decoding complete, while the product
+  correctly keeps **Build report** disabled during capture. The test now waits
+  for the enabled build action and the composed preview node. The focused path
+  and complete local API 35 production shell pass.
 
 ## Data, privacy, and medical truth
 
@@ -514,12 +532,12 @@ records. Concurrent development must remain isolated by worktree and branch.
 | Shared health and guidance analytics | Exact-current-tree `StrandAnalytics` executed 1,479 tests with zero failures. | Body/BMI guards, hydration goals, sleep/recovery evidence gates, workout detection, adaptive guidance, planned-workout collapse, fallback-day handling, and formula contracts pass on the current source. | Clinical validity, individual physiology, or physical sensor accuracy |
 | Complete Apple app suite | Exact-current-tree macOS `Strand` suite executed 1,913 tests with one expected external Xiaomi-fixture skip and zero failures after the UI-audit and feedback corrections. | Current Apple app, persistence, notification, calendar, privacy, accessibility, performance, Safety, hydration, feedback, Trends, Today feature mounts, and lifecycle contracts pass together. | iOS background delivery, physical BLE, haptics, notification presentation, signing, or store behavior |
 | iPhone UI and navigation regression wall | The complete isolated iPhone 17 Pro UI suite executed 39 tests with one intentional private-pilot skip and zero failures. It covers repeated tab navigation, compact navigation, semantic green switches, Sleep Planner final-control and weekday endpoint clearance, strength body-map multi-selection, the complete Today metric catalog, Trends loading, Today scroll performance, feedback consent/progress, onboarding, Review Sample, calendar routing, pull-to-sync feedback, planner states, and update history. Today scroll averaged 5.411 seconds with 0.190 seconds average CPU time and peak physical memory of about 63.3 MiB. | The corrected simulator build can repeatedly scroll Today, load Trends with explicit state, submit only reviewed feedback, and expose real endpoint controls above either compact or accessibility-expanded persistent navigation without the reproduced freeze or overlap. | VoiceOver traversal, physical-device memory pressure, signed distribution, background collection, or background upload |
-| Android exact-source matrix | Full and Demo unit suites passed. Both lint variants, APK assemblies, and Full/Demo instrumentation Kotlin compilation succeeded; Gradle completed 137 tasks successfully. | Room v46-v51, Health Connect BMI reprojection, exact-day hydration, account isolation, private notifications including the persistent connection service, generation-ledger behavior, capability-versioned restore, feedback archive/outbox/upload, Trends state, UI-audit presentation, incident serialization, and both product variants compile and pass their local contracts together. | Signed install, API 35 runtime behavior on this final source, OEM delivery timing, Health Connect provider behavior, or physical hardware |
+| Android exact-source matrix | Full and Demo unit suites passed. Both lint variants, APK assemblies, and Full/Demo instrumentation Kotlin compilation succeeded; Gradle completed 137 tasks successfully. The authoritative final API 35 XML records 97 production-shell cases with 95 passes, two intentional private-pilot skips, and zero failures after the screenshot test was synchronized with capture and preview completion. | Room v46-v51, Health Connect BMI reprojection, exact-day hydration, account isolation, private notifications including the persistent connection service, generation-ledger behavior, capability-versioned restore, feedback archive/outbox/upload, screenshot consent/review, Trends state, UI-audit presentation, incident serialization, and both product variants compile and pass their local contracts together. | Signed install, OEM delivery timing, Health Connect provider behavior, or physical hardware |
 | Durable analysis invalidation | Apple package/app tests and Android JVM/source-compilation gates cover all ten score-bearing tables, migration seeding and repair, blank-ID exclusion, snapshot-without-clear, crash/restart persistence, exact acknowledgement, partial failure, concurrent writes, outer UPSERT/REPLACE, forced passes, and source deletion. | Launch/resume and post-backfill work now use bounded durable generations rather than whole-history fingerprints, and current Swift/Kotlin/Room source compiles. | Participant-scale performance, Android device instrumentation execution, or physical BLE catch-up |
 | Complete Apple simulator graph | Unsigned generic `NOOPiOS` simulator build succeeded on the exact current source after the disk-only failed attempt was discarded. | The current iPhone app, Watch app, widgets, App Intents metadata, and embedded graph compile, link, and validate. | Signing, store acceptance, physical-device behavior, or UI interaction quality |
 | Deterministic visual matrices | The exact final iPhone matrix generated eleven current nonblank states, including normal, check-in, recovery-shift, planned-workout, collapsed planned-workout, dark/high-contrast, stop, and accessibility variants. The normal and accessibility collapsed-planned-workout captures were manually inspected for clipping and overlap. Stale macOS WindowServer surfaces were rejected as evidence. | Required simulator states preserve hierarchy, reachability, text visibility, and a stable navigation footprint on the current source. | VoiceOver focus order, fresh macOS visual proof, haptics, notification presentation, physical display behavior, or hardware |
 | Android navigation accessibility | `PrimaryNavigationContractTest` passed on the exact source; review confirmed `Scaffold` applies its measured bottom-bar inset to the `NavHost`, while `GlassBottomBar` grows with wrapped text and applies system navigation-bar padding. | Android source retains a dynamic, non-overlapping navigation reservation rather than copying the iOS overlay implementation. | Runtime large-text behavior on a physical Android device or OEM font/rendering differences |
-| Complete server suite | A fresh exact-tree run against isolated local PostgreSQL databases passed 433 tests with 106 external/configuration skips and one Starlette deprecation warning. The focused feedback/API slice passed 25 tests with nine external/configuration skips; eight OpenTofu feedback lifecycle tests and configuration validation passed. | The current server, standard-PostgreSQL migrations, memory/PostgreSQL parity, backup/deployment contracts, Safety lifecycle, managed-document readiness, feedback tenant/capability/lifecycle boundaries, and object cleanup pass together under available local dependencies. | Docker image execution, public feedback ingress, attestation, encrypted staging restore, real providers/carriers, or production runtime |
+| Complete server suite | A fresh final run against separate disposable primary and PostgreSQL-overlay databases passed 541 tests with one provider/environment skip and one Starlette deprecation warning. The focused feedback/API slice passed 25 tests with nine external/configuration skips; eight OpenTofu feedback lifecycle tests and configuration validation passed. | The current server, immutable migration selection, memory/PostgreSQL parity, backup/deployment contracts, Safety lifecycle, managed-document readiness, feedback tenant/capability/lifecycle boundaries, and object cleanup pass together without cross-engine checksum contamination. | Docker image execution, public feedback ingress, attestation, encrypted staging restore, real providers/carriers, or production runtime |
 | Localization and repository policy | After the hosted `48eec068` i18n/Ruff findings, strict differential and full i18n, feedback-localization generation, Ruff check and format, 230 Tools tests plus 34 subtests, the 1,246-file health-claims scan, required-CI, calibration parity across 12 metrics/three revisions/13 thresholds/16 guards, active and legacy terminology inventories with zero forbidden uses, release controls with its high-confidence credential scan, legal inventory for 230 runtime components and three container inputs, distribution provenance, private-data, all 54 operations records, both locked dependency audits, and diff gates pass locally. | Current source and release-control wiring reject new unlocalized copy, noncanonical Python formatting, unsupported claims, forbidden vendor mappings, high-confidence secrets, and unreviewed distribution inputs. | Professional translation, corrected hosted exact-SHA checks, or clinical/legal approval |
 | Review status | Pull request `#15` previously identified ten actionable lifecycle defects. Replacement exact-tree reviews then closed restore, schema-proof, BLE privacy, Safety cancellation, and backup defects. The private UI audit added four P1 and sixteen P2 findings; all twenty are implemented and covered locally. The feedback path received direct archive, outbox, screenshot, capability, principal, lifecycle, tenant, retention, and cleanup tests. Final independent read-only review found three record-consistency defects, now corrected, and no P0 code defect, high-confidence secret, or tracked private audit screenshot. | Corrective work remains tied to concrete source review and direct regression evidence, including explicit rejection of stale screenshot and stale-tree evidence. | Corrected hosted exact-SHA verdict, physical behavior, or external launch gates |
 | Project agent handoff | Root `AGENTS.md` points to the checked-in skill; `quick_validate.py` reports `Skill is valid!`; `bash -n` passes; the repository-local context snapshot runs against this dirty worktree; project and user-level skill copies are byte-identical by recursive diff and per-file SHA-256; a read-only fresh-agent rehearsal recovered the branch, risks, invariants, verified/open split, and next command | A future agent entering the repository can discover the same stable engineering, medical-truth, privacy, parity, verification, and handoff contract and recover live context without the oversized chat | That any current feature, deployment, physical-device path, or external release gate is complete |
@@ -560,15 +578,16 @@ remain required before this round can be closed.
   reliability/accessibility `99a51b80`; Safety lifecycle `e35d1d37`; first
   consolidated correction `142eeec5`; latest pushed production-shell
   correction `66c2b0a9`; final exact-current implementation `156937fc`; first
-  consolidated record head `48eec068`; bounded i18n/Ruff correction containing
-  this refreshed evidence entry
+  consolidated record head `48eec068`; pushed i18n/Ruff correction
+  `6cd1a932`; bounded hosted-failure correction containing this refreshed
+  evidence entry
 - Branch and remote state: protected pull request `#15` evaluated pushed head
-  `48eec068`. Hosted i18n run `34735775033` and server run `34735775028`
-  exposed the two deterministic catalog/format defects described above. The
-  local correction contains generated nine-locale resources, canonical Ruff
-  formatting, rebuilt Apple/Android graphs, and the rerun policy wall. Fresh
-  hosted corrected-head review, every required exact-SHA check, and normal
-  integration remain pending; failed hosted heads are not reused as proof.
+  `6cd1a932`. Hosted server run `34736217134` exposed the cross-engine test
+  database collision, and Android run `34736217114` exposed the screenshot
+  test's two missing asynchronous waits. Both are corrected and pass complete
+  local regressions. Fresh hosted corrected-head review, every required
+  exact-SHA check, and normal integration remain pending; failed hosted heads
+  are not reused as proof.
 - Repository visibility verified: `PUBLIC` before final protected integration;
   the owner-requested return to `PRIVATE` occurs only after the merge is
   verified so required checks are not silently disrupted mid-review
