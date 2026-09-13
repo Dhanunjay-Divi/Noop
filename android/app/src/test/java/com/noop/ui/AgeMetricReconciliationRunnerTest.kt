@@ -62,7 +62,7 @@ class AgeMetricReconciliationRunnerTest {
         )
         val ble = bleFile!!.readText()
         val postBackfillStart =
-            ble.indexOf("private suspend fun awaitEvaluablePostBackfillAnalysis(")
+            ble.indexOf("private suspend fun runPostBackfillAnalysisPass(")
         val postBackfillEnd = ble.indexOf("\n    private var backfilling", postBackfillStart)
             .takeIf { it > postBackfillStart } ?: ble.length
         val postBackfill = ble.substring(postBackfillStart, postBackfillEnd)
