@@ -49,10 +49,11 @@ BEGIN
                 '035_managed_document_plaintext_quarantine.sql',
                 '036_managed_document_contract_v2_validate.sql',
                 '037_managed_document_contract_v2_activate.sql',
-                '038_managed_safety_band_sos.sql'
+                '038_managed_safety_band_sos.sql',
+                '041_managed_safety_writer_compatibility.sql'
             ]
         )
-    ) <> 5 THEN
+    ) <> 6 THEN
         RAISE EXCEPTION 'required managed contract migration is missing';
     END IF;
     IF EXISTS (
@@ -85,10 +86,10 @@ BEGIN
         FROM pg_attribute
         WHERE attrelid = 'managed_safety_page_quota_events'::regclass
           AND attname = 'trigger'
-          AND attnotnull
+          AND NOT attnotnull
           AND NOT attisdropped
     ) THEN
-        RAISE EXCEPTION 'managed Safety quota trigger column is nullable or missing';
+        RAISE EXCEPTION 'managed Safety quota writer compatibility is missing';
     END IF;
     IF EXISTS (
         SELECT 1

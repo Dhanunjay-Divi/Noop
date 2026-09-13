@@ -898,6 +898,7 @@ async def test_managed_safety_band_sos_migration_enforces_provenance() -> None:
     repository = _repository(run_migrations=False)
     schema = f"managed_safety_band_sos_{uuid4().hex}"
     migration = MIGRATIONS / "038_managed_safety_band_sos.sql"
+    compatibility_migration = MIGRATIONS / "041_managed_safety_writer_compatibility.sql"
     account_a = uuid4()
     account_b = uuid4()
     account_c = uuid4()
@@ -1014,7 +1015,7 @@ async def test_managed_safety_band_sos_migration_enforces_provenance() -> None:
                 assert (
                     await connection.fetchval(
                         """
-                        SELECT NOT attribute.attnotnull
+                        SELECT attribute.attnotnull
                         FROM pg_attribute attribute
                         WHERE attribute.attrelid =
                               'managed_safety_page_quota_events'::regclass
@@ -1074,6 +1075,40 @@ async def test_managed_safety_band_sos_migration_enforces_provenance() -> None:
                     now,
                 )
 
+                with pytest.raises(Exception) as missing_trigger:
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_safety_page_quota_events (
+                            owner_account_id, client_request_id, incident_id,
+                            duration_hours, share_location, created_at, purge_after
+                        ) VALUES (
+                            $1, $2, $3, 8, true,
+                            $4::timestamptz,
+                            $4::timestamptz + interval '30 days'
+                        )
+                        """,
+                        account_a,
+                        uuid4(),
+                        legacy_writer_incident,
+                        now,
+                    )
+                assert getattr(missing_trigger.value, "sqlstate", None) == "23502"
+
+                await connection.execute(
+                    compatibility_migration.read_text(encoding="utf-8")
+                )
+                assert (
+                    await connection.fetchval(
+                        """
+                        SELECT NOT attribute.attnotnull
+                        FROM pg_attribute attribute
+                        WHERE attribute.attrelid =
+                              'managed_safety_page_quota_events'::regclass
+                          AND attribute.attname = 'trigger'
+                        """
+                    )
+                    is True
+                )
                 await connection.execute(
                     """
                     INSERT INTO managed_safety_page_quota_events (
@@ -1400,6 +1435,9 @@ def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> Non
     band_sos = (MIGRATIONS / "038_managed_safety_band_sos.sql").read_text(
         encoding="utf-8"
     )
+    writer_compatibility = (
+        MIGRATIONS / "041_managed_safety_writer_compatibility.sql"
+    ).read_text(encoding="utf-8")
 
     assert "CREATE TABLE IF NOT EXISTS managed_push_installations" in sql
     assert "CREATE TABLE IF NOT EXISTS managed_safety_contacts" in sql
@@ -1444,18 +1482,25 @@ def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> Non
     assert "REFERENCES managed_safety_requests" not in request_quota
     assert "ON CONFLICT DO NOTHING" in request_quota
     assert "managed_safety_incident_trigger_v2" in band_sos
-    assert band_sos.count("NOT VALID") == 2
-    assert band_sos.count("VALIDATE CONSTRAINT") == 2
+    assert band_sos.count("NOT VALID") == 3
+    assert band_sos.count("VALIDATE CONSTRAINT") == 3
     assert "ALTER COLUMN trigger DROP DEFAULT" in band_sos
     assert "ALTER COLUMN trigger SET DEFAULT" not in band_sos
-    assert "ALTER COLUMN trigger SET NOT NULL" not in band_sos
+    assert "ALTER COLUMN trigger SET NOT NULL" in band_sos
     assert "managed Safety quota owner does not match incident owner account" in (
         band_sos
     )
     assert "SET trigger = 'manual_sos'" in band_sos
-    assert "NEW.trigger := incident_trigger" in band_sos
+    assert "NEW.trigger := incident_trigger" not in band_sos
     assert "noop_managed_safety_quota_incident_consistent" in band_sos
     assert "noop_managed_safety_incident_quota_immutable" in band_sos
+    assert "ALTER COLUMN trigger DROP NOT NULL" in writer_compatibility
+    assert "ALTER COLUMN trigger DROP DEFAULT" in writer_compatibility
+    assert "ALTER COLUMN trigger SET DEFAULT" not in writer_compatibility
+    assert "NEW.trigger := incident_trigger" in writer_compatibility
+    assert "managed Safety quota incident provenance is inconsistent" in (
+        writer_compatibility
+    )
 
 
 def test_managed_storage_migration_covers_control_and_data_planes() -> None:

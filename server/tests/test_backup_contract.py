@@ -152,8 +152,10 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "036_managed_document_contract_v2_validate.sql" in smoke
     assert "037_managed_document_contract_v2_activate.sql" in smoke
     assert "038_managed_safety_band_sos.sql" in smoke
+    assert "041_managed_safety_writer_compatibility.sql" in smoke
     assert "managed_document_contract_v2_readiness" in smoke
     assert "content contract activated before client readiness" in smoke
+    assert "managed Safety quota writer compatibility is missing" in smoke
     assert "managed_safety_page_quota_trigger" in smoke
     assert "managed_social_profile_account_immutability" in smoke
     assert "managed_safety_incident_quota_immutability" in smoke

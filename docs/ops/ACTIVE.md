@@ -23,17 +23,19 @@ Last updated: **2026-09-13**
 
 ### PR 15 server and infrastructure review fixes
 
-A narrow local correction based exactly on `0aa7c86c` keeps migration `038`
-safe for migration-first deployment and application rollback while the prior
-Safety writer omits the quota-event trigger. The expand migration leaves the
-column nullable, and its provenance trigger derives an omitted value from the
+A narrow local correction now restores published migration `038` exactly to
+SHA-256 `da26324b...` and adds forward-only migration `041` for
+migration-first deployment and application rollback while the prior Safety
+writer omits the quota-event trigger. The expand state leaves the column
+nullable, and its provenance trigger derives an omitted value from the
 referenced incident while continuing to reject owner or explicit-trigger
-mismatches. The feedback bucket lifecycle is now one day later than the exact
-application retention window, leaving exact `retained_until` deletion with the
-lifecycle worker. Focused PostgreSQL, repository, backup/deployment-contract,
-OpenTofu, formatting, and manifest checks pass against synthetic local state.
-No service was deployed, no cloud plan was applied, no real data was touched,
-and the local correction is tracked in
+mismatches. Fresh 001-through-041 and already-applied-original-038 upgrade paths
+pass against a disposable PostgreSQL database. The feedback bucket lifecycle is
+one day later than the exact application retention window, leaving exact
+`retained_until` deletion with the lifecycle worker. Focused PostgreSQL,
+repository, backup/restore, OpenTofu, formatting, and all 41 manifest checks
+pass against synthetic local state. No service was deployed, no cloud plan was
+applied, no real data was touched, and the local correction is tracked in
 [`rounds/2026-09-13-pr15-server-infra-review-fixes.md`](rounds/2026-09-13-pr15-server-infra-review-fixes.md).
 
 ### Android analysis and Trends cancellation closeout
