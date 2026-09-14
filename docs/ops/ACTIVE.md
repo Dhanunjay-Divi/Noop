@@ -32,7 +32,14 @@ Last updated: **2026-09-14**
   now removed; the dedicated compaction test remains authoritative. The
   corrected performance case passed in 36.251 seconds, and the complete
   39-case iPhone shell passed 38 cases with one intentional private-pilot skip
-  and zero failures in 659.905 seconds
+  and zero failures in 659.905 seconds. A later exact-head run passed all 33
+  other required contexts and every other iOS UI case, but hosted interruption
+  handling invalidated the cached Today ScrollView during the third repeated
+  simulator round trip. The simulator path is now bounded to one smoke and one
+  measured round trip and resolves a fresh element for every event; production
+  and physical-device frame evidence are unchanged. The focused correction
+  passed in 26.471 seconds, and the complete 39-case shell passed 38 cases with
+  one intentional private-pilot skip and zero failures in 712.449 seconds
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration

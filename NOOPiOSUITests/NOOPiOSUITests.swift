@@ -1269,32 +1269,25 @@ final class NOOPiOSUITests: XCTestCase {
         let app = launchApp()
         let calendar = app.buttons["noop.today.calendar"]
         XCTAssertTrue(calendar.waitForExistence(timeout: 20))
-        let scroll = app.scrollViews["noop.today.scroll"]
-        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        let scrollIdentifier = "noop.today.scroll"
+        XCTAssertTrue(app.scrollViews[scrollIdentifier].waitForExistence(timeout: 5))
 
         let options = XCTMeasureOptions()
         #if targetEnvironment(simulator)
         // The iOS 26 simulator currently throws NSInternalInconsistencyException while decoding the
         // scrolling signpost payload and can starve XCTest's event-loop observer across repeated measured
-        // gestures. One complete process-metric round trip keeps hosted CI as a bounded scroll-liveness
-        // check. Three unmeasured round trips retain intermittent-lag coverage without inserting an
-        // accessibility-tree query between every gesture; the dedicated compaction test verifies the real
-        // navigation state. XCTest gesture synthesis and idle detection vary materially with hosted-runner
-        // load, so the broad wall-clock ceiling catches a stalled shell without treating runner scheduling
-        // as frame-pacing evidence; production's bounded CADisplayLink monitor records 50 ms and 150 ms
-        // hitches, and real devices keep five iterations of Apple's metric below.
-        var longestSmokeRoundTrip = 0.0
-        for _ in 0..<3 {
-            let startedAt = ProcessInfo.processInfo.systemUptime
-            scroll.swipeUp()
-            scroll.swipeDown()
-            longestSmokeRoundTrip = max(
-                longestSmokeRoundTrip,
-                ProcessInfo.processInfo.systemUptime - startedAt
-            )
-        }
+        // gestures. One unmeasured round trip plus one complete process-metric round trip keeps hosted CI
+        // as a bounded liveness check without crossing the simulator's repeat-interaction failure edge.
+        // Re-query before every event because interruption handling can invalidate a cached XCUIElement.
+        // The dedicated compaction test owns navigation semantics; production's bounded CADisplayLink
+        // monitor records 50 ms and 150 ms hitches, and real devices retain five iterations of Apple's
+        // scrolling/deceleration metric below.
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        app.scrollViews[scrollIdentifier].swipeUp()
+        app.scrollViews[scrollIdentifier].swipeDown()
+        let smokeRoundTrip = ProcessInfo.processInfo.systemUptime - startedAt
         XCTAssertLessThan(
-            longestSmokeRoundTrip,
+            smokeRoundTrip,
             15,
             "A simulator Today scroll round trip must not stall."
         )
@@ -1303,8 +1296,8 @@ final class NOOPiOSUITests: XCTestCase {
             metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()],
             options: options
         ) {
-            scroll.swipeUp()
-            scroll.swipeDown()
+            app.scrollViews[scrollIdentifier].swipeUp()
+            app.scrollViews[scrollIdentifier].swipeDown()
         }
         #else
         options.iterationCount = 5
@@ -1312,7 +1305,7 @@ final class NOOPiOSUITests: XCTestCase {
             metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric],
             options: options
         ) {
-            scroll.swipeUp()
+            app.scrollViews[scrollIdentifier].swipeUp()
         }
         #endif
     }

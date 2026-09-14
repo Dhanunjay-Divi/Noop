@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `third hosted correction and complete replacement local verification
+- State: `fourth hosted correction and complete replacement local verification
   finished; exact-SHA hosted checks, protected integration, repository privacy
   restoration, and cleanup pending`
 - Owner: project team
@@ -74,6 +74,11 @@ matrix before protected integration.
   contract; repeating the query inside the smoke loop can starve iOS 26
   XCTest's event-loop observer after the third swipe even when the app gesture
   itself completed.
+- Keep the simulator contract to one unmeasured and one measured round trip,
+  and re-query the scroll element before every event. Hosted interruption
+  handling can invalidate a cached `XCUIElement` after repeated gestures; that
+  framework failure is not a stable app-performance signal. Production and
+  physical-device frame evidence remain unchanged.
 
 ## Data, privacy, and medical truth
 
@@ -104,6 +109,9 @@ matrix before protected integration.
 | Hosted exact-head iOS shell at `fd0e79ae` | App build and 38 UI cases passed or intentionally skipped; the performance case completed two round trips, then XCTest waited 60 seconds for its event-loop observer and timed out evaluating the third intermediate compact-button query | Isolates the remaining failure to redundant accessibility-query pressure inside the simulator smoke, not the production compaction contract | Whether removing that redundant query passes replacement hosted CI |
 | Focused no-query performance case | Passed without retry in 36.251 seconds | The performance smoke completes after removing the redundant accessibility-tree query | Accumulated full-suite pressure or physical-device frame pacing |
 | Complete no-query iOS production shell | 39 tests executed: 38 passed, one intentional private-pilot skip, zero failures in 659.905 seconds | The exact correction passes under accumulated local suite pressure | Hosted-runner and physical-device performance |
+| Hosted exact-head iOS shell at `a748ab36` | All 33 non-derived required contexts passed; the iOS shell passed every other UI case, then interruption handling invalidated the cached Today ScrollView during the third simulator round trip | Proves the remaining failure is repeated hosted XCTest element invalidation, not an app assertion, build failure, or cross-platform regression | Whether the bounded fresh-query simulator contract passes hosted CI |
+| Focused bounded fresh-query performance case | Passed without retry in 26.471 seconds | One smoke and one measured round trip complete with a fresh element per event | Accumulated full-suite pressure or physical-device frame pacing |
+| Complete bounded fresh-query iOS production shell | 39 tests executed: 38 passed, one intentional private-pilot skip, zero failures in 712.449 seconds | The exact fourth correction passes under accumulated local suite pressure | Hosted-runner and physical-device performance |
 | Replacement exact-SHA hosted matrix | Pending | Pending | External release gates |
 
 ## Physical device and deployment
