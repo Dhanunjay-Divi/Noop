@@ -14,6 +14,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.IOException
 import java.time.Instant
 import java.time.ZoneId
 import java.util.TimeZone
@@ -358,6 +359,26 @@ class BackupSettingsCodecTest {
                 onFailure = { throw AssertionError("success must not record failure") },
             ),
         )
+    }
+
+    @Test fun dailyReviewRestoreReconcileRunsImmediatelyAndRetriesOnFailure() {
+        var calls = 0
+        BackupSettingsBridge.reconcileDailyReviewForConfirmedRestore(
+            operation = { calls += 1 },
+            onFailure = { throw AssertionError("success must not record failure") },
+        )
+        assertEquals(1, calls)
+
+        var failureRecorded = false
+        val failure = assertThrows(IOException::class.java) {
+            BackupSettingsBridge.reconcileDailyReviewForConfirmedRestore(
+                operation = { throw IllegalStateException("scheduler unavailable") },
+                onFailure = { failureRecorded = true },
+            )
+        }
+
+        assertTrue(failureRecorded)
+        assertTrue(failure.cause is IllegalStateException)
     }
 
     @Test fun hydrationMaintenanceWaitsForDatabaseBeforeReadingOrRetryingState() {

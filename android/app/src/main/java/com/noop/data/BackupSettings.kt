@@ -589,6 +589,33 @@ object BackupSettingsBridge {
                 ),
             )
         }
+        reconcileDailyReviewForConfirmedRestore(
+            operation = { DailyReviewReminders.reconcile(appContext) },
+            onFailure = {
+                AppDiagnosticsRecorder.record(
+                    "database.restore_reconcile",
+                    fields = mapOf(
+                        "outcome" to "failed",
+                        "component" to "daily_review",
+                    ),
+                )
+            },
+        )
+    }
+
+    internal fun reconcileDailyReviewForConfirmedRestore(
+        operation: () -> Unit,
+        onFailure: () -> Unit,
+    ) {
+        try {
+            operation()
+        } catch (failure: Exception) {
+            runCatching(onFailure)
+            throw IOException(
+                "Restored daily-review schedule could not be reconciled.",
+                failure,
+            )
+        }
     }
 
     internal enum class HydrationRestoreRetryOutcome(val wireValue: String) {

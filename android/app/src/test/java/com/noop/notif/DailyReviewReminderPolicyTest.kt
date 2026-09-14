@@ -309,6 +309,21 @@ class DailyReviewReminderPolicyTest {
         )
     }
 
+    @Test
+    fun restoredDailyReviewChoicesReplaceScheduledWorkImmediately() {
+        val source = locateBackupSettingsSource().readText()
+        val reconcile = source.substring(
+            source.indexOf("fun reconcileAfterRestore(context: Context)"),
+            source.indexOf("internal enum class HydrationRestoreRetryOutcome"),
+        )
+
+        assertTrue(reconcile.contains("DailyReviewReminders.reconcile(appContext)"))
+        assertTrue(reconcile.contains("\"component\" to \"daily_review\""))
+        assertTrue(
+            reconcile.contains("reconcileDailyReviewForConfirmedRestore("),
+        )
+    }
+
     private fun locateReminderSource(): File {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         return listOf(
@@ -317,5 +332,15 @@ class DailyReviewReminderPolicyTest {
             File(root, "android/app/src/main/java/com/noop/notif/DailyReviewReminders.kt"),
         ).firstOrNull(File::isFile)
             ?: error("Could not locate DailyReviewReminders.kt from $root")
+    }
+
+    private fun locateBackupSettingsSource(): File {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        return listOf(
+            File(root, "src/main/java/com/noop/data/BackupSettings.kt"),
+            File(root, "app/src/main/java/com/noop/data/BackupSettings.kt"),
+            File(root, "android/app/src/main/java/com/noop/data/BackupSettings.kt"),
+        ).firstOrNull(File::isFile)
+            ?: error("Could not locate BackupSettings.kt from $root")
     }
 }
