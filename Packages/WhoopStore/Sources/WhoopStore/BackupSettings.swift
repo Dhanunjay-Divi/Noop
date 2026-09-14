@@ -11,7 +11,8 @@ import Foundation
 /// The whitelist is the contract. Its v1 keys remain mirrored by Android's `BackupSettingsCodec`;
 /// v2 added the schema stamp and exact civil birthday; v3 added a bounded set of durable, user-authored
 /// display, dashboard, reminder, and Sleep Planner preferences; v4 adds the optional user-selected
-/// target weight; v5 adds validated user-authored weekday wake overrides. Additive fields are ignored safely by
+/// target weight; v5 adds validated user-authored weekday wake overrides; v6 preserves the user's
+/// independent morning-review and journal-reminder opt-ins. Additive fields are ignored safely by
 /// older readers. Only stable, user-set, non-device-specific values are allowed. NEVER add device ids,
 /// peripheral ids, tokens, sync cursors, delivery de-dup state, derived planner outputs,
 /// or anything anonymity-sensitive: backups get copied into cloud folders and attached to GitHub
@@ -29,12 +30,18 @@ public enum BackupSettings {
 
     /// V1 carried profile/unit values; v2 added exact civil DOB; v3 added explicitly allowlisted durable
     /// preferences; v4 adds an optional user-selected target weight; v5 adds portable weekday wake
-    /// overrides. Every older key remains for downgrade compatibility.
-    public static let schemaVersion = 5
+    /// overrides; v6 adds the two independent daily-review opt-ins. Every older key remains for
+    /// downgrade compatibility.
+    public static let schemaVersion = 6
     public static let schemaVersionKey = "settings.schemaVersion"
     public static let dateOfBirthKey = "profile.dateOfBirth"
     static let perDayWakeMinutesKey = "windDown.perDayWakeMinutes"
     static let legacyRecoveryMinutesKey = "windDown.recoveryMinutes"
+    static let dailyReviewMorningEnabledKey = "dailyReview.morningEnabled"
+    static let dailyReviewJournalEnabledKey = "dailyReview.journalEnabled"
+    static let dailyReviewLegacyEnabledDefaultsKey = "dailyReview.enabled"
+    static let dailyReviewSplitMigrationDefaultsKey =
+        "dailyReview.splitPreferenceMigrated.v1"
 
     /// The JSON kind a whitelisted key must decode to. Anything else (wrong type, JSON bool posing
     /// as a number, nested objects) is dropped rather than guessed at.
@@ -111,6 +118,8 @@ public enum BackupSettings {
         "hydrationReminders.activeEndMinutes": .int,
         "hydrationReminders.adaptiveEnabled": .bool,
         "hydrationReminders.strapBuzzEnabled": .bool,
+        dailyReviewMorningEnabledKey: .bool,
+        dailyReviewJournalEnabledKey: .bool,
     ]
 
     /// Canonical JSON key → this platform's UserDefaults key. Identity everywhere except
@@ -167,6 +176,8 @@ public enum BackupSettings {
         "hydrationReminders.activeEndMinutes": "hydrationReminders.activeEndMinutes",
         "hydrationReminders.adaptiveEnabled": "hydrationReminders.adaptiveEnabled",
         "hydrationReminders.strapBuzzEnabled": "hydrationReminders.strapBuzzEnabled",
+        dailyReviewMorningEnabledKey: dailyReviewMorningEnabledKey,
+        dailyReviewJournalEnabledKey: dailyReviewJournalEnabledKey,
     ]
 
     // MARK: - Snapshot / apply (UserDefaults boundary)
@@ -189,6 +200,16 @@ public enum BackupSettings {
             guard let raw = defaults.object(forKey: storageKey),
                   let coerced = normalized(raw, for: canonical, as: kind) else { continue }
             out[canonical] = coerced
+        }
+        if let legacyEnabled = defaults.object(
+            forKey: dailyReviewLegacyEnabledDefaultsKey
+        ) as? Bool {
+            if out[dailyReviewMorningEnabledKey] == nil {
+                out[dailyReviewMorningEnabledKey] = legacyEnabled
+            }
+            if out[dailyReviewJournalEnabledKey] == nil {
+                out[dailyReviewJournalEnabledKey] = legacyEnabled
+            }
         }
         return out
     }
@@ -217,6 +238,7 @@ public enum BackupSettings {
             }
             defaults.set(coerced, forKey: storageKey)
         }
+        reconcileDailyReviewCompatibility(values, in: defaults)
         // V2: an exact civil birthday wins over the lossy whole-years compatibility field. Store it as
         // a Date because that is ProfileStore's canonical representation, then mirror the derived age so
         // an older reader still sees a coherent value. V1: when no exact DOB exists, preserve the prior
@@ -234,6 +256,34 @@ public enum BackupSettings {
         if values["profile.sex"] != nil {
             defaults.set(true, forKey: sexConfirmedDefaultsKey)
         }
+    }
+
+    private static func reconcileDailyReviewCompatibility(
+        _ values: [String: Any],
+        in defaults: UserDefaults
+    ) {
+        let touchesMorning = values[dailyReviewMorningEnabledKey] is Bool
+        let touchesJournal = values[dailyReviewJournalEnabledKey] is Bool
+        guard touchesMorning || touchesJournal else { return }
+
+        let legacyEnabled =
+            defaults.object(forKey: dailyReviewLegacyEnabledDefaultsKey) as? Bool
+        let morningEnabled =
+            values[dailyReviewMorningEnabledKey] as? Bool
+            ?? defaults.object(forKey: dailyReviewMorningEnabledKey) as? Bool
+            ?? legacyEnabled
+            ?? false
+        let journalEnabled =
+            values[dailyReviewJournalEnabledKey] as? Bool
+            ?? defaults.object(forKey: dailyReviewJournalEnabledKey) as? Bool
+            ?? legacyEnabled
+            ?? false
+
+        defaults.set(
+            morningEnabled || journalEnabled,
+            forKey: dailyReviewLegacyEnabledDefaultsKey
+        )
+        defaults.set(true, forKey: dailyReviewSplitMigrationDefaultsKey)
     }
 
     /// UserDefaults key `ProfileStore` stores the canonical Date under. V2 serializes only its civil

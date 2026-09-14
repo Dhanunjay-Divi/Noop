@@ -27,8 +27,8 @@ import java.util.zip.ZipOutputStream
  * Plain JVM (real org.json + java.util.zip, no Robolectric); the SharedPreferences apply/snapshot
  * bridge needs a Context and is covered by the shared restore path at the platform level.
  *
- * Shared fields mirror the Apple `BackupSettingsTests`; Android v5 planner-continuity fields are
- * additive and remain unknown-key-safe for older or cross-platform readers.
+ * Shared fields mirror the Apple `BackupSettingsTests`; v5 planner-continuity and v6 split-review
+ * fields are additive and remain unknown-key-safe for older or cross-platform readers.
  */
 class BackupSettingsCodecTest {
 
@@ -88,6 +88,8 @@ class BackupSettingsCodecTest {
             "hydrationReminders.activeEndMinutes" to 1_260,
             "hydrationReminders.adaptiveEnabled" to false,
             "hydrationReminders.strapBuzzEnabled" to false,
+            "dailyReview.morningEnabled" to true,
+            "dailyReview.journalEnabled" to false,
         )
         assertEquals(
             "This fixture must cover every settings-schema field",
@@ -99,7 +101,7 @@ class BackupSettingsCodecTest {
 
         assertEquals(34, back["profile.age"])
         assertEquals("1992-11-03", back["profile.dateOfBirth"])
-        assertEquals(5, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
+        assertEquals(6, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
         assertEquals("female", back["profile.sex"])
         assertEquals(62.5, back["profile.weightKg"])
         assertEquals(60.0, back["profile.targetWeightKg"])
@@ -122,6 +124,8 @@ class BackupSettingsCodecTest {
         )
         assertEquals(120, back["hydrationReminders.intervalMinutes"])
         assertEquals(false, back["hydrationReminders.adaptiveEnabled"])
+        assertEquals(true, back["dailyReview.morningEnabled"])
+        assertEquals(false, back["dailyReview.journalEnabled"])
         assertEquals(values.size + 1, back.size)
     }
 
@@ -256,6 +260,7 @@ class BackupSettingsCodecTest {
                 .putInt(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY, 45)
                 .apply()
         }
+        val dailyReview = singleCommitPrefs()
 
         BackupSettingsBridge.applyRestoreValuesDurably(
             targets = BackupSettingsBridge.RestorePreferenceTargets(
@@ -265,6 +270,7 @@ class BackupSettingsCodecTest {
                 inactivity = inactivity,
                 hydrationReminders = hydrationReminders,
                 windDown = windDown,
+                dailyReview = dailyReview,
             ),
             values = mapOf(
                 "profile.age" to 34,
@@ -280,6 +286,8 @@ class BackupSettingsCodecTest {
                 "hydrationReminders.enabled" to true,
                 "windDown.enabled" to true,
                 "windDown.sleepNeedMinutes" to 8 * 60,
+                "dailyReview.morningEnabled" to true,
+                "dailyReview.journalEnabled" to false,
             ),
         )
 
@@ -301,6 +309,31 @@ class BackupSettingsCodecTest {
         assertTrue(windDown.getBoolean("windDown.enabled", false))
         assertEquals(8 * 60, windDown.getInt("windDown.sleepNeedMinutes", 0))
         assertFalse(windDown.contains(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY))
+        assertTrue(dailyReview.getBoolean("morning_enabled", false))
+        assertFalse(dailyReview.getBoolean("journal_enabled", true))
+        assertTrue(dailyReview.getBoolean("enabled", false))
+        assertTrue(dailyReview.getBoolean("split_migrated_v1", false))
+    }
+
+    @Test fun partialDailyReviewRestorePreservesTheOtherTargetPreference() {
+        val preferences = FakeSharedPreferences().also {
+            it.edit()
+                .putBoolean("morning_enabled", true)
+                .putBoolean("journal_enabled", true)
+                .putBoolean("enabled", true)
+                .putBoolean("split_migrated_v1", true)
+                .apply()
+        }
+
+        BackupSettingsBridge.applyDailyReviewSettings(
+            preferences,
+            mapOf("dailyReview.morningEnabled" to false),
+        )
+
+        assertFalse(preferences.getBoolean("morning_enabled", true))
+        assertTrue(preferences.getBoolean("journal_enabled", false))
+        assertTrue(preferences.getBoolean("enabled", false))
+        assertTrue(preferences.getBoolean("split_migrated_v1", false))
     }
 
     @Test fun repairableSchedulerFailureDoesNotRejectRestoredDatabase() {

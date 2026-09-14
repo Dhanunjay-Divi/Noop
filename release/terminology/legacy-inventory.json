@@ -6950,7 +6950,7 @@
       "lineNumbers": [
         0,
         0,
-        342
+        392
       ],
       "occurrenceCount": 3,
       "path": "Packages/WhoopStore/Sources/WhoopStore/BackupSettings.swift",
@@ -7941,7 +7941,7 @@
         0,
         2,
         26,
-        89
+        91
       ],
       "occurrenceCount": 5,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/BackupSettingsTests.swift",
@@ -21243,8 +21243,8 @@
     {
       "category": "core",
       "lineNumbers": [
-        22,
-        194
+        23,
+        200
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/data/BackupSettings.kt",
@@ -29896,7 +29896,7 @@
       "category": "fixture",
       "lineNumbers": [
         53,
-        113
+        115
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/test/java/com/noop/data/BackupSettingsCodecTest.kt",
@@ -35898,9 +35898,9 @@
     {
       "category": "historical",
       "lineNumbers": [
-        24,
-        60,
-        60
+        25,
+        61,
+        61
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/rounds/INDEX.md",

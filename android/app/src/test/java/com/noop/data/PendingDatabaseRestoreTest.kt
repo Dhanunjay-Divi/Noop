@@ -104,6 +104,7 @@ class PendingDatabaseRestoreTest {
         inactivity: FakeSharedPreferences = FakeSharedPreferences(),
         hydrationReminders: FakeSharedPreferences = FakeSharedPreferences(),
         windDown: FakeSharedPreferences = FakeSharedPreferences(),
+        dailyReview: FakeSharedPreferences = FakeSharedPreferences(),
     ) = BackupSettingsBridge.RestorePreferenceTargets(
         profile = profile,
         noop = noop,
@@ -111,6 +112,7 @@ class PendingDatabaseRestoreTest {
         inactivity = inactivity,
         hydrationReminders = hydrationReminders,
         windDown = windDown,
+        dailyReview = dailyReview,
     )
 
     @Test fun pendingRequiresCandidate() {

@@ -6,6 +6,7 @@ import com.noop.AppDiagnosticsRecorder
 import com.noop.alarm.SmartAlarmStore
 import com.noop.alarm.WindDownScheduler
 import com.noop.alarm.WindDownStore
+import com.noop.notif.DailyReviewReminders
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.ui.AppearancePrefs
 import com.noop.ui.ChartStylePrefs
@@ -28,11 +29,12 @@ import org.json.JSONObject
  * ZIP entry — `settings.json`, a flat JSON object — carrying exactly one WHITELISTED set of keys.
  *
  * The whitelist is the portable contract. Shared keys keep the same canonical names and JSON kinds
- * as Apple; v5 adds portable weekday wake overrides that older readers safely ignore. V1 carried profile/unit
+ * as Apple; v5 adds portable weekday wake overrides and v6 adds independent daily-review opt-ins
+ * that older readers safely ignore. V1 carried profile/unit
  * values, v2 added a schema stamp and exact civil birthday, v3 added a bounded set of durable,
  * user-authored display, dashboard, reminder, HRV, and Sleep Planner preferences, v4 adds the
- * optional user-selected target weight, and v5 preserves validated user-authored weekday wake
- * overrides. Only stable,
+ * optional user-selected target weight, v5 preserves validated user-authored weekday wake
+ * overrides, and v6 preserves the morning-review and journal-reminder choices. Only stable,
  * non-device-specific values are allowed. NEVER add credentials, device/peripheral/install ids,
  * sync cursors, active alarm epochs, or delivery de-dup state: backups get
  * copied into cloud folders and attached to GitHub issues, so this file must stay safe to share.
@@ -46,9 +48,11 @@ object BackupSettingsCodec {
 
     /** Canonical entry name inside the `.noopbak` ZIP. Matches the Apple exporter byte-for-byte. */
     const val ENTRY_NAME = "settings.json"
-    const val SCHEMA_VERSION = 5
+    const val SCHEMA_VERSION = 6
     const val SCHEMA_VERSION_KEY = "settings.schemaVersion"
     const val DATE_OF_BIRTH_KEY = "profile.dateOfBirth"
+    const val DAILY_REVIEW_MORNING_ENABLED_KEY = "dailyReview.morningEnabled"
+    const val DAILY_REVIEW_JOURNAL_ENABLED_KEY = "dailyReview.journalEnabled"
     internal const val LEGACY_RECOVERY_MINUTES_KEY = "windDown.recoveryMinutes"
 
     /** The JSON kind a whitelisted key must decode to. Anything else is dropped, never guessed at. */
@@ -116,6 +120,8 @@ object BackupSettingsCodec {
         "hydrationReminders.activeEndMinutes" to Kind.INT,
         "hydrationReminders.adaptiveEnabled" to Kind.BOOL,
         "hydrationReminders.strapBuzzEnabled" to Kind.BOOL,
+        DAILY_REVIEW_MORNING_ENABLED_KEY to Kind.BOOL,
+        DAILY_REVIEW_JOURNAL_ENABLED_KEY to Kind.BOOL,
     )
     private val LEGACY_ROUND_TRIP_ONLY: Map<String, Kind> = mapOf(
         LEGACY_RECOVERY_MINUTES_KEY to Kind.INT,
@@ -345,6 +351,12 @@ object BackupSettingsBridge {
         "sleepPlanner.wakeMinutes" to "windDown.wakeMinutes",
         "windDown.perDayWakeMinutes" to "windDown.perDayWakeMinutes",
     )
+    private val DAILY_REVIEW_KEYS = linkedMapOf(
+        BackupSettingsCodec.DAILY_REVIEW_MORNING_ENABLED_KEY to
+            DailyReviewReminders.MORNING_ENABLED_KEY,
+        BackupSettingsCodec.DAILY_REVIEW_JOURNAL_ENABLED_KEY to
+            DailyReviewReminders.JOURNAL_ENABLED_KEY,
+    )
 
     /** Canonical non-profile keys with an explicit SharedPreferences destination. */
     internal val mappedCanonicalKeys: Set<String>
@@ -354,6 +366,7 @@ object BackupSettingsBridge {
             addAll(INACTIVITY_KEYS.keys)
             addAll(HYDRATION_REMINDER_KEYS.keys)
             addAll(WIND_DOWN_KEYS.keys)
+            addAll(DAILY_REVIEW_KEYS.keys)
         }
 
     internal data class RestorePreferenceTargets(
@@ -363,6 +376,7 @@ object BackupSettingsBridge {
         val inactivity: SharedPreferences,
         val hydrationReminders: SharedPreferences,
         val windDown: SharedPreferences,
+        val dailyReview: SharedPreferences,
     )
 
     /** The whitelisted, user-SET settings of this device as the `settings.json` string, or null. */
@@ -389,6 +403,13 @@ object BackupSettingsBridge {
         snapshot(
             context.getSharedPreferences("noop_wind_down", Context.MODE_PRIVATE),
             WIND_DOWN_KEYS,
+            values,
+        )
+        snapshotDailyReview(
+            context.getSharedPreferences(
+                DailyReviewReminders.PREFS_NAME,
+                Context.MODE_PRIVATE,
+            ),
             values,
         )
         return BackupSettingsCodec.encode(values)
@@ -418,6 +439,13 @@ object BackupSettingsBridge {
         )
         applyWindDownSettings(
             prefs = context.getSharedPreferences("noop_wind_down", Context.MODE_PRIVATE),
+            values = values,
+        )
+        applyDailyReviewSettings(
+            prefs = context.getSharedPreferences(
+                DailyReviewReminders.PREFS_NAME,
+                Context.MODE_PRIVATE,
+            ),
             values = values,
         )
     }
@@ -450,6 +478,10 @@ object BackupSettingsBridge {
                     "noop_wind_down",
                     Context.MODE_PRIVATE,
                 ),
+                dailyReview = appContext.getSharedPreferences(
+                    DailyReviewReminders.PREFS_NAME,
+                    Context.MODE_PRIVATE,
+                ),
             ),
             values = json?.let(BackupSettingsCodec::decode).orEmpty(),
         )
@@ -465,6 +497,7 @@ object BackupSettingsBridge {
         commitMappedRestore(targets.notifications, NOTIFICATION_KEYS, values)
         commitMappedRestore(targets.inactivity, INACTIVITY_KEYS, values)
         commitMappedRestore(targets.hydrationReminders, HYDRATION_REMINDER_KEYS, values)
+        commitDailyReviewRestore(targets.dailyReview, values)
 
         // Recovery minutes are derived from current evidence and must never survive a database
         // restore. Remove them in the same durable batch as restored wind-down preferences.
@@ -485,6 +518,16 @@ object BackupSettingsBridge {
             editor.remove(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY)
         }
         editor.apply()
+    }
+
+    internal fun applyDailyReviewSettings(
+        prefs: SharedPreferences,
+        values: Map<String, Any>,
+    ) {
+        val editor = prefs.edit()
+        if (writeDailyReview(editor, prefs, values)) {
+            editor.apply()
+        }
     }
 
     /** Refresh process mirrors and OS schedules after settings were committed with the restored DB. */
@@ -682,6 +725,23 @@ object BackupSettingsBridge {
         }
     }
 
+    private fun snapshotDailyReview(
+        prefs: SharedPreferences,
+        destination: MutableMap<String, Any>,
+    ) {
+        snapshot(prefs, DAILY_REVIEW_KEYS, destination)
+        if (!prefs.contains(DailyReviewReminders.LEGACY_ENABLED_KEY)) return
+        val legacyEnabled = prefs.getBoolean(DailyReviewReminders.LEGACY_ENABLED_KEY, false)
+        destination.putIfAbsent(
+            BackupSettingsCodec.DAILY_REVIEW_MORNING_ENABLED_KEY,
+            legacyEnabled,
+        )
+        destination.putIfAbsent(
+            BackupSettingsCodec.DAILY_REVIEW_JOURNAL_ENABLED_KEY,
+            legacyEnabled,
+        )
+    }
+
     private fun apply(
         prefs: SharedPreferences,
         mapping: Map<String, String>,
@@ -718,6 +778,43 @@ object BackupSettingsBridge {
         return changed
     }
 
+    private fun writeDailyReview(
+        editor: SharedPreferences.Editor,
+        prefs: SharedPreferences,
+        values: Map<String, Any>,
+    ): Boolean {
+        val touchesMorning =
+            values[BackupSettingsCodec.DAILY_REVIEW_MORNING_ENABLED_KEY] is Boolean
+        val touchesJournal =
+            values[BackupSettingsCodec.DAILY_REVIEW_JOURNAL_ENABLED_KEY] is Boolean
+        if (!touchesMorning && !touchesJournal) return false
+
+        writeMapped(editor, DAILY_REVIEW_KEYS, values)
+        val legacyEnabled = prefs.getBoolean(
+            DailyReviewReminders.LEGACY_ENABLED_KEY,
+            false,
+        )
+        val morningEnabled =
+            values[BackupSettingsCodec.DAILY_REVIEW_MORNING_ENABLED_KEY] as? Boolean
+                ?: prefs.takeIf {
+                    it.contains(DailyReviewReminders.MORNING_ENABLED_KEY)
+                }?.getBoolean(DailyReviewReminders.MORNING_ENABLED_KEY, false)
+                ?: legacyEnabled
+        val journalEnabled =
+            values[BackupSettingsCodec.DAILY_REVIEW_JOURNAL_ENABLED_KEY] as? Boolean
+                ?: prefs.takeIf {
+                    it.contains(DailyReviewReminders.JOURNAL_ENABLED_KEY)
+                }?.getBoolean(DailyReviewReminders.JOURNAL_ENABLED_KEY, false)
+                ?: legacyEnabled
+        editor
+            .putBoolean(
+                DailyReviewReminders.LEGACY_ENABLED_KEY,
+                morningEnabled || journalEnabled,
+            )
+            .putBoolean(DailyReviewReminders.SPLIT_MIGRATED_KEY, true)
+        return true
+    }
+
     @Throws(IOException::class)
     private fun commitMappedRestore(
         prefs: SharedPreferences,
@@ -726,6 +823,15 @@ object BackupSettingsBridge {
     ) {
         val editor = prefs.edit()
         if (writeMapped(editor, mapping, values)) commitOrThrow(editor)
+    }
+
+    @Throws(IOException::class)
+    private fun commitDailyReviewRestore(
+        prefs: SharedPreferences,
+        values: Map<String, Any>,
+    ) {
+        val editor = prefs.edit()
+        if (writeDailyReview(editor, prefs, values)) commitOrThrow(editor)
     }
 
     @Throws(IOException::class)

@@ -61,6 +61,8 @@ final class BackupSettingsTests: XCTestCase {
             "hydrationReminders.activeEndMinutes": 1_260,
             "hydrationReminders.adaptiveEnabled": false,
             "hydrationReminders.strapBuzzEnabled": false,
+            "dailyReview.morningEnabled": true,
+            "dailyReview.journalEnabled": false,
         ]
         XCTAssertEqual(
             Set(values.keys).union([
@@ -75,7 +77,7 @@ final class BackupSettingsTests: XCTestCase {
 
         XCTAssertEqual(back["profile.age"] as? Int, 34)
         XCTAssertEqual(back["profile.dateOfBirth"] as? String, "1992-11-03")
-        XCTAssertEqual(back[BackupSettings.schemaVersionKey] as? Int, 5)
+        XCTAssertEqual(back[BackupSettings.schemaVersionKey] as? Int, 6)
         XCTAssertEqual(back["profile.sex"] as? String, "female")
         XCTAssertEqual(back["profile.weightKg"] as? Double, 62.5)
         XCTAssertEqual(back["profile.targetWeightKg"] as? Double, 60.0)
@@ -98,7 +100,9 @@ final class BackupSettingsTests: XCTestCase {
         )
         XCTAssertEqual(back["hydrationReminders.intervalMinutes"] as? Int, 120)
         XCTAssertEqual(back["hydrationReminders.adaptiveEnabled"] as? Bool, false)
-        XCTAssertEqual(back.count, values.count + 1, "Only the v5 schema stamp should be added")
+        XCTAssertEqual(back["dailyReview.morningEnabled"] as? Bool, true)
+        XCTAssertEqual(back["dailyReview.journalEnabled"] as? Bool, false)
+        XCTAssertEqual(back.count, values.count + 1, "Only the v6 schema stamp should be added")
     }
 
     func testEveryPayloadFieldHasAnAppleDefaultsMapping() {
@@ -260,7 +264,7 @@ final class BackupSettingsTests: XCTestCase {
         let snap = BackupSettings.snapshot(from: defaults)
         XCTAssertEqual(snap["profile.age"] as? Int, 29)
         XCTAssertEqual(snap["profile.dateOfBirth"] as? String, "1997-04-09")
-        XCTAssertEqual(snap[BackupSettings.schemaVersionKey] as? Int, 5)
+        XCTAssertEqual(snap[BackupSettings.schemaVersionKey] as? Int, 6)
         XCTAssertEqual(snap["profile.weightKg"] as? Double, 82.5)
         XCTAssertEqual(snap["profile.targetWeightKg"] as? Double, 79.0)
         XCTAssertEqual(snap["profile.hrMax"] as? Int, 198, "hrMaxOverride surfaces under the canonical key")
@@ -305,6 +309,9 @@ final class BackupSettingsTests: XCTestCase {
         )
         source.set(120, forKey: "hydrationReminders.intervalMinutes")
         source.set(false, forKey: "hydrationReminders.adaptiveEnabled")
+        source.set(true, forKey: BackupSettings.dailyReviewMorningEnabledKey)
+        source.set(false, forKey: BackupSettings.dailyReviewJournalEnabledKey)
+        source.set(true, forKey: BackupSettings.dailyReviewSplitMigrationDefaultsKey)
 
         let snapshot = BackupSettings.snapshot(from: source)
         XCTAssertEqual(snapshot["hrv.window"] as? String, "deep")
@@ -317,6 +324,8 @@ final class BackupSettingsTests: XCTestCase {
         )
         XCTAssertNil(snapshot["windDown.wakeMinutes"],
                      "The platform storage name must not leak into the portable payload")
+        XCTAssertEqual(snapshot[BackupSettings.dailyReviewMorningEnabledKey] as? Bool, true)
+        XCTAssertEqual(snapshot[BackupSettings.dailyReviewJournalEnabledKey] as? Bool, false)
 
         let target = try freshDefaults()
         BackupSettings.apply(BackupSettings.decode(try XCTUnwrap(BackupSettings.encode(snapshot))),
@@ -335,6 +344,32 @@ final class BackupSettingsTests: XCTestCase {
         )
         XCTAssertEqual(target.object(forKey: "hydrationReminders.intervalMinutes") as? Int, 120)
         XCTAssertEqual(target.object(forKey: "hydrationReminders.adaptiveEnabled") as? Bool, false)
+        XCTAssertEqual(
+            target.object(forKey: BackupSettings.dailyReviewMorningEnabledKey) as? Bool,
+            true
+        )
+        XCTAssertEqual(
+            target.object(forKey: BackupSettings.dailyReviewJournalEnabledKey) as? Bool,
+            false
+        )
+        XCTAssertEqual(
+            target.object(forKey: BackupSettings.dailyReviewLegacyEnabledDefaultsKey) as? Bool,
+            true
+        )
+        XCTAssertEqual(
+            target.object(forKey: BackupSettings.dailyReviewSplitMigrationDefaultsKey) as? Bool,
+            true
+        )
+    }
+
+    func testLegacyDailyReviewOptInExportsAsBothPortablePreferences() throws {
+        let defaults = try freshDefaults()
+        defaults.set(true, forKey: BackupSettings.dailyReviewLegacyEnabledDefaultsKey)
+
+        let snapshot = BackupSettings.snapshot(from: defaults)
+
+        XCTAssertEqual(snapshot[BackupSettings.dailyReviewMorningEnabledKey] as? Bool, true)
+        XCTAssertEqual(snapshot[BackupSettings.dailyReviewJournalEnabledKey] as? Bool, true)
     }
 
     func testMalformedWeekdayWakeOverridesAreDropped() throws {

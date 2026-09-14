@@ -185,11 +185,11 @@ internal object DailyReviewReminderPolicy {
  * journal at fire time, so a completed day is suppressed even when NOOP has not been opened since.
  */
 object DailyReviewReminders {
-    private const val PREFS = "noop_daily_review"
-    private const val LEGACY_ENABLED = "enabled"
-    private const val MORNING_ENABLED = "morning_enabled"
-    private const val JOURNAL_ENABLED = "journal_enabled"
-    private const val SPLIT_MIGRATED = "split_migrated_v1"
+    internal const val PREFS_NAME = "noop_daily_review"
+    internal const val LEGACY_ENABLED_KEY = "enabled"
+    internal const val MORNING_ENABLED_KEY = "morning_enabled"
+    internal const val JOURNAL_ENABLED_KEY = "journal_enabled"
+    internal const val SPLIT_MIGRATED_KEY = "split_migrated_v1"
     private const val MORNING_MINUTES = "morning_minutes"
     private const val EVENING_MINUTES = "evening_minutes"
     private const val MORNING_WORK = "noop_daily_review_morning"
@@ -203,12 +203,12 @@ object DailyReviewReminders {
 
     fun isMorningEnabled(context: Context): Boolean {
         migrateLegacyPreferenceIfNeeded(context)
-        return prefs(context).getBoolean(MORNING_ENABLED, false)
+        return prefs(context).getBoolean(MORNING_ENABLED_KEY, false)
     }
 
     fun isJournalEnabled(context: Context): Boolean {
         migrateLegacyPreferenceIfNeeded(context)
-        return prefs(context).getBoolean(JOURNAL_ENABLED, false)
+        return prefs(context).getBoolean(JOURNAL_ENABLED_KEY, false)
     }
 
     fun morningMinutes(context: Context): Int =
@@ -275,10 +275,10 @@ object DailyReviewReminders {
             return false
         }
         val committed = prefs(appContext).edit()
-            .putBoolean(MORNING_ENABLED, requestedMorning)
-            .putBoolean(JOURNAL_ENABLED, requestedJournal)
-            .putBoolean(LEGACY_ENABLED, requestedMorning || requestedJournal)
-            .putBoolean(SPLIT_MIGRATED, true)
+            .putBoolean(MORNING_ENABLED_KEY, requestedMorning)
+            .putBoolean(JOURNAL_ENABLED_KEY, requestedJournal)
+            .putBoolean(LEGACY_ENABLED_KEY, requestedMorning || requestedJournal)
+            .putBoolean(SPLIT_MIGRATED_KEY, true)
             .commit()
         if (!committed) return false
         reconcile(appContext)
@@ -553,18 +553,18 @@ object DailyReviewReminders {
         val appContext = context.applicationContext
         synchronized(preferenceLock) {
             val preferences = prefs(appContext)
-            if (preferences.getBoolean(SPLIT_MIGRATED, false)) return
-            val legacyEnabled = preferences.getBoolean(LEGACY_ENABLED, false)
+            if (preferences.getBoolean(SPLIT_MIGRATED_KEY, false)) return
+            val legacyEnabled = preferences.getBoolean(LEGACY_ENABLED_KEY, false)
             preferences.edit()
-                .putBoolean(MORNING_ENABLED, legacyEnabled)
-                .putBoolean(JOURNAL_ENABLED, legacyEnabled)
-                .putBoolean(SPLIT_MIGRATED, true)
+                .putBoolean(MORNING_ENABLED_KEY, legacyEnabled)
+                .putBoolean(JOURNAL_ENABLED_KEY, legacyEnabled)
+                .putBoolean(SPLIT_MIGRATED_KEY, true)
                 .commit()
         }
     }
 
     private fun prefs(context: Context) = context.applicationContext
-        .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     internal fun workName(kind: DailyReviewKind): String = when (kind) {
         DailyReviewKind.MORNING -> MORNING_WORK
