@@ -219,6 +219,34 @@ class DailyReviewReminderPolicyTest {
     }
 
     @Test
+    fun operationalEntryPointsRejectBeforeReadingOrRepairingReminderState() {
+        val source = locateReminderSource().readText()
+        val worker = source.substring(
+            source.indexOf("class DailyReviewReminderWorker"),
+            source.indexOf("/** Recomputes local wall-clock work"),
+        )
+        val receiver = source.substring(
+            source.indexOf("class DailyReviewTimeChangeReceiver"),
+            source.indexOf("internal object DailyReviewReminderNotifier"),
+        )
+
+        val workerGate = worker.indexOf(
+            "ManagedRuntimeGate.isAuthorized(applicationContext)",
+        )
+        val workerInput = worker.indexOf("inputData.getString(KIND_KEY)")
+        val receiverGate = receiver.indexOf(
+            "ManagedRuntimeGate.isAuthorized(context.applicationContext)",
+        )
+        val receiverRepair = receiver.indexOf("DailyReviewReminders.restore(context)")
+
+        assertTrue(workerGate >= 0)
+        assertTrue(workerInput > workerGate)
+        assertTrue(receiverGate >= 0)
+        assertTrue(receiverRepair > receiverGate)
+        assertTrue(source.contains("\"daily_review.operational_gate\""))
+    }
+
+    @Test
     fun journalRouteKeepsTheLogicalDayAfterQuietHoursCrossMidnight() {
         val request = PendingNotificationRouteRequest(
             route = NoopNotificationRoute.JOURNAL,

@@ -8,12 +8,13 @@ Last updated: **2026-09-14**
 - Protected branch: `main`
 - Active worktree: `/private/tmp/noop-product-audit-20260911`
 - Active branch: `codex/product-safety-quality-audit-20260911`
-- Local and remote committed head before the final bounded change:
-  `270a221f6be298c577a343fd9243a1f5334d49f4`
-- Local state at this update: exact-current supplier-independent product,
-  platform, server, package, infrastructure, localization, privacy, claims,
-  policy, and diff verification passed; staged review and one bounded commit
-  remain
+- Remote pull-request head before the corrective push:
+  `e0297be1896a87493c2b3ce4ad1482801078f3f4`
+- Local state at this update: the hosted Android Review Sample regression is
+  corrected, and exact-current focused, complete-variant, API 35, operations,
+  privacy, claims, terminology, calibration, legal, required-CI, tooling,
+  secret, and diff verification passed; the bounded corrective commit is the
+  current local branch head and one replacement push remains
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration
@@ -22,6 +23,7 @@ Resume work from:
 
 - [Agent entry point](../../AGENTS.md)
 - [NOOP operations skill](../../.agents/skills/noop-ops/SKILL.md)
+- [Current Android Review Sample terms gate](rounds/2026-09-14-android-review-sample-terms-gate.md)
 - [Current final-review remediation](rounds/2026-09-14-pr15-final-review-remediation.md)
 - [Current reference-guidance closeout](rounds/2026-09-14-reference-guidance-closeout.md)
 - [Current hosted-CI correction round](rounds/2026-09-14-ios-tab-selection-ci-stability.md)
@@ -34,6 +36,14 @@ Old chats, screenshots, prior commits, and earlier green matrices are
 chronological evidence only. They do not establish the current worktree state.
 
 ## Current scope
+
+The exact remote head `e0297be1` passed the hosted product and policy matrix
+except for Android Review Sample isolation. Android delivered a supported
+time-change broadcast before Terms acceptance, and the new daily-review split
+reconciliation called cancellation, which lazily initialized WorkManager. The
+local correction independently gates both the time-change receiver and worker
+before input, preferences, health, scheduling, or WorkManager access. A fresh
+API 35 Review Sample now passes while WorkManager remains uninitialized.
 
 The final local slice closes seven concrete review defects:
 
@@ -107,14 +117,16 @@ Completed on the current product source:
 - Focused Apple notification, contextual-action, route, and calendar wall:
   113 passed, zero failed/skipped.
 - Focused Android hydration API 35 wall: three passed, zero failed.
-- Complete Android source wall: Full and Demo each executed 4,766 unit cases
-  with 4,759 passes, seven intentional skips, and zero failures/errors; both
+- Complete Android source wall: Full and Demo each executed 4,767 unit cases
+  with 4,760 passes, seven intentional skips, and zero failures/errors; both
   APKs, both lint variants, and both instrumentation-source compilations passed
   in 137 Gradle tasks.
-- Android Pixel 2 API 35 managed-device production shell: 109 tests total, 107
-  passed, zero failures/errors, and two intentional private-pilot skips. The
-  hydration transaction rollback, WorkManager continuity, and notification
-  runtime paths passed.
+- Android Pixel 2 API 35 Review Sample: one passed with a fresh process and
+  WorkManager remaining uninitialized before Terms.
+- Remaining Android Pixel 2 API 35 managed-device production shell: 108
+  completed, zero failures/errors, and two intentional private-pilot skips.
+  The hydration transaction rollback, WorkManager continuity, notification,
+  managed-data, and app-shell runtime paths passed.
 - Focused server closeout: the backup/migration/feedback wall passed 42 tests;
   the complete PostgreSQL feedback file passed 27 tests after the final
   formatter-only correction. The strengthened restore application smoke passed
@@ -148,8 +160,7 @@ Completed on the current product source:
 - Repository tools: 230 tests plus 34 subtests, 49 top-level i18n tests, and 12
   OpenTofu tests passed.
 
-Still required before a push: stage and inspect the complete intended change,
-then create one bounded final commit.
+Still required before a push: push the reviewed corrective branch head once.
 
 Do not describe prior matrices as exact-current evidence after any product,
 test, localization, migration, workflow, or policy edit.
@@ -157,10 +168,12 @@ test, localization, migration, workflow, or policy edit.
 ## Pull request and integration
 
 Pull request `#15` is the protected integration record. Its current remote head
-is `270a221f`; any check or review state on an earlier SHA is not final evidence.
+is `e0297be1`. All completed hosted product and policy checks on that SHA passed
+except Android Review Sample isolation; that failed check is valid historical
+evidence and the local correction requires a replacement exact-SHA matrix.
 Known review conversations remain unresolved until the replacement head proves
-their fixes, including hydration limits/transactions, feedback continuity, and
-managed-sync deletion behavior.
+their fixes, including hydration limits/transactions, feedback continuity,
+managed-sync deletion behavior, and pre-Terms Review Sample isolation.
 
 Closeout order:
 

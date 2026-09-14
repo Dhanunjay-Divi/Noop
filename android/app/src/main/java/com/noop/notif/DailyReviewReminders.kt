@@ -21,6 +21,7 @@ import androidx.work.workDataOf
 import com.noop.AppDiagnosticsRecorder
 import com.noop.R
 import com.noop.data.WhoopRepository
+import com.noop.managed.ManagedRuntimeGate
 import com.noop.ui.ContextualActionCenter
 import com.noop.ui.JOURNAL_DEVICE_ID
 import com.noop.ui.NoopNotificationRoute
@@ -585,6 +586,16 @@ class DailyReviewReminderWorker(appContext: Context, params: WorkerParameters) :
     CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
+        if (!ManagedRuntimeGate.isAuthorized(applicationContext)) {
+            AppDiagnosticsRecorder.record(
+                "daily_review.operational_gate",
+                fields = mapOf(
+                    "entrypoint" to "worker",
+                    "outcome" to "blocked",
+                ),
+            )
+            return Result.success()
+        }
         val kind = inputData.getString(KIND_KEY)
             ?.let { runCatching { DailyReviewKind.valueOf(it) }.getOrNull() }
             ?: return Result.failure()
@@ -701,6 +712,16 @@ class DailyReviewTimeChangeReceiver : BroadcastReceiver() {
             else -> false
         }
         if (!supported) return
+        if (!ManagedRuntimeGate.isAuthorized(context.applicationContext)) {
+            AppDiagnosticsRecorder.record(
+                "daily_review.operational_gate",
+                fields = mapOf(
+                    "entrypoint" to "time_change_receiver",
+                    "outcome" to "blocked",
+                ),
+            )
+            return
+        }
         if (intent?.action == Intent.ACTION_DATE_CHANGED) {
             DailyReviewReminders.restore(context)
         } else {
