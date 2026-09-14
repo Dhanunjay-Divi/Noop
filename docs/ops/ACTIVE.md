@@ -25,7 +25,14 @@ Last updated: **2026-09-14**
   targets Trends' actual vertical scroll surface, and retains bounded
   production frame-hitch diagnostics. The focused source contract and affected
   iPhone tests pass, and the complete iPhone shell executed 39 cases with 38
-  passes, one intentional private-pilot skip, and zero failures
+  passes, one intentional private-pilot skip, and zero failures. A subsequent
+  exact-head hosted run passed every non-Apple requirement and every other
+  Apple UI case, but iOS 26 XCTest starved while evaluating a redundant
+  compact-button query between repeated performance gestures. That query is
+  now removed; the dedicated compaction test remains authoritative. The
+  corrected performance case passed in 36.251 seconds, and the complete
+  39-case iPhone shell passed 38 cases with one intentional private-pilot skip
+  and zero failures in 659.905 seconds
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration

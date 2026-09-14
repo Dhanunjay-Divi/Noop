@@ -1277,19 +1277,16 @@ final class NOOPiOSUITests: XCTestCase {
         // The iOS 26 simulator currently throws NSInternalInconsistencyException while decoding the
         // scrolling signpost payload and can starve XCTest's event-loop observer across repeated measured
         // gestures. One complete process-metric round trip keeps hosted CI as a bounded scroll-liveness
-        // check. Three unmeasured round trips retain intermittent-lag coverage and verify the real
-        // compact/expanded navigation state. XCTest gesture synthesis and idle detection vary materially
-        // with hosted-runner load, so the broad wall-clock ceiling catches a stalled shell without treating
-        // runner scheduling as frame-pacing evidence; production's bounded CADisplayLink monitor records
-        // 50 ms and 150 ms hitches, and real devices keep five iterations of Apple's metric below.
+        // check. Three unmeasured round trips retain intermittent-lag coverage without inserting an
+        // accessibility-tree query between every gesture; the dedicated compaction test verifies the real
+        // navigation state. XCTest gesture synthesis and idle detection vary materially with hosted-runner
+        // load, so the broad wall-clock ceiling catches a stalled shell without treating runner scheduling
+        // as frame-pacing evidence; production's bounded CADisplayLink monitor records 50 ms and 150 ms
+        // hitches, and real devices keep five iterations of Apple's metric below.
         var longestSmokeRoundTrip = 0.0
         for _ in 0..<3 {
             let startedAt = ProcessInfo.processInfo.systemUptime
             scroll.swipeUp()
-            XCTAssertTrue(
-                app.buttons["noop.tab.compact"].waitForExistence(timeout: 5),
-                "Advancing Today must compact the persistent navigation."
-            )
             scroll.swipeDown()
             longestSmokeRoundTrip = max(
                 longestSmokeRoundTrip,

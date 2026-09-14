@@ -2,9 +2,9 @@
 
 ## Status
 
-- State: `second hosted correction and complete local verification finished;
-  replacement exact-SHA hosted checks, protected integration, repository
-  privacy restoration, and cleanup pending`
+- State: `third hosted correction and complete replacement local verification
+  finished; exact-SHA hosted checks, protected integration, repository privacy
+  restoration, and cleanup pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `703727e6087ab8b1384d1cfab50cf4e28f18b430`
@@ -69,6 +69,11 @@ matrix before protected integration.
   XCTest gesture synthesis is not frame-pacing evidence; production continues
   to record bounded 50 ms and 150 ms display-link hitches, and physical devices
   retain Apple's scrolling/deceleration metric.
+- Do not evaluate the compact-button accessibility query between every
+  performance gesture. The dedicated compaction case owns that semantic
+  contract; repeating the query inside the smoke loop can starve iOS 26
+  XCTest's event-loop observer after the third swipe even when the app gesture
+  itself completed.
 
 ## Data, privacy, and medical truth
 
@@ -96,6 +101,9 @@ matrix before protected integration.
 | Hosted exact-head iOS shell at `69749fbc` | App build passed; 38 UI cases passed or intentionally skipped, while Trends compaction and the 8-second simulator gesture ceiling failed | Exposes the first-sample compaction race and shows that hosted XCTest wall time is not app CPU or memory evidence | Whether the correction passes hosted CI |
 | Focused final correction | Source contract passed; both affected iPhone UI tests passed with zero retry/failure in 51.687 seconds | The coalesced first-sample rule compiles, Trends targets its actual scroll surface, and repeated Today gestures complete under the corrected bounded contract | Complete-suite or physical-device behavior |
 | Complete replacement iOS production shell | 39 tests executed: 38 passed, one intentional private-pilot skip, zero failures in 654.629 seconds | The corrected implementation passes every production-shell UI contract without retry | Physical-device performance |
+| Hosted exact-head iOS shell at `fd0e79ae` | App build and 38 UI cases passed or intentionally skipped; the performance case completed two round trips, then XCTest waited 60 seconds for its event-loop observer and timed out evaluating the third intermediate compact-button query | Isolates the remaining failure to redundant accessibility-query pressure inside the simulator smoke, not the production compaction contract | Whether removing that redundant query passes replacement hosted CI |
+| Focused no-query performance case | Passed without retry in 36.251 seconds | The performance smoke completes after removing the redundant accessibility-tree query | Accumulated full-suite pressure or physical-device frame pacing |
+| Complete no-query iOS production shell | 39 tests executed: 38 passed, one intentional private-pilot skip, zero failures in 659.905 seconds | The exact correction passes under accumulated local suite pressure | Hosted-runner and physical-device performance |
 | Replacement exact-SHA hosted matrix | Pending | Pending | External release gates |
 
 ## Physical device and deployment
