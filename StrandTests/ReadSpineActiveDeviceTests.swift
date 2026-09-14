@@ -473,6 +473,342 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         )
     }
 
+    func testLateOnlyClaimDefersUntilItsLocalDayIsComplete() {
+        let base = IntelligenceEngine.midnightLocal(1_780_000_000, offsetSec: 0)
+        let now = base + 21 * 3_600
+        let late = AnalysisInputGenerationClaim(
+            deviceId: canonicalId,
+            generation: 1,
+            earliestAffectedTs: Int64(base + 20 * 3_600),
+            latestAffectedTs: Int64(base + 20 * 3_600)
+        )
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: [late],
+            now: now,
+            timezoneOffsetSeconds: 0
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: now,
+            timezoneOffsetSeconds: 0
+        )
+
+        XCTAssertEqual(plan.passKind, .deferred)
+        XCTAssertFalse(plan.shouldAnalyze)
+        XCTAssertFalse(coverage.covers(late))
+    }
+
+    func testDeferredLateClaimBecomesRecentAfterLocalMidnight() {
+        let base = IntelligenceEngine.midnightLocal(1_780_000_000, offsetSec: 0)
+        let late = AnalysisInputGenerationClaim(
+            deviceId: canonicalId,
+            generation: 1,
+            earliestAffectedTs: Int64(base + 20 * 3_600),
+            latestAffectedTs: Int64(base + 20 * 3_600)
+        )
+        let afterMidnight = base + 86_400 + 60
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: [late],
+            now: afterMidnight,
+            timezoneOffsetSeconds: 0
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: afterMidnight,
+            timezoneOffsetSeconds: 0
+        )
+
+        XCTAssertEqual(plan.passKind, .recent)
+        XCTAssertTrue(plan.shouldAnalyze)
+        XCTAssertTrue(coverage.covers(late))
+    }
+
+    func testRecentClaimWinsOverHistoricalBacklog() {
+        let base = IntelligenceEngine.midnightLocal(1_780_000_000, offsetSec: 0)
+        let now = base + 17 * 3_600
+        let historicalTs = Int64(base - 365 * 86_400)
+        let historical = AnalysisInputGenerationClaim(
+            deviceId: "historical",
+            generation: 1,
+            earliestAffectedTs: historicalTs,
+            latestAffectedTs: historicalTs
+        )
+        let recent = AnalysisInputGenerationClaim(
+            deviceId: "recent",
+            generation: 1,
+            earliestAffectedTs: Int64(base + 16 * 3_600),
+            latestAffectedTs: Int64(base + 16 * 3_600)
+        )
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: [historical, recent],
+            now: now,
+            timezoneOffsetSeconds: 0
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: now,
+            timezoneOffsetSeconds: 0
+        )
+
+        XCTAssertEqual(plan.passKind, .recent)
+        XCTAssertTrue(plan.defersHistoricalBacklog)
+        XCTAssertTrue(coverage.covers(recent))
+        XCTAssertFalse(coverage.covers(historical))
+    }
+
+    func testSuccessfulRecentPassGivesNextPassOneHistoricalBatch() {
+        let base = IntelligenceEngine.midnightLocal(1_780_000_000, offsetSec: 0)
+        let now = base + 17 * 3_600
+        let historicalTs = Int64(base - 365 * 86_400)
+        let historical = AnalysisInputGenerationClaim(
+            deviceId: "historical",
+            generation: 1,
+            earliestAffectedTs: historicalTs,
+            latestAffectedTs: historicalTs
+        )
+        let recent = AnalysisInputGenerationClaim(
+            deviceId: "recent",
+            generation: 1,
+            earliestAffectedTs: Int64(base + 16 * 3_600),
+            latestAffectedTs: Int64(base + 16 * 3_600)
+        )
+        let claims = [historical, recent]
+
+        let first = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: claims,
+            now: now,
+            timezoneOffsetSeconds: 0
+        )
+        let catchUpDue = IntelligenceEngine.analysisHistoricalCatchUpPreference(
+            current: false,
+            force: false,
+            plan: first,
+            finalization: .init(acknowledgedCount: 1, advancedCount: 0)
+        )
+        let second = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: claims,
+            now: now,
+            timezoneOffsetSeconds: 0,
+            preferHistoricalCatchUp: catchUpDue
+        )
+        let secondCoverage = IntelligenceEngine.analysisScanCoverage(
+            plan: second,
+            actualNow: now,
+            timezoneOffsetSeconds: 0
+        )
+        let consumedCatchUp = IntelligenceEngine
+            .analysisHistoricalCatchUpPreferenceAfterSelection(
+                current: catchUpDue,
+                force: false,
+                plan: second
+            )
+        let third = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: claims,
+            now: now,
+            timezoneOffsetSeconds: 0,
+            preferHistoricalCatchUp: consumedCatchUp
+        )
+
+        XCTAssertEqual(first.passKind, .recent)
+        XCTAssertTrue(catchUpDue)
+        XCTAssertEqual(second.passKind, .historical)
+        XCTAssertTrue(secondCoverage.covers(historical))
+        XCTAssertFalse(secondCoverage.covers(recent))
+        XCTAssertFalse(consumedCatchUp)
+        XCTAssertEqual(
+            third.passKind,
+            .recent,
+            "a failed historical attempt must still yield the next turn to fresh data"
+        )
+        XCTAssertFalse(
+            IntelligenceEngine.analysisHistoricalCatchUpPreference(
+                current: consumedCatchUp,
+                force: false,
+                plan: second,
+                finalization: .init(acknowledgedCount: 1, advancedCount: 0)
+            )
+        )
+    }
+
+    func testPartialRecentTailAndFailedPassPreserveHistoricalFairness() {
+        let recent = IntelligenceEngine.AnalysisScoringPlan(
+            referenceNow: 1_780_000_000,
+            maxDays: 21,
+            passKind: .recent
+        )
+        let historical = IntelligenceEngine.AnalysisScoringPlan(
+            referenceNow: 1_780_000_000,
+            maxDays: 21,
+            passKind: .historical
+        )
+
+        XCTAssertTrue(
+            IntelligenceEngine.analysisHistoricalCatchUpPreference(
+                current: false,
+                force: false,
+                plan: recent,
+                finalization: .init(acknowledgedCount: 0, advancedCount: 1)
+            ),
+            "advancing a recent tail leaves an older remainder that must get the next bounded pass"
+        )
+        XCTAssertTrue(
+            IntelligenceEngine.analysisHistoricalCatchUpPreference(
+                current: true,
+                force: false,
+                plan: recent,
+                finalization: .init(acknowledgedCount: 0, advancedCount: 0)
+            ),
+            "a failed or no-op finalization must not discard an already-due catch-up"
+        )
+        XCTAssertFalse(
+            IntelligenceEngine.analysisHistoricalCatchUpPreferenceAfterSelection(
+                current: true,
+                force: false,
+                plan: historical
+            ),
+            "starting the bounded historical turn must consume it before fallible work begins"
+        )
+        XCTAssertTrue(
+            IntelligenceEngine.analysisHistoricalCatchUpPreference(
+                current: true,
+                force: true,
+                plan: recent,
+                finalization: .init(acknowledgedCount: 1, advancedCount: 0)
+            ),
+            "forced maintenance must preserve non-forced fairness state"
+        )
+        XCTAssertTrue(
+            IntelligenceEngine.analysisHistoricalCatchUpPreferenceAfterSelection(
+                current: true,
+                force: true,
+                plan: historical
+            ),
+            "forced maintenance must not consume the non-forced historical turn"
+        )
+    }
+
+    func testHistoricalClaimRunsWhenOnlyOtherClaimIsPastCoverageCutoff() {
+        let base = IntelligenceEngine.midnightLocal(1_780_000_000, offsetSec: 0)
+        let now = base + 21 * 3_600
+        let historicalTs = Int64(base - 30 * 86_400)
+        let historical = AnalysisInputGenerationClaim(
+            deviceId: "historical",
+            generation: 1,
+            earliestAffectedTs: historicalTs,
+            latestAffectedTs: historicalTs
+        )
+        let late = AnalysisInputGenerationClaim(
+            deviceId: "late",
+            generation: 1,
+            earliestAffectedTs: Int64(base + 20 * 3_600),
+            latestAffectedTs: Int64(base + 20 * 3_600)
+        )
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: [historical, late],
+            now: now,
+            timezoneOffsetSeconds: 0
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: now,
+            timezoneOffsetSeconds: 0
+        )
+
+        XCTAssertEqual(plan.passKind, .historical)
+        XCTAssertTrue(coverage.covers(historical))
+        XCTAssertFalse(coverage.covers(late))
+    }
+
+    func testHistoricalClaimRunsWhenOtherClaimStraddlesCoverageCutoff() {
+        let base = IntelligenceEngine.midnightLocal(1_780_000_000, offsetSec: 0)
+        let now = base + 21 * 3_600
+        let historicalTs = Int64(base - 30 * 86_400)
+        let historical = AnalysisInputGenerationClaim(
+            deviceId: "historical",
+            generation: 1,
+            earliestAffectedTs: historicalTs,
+            latestAffectedTs: historicalTs
+        )
+        let straddling = AnalysisInputGenerationClaim(
+            deviceId: "straddling",
+            generation: 1,
+            earliestAffectedTs: Int64(base + 17 * 3_600),
+            latestAffectedTs: Int64(base + 20 * 3_600)
+        )
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: [historical, straddling],
+            now: now,
+            timezoneOffsetSeconds: 0
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: now,
+            timezoneOffsetSeconds: 0
+        )
+
+        XCTAssertEqual(plan.passKind, .historical)
+        XCTAssertTrue(coverage.covers(historical))
+        XCTAssertFalse(coverage.covers(straddling))
+    }
+
+    func testForcedPassRunsOnceWithoutClaimingLateInput() {
+        let base = IntelligenceEngine.midnightLocal(1_780_000_000, offsetSec: 0)
+        let now = base + 21 * 3_600
+        let late = AnalysisInputGenerationClaim(
+            deviceId: canonicalId,
+            generation: 1,
+            earliestAffectedTs: Int64(base + 20 * 3_600),
+            latestAffectedTs: Int64(base + 20 * 3_600)
+        )
+
+        let forced = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 90,
+            force: true,
+            claims: [late],
+            now: now,
+            timezoneOffsetSeconds: 0
+        )
+        let forcedCoverage = IntelligenceEngine.analysisScanCoverage(
+            plan: forced,
+            actualNow: now,
+            timezoneOffsetSeconds: 0
+        )
+        let followUp = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 90,
+            force: false,
+            claims: [late],
+            now: now + 900,
+            timezoneOffsetSeconds: 0
+        )
+
+        XCTAssertEqual(forced.passKind, .recent)
+        XCTAssertTrue(forced.shouldAnalyze)
+        XCTAssertFalse(forcedCoverage.covers(late))
+        XCTAssertEqual(followUp.passKind, .deferred)
+        XCTAssertFalse(followUp.shouldAnalyze)
+    }
+
     func testEveryIncompleteOrCancelledAnalysisOutcomeLeavesClaimPending() async throws {
         var readFailure = IntelligenceEngine.AnalysisPassIntegrity()
         readFailure.requiredReadsSucceeded = false

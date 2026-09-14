@@ -314,14 +314,14 @@ class DailyReviewReminderPolicyTest {
         val source = locateBackupSettingsSource().readText()
         val reconcile = source.substring(
             source.indexOf("fun reconcileAfterRestore(context: Context)"),
-            source.indexOf("internal enum class HydrationRestoreRetryOutcome"),
+            source.indexOf("internal enum class RestoreSchedulerRetryOutcome"),
         )
 
         assertTrue(reconcile.contains("DailyReviewReminders.reconcile(appContext)"))
         assertTrue(reconcile.contains("\"component\" to \"daily_review\""))
-        assertTrue(
-            reconcile.contains("reconcileDailyReviewForConfirmedRestore("),
-        )
+        assertTrue(reconcile.contains("reconcileSchedulerForConfirmedRestore("))
+        assertTrue(reconcile.contains("DAILY_REVIEW_RETRY_NEEDED"))
+        assertTrue(source.contains("fun reconcileDailyReviewAfterDatabaseReady("))
     }
 
     private fun locateReminderSource(): File {

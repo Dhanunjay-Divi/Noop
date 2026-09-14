@@ -92,10 +92,37 @@ final class IntelligenceEngine: ObservableObject {
         }
     }
 
+    enum AnalysisPassKind: Equatable, Sendable {
+        case recent
+        case historical
+        case deferred
+    }
+
     struct AnalysisScoringPlan: Equatable, Sendable {
         let referenceNow: Int
         let maxDays: Int
-        let isHistoricalCatchUp: Bool
+        let passKind: AnalysisPassKind
+        let defersHistoricalBacklog: Bool
+
+        init(
+            referenceNow: Int,
+            maxDays: Int,
+            passKind: AnalysisPassKind,
+            defersHistoricalBacklog: Bool = false
+        ) {
+            self.referenceNow = referenceNow
+            self.maxDays = maxDays
+            self.passKind = passKind
+            self.defersHistoricalBacklog = defersHistoricalBacklog
+        }
+
+        var isHistoricalCatchUp: Bool {
+            passKind == .historical
+        }
+
+        var shouldAnalyze: Bool {
+            passKind != .deferred
+        }
     }
 
     enum AnalysisReadFailurePoint: Hashable, Sendable {
@@ -189,6 +216,12 @@ final class IntelligenceEngine: ObservableObject {
     /// `defer` re-invokes `analyzeRecent(force: true)` ONCE when it clears. A single re-arm (the flag is
     /// cleared BEFORE the re-invoke) bounds it to one extra pass , no recompute storm.
     private var pendingForcedRescore = false
+    /// Durable fairness bit for non-forced analysis. A successful recent pass that leaves an older
+    /// generation pending gives the next idle pass one bounded historical batch; that batch then yields
+    /// back to current data. Failures and forced passes preserve the bit so neither can silently discard
+    /// catch-up work.
+    static let analysisHistoricalCatchUpDueKey =
+        "intelligence.analysisHistoricalCatchUp.v1.due"
     /// #899 heal bound: true while the last heal already re-armed a rescore, so a heal firing again on
     /// the very next pass cannot re-arm a second time (the Android twin is hard-bounded to exactly one
     /// re-pass; this mirrors it). Reset by any pass whose heal finds nothing, restoring the budget.
@@ -1055,13 +1088,40 @@ final class IntelligenceEngine: ObservableObject {
         // so only genuinely-daytime windows face the stricter nap bar. (Computed once; a DST
         // boundary inside the window is a negligible edge case for an hour-of-day band.)
         let tzOffset = TimeZone.current.secondsFromGMT()
+        let historicalCatchUpDue = UserDefaults.standard.bool(
+            forKey: Self.analysisHistoricalCatchUpDueKey
+        )
         let scoringPlan = Self.analysisScoringPlan(
             requestedMaxDays: maxDays,
             force: force,
             claims: claimedAnalysisInputs,
             now: actualNow,
-            timezoneOffsetSeconds: tzOffset
+            timezoneOffsetSeconds: tzOffset,
+            preferHistoricalCatchUp: historicalCatchUpDue
         )
+        let historicalCatchUpPreferenceAfterSelection =
+            Self.analysisHistoricalCatchUpPreferenceAfterSelection(
+                current: historicalCatchUpDue,
+                force: force,
+                plan: scoringPlan
+            )
+        if historicalCatchUpPreferenceAfterSelection != historicalCatchUpDue {
+            UserDefaults.standard.set(
+                historicalCatchUpPreferenceAfterSelection,
+                forKey: Self.analysisHistoricalCatchUpDueKey
+            )
+        }
+        guard scoringPlan.shouldAnalyze else {
+            AppDiagnosticsRecorder.shared.record(
+                "analysis.pass",
+                fields: [
+                    "outcome": "deferred",
+                    "mode": "current",
+                    "reason": "coverage_cutoff",
+                ]
+            )
+            return nil
+        }
         let now = scoringPlan.referenceNow
         let scoringMaxDays = scoringPlan.maxDays
         let historicalCatchUp = scoringPlan.isHistoricalCatchUp
@@ -2854,6 +2914,19 @@ final class IntelligenceEngine: ObservableObject {
                             .map(\.id)
                     )
                 )
+                let nextHistoricalCatchUpDue =
+                    Self.analysisHistoricalCatchUpPreference(
+                        current: historicalCatchUpPreferenceAfterSelection,
+                        force: force,
+                        plan: scoringPlan,
+                        finalization: finalization
+                    )
+                if nextHistoricalCatchUpDue != historicalCatchUpPreferenceAfterSelection {
+                    UserDefaults.standard.set(
+                        nextHistoricalCatchUpDue,
+                        forKey: Self.analysisHistoricalCatchUpDueKey
+                    )
+                }
                 AppDiagnosticsRecorder.shared.record(
                     "analysis.pass",
                     fields: [
@@ -2896,6 +2969,40 @@ final class IntelligenceEngine: ObservableObject {
         claims: [AnalysisInputGenerationClaim]
     ) -> Bool {
         force || !generationSnapshotSucceeded || !claims.isEmpty
+    }
+
+    /// Consumes one selected historical turn before any async read or persistence work. If that attempt
+    /// fails, newly arrived current data gets the next pass instead of remaining behind an unprocessable
+    /// archive claim. A later successful recent pass can re-arm another bounded historical turn.
+    nonisolated static func analysisHistoricalCatchUpPreferenceAfterSelection(
+        current: Bool,
+        force: Bool,
+        plan: AnalysisScoringPlan
+    ) -> Bool {
+        guard !force, current, plan.isHistoricalCatchUp else { return current }
+        return false
+    }
+
+    /// Alternates bounded current and historical work without letting either side starve. Recent durable
+    /// progress can arm one historical turn; a selected historical turn was already consumed above.
+    /// Forced maintenance never changes the non-forced fairness state.
+    nonisolated static func analysisHistoricalCatchUpPreference(
+        current: Bool,
+        force: Bool,
+        plan: AnalysisScoringPlan,
+        finalization: AnalysisInputFinalizationResult
+    ) -> Bool {
+        guard !force else { return current }
+        guard finalization.acknowledgedCount > 0 || finalization.advancedCount > 0 else {
+            return current
+        }
+        if plan.isHistoricalCatchUp {
+            return false
+        }
+        if plan.defersHistoricalBacklog || finalization.advancedCount > 0 {
+            return true
+        }
+        return false
     }
 
     @discardableResult
@@ -2957,22 +3064,23 @@ final class IntelligenceEngine: ObservableObject {
         )
     }
 
-    /// Select one bounded analysis window. Ordinary current data keeps the requested recent window.
-    /// A non-forced pass whose newest pending timestamp is older than that window anchors one historical
-    /// batch at the newest unprocessed day. The durable claim then moves backward only after that exact
-    /// batch succeeds, so even a multi-year migration never becomes one multi-thousand-day UI pass.
+    /// Select one bounded analysis window. Evaluable current data wins first so a large import cannot keep
+    /// fresh scores stale. After that pass makes durable progress, [preferHistoricalCatchUp] gives the next
+    /// non-forced pass one bounded historical batch before yielding to current data again. A late-only claim
+    /// defers until the next complete local-day window instead of repeating a scan that cannot advance it.
     nonisolated static func analysisScoringPlan(
         requestedMaxDays: Int,
         force: Bool,
         claims: [AnalysisInputGenerationClaim],
         now: Int,
-        timezoneOffsetSeconds: Int
+        timezoneOffsetSeconds: Int,
+        preferHistoricalCatchUp: Bool = false
     ) -> AnalysisScoringPlan {
         let requested = max(1, requestedMaxDays)
         let current = AnalysisScoringPlan(
             referenceNow: now,
             maxDays: requested,
-            isHistoricalCatchUp: false
+            passKind: .recent
         )
         guard !force else { return current }
         let currentCoverage = analysisScanCoverage(
@@ -2980,15 +3088,33 @@ final class IntelligenceEngine: ObservableObject {
             actualNow: now,
             timezoneOffsetSeconds: timezoneOffsetSeconds
         )
-        let oldRanges = claims.compactMap { claim -> ClosedRange<Int64>? in
-            guard let affected = claim.affectedTimeRange,
-                  affected.upperBound < currentCoverage.startTs,
-                  affected.upperBound <= Int64(now) else {
-                return nil
-            }
-            return affected
+        let validRanges = claims.compactMap(\.affectedTimeRange)
+        if !validRanges.isEmpty,
+           validRanges.allSatisfy({ $0.upperBound > currentCoverage.endTs }) {
+            return AnalysisScoringPlan(
+                referenceNow: now,
+                maxDays: 1,
+                passKind: .deferred
+            )
+        }
+        let hasFinalizableCurrentRange = validRanges.contains { affected in
+            affected.upperBound >= currentCoverage.startTs
+                && affected.upperBound <= currentCoverage.endTs
+        }
+        let oldRanges = validRanges.filter { affected in
+            affected.upperBound < currentCoverage.startTs
+                && affected.upperBound <= Int64(now)
         }
         let newestOldTimestamp = oldRanges.map(\.upperBound).max()
+        if hasFinalizableCurrentRange
+            && (!preferHistoricalCatchUp || newestOldTimestamp == nil) {
+            return AnalysisScoringPlan(
+                referenceNow: now,
+                maxDays: requested,
+                passKind: .recent,
+                defersHistoricalBacklog: newestOldTimestamp != nil
+            )
+        }
         guard let newestOldTimestamp,
               let newestOldSecond = Int(exactly: newestOldTimestamp) else {
             return current
@@ -3014,7 +3140,7 @@ final class IntelligenceEngine: ObservableObject {
         return AnalysisScoringPlan(
             referenceNow: historicalMidnight + 12 * 3_600,
             maxDays: min(requested, min(21, selectedSpanDays)),
-            isHistoricalCatchUp: true
+            passKind: .historical
         )
     }
 
@@ -3043,7 +3169,7 @@ final class IntelligenceEngine: ObservableObject {
             plan: AnalysisScoringPlan(
                 referenceNow: now,
                 maxDays: maxDays,
-                isHistoricalCatchUp: false
+                passKind: .recent
             ),
             actualNow: now,
             timezoneOffsetSeconds: timezoneOffsetSeconds

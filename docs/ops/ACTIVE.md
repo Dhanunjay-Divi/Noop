@@ -8,15 +8,18 @@ Last updated: **2026-09-14**
 - Protected branch: `main`
 - Active worktree: `/private/tmp/noop-product-audit-20260911`
 - Active branch: `codex/product-safety-quality-audit-20260911`
-- Remote pull-request head before the Daily Plan rounding correction:
-  `7e161d91992ff52389bd809b6c03ff3af8f906e0`
-- Local state at this update: portable settings schema v6 preserves the
-  independent morning-review and journal-reminder choices on Apple and
-  Android, and Android now matches Apple's explicit half-away-from-zero
-  sleep-minute rounding. Exact-current focused and complete Android,
-  operations, and diff verification passed on top of the prior complete
-  Apple/server/repository wall; one bounded corrective commit and replacement
-  hosted exact-SHA verification remain
+- Remote pull-request head before the final review corrections:
+  `703727e6087ab8b1384d1cfab50cf4e28f18b430`
+- Local state at this update: Apple analysis scheduling now defers claims that
+  cannot advance beyond the current-day coverage cutoff and prioritizes
+  actionable recent work while alternating bounded historical catch-up without
+  starvation. Android restored daily-review scheduling now uses a serialized,
+  durable marker-only retry after Room is ready without withholding the
+  accepted database or replacing normal startup work. Final Apple and Android
+  platform walls and the complete repository policy wall passed on the final
+  local source and operations records. One bounded commit, one replacement
+  exact-SHA push, protected integration, privacy restoration, and round-owned
+  cleanup remain
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration
@@ -25,6 +28,8 @@ Resume work from:
 
 - [Agent entry point](../../AGENTS.md)
 - [NOOP operations skill](../../.agents/skills/noop-ops/SKILL.md)
+- [Current iOS Today hosted CI stability](rounds/2026-09-14-ios-today-hosted-ci-stability.md)
+- [Current analysis and restore retry closeout](rounds/2026-09-14-analysis-restore-retry-closeout.md)
 - [Current Daily Plan rounding parity](rounds/2026-09-14-daily-plan-rounding-parity.md)
 - [Current daily-review backup parity](rounds/2026-09-14-daily-review-backup-parity.md)
 - [Current Android Review Sample terms gate](rounds/2026-09-14-android-review-sample-terms-gate.md)
@@ -119,10 +124,10 @@ Completed on the current product source:
 - Focused Apple notification, contextual-action, route, and calendar wall:
   113 passed, zero failed/skipped.
 - Focused Android hydration API 35 wall: three passed, zero failed.
-- Complete Android source wall: Full and Demo each executed 4,767 unit cases
-  with 4,760 passes, seven intentional skips, and zero failures/errors; both
+- Complete Android source wall: Full and Demo each executed 4,775 unit cases
+  with 4,768 passes, seven intentional skips, and zero failures/errors; both
   APKs, both lint variants, and both instrumentation-source compilations passed
-  in 137 Gradle tasks.
+  across 124 Gradle tasks on the final source.
 - Android Pixel 2 API 35 Review Sample: one passed with a fresh process and
   WorkManager remaining uninitialized before Terms.
 - Remaining Android Pixel 2 API 35 managed-device production shell: 108
@@ -140,8 +145,8 @@ Completed on the current product source:
   remote-deletion continuity after a second material clock rollback.
 - Apple portable-settings schema-v6 tests: 21 passed, zero failed/skipped.
 - Android portable-settings and daily-review compatibility: Full and Demo each
-  passed 85 focused codec, durable-restore, and reminder-policy cases.
-- Complete macOS app suite: 2,007 tests total, 2,006 passed, zero failures, and
+  passed 91 focused codec, durable-restore, and reminder-policy cases.
+- Complete macOS app suite: 2,015 tests total, 2,014 passed, zero failures, and
   one expected external Xiaomi-fixture skip.
 - Generic dual-architecture iOS Simulator Release build: the complete app,
   widgets, Watch companion, metadata, and launch gate built successfully with
@@ -149,8 +154,8 @@ Completed on the current product source:
 - Exact-current iPhone UI suite: 39 tests total, 38 passed, zero failures, and
   one intentional private-pilot skip.
 - Nine core Swift packages executed 2,971 tests: 2,961 passed, ten
-  fixture-dependent skips, and zero failures. StudyHarness and Backfill both
-  built and tested successfully.
+  fixture-dependent skips, and zero failures. StudyHarness and Backfill built
+  and passed 14 additional tests.
 - Exact-current repository wall: feedback localization for 86 strings across
   nine locales; 788 app-wide strings plus 45 Android-only resources across nine
   locales generated idempotently; strict whole-tree and differential i18n; the
@@ -160,13 +165,13 @@ Completed on the current product source:
   the 1,252-file health-claims scan; private-data, calibration,
   legal/distribution, release-control, required-CI, 111 tracked JSON files, 27
   tracked shell syntax checks, ShellCheck over 25 POSIX/bash scripts,
-  Actionlint, Ruff, 67 operations records, 12 OpenTofu tests, and diff gates
+  Actionlint, Ruff, 72 operations records, 12 OpenTofu tests, and diff gates
   passed on the final source and operations records.
 - Repository tools: 230 tests plus 34 subtests, 49 top-level i18n tests, and 12
   OpenTofu tests passed.
 
-Still required before a push: create the bounded Daily Plan rounding parity
-commit and push the reviewed branch head.
+Still required before a push: perform the final staged-diff and scope review,
+create one bounded corrective commit, and push the reviewed branch head once.
 
 Do not describe prior matrices as exact-current evidence after any product,
 test, localization, migration, workflow, or policy edit.
@@ -174,8 +179,8 @@ test, localization, migration, workflow, or policy edit.
 ## Pull request and integration
 
 Pull request `#15` is the protected integration record. Its current remote head
-is `7e161d91`. Earlier hosted results remain historical evidence because the
-local Daily Plan rounding correction is not yet on that SHA. Known review
+is `703727e6`. Earlier hosted results remain historical evidence because the
+final local corrections are not yet on that SHA. Known review
 conversations remain unresolved until the replacement head proves their fixes,
 including hydration limits/transactions, feedback continuity, managed-sync
 deletion behavior, pre-Terms Review Sample isolation, split daily-review backup
@@ -183,15 +188,13 @@ parity, and sleep-minute rounding parity.
 
 Closeout order:
 
-1. Finish every local gate on one unchanged tree.
-2. Update this handoff and the active round with exact evidence.
-3. Stage and review every intended path, including new files.
-4. Create one bounded final commit and one consolidated replacement push.
-5. Wait for all required checks on that exact SHA.
-6. Resolve only review threads proven by that SHA.
-7. Integrate through normal branch protection.
-8. Immediately restore private repository visibility.
-9. Synchronize canonical `main` and remove only round-owned temporary
+1. Stage and review every intended path, including new files.
+2. Create one bounded final commit and one consolidated replacement push.
+3. Wait for all required checks on that exact SHA.
+4. Resolve only review threads proven by that SHA.
+5. Integrate through normal branch protection.
+6. Immediately restore private repository visibility.
+7. Synchronize canonical `main` and remove only round-owned temporary
    resources.
 
 ## Runtime and launch boundaries

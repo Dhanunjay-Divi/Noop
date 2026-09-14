@@ -280,6 +280,8 @@ object BackupSettingsBridge {
     private const val PROFILE_PREFS = "noop_profile"
     internal const val RESTORE_MAINTENANCE_PREFS = "noop_restore_maintenance"
     internal const val HYDRATION_RETRY_NEEDED = "hydration_reconcile_retry_needed"
+    internal const val DAILY_REVIEW_RETRY_NEEDED = "daily_review_reconcile_retry_needed"
+    private val restoreSchedulerRetryStateLock = Any()
     private const val PROFILE_DOB = "date_of_birth"
     private const val PROFILE_AGE = "age"
     private const val PROFILE_SEX = "sex"
@@ -535,7 +537,7 @@ object BackupSettingsBridge {
         val appContext = context.applicationContext
         AppearancePrefs.load(appContext)
         ChartStylePrefs.load(appContext)
-        reconcileHydrationForConfirmedRestore(
+        reconcileSchedulerForConfirmedRestore(
             operation = { HydrationReminderScheduler.reconcile(appContext) },
             onFailure = {
                 AppDiagnosticsRecorder.record(
@@ -547,8 +549,9 @@ object BackupSettingsBridge {
                 )
             },
             persistRetryNeeded = { needed ->
-                persistHydrationRestoreRetryNeeded(
+                persistRestoreSchedulerRetryNeeded(
                     preferences = restoreMaintenancePreferences(appContext),
+                    key = HYDRATION_RETRY_NEEDED,
                     needed = needed,
                 )
             },
@@ -589,7 +592,7 @@ object BackupSettingsBridge {
                 ),
             )
         }
-        reconcileDailyReviewForConfirmedRestore(
+        reconcileSchedulerForConfirmedRestore(
             operation = { DailyReviewReminders.reconcile(appContext) },
             onFailure = {
                 AppDiagnosticsRecorder.record(
@@ -600,76 +603,75 @@ object BackupSettingsBridge {
                     ),
                 )
             },
+            persistRetryNeeded = { needed ->
+                persistRestoreSchedulerRetryNeeded(
+                    preferences = restoreMaintenancePreferences(appContext),
+                    key = DAILY_REVIEW_RETRY_NEEDED,
+                    needed = needed,
+                )
+            },
         )
     }
 
-    internal fun reconcileDailyReviewForConfirmedRestore(
-        operation: () -> Unit,
-        onFailure: () -> Unit,
-    ) {
-        try {
-            operation()
-        } catch (failure: Exception) {
-            runCatching(onFailure)
-            throw IOException(
-                "Restored daily-review schedule could not be reconciled.",
-                failure,
-            )
-        }
-    }
-
-    internal enum class HydrationRestoreRetryOutcome(val wireValue: String) {
+    internal enum class RestoreSchedulerRetryOutcome(val wireValue: String) {
         RETRY_COMPLETED("retry_completed"),
         RETRY_FAILED("retry_failed"),
         STATE_READ_FAILED("state_read_failed"),
         STATE_CLEAR_FAILED("state_clear_failed"),
     }
 
-    internal fun persistHydrationRestoreRetryNeeded(
+    internal fun persistRestoreSchedulerRetryNeeded(
         preferences: SharedPreferences,
+        key: String,
         needed: Boolean,
     ) {
-        val editor = preferences.edit()
-        if (needed) {
-            editor.putBoolean(HYDRATION_RETRY_NEEDED, true)
-        } else {
-            editor.remove(HYDRATION_RETRY_NEEDED)
-        }
-        if (!editor.commit()) {
-            throw IOException("Restore maintenance retry state could not be persisted.")
+        synchronized(restoreSchedulerRetryStateLock) {
+            val editor = preferences.edit()
+            if (needed) {
+                editor.putBoolean(key, true)
+            } else {
+                editor.remove(key)
+            }
+            if (!editor.commit()) {
+                throw IOException("Restore maintenance retry state could not be persisted.")
+            }
         }
     }
 
-    internal fun runHydrationMaintenanceAfterDatabaseReady(
+    internal fun runRestoreSchedulerMaintenanceAfterDatabaseReady(
         ensureDatabaseReady: () -> Unit,
         retryNeeded: () -> Boolean,
+        reconcileWithoutRetry: Boolean = true,
         reconcile: () -> Unit,
         clearRetryNeeded: () -> Unit,
-        onRetryOutcome: (HydrationRestoreRetryOutcome) -> Unit,
+        onRetryOutcome: (RestoreSchedulerRetryOutcome) -> Unit,
     ): Boolean {
         ensureDatabaseReady()
-        val pendingRetry = try {
-            retryNeeded()
-        } catch (_: Exception) {
-            onRetryOutcome(HydrationRestoreRetryOutcome.STATE_READ_FAILED)
-            return false
-        }
-        val reconciled = runBestEffortReconcile(
-            operation = reconcile,
-            onFailure = {
-                if (pendingRetry) {
-                    onRetryOutcome(HydrationRestoreRetryOutcome.RETRY_FAILED)
-                }
-            },
-        )
-        if (!reconciled || !pendingRetry) return reconciled
-        return try {
-            clearRetryNeeded()
-            onRetryOutcome(HydrationRestoreRetryOutcome.RETRY_COMPLETED)
-            true
-        } catch (_: Exception) {
-            onRetryOutcome(HydrationRestoreRetryOutcome.STATE_CLEAR_FAILED)
-            false
+        return synchronized(restoreSchedulerRetryStateLock) {
+            val pendingRetry = try {
+                retryNeeded()
+            } catch (_: Exception) {
+                onRetryOutcome(RestoreSchedulerRetryOutcome.STATE_READ_FAILED)
+                return@synchronized false
+            }
+            if (!pendingRetry && !reconcileWithoutRetry) return@synchronized true
+            val reconciled = runBestEffortReconcile(
+                operation = reconcile,
+                onFailure = {
+                    if (pendingRetry) {
+                        onRetryOutcome(RestoreSchedulerRetryOutcome.RETRY_FAILED)
+                    }
+                },
+            )
+            if (!reconciled || !pendingRetry) return@synchronized reconciled
+            try {
+                clearRetryNeeded()
+                onRetryOutcome(RestoreSchedulerRetryOutcome.RETRY_COMPLETED)
+                true
+            } catch (_: Exception) {
+                onRetryOutcome(RestoreSchedulerRetryOutcome.STATE_CLEAR_FAILED)
+                false
+            }
         }
     }
 
@@ -678,32 +680,66 @@ object BackupSettingsBridge {
         ensureDatabaseReady: () -> Unit,
     ): Boolean {
         val appContext = context.applicationContext
-        val preferences = restoreMaintenancePreferences(appContext)
-        return runHydrationMaintenanceAfterDatabaseReady(
+        return reconcileSchedulerAfterDatabaseReady(
+            appContext = appContext,
             ensureDatabaseReady = ensureDatabaseReady,
-            retryNeeded = {
-                preferences.getBoolean(HYDRATION_RETRY_NEEDED, false)
-            },
-            reconcile = {
-                HydrationReminderScheduler.reconcile(appContext)
-            },
+            retryKey = HYDRATION_RETRY_NEEDED,
+            component = "hydration",
+            reconcile = { HydrationReminderScheduler.reconcile(appContext) },
+        )
+    }
+
+    internal fun reconcileDailyReviewAfterDatabaseReady(
+        context: Context,
+        ensureDatabaseReady: () -> Unit,
+    ): Boolean {
+        val appContext = context.applicationContext
+        return reconcileSchedulerAfterDatabaseReady(
+            appContext = appContext,
+            ensureDatabaseReady = ensureDatabaseReady,
+            retryKey = DAILY_REVIEW_RETRY_NEEDED,
+            component = "daily_review",
+            reconcileWithoutRetry = false,
+            reconcile = { DailyReviewReminders.reconcile(appContext) },
+        )
+    }
+
+    private fun reconcileSchedulerAfterDatabaseReady(
+        appContext: Context,
+        ensureDatabaseReady: () -> Unit,
+        retryKey: String,
+        component: String,
+        reconcileWithoutRetry: Boolean = true,
+        reconcile: () -> Unit,
+    ): Boolean {
+        val preferences = restoreMaintenancePreferences(appContext)
+        return runRestoreSchedulerMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = ensureDatabaseReady,
+            retryNeeded = { preferences.getBoolean(retryKey, false) },
+            reconcileWithoutRetry = reconcileWithoutRetry,
+            reconcile = reconcile,
             clearRetryNeeded = {
-                persistHydrationRestoreRetryNeeded(preferences, needed = false)
+                persistRestoreSchedulerRetryNeeded(
+                    preferences = preferences,
+                    key = retryKey,
+                    needed = false,
+                )
             },
             onRetryOutcome = { outcome ->
                 AppDiagnosticsRecorder.record(
                     "database.restore_reconcile",
-                    fields = hydrationRestoreRetryDiagnosticFields(outcome),
+                    fields = restoreSchedulerRetryDiagnosticFields(outcome, component),
                 )
             },
         )
     }
 
-    internal fun hydrationRestoreRetryDiagnosticFields(
-        outcome: HydrationRestoreRetryOutcome,
+    internal fun restoreSchedulerRetryDiagnosticFields(
+        outcome: RestoreSchedulerRetryOutcome,
+        component: String,
     ): Map<String, String> = mapOf(
         "outcome" to outcome.wireValue,
-        "component" to "hydration",
+        "component" to component,
     )
 
     /**
@@ -727,14 +763,14 @@ object BackupSettingsBridge {
         false
     }
 
-    internal fun reconcileHydrationForConfirmedRestore(
+    internal fun reconcileSchedulerForConfirmedRestore(
         operation: () -> Unit,
         onFailure: () -> Unit,
         persistRetryNeeded: (Boolean) -> Unit,
-    ): Boolean {
+    ): Boolean = synchronized(restoreSchedulerRetryStateLock) {
         val reconciled = runBestEffortReconcile(operation, onFailure)
         persistRetryNeeded(!reconciled)
-        return reconciled
+        reconciled
     }
 
     private fun restoreMaintenancePreferences(context: Context): SharedPreferences =

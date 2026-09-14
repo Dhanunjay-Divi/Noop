@@ -980,11 +980,35 @@ final class NOOPiOSUITests: XCTestCase {
             "charge", "effort", "rest", "hrv", "restingHr",
             "bloodOxygen", "respiratory", "steps", "weight", "calories",
         ]
-        for id in metricIDs {
-            let tile = app.descendants(matching: .any)["noop.today.key-metric.\(id)"]
-            for _ in 0..<4 where !tile.exists { app.swipeUp() }
-            XCTAssertTrue(tile.waitForExistence(timeout: 3), "\(id) must remain in the Today catalog.")
+        let scroll = app.scrollViews["noop.today.scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 20))
+        let readinessTile = app.descendants(matching: .any)["noop.today.key-metric.charge"]
+        for _ in 0..<12 where !readinessTile.exists {
+            scroll.swipeUp()
         }
+        XCTAssertTrue(
+            readinessTile.waitForExistence(timeout: 15),
+            "The demo Key Metrics section must finish loading before catalog traversal."
+        )
+        let calendar = app.buttons["noop.today.calendar"]
+        for _ in 0..<12 where !calendar.isHittable {
+            scroll.swipeDown()
+        }
+        XCTAssertTrue(calendar.isHittable, "Today must return to the top before catalog traversal.")
+
+        var missing = Set(metricIDs)
+        for _ in 0..<16 {
+            let visible = missing.filter { id in
+                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists
+            }
+            missing.subtract(visible)
+            if missing.isEmpty { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(
+            missing.isEmpty,
+            "Every Today metric must remain reachable; missing: \(missing.sorted().joined(separator: ", "))."
+        )
         keepScreenshot(app, name: "today-complete-key-metric-catalog")
     }
 
@@ -1243,16 +1267,32 @@ final class NOOPiOSUITests: XCTestCase {
         let app = launchApp()
         let calendar = app.buttons["noop.today.calendar"]
         XCTAssertTrue(calendar.waitForExistence(timeout: 20))
-        let scroll = app.scrollViews.firstMatch
+        let scroll = app.scrollViews["noop.today.scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
 
         let options = XCTMeasureOptions()
         #if targetEnvironment(simulator)
         // The iOS 26 simulator currently throws NSInternalInconsistencyException while decoding the
-        // scrolling signpost payload and can starve XCTest's event-loop observer after four consecutive
-        // measured round trips. Three process-metric iterations keep hosted CI deterministic; real
-        // devices retain five iterations of Apple's hitch/deceleration metric below.
-        options.iterationCount = 3
+        // scrolling signpost payload and can starve XCTest's event-loop observer across repeated measured
+        // gestures. One complete process-metric round trip keeps hosted CI as a bounded scroll-liveness
+        // check. Three unmeasured round trips retain intermittent-lag coverage; real devices keep five
+        // iterations of Apple's hitch/deceleration metric below.
+        var longestSmokeRoundTrip = 0.0
+        for _ in 0..<3 {
+            let startedAt = ProcessInfo.processInfo.systemUptime
+            scroll.swipeUp()
+            scroll.swipeDown()
+            longestSmokeRoundTrip = max(
+                longestSmokeRoundTrip,
+                ProcessInfo.processInfo.systemUptime - startedAt
+            )
+        }
+        XCTAssertLessThan(
+            longestSmokeRoundTrip,
+            8,
+            "A simulator Today scroll round trip must remain responsive."
+        )
+        options.iterationCount = 1
         measure(
             metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()],
             options: options

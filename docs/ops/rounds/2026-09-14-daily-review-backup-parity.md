@@ -57,8 +57,12 @@ allowing the first post-restore read to overwrite the restored choices.
   preference file and commits them durably with the aggregate and migration
   compatibility values.
 - Android immediately reconciles both daily-review WorkManager identities after
-  portable or managed preference restore. A scheduling failure leaves restore
-  finalization retryable instead of silently waiting for a process restart.
+  portable or managed preference restore. A scheduling failure records a
+  bounded diagnostic and durably marks process maintenance for retry without
+  withholding the already accepted restored database.
+- After Room is ready, process maintenance retries only a marked restore
+  failure. Ordinary startup retains the reminder scheduler's
+  `ExistingWorkPolicy.KEEP` behavior instead of replacing valid delayed work.
 - Legacy aggregate-only installations export both portable choices so an
   older explicit opt-in is not lost.
 - Scheduled requests, permission receipts, completion state, and delivery
@@ -78,8 +82,9 @@ allowing the first post-restore read to overwrite the restored choices.
 
 - No new runtime telemetry is required for a deterministic settings-codec
   contract.
-- Existing restore diagnostics now include the fixed `daily_review` component
-  and `failed` outcome without preference values, work IDs, or health data.
+- Existing restore diagnostics now include fixed `daily_review` component and
+  bounded failure/retry outcomes without preference values, work IDs, or
+  health data.
 - Physical OS scheduling and notification delivery remain outside codec
   evidence.
 
@@ -88,8 +93,8 @@ allowing the first post-restore read to overwrite the restored choices.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Apple `BackupSettingsTests` | 21 passed, zero failed/skipped | Portable schema, legacy fallback, and split restore compatibility | OS notification delivery |
-| Android `BackupSettingsCodecTest`, `PendingDatabaseRestoreTest`, and `DailyReviewReminderPolicyTest` | Full and Demo each passed 87 focused cases, zero failed/skipped | Codec parity, durable dedicated-preference restore, immediate reminder reconciliation, retryable finalization, and reminder policy compatibility | OEM background behavior |
-| Complete Apple and Android product walls | macOS passed 2,006 of 2,007 with one external-fixture skip; iPhone Simulator passed 38 of 39 with one intentional private-pilot skip; Android Full and Demo each passed 4,764 of 4,771 with seven intentional skips, and both APK, lint, and instrumentation-source walls passed across 137 tasks | No product regression on the exact source across supported local targets | Physical hardware, background delivery, signing, or store behavior |
+| Android `BackupSettingsCodecTest`, `PendingDatabaseRestoreTest`, and `DailyReviewReminderPolicyTest` | Full and Demo each passed 91 focused cases, zero failed/skipped | Codec parity, durable dedicated-preference restore, serialized retry state, immediate reminder reconciliation, accepted-database availability, and reminder policy compatibility | OEM background behavior |
+| Complete Apple and Android product walls | macOS passed 2,014 of 2,015 with one external-fixture skip; iPhone Simulator passed 38 of 39 with one intentional private-pilot skip; Android Full and Demo each passed 4,768 of 4,775 with seven intentional skips, and both APK, lint, and instrumentation-source walls passed across 124 tasks | No product regression on the final local source across supported local targets | Physical hardware, background delivery, signing, or store behavior |
 | Complete repository policy wall | 230 tool tests, 49 i18n tests, localization, privacy, health-claims, calibration, terminology, legal/distribution, release-control, required-CI, operations, secret, and diff gates passed | Source, policy, localization, privacy, and release contracts remain internally consistent | Hosted exact-SHA checks or external approvals |
 | Hosted exact-SHA matrix | Pending | Branch-protected verification of the committed fix | Physical hardware or production operation |
 

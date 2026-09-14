@@ -478,6 +478,7 @@ struct LiquidTodayView: View {
             .frame(maxWidth: .infinity)
             #endif
         }
+        .accessibilityIdentifier("noop.today.scroll")
         .background(HistoryWriteQueryGateBridge(
             active: repo.historyWritesActive,
             blocked: $historyWriteQueryGate
@@ -2666,6 +2667,7 @@ struct LiquidTodayView: View {
             }
             .buttonStyle(.plain)
         }
+        .accessibilityIdentifier("noop.today.key-metrics")
     }
 
     /// One editor-selected Key-Metric tile: the metric's value/tint/fill exactly as the old hard-coded

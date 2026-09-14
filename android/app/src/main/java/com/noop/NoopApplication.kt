@@ -411,12 +411,20 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(this@NoopApplication) }
             runCatching { HealthConnectSyncScheduler.reconcile(this@NoopApplication) }
             runCatching { DailyReviewReminders.restore(this@NoopApplication) }
+            val ensureDatabaseReady = {
+                WhoopDatabase.get(this@NoopApplication)
+                Unit
+            }
             runCatching {
                 BackupSettingsBridge.reconcileHydrationAfterDatabaseReady(
                     context = this@NoopApplication,
-                    ensureDatabaseReady = {
-                        WhoopDatabase.get(this@NoopApplication)
-                    },
+                    ensureDatabaseReady = ensureDatabaseReady,
+                )
+            }
+            runCatching {
+                BackupSettingsBridge.reconcileDailyReviewAfterDatabaseReady(
+                    context = this@NoopApplication,
+                    ensureDatabaseReady = ensureDatabaseReady,
                 )
             }
             runCatching {
