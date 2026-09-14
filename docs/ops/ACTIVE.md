@@ -8,14 +8,15 @@ Last updated: **2026-09-14**
 - Protected branch: `main`
 - Active worktree: `/private/tmp/noop-product-audit-20260911`
 - Active branch: `codex/product-safety-quality-audit-20260911`
-- Remote pull-request head before the final parity push:
-  `b495558628b925821c4a4b50360c8f4a7a44fffe`
-- Local state at this update: portable settings schema v6 now preserves the
+- Remote pull-request head before the Daily Plan rounding correction:
+  `7e161d91992ff52389bd809b6c03ff3af8f906e0`
+- Local state at this update: portable settings schema v6 preserves the
   independent morning-review and journal-reminder choices on Apple and
-  Android. Exact-current focused, complete Apple/Android, simulator,
-  operations, privacy, claims, terminology, calibration, legal, required-CI,
-  tooling, secret, and diff verification passed; one bounded final commit and
-  one consolidated replacement push remain
+  Android, and Android now matches Apple's explicit half-away-from-zero
+  sleep-minute rounding. Exact-current focused and complete Android,
+  operations, and diff verification passed on top of the prior complete
+  Apple/server/repository wall; one bounded corrective commit and replacement
+  hosted exact-SHA verification remain
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration
@@ -24,6 +25,7 @@ Resume work from:
 
 - [Agent entry point](../../AGENTS.md)
 - [NOOP operations skill](../../.agents/skills/noop-ops/SKILL.md)
+- [Current Daily Plan rounding parity](rounds/2026-09-14-daily-plan-rounding-parity.md)
 - [Current daily-review backup parity](rounds/2026-09-14-daily-review-backup-parity.md)
 - [Current Android Review Sample terms gate](rounds/2026-09-14-android-review-sample-terms-gate.md)
 - [Current final-review remediation](rounds/2026-09-14-pr15-final-review-remediation.md)
@@ -39,11 +41,11 @@ chronological evidence only. They do not establish the current worktree state.
 
 ## Current scope
 
-The exact remote head `b4955586` includes the Android Review Sample isolation
-correction. A fresh API 35 Review Sample passes while WorkManager remains
-uninitialized before Terms. The local unpushed schema-v6 slice additionally
-preserves the two split daily-review choices through portable backup and
-restore without exporting notification permission or delivery state.
+The exact remote head `7e161d91` includes the Android Review Sample isolation
+correction and schema-v6 daily-review backup parity. A fresh API 35 Review
+Sample passes while WorkManager remains uninitialized before Terms. The local
+unpushed correction additionally makes Android match Apple's explicit
+half-away-from-zero sleep-minute rounding at exact half-minute boundaries.
 
 The final local slice closes seven concrete review defects:
 
@@ -67,9 +69,9 @@ The final local slice closes seven concrete review defects:
   Provider, validate a still-current future event at commit time, and use a
   deadlock-safe notification-then-calendar lock order.
 
-Remote head `b4955586` predates the schema-v6 parity slice. Earlier hosted
-matrices remain chronological evidence only; replacement exact-SHA hosted
-verification is required after the bounded final commit.
+Remote head `7e161d91` predates the Daily Plan rounding correction. Its hosted
+matrix remains chronological evidence only; replacement exact-SHA hosted
+verification is required after the bounded corrective commit.
 
 The active closeout covers the remaining supplier-independent product,
 health-safety, hydration, notification, wind-down, accessibility, Safety,
@@ -163,8 +165,8 @@ Completed on the current product source:
 - Repository tools: 230 tests plus 34 subtests, 49 top-level i18n tests, and 12
   OpenTofu tests passed.
 
-Still required before a push: create the bounded schema-v6 parity commit and
-push the reviewed branch head once.
+Still required before a push: create the bounded Daily Plan rounding parity
+commit and push the reviewed branch head.
 
 Do not describe prior matrices as exact-current evidence after any product,
 test, localization, migration, workflow, or policy edit.
@@ -172,12 +174,12 @@ test, localization, migration, workflow, or policy edit.
 ## Pull request and integration
 
 Pull request `#15` is the protected integration record. Its current remote head
-is `b4955586`. Earlier hosted results remain historical evidence because the
-local schema-v6 parity fix is not yet on that SHA. Known review conversations
-remain unresolved until the replacement head proves their fixes, including
-hydration limits/transactions, feedback continuity, managed-sync deletion
-behavior, pre-Terms Review Sample isolation, and split daily-review backup
-parity.
+is `7e161d91`. Earlier hosted results remain historical evidence because the
+local Daily Plan rounding correction is not yet on that SHA. Known review
+conversations remain unresolved until the replacement head proves their fixes,
+including hydration limits/transactions, feedback continuity, managed-sync
+deletion behavior, pre-Terms Review Sample isolation, split daily-review backup
+parity, and sleep-minute rounding parity.
 
 Closeout order:
 

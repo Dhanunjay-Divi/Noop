@@ -83,6 +83,15 @@ object DailyActionPlanner {
     private const val planningLimitation =
         "This is a personal planning range, not a safety limit, diagnosis, or medical clearance."
 
+    internal fun roundHalfAwayFromZero(value: Double): Int {
+        require(value.isFinite())
+        return if (value >= 0.0) {
+            floor(value + 0.5).toInt()
+        } else {
+            ceil(value - 0.5).toInt()
+        }
+    }
+
     /**
      * Associate an asleep-minute aggregate with one fresh session without accepting a short nap as proof
      * that an unrelated aggregate is current. Missing, stale, or implausibly different evidence fails closed.
@@ -371,11 +380,11 @@ object DailyActionPlanner {
             source = SleepReference.EXPLICIT_TARGET
             confidence = ScoreConfidence.BUILDING
         }
-        val deficit = kotlin.math.round(reference - current).toInt()
+        val deficit = roundHalfAwayFromZero(reference - current)
         if (deficit < WORKOUT_SLEEP_DEFICIT_THRESHOLD_MINUTES) return null
         return SleepContext(
-            measuredMinutes = kotlin.math.round(current).toInt(),
-            referenceMinutes = kotlin.math.round(reference).toInt(),
+            measuredMinutes = roundHalfAwayFromZero(current),
+            referenceMinutes = roundHalfAwayFromZero(reference),
             deficitMinutes = deficit,
             reference = source,
             confidence = confidence,

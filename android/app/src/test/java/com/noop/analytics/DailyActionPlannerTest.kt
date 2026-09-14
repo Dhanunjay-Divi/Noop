@@ -188,6 +188,25 @@ class DailyActionPlannerTest {
         )
     }
 
+    @Test fun sleepMinuteRoundingMatchesAppleAtHalfMinuteBoundary() {
+        assertEquals(61, DailyActionPlanner.roundHalfAwayFromZero(60.5))
+        assertEquals(-61, DailyActionPlanner.roundHalfAwayFromZero(-60.5))
+
+        val plan = DailyActionPlanner.plan(
+            today = today,
+            readiness = readiness(),
+            checkIn = DailyActionPlanner.CheckIn.AS_USUAL,
+            recentEffort = history(),
+            recentSleep = usualSleep(todayMinutes = 389.5),
+            plannedWorkout = plannedWorkout(),
+            nowSec = 1_000_000L,
+        )
+
+        assertEquals(390, plan.workoutAdjustment?.measuredSleepMinutes)
+        assertEquals(450, plan.workoutAdjustment?.referenceSleepMinutes)
+        assertEquals(61, plan.workoutAdjustment?.sleepDeficitMinutes)
+    }
+
     @Test fun plannedWorkoutFallsBackToExplicitSleepTargetWhileBaselineBuilds() {
         val plan = DailyActionPlanner.plan(
             today = today,
