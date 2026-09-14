@@ -140,6 +140,10 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
     /// `liquidScaffoldSky()` is dark obsidian in Dark mode but a pearl relief in Light mode. Only a
     /// genuinely fixed-dark backdrop (for example Live's console field) should pass `true`.
     var topBackgroundUsesDarkHeader: Bool? = nil
+    /// Optional stable identifier for the scaffold's actual vertical ScrollView. UI verification that
+    /// injects gestures must target this surface rather than the application root, which can contain
+    /// horizontal charts and persistent controls that legitimately own their own gestures.
+    var scrollAccessibilityIdentifier: String? = nil
     /// Optional element pinned to the header's trailing edge (e.g. the strap-battery badge on Today).
     /// Defaults to `EmptyView` via the convenience init below, so other screens are unaffected.
     @ViewBuilder var trailing: () -> Trailing
@@ -208,6 +212,11 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
             .modifier(LegacyScreenScrollOffsetProbe())
             #endif
         }
+        .modifier(
+            OptionalScrollAccessibilityIdentifier(
+                identifier: scrollAccessibilityIdentifier
+            )
+        )
         #if os(iOS)
         .modifier(DemoBottomScrollAnchor())
         .modifier(ScreenScrollPositionReporter { offset in
@@ -356,11 +365,26 @@ extension ScreenScaffold where Trailing == EmptyView {
     init(title: LocalizedStringKey?, subtitle: LocalizedStringKey? = nil,
          onRefresh: (() async -> Void)? = nil, lazy: Bool = false, topBackground: AnyView? = nil,
          topBackgroundUsesDarkHeader: Bool? = nil,
+         scrollAccessibilityIdentifier: String? = nil,
          @ViewBuilder content: @escaping () -> Content) {
         self.init(title: title, subtitle: subtitle, onRefresh: onRefresh, lazy: lazy,
                   topBackground: topBackground,
                   topBackgroundUsesDarkHeader: topBackgroundUsesDarkHeader,
+                  scrollAccessibilityIdentifier: scrollAccessibilityIdentifier,
                   trailing: { EmptyView() }, content: content)
+    }
+}
+
+private struct OptionalScrollAccessibilityIdentifier: ViewModifier {
+    let identifier: String?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let identifier {
+            content.accessibilityIdentifier(identifier)
+        } else {
+            content
+        }
     }
 }
 

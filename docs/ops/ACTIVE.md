@@ -19,7 +19,13 @@ Last updated: **2026-09-14**
   platform walls and the complete repository policy wall passed on the final
   local source and operations records. One bounded commit, one replacement
   exact-SHA push, protected integration, privacy restoration, and round-owned
-  cleanup remain
+  cleanup remain. A later hosted Apple run exposed a coalesced-first-scroll
+  compaction race and a runner-bound simulator wall-clock threshold. The
+  correction now compacts from an already-advanced first geometry sample,
+  targets Trends' actual vertical scroll surface, and retains bounded
+  production frame-hitch diagnostics. The focused source contract and affected
+  iPhone tests pass, and the complete iPhone shell executed 39 cases with 38
+  passes, one intentional private-pilot skip, and zero failures
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration

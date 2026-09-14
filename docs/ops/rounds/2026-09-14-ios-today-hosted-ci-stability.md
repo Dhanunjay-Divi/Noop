@@ -2,9 +2,9 @@
 
 ## Status
 
-- State: `implementation and complete local verification finished; replacement
-  exact-SHA hosted checks, protected integration, repository privacy
-  restoration, and round-owned cleanup pending`
+- State: `second hosted correction and complete local verification finished;
+  replacement exact-SHA hosted checks, protected integration, repository
+  privacy restoration, and cleanup pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `703727e6087ab8b1384d1cfab50cf4e28f18b430`
@@ -44,6 +44,11 @@ matrix before protected integration.
 - The same 39-case suite passed locally with 38 passes, one intentional
   private-pilot skip, and zero failures, proving the product identifiers and
   scroll path exist but not that the old synchronization is hosted-stable.
+- Replacement head `69749fbc` built the app and passed the rest of the hosted
+  Apple job, but its Trends compaction swipe delivered no compact state and its
+  Today smoke observed a 10.484-second XCTest gesture round trip. The measured
+  app round used 0.403 seconds of CPU and about 73 MB peak physical memory,
+  separating runner event/idle latency from an app CPU or memory blow-up.
 
 ## Delivered
 
@@ -54,6 +59,16 @@ matrix before protected integration.
 - Use three unmeasured simulator round trips as an intermittent-liveness smoke
   plus one complete measured round trip; real devices retain five iterations
   of Apple's scrolling/deceleration metric.
+- Compact immediately when the first native scroll-geometry sample is already
+  beyond the down-page threshold; a coalesced first callback must not strand
+  expanded navigation until a second gesture.
+- Give Trends' real vertical scaffold a stable accessibility identifier and
+  inject the verification gesture into that scroll view rather than the
+  application root.
+- Keep the simulator smoke bounded by a broad 15-second stall ceiling. Hosted
+  XCTest gesture synthesis is not frame-pacing evidence; production continues
+  to record bounded 50 ms and 150 ms display-link hitches, and physical devices
+  retain Apple's scrolling/deceleration metric.
 
 ## Data, privacy, and medical truth
 
@@ -78,6 +93,9 @@ matrix before protected integration.
 | Hosted exact-head iOS shell at `703727e6` | App build passed; 36 UI tests passed, one private-pilot test skipped, the catalog test recorded ten misses, and the following scroll test timed out | Isolates the required-check failure to hosted UI synchronization and simulator gesture pressure | Whether the correction passes |
 | Focused corrected UI tests | Two of two passed without retry; three unmeasured round trips remained below the eight-second liveness bound and the measured round trip completed in 5.675 seconds | The complete metric catalog waits for real content, remains reachable, and the stable Today scroll survives repeated simulator gestures | Physical-device frame pacing or long-duration responsiveness |
 | Complete iOS production shell | 39 tests executed: 38 passed, one intentional private-pilot skip, and zero failures in 724.931 seconds | The correction passes in the complete unchanged iPhone 17 Pro simulator production shell with every other UI contract | Physical-device performance |
+| Hosted exact-head iOS shell at `69749fbc` | App build passed; 38 UI cases passed or intentionally skipped, while Trends compaction and the 8-second simulator gesture ceiling failed | Exposes the first-sample compaction race and shows that hosted XCTest wall time is not app CPU or memory evidence | Whether the correction passes hosted CI |
+| Focused final correction | Source contract passed; both affected iPhone UI tests passed with zero retry/failure in 51.687 seconds | The coalesced first-sample rule compiles, Trends targets its actual scroll surface, and repeated Today gestures complete under the corrected bounded contract | Complete-suite or physical-device behavior |
+| Complete replacement iOS production shell | 39 tests executed: 38 passed, one intentional private-pilot skip, zero failures in 654.629 seconds | The corrected implementation passes every production-shell UI contract without retry | Physical-device performance |
 | Replacement exact-SHA hosted matrix | Pending | Pending | External release gates |
 
 ## Physical device and deployment
@@ -91,8 +109,8 @@ matrix before protected integration.
 
 ## Git and release state
 
-- Changed paths: Today accessibility identifiers, iOS UI tests, and operations
-  records only.
+- Changed paths: shared scaffold/Trends accessibility targeting, iOS tab-shell
+  first-sample handling, iOS UI tests, source contract, and operations records.
 - Commits: pending bounded correction commit.
 - Branch and remote state: pull request head remains `703727e6`; correction is
   local and uncommitted.

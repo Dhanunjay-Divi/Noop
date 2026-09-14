@@ -609,7 +609,14 @@ struct RootTabView: View {
 
         guard let previous = tracker.lastOffset else {
             tracker.lastOffset = offset
-            if offset >= -10 { tabBarCompact = false }
+            // The native scroll-geometry callback is allowed to coalesce its first delivery. If the
+            // page has already advanced by then, treating that negative sample only as a baseline leaves
+            // the expanded rail stranded until another scroll event arrives.
+            if offset <= -24 {
+                tabBarCompact = true
+            } else if offset >= -10 {
+                tabBarCompact = false
+            }
             return
         }
 

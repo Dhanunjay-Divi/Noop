@@ -290,6 +290,8 @@ final class MoreListParityTests: XCTestCase {
         // of that asymmetry, including the release threshold, so neither side silently loses its rule.
         XCTAssertTrue(shell.contains("offset <= -24"),
                       "Compaction must still require real page progress, not any downward pixel.")
+        XCTAssertTrue(shell.contains("if offset <= -24 {\n                tabBarCompact = true"),
+                      "A coalesced first geometry sample that is already down-page must compact immediately.")
         XCTAssertTrue(shell.contains("if offset >= -10"),
                       "Returning near the top must always restore the full bar.")
         XCTAssertTrue(shell.contains("tracker.directionalTravel >= 18"),
