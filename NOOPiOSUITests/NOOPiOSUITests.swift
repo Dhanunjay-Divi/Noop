@@ -1276,21 +1276,34 @@ final class NOOPiOSUITests: XCTestCase {
         // removes SwiftUI's transient replacement of compact/expanded accessibility nodes from this
         // performance regression; dedicated tests above cover that morph at standard text sizes.
         let app = launchApp(preferredContentSize: PreferredContentSize.accessibilityLarge)
-        let tabs = (0...4).map { app.buttons["noop.tab.\($0)"] }
-        XCTAssertTrue(tabs[0].waitForExistence(timeout: 20))
+        let identifiers = (0...4).map { "noop.tab.\($0)" }
+        XCTAssertTrue(app.buttons[identifiers[0]].waitForExistence(timeout: 20))
 
         for _ in 0..<3 {
-            for tab in tabs.dropFirst() {
+            for identifier in identifiers.dropFirst() {
+                let tab = app.buttons[identifier]
                 guard tab.waitForExistence(timeout: 5) else {
                     XCTFail("A primary tab did not remain responsive.")
                     return
                 }
                 tab.tap()
-                XCTAssertTrue(tab.isSelected)
+                XCTAssertTrue(
+                    waitUntil(timeout: 3) {
+                        app.buttons[identifier].isSelected
+                    },
+                    "\(identifier) did not expose its selected accessibility state promptly."
+                )
                 app.swipeUp()
             }
-            tabs[0].tap()
-            XCTAssertTrue(tabs[0].isSelected)
+            let today = app.buttons[identifiers[0]]
+            XCTAssertTrue(today.waitForExistence(timeout: 5))
+            today.tap()
+            XCTAssertTrue(
+                waitUntil(timeout: 3) {
+                    app.buttons[identifiers[0]].isSelected
+                },
+                "\(identifiers[0]) did not expose its selected accessibility state promptly."
+            )
         }
     }
 

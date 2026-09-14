@@ -8,11 +8,10 @@ Last updated: **2026-09-14**
 - Protected branch: `main`
 - Active worktree: `/private/tmp/noop-product-audit-20260911`
 - Active branch: `codex/product-safety-quality-audit-20260911`
-- Local committed head before the bounded closeout commit: `c7a0fac7e6ab`
-- Remote pull-request head: `6766b30c2816`
-- Local state at this update: four commits ahead of the pull-request head, with
-  the final reviewed correction and this closeout record pending one bounded
-  commit
+- Local committed head before the bounded CI correction: `1b215c82e0bf`
+- Remote pull-request head: `1b215c82e0bf`
+- Local state at this update: one locally verified iOS test-harness correction
+  plus its operations records pending one bounded commit
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration
@@ -21,6 +20,7 @@ Resume work from:
 
 - [Agent entry point](../../AGENTS.md)
 - [NOOP operations skill](../../.agents/skills/noop-ops/SKILL.md)
+- [Current hosted-CI correction round](rounds/2026-09-14-ios-tab-selection-ci-stability.md)
 - [Current late-review round](rounds/2026-09-13-pr15-late-data-integrity-review.md)
 - [First production release plan](../FIRST_PRODUCTION_RELEASE_PLAN.md)
 - [First production release checklist](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md)
@@ -30,6 +30,16 @@ Old chats, screenshots, prior commits, and earlier green matrices are
 chronological evidence only. They do not establish the current worktree state.
 
 ## Current scope
+
+Exact head `1b215c82` passed every hosted job except the iOS production-shell
+job and its required aggregator. The app built, 38 UI tests passed, one
+private-pilot test skipped intentionally, and one repeated-navigation test
+failed after a successful Sleep-tab tap because it read the selected trait from
+a cached SwiftUI accessibility node immediately. A bounded test-only correction
+now re-queries the element and waits at most three seconds. The focused case
+passed once plus three consecutive no-retry repetitions, and the complete iOS
+production shell executed 39 tests with 38 passes, one intentional private-pilot
+skip, and zero failures. Replacement exact-SHA hosted verification remains.
 
 The active closeout covers the remaining supplier-independent product,
 health-safety, hydration, notification, wind-down, accessibility, Safety,
