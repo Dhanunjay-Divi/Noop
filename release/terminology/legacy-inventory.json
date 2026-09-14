@@ -666,10 +666,10 @@
     {
       "category": "historical",
       "lineNumbers": [
-        769,
         771,
-        790,
-        791
+        773,
+        792,
+        793
       ],
       "occurrenceCount": 4,
       "path": "NOOPiOSUITests/NOOPiOSUITests.swift",
@@ -13771,16 +13771,16 @@
       "category": "core",
       "lineNumbers": [
         4,
-        1147,
-        1170,
-        1175,
-        1177,
-        1306,
-        1424,
-        1499,
-        1531,
-        1656,
-        1665
+        1148,
+        1171,
+        1176,
+        1178,
+        1307,
+        1425,
+        1500,
+        1532,
+        1657,
+        1666
       ],
       "occurrenceCount": 11,
       "path": "Strand/Screens/TrendsView.swift",
@@ -13794,7 +13794,7 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        732
+        733
       ],
       "occurrenceCount": 1,
       "path": "Strand/Screens/TrendsView.swift",
