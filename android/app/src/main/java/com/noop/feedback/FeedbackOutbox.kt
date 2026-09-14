@@ -671,6 +671,7 @@ internal class FeedbackOutbox(
         lane: FeedbackReservationAttemptLane,
         failure: FeedbackFailureCategory = FeedbackFailureCategory.IDENTITY,
         allowBoundIdentity: Boolean = false,
+        retryAfterMillis: Long? = null,
         expectedWorkerGeneration: String? = null,
         nextWorkerGeneration: String =
             UUID.randomUUID().toString().lowercase(Locale.US),
@@ -709,10 +710,12 @@ internal class FeedbackOutbox(
             throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_TRANSITION)
         }
         val now = nowMillis()
-        val delay = FeedbackReservationContinuityPolicy.retryDelayMillis(
-            records = loadRecordsLocked().map(StoredRecord::record),
-            nowMillis = now,
-        )
+        val delay =
+            FeedbackReservationAdmissionPolicy.boundedRetryAfterMillis(retryAfterMillis)
+                ?: FeedbackReservationContinuityPolicy.retryDelayMillis(
+                    records = loadRecordsLocked().map(StoredRecord::record),
+                    nowMillis = now,
+                )
         val canonicalNextGeneration = canonicalUuid(nextWorkerGeneration)
             ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
         val retryNotBeforeMillis =

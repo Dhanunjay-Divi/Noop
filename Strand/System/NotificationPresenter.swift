@@ -204,7 +204,9 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
         switch raw {
         case "":
             return "none"
-        case DailyReviewNotifications.privacyCategoryID, "private":
+        case DailyReviewNotifications.privacyCategoryID,
+             DailyReviewNotifications.plannedWorkoutCategoryID,
+             "private":
             return "private"
         case "none", "unknown":
             return raw
@@ -1079,6 +1081,36 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         // A response is direct evidence that Notification Center surfaced this request to the user. It
         // does not retroactively make any claim about other scheduled notifications.
         LocalNotificationLifecycle.presented(response.notification.request)
+        let actionIdentifier = response.actionIdentifier
+        if actionIdentifier == DailyReviewNotifications.keepCurrentPlanActionID ||
+            actionIdentifier == DailyReviewNotifications.reviewLighterOptionsActionID {
+            let userInfo = response.notification.request.content.userInfo
+            let fingerprint = userInfo[
+                AdaptivePlannedWorkoutScheduler.fingerprintUserInfoKey
+            ] as? String
+            Task { @MainActor in
+                defer { completionHandler() }
+                if let fingerprint {
+                    let decision: AdaptivePlannedWorkoutDecision =
+                        actionIdentifier ==
+                            DailyReviewNotifications.keepCurrentPlanActionID
+                            ? .keepCurrentPlan
+                            : .reviewLighterOptions
+                    let accepted = await ContextualInterventionCenter
+                        .acknowledgePlannedWorkoutDecision(
+                            fingerprint: fingerprint,
+                            decision: decision,
+                            center: center
+                        )
+                    if accepted,
+                       actionIdentifier ==
+                        DailyReviewNotifications.reviewLighterOptionsActionID {
+                        NotificationRouteBridge.recordPending(.workouts)
+                    }
+                }
+            }
+            return
+        }
         Task { @MainActor in
             ContextualActionCenter.shared.capture(response.notification.request)
         }
@@ -1108,13 +1140,23 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         } else if let route = NotificationRouteBridge.route(
             from: response.notification.request.content.userInfo
         ) {
-            NotificationRouteBridge.recordPending(route)
+            NotificationRouteBridge.recordPending(
+                route,
+                journalDay: NotificationRouteBridge.journalDay(
+                    from: response.notification.request.content.userInfo
+                )
+            )
         }
         #else
         if let route = NotificationRouteBridge.route(
             from: response.notification.request.content.userInfo
         ) {
-            NotificationRouteBridge.recordPending(route)
+            NotificationRouteBridge.recordPending(
+                route,
+                journalDay: NotificationRouteBridge.journalDay(
+                    from: response.notification.request.content.userInfo
+                )
+            )
         }
         #endif
         completionHandler()

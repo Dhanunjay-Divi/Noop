@@ -8,7 +8,8 @@ final class ContextualActionPolicyTests: XCTestCase {
         id: String? = nil,
         createdAt: Date,
         expiresAt: Date,
-        route: NoopNotificationRoute? = nil
+        route: NoopNotificationRoute? = nil,
+        journalDay: String? = nil
     ) -> ContextualAction {
         ContextualAction(
             id: id ?? kind.rawValue,
@@ -19,7 +20,8 @@ final class ContextualActionPolicyTests: XCTestCase {
             createdAt: createdAt,
             expiresAt: expiresAt,
             amountML: nil,
-            route: route
+            route: route,
+            journalDay: journalDay
         )
     }
 
@@ -94,12 +96,42 @@ final class ContextualActionPolicyTests: XCTestCase {
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
         object.removeValue(forKey: "route")
+        object.removeValue(forKey: "journalDay")
         let legacy = try JSONSerialization.data(withJSONObject: object)
 
         let decoded = try JSONDecoder().decode(ContextualAction.self, from: legacy)
 
         XCTAssertNil(decoded.route)
+        XCTAssertNil(decoded.journalDay)
         XCTAssertEqual(decoded.resolvedRecoveryRoute, .sleep)
+    }
+
+    @MainActor
+    func testJournalLogicalDayPersistsAcrossActionCenterReload() throws {
+        let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let content = UNMutableNotificationContent()
+        content.title = "Journal check-in"
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey: NoopNotificationRoute.journal.rawValue,
+            NotificationRouteBridge.journalDayUserInfoKey: "2026-09-13",
+        ]
+        let request = UNNotificationRequest(
+            identifier: "daily-review-evening-2026-09-13",
+            content: content,
+            trigger: nil
+        )
+        let center = ContextualActionCenter(defaults: defaults, storageKey: "state")
+
+        center.capture(request)
+
+        XCTAssertEqual(center.visibleActions.first?.journalDay, "2026-09-13")
+        XCTAssertEqual(
+            ContextualActionCenter(defaults: defaults, storageKey: "state")
+                .visibleActions.first?.journalDay,
+            "2026-09-13"
+        )
     }
 
     @MainActor
@@ -354,5 +386,32 @@ final class ContextualActionPolicyTests: XCTestCase {
             start.timeIntervalSince1970,
             accuracy: 0.001
         )
+    }
+
+    @MainActor
+    func testPlannedWorkoutOwnershipAndResolutionUseEquivalentFingerprintIdentity() {
+        let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let center = ContextualActionCenter(defaults: defaults, storageKey: "state")
+        let legacy = "planned-workout|2026-09-15|1789502400|SLEEP_DEFICIT"
+        let current = "planned-workout|2026-09-15|1789502400"
+        center.presentRecovery(
+            title: "Planned workout",
+            detail: "Review options.",
+            fingerprint: legacy,
+            evidence: [],
+            observedAt: Date(),
+            maximumAge: 60 * 60,
+            route: .workouts
+        )
+
+        XCTAssertTrue(center.ownsPlannedWorkoutDecision(fingerprint: current))
+        XCTAssertFalse(center.hasResolvedPlannedWorkoutDecision(fingerprint: current))
+
+        center.resolvePlannedWorkoutDecision(fingerprint: current)
+
+        XCTAssertFalse(center.ownsPlannedWorkoutDecision(fingerprint: current))
+        XCTAssertTrue(center.hasResolvedPlannedWorkoutDecision(fingerprint: legacy))
     }
 }

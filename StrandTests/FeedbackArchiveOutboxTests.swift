@@ -55,6 +55,43 @@ private actor FeedbackAuthorizationGateProbe {
 }
 
 final class FeedbackArchiveOutboxTests: XCTestCase {
+    func testReservationDrainDeferralPreservesAutomaticAttemptBudget() {
+        XCTAssertTrue(
+            FeedbackReservationAdmissionPolicy.preservesAttemptBudget(
+                statusCode: 503,
+                deferral: "reservation-drain"
+            )
+        )
+        XCTAssertTrue(
+            FeedbackReservationAdmissionPolicy.preservesAttemptBudget(
+                statusCode: 503,
+                deferral: "RESERVATION-DRAIN"
+            )
+        )
+        XCTAssertFalse(
+            FeedbackReservationAdmissionPolicy.preservesAttemptBudget(
+                statusCode: 503,
+                deferral: nil
+            )
+        )
+        XCTAssertFalse(
+            FeedbackReservationAdmissionPolicy.preservesAttemptBudget(
+                statusCode: 500,
+                deferral: "reservation-drain"
+            )
+        )
+        XCTAssertEqual(
+            FeedbackReservationAdmissionPolicy.retryDelay("300"),
+            300
+        )
+        XCTAssertEqual(
+            FeedbackReservationAdmissionPolicy.retryDelay("999999"),
+            FeedbackReservationAdmissionPolicy.maximumRetryDelay
+        )
+        XCTAssertNil(FeedbackReservationAdmissionPolicy.retryDelay("invalid"))
+        XCTAssertNil(FeedbackReservationAdmissionPolicy.retryDelay("0"))
+    }
+
     func testLateUploadCallbacksTreatOnlyDurableEndStatesAsTerminal() {
         XCTAssertTrue(FeedbackDeliveryState.sent.isTerminal)
         XCTAssertTrue(FeedbackDeliveryState.cancelled.isTerminal)
@@ -1201,6 +1238,46 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
             stableIdentitySubjectSHA256
         )
         XCTAssertFalse(waiting.hasRemoteBinding)
+    }
+
+    func testReservationDrainUsesServerRetryDelay() async throws {
+        let root = temporaryDirectory("feedback-reservation-drain-delay")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: created.addingTimeInterval(2)
+        )
+        _ = try await outbox.markReserving(
+            id: source.id,
+            now: created.addingTimeInterval(3)
+        )
+
+        let waiting = try await outbox.markReservationContinuityWaiting(
+            id: source.id,
+            lane: .delivery,
+            allowBoundIdentity: true,
+            failureKind: .reservationUnavailable,
+            retryAfter: 300,
+            now: created.addingTimeInterval(4)
+        )
+
+        XCTAssertEqual(
+            waiting.nextRetryAt,
+            created.addingTimeInterval(304)
+        )
+        XCTAssertEqual(waiting.attemptCount, 0)
     }
 
     func testBoundReservationContinuityWaitPreservesCancellationAttemptBudget()

@@ -544,11 +544,18 @@ internal object HydrationEntryContract {
     const val METRIC_KEY = "hydration"
     const val MAX_ENTRY_ML = 10_000
     const val MAX_DAY_ML = 10_000
+    const val LEGACY_OVERSIZED_ID_PREFIX = "00000000-0000-5000-a000-"
+
+    fun isLegacyOversized(row: HydrationEntryRow): Boolean =
+        row.id.startsWith(LEGACY_OVERSIZED_ID_PREFIX) &&
+            row.amountML > MAX_DAY_ML
 
     fun validated(row: HydrationEntryRow): HydrationEntryRow {
         require(row.deviceId == SOURCE_ID) { "invalid hydration source" }
         requireCanonicalDay(row.day)
-        require(row.amountML in 1..MAX_ENTRY_ML) { "invalid hydration amount" }
+        require(
+            row.amountML in 1..MAX_ENTRY_ML || isLegacyOversized(row),
+        ) { "invalid hydration amount" }
         require(row.loggedAt > 0L) { "invalid hydration timestamp" }
         require(runCatching { java.util.UUID.fromString(row.id) }.isSuccess) {
             "invalid hydration entry id"
@@ -563,6 +570,12 @@ internal object HydrationEntryContract {
     }
 
     fun total(entries: List<HydrationEntryRow>): Long {
+        if (entries.size == 1 && isLegacyOversized(entries[0])) {
+            return validated(entries[0]).amountML.toLong()
+        }
+        require(entries.none(::isLegacyOversized)) {
+            "legacy oversized hydration must be corrected before adding entries"
+        }
         var total = 0L
         for (entry in entries) {
             validated(entry)
@@ -573,9 +586,9 @@ internal object HydrationEntryContract {
     }
 
     /**
-     * A positive scalar with no matching rows is a legacy-only record. Fractional, malformed, or
-     * over-limit scalars also stay scalar-only. Mutations fail closed so none of them can be silently
-     * replaced by a partial entry list.
+     * A positive scalar with no matching rows is a legacy-only record. Fractional or malformed
+     * scalars stay scalar-only. A marked oversized legacy row is accepted only as a correction
+     * boundary so it can be reduced, replaced, or cleared without authorizing new over-limit data.
      */
     fun requireEditableProjection(
         scalar: Double?,
@@ -586,10 +599,12 @@ internal object HydrationEntryContract {
             if (scalar == null || scalar == 0.0) return 0L
             throw HydrationEntryIntegrityException()
         }
+        val legacyCorrection =
+            entries.size == 1 && isLegacyOversized(entries[0])
         if (scalar == null ||
             !scalar.isFinite() ||
             scalar <= 0.0 ||
-            scalar > MAX_DAY_ML.toDouble() ||
+            (!legacyCorrection && scalar > MAX_DAY_ML.toDouble()) ||
             scalar % 1.0 != 0.0 ||
             scalar.toLong() != entryTotal
         ) {

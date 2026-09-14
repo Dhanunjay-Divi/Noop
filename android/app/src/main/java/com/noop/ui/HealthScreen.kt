@@ -396,10 +396,15 @@ private fun BodyCompositionSection(
         .takeIf { profile.weightInputConfirmed }
         ?.let { BodyCompositionReading(value = it, day = null, source = "profile") }
     val currentBmi = if (
-        profile.ageInputConfirmed &&
-        profile.age >= BodyProfilePolicy.ADULT_MINIMUM_AGE &&
-        profile.heightInputConfirmed &&
-        currentWeight != null
+        currentWeight != null &&
+        BodyProfilePolicy.canPresentAdultBmi(
+            age = profile.age,
+            currentWeightKg = currentWeight.value,
+            heightCm = profile.heightCm,
+            ageConfirmed = profile.ageInputConfirmed,
+            heightConfirmed = profile.heightInputConfirmed,
+            currentWeightConfirmed = profile.weightInputConfirmed,
+        )
     ) {
         snapshot.bmi ?: run {
             val weight = currentWeight

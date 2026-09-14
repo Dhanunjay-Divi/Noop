@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -62,6 +63,7 @@ internal fun ContextualActionRail(
     expandedId: String?,
     onExpandedChange: (String?) -> Unit,
     onPrimary: (ContextualAction) -> Unit,
+    onSecondary: (ContextualAction) -> Unit,
     onDismiss: (ContextualAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -79,6 +81,7 @@ internal fun ContextualActionRail(
                     processing = action.id in processingIds,
                     onCollapse = { onExpandedChange(null) },
                     onPrimary = { onPrimary(action) },
+                    onSecondary = { onSecondary(action) },
                     onDismiss = {
                         onExpandedChange(null)
                         onDismiss(action)
@@ -126,6 +129,7 @@ private fun ExpandedContextualAction(
     processing: Boolean,
     onCollapse: () -> Unit,
     onPrimary: () -> Unit,
+    onSecondary: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val tint = contextualActionTint(action.kind)
@@ -233,6 +237,27 @@ private fun ExpandedContextualAction(
                 style = NoopType.subhead,
                 maxLines = 2,
             )
+        }
+
+        if (action.isPlannedWorkoutDecision()) {
+            OutlinedButton(
+                onClick = onSecondary,
+                enabled = !processing,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 42.dp)
+                    .testTag("noop.context-action.keep-current-plan"),
+            ) {
+                Text(
+                    text = stringResource(
+                        R.string.appwide_adaptive_day_guidance_planned_workout_keep_plan,
+                    ),
+                    style = NoopType.subhead,
+                    color = Palette.textPrimary,
+                    maxLines = 2,
+                )
+            }
         }
     }
 }
@@ -396,8 +421,10 @@ private fun primaryTitle(action: ContextualAction): String = when (action.kind) 
     ContextualActionKind.JOURNAL -> stringResource(R.string.context_action_open_journal)
     ContextualActionKind.WIND_DOWN -> stringResource(R.string.context_action_open_sleep)
     ContextualActionKind.RECOVERY ->
-        if (action.route == NoopNotificationRoute.WORKOUTS) {
-            stringResource(R.string.nav_workouts)
+        if (action.isPlannedWorkoutDecision()) {
+            stringResource(
+                R.string.appwide_adaptive_day_guidance_planned_workout_review_options,
+            )
         } else {
             stringResource(R.string.context_action_open_sleep)
         }

@@ -30,6 +30,7 @@ struct ContextualAction: Identifiable, Codable, Equatable, Sendable {
     let expiresAt: Date
     let amountML: Int?
     let route: NoopNotificationRoute?
+    let journalDay: String?
 
     init(
         id: String,
@@ -40,7 +41,8 @@ struct ContextualAction: Identifiable, Codable, Equatable, Sendable {
         createdAt: Date,
         expiresAt: Date,
         amountML: Int?,
-        route: NoopNotificationRoute? = nil
+        route: NoopNotificationRoute? = nil,
+        journalDay: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -51,10 +53,21 @@ struct ContextualAction: Identifiable, Codable, Equatable, Sendable {
         self.expiresAt = expiresAt
         self.amountML = amountML
         self.route = route
+        self.journalDay = journalDay
     }
 
     var resolvedRecoveryRoute: NoopNotificationRoute {
         route ?? .sleep
+    }
+
+    var fingerprint: String? {
+        let prefix = "\(kind.rawValue):"
+        guard id.hasPrefix(prefix) else { return nil }
+        return String(id.dropFirst(prefix.count))
+    }
+
+    var isPlannedWorkoutDecision: Bool {
+        kind == .recovery && resolvedRecoveryRoute == .workouts
     }
 }
 
@@ -214,7 +227,8 @@ final class ContextualActionCenter: ObservableObject {
                     : content.body,
                 evidence: [String(localized: "No journal answer was recorded for this review")],
                 observedAt: observedAt,
-                expiresAfter: 8 * 60 * 60
+                expiresAfter: 8 * 60 * 60,
+                journalDay: NotificationRouteBridge.journalDay(from: content.userInfo)
             )
         } else if identifier.hasPrefix("wind-down-nudge") {
             present(
@@ -362,6 +376,55 @@ final class ContextualActionCenter: ObservableObject {
         finish(action, succeeded: begin(action))
     }
 
+    func resolvePlannedWorkoutDecision(fingerprint: String) {
+        let canonicalID = "\(ContextualActionKind.recovery.rawValue):\(fingerprint)"
+        let matchingIDs = Set(
+            actions.compactMap { action -> String? in
+                guard action.isPlannedWorkoutDecision,
+                      let candidate = action.fingerprint,
+                      ContextualInterventionCenter.plannedWorkoutFingerprintsMatch(
+                          candidate,
+                          fingerprint
+                      )
+                else { return nil }
+                return action.id
+            }
+        )
+        completedIDs.subtract(matchingIDs)
+        completedIDs.insert(canonicalID)
+        dismissedIDs.subtract(matchingIDs)
+        actions.removeAll { matchingIDs.contains($0.id) }
+        processingIDs.subtract(matchingIDs)
+        persist()
+    }
+
+    func ownsPlannedWorkoutDecision(
+        fingerprint: String,
+        now: Date = Date()
+    ) -> Bool {
+        actions.contains { action in
+            guard action.isPlannedWorkoutDecision,
+                  action.expiresAt > now,
+                  let candidate = action.fingerprint
+            else { return false }
+            return ContextualInterventionCenter.plannedWorkoutFingerprintsMatch(
+                candidate,
+                fingerprint
+            )
+        }
+    }
+
+    func hasResolvedPlannedWorkoutDecision(fingerprint: String) -> Bool {
+        let prefix = "\(ContextualActionKind.recovery.rawValue):"
+        return completedIDs.contains { id in
+            guard id.hasPrefix(prefix) else { return false }
+            return ContextualInterventionCenter.plannedWorkoutFingerprintsMatch(
+                String(id.dropFirst(prefix.count)),
+                fingerprint
+            )
+        }
+    }
+
     func reconcileRecoveryActions(
         route: NoopNotificationRoute,
         keepingFingerprint: String?
@@ -415,7 +478,8 @@ final class ContextualActionCenter: ObservableObject {
                         createdAt: prior.createdAt,
                         expiresAt: prior.expiresAt,
                         amountML: prior.amountML,
-                        route: prior.route
+                        route: prior.route,
+                        journalDay: prior.journalDay
                     )
                 )
             }
@@ -454,7 +518,8 @@ final class ContextualActionCenter: ObservableObject {
         observedAt: Date,
         expiresAfter: TimeInterval,
         amountML: Int? = nil,
-        route: NoopNotificationRoute? = nil
+        route: NoopNotificationRoute? = nil,
+        journalDay: String? = nil
     ) {
         let id = "\(kind.rawValue):\(fingerprint)"
         let expiresAt = observedAt.addingTimeInterval(max(0, expiresAfter))
@@ -478,7 +543,10 @@ final class ContextualActionCenter: ObservableObject {
                 createdAt: existing.createdAt,
                 expiresAt: expiresAt,
                 amountML: amountML ?? existing.amountML,
-                route: route ?? existing.route
+                route: route ?? existing.route,
+                journalDay:
+                    NotificationRouteBridge.canonicalJournalDay(journalDay)
+                    ?? existing.journalDay
             )
             persist()
             return
@@ -507,7 +575,8 @@ final class ContextualActionCenter: ObservableObject {
                 createdAt: observedAt,
                 expiresAt: expiresAt,
                 amountML: amountML,
-                route: route
+                route: route,
+                journalDay: NotificationRouteBridge.canonicalJournalDay(journalDay)
             )
         )
         persist()

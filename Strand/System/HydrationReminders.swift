@@ -58,6 +58,12 @@ enum HydrationReminders {
         case off
     }
 
+    private enum RestoreAuthorizationDisposition {
+        case reschedule
+        case retainOptIn
+        case disable
+    }
+
     struct ReminderSpec: Equatable, Sendable {
         let identifier: String
         let minuteOfDay: Int
@@ -414,9 +420,7 @@ enum HydrationReminders {
         }
         Task { @MainActor in
             let settings = await UNUserNotificationCenter.current().notificationSettings()
-            switch DailyReviewNotifications.restoreAuthorizationDisposition(
-                settings.authorizationStatus
-            ) {
+            switch restoreAuthorizationDisposition(settings.authorizationStatus) {
             case .reschedule:
                 requestReschedule()
             case .retainOptIn:
@@ -619,9 +623,7 @@ enum HydrationReminders {
             let center = UNUserNotificationCenter.current()
             let initialSettings = await center.notificationSettings()
             guard generation == scheduleGeneration else { return }
-            switch DailyReviewNotifications.restoreAuthorizationDisposition(
-                initialSettings.authorizationStatus
-            ) {
+            switch restoreAuthorizationDisposition(initialSettings.authorizationStatus) {
             case .retainOptIn:
                 UserDefaults.standard.set(true, forKey: enabledKey)
                 recordSuppressedRequests()
@@ -656,9 +658,7 @@ enum HydrationReminders {
         _ result: LocalNotificationReconciliationResult?,
         authorizationStatus: UNAuthorizationStatus
     ) -> EnableOutcome {
-        switch DailyReviewNotifications.restoreAuthorizationDisposition(
-            authorizationStatus
-        ) {
+        switch restoreAuthorizationDisposition(authorizationStatus) {
         case .reschedule:
             return applyAuthorizedScheduleResult(result)
         case .retainOptIn:
@@ -685,6 +685,21 @@ enum HydrationReminders {
         return (result?.activeCount ?? 0) > 0
             ? .scheduled
             : .deferred
+    }
+
+    private static func restoreAuthorizationDisposition(
+        _ status: UNAuthorizationStatus
+    ) -> RestoreAuthorizationDisposition {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            return .reschedule
+        case .notDetermined:
+            return .retainOptIn
+        case .denied:
+            return .disable
+        @unknown default:
+            return .disable
+        }
     }
 
     @discardableResult

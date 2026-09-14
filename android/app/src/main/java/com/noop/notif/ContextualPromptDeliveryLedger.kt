@@ -62,6 +62,7 @@ internal data class ContextualPromptOwnerReconciliation(
     val ownerRemoved: Boolean,
     val ownedNotificationSlot: Boolean,
     val notificationSlotCutoffMillis: Long? = null,
+    val notificationCleanupPending: Boolean = false,
 )
 
 internal data class ContextualPromptForcedCancellationResult(
@@ -401,18 +402,30 @@ internal object ContextualPromptDeliveryLedger {
         owner: ContextualPromptDeliveryOwner,
         expectedAtMillis: Long,
         onNotificationSlotOwnerRemoved: () -> Boolean = { false },
-    ): Boolean = synchronized(lock) {
+    ): Boolean = reconcileIfOwnedWithOutcome(
+        context = context,
+        owner = owner,
+        expectedAtMillis = expectedAtMillis,
+        onNotificationSlotOwnerRemoved = onNotificationSlotOwnerRemoved,
+    ).ownerRemoved
+
+    fun reconcileIfOwnedWithOutcome(
+        context: Context,
+        owner: ContextualPromptDeliveryOwner,
+        expectedAtMillis: Long,
+        onNotificationSlotOwnerRemoved: () -> Boolean = { false },
+    ): ContextualPromptOwnerReconciliation = synchronized(lock) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
         val state = loadState(prefs)
         val outcome = exactOwnerReconciliation(state, owner, expectedAtMillis)
-        if (!outcome.ownerRemoved) return@synchronized false
+        if (!outcome.ownerRemoved) return@synchronized outcome
         persistOwnerReconciliation(
             prefs = prefs,
             state = state,
             outcome = outcome,
             slot = owner.notificationSlot,
             onNotificationSlotOwnerRemoved = onNotificationSlotOwnerRemoved,
-        ).ownerRemoved
+        )
     }
 
     internal fun deliveryReceipt(
@@ -551,6 +564,8 @@ internal object ContextualPromptDeliveryLedger {
                 nextState = state,
                 ownerRemoved = false,
                 ownedNotificationSlot = false,
+                notificationSlotCutoffMillis = outcome.notificationSlotCutoffMillis,
+                notificationCleanupPending = shouldCancel,
             )
         }
         var finalState = prepared
@@ -575,6 +590,9 @@ internal object ContextualPromptDeliveryLedger {
             nextState = finalState,
             ownerRemoved = outcome.ownerRemoved,
             ownedNotificationSlot = shouldCancel,
+            notificationSlotCutoffMillis = outcome.notificationSlotCutoffMillis,
+            notificationCleanupPending =
+                shouldCancel && slot in finalState.pendingCancellationSlots,
         )
     }
 

@@ -44,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -115,6 +116,9 @@ internal data class HydrationDetailReadState(
     val entries: List<HydrationStore.Entry>,
     val status: HydrationDetailReadStatus,
 )
+
+internal fun hydrationCorrectionRequired(entries: List<HydrationStore.Entry>): Boolean =
+    entries.any(HydrationStore.Entry::correctionRequired)
 
 internal fun hydrationDetailStateForDay(
     state: HydrationDetailReadState?,
@@ -380,6 +384,9 @@ fun HydrationScreen(
     val sipLabel = uiString(R.string.hydration_screen_sip)
     val cupLabel = uiString(R.string.hydration_screen_cup)
     val bottleLabel = uiString(R.string.hydration_screen_bottle)
+    val correctionTitle = uiString(R.string.appwide_hydration_correction_title)
+    val correctionDetail = uiString(R.string.appwide_hydration_correction_detail)
+    val correctionEntryLabel = uiString(R.string.appwide_hydration_correction_entry_label)
     val lastSevenDaysText = uiString(R.string.hydration_screen_last_seven_days)
     val shortLitresFormat = uiString(R.string.hydration_screen_litres_short_format)
     val litreNumberFormat = remember(locale) { hydrationLitreNumberFormat(locale) }
@@ -411,6 +418,7 @@ fun HydrationScreen(
     val totalMl = reading?.valueMl
     val history = displayedDetailRead.history
     val entries = displayedDetailRead.entries
+    val correctionRequired = hydrationCorrectionRequired(entries)
     val provenance = reading?.let { HydrationStore.run { it.provenance(provenanceStrings) } }
     var hydrationFailure by remember { mutableStateOf<HydrationUIFailure?>(null) }
     // A simple reload key the log taps bump so the LaunchedEffect re-reads the store.
@@ -454,15 +462,17 @@ fun HydrationScreen(
     var editingEntry by remember { mutableStateOf<HydrationStore.Entry?>(null) }
 
     val log: (Int) -> Unit = { amount ->
-        scope.launch {
-            try {
-                HydrationStore.logForDay(viewModel.repo, amount, selectedDayKey)
-                hydrationFailure = null
-                reloadTick += 1
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Throwable) {
-                hydrationFailure = HydrationUIFailure.SAVE
+        if (!correctionRequired) {
+            scope.launch {
+                try {
+                    HydrationStore.logForDay(viewModel.repo, amount, selectedDayKey)
+                    hydrationFailure = null
+                    reloadTick += 1
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    hydrationFailure = HydrationUIFailure.SAVE
+                }
             }
         }
     }
@@ -526,7 +536,7 @@ fun HydrationScreen(
 
     // #798 - the amount editor. New custom amounts use the same additive entry path as quick logs;
     // existing entries retain their ID/day and update only their persisted amount.
-    if (showCustom || editingEntry != null) {
+    if ((showCustom && !correctionRequired) || editingEntry != null) {
         val entry = editingEntry
         CustomAmountDialog(
             accent = accent,
@@ -612,6 +622,25 @@ fun HydrationScreen(
                                 tint = Palette.accent,
                             )
                         }
+                    }
+                }
+            }
+        }
+
+        if (correctionRequired) {
+            item {
+                NoopCard(padding = 18.dp) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            correctionTitle,
+                            style = NoopType.headline,
+                            color = Palette.statusWarning,
+                        )
+                        Text(
+                            correctionDetail,
+                            style = NoopType.subhead,
+                            color = Palette.textSecondary,
+                        )
                     }
                 }
             }
@@ -756,6 +785,7 @@ fun HydrationScreen(
                     onClickLabel = uiString(R.string.hydration_screen_log_accessibility_format, sipLabel),
                     icon = Icons.Filled.WaterDrop,
                     accent = accent,
+                    enabled = !correctionRequired,
                     modifier = Modifier.weight(1f),
                 ) { log(HydrationGoal.SIP_ML) }
                 LiquidLogTile(
@@ -763,6 +793,7 @@ fun HydrationScreen(
                     onClickLabel = uiString(R.string.hydration_screen_log_accessibility_format, cupLabel),
                     icon = Icons.Filled.LocalDrink,
                     accent = accent,
+                    enabled = !correctionRequired,
                     modifier = Modifier.weight(1f),
                 ) { log(HydrationGoal.CUP_ML) }
                 LiquidLogTile(
@@ -770,6 +801,7 @@ fun HydrationScreen(
                     onClickLabel = uiString(R.string.hydration_screen_log_accessibility_format, bottleLabel),
                     icon = Icons.Filled.LocalDrink,
                     accent = accent,
+                    enabled = !correctionRequired,
                     modifier = Modifier.weight(1f),
                 ) { log(HydrationGoal.BOTTLE_ML) }
             }
@@ -782,6 +814,7 @@ fun HydrationScreen(
                 text = uiString(R.string.hydration_screen_custom_amount),
                 leadingIcon = Icons.Filled.Add,
                 kind = NoopButtonKind.Secondary,
+                enabled = !correctionRequired,
                 modifier = Modifier.fillMaxWidth(),
             ) { showCustom = true }
         }
@@ -960,6 +993,15 @@ fun HydrationScreen(
                                         style = NoopType.footnote,
                                         color = Palette.textTertiary,
                                     )
+                                    if (entry.correctionRequired) {
+                                        Text(
+                                            correctionEntryLabel,
+                                            style = NoopType.footnote.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                            ),
+                                            color = Palette.statusWarning,
+                                        )
+                                    }
                                 }
                                 IconButton(onClick = { editingEntry = entry }) {
                                     Icon(
@@ -1041,6 +1083,7 @@ private fun LiquidLogTile(
     onClickLabel: String,
     icon: ImageVector,
     accent: Color,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
     onLog: () -> Unit,
 ) {
@@ -1053,9 +1096,11 @@ private fun LiquidLogTile(
             .clickable(
                 interactionSource = interaction,
                 indication = null,
+                enabled = enabled,
                 onClickLabel = onClickLabel,
                 onClick = onLog,
             )
+            .alpha(if (enabled) 1f else 0.45f)
             .padding(vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),

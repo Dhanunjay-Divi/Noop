@@ -131,6 +131,39 @@
     "zh-Hans": "清除%1$s",
     "zh-Hant": "清除%1$s"
   },
+  "appwide.hydration.correction_title": {
+    "de": "Wassereintrag korrigieren",
+    "en": "Correct this water entry",
+    "es": "Corrige esta entrada de agua",
+    "fr": "Corrigez cette consommation d’eau",
+    "it": "Correggi questa registrazione d’acqua",
+    "pt-PT": "Corrija este registo de água",
+    "ru": "Исправьте запись о воде",
+    "zh-Hans": "更正这条饮水记录",
+    "zh-Hant": "更正這筆飲水記錄"
+  },
+  "appwide.hydration.correction_detail": {
+    "de": "Ein älterer Tageswert liegt über dem aktuellen Eingabelimit von 10 Litern. Bearbeite oder lösche den markierten Eintrag oder lösche den Tag, bevor du weitere Getränke protokollierst.",
+    "en": "An older daily total is above the current 10 L entry limit. Edit or delete the marked entry, or clear the day, before logging more drinks.",
+    "es": "Un total diario anterior supera el límite actual de entrada de 10 L. Edita o elimina la entrada marcada, o borra el día, antes de registrar más bebidas.",
+    "fr": "Un ancien total quotidien dépasse la limite de saisie actuelle de 10 L. Modifiez ou supprimez l’entrée signalée, ou effacez la journée, avant d’ajouter d’autres boissons.",
+    "it": "Un totale giornaliero precedente supera l’attuale limite di inserimento di 10 L. Modifica o elimina la registrazione contrassegnata, oppure cancella la giornata, prima di aggiungere altre bevande.",
+    "pt-PT": "Um total diário antigo ultrapassa o limite de registo atual de 10 L. Edite ou elimine o registo assinalado, ou limpe o dia, antes de registar mais bebidas.",
+    "ru": "Старое суточное значение превышает текущий предел ввода 10 л. Прежде чем добавлять новые напитки, измените или удалите отмеченную запись либо очистите день.",
+    "zh-Hans": "较早的每日总量超过当前 10 升记录上限。请先编辑或删除标记的记录，或清除当天数据，再记录更多饮水。",
+    "zh-Hant": "較早的每日總量超過目前 10 公升記錄上限。請先編輯或刪除標記的記錄，或清除當天資料，再記錄更多飲水。"
+  },
+  "appwide.hydration.correction_entry_label": {
+    "de": "Korrektur erforderlich",
+    "en": "Needs correction",
+    "es": "Necesita corrección",
+    "fr": "Correction requise",
+    "it": "Correzione necessaria",
+    "pt-PT": "Requer correção",
+    "ru": "Требуется исправление",
+    "zh-Hans": "需要更正",
+    "zh-Hant": "需要更正"
+  },
   "appwide.hydration.logged_day": {
     "de": "%1$s erfasst",
     "en": "Logged %1$s",
@@ -1153,6 +1186,17 @@
     "ru": "Уведомления отключены в системных настройках.",
     "zh-Hans": "系统设置中已关闭通知。",
     "zh-Hant": "系統設定中已關閉通知。"
+  },
+  "appwide.notifications.quiet_hours.help": {
+    "de": "Schaltet Handgelenkhinweise stumm und verschiebt tägliche Erinnerungen bis zum Ende der Ruhezeit.",
+    "en": "Mutes wrist alerts and defers daily-review reminders until quiet hours end.",
+    "es": "Silencia las alertas en la muñeca y aplaza los recordatorios diarios hasta que terminen las horas de silencio.",
+    "fr": "Met en sourdine les alertes au poignet et reporte les rappels quotidiens jusqu’à la fin des heures calmes.",
+    "it": "Disattiva gli avvisi al polso e rimanda i promemoria di revisione giornaliera fino alla fine delle ore silenziose.",
+    "pt-PT": "Silencia os alertas no pulso e adia os lembretes de revisão diária até ao fim das horas de silêncio.",
+    "ru": "Отключает сигналы на запястье и откладывает ежедневные напоминания до окончания тихих часов.",
+    "zh-Hans": "静音手腕提醒，并将每日回顾提醒延后到免打扰时段结束后。",
+    "zh-Hant": "將手腕提醒設為靜音，並把每日回顧提醒延後到安靜時段結束後。"
   },
   "appwide.activity_suggestion_notifications": {
     "de": "Mitteilungen zu Aktivitätsvorschlägen",
@@ -5367,6 +5411,28 @@
     "zh-Hans": "日历访问不可用。请在系统设置中允许 NOOP 访问日历。",
     "zh-Hant": "行事曆存取無法使用。請在系統設定中允許 NOOP 存取行事曆。"
   },
+  "appwide.adaptive_day_guidance.planned_workout.keep_plan": {
+    "de": "Aktuellen Plan beibehalten",
+    "en": "Keep current plan",
+    "es": "Mantener el plan actual",
+    "fr": "Garder le programme actuel",
+    "it": "Mantieni il piano attuale",
+    "pt-PT": "Manter o plano atual",
+    "ru": "Оставить текущий план",
+    "zh-Hans": "保留当前计划",
+    "zh-Hant": "保留目前計畫"
+  },
+  "appwide.adaptive_day_guidance.planned_workout.review_options": {
+    "de": "Leichtere Optionen prüfen",
+    "en": "Review lighter options",
+    "es": "Revisar opciones más ligeras",
+    "fr": "Voir des options plus légères",
+    "it": "Valuta opzioni più leggere",
+    "pt-PT": "Rever opções mais leves",
+    "ru": "Посмотреть более лёгкие варианты",
+    "zh-Hans": "查看较轻的选项",
+    "zh-Hant": "查看較輕的選項"
+  },
   "appwide.adaptive_day_guidance.planned_workout.title": {
     "de": "Zieh heute ein leichteres Training in Betracht",
     "en": "Consider a lighter workout today",
@@ -5388,6 +5454,61 @@
     "ru": "Скоро запланированная тренировка, а сегодняшний сон или восстановление указывают на необходимость гибкости. Оцените самочувствие перед началом.",
     "zh-Hans": "计划锻炼即将开始，而今天的睡眠或恢复信号建议灵活调整。开始前请确认自己的感受。",
     "zh-Hant": "計畫運動即將開始，而今天的睡眠或恢復訊號建議彈性調整。開始前請確認自己的感受。"
+  },
+  "appwide.daily_review.journal.help": {
+    "de": "Standardmäßig aus. Öffnet das Tagebuch und wird übersprungen, sobald es für diesen lokalen Tag einen Eintrag gibt.",
+    "en": "Off by default. Opens Journal and is skipped once that local day has an entry.",
+    "es": "Desactivado de forma predeterminada. Abre Diario y se omite cuando ese día local ya tiene una entrada.",
+    "fr": "Désactivé par défaut. Ouvre Journal et est ignoré dès que cette journée locale contient une entrée.",
+    "it": "Disattivato per impostazione predefinita. Apre Diario e viene ignorato quando il giorno locale ha già una voce.",
+    "pt-PT": "Desativado por predefinição. Abre o Diário e é ignorado quando esse dia local já tem um registo.",
+    "ru": "По умолчанию выключено. Открывает дневник и пропускается, если за этот локальный день уже есть запись.",
+    "zh-Hans": "默认关闭。打开日记；本地当天已有记录后会跳过提醒。",
+    "zh-Hant": "預設關閉。開啟日記；本地當天已有記錄後會略過提醒。"
+  },
+  "appwide.daily_review.journal.label": {
+    "de": "Tagebuch-Erinnerung",
+    "en": "Journal reminder",
+    "es": "Recordatorio del diario",
+    "fr": "Rappel du journal",
+    "it": "Promemoria diario",
+    "pt-PT": "Lembrete do diário",
+    "ru": "Напоминание о дневнике",
+    "zh-Hans": "日记提醒",
+    "zh-Hant": "日記提醒"
+  },
+  "appwide.daily_review.morning.help": {
+    "de": "Standardmäßig aus. Öffnet Schlaf für eine private Übersicht; die Benachrichtigung zeigt keine Scores oder Gesundheitswerte.",
+    "en": "Off by default. Opens Sleep for a private review; no scores or health values appear in the notification.",
+    "es": "Desactivado de forma predeterminada. Abre Sueño para una revisión privada; la notificación no muestra puntuaciones ni valores de salud.",
+    "fr": "Désactivé par défaut. Ouvre Sommeil pour un bilan privé ; la notification n’affiche aucun score ni aucune valeur de santé.",
+    "it": "Disattivato per impostazione predefinita. Apre Sonno per una revisione privata; la notifica non mostra punteggi o valori di salute.",
+    "pt-PT": "Desativado por predefinição. Abre o Sono para uma revisão privada; a notificação não mostra pontuações nem valores de saúde.",
+    "ru": "По умолчанию выключено. Открывает раздел сна для личного обзора; уведомление не показывает оценки или показатели здоровья.",
+    "zh-Hans": "默认关闭。打开睡眠进行私密回顾；通知中不显示评分或健康数值。",
+    "zh-Hant": "預設關閉。開啟睡眠進行私密回顧；通知中不顯示評分或健康數值。"
+  },
+  "appwide.daily_review.morning.label": {
+    "de": "Morgendlicher Check-in",
+    "en": "Morning check-in",
+    "es": "Revisión matutina",
+    "fr": "Bilan du matin",
+    "it": "Check-in del mattino",
+    "pt-PT": "Check-in da manhã",
+    "ru": "Утренний обзор",
+    "zh-Hans": "早晨回顾",
+    "zh-Hant": "早晨回顧"
+  },
+  "appwide.daily_review.quiet_hours_note": {
+    "de": "Diese Erinnerungen beachten deine Ruhezeiten. Ihre Banner enthalten keine Scores, Gesundheitswerte oder Tagebuchinhalte.",
+    "en": "These reminders follow your quiet hours. Their banners contain no scores, health values, or journal content.",
+    "es": "Estos recordatorios respetan tus horas de silencio. Sus avisos no contienen puntuaciones, valores de salud ni contenido del diario.",
+    "fr": "Ces rappels respectent vos heures calmes. Leurs bannières ne contiennent aucun score, aucune valeur de santé ni aucun contenu du journal.",
+    "it": "Questi promemoria rispettano le ore di silenzio. I banner non contengono punteggi, valori di salute o contenuti del diario.",
+    "pt-PT": "Estes lembretes respeitam as horas de silêncio. Os avisos não contêm pontuações, valores de saúde nem conteúdo do diário.",
+    "ru": "Эти напоминания соблюдают тихие часы. Баннеры не содержат оценок, показателей здоровья или записей дневника.",
+    "zh-Hans": "这些提醒会遵循免打扰时段。横幅中不含评分、健康数值或日记内容。",
+    "zh-Hant": "這些提醒會遵循勿擾時段。橫幅中不含評分、健康數值或日記內容。"
   },
   "appwide.workout_guidance.label": {
     "de": "Hinweise zur Trainingsbelastung",

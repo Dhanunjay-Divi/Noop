@@ -82,4 +82,22 @@ class HydrationDayRouteTest {
             hydrationDetailStateAfterFailure(previouslyMissing, "2026-09-10").status,
         )
     }
+
+    @Test
+    fun oversizedCompatibilityEntryBlocksNewLogsUntilCorrected() {
+        val normal = HydrationStore.Entry(
+            id = "normal",
+            day = "2026-09-10",
+            amountML = 500,
+            loggedAt = 1_788_912_000L,
+        )
+        val correction = normal.copy(
+            id = "legacy-oversized",
+            amountML = 12_000,
+            correctionRequired = true,
+        )
+
+        assertTrue(hydrationCorrectionRequired(listOf(normal, correction)))
+        assertEquals(false, hydrationCorrectionRequired(listOf(normal)))
+    }
 }

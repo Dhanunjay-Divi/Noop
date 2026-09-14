@@ -37,10 +37,20 @@ internal data class ContextualAction(
     val amountMl: Int? = null,
     val route: NoopNotificationRoute? = null,
     val source: ContextualActionSource? = null,
+    val journalDay: String? = null,
 )
 
 internal fun ContextualAction.resolvedRecoveryRoute(): NoopNotificationRoute =
     route ?: NoopNotificationRoute.SLEEP
+
+internal fun ContextualAction.fingerprint(): String? {
+    val prefix = "${kind.name.lowercase(Locale.ROOT)}:"
+    return id.takeIf { it.startsWith(prefix) }?.removePrefix(prefix)
+}
+
+internal fun ContextualAction.isPlannedWorkoutDecision(): Boolean =
+    kind == ContextualActionKind.RECOVERY &&
+        resolvedRecoveryRoute() == NoopNotificationRoute.WORKOUTS
 
 internal object ContextualActionPolicy {
     const val VISIBLE_LIMIT = 3
@@ -153,6 +163,7 @@ internal object ContextualActionRefreshPolicy {
         amountMl: Int?,
         route: NoopNotificationRoute?,
         source: ContextualActionSource?,
+        journalDay: String?,
     ): ContextualAction = existing.copy(
         title = title,
         detail = detail,
@@ -161,6 +172,8 @@ internal object ContextualActionRefreshPolicy {
         amountMl = amountMl ?: existing.amountMl,
         route = route ?: existing.route,
         source = source ?: existing.source,
+        journalDay = NotificationRouteBridge.canonicalJournalDay(journalDay)
+            ?: existing.journalDay,
     )
 }
 
@@ -214,6 +227,49 @@ internal object ContextualActionIdentityMigration {
             processingIds = migrateIds(state.processingIds),
             dismissedIds = migrateIds(state.dismissedIds),
             completedIds = migrateIds(state.completedIds),
+        )
+    }
+}
+
+internal object ContextualPlannedWorkoutDecisionPolicy {
+    private val idPrefix =
+        "${ContextualActionKind.RECOVERY.name.lowercase(Locale.ROOT)}:"
+
+    fun owns(
+        state: ContextualActionIdentityState,
+        fingerprint: String,
+        nowMillis: Long,
+        fingerprintsMatch: (String, String) -> Boolean,
+    ): Boolean = state.actions.any { action ->
+        action.id !in state.completedIds &&
+            action.isPlannedWorkoutDecision() &&
+            action.expiresAtMillis > nowMillis &&
+            action.fingerprint()?.let { candidate ->
+                fingerprintsMatch(candidate, fingerprint)
+            } == true
+    }
+
+    fun resolved(
+        state: ContextualActionIdentityState,
+        fingerprint: String,
+        fingerprintsMatch: (String, String) -> Boolean,
+    ): ContextualActionIdentityState {
+        val canonicalId = "$idPrefix$fingerprint"
+        val equivalentActionIds = state.actions
+            .asSequence()
+            .filter(ContextualAction::isPlannedWorkoutDecision)
+            .filter { action ->
+                action.fingerprint()?.let { candidate ->
+                    fingerprintsMatch(candidate, fingerprint)
+                } == true
+            }
+            .mapTo(linkedSetOf(), ContextualAction::id)
+        val resolvedIds = equivalentActionIds + canonicalId
+        return ContextualActionIdentityState(
+            actions = state.actions.filterNot { it.id in resolvedIds },
+            processingIds = state.processingIds - resolvedIds,
+            dismissedIds = state.dismissedIds - resolvedIds,
+            completedIds = state.completedIds + resolvedIds,
         )
     }
 }
@@ -347,6 +403,7 @@ internal object ContextualActionCenter {
         fingerprint: String,
         title: String,
         detail: String,
+        journalDay: String?,
         observedAtMillis: Long = System.currentTimeMillis(),
     ) {
         present(
@@ -358,6 +415,7 @@ internal object ContextualActionCenter {
             evidence = listOf(context.getString(R.string.context_action_journal_evidence)),
             observedAtMillis = observedAtMillis,
             expiresAfterMillis = 8L * 60L * 60L * 1_000L,
+            journalDay = journalDay,
         )
     }
 
@@ -422,6 +480,84 @@ internal object ContextualActionCenter {
     fun complete(context: Context, action: ContextualAction) {
         if (begin(context, action)) finish(context, action, succeeded = true)
     }
+
+    fun resolvePlannedWorkoutDecision(
+        context: Context,
+        fingerprint: String,
+        fingerprintsMatch: (String, String) -> Boolean,
+    ): Boolean = synchronized(lock) {
+            val app = context.applicationContext
+            ensureLoadedLocked(app)
+            val prior = ContextualActionIdentityState(
+                actions = storedActions,
+                processingIds = _processingIds.value,
+                dismissedIds = dismissedIds,
+                completedIds = completedIds,
+            )
+            val resolved = ContextualPlannedWorkoutDecisionPolicy.resolved(
+                state = prior,
+                fingerprint = fingerprint,
+                fingerprintsMatch = fingerprintsMatch,
+            )
+            val nextActions = resolved.actions
+                .sortedByDescending { it.createdAtMillis }
+                .take(MAX_STORED_ACTIONS)
+            val nextDismissedIds = resolved.dismissedIds
+                .toList()
+                .takeLast(MAX_HISTORY_IDS)
+                .toCollection(linkedSetOf())
+            val nextCompletedIds = resolved.completedIds
+                .toList()
+                .takeLast(MAX_HISTORY_IDS)
+                .toCollection(linkedSetOf())
+            val removedIds = prior.actions.mapTo(linkedSetOf()) { it.id } -
+                nextActions.mapTo(hashSetOf()) { it.id }
+            val committed = writeStateLocked(
+                context = app,
+                actions = nextActions,
+                dismissedHistory = nextDismissedIds,
+                completedHistory = nextCompletedIds,
+                synchronous = true,
+            )
+            if (!committed) {
+                hiddenActionIds.addAll(removedIds)
+                _processingIds.value = _processingIds.value - removedIds
+                publishLocked()
+                scheduleExpiryLocked()
+                return@synchronized false
+            }
+            storedActions = nextActions.toMutableList()
+            dismissedIds = nextDismissedIds
+            completedIds = nextCompletedIds
+            hiddenActionIds.removeAll(removedIds)
+            _processingIds.value = resolved.processingIds.intersect(
+                nextActions.mapTo(hashSetOf()) { it.id },
+            )
+            publishLocked()
+            scheduleExpiryLocked()
+            true
+    }
+
+    fun ownsPlannedWorkoutDecision(
+        context: Context,
+        fingerprint: String,
+        fingerprintsMatch: (String, String) -> Boolean,
+    ): Boolean =
+        synchronized(lock) {
+            val app = context.applicationContext
+            ensureLoadedLocked(app)
+            ContextualPlannedWorkoutDecisionPolicy.owns(
+                state = ContextualActionIdentityState(
+                    actions = storedActions,
+                    processingIds = _processingIds.value,
+                    dismissedIds = dismissedIds,
+                    completedIds = completedIds,
+                ),
+                fingerprint = fingerprint,
+                nowMillis = System.currentTimeMillis(),
+                fingerprintsMatch = fingerprintsMatch,
+            )
+        }
 
     fun migrateRecoveryAction(
         context: Context,
@@ -558,6 +694,7 @@ internal object ContextualActionCenter {
         amountMl: Int? = null,
         route: NoopNotificationRoute? = null,
         source: ContextualActionSource? = null,
+        journalDay: String? = null,
     ) {
         synchronized(lock) {
             val app = context.applicationContext
@@ -580,6 +717,7 @@ internal object ContextualActionCenter {
                     amountMl = amountMl,
                     route = route,
                     source = source,
+                    journalDay = journalDay,
                 )
                 if (
                     writeStateLocked(
@@ -621,6 +759,7 @@ internal object ContextualActionCenter {
                 amountMl = amountMl,
                 route = route,
                 source = source,
+                journalDay = NotificationRouteBridge.canonicalJournalDay(journalDay),
             )
             persistLocked(app)
         }
@@ -680,12 +819,14 @@ internal object ContextualActionCenter {
     private fun writeStateLocked(
         context: Context,
         actions: List<ContextualAction>,
+        dismissedHistory: Set<String> = dismissedIds,
+        completedHistory: Set<String> = completedIds,
         synchronous: Boolean,
     ): Boolean {
         val root = JSONObject()
             .put("actions", JSONArray().apply { actions.forEach { put(encode(it)) } })
-            .put("dismissed", JSONArray(dismissedIds.toList()))
-            .put("completed", JSONArray(completedIds.toList()))
+            .put("dismissed", JSONArray(dismissedHistory.toList()))
+            .put("completed", JSONArray(completedHistory.toList()))
         return ContextualActionStateStore.write(
             prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE),
             key = STATE_KEY,
@@ -726,6 +867,7 @@ internal object ContextualActionCenter {
         .apply { action.route?.let { put("route", it.navRoute) } }
         .apply { action.source?.let { put("source", it.name) } }
         .apply { action.amountMl?.let { put("amountMl", it) } }
+        .apply { action.journalDay?.let { put("journalDay", it) } }
 
     private fun decodeActions(array: JSONArray?): List<ContextualAction> = buildList {
         if (array == null) return@buildList
@@ -751,6 +893,9 @@ internal object ContextualActionCenter {
                     source = runCatching {
                         ContextualActionSource.valueOf(item.optString("source"))
                     }.getOrNull(),
+                    journalDay = NotificationRouteBridge.canonicalJournalDay(
+                        item.optString("journalDay").takeIf { item.has("journalDay") },
+                    ),
                 ),
             )
         }

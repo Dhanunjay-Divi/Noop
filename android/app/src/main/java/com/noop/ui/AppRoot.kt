@@ -101,6 +101,8 @@ import com.noop.BuildConfig
 import com.noop.R
 import com.noop.analytics.FusionSource
 import com.noop.analytics.HydrationStore
+import com.noop.notif.AdaptiveDayNotifier
+import com.noop.notif.AdaptivePlannedWorkoutDecision
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -412,6 +414,9 @@ fun AppRoot(
             ContextualActionKind.JOURNAL -> {
                 ContextualActionCenter.complete(context, action)
                 expandedContextualActionId = null
+                NotificationRouteBridge.journalDayOffset(action.journalDay)?.let {
+                    viewModel.requestJournalDay(it)
+                }
                 openTopLevel(Destination.Insights.route)
             }
             ContextualActionKind.WIND_DOWN -> {
@@ -420,14 +425,45 @@ fun AppRoot(
                 openTopLevel(Destination.Sleep.route)
             }
             ContextualActionKind.RECOVERY -> {
-                ContextualActionCenter.complete(context, action)
+                if (action.isPlannedWorkoutDecision()) {
+                    val fingerprint = action.fingerprint() ?: return
+                    contextualActionScope.launch {
+                        if (!AdaptiveDayNotifier.acknowledgePlannedWorkoutDecision(
+                            context,
+                            fingerprint,
+                            AdaptivePlannedWorkoutDecision.REVIEW_OPTIONS,
+                        )) {
+                            return@launch
+                        }
+                        expandedContextualActionId = null
+                        openTopLevel(action.resolvedRecoveryRoute().navRoute)
+                    }
+                    return
+                } else {
+                    ContextualActionCenter.complete(context, action)
+                }
                 expandedContextualActionId = null
                 openTopLevel(action.resolvedRecoveryRoute().navRoute)
             }
         }
     }
 
+    fun keepCurrentWorkoutPlan(action: ContextualAction) {
+        if (!action.isPlannedWorkoutDecision()) return
+        val fingerprint = action.fingerprint() ?: return
+        contextualActionScope.launch {
+            if (AdaptiveDayNotifier.acknowledgePlannedWorkoutDecision(
+                context,
+                fingerprint,
+                AdaptivePlannedWorkoutDecision.KEEP_CURRENT,
+            )) {
+                expandedContextualActionId = null
+            }
+        }
+    }
+
     LaunchedEffect(context, initialRoute) {
+        AdaptiveDayNotifier.recoverResolvedPlannedWorkoutDecision(context)
         ContextualActionCenter.refresh(context)
         if (BuildConfig.DEBUG && initialRoute == "context-actions") {
             ContextualActionCenter.applyDemoActions(context)
@@ -448,8 +484,11 @@ fun AppRoot(
     // routes can enter the bridge, and consumePending removes each request before navigation.
     LaunchedEffect(nav, context) {
         NotificationRouteBridge.routeRequests.collect {
-            NotificationRouteBridge.consumePending(context)?.let { route ->
-                openTopLevel(route.navRoute)
+            NotificationRouteBridge.consumePendingRequest(context)?.let { request ->
+                NotificationRouteBridge.journalDayOffset(request)?.let {
+                    viewModel.requestJournalDay(it)
+                }
+                openTopLevel(request.route.navRoute)
             }
         }
     }
@@ -668,6 +707,7 @@ fun AppRoot(
                 expandedId = expandedContextualActionId,
                 onExpandedChange = { expandedContextualActionId = it },
                 onPrimary = ::performContextualAction,
+                onSecondary = ::keepCurrentWorkoutPlan,
                 onDismiss = { ContextualActionCenter.dismiss(context, it) },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)

@@ -1154,7 +1154,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 777)
+        XCTAssertEqual(source.count, 788)
         XCTAssertEqual(source["appwide.daily_signal.status.aligned"]?["en"], "Steady")
         XCTAssertEqual(source["appwide.daily_signal.status.recheck"]?["en"], "Watch")
         XCTAssertEqual(

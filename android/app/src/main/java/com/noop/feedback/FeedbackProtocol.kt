@@ -188,6 +188,9 @@ internal sealed class FeedbackProtocolException(
         FeedbackProtocolException("Feedback identity is unavailable.", cause)
     class ReservationContinuityPending :
         FeedbackProtocolException("Feedback identity reservation is waiting.")
+    class ReservationAdmissionDeferred(
+        val retryAfterMillis: Long? = null,
+    ) : FeedbackProtocolException("New feedback reservations are temporarily paused.")
     class ReservationPending :
         FeedbackProtocolException("Feedback reservation state is still pending.")
     class ReservationGone :
@@ -205,6 +208,30 @@ internal interface FeedbackAuthorizationProvider {
         forceRefresh: Boolean,
         bind: suspend (FeedbackAuthorization) -> T,
     ): T = bind(authorization(forceRefresh))
+}
+
+internal object FeedbackReservationAdmissionPolicy {
+    const val HEADER = "X-NOOP-Feedback-Deferral"
+    const val RETRY_AFTER_HEADER = "Retry-After"
+    const val RESERVATION_DRAIN = "reservation-drain"
+    const val MAXIMUM_RETRY_AFTER_MILLIS = 6L * 60L * 60L * 1_000L
+
+    fun preservesAttemptBudget(statusCode: Int, deferral: String?): Boolean =
+        statusCode == 503 &&
+            deferral.equals(RESERVATION_DRAIN, ignoreCase = true)
+
+    fun retryAfterMillis(raw: String?): Long? {
+        val seconds = raw?.trim()?.toLongOrNull()?.takeIf { it > 0L } ?: return null
+        val millis = if (seconds > Long.MAX_VALUE / 1_000L) {
+            Long.MAX_VALUE
+        } else {
+            seconds * 1_000L
+        }
+        return millis.coerceAtMost(MAXIMUM_RETRY_AFTER_MILLIS)
+    }
+
+    fun boundedRetryAfterMillis(value: Long?): Long? =
+        value?.takeIf { it > 0L }?.coerceAtMost(MAXIMUM_RETRY_AFTER_MILLIS)
 }
 
 internal object FeedbackIdentityCreationPolicy {
@@ -917,6 +944,22 @@ internal class FeedbackApiClient(
     private suspend fun executeJson(request: Request): JSONObject {
         execute(request).use { response ->
             if (!response.isSuccessful) {
+                if (FeedbackReservationAdmissionPolicy.preservesAttemptBudget(
+                        statusCode = response.code,
+                        deferral = response.header(
+                            FeedbackReservationAdmissionPolicy.HEADER,
+                        ),
+                    )
+                ) {
+                    throw FeedbackProtocolException.ReservationAdmissionDeferred(
+                        retryAfterMillis =
+                            FeedbackReservationAdmissionPolicy.retryAfterMillis(
+                                response.header(
+                                    FeedbackReservationAdmissionPolicy.RETRY_AFTER_HEADER,
+                                ),
+                            ),
+                    )
+                }
                 throw FeedbackProtocolException.Http(response.code)
             }
             val body = response.readBoundedBody()

@@ -234,6 +234,32 @@ enum FeedbackRetryPolicy {
     }
 }
 
+enum FeedbackReservationAdmissionPolicy {
+    static let deferralHeader = "X-NOOP-Feedback-Deferral"
+    static let retryAfterHeader = "Retry-After"
+    static let reservationDrain = "reservation-drain"
+    static let maximumRetryDelay: TimeInterval = 6 * 60 * 60
+
+    static func preservesAttemptBudget(
+        statusCode: Int,
+        deferral: String?
+    ) -> Bool {
+        statusCode == 503
+            && deferral?.lowercased() == reservationDrain
+    }
+
+    static func retryDelay(_ raw: String?) -> TimeInterval? {
+        guard let raw,
+              let seconds = Int(
+                  raw.trimmingCharacters(in: .whitespacesAndNewlines)
+              ),
+              seconds > 0 else {
+            return nil
+        }
+        return min(TimeInterval(seconds), maximumRetryDelay)
+    }
+}
+
 struct FeedbackBackgroundCompletionGate {
     private var completionHandler: (() -> Void)?
     private var eventsFinishedBeforeHandler = false
@@ -1225,6 +1251,7 @@ actor FeedbackOutbox {
         lane: FeedbackReservationAttemptLane,
         allowBoundIdentity: Bool = false,
         failureKind: FeedbackFailureKind = .identity,
+        retryAfter: TimeInterval? = nil,
         now: Date = Date()
     ) throws -> FeedbackOutboxRecord {
         try ensureRoot()
@@ -1254,10 +1281,18 @@ actor FeedbackOutbox {
                 throw FeedbackOutboxError.invalidRecord
             }
         }
-        let delay = FeedbackReservationContinuityPolicy.retryDelay(
-            in: try loadRecords(),
-            now: now
-        )
+        let delay: TimeInterval
+        if let retryAfter {
+            delay = min(
+                max(1, retryAfter),
+                FeedbackReservationAdmissionPolicy.maximumRetryDelay
+            )
+        } else {
+            delay = FeedbackReservationContinuityPolicy.retryDelay(
+                in: try loadRecords(),
+                now: now
+            )
+        }
         return try update(id: id) { record in
             switch lane {
             case .delivery:

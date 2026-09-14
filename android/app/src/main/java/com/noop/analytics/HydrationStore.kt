@@ -42,6 +42,7 @@ object HydrationStore {
         val day: String,
         val amountML: Int,
         val loggedAt: Long,
+        val correctionRequired: Boolean = false,
     )
 
     data class ProvenanceStrings(
@@ -367,7 +368,13 @@ object HydrationStore {
         }
 
     private fun HydrationEntryRow.asEntry(): Entry =
-        Entry(id = id, day = day, amountML = amountML, loggedAt = loggedAt)
+        Entry(
+            id = id,
+            day = day,
+            amountML = amountML,
+            loggedAt = loggedAt,
+            correctionRequired = HydrationEntryContract.isLegacyOversized(this),
+        )
 
     /** Source-aware confirmed intake for the local day containing [ts], or null when neither source
      * has a record. NOOP and Health Connect remain visible separately for honest UI/corrections. */

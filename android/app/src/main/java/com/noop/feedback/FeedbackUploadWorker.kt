@@ -103,6 +103,7 @@ internal data class FeedbackRetryDecision(
     val retryAutomatically: Boolean,
     val preservesAttemptBudget: Boolean = false,
     val allowsBoundIdentityContinuity: Boolean = false,
+    val retryAfterMillis: Long? = null,
 )
 
 internal object FeedbackRetryPolicy {
@@ -118,6 +119,14 @@ internal object FeedbackRetryPolicy {
                 category = FeedbackFailureCategory.IDENTITY,
                 retryAutomatically = true,
                 preservesAttemptBudget = true,
+            )
+        is FeedbackProtocolException.ReservationAdmissionDeferred ->
+            FeedbackRetryDecision(
+                category = FeedbackFailureCategory.SERVER_RETRYABLE,
+                retryAutomatically = true,
+                preservesAttemptBudget = true,
+                allowsBoundIdentityContinuity = true,
+                retryAfterMillis = error.retryAfterMillis,
             )
         is FeedbackProtocolException.ReservationPending ->
             FeedbackRetryDecision(
@@ -1530,6 +1539,7 @@ class FeedbackUploadWorker(
                     failure = decision.category,
                     allowBoundIdentity =
                         decision.allowsBoundIdentityContinuity,
+                    retryAfterMillis = decision.retryAfterMillis,
                     expectedWorkerGeneration = workerGeneration,
                 )
                 val waitStage = if (decision.allowsBoundIdentityContinuity) {

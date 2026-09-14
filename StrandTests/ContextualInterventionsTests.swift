@@ -164,6 +164,105 @@ final class ContextualInterventionsTests: XCTestCase {
         )
     }
 
+    func testPlannedWorkoutDecisionRequiresCurrentOwnershipConsentAndFutureStart() {
+        let now = date(2026, 9, 14, 12)
+        let future = "planned-workout|2026-09-14|\(Int(now.timeIntervalSince1970) + 3_600)"
+        XCTAssertTrue(
+            ContextualInterventionCenter.plannedWorkoutDecisionIsActionable(
+                fingerprint: future,
+                ownsCurrentAction: true,
+                ownsCurrentDelivery: false,
+                alreadyResolved: false,
+                guidanceEnabled: true,
+                plannedWorkoutCalendarEnabled: true,
+                calendarPermissionGranted: true,
+                calendarCandidateMatches: true,
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            ContextualInterventionCenter.plannedWorkoutDecisionIsActionable(
+                fingerprint: future,
+                ownsCurrentAction: false,
+                ownsCurrentDelivery: false,
+                alreadyResolved: false,
+                guidanceEnabled: true,
+                plannedWorkoutCalendarEnabled: true,
+                calendarPermissionGranted: true,
+                calendarCandidateMatches: true,
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            ContextualInterventionCenter.plannedWorkoutDecisionIsActionable(
+                fingerprint: future,
+                ownsCurrentAction: true,
+                ownsCurrentDelivery: true,
+                alreadyResolved: true,
+                guidanceEnabled: true,
+                plannedWorkoutCalendarEnabled: true,
+                calendarPermissionGranted: true,
+                calendarCandidateMatches: true,
+                now: now
+            )
+        )
+        let expired = "planned-workout|2026-09-14|\(Int(now.timeIntervalSince1970) - 1)"
+        XCTAssertFalse(
+            ContextualInterventionCenter.plannedWorkoutDecisionIsActionable(
+                fingerprint: expired,
+                ownsCurrentAction: true,
+                ownsCurrentDelivery: true,
+                alreadyResolved: false,
+                guidanceEnabled: true,
+                plannedWorkoutCalendarEnabled: true,
+                calendarPermissionGranted: true,
+                calendarCandidateMatches: true,
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            ContextualInterventionCenter.plannedWorkoutDecisionIsActionable(
+                fingerprint: future,
+                ownsCurrentAction: true,
+                ownsCurrentDelivery: true,
+                alreadyResolved: false,
+                guidanceEnabled: true,
+                plannedWorkoutCalendarEnabled: true,
+                calendarPermissionGranted: true,
+                calendarCandidateMatches: false,
+                now: now
+            )
+        )
+    }
+
+    func testPlannedWorkoutDecisionMatchesOnlyTheCurrentCalendarWindow() {
+        let snapshot = PlannedWorkoutCalendarSnapshot(
+            day: "2026-09-14",
+            startSec: 1_789_420_800,
+            endSec: 1_789_424_400,
+            observedAtSec: 1_789_400_000,
+            revision: 1
+        )
+        XCTAssertTrue(
+            ContextualInterventionCenter.plannedWorkoutCalendarCandidateMatches(
+                fingerprint: "planned-workout|2026-09-14|1789420800",
+                snapshot: snapshot
+            )
+        )
+        XCTAssertFalse(
+            ContextualInterventionCenter.plannedWorkoutCalendarCandidateMatches(
+                fingerprint: "planned-workout|2026-09-14|1789424400",
+                snapshot: snapshot
+            )
+        )
+        XCTAssertFalse(
+            ContextualInterventionCenter.plannedWorkoutCalendarCandidateMatches(
+                fingerprint: "planned-workout|2026-09-14|1789420800",
+                snapshot: nil
+            )
+        )
+    }
+
     func testDeliveryStateRoundTripsAcrossRestart() {
         let suiteName = "contextual-interventions.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

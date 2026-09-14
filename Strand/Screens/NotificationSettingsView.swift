@@ -237,8 +237,8 @@ struct NotificationSettingsView: View {
                               isOn: $store.onlyWhenWorn)
                 rowDivider
                 FormToggleRow(label: String(localized: "Quiet hours"),
-                              help: String(localized: "Mute wrist alerts overnight."),
-                              isOn: $store.quietHoursEnabled)
+                              help: String(localized: "appwide.notifications.quiet_hours.help"),
+                              isOn: quietHoursEnabledBinding)
                 if store.quietHoursEnabled {
                     rowDivider
                     HStack(spacing: 12) {
@@ -267,13 +267,33 @@ struct NotificationSettingsView: View {
 
     // MARK: - Quiet-hours bindings
 
+    private var quietHoursEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { store.quietHoursEnabled },
+            set: {
+                store.quietHoursEnabled = $0
+                DailyReviewNotifications.quietHoursDidChange()
+            }
+        )
+    }
+
     private var quietStartBinding: Binding<Date> {
-        Binding(get: { Self.date(fromMinutes: store.quietStartMinutes) },
-                set: { store.quietStartMinutes = Self.minutes(from: $0) })
+        Binding(
+            get: { Self.date(fromMinutes: store.quietStartMinutes) },
+            set: {
+                store.quietStartMinutes = Self.minutes(from: $0)
+                DailyReviewNotifications.quietHoursDidChange()
+            }
+        )
     }
     private var quietEndBinding: Binding<Date> {
-        Binding(get: { Self.date(fromMinutes: store.quietEndMinutes) },
-                set: { store.quietEndMinutes = Self.minutes(from: $0) })
+        Binding(
+            get: { Self.date(fromMinutes: store.quietEndMinutes) },
+            set: {
+                store.quietEndMinutes = Self.minutes(from: $0)
+                DailyReviewNotifications.quietHoursDidChange()
+            }
+        )
     }
     private static func date(fromMinutes m: Int) -> Date {
         Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()

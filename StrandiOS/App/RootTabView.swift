@@ -294,6 +294,7 @@ struct RootTabView: View {
                     processingIDs: contextualActions.processingIDs,
                     expandedID: $expandedContextualActionID,
                     onPrimary: performContextualAction,
+                    onSecondary: keepCurrentWorkoutPlan,
                     onDismiss: contextualActions.dismiss
                 )
                 .padding(.trailing, 12)
@@ -518,15 +519,46 @@ struct RootTabView: View {
         case .journal:
             contextualActions.complete(action)
             expandedContextualActionID = nil
+            router.pendingJournalDayOffset = NotificationRouteBridge.journalDayOffset(
+                for: PendingNotificationRouteRequest(
+                    route: .journal,
+                    journalDay: action.journalDay
+                )
+            )
             routeToMore(.insights)
         case .windDown:
             contextualActions.complete(action)
             expandedContextualActionID = nil
             openNotificationRoute(.sleep)
         case .recovery:
-            contextualActions.complete(action)
+            if action.isPlannedWorkoutDecision,
+               let fingerprint = action.fingerprint {
+                Task { @MainActor in
+                    guard await ContextualInterventionCenter.acknowledgePlannedWorkoutDecision(
+                        fingerprint: fingerprint,
+                        decision: .reviewLighterOptions
+                    ) else { return }
+                    expandedContextualActionID = nil
+                    openNotificationRoute(action.resolvedRecoveryRoute)
+                }
+                return
+            } else {
+                contextualActions.complete(action)
+            }
             expandedContextualActionID = nil
             openNotificationRoute(action.resolvedRecoveryRoute)
+        }
+    }
+
+    private func keepCurrentWorkoutPlan(_ action: ContextualAction) {
+        guard action.isPlannedWorkoutDecision,
+              let fingerprint = action.fingerprint else { return }
+        Task { @MainActor in
+            guard await ContextualInterventionCenter.acknowledgePlannedWorkoutDecision(
+                fingerprint: fingerprint,
+                decision: .keepCurrentPlan
+            ) else { return }
+            expandedContextualActionID = nil
         }
     }
 
@@ -691,8 +723,14 @@ struct RootTabView: View {
     /// morning lands on the Sleep root and evening on the Today root, even if that tab was last left
     /// on a pushed detail page.
     private func consumePendingNotificationRoute() {
-        guard let route = NotificationRouteBridge.consumePending() else { return }
-        openNotificationRoute(route)
+        guard let request = NotificationRouteBridge.consumePendingRequest() else {
+            return
+        }
+        if request.route == .journal {
+            router.pendingJournalDayOffset =
+                NotificationRouteBridge.journalDayOffset(for: request)
+        }
+        openNotificationRoute(request.route)
     }
 
     private func openNotificationRoute(_ route: NoopNotificationRoute) {
@@ -2107,6 +2145,7 @@ private struct ContextualActionRail: View {
     let processingIDs: Set<String>
     @Binding var expandedID: String?
     let onPrimary: (ContextualAction) -> Void
+    let onSecondary: (ContextualAction) -> Void
     let onDismiss: (ContextualAction) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -2230,13 +2269,41 @@ private struct ContextualActionRail: View {
                     .lineLimit(2)
                     .minimumScaleFactor(0.82)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, minHeight: 42)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .background(tint(action), in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
             .disabled(processingIDs.contains(action.id))
             .opacity(processingIDs.contains(action.id) ? 0.58 : 1)
             .accessibilityIdentifier("noop.context-action.primary.\(action.kind.rawValue)")
+
+            if action.isPlannedWorkoutDecision {
+                Button {
+                    onSecondary(action)
+                } label: {
+                    Text(
+                        "appwide.adaptive_day_guidance.planned_workout.keep_plan"
+                    )
+                    .font(StrandFont.subhead.weight(.semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(
+                                StrandPalette.hairlineStrong,
+                                lineWidth: 1
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(processingIDs.contains(action.id))
+                .accessibilityIdentifier(
+                    "noop.context-action.keep-current-plan"
+                )
+            }
         }
         .padding(14)
         .frame(width: 274, alignment: .leading)
@@ -2299,8 +2366,11 @@ private struct ContextualActionRail: View {
         case .journal: return String(localized: "Open journal")
         case .windDown: return String(localized: "Open Sleep")
         case .recovery:
-            return action.route == .workouts
-                ? String(localized: "Workouts")
+            return action.isPlannedWorkoutDecision
+                ? String(
+                    localized:
+                        "appwide.adaptive_day_guidance.planned_workout.review_options"
+                )
                 : String(localized: "Open Sleep")
         }
     }

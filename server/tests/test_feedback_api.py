@@ -1202,6 +1202,7 @@ def test_feedback_drain_mode_rejects_new_reservations_but_keeps_control() -> Non
 
     assert rejected.status_code == 503
     assert rejected.headers["Retry-After"] == "300"
+    assert rejected.headers["X-NOOP-Feedback-Deferral"] == "reservation-drain"
     assert current.status_code == 200
     assert current.json()["status"] == "reserved"
     assert recovered.status_code == 200

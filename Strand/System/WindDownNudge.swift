@@ -865,7 +865,6 @@ enum WindDownNudge {
             )
             return nil
         case .denied:
-            persistEnabled(false)
             cancelAllScheduledReminders(using: client)
             LocalNotificationLifecycle.suppressed(
                 identifier: requestId,
@@ -888,7 +887,6 @@ enum WindDownNudge {
         if await client.authorization() != .authorized {
             guard isSchedulingOwner(ownerGeneration),
                   isLatestSchedulingIntent(ownerGeneration) else { return nil }
-            persistEnabled(false)
             cancelAllScheduledReminders(using: client)
             LocalNotificationLifecycle.suppressed(
                 identifier: requestId,

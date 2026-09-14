@@ -1405,7 +1405,7 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun addHydrationEntry(row: HydrationEntryRow): HydrationEntryMutationResult {
         val clean = HydrationEntryContract.validated(row)
         val existing = hydrationEntries(clean.deviceId, clean.day)
-        HydrationEntryContract.requireEditableProjection(
+        val existingTotal = HydrationEntryContract.requireEditableProjection(
             hydrationProjectionValue(
                 clean.deviceId,
                 clean.day,
@@ -1413,6 +1413,9 @@ interface WhoopDao : DeviceRegistryDao {
             ),
             existing,
         )
+        if (existingTotal > HydrationEntryContract.MAX_DAY_ML) {
+            throw HydrationEntryIntegrityException()
+        }
         insertHydrationEntryRaw(clean)
         return reprojectHydrationDay(clean.deviceId, clean.day, changed = true)
     }
@@ -1424,6 +1427,11 @@ interface WhoopDao : DeviceRegistryDao {
         val current = hydrationEntry(clean.id)
             ?: return HydrationEntryMutationResult(changed = false, totalML = null)
         if (current.deviceId != clean.deviceId || current.day != clean.day) {
+            throw HydrationEntryIntegrityException()
+        }
+        if (HydrationEntryContract.isLegacyOversized(current) &&
+            clean.amountML > HydrationEntryContract.MAX_DAY_ML
+        ) {
             throw HydrationEntryIntegrityException()
         }
         val existing = hydrationEntries(clean.deviceId, clean.day)
@@ -1517,7 +1525,9 @@ interface WhoopDao : DeviceRegistryDao {
             ),
             existing,
         )
-        HydrationEntryContract.total(clean)
+        if (HydrationEntryContract.total(clean) > HydrationEntryContract.MAX_DAY_ML) {
+            throw HydrationEntryIntegrityException()
+        }
         deleteHydrationEntriesForDayRaw(deviceId, canonicalDay)
         for (row in clean) insertHydrationEntryRaw(row)
         return reprojectHydrationDay(deviceId, canonicalDay, changed = existing != clean)

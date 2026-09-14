@@ -440,17 +440,20 @@ private struct FeedbackTransportFailure: Error {
     let retryable: Bool
     let statusCode: Int?
     let scheduling: FeedbackFailureScheduling
+    let retryAfter: TimeInterval?
 
     init(
         kind: FeedbackFailureKind,
         retryable: Bool,
         statusCode: Int? = nil,
-        scheduling: FeedbackFailureScheduling = .normal
+        scheduling: FeedbackFailureScheduling = .normal,
+        retryAfter: TimeInterval? = nil
     ) {
         self.kind = kind
         self.retryable = retryable
         self.statusCode = statusCode
         self.scheduling = scheduling
+        self.retryAfter = retryAfter
     }
 }
 
@@ -1318,7 +1321,8 @@ actor FeedbackUploadCoordinator {
                         kind: .cancellationUnavailable,
                         retryable: failure.retryable,
                         statusCode: failure.statusCode,
-                        scheduling: failure.scheduling
+                        scheduling: failure.scheduling,
+                        retryAfter: failure.retryAfter
                     )
                 )
             } else {
@@ -1362,7 +1366,8 @@ actor FeedbackUploadCoordinator {
                 kind: failure.kind,
                 retryable: true,
                 statusCode: failure.statusCode,
-                scheduling: .reservationContinuityWait
+                scheduling: .reservationContinuityWait,
+                retryAfter: failure.retryAfter
             )
         }
         guard !responseData.isEmpty else { return nil }
@@ -1981,7 +1986,8 @@ actor FeedbackUploadCoordinator {
                         id: id,
                         lane: .delivery,
                         allowBoundIdentity: isReservationWait,
-                        failureKind: failure.kind
+                        failureKind: failure.kind,
+                        retryAfter: failure.retryAfter
                     )
                 AppDiagnosticsRecorder.shared.record(
                     isReservationWait
@@ -2112,7 +2118,8 @@ actor FeedbackUploadCoordinator {
                         id: id,
                         lane: .cancellation,
                         allowBoundIdentity: isReservationWait,
-                        failureKind: failure.kind
+                        failureKind: failure.kind,
+                        retryAfter: failure.retryAfter
                     )
                 AppDiagnosticsRecorder.shared.record(
                     isReservationWait
@@ -2430,6 +2437,26 @@ actor FeedbackUploadCoordinator {
                 refreshedAuthorization: true
             )
         }
+        if FeedbackReservationAdmissionPolicy.preservesAttemptBudget(
+            statusCode: http.statusCode,
+            deferral: http.value(
+                forHTTPHeaderField:
+                    FeedbackReservationAdmissionPolicy.deferralHeader
+            )
+        ) {
+            throw FeedbackTransportFailure(
+                kind: .reservationUnavailable,
+                retryable: true,
+                statusCode: http.statusCode,
+                scheduling: .reservationContinuityWait,
+                retryAfter: FeedbackReservationAdmissionPolicy.retryDelay(
+                    http.value(
+                        forHTTPHeaderField:
+                            FeedbackReservationAdmissionPolicy.retryAfterHeader
+                    )
+                )
+            )
+        }
         guard acceptedStatusCodes.contains(http.statusCode) else {
             throw FeedbackTransportFailure(
                 kind: (400...499).contains(http.statusCode)
@@ -2476,7 +2503,8 @@ actor FeedbackUploadCoordinator {
                     kind: rejected,
                     retryable: failure.retryable,
                     statusCode: failure.statusCode,
-                    scheduling: failure.scheduling
+                    scheduling: failure.scheduling,
+                    retryAfter: failure.retryAfter
                 )
             case .reservationUnavailable, .uploadUnavailable,
                     .completionUnavailable:
@@ -2484,7 +2512,8 @@ actor FeedbackUploadCoordinator {
                     kind: unavailable,
                     retryable: failure.retryable,
                     statusCode: failure.statusCode,
-                    scheduling: failure.scheduling
+                    scheduling: failure.scheduling,
+                    retryAfter: failure.retryAfter
                 )
             default:
                 return failure

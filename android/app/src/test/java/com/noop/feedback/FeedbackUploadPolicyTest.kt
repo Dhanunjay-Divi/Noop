@@ -80,6 +80,16 @@ class FeedbackUploadPolicyTest {
         assertTrue(continuityWait.retryAutomatically)
         assertTrue(continuityWait.preservesAttemptBudget)
         assertFalse(continuityWait.allowsBoundIdentityContinuity)
+        val admissionWait = FeedbackRetryPolicy.classify(
+            FeedbackProtocolException.ReservationAdmissionDeferred(
+                retryAfterMillis = 300_000L,
+            ),
+        )
+        assertEquals(FeedbackFailureCategory.SERVER_RETRYABLE, admissionWait.category)
+        assertTrue(admissionWait.retryAutomatically)
+        assertTrue(admissionWait.preservesAttemptBudget)
+        assertTrue(admissionWait.allowsBoundIdentityContinuity)
+        assertEquals(300_000L, admissionWait.retryAfterMillis)
         val reservationWait = FeedbackRetryPolicy.classify(
             FeedbackProtocolException.ReservationPending(),
         )

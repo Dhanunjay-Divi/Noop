@@ -545,27 +545,17 @@ final class WindDownPerDayOverrideTests: XCTestCase {
         )
     }
 
-    func testAuthorizationRevocationDisablesCancelsAndPublishesState() async throws {
+    func testAuthorizationRevocationCancelsScheduleAndRetainsOptIn() async {
         UserDefaults.standard.set(true, forKey: enabledKey)
         let client = FakeWindDownNotificationClient(authorization: .denied)
-        let changed = expectation(description: "enabled state published")
-        let observer = NotificationCenter.default.addObserver(
-            forName: WindDownNudge.stateDidChange,
-            object: nil,
-            queue: nil
-        ) { _ in
-            changed.fulfill()
-        }
-        defer { NotificationCenter.default.removeObserver(observer) }
 
         let result = await WindDownNudge.reconcileScheduleIfAuthorized(
             client: client,
             retryPolicy: .init(maximumAttempts: 2, delayNanoseconds: 0)
         )
 
-        await fulfillment(of: [changed], timeout: 1)
         XCTAssertEqual(result, .failed(.authorizationRevoked))
-        XCTAssertFalse(WindDownNudge.isEnabled)
+        XCTAssertTrue(WindDownNudge.isEnabled)
         XCTAssertFalse(client.cancelledIdentifierBatches.isEmpty)
         XCTAssertEqual(client.addAttempts, 0)
     }

@@ -674,6 +674,35 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertLessThan(currentGate.lowerBound, cleanup.lowerBound)
     }
 
+    func testWorkoutDecisionForcesCalendarRevalidationBeforeAcceptance() throws {
+        let source = try source("Strand/System/ContextualInterventions.swift")
+        let start = try XCTUnwrap(
+            source.range(of: "static func acknowledgePlannedWorkoutDecision(")
+        )
+        let end = try XCTUnwrap(
+            source.range(
+                of: "private static func isAuthorized(",
+                range: start.upperBound..<source.endIndex
+            )
+        )
+        let decision = source[start.lowerBound..<end.lowerBound]
+        let refresh = try XCTUnwrap(
+            decision.range(of: "await PlannedWorkoutCalendarStore.shared.refreshOutcome(")
+        )
+        let force = try XCTUnwrap(
+            decision.range(of: "force: true", range: refresh.upperBound..<decision.endIndex)
+        )
+        let gate = try XCTUnwrap(
+            decision.range(
+                of: "calendarCandidateMatches: calendarCandidateMatches",
+                range: force.upperBound..<decision.endIndex
+            )
+        )
+
+        XCTAssertLessThan(refresh.lowerBound, force.lowerBound)
+        XCTAssertLessThan(force.lowerBound, gate.lowerBound)
+    }
+
     func testBoundaryScheduleStopsAfterNotificationSettingsWhenSuperseded() throws {
         let source = try source("Strand/System/ContextualInterventions.swift")
         let schedulerStart = try XCTUnwrap(

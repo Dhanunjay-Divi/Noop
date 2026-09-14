@@ -10,7 +10,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 52
+const val NOOP_DATABASE_SCHEMA_VERSION = 53
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -1386,6 +1386,37 @@ abstract class WhoopDatabase : RoomDatabase() {
               AND `value` > 0
               AND `value` <= ${HydrationEntryContract.MAX_DAY_ML}
               AND `value` = CAST(`value` AS INTEGER)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM `hydrationEntry`
+                  WHERE `hydrationEntry`.`deviceId` = `metricSeries`.`deviceId`
+                    AND `hydrationEntry`.`day` = `metricSeries`.`day`
+              )
+        """.trimIndent()
+
+        internal val HYDRATION_ENTRY_OVERSIZED_SELECT_SQL = """
+            SELECT
+                printf(
+                    '${HydrationEntryContract.LEGACY_OVERSIZED_ID_PREFIX}%012x',
+                    `rowid`
+                ),
+                `deviceId`,
+                `day`,
+                CAST(`value` AS INTEGER)
+            FROM `metricSeries`
+            WHERE `deviceId` = '${HydrationEntryContract.SOURCE_ID}'
+              AND `key` = '${HydrationEntryContract.METRIC_KEY}'
+              AND `day` = date(`day`, '+0 days')
+              AND typeof(`value`) IN ('integer', 'real')
+              AND `value` > ${HydrationEntryContract.MAX_DAY_ML}
+              AND `value` <= ${Int.MAX_VALUE}
+              AND `value` = CAST(`value` AS INTEGER)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM `hydrationEntry`
+                  WHERE `hydrationEntry`.`deviceId` = `metricSeries`.`deviceId`
+                    AND `hydrationEntry`.`day` = `metricSeries`.`day`
+              )
         """.trimIndent()
 
         internal const val HYDRATION_ENTRY_LEGACY_INSERT_SQL =
@@ -1410,8 +1441,9 @@ abstract class WhoopDatabase : RoomDatabase() {
         private fun migrateLegacyHydrationEntries(
             db: SupportSQLiteDatabase,
             zoneId: ZoneId,
+            selectSql: String = HYDRATION_ENTRY_LEGACY_SELECT_SQL,
         ) {
-            db.query(HYDRATION_ENTRY_LEGACY_SELECT_SQL).use { cursor ->
+            db.query(selectSql).use { cursor ->
                 while (cursor.moveToNext()) {
                     val day = cursor.getString(2)
                     val loggedAt = legacyHydrationLoggedAt(day, zoneId) ?: continue
@@ -1529,6 +1561,22 @@ abstract class WhoopDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 dropManagedDocumentTriggers(db)
                 installManagedDocumentTriggers(db)
+            }
+        }
+
+        /**
+         * v52 -> v53: materialize previously accepted oversized local hydration
+         * scalars as one marked correction-only row. The value is preserved
+         * exactly; users may reduce, replace, or clear it, while normal writes
+         * remain capped at 10 L.
+         */
+        internal val MIGRATION_52_53 = object : Migration(52, 53) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                migrateLegacyHydrationEntries(
+                    db,
+                    ZoneId.systemDefault(),
+                    HYDRATION_ENTRY_OVERSIZED_SELECT_SQL,
+                )
             }
         }
 
@@ -2078,6 +2126,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44,
                     MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48,
                     MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52,
+                    MIGRATION_52_53,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

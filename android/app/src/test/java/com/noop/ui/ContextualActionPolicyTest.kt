@@ -108,6 +108,58 @@ class ContextualActionPolicyTest {
         assertFalse(migrated.actions.any { it.id == legacyId })
     }
 
+    @Test fun equivalentWorkoutActionCanBeOwnedAndResolvedAcrossFingerprintVersions() {
+        val legacyFingerprint =
+            "planned-workout|2026-09-14|1789412400|SLEEP_DEFICIT"
+        val currentFingerprint = "planned-workout|2026-09-14|1789412400"
+        val legacyId = "recovery:$legacyFingerprint"
+        val currentId = "recovery:$currentFingerprint"
+        val matches: (String, String) -> Boolean = { first, second ->
+            first.split('|').take(3) == second.split('|').take(3)
+        }
+        val state = ContextualActionIdentityState(
+            actions = listOf(
+                action(
+                    kind = ContextualActionKind.RECOVERY,
+                    id = legacyId,
+                    expiresAt = 10_000L,
+                    route = NoopNotificationRoute.WORKOUTS,
+                ),
+            ),
+            processingIds = setOf(legacyId),
+            dismissedIds = setOf(legacyId),
+            completedIds = emptySet(),
+        )
+
+        assertTrue(
+            ContextualPlannedWorkoutDecisionPolicy.owns(
+                state = state,
+                fingerprint = currentFingerprint,
+                nowMillis = 5_000L,
+                fingerprintsMatch = matches,
+            ),
+        )
+
+        val resolved = ContextualPlannedWorkoutDecisionPolicy.resolved(
+            state = state,
+            fingerprint = currentFingerprint,
+            fingerprintsMatch = matches,
+        )
+
+        assertTrue(resolved.actions.isEmpty())
+        assertTrue(resolved.processingIds.isEmpty())
+        assertTrue(resolved.dismissedIds.isEmpty())
+        assertEquals(setOf(legacyId, currentId), resolved.completedIds)
+        assertFalse(
+            ContextualPlannedWorkoutDecisionPolicy.owns(
+                state = resolved.copy(actions = state.actions),
+                fingerprint = currentFingerprint,
+                nowMillis = 5_000L,
+                fingerprintsMatch = matches,
+            ),
+        )
+    }
+
     @Test fun adaptiveCleanupPreservesUnrelatedSleepRecoveryActions() {
         val retained = ContextualActionCleanupPolicy.removeRecoveryActions(
             actions = listOf(
@@ -222,6 +274,7 @@ class ContextualActionPolicyTest {
             amountMl = 250,
             route = NoopNotificationRoute.WORKOUTS,
             source = ContextualActionSource.ADAPTIVE_DAY,
+            journalDay = "2026-09-13",
         )
 
         val refreshed = ContextualActionRefreshPolicy.refreshed(
@@ -233,6 +286,7 @@ class ContextualActionPolicyTest {
             amountMl = null,
             route = null,
             source = null,
+            journalDay = null,
         )
 
         assertEquals(original.id, refreshed.id)
@@ -244,5 +298,6 @@ class ContextualActionPolicyTest {
         assertEquals(250, refreshed.amountMl)
         assertEquals(NoopNotificationRoute.WORKOUTS, refreshed.route)
         assertEquals(ContextualActionSource.ADAPTIVE_DAY, refreshed.source)
+        assertEquals("2026-09-13", refreshed.journalDay)
     }
 }

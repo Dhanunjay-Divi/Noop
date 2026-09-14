@@ -16,13 +16,17 @@ class HydrationEntryMigrationTest {
     fun migrationIsAdditiveLocalOnlyAndFailClosedForLegacyEdges() {
         assertEquals(48, WhoopDatabase.MIGRATION_48_49.startVersion)
         assertEquals(49, WhoopDatabase.MIGRATION_48_49.endVersion)
-        assertEquals(52, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(52, WhoopDatabase.MIGRATION_52_53.startVersion)
+        assertEquals(53, WhoopDatabase.MIGRATION_52_53.endVersion)
+        assertEquals(53, NOOP_DATABASE_SCHEMA_VERSION)
 
         val schemaSql = WhoopDatabase.HYDRATION_ENTRY_MIGRATION_SQL.joinToString("\n")
         val selectSql = WhoopDatabase.HYDRATION_ENTRY_LEGACY_SELECT_SQL
+        val oversizedSelectSql = WhoopDatabase.HYDRATION_ENTRY_OVERSIZED_SELECT_SQL
         val sql = listOf(
             schemaSql,
             selectSql,
+            oversizedSelectSql,
             WhoopDatabase.HYDRATION_ENTRY_LEGACY_INSERT_SQL,
         ).joinToString("\n")
         assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS `hydrationEntry`"))
@@ -34,7 +38,20 @@ class HydrationEntryMigrationTest {
         assertTrue(sql.contains("`key` = '${HydrationEntryContract.METRIC_KEY}'"))
         assertTrue(sql.contains("`day` = date(`day`, '+0 days')"))
         assertTrue(sql.contains("`value` = CAST(`value` AS INTEGER)"))
-        assertTrue(sql.contains("`value` <= ${HydrationEntryContract.MAX_DAY_ML}"))
+        assertTrue(sql.contains(HydrationEntryContract.LEGACY_OVERSIZED_ID_PREFIX))
+        assertTrue(sql.contains("`value` <= ${Int.MAX_VALUE}"))
+        assertTrue(
+            selectSql.contains(
+                "`value` <= ${HydrationEntryContract.MAX_DAY_ML}",
+            ),
+        )
+        assertFalse(selectSql.contains(HydrationEntryContract.LEGACY_OVERSIZED_ID_PREFIX))
+        assertTrue(
+            oversizedSelectSql.contains(
+                "`value` > ${HydrationEntryContract.MAX_DAY_ML}",
+            ),
+        )
+        assertTrue(sql.contains("NOT EXISTS"))
         assertFalse(sql.contains("strftime('%s'"))
         assertFalse(sql.contains(WhoopRepository.HEALTH_CONNECT_SOURCE))
         assertFalse(sql.uppercase().contains("DROP TABLE"))
@@ -90,11 +107,44 @@ class HydrationEntryMigrationTest {
         assertFails { HydrationEntryContract.requireEditableProjection(700.0, listOf(row)) }
     }
 
+    @Test
+    fun oversizedLegacyProjectionIsCorrectionOnly() {
+        val row = HydrationEntryRow(
+            id = "${HydrationEntryContract.LEGACY_OVERSIZED_ID_PREFIX}000000000001",
+            deviceId = HydrationEntryContract.SOURCE_ID,
+            day = "2026-09-10",
+            amountML = 12_000,
+            loggedAt = 1_789_000_000L,
+        )
+
+        assertTrue(HydrationEntryContract.isLegacyOversized(row))
+        assertEquals(
+            12_000L,
+            HydrationEntryContract.requireEditableProjection(
+                scalar = 12_000.0,
+                entries = listOf(row),
+            ),
+        )
+        assertFails {
+            HydrationEntryContract.total(
+                listOf(
+                    row,
+                    row.copy(
+                        id = "719c47b0-7ed1-44a2-94b5-aa6b926e4d5b",
+                        amountML = 200,
+                    ),
+                ),
+            )
+        }
+    }
+
     private fun assertFails(block: () -> Unit) {
         var failed = false
         try {
             block()
         } catch (_: HydrationEntryIntegrityException) {
+            failed = true
+        } catch (_: IllegalArgumentException) {
             failed = true
         }
         assertTrue("expected hydration integrity rejection", failed)

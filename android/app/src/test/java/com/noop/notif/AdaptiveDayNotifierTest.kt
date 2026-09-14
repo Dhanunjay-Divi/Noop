@@ -317,6 +317,46 @@ class AdaptiveDayNotifierTest {
         }
     }
 
+    @Test fun resolvedPlannedWorkoutDoesNotRepostAcrossRestartOrFingerprintRevision() {
+        val currentFingerprint = "planned-workout|2026-09-14|1789412400"
+        val legacyFingerprint = "$currentFingerprint|SLEEP_DEFICIT"
+        val state = AdaptiveDayDeliveryState(
+            resolvedPlannedWorkoutFingerprint = legacyFingerprint,
+        )
+
+        val repeated = AdaptiveDayDeliveryPolicy.evaluate(
+            candidate(
+                kind = AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
+                fingerprint = currentFingerprint,
+            ),
+            state,
+            nowMillis,
+            12 * 60,
+            false,
+            22 * 60,
+            7 * 60,
+        )
+
+        assertFalse(repeated.shouldDeliver)
+        assertEquals(AdaptiveDayDeliveryReason.DUPLICATE, repeated.reason)
+        assertEquals(state, repeated.nextState)
+
+        val moved = AdaptiveDayDeliveryPolicy.evaluate(
+            candidate(
+                kind = AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
+                fingerprint = "planned-workout|2026-09-14|1789416000",
+            ),
+            state,
+            nowMillis,
+            12 * 60,
+            false,
+            22 * 60,
+            7 * 60,
+        )
+
+        assertTrue(moved.shouldDeliver)
+    }
+
     @Test fun recommendationMappingKeepsTheEvidenceIdentityAndTopic() {
         val recommendation = AdaptiveDayGuidance.Recommendation(
             kind = AdaptiveDayGuidance.Kind.ROUTINE_RECOVERY,
@@ -657,6 +697,116 @@ class AdaptiveDayNotifierTest {
                 currentFingerprint = "planned-a",
             ),
         )
+    }
+
+    @Test fun staleResolvedPlannedWorkoutMarkerExpiresWithItsWorkout() {
+        val fingerprint = "planned-workout|2026-09-14|1789412400"
+        val state = AdaptiveDayDeliveryState(
+            lastGlobalDeliveryMillis = 2_000L,
+            deliveries = mapOf(
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT to
+                    AdaptiveDayDelivery(2_000L, fingerprint),
+            ),
+            resolvedPlannedWorkoutFingerprint = "$fingerprint|SLEEP_DEFICIT",
+        )
+
+        val expired = AdaptiveDayNotifier.reconciledPlannedWorkoutState(
+            state,
+            currentFingerprint = null,
+        )
+        val retained = AdaptiveDayNotifier.reconciledPlannedWorkoutState(
+            state,
+            currentFingerprint = fingerprint,
+        )
+
+        assertNull(expired.resolvedPlannedWorkoutFingerprint)
+        assertFalse(
+            expired.deliveries.containsKey(AdaptiveDayDeliveryKind.PLANNED_WORKOUT),
+        )
+        assertEquals(fingerprint, retained.resolvedPlannedWorkoutFingerprint)
+    }
+
+    @Test fun orphanedResolvedPlannedWorkoutMarkerExpiresWithoutDeliveryState() {
+        val state = AdaptiveDayDeliveryState(
+            resolvedPlannedWorkoutFingerprint =
+                "planned-workout|2026-09-14|1789412400",
+        )
+
+        assertNull(
+            AdaptiveDayNotifier.reconciledPlannedWorkoutState(
+                state,
+                currentFingerprint = null,
+            ).resolvedPlannedWorkoutFingerprint,
+        )
+    }
+
+    @Test fun normalWorkoutExpiryPersistsClearedMarkerDeliveryAndGlobalCooldown() {
+        val prefs = FakeSharedPreferences()
+        val fingerprint = "planned-workout|2026-09-14|1789412400"
+        val plannedDelivery = AdaptiveDayDelivery(
+            atMillis = 2_000L,
+            fingerprint = "$fingerprint|SLEEP_DEFICIT",
+        )
+        val state = AdaptiveDayDeliveryState(
+            lastGlobalDeliveryMillis = plannedDelivery.atMillis,
+            deliveries = mapOf(
+                AdaptiveDayDeliveryKind.SLEEP_RECOVERY to
+                    AdaptiveDayDelivery(1_000L, "sleep-a"),
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT to plannedDelivery,
+            ),
+            resolvedPlannedWorkoutFingerprint = fingerprint,
+        )
+        assertTrue(AdaptiveDayNotifier.saveState(prefs, state))
+        var expiredArtifactOwner: AdaptiveDayDelivery? = null
+        var commitFailureCount = 0
+
+        assertTrue(
+            AdaptiveDayNotifier.expirePlannedWorkoutArtifacts(
+                prefs = prefs,
+                fingerprint = fingerprint,
+                expireOwnedArtifacts = { expiredArtifactOwner = it },
+                onCommitFailure = { commitFailureCount += 1 },
+            ),
+        )
+
+        assertEquals(plannedDelivery, expiredArtifactOwner)
+        assertEquals(0, commitFailureCount)
+        assertEquals(
+            AdaptiveDayDeliveryState(
+                lastGlobalDeliveryMillis = 1_000L,
+                deliveries = mapOf(
+                    AdaptiveDayDeliveryKind.SLEEP_RECOVERY to
+                        AdaptiveDayDelivery(1_000L, "sleep-a"),
+                ),
+            ),
+            AdaptiveDayNotifier.loadState(prefs),
+        )
+    }
+
+    @Test fun staleWorkoutExpiryDoesNotMutateOrCleanUpNewerGuidance() {
+        val prefs = FakeSharedPreferences()
+        val newerFingerprint = "planned-workout|2026-09-14|1789416000"
+        val state = AdaptiveDayDeliveryState(
+            lastGlobalDeliveryMillis = 2_000L,
+            deliveries = mapOf(
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT to
+                    AdaptiveDayDelivery(2_000L, newerFingerprint),
+            ),
+            resolvedPlannedWorkoutFingerprint = newerFingerprint,
+        )
+        assertTrue(AdaptiveDayNotifier.saveState(prefs, state))
+        var cleanupCount = 0
+
+        assertFalse(
+            AdaptiveDayNotifier.expirePlannedWorkoutArtifacts(
+                prefs = prefs,
+                fingerprint = "planned-workout|2026-09-14|1789412400",
+                expireOwnedArtifacts = { cleanupCount += 1 },
+            ),
+        )
+
+        assertEquals(0, cleanupCount)
+        assertEquals(state, AdaptiveDayNotifier.loadState(prefs))
     }
 
     @Test fun acceptedDeliveryUsesTheDurableReceiptTimestamp() {
@@ -1307,7 +1457,7 @@ class AdaptiveDayNotifierTest {
         assertTrue(text.substring(saveState).contains(".clear()"))
     }
 
-    @Test fun naturalWorkoutExpiryPreservesCooldownLedgersAndTransientSuppressionRetries() {
+    @Test fun naturalWorkoutExpiryPersistsPrivateCleanupWithoutReconcilingSharedCooldownLedger() {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val source = listOf(
             File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
@@ -1339,7 +1489,8 @@ class AdaptiveDayNotifierTest {
         assertTrue(postSource.contains("schedulePlannedWorkoutRetry("))
         assertTrue(expire >= 0)
         assertFalse(expireSource.contains("ContextualPromptDeliveryLedger.reconcile"))
-        assertFalse(expireSource.contains("saveState("))
+        assertTrue(expireSource.contains("reconciledPlannedWorkoutState("))
+        assertTrue(expireSource.contains("saveState(prefs, cleared)"))
         assertTrue(expireSource.contains("plannedWorkoutFingerprintsMatch("))
         assertTrue(expireSource.contains("cancelNotificationSlotIfOwned("))
         assertTrue(missingSource.contains("plannedWorkoutStartSec(prior.fingerprint)"))
@@ -1792,5 +1943,288 @@ class AdaptiveDayNotifierTest {
         assertTrue(cancel >= 0)
         assertTrue(cancel > save)
         assertTrue(methodSource.contains("pendingCancellationSlots"))
+    }
+
+    @Test fun plannedWorkoutDecisionActionsAreExplicitPrivateAndUserControlled() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        fun source(vararg candidates: String): String {
+            return candidates
+                .map { File(root, it) }
+                .firstOrNull(File::isFile)
+                ?.readText()
+                ?: error("Could not locate ${candidates.last()} from $root")
+        }
+
+        val notifier = source(
+            "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt",
+            "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt",
+            "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt",
+        )
+        val rail = source(
+            "src/main/java/com/noop/ui/ContextualActionRail.kt",
+            "app/src/main/java/com/noop/ui/ContextualActionRail.kt",
+            "android/app/src/main/java/com/noop/ui/ContextualActionRail.kt",
+        )
+        val actionCenter = source(
+            "src/main/java/com/noop/ui/ContextualActionCenter.kt",
+            "app/src/main/java/com/noop/ui/ContextualActionCenter.kt",
+            "android/app/src/main/java/com/noop/ui/ContextualActionCenter.kt",
+        )
+        val appRoot = source(
+            "src/main/java/com/noop/ui/AppRoot.kt",
+            "app/src/main/java/com/noop/ui/AppRoot.kt",
+            "android/app/src/main/java/com/noop/ui/AppRoot.kt",
+        )
+        val manifest = source(
+            "src/main/AndroidManifest.xml",
+            "app/src/main/AndroidManifest.xml",
+            "android/app/src/main/AndroidManifest.xml",
+        )
+
+        assertTrue(notifier.contains("ACTION_KEEP_CURRENT_PLAN"))
+        assertTrue(notifier.contains("ACTION_REVIEW_LIGHTER_OPTIONS"))
+        assertTrue(notifier.contains("AdaptivePlannedWorkoutDecisionReceiver"))
+        assertTrue(notifier.contains("resolvePlannedWorkoutDecision("))
+        assertTrue(notifier.contains("::plannedWorkoutFingerprintsMatch"))
+        assertTrue(notifier.contains("plannedWorkoutDecisionIsActionable("))
+        assertTrue(
+            notifier.contains(
+                "ContextualActionCenter.ownsPlannedWorkoutDecision(",
+            ),
+        )
+        assertTrue(notifier.contains("NoopNotificationRoute.WORKOUTS"))
+        val acknowledgement = notifier.substring(
+            notifier.indexOf("internal suspend fun acknowledgePlannedWorkoutDecision("),
+            notifier.indexOf("fun setGuidanceConsent("),
+        )
+        assertFalse(acknowledgement.contains("contentResolver"))
+        assertFalse(acknowledgement.contains("CalendarContract"))
+        assertTrue(acknowledgement.contains("PlannedWorkoutCalendarStore.refresh("))
+        assertTrue(acknowledgement.contains("force = true"))
+        assertTrue(acknowledgement.contains("PlannedWorkoutCalendarStore.commitIfCurrentFuture("))
+        assertTrue(acknowledgement.contains("private fun commitPlannedWorkoutDecisionLocked("))
+        assertTrue(acknowledgement.contains("nowMillis = nowMillis"))
+        assertTrue(acknowledgement.contains("calendarCandidateMatches"))
+        assertTrue(acknowledgement.contains("reconcileIfOwnedWithOutcome("))
+        assertFalse(
+            acknowledgement.contains(
+                "?: run {\n            cancelAdaptiveDayNotification(app)",
+            ),
+        )
+        assertTrue(acknowledgement.contains("currentResolvedPlannedWorkoutPromptReceipt("))
+        assertTrue(acknowledgement.contains("hasPendingCancellation("))
+        assertTrue(acknowledgement.contains("cancelNotificationSlotIfUnowned("))
+        val recovery = acknowledgement.substring(
+            acknowledgement.indexOf("internal fun recoverResolvedPlannedWorkoutDecision("),
+            acknowledgement.indexOf("internal fun plannedWorkoutDecisionIsActionable("),
+        )
+        assertTrue(recovery.contains("reconcileResolvedPlannedWorkoutPromptState("))
+        assertTrue(recovery.contains("sharedCleanupRequired"))
+        assertTrue(actionCenter.contains("synchronous = true"))
+        assertTrue(actionCenter.contains("ContextualPlannedWorkoutDecisionPolicy.resolved("))
+        assertTrue(notifier.contains("val pendingResult = goAsync()"))
+        assertTrue(notifier.contains("pendingResult.finish()"))
+        assertTrue(
+            appRoot.indexOf("recoverResolvedPlannedWorkoutDecision(context)") <
+                appRoot.indexOf("ContextualActionCenter.refresh(context)"),
+        )
+        assertTrue(rail.contains("appwide_adaptive_day_guidance_planned_workout_keep_plan"))
+        assertTrue(
+            rail.contains(
+                "appwide_adaptive_day_guidance_planned_workout_review_options",
+            ),
+        )
+        assertTrue(
+            manifest.contains(
+                "android:name=\"com.noop.notif.AdaptivePlannedWorkoutDecisionReceiver\"",
+            ),
+        )
+        assertTrue(manifest.contains("android:exported=\"false\""))
+    }
+
+    @Test fun plannedWorkoutDecisionUsesCurrentActionOwnershipWithoutRequiringNotificationDelivery() {
+        val fingerprint = "planned-workout|2026-09-14|1789412400"
+
+        assertTrue(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = fingerprint,
+                ownsCurrentAction = true,
+                ownsCurrentDelivery = false,
+                alreadyResolved = false,
+                guidanceEnabled = true,
+                plannedWorkoutCalendarEnabled = true,
+                calendarPermissionGranted = true,
+                calendarCandidateMatches = true,
+                nowSec = 1_789_000_000,
+            ),
+        )
+        assertTrue(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = fingerprint,
+                ownsCurrentAction = false,
+                ownsCurrentDelivery = true,
+                alreadyResolved = false,
+                guidanceEnabled = true,
+                plannedWorkoutCalendarEnabled = true,
+                calendarPermissionGranted = true,
+                calendarCandidateMatches = true,
+                nowSec = 1_789_000_000,
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = fingerprint,
+                ownsCurrentAction = false,
+                ownsCurrentDelivery = false,
+                alreadyResolved = false,
+                guidanceEnabled = true,
+                plannedWorkoutCalendarEnabled = true,
+                calendarPermissionGranted = true,
+                calendarCandidateMatches = true,
+                nowSec = 1_789_000_000,
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = fingerprint,
+                ownsCurrentAction = true,
+                ownsCurrentDelivery = false,
+                alreadyResolved = true,
+                guidanceEnabled = true,
+                plannedWorkoutCalendarEnabled = true,
+                calendarPermissionGranted = true,
+                calendarCandidateMatches = true,
+                nowSec = 1_789_000_000,
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = fingerprint,
+                ownsCurrentAction = true,
+                ownsCurrentDelivery = false,
+                alreadyResolved = false,
+                guidanceEnabled = false,
+                plannedWorkoutCalendarEnabled = true,
+                calendarPermissionGranted = true,
+                calendarCandidateMatches = true,
+                nowSec = 1_789_000_000,
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = fingerprint,
+                ownsCurrentAction = true,
+                ownsCurrentDelivery = false,
+                alreadyResolved = false,
+                guidanceEnabled = true,
+                plannedWorkoutCalendarEnabled = false,
+                calendarPermissionGranted = true,
+                calendarCandidateMatches = true,
+                nowSec = 1_789_000_000,
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = fingerprint,
+                ownsCurrentAction = true,
+                ownsCurrentDelivery = false,
+                alreadyResolved = false,
+                guidanceEnabled = true,
+                plannedWorkoutCalendarEnabled = true,
+                calendarPermissionGranted = false,
+                calendarCandidateMatches = true,
+                nowSec = 1_789_000_000,
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = "planned-workout|invalid",
+                ownsCurrentAction = true,
+                ownsCurrentDelivery = false,
+                alreadyResolved = false,
+                guidanceEnabled = true,
+                plannedWorkoutCalendarEnabled = true,
+                calendarPermissionGranted = true,
+                calendarCandidateMatches = true,
+                nowSec = 1_789_000_000,
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = fingerprint,
+                ownsCurrentAction = true,
+                ownsCurrentDelivery = false,
+                alreadyResolved = false,
+                guidanceEnabled = true,
+                plannedWorkoutCalendarEnabled = true,
+                calendarPermissionGranted = true,
+                calendarCandidateMatches = false,
+                nowSec = 1_789_000_000,
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionIsActionable(
+                fingerprint = fingerprint,
+                ownsCurrentAction = true,
+                ownsCurrentDelivery = false,
+                alreadyResolved = false,
+                guidanceEnabled = true,
+                plannedWorkoutCalendarEnabled = true,
+                calendarPermissionGranted = true,
+                calendarCandidateMatches = true,
+                nowSec = 1_789_412_400,
+            ),
+        )
+    }
+
+    @Test fun plannedWorkoutDecisionOwnershipRequiresMatchingDurableDeliveryReceipt() {
+        val fingerprint = "planned-workout|2026-09-14|1789412400"
+        val state = AdaptiveDayDeliveryState(
+            deliveries = mapOf(
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT to AdaptiveDayDelivery(
+                    atMillis = 1_000L,
+                    fingerprint = "$fingerprint|4",
+                ),
+            ),
+        )
+
+        assertTrue(
+            AdaptiveDayNotifier.plannedWorkoutDecisionOwnsCurrentDelivery(
+                state = state,
+                fingerprint = fingerprint,
+                receipt = ContextualPromptDeliveryReceipt(
+                    atMillis = 1_000L,
+                    identity = fingerprint,
+                ),
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionOwnsCurrentDelivery(
+                state = state,
+                fingerprint = fingerprint,
+                receipt = null,
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutDecisionOwnsCurrentDelivery(
+                state = state,
+                fingerprint = fingerprint,
+                receipt = ContextualPromptDeliveryReceipt(
+                    atMillis = 2_000L,
+                    identity = fingerprint,
+                ),
+            ),
+        )
+    }
+
+    @Test fun plannedWorkoutDecisionResolutionMarkerRoundTrips() {
+        val prefs = FakeSharedPreferences()
+        val fingerprint = "planned-workout|2026-09-14|1789412400"
+        val state = AdaptiveDayDeliveryState(
+            resolvedPlannedWorkoutFingerprint = fingerprint,
+        )
+
+        assertTrue(AdaptiveDayNotifier.saveState(prefs, state))
+        assertEquals(state, AdaptiveDayNotifier.loadState(prefs))
     }
 }

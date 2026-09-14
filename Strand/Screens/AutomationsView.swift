@@ -32,12 +32,17 @@ struct AutomationsView: View {
     private var cycleOptInApplies: Bool { model.profile.cycleAwarenessApplies }
     /// v5 Rhythm experimental gate (the screen still shows its own consent clickwrap when opened).
     @AppStorage(RhythmConsent.enabledKey) private var rhythmEnabled = false
-    /// Daily phone reminders are separate from wrist alerts and default OFF. State is mirrored only
-    /// after the authorization outcome so a denied system permission never leaves an inert ON switch.
-    @State private var dailyReviewEnabled = DailyReviewNotifications.isEnabled
+    /// Daily phone reminders are separate from wrist alerts and default OFF. A newly denied enable
+    /// stays OFF; an existing opt-in remains visible if OS permission is later revoked so the user's
+    /// intent can be restored without silently changing it.
+    @State private var morningReviewEnabled = DailyReviewNotifications.isMorningEnabled
+    @State private var journalReviewEnabled = DailyReviewNotifications.isJournalEnabled
     @State private var morningRecapEnabled = MorningRecapNotifications.isEnabled
     @AppStorage(DailyReviewNotifications.morningMinutesKey) private var morningReviewMinutes = 8 * 60
     @AppStorage(DailyReviewNotifications.eveningMinutesKey) private var eveningReviewMinutes = 19 * 60
+    @AppStorage("notif.quietHoursEnabled") private var quietHoursEnabled = false
+    @AppStorage("notif.quietStartMinutes") private var quietStartMinutes = 22 * 60
+    @AppStorage("notif.quietEndMinutes") private var quietEndMinutes = 7 * 60
     /// A separate post-sync report opt-in. It shares notification permission with the scheduled review
     /// reminders but has its own preference and workout frontier.
     @State private var postWorkoutSummaryEnabled = PostWorkoutSummaryNotifications.isEnabled
@@ -109,7 +114,8 @@ struct AutomationsView: View {
             strainTargetCard
         }
         .onAppear {
-            dailyReviewEnabled = DailyReviewNotifications.isEnabled
+            morningReviewEnabled = DailyReviewNotifications.isMorningEnabled
+            journalReviewEnabled = DailyReviewNotifications.isJournalEnabled
             morningRecapEnabled = MorningRecapNotifications.isEnabled
             postWorkoutSummaryEnabled = PostWorkoutSummaryNotifications.isEnabled
             hydrationReminderEnabled = HydrationReminders.isEnabled
@@ -180,33 +186,82 @@ struct AutomationsView: View {
             icon: "sun.horizon.fill",
             title: String(localized: "Daily review"),
             blurb: String(localized: "Optional phone reminders for daily review and newly synced workouts. Post-sync timing depends on when your wearable reaches NOOP."),
-            active: dailyReviewEnabled || morningRecapEnabled || postWorkoutSummaryEnabled
+            active: morningReviewEnabled || journalReviewEnabled ||
+                morningRecapEnabled || postWorkoutSummaryEnabled
         ) {
             VStack(spacing: 0) {
                 ToggleRow(
-                    label: String(localized: "Morning & evening reminders"),
-                    help: String(localized: "Off by default. Turning this on asks for notification access once; declining never blocks NOOP."),
-                    isOn: dailyReviewToggle
+                    label: String(localized: "appwide.daily_review.morning.label"),
+                    help: String(localized: "appwide.daily_review.morning.help"),
+                    isOn: morningReviewToggle
                 )
-
-                if dailyReviewEnabled {
+                if morningReviewEnabled {
                     rowDivider
                     reviewTimeRow(
                         label: String(localized: "Morning · opens Sleep"),
                         minutes: morningTimeBinding
                     )
+                }
+
+                rowDivider
+                ToggleRow(
+                    label: String(localized: "appwide.daily_review.journal.label"),
+                    help: String(localized: "appwide.daily_review.journal.help"),
+                    isOn: journalReviewToggle
+                )
+                if journalReviewEnabled {
                     rowDivider
                     reviewTimeRow(
                         label: String(localized: "Evening · opens Journal"),
                         minutes: eveningTimeBinding
                     )
+                }
+
+                if morningReviewEnabled || journalReviewEnabled {
                     rowDivider
-                    Text("Reminder banners never include scores or health values. Morning invites a Sleep and Recovery review; evening invites an Effort comparison and journal check-in.")
+                    Text("appwide.daily_review.quiet_hours_note")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 6)
+                }
+
+                rowDivider
+                ToggleRow(
+                    label: String(localized: "Quiet hours"),
+                    help: String(localized: "appwide.notifications.quiet_hours.help"),
+                    isOn: quietHoursEnabledBinding
+                )
+                if quietHoursEnabled {
+                    rowDivider
+                    HStack(spacing: 12) {
+                        Text("From")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        DatePicker(
+                            "",
+                            selection: quietStartBinding,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .accessibilityLabel("Quiet hours start")
+                        Text("to")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        DatePicker(
+                            "",
+                            selection: quietEndBinding,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .accessibilityLabel("Quiet hours end")
+                        Spacer(minLength: 0)
+                    }
+                    .frame(minHeight: 44)
+                    .padding(.vertical, 4)
                 }
 
                 rowDivider
@@ -280,39 +335,114 @@ struct AutomationsView: View {
         }
     }
 
-    private var dailyReviewToggle: Binding<Bool> {
+    private var morningReviewToggle: Binding<Bool> {
         Binding(
-            get: { dailyReviewEnabled },
+            get: { morningReviewEnabled },
             set: { on in
                 if !on {
-                    dailyReviewEnabled = false
-                    notificationPermissionDenied = false
-                    DailyReviewNotifications.setEnabled(false)
+                    morningReviewEnabled = false
+                    DailyReviewNotifications.setMorningEnabled(false)
+                    refreshNotificationPermissionState()
                     return
                 }
 
-                // The explanatory row is visible before this call, so the OS prompt happens only at
-                // the predictable moment the user explicitly turns the feature on.
-                dailyReviewEnabled = true
-                DailyReviewNotifications.setEnabled(true) { outcome in
+                morningReviewEnabled = true
+                DailyReviewNotifications.setMorningEnabled(true) { outcome in
                     switch outcome {
                     case .scheduled:
-                        dailyReviewEnabled = true
+                        morningReviewEnabled = true
                         notificationPermissionDenied = false
                         refreshNotificationPermissionState()
                     case .deferred:
-                        dailyReviewEnabled = true
+                        morningReviewEnabled = true
                         notificationPermissionDenied = false
                     case .denied:
-                        dailyReviewEnabled = false
+                        morningReviewEnabled = false
                         notificationPermissionDenied = true
                         showNotificationPermissionAlert = true
                     case .off:
-                        dailyReviewEnabled = false
+                        morningReviewEnabled = false
                     }
                 }
             }
         )
+    }
+
+    private var journalReviewToggle: Binding<Bool> {
+        Binding(
+            get: { journalReviewEnabled },
+            set: { on in
+                if !on {
+                    journalReviewEnabled = false
+                    DailyReviewNotifications.setJournalEnabled(false)
+                    refreshNotificationPermissionState()
+                    return
+                }
+
+                journalReviewEnabled = true
+                DailyReviewNotifications.setJournalEnabled(true) { outcome in
+                    switch outcome {
+                    case .scheduled:
+                        journalReviewEnabled = true
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
+                    case .deferred:
+                        journalReviewEnabled = true
+                        notificationPermissionDenied = false
+                    case .denied:
+                        journalReviewEnabled = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        journalReviewEnabled = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var quietHoursEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { quietHoursEnabled },
+            set: { enabled in
+                quietHoursEnabled = enabled
+                DailyReviewNotifications.quietHoursDidChange()
+            }
+        )
+    }
+
+    private var quietStartBinding: Binding<Date> {
+        Binding(
+            get: { Self.notificationTime(fromMinutes: quietStartMinutes) },
+            set: { date in
+                quietStartMinutes = Self.notificationMinutes(from: date)
+                DailyReviewNotifications.quietHoursDidChange()
+            }
+        )
+    }
+
+    private var quietEndBinding: Binding<Date> {
+        Binding(
+            get: { Self.notificationTime(fromMinutes: quietEndMinutes) },
+            set: { date in
+                quietEndMinutes = Self.notificationMinutes(from: date)
+                DailyReviewNotifications.quietHoursDidChange()
+            }
+        )
+    }
+
+    private static func notificationTime(fromMinutes minutes: Int) -> Date {
+        Calendar.current.date(
+            bySettingHour: minutes / 60,
+            minute: minutes % 60,
+            second: 0,
+            of: Date()
+        ) ?? Date()
+    }
+
+    private static func notificationMinutes(from date: Date) -> Int {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
     }
 
     private var postWorkoutSummaryToggle: Binding<Bool> {
@@ -690,10 +820,6 @@ struct AutomationsView: View {
             Task { @MainActor in
                 notificationPermissionDenied = settings.authorizationStatus == .denied
                 if settings.authorizationStatus == .denied {
-                    if dailyReviewEnabled {
-                        dailyReviewEnabled = false
-                        DailyReviewNotifications.setEnabled(false)
-                    }
                     if morningRecapEnabled {
                         morningRecapEnabled = false
                         MorningRecapNotifications.setEnabled(false)

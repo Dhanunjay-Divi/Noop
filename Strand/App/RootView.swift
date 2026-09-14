@@ -419,8 +419,14 @@ struct RootView: View {
     /// Cold and warm notification taps converge here. `consumePending` removes the route before the
     /// sidebar selection changes, so a later foreground/relaunch cannot replay an old reminder.
     private func consumePendingNotificationRoute() {
-        guard let route = NotificationRouteBridge.consumePending() else { return }
-        switch route {
+        guard let request = NotificationRouteBridge.consumePendingRequest() else {
+            return
+        }
+        if request.route == .journal {
+            router.pendingJournalDayOffset =
+                NotificationRouteBridge.journalDayOffset(for: request)
+        }
+        switch request.route {
         case .sleep: selection = .sleep
         case .journal: selection = .insights
         case .hydration: selection = .today

@@ -334,7 +334,10 @@ def feedback_router(
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="new feedback submissions are temporarily unavailable",
-                headers={"Retry-After": "300"},
+                headers={
+                    "Retry-After": "300",
+                    "X-NOOP-Feedback-Deferral": "reservation-drain",
+                },
             )
         if principal.app_check.app_id != expected_app_id(payload.platform):
             request.state.auth_result = "platform_app_mismatch"

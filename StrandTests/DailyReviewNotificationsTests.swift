@@ -111,6 +111,12 @@ final class LocalNotificationLifecycleLedgerTests: XCTestCase {
             Set(ledger.records().dropFirst().map(\.categoryIdentifier)),
             ["private"]
         )
+        XCTAssertEqual(
+            LocalNotificationLifecycleLedger.stableCategory(
+                DailyReviewNotifications.plannedWorkoutCategoryID
+            ),
+            "private"
+        )
     }
 
     func testConcurrentDelegateWritesRemainBoundedAndDecodable() {
@@ -959,11 +965,15 @@ private final class LocalNotificationCenterCapacitySpy {
 final class DailyReviewNotificationsTests: XCTestCase {
     private let keys = [
         DailyReviewNotifications.enabledKey,
+        DailyReviewNotifications.morningEnabledKey,
+        DailyReviewNotifications.journalEnabledKey,
+        DailyReviewNotifications.splitPreferenceMigrationKey,
         DailyReviewNotifications.morningMinutesKey,
         DailyReviewNotifications.eveningMinutesKey,
         DailyReviewNotifications.completedJournalDaysKey,
         DailyReviewNotifications.scheduledEveningIDsKey,
         NotificationRouteBridge.pendingRouteKey,
+        NotificationRouteBridge.pendingJournalDayKey,
         HydrationReminders.enabledKey,
         HydrationReminders.intervalMinutesKey,
         HydrationReminders.activeStartMinutesKey,
@@ -1004,7 +1014,7 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertEqual(DailyReviewNotifications.eveningMinutes, 19 * 60)
     }
 
-    func testRestoreAuthorizationPolicyRetainsUnpromptedIntentAndFailsClosedOnRevocation() {
+    func testRestoreAuthorizationPolicyRetainsExplicitIntentWhenDeliveryIsUnavailable() {
         XCTAssertEqual(
             DailyReviewNotifications.restoreAuthorizationDisposition(.authorized),
             .reschedule
@@ -1025,7 +1035,114 @@ final class DailyReviewNotificationsTests: XCTestCase {
         )
         XCTAssertEqual(
             DailyReviewNotifications.restoreAuthorizationDisposition(.denied),
-            .disable
+            .retainOptIn
+        )
+    }
+
+    func testReenablingAnEnabledReminderKeepsThePreferenceOn() {
+        XCTAssertEqual(
+            DailyReviewNotifications.persistedPreferenceOutcome(
+                morningEnabled: true,
+                journalEnabled: false
+            ),
+            .deferred
+        )
+        XCTAssertEqual(
+            DailyReviewNotifications.persistedPreferenceOutcome(
+                morningEnabled: false,
+                journalEnabled: false
+            ),
+            .off
+        )
+    }
+
+    func testUnavailableAuthorizationCancellationClearsTrackedScheduleButKeepsOptIn() {
+        let suiteName = "DailyReviewNotificationsTests.cancellation.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: DailyReviewNotifications.enabledKey)
+        defaults.set(true, forKey: DailyReviewNotifications.morningEnabledKey)
+        defaults.set(true, forKey: DailyReviewNotifications.journalEnabledKey)
+        defaults.set(true, forKey: DailyReviewNotifications.splitPreferenceMigrationKey)
+        defaults.set(
+            [
+                "daily-review-evening-2026-09-14",
+                "daily-review-evening-2026-09-15",
+            ],
+            forKey: DailyReviewNotifications.scheduledEveningIDsKey
+        )
+        var cancelled: [String] = []
+
+        DailyReviewNotifications.cancelTrackedRequestsPreservingOptIn(
+            defaults: defaults,
+            cancel: { cancelled = $0 }
+        )
+
+        XCTAssertEqual(
+            Set(cancelled),
+            [
+                "daily-review-morning",
+                "daily-review-evening",
+                "daily-review-evening-2026-09-14",
+                "daily-review-evening-2026-09-15",
+            ]
+        )
+        XCTAssertNil(
+            defaults.object(
+                forKey: DailyReviewNotifications.scheduledEveningIDsKey
+            )
+        )
+        XCTAssertTrue(
+            defaults.bool(forKey: DailyReviewNotifications.morningEnabledKey)
+        )
+        XCTAssertTrue(
+            defaults.bool(forKey: DailyReviewNotifications.journalEnabledKey)
+        )
+    }
+
+    func testAutomationsExposePlatformNeutralQuietHoursControls() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/Screens/AutomationsView.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("@AppStorage(\"notif.quietHoursEnabled\")"))
+        XCTAssertTrue(source.contains("isOn: quietHoursEnabledBinding"))
+        XCTAssertTrue(source.contains("selection: quietStartBinding"))
+        XCTAssertTrue(source.contains("selection: quietEndBinding"))
+
+        let localizationData = try Data(
+            contentsOf: root.appendingPathComponent(
+                "Tools/AppWideLocalization/appwide_strings.json"
+            )
+        )
+        let localizations = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: localizationData)
+                as? [String: [String: String]]
+        )
+        let help = try XCTUnwrap(
+            localizations["appwide.notifications.quiet_hours.help"]?["en"]
+        )
+        XCTAssertFalse(help.localizedCaseInsensitiveContains("phone"))
+        XCTAssertTrue(
+            help.localizedCaseInsensitiveContains("daily-review reminders")
+        )
+    }
+
+    func testLegacyCombinedPreferenceMigratesToIndependentPreferences() {
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
+
+        XCTAssertTrue(DailyReviewNotifications.isMorningEnabled)
+        XCTAssertTrue(DailyReviewNotifications.isJournalEnabled)
+        XCTAssertTrue(
+            UserDefaults.standard.bool(
+                forKey: DailyReviewNotifications.splitPreferenceMigrationKey
+            )
         )
     }
 
@@ -1061,6 +1178,171 @@ final class DailyReviewNotificationsTests: XCTestCase {
         let category = DailyReviewNotifications.privacyCategory()
         XCTAssertEqual(category.identifier, "noop.daily-review.private")
         XCTAssertEqual(category.hiddenPreviewsBodyPlaceholder, "Private NOOP check-in")
+
+        let planned = DailyReviewNotifications.plannedWorkoutDecisionCategory()
+        XCTAssertEqual(
+            planned.identifier,
+            DailyReviewNotifications.plannedWorkoutCategoryID
+        )
+        XCTAssertEqual(
+            planned.actions.map(\.identifier),
+            [
+                DailyReviewNotifications.keepCurrentPlanActionID,
+                DailyReviewNotifications.reviewLighterOptionsActionID,
+            ]
+        )
+        XCTAssertTrue(
+            planned.actions[0].options.contains(.authenticationRequired)
+        )
+        XCTAssertTrue(
+            planned.actions[1].options.contains(.authenticationRequired)
+        )
+        XCTAssertTrue(planned.actions[1].options.contains(.foreground))
+    }
+
+    func testIndependentPreferencesBuildOnlySelectedRequests() {
+        setDailyReviewPreferences(morning: true, journal: false)
+        let morningOnly = DailyReviewNotifications.notificationRequests()
+        XCTAssertEqual(morningOnly.map(\.identifier), ["daily-review-morning"])
+
+        setDailyReviewPreferences(morning: false, journal: true)
+        let journalOnly = DailyReviewNotifications.notificationRequests()
+        XCTAssertFalse(journalOnly.isEmpty)
+        XCTAssertTrue(
+            journalOnly.allSatisfy {
+                $0.identifier.hasPrefix("daily-review-evening-")
+            }
+        )
+    }
+
+    func testDisablingOnePreferenceCancelsOnlyItsPendingRequests() {
+        let storedEveningIDs = [
+            "daily-review-evening-2026-09-14",
+            "daily-review-evening-2026-09-15",
+        ]
+
+        XCTAssertEqual(
+            DailyReviewNotifications.disabledRequestIDs(
+                morningEnabled: false,
+                journalEnabled: true,
+                storedEveningIDs: storedEveningIDs
+            ),
+            ["daily-review-morning"]
+        )
+        XCTAssertEqual(
+            DailyReviewNotifications.disabledRequestIDs(
+                morningEnabled: true,
+                journalEnabled: false,
+                storedEveningIDs: storedEveningIDs
+            ),
+            [
+                "daily-review-evening",
+                "daily-review-evening-2026-09-14",
+                "daily-review-evening-2026-09-15",
+            ]
+        )
+    }
+
+    func testJournalCandidatesAreTrackedBeforeNotificationCenterIsRead() async {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 12
+        ))!
+        setDailyReviewPreferences(morning: false, journal: true)
+        let candidateIDs = DailyReviewNotifications.datedEveningRequestIDs(
+            DailyReviewNotifications.notificationRequests(
+                now: now,
+                calendar: calendar
+            ).map(\.identifier)
+        )
+        let priorID = "daily-review-evening-2026-09-01"
+        UserDefaults.standard.set(
+            [priorID],
+            forKey: DailyReviewNotifications.scheduledEveningIDsKey
+        )
+        let pendingPaused = expectation(
+            description: "pending Notification Center read paused"
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            pauseFirstPending: true,
+            onFirstPendingPaused: { pendingPaused.fulfill() }
+        )
+
+        let reconciliation = Task { @MainActor in
+            await DailyReviewNotifications.reconcileSchedule(
+                now: now,
+                calendar: calendar,
+                coordinator: LocalNotificationCapacityCoordinator(
+                    capacity: 32,
+                    reservedPrioritySlots: 0
+                ),
+                client: center.client
+            )
+        }
+        await fulfillment(of: [pendingPaused], timeout: 1)
+
+        XCTAssertEqual(
+            Set(
+                UserDefaults.standard.stringArray(
+                    forKey: DailyReviewNotifications.scheduledEveningIDsKey
+                ) ?? []
+            ),
+            Set(candidateIDs + [priorID])
+        )
+
+        center.resumeFirstPending()
+        _ = await reconciliation.value
+    }
+
+    func testDailyReviewRequestsMoveOutsideQuietHours() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 12
+        ))!
+        let suiteName = "DailyReviewNotificationsTests.quiet.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "notif.quietHoursEnabled")
+        defaults.set(22 * 60, forKey: "notif.quietStartMinutes")
+        defaults.set(7 * 60, forKey: "notif.quietEndMinutes")
+
+        setDailyReviewPreferences(morning: true, journal: false)
+        UserDefaults.standard.set(
+            6 * 60 + 30,
+            forKey: DailyReviewNotifications.morningMinutesKey
+        )
+        let morning = DailyReviewNotifications.notificationRequests(
+            now: now,
+            calendar: calendar,
+            defaults: defaults
+        )
+        let morningTrigger = morning.first?.trigger as? UNCalendarNotificationTrigger
+        XCTAssertEqual(morningTrigger?.dateComponents.hour, 7)
+        XCTAssertEqual(morningTrigger?.dateComponents.minute, 0)
+        XCTAssertEqual(morningTrigger?.repeats, true)
+
+        setDailyReviewPreferences(morning: false, journal: true)
+        UserDefaults.standard.set(
+            23 * 60,
+            forKey: DailyReviewNotifications.eveningMinutesKey
+        )
+        let journal = DailyReviewNotifications.notificationRequests(
+            now: now,
+            calendar: calendar,
+            defaults: defaults
+        )
+        let journalTrigger = journal.first?.trigger as? UNCalendarNotificationTrigger
+        XCTAssertEqual(journalTrigger?.dateComponents.hour, 7)
+        XCTAssertEqual(journalTrigger?.dateComponents.minute, 0)
+        XCTAssertEqual(journalTrigger?.repeats, false)
     }
 
     func testFailedStableReplacementKeepsDailyReviewEnabledAndTracked() async {
@@ -1072,6 +1354,7 @@ final class DailyReviewNotificationsTests: XCTestCase {
             day: 12,
             hour: 12
         ))!
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
         let existing = DailyReviewNotifications.notificationRequests(
             now: now,
             calendar: calendar
@@ -1079,7 +1362,6 @@ final class DailyReviewNotificationsTests: XCTestCase {
         let eveningIDs = existing.map(\.identifier).filter {
             $0.hasPrefix("daily-review-evening-")
         }
-        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
         UserDefaults.standard.set(
             eveningIDs,
             forKey: DailyReviewNotifications.scheduledEveningIDsKey
@@ -1126,6 +1408,7 @@ final class DailyReviewNotificationsTests: XCTestCase {
             day: 13,
             hour: 12
         ))!
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
         let requests = DailyReviewNotifications.notificationRequests(
             now: now,
             calendar: calendar
@@ -1154,7 +1437,7 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertTrue(DailyReviewNotifications.isEnabled)
     }
 
-    func testDailyReviewScheduleResultDisablesOptInWhenAuthorizationWasRevoked() {
+    func testDailyReviewScheduleResultRetainsOptInWhenAuthorizationWasRevoked() {
         UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
         UserDefaults.standard.set(
             ["daily-review-evening-legacy"],
@@ -1166,8 +1449,8 @@ final class DailyReviewNotificationsTests: XCTestCase {
             authorizationStatus: .denied
         )
 
-        XCTAssertEqual(outcome, .denied)
-        XCTAssertFalse(DailyReviewNotifications.isEnabled)
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertTrue(DailyReviewNotifications.isEnabled)
         XCTAssertNil(
             UserDefaults.standard.object(
                 forKey: DailyReviewNotifications.scheduledEveningIDsKey
@@ -1185,6 +1468,28 @@ final class DailyReviewNotificationsTests: XCTestCase {
 
         XCTAssertEqual(outcome, .deferred)
         XCTAssertTrue(DailyReviewNotifications.isEnabled)
+    }
+
+    private func setDailyReviewPreferences(
+        morning: Bool,
+        journal: Bool
+    ) {
+        UserDefaults.standard.set(
+            morning,
+            forKey: DailyReviewNotifications.morningEnabledKey
+        )
+        UserDefaults.standard.set(
+            journal,
+            forKey: DailyReviewNotifications.journalEnabledKey
+        )
+        UserDefaults.standard.set(
+            morning || journal,
+            forKey: DailyReviewNotifications.enabledKey
+        )
+        UserDefaults.standard.set(
+            true,
+            forKey: DailyReviewNotifications.splitPreferenceMigrationKey
+        )
     }
 
     func testFailedStableReplacementKeepsHydrationEnabledAndTracked() async {
@@ -1321,6 +1626,51 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertNil(NotificationRouteBridge.consumePending())
     }
 
+    func testPendingJournalRoutePreservesLogicalDayAndComputesDaysBack() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 8
+        )))
+        NotificationRouteBridge.recordPending(
+            .journal,
+            journalDay: "2026-09-13"
+        )
+
+        let request = try XCTUnwrap(
+            NotificationRouteBridge.consumePendingRequest()
+        )
+
+        XCTAssertEqual(request.route, .journal)
+        XCTAssertEqual(request.journalDay, "2026-09-13")
+        XCTAssertEqual(
+            NotificationRouteBridge.journalDayOffset(
+                for: request,
+                now: now,
+                calendar: calendar
+            ),
+            1
+        )
+        XCTAssertNil(NotificationRouteBridge.consumePendingRequest())
+    }
+
+    func testInvalidPendingJournalDayIsDiscarded() throws {
+        NotificationRouteBridge.recordPending(
+            .journal,
+            journalDay: "2026-02-31"
+        )
+
+        let request = try XCTUnwrap(
+            NotificationRouteBridge.consumePendingRequest()
+        )
+
+        XCTAssertEqual(request.route, .journal)
+        XCTAssertNil(request.journalDay)
+    }
+
     func testEveningJournalScheduleSkipsCompletedDaysAndPastToday() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -1342,6 +1692,87 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertFalse(specs.map(\.day).contains("2026-09-01"))
         XCTAssertEqual(specs.first?.reminder.route, .journal)
         XCTAssertEqual(specs.first?.day, "2026-09-02")
+    }
+
+    func testQuietHoursCarryPreviousJournalDayAcrossMidnight() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 1,
+            hour: 1
+        )))
+        let suiteName = "DailyReviewNotificationsTests.carryover.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "notif.quietHoursEnabled")
+        defaults.set(22 * 60, forKey: "notif.quietStartMinutes")
+        defaults.set(7 * 60, forKey: "notif.quietEndMinutes")
+
+        let specs = DailyReviewNotifications.eveningReminderSpecs(
+            now: now,
+            minuteOfDay: 23 * 60,
+            completedDays: [],
+            calendar: calendar,
+            defaults: defaults
+        )
+        let carryover = try XCTUnwrap(
+            specs.first(where: { $0.day == "2026-08-31" })
+        )
+
+        let fireComponents = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: carryover.fireDate
+        )
+        XCTAssertEqual(fireComponents.year, 2026)
+        XCTAssertEqual(fireComponents.month, 9)
+        XCTAssertEqual(fireComponents.day, 1)
+        XCTAssertEqual(fireComponents.hour, 7)
+        XCTAssertEqual(fireComponents.minute, 0)
+        XCTAssertTrue(
+            DailyReviewNotifications.journalHorizonDayKeys(
+                now: now,
+                calendar: calendar
+            ).contains("2026-08-31")
+        )
+    }
+
+    func testJournalRequestCarriesOriginalLogicalDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 1,
+            hour: 1
+        )))
+        let suiteName = "DailyReviewNotificationsTests.request-day.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "notif.quietHoursEnabled")
+        defaults.set(22 * 60, forKey: "notif.quietStartMinutes")
+        defaults.set(7 * 60, forKey: "notif.quietEndMinutes")
+        setDailyReviewPreferences(morning: false, journal: true)
+        UserDefaults.standard.set(
+            23 * 60,
+            forKey: DailyReviewNotifications.eveningMinutesKey
+        )
+
+        let request = try XCTUnwrap(
+            DailyReviewNotifications.notificationRequests(
+                now: now,
+                calendar: calendar,
+                defaults: defaults
+            ).first(where: {
+                $0.identifier == "daily-review-evening-2026-08-31"
+            })
+        )
+
+        XCTAssertEqual(
+            NotificationRouteBridge.journalDay(from: request.content.userInfo),
+            "2026-08-31"
+        )
     }
 
     func testUnknownNotificationRouteIsIgnored() {

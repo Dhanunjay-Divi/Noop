@@ -74,6 +74,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.noop.notif.CallAlertController
 import com.noop.notif.CallAlertSource
+import com.noop.notif.DailyReviewReminders
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StrainTargetNotifier
 import java.util.Calendar
@@ -552,6 +553,7 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
                 onChange = {
                     quietHoursEnabled = it
                     NotifPrefs.setBool(context, NotifPrefs.QUIET, it)
+                    DailyReviewReminders.reconcile(context)
                 },
             )
             if (quietHoursEnabled) {
@@ -568,6 +570,7 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
                         onPicked = {
                             quietStartMinutes = it
                             NotifPrefs.setInt(context, NotifPrefs.QUIET_START, it)
+                            DailyReviewReminders.reconcile(context)
                         },
                     )
                     Text("to", style = NoopType.body, color = Palette.textSecondary)
@@ -577,6 +580,7 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
                         onPicked = {
                             quietEndMinutes = it
                             NotifPrefs.setInt(context, NotifPrefs.QUIET_END, it)
+                            DailyReviewReminders.reconcile(context)
                         },
                     )
                     Spacer(Modifier.weight(1f))

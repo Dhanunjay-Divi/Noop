@@ -41,6 +41,60 @@ class PlannedWorkoutCalendarSnapshotTest {
     }
 
     @Test
+    fun providerQueryConnectsCoroutineCancellationToThePlatformQuery() {
+        val source = plannedWorkoutCalendarStoreSource()
+        val queryStart = source.indexOf("private suspend fun query(")
+        val blockingStart = source.indexOf("private fun queryBlocking(", queryStart)
+        val candidates = source.indexOf("val candidates =", blockingStart)
+        val loop = source.indexOf("while (it.moveToNext())", candidates)
+        assertTrue(queryStart >= 0 && blockingStart > queryStart)
+        assertTrue(source.substring(queryStart, blockingStart).contains("suspendCancellableCoroutine"))
+        assertTrue(source.substring(queryStart, blockingStart).contains("CancellationSignal()"))
+        assertTrue(source.substring(queryStart, blockingStart).contains("invokeOnCancellation"))
+        assertTrue(source.substring(blockingStart, candidates).contains("cancellationSignal,"))
+        assertTrue(loop > candidates)
+        assertTrue(
+            source.substring(loop, source.indexOf("val bucket =", loop))
+                .contains("cancellationSignal.throwIfCanceled()"),
+        )
+    }
+
+    @Test
+    fun decisionCommitHoldsTheSnapshotLockAndSamplesTimeInsideIt() {
+        val store = plannedWorkoutCalendarStoreSource()
+        val notifier = source("com/noop/notif/AdaptiveDayNotifier.kt")
+        val guardStart = store.indexOf("internal fun <T> commitIfCurrentFuture(")
+        val refreshStart = store.indexOf("suspend fun refresh(")
+        assertTrue(guardStart >= 0 && refreshStart > guardStart)
+        val guard = store.substring(guardStart, refreshStart)
+        assertTrue(guard.contains("synchronized(stateLock)"))
+        assertTrue(guard.contains("val nowMillis = nowMillisProvider()"))
+        assertTrue(guard.contains("_snapshot.value != expectedSnapshot"))
+        assertTrue(guard.contains("expectedSnapshot.startSec <= nowMillis / 1_000L"))
+        assertTrue(guard.contains("commit(nowMillis)"))
+
+        val acknowledgeStart = notifier.indexOf(
+            "internal suspend fun acknowledgePlannedWorkoutDecision(",
+        )
+        val commitStart = notifier.indexOf(
+            "private fun commitPlannedWorkoutDecision(",
+            acknowledgeStart,
+        )
+        val lockedCommitStart = notifier.indexOf(
+            "private fun commitPlannedWorkoutDecisionLocked(",
+            commitStart,
+        )
+        val acknowledge = notifier.substring(acknowledgeStart, commitStart)
+        val commit = notifier.substring(commitStart, lockedCommitStart)
+        val synchronizedAnnotation = notifier.lastIndexOf("@Synchronized", commitStart)
+        assertTrue(acknowledge.contains("return commitPlannedWorkoutDecision("))
+        assertTrue(synchronizedAnnotation in acknowledgeStart until commitStart)
+        assertTrue(commit.contains("PlannedWorkoutCalendarStore.commitIfCurrentFuture("))
+        assertTrue(commit.contains("nowMillis = nowMillis"))
+        assertTrue(!acknowledge.contains("PlannedWorkoutCalendarStore.isCurrent(snapshot)"))
+    }
+
+    @Test
     fun recoverableProviderFailurePreservesKnownStateAndReturnsUnknownOutcome() {
         val source = plannedWorkoutCalendarStoreSource()
         val genericCatch = source.indexOf("catch (_: Exception)")

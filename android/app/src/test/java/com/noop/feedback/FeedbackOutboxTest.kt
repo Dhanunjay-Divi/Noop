@@ -1369,6 +1369,32 @@ class FeedbackOutboxTest {
     }
 
     @Test
+    fun reservationDrainPersistsServerRetryDelayWithoutConsumingAttempt() {
+        val filesDir = temporary.newFolder("reservation-drain-retry-delay")
+        val now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        outbox.bindIdentity(staged.localId, identitySubjectSha256)
+
+        val schedule = outbox.scheduleContinuityRetry(
+            localId = staged.localId,
+            lane = FeedbackReservationAttemptLane.DELIVERY,
+            failure = FeedbackFailureCategory.SERVER_RETRYABLE,
+            allowBoundIdentity = true,
+            retryAfterMillis = 300_000L,
+        )
+
+        assertEquals(300_000L, schedule.delayMillis)
+        assertEquals(now + 300_000L, schedule.record.retryNotBeforeMillis)
+        assertEquals(0, schedule.record.attempt)
+    }
+
+    @Test
     fun boundReservationPendingRefundsAttemptAndPersistsRetryDeadlineAcrossRestart() {
         val filesDir = temporary.newFolder("bound-delivery-continuity-restart")
         var now = 1_789_000_000_000L

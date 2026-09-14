@@ -35,7 +35,7 @@ class CurrentSchemaMigrationInstrumentedTest {
     }
 
     @Test
-    fun complete47To52UpgradeKeepsLegacyDirtyRowsUnclaimedAndInstallsCurrentTriggers() {
+    fun complete47To53UpgradeKeepsLegacyDirtyRowsUnclaimedAndInstallsCurrentTriggers() {
         migrationHelper.createDatabase(MIGRATION_DATABASE, 47).use { database ->
             database.execSQL(
                 """
@@ -61,15 +61,16 @@ class CurrentSchemaMigrationInstrumentedTest {
 
         migrationHelper.runMigrationsAndValidate(
             MIGRATION_DATABASE,
-            52,
+            53,
             true,
             WhoopDatabase.MIGRATION_47_48,
             WhoopDatabase.MIGRATION_48_49,
             WhoopDatabase.MIGRATION_49_50,
             WhoopDatabase.MIGRATION_50_51,
             WhoopDatabase.MIGRATION_51_52,
+            WhoopDatabase.MIGRATION_52_53,
         ).use { database ->
-            assertEquals(52, database.version)
+            assertEquals(53, database.version)
             database.query(
                 """
                     SELECT localProfileId, accountScopeHash
@@ -294,7 +295,7 @@ class CurrentSchemaMigrationInstrumentedTest {
     }
 
     @Test
-    fun fresh52InitializationCreatesBindingAndBothTriggerFamilies() {
+    fun fresh53InitializationCreatesBindingAndBothTriggerFamilies() {
         val database = Room.databaseBuilder(
             context,
             WhoopDatabase::class.java,
@@ -310,7 +311,7 @@ class CurrentSchemaMigrationInstrumentedTest {
         ).build()
         val sql = database.openHelper.writableDatabase
 
-        assertEquals(52, sql.version)
+        assertEquals(53, sql.version)
         assertEquals(1L, tableCount(sql, "managedLocalProfile"))
         sql.query(
             "SELECT localProfileId, accountScopeHash FROM managedLocalProfile WHERE bindingId = 1",
@@ -325,7 +326,7 @@ class CurrentSchemaMigrationInstrumentedTest {
     }
 
     @Test
-    fun complete44To52UpgradeUsesLegacyTriggersUntilAccountPartitionExists() {
+    fun complete44To53UpgradeUsesLegacyTriggersUntilAccountPartitionExists() {
         migrationHelper.createDatabase(FULL_MIGRATION_DATABASE, 44).use { database ->
             database.execSQL(
                 """
@@ -337,7 +338,7 @@ class CurrentSchemaMigrationInstrumentedTest {
 
         migrationHelper.runMigrationsAndValidate(
             FULL_MIGRATION_DATABASE,
-            52,
+            53,
             true,
             WhoopDatabase.MIGRATION_44_45,
             WhoopDatabase.MIGRATION_45_46,
@@ -347,8 +348,9 @@ class CurrentSchemaMigrationInstrumentedTest {
             WhoopDatabase.MIGRATION_49_50,
             WhoopDatabase.MIGRATION_50_51,
             WhoopDatabase.MIGRATION_51_52,
+            WhoopDatabase.MIGRATION_52_53,
         ).use { database ->
-            assertEquals(52, database.version)
+            assertEquals(53, database.version)
             assertEquals(36, triggerCount(database, "managed_document_%"))
             assertEquals(
                 1L,

@@ -8,6 +8,21 @@ import org.junit.Test
 
 /** Prevents regressions in the core surfaces covered by the cross-platform UI audit. */
 class UiAuditPresentationContractTest {
+    @Test
+    fun healthBodyCompositionRequiresConfirmedWeightBeforePresentingBmi() {
+        val health = source("src/main/java/com/noop/ui/HealthScreen.kt")
+        val bmiGate = health
+            .substringAfter("val currentBmi = if (")
+            .substringBefore("val targetAvailability")
+
+        assertTrue(bmiGate.contains("BodyProfilePolicy.canPresentAdultBmi("))
+        assertTrue(
+            bmiGate.contains(
+                "currentWeightConfirmed = profile.weightInputConfirmed",
+            ),
+        )
+    }
+
     private fun root(): File = File(System.getProperty("user.dir") ?: ".")
 
     private fun source(relativePath: String): String {

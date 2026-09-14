@@ -8,10 +8,12 @@ Last updated: **2026-09-14**
 - Protected branch: `main`
 - Active worktree: `/private/tmp/noop-product-audit-20260911`
 - Active branch: `codex/product-safety-quality-audit-20260911`
-- Local committed head before the bounded CI correction: `1b215c82e0bf`
-- Remote pull-request head: `1b215c82e0bf`
-- Local state at this update: one locally verified iOS test-harness correction
-  plus its operations records pending one bounded commit
+- Local and remote committed head before the final bounded change:
+  `270a221f6be298c577a343fd9243a1f5334d49f4`
+- Local state at this update: exact-current supplier-independent product,
+  platform, server, package, infrastructure, localization, privacy, claims,
+  policy, and diff verification passed; staged review and one bounded commit
+  remain
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration
@@ -20,6 +22,8 @@ Resume work from:
 
 - [Agent entry point](../../AGENTS.md)
 - [NOOP operations skill](../../.agents/skills/noop-ops/SKILL.md)
+- [Current final-review remediation](rounds/2026-09-14-pr15-final-review-remediation.md)
+- [Current reference-guidance closeout](rounds/2026-09-14-reference-guidance-closeout.md)
 - [Current hosted-CI correction round](rounds/2026-09-14-ios-tab-selection-ci-stability.md)
 - [Current late-review round](rounds/2026-09-13-pr15-late-data-integrity-review.md)
 - [First production release plan](../FIRST_PRODUCTION_RELEASE_PLAN.md)
@@ -31,15 +35,31 @@ chronological evidence only. They do not establish the current worktree state.
 
 ## Current scope
 
-Exact head `1b215c82` passed every hosted job except the iOS production-shell
-job and its required aggregator. The app built, 38 UI tests passed, one
-private-pilot test skipped intentionally, and one repeated-navigation test
-failed after a successful Sleep-tab tap because it read the selected trait from
-a cached SwiftUI accessibility node immediately. A bounded test-only correction
-now re-queries the element and waits at most three seconds. The focused case
-passed once plus three consecutive no-retry repetitions, and the complete iOS
-production shell executed 39 tests with 38 passes, one intentional private-pilot
-skip, and zero failures. Replacement exact-SHA hosted verification remains.
+The final local slice closes seven concrete review defects:
+
+- an operational feedback-reservation drain no longer consumes a submitted
+  report's finite automatic-attempt budget;
+- Android BMI requires confirmed profile age, height, and current weight;
+- accepted oversized Android hydration history has an exact correction/clear
+  path with transactional projection rollback;
+- journal notification/contextual routing preserves the logical journal day;
+- Apple force-refreshes EventKit and rejects a stale planned-workout decision;
+- Android expires only the owned planned-workout instance and preserves newer
+  guidance;
+- morning and journal reminders have independent consent and durable
+  quiet-hour handling on both phones;
+- both feedback clients persist the bounded server `Retry-After` deadline for
+  the exact reservation-drain response without consuming an automatic attempt;
+- Android persists cross-midnight daily-review carryover before the first
+  delayed delivery and retains it across time, settings, and process
+  reconciliation;
+- Android planned-workout choices bind receiver cancellation to Calendar
+  Provider, validate a still-current future event at commit time, and use a
+  deadlock-safe notification-then-calendar lock order.
+
+Remote head `270a221f` predates this final slice. Earlier hosted matrices remain
+chronological evidence only; replacement exact-SHA hosted verification is
+required after the bounded final commit.
 
 The active closeout covers the remaining supplier-independent product,
 health-safety, hydration, notification, wind-down, accessibility, Safety,
@@ -84,13 +104,17 @@ promises, or silently change a workout.
 Completed on the current product source:
 
 - Focused Android UI-audit contracts: Full and Demo passed.
-- Complete Android source wall: Full and Demo each executed 4,742 unit cases
-  with 4,735 passes, seven intentional skips, and zero failures/errors; both
+- Focused Apple notification, contextual-action, route, and calendar wall:
+  113 passed, zero failed/skipped.
+- Focused Android hydration API 35 wall: three passed, zero failed.
+- Complete Android source wall: Full and Demo each executed 4,766 unit cases
+  with 4,759 passes, seven intentional skips, and zero failures/errors; both
   APKs, both lint variants, and both instrumentation-source compilations passed
   in 137 Gradle tasks.
-- Android Pixel 2 API 35 managed-device production shell: 107 tests total, 105
+- Android Pixel 2 API 35 managed-device production shell: 109 tests total, 107
   passed, zero failures/errors, and two intentional private-pilot skips. The
-  new WorkManager feedback-continuity ordering test passed.
+  hydration transaction rollback, WorkManager continuity, and notification
+  runtime paths passed.
 - Focused server closeout: the backup/migration/feedback wall passed 42 tests;
   the complete PostgreSQL feedback file passed 27 tests after the final
   formatter-only correction. The strengthened restore application smoke passed
@@ -100,22 +124,26 @@ Completed on the current product source:
   deprecation warning. Ruff check and canonical format passed over 81 files.
 - Focused Apple feedback and terminology checks passed, including
   remote-deletion continuity after a second material clock rollback.
-- Complete macOS app suite: 1,988 tests total, 1,987 passed, zero failures, and
+- Complete macOS app suite: 2,007 tests total, 2,006 passed, zero failures, and
   one expected external Xiaomi-fixture skip.
 - Generic dual-architecture iOS Simulator Release build: the complete app,
   widgets, Watch companion, metadata, and launch gate built successfully with
   signing disabled.
 - Exact-current iPhone UI suite: 39 tests total, 38 passed, zero failures, and
   one intentional private-pilot skip.
+- Nine core Swift packages executed 2,971 tests: 2,961 passed, ten
+  fixture-dependent skips, and zero failures. StudyHarness and Backfill both
+  built and tested successfully.
 - Exact-current repository wall: feedback localization for 86 strings across
-  nine locales; strict whole-tree and differential i18n; the Android hardcoded
-  baseline shrank by two reviewed Stress strings to 231 entries while Apple
-  remains at 150; the terminology inventory records 17,631 classified
+  nine locales; 788 app-wide strings plus 45 Android-only resources across nine
+  locales generated idempotently; strict whole-tree and differential i18n; the
+  Android hardcoded baseline remains at 231 entries while Apple remains at
+  150; the terminology inventory records 17,644 classified
   occurrences with zero forbidden mappings and no active-allowlist expansion;
   the 1,252-file health-claims scan; private-data, calibration,
-  legal/distribution, release-control, required-CI, 109 tracked JSON files, 27
+  legal/distribution, release-control, required-CI, 111 tracked JSON files, 27
   tracked shell syntax checks, ShellCheck over 25 POSIX/bash scripts,
-  Actionlint, Ruff, 64 operations records, 12 OpenTofu tests, and diff gates
+  Actionlint, Ruff, 67 operations records, 12 OpenTofu tests, and diff gates
   passed on the final source and operations records.
 - Repository tools: 230 tests plus 34 subtests, 49 top-level i18n tests, and 12
   OpenTofu tests passed.
@@ -128,16 +156,11 @@ test, localization, migration, workflow, or policy edit.
 
 ## Pull request and integration
 
-Pull request `#15` is open, mergeable, and blocked by unresolved review
-conversations. Its remote head has 35 passing hosted checks and three expected
-skips, but those checks validate `6766b30c`, not the current local work.
-
-Three review threads remain unresolved until the replacement head proves their
-fixes:
-
-- merged hydration-day limit enforcement;
-- feedback anonymous-identity lifetime and continuity;
-- managed-sync deletion tombstones.
+Pull request `#15` is the protected integration record. Its current remote head
+is `270a221f`; any check or review state on an earlier SHA is not final evidence.
+Known review conversations remain unresolved until the replacement head proves
+their fixes, including hydration limits/transactions, feedback continuity, and
+managed-sync deletion behavior.
 
 Closeout order:
 

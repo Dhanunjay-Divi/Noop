@@ -3,9 +3,9 @@
     "compatibility": 1709,
     "core": 4983,
     "customer": 815,
-    "fixture": 5507,
-    "generated": 20,
-    "historical": 3060,
+    "fixture": 5511,
+    "generated": 21,
+    "historical": 3068,
     "import": 870,
     "persisted": 667
   },
@@ -14348,7 +14348,7 @@
       "category": "core",
       "lineNumbers": [
         7,
-        548
+        552
       ],
       "occurrenceCount": 2,
       "path": "Strand/System/HydrationReminders.swift",
@@ -14908,10 +14908,10 @@
       "lineNumbers": [
         3,
         4,
-        1038,
-        1068,
-        1079,
-        1080
+        1137,
+        1167,
+        1178,
+        1179
       ],
       "occurrenceCount": 6,
       "path": "StrandTests/ContextualInterventionsTests.swift",
@@ -18266,6 +18266,18 @@
       }
     },
     {
+      "category": "generated",
+      "lineNumbers": [
+        0
+      ],
+      "occurrenceCount": 1,
+      "path": "android/app/schemas/com.noop.data.WhoopDatabase/53.json",
+      "sha256": "e0ec7488dc4cbcafdd7a3bf1dbd7128922aba9f4a10f63c06c97d2bd8dc444c8",
+      "tokenCounts": {
+        "whoopdatabase": 1
+      }
+    },
+    {
       "category": "historical",
       "lineNumbers": [
         0,
@@ -18375,26 +18387,28 @@
         68,
         69,
         70,
-        148,
-        259,
-        300,
-        305,
+        71,
+        149,
+        260,
+        301,
         306,
         307,
-        342,
+        308,
         343,
         344,
         345,
         346,
         347,
         348,
-        349
+        349,
+        350,
+        351
       ],
-      "occurrenceCount": 20,
+      "occurrenceCount": 22,
       "path": "android/app/src/androidTest/java/com/noop/data/CurrentSchemaMigrationInstrumentedTest.kt",
-      "sha256": "d8f1808fa9010e9fde692ea523bae8014c5be05597ee2aff0bef26b653d905fc",
+      "sha256": "947d8c4eb5ba09c251c2950264fc9fa8281475d38352b23b8e514d7d53e6ff5d",
       "tokenCounts": {
-        "whoopdatabase": 20
+        "whoopdatabase": 22
       }
     },
     {
@@ -18443,15 +18457,22 @@
     {
       "category": "historical",
       "lineNumbers": [
-        23,
-        57,
-        72
+        26,
+        60,
+        75,
+        128,
+        174,
+        178,
+        182,
+        276,
+        289
       ],
-      "occurrenceCount": 3,
+      "occurrenceCount": 9,
       "path": "android/app/src/androidTest/java/com/noop/data/HydrationEntryMigrationInstrumentedTest.kt",
-      "sha256": "9a6f63c17995690cc2ffbb763e3f71c406ea492d8b81a050e5b93cd6a7e13428",
+      "sha256": "325f3124f4f7829cf29458be59c5e51b653a6ebdce20c5264685e0d036a12819",
       "tokenCounts": {
-        "whoopdatabase": 3
+        "whoopdao": 1,
+        "whoopdatabase": 8
       }
     },
     {
@@ -18775,8 +18796,8 @@
         143,
         307,
         311,
-        441,
-        445
+        445,
+        449
       ],
       "occurrenceCount": 6,
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -19177,24 +19198,24 @@
       "category": "core",
       "lineNumbers": [
         8,
-        147,
-        158,
-        164,
-        208,
-        214,
-        246,
-        252,
-        281,
-        304,
-        317,
-        375,
-        381,
-        387,
-        409,
-        414,
-        423,
-        431,
-        445
+        148,
+        159,
+        165,
+        209,
+        215,
+        247,
+        253,
+        282,
+        305,
+        318,
+        382,
+        388,
+        394,
+        416,
+        421,
+        430,
+        438,
+        452
       ],
       "occurrenceCount": 19,
       "path": "android/app/src/main/java/com/noop/analytics/HydrationStore.kt",
@@ -21444,15 +21465,15 @@
         398,
         400,
         438,
-        658,
-        666,
-        764,
-        765,
-        773,
-        803,
-        805,
-        808,
-        835
+        673,
+        681,
+        779,
+        780,
+        788,
+        818,
+        820,
+        823,
+        850
       ],
       "occurrenceCount": 26,
       "path": "android/app/src/main/java/com/noop/data/Entities.kt",
@@ -21469,7 +21490,7 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        668
+        683
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/data/Entities.kt",
@@ -21692,14 +21713,14 @@
         1179,
         1190,
         1288,
-        1925,
-        1941,
-        1965,
-        2020,
-        2166,
-        2189,
-        2394,
-        2436
+        1935,
+        1951,
+        1975,
+        2030,
+        2176,
+        2199,
+        2404,
+        2446
       ],
       "occurrenceCount": 22,
       "path": "android/app/src/main/java/com/noop/data/WhoopDao.kt",
@@ -21724,8 +21745,8 @@
         1195,
         1204,
         1211,
-        2397,
-        2436
+        2407,
+        2446
       ],
       "occurrenceCount": 9,
       "path": "android/app/src/main/java/com/noop/data/WhoopDao.kt",
@@ -21776,14 +21797,14 @@
         707,
         707,
         715,
-        2055,
-        2058,
-        2083,
-        2086,
-        2102,
-        2102,
         2103,
-        2103
+        2106,
+        2132,
+        2135,
+        2151,
+        2151,
+        2152,
+        2152
       ],
       "occurrenceCount": 46,
       "path": "android/app/src/main/java/com/noop/data/WhoopDatabase.kt",
@@ -21807,8 +21828,8 @@
         891,
         894,
         897,
-        2083,
-        2102
+        2132,
+        2151
       ],
       "occurrenceCount": 9,
       "path": "android/app/src/main/java/com/noop/data/WhoopDatabase.kt",
@@ -22611,11 +22632,11 @@
     {
       "category": "core",
       "lineNumbers": [
-        29,
-        33,
-        697,
-        700,
-        756
+        32,
+        37,
+        721,
+        724,
+        780
       ],
       "occurrenceCount": 5,
       "path": "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt",
@@ -22658,8 +22679,8 @@
     {
       "category": "core",
       "lineNumbers": [
-        22,
-        261
+        23,
+        656
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/notif/DailyReviewReminders.kt",
@@ -24081,7 +24102,7 @@
     {
       "category": "core",
       "lineNumbers": [
-        171
+        173
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/ui/AppRoot.kt",
@@ -24251,9 +24272,9 @@
     {
       "category": "core",
       "lineNumbers": [
-        134,
-        848,
-        1234
+        139,
+        927,
+        1313
       ],
       "occurrenceCount": 3,
       "path": "android/app/src/main/java/com/noop/ui/AutomationsScreen.kt",
@@ -24785,18 +24806,18 @@
       "category": "core",
       "lineNumbers": [
         102,
-        715,
-        966,
-        979,
-        1283,
-        1441,
+        720,
+        971,
+        984,
+        1288,
         1446,
-        1452,
-        1540,
-        3199,
-        3456,
-        3457,
-        3498
+        1451,
+        1457,
+        1545,
+        3204,
+        3461,
+        3462,
+        3503
       ],
       "occurrenceCount": 13,
       "path": "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
@@ -24810,12 +24831,12 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        780,
-        3391,
-        3415,
-        3464,
-        3480,
-        3502
+        785,
+        3396,
+        3420,
+        3469,
+        3485,
+        3507
       ],
       "occurrenceCount": 6,
       "path": "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
@@ -25233,7 +25254,7 @@
     {
       "category": "core",
       "lineNumbers": [
-        624
+        628
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/ui/NotificationsSettingsScreen.kt",
@@ -30295,18 +30316,21 @@
       "lineNumbers": [
         17,
         18,
-        21,
-        22,
-        26,
-        39,
-        57,
-        68
+        19,
+        20,
+        23,
+        24,
+        25,
+        30,
+        56,
+        74,
+        85
       ],
-      "occurrenceCount": 8,
+      "occurrenceCount": 11,
       "path": "android/app/src/test/java/com/noop/data/HydrationEntryMigrationTest.kt",
-      "sha256": "5f07b23762ee6f5aec3d9684c42e6f2baac79929bbb269040beb64fd306dc47a",
+      "sha256": "6888b40fdc96a0ada63aaf29c03d388f8c887d816c3faae01d51b5da9d61bc7c",
       "tokenCounts": {
-        "whoopdatabase": 7,
+        "whoopdatabase": 10,
         "whooprepository": 1
       }
     },
@@ -31656,11 +31680,23 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        1067
+        1217
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/test/java/com/noop/notif/AdaptiveDayNotifierTest.kt",
       "sha256": "67edd8933cc4e65bed34a22a63dc4a646b43bb2111cc5749a9b87150134ac109",
+      "tokenCounts": {
+        "whooprepository": 1
+      }
+    },
+    {
+      "category": "fixture",
+      "lineNumbers": [
+        200
+      ],
+      "occurrenceCount": 1,
+      "path": "android/app/src/test/java/com/noop/notif/DailyReviewReminderPolicyTest.kt",
+      "sha256": "93ae90ff187cdcfb6a876e80f9a26e94086cc08cab2b3b027ba10fcb1bc61e35",
       "tokenCounts": {
         "whooprepository": 1
       }
@@ -33625,10 +33661,10 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        165,
-        166,
-        266,
-        299
+        180,
+        181,
+        281,
+        314
       ],
       "occurrenceCount": 4,
       "path": "android/app/src/test/java/com/noop/ui/UiAuditPresentationContractTest.kt",
@@ -35616,7 +35652,7 @@
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/DECISIONS.md",
-      "sha256": "2abd89db47ff2c54bbb39b74f1a008d2f38a83b40f7c8b73080463fac75dbcc6",
+      "sha256": "b4e35780fed750947553879f6651a62f52ddda8a0bb7787aaa6ecc5afdc67e63",
       "tokenCounts": {
         "whoopbleclient": 1,
         "whoopmanagedsyncadapter": 1,
@@ -35862,9 +35898,9 @@
     {
       "category": "historical",
       "lineNumbers": [
-        20,
-        56,
-        56
+        23,
+        59,
+        59
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/rounds/INDEX.md",
@@ -38087,7 +38123,7 @@
       }
     }
   ],
-  "occurrenceCount": 17631,
+  "occurrenceCount": 17644,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

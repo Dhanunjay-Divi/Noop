@@ -410,7 +410,7 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             runCatching { RemoteSyncScheduler.reschedule(this@NoopApplication) }
             runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(this@NoopApplication) }
             runCatching { HealthConnectSyncScheduler.reconcile(this@NoopApplication) }
-            runCatching { DailyReviewReminders.reconcile(this@NoopApplication) }
+            runCatching { DailyReviewReminders.restore(this@NoopApplication) }
             runCatching {
                 BackupSettingsBridge.reconcileHydrationAfterDatabaseReady(
                     context = this@NoopApplication,

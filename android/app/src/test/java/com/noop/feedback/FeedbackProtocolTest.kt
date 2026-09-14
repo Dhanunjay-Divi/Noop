@@ -38,6 +38,55 @@ class FeedbackProtocolTest {
     val temporary = TemporaryFolder()
 
     @Test
+    fun reservationDrainDeferralIsAttemptPreserving() = runTest {
+        val http = client { request ->
+            response(
+                request = request,
+                code = 503,
+                body = """{"detail":"temporarily unavailable"}""",
+                headers = mapOf(
+                    FeedbackReservationAdmissionPolicy.HEADER to
+                        FeedbackReservationAdmissionPolicy.RESERVATION_DRAIN,
+                    FeedbackReservationAdmissionPolicy.RETRY_AFTER_HEADER to "300",
+                ),
+            )
+        }
+        val api = FeedbackApiClient(
+            configuration = FeedbackConfiguration(
+                "https://api.example/base".toHttpUrl(),
+            ),
+            apiHttp = http,
+            uploadHttp = http,
+        )
+
+        try {
+            api.reserve(
+                authorization = authorization,
+                idempotencyKey =
+                    UUID.fromString("11111111-2222-4333-8444-555555555555"),
+                request = reservationRequest(appVersion = "9.2.1"),
+            )
+            fail("Expected reservation admission deferral")
+        } catch (error: FeedbackProtocolException.ReservationAdmissionDeferred) {
+            assertEquals(300_000L, error.retryAfterMillis)
+        }
+    }
+
+    @Test
+    fun reservationRetryAfterIsBoundedAndRejectsMalformedValues() {
+        assertEquals(
+            300_000L,
+            FeedbackReservationAdmissionPolicy.retryAfterMillis("300"),
+        )
+        assertEquals(
+            FeedbackReservationAdmissionPolicy.MAXIMUM_RETRY_AFTER_MILLIS,
+            FeedbackReservationAdmissionPolicy.retryAfterMillis("999999"),
+        )
+        assertNull(FeedbackReservationAdmissionPolicy.retryAfterMillis("invalid"))
+        assertNull(FeedbackReservationAdmissionPolicy.retryAfterMillis("0"))
+    }
+
+    @Test
     fun reserveUploadAndCompleteUseExactAccountFreeIdentityProtocol() = runTest {
         val requests = mutableListOf<Request>()
         val reportId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
@@ -774,13 +823,21 @@ class FeedbackProtocolTest {
             .addInterceptor(Interceptor { chain -> responder(chain.request()) })
             .build()
 
-    private fun response(request: Request, code: Int, body: String): Response =
+    private fun response(
+        request: Request,
+        code: Int,
+        body: String,
+        headers: Map<String, String> = emptyMap(),
+    ): Response =
         Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
             .code(code)
             .message("synthetic")
             .body(body.toResponseBody("application/json".toMediaType()))
+            .apply {
+                headers.forEach { (name, value) -> header(name, value) }
+            }
             .build()
 
     private fun Request.bodyText(): String =

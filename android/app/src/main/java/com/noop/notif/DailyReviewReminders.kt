@@ -18,13 +18,16 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.noop.AppDiagnosticsRecorder
 import com.noop.R
 import com.noop.data.WhoopRepository
 import com.noop.ui.ContextualActionCenter
 import com.noop.ui.JOURNAL_DEVICE_ID
 import com.noop.ui.NoopNotificationRoute
+import com.noop.ui.NotifPrefs
 import com.noop.ui.NotificationRouteBridge
 import java.time.Duration
+import java.time.LocalDate
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.TimeUnit
@@ -39,10 +42,31 @@ internal object DailyReviewReminderPolicy {
     const val DEFAULT_MORNING_MINUTES = 8 * 60
     const val DEFAULT_EVENING_MINUTES = 19 * 60
     const val DELIVERY_GRACE_MINUTES = 3 * 60L
+    const val DEFAULT_QUIET_START_MINUTES = 22 * 60
+    const val DEFAULT_QUIET_END_MINUTES = 7 * 60
 
     fun clampMinuteOfDay(value: Int): Int = value.coerceIn(0, 24 * 60 - 1)
 
-    fun nextRun(now: ZonedDateTime, minuteOfDay: Int): ZonedDateTime {
+    fun nextRun(
+        now: ZonedDateTime,
+        minuteOfDay: Int,
+        quietHoursEnabled: Boolean = false,
+        quietStartMinutes: Int = DEFAULT_QUIET_START_MINUTES,
+        quietEndMinutes: Int = DEFAULT_QUIET_END_MINUTES,
+    ): ZonedDateTime {
+        val nominal = nextNominalRun(now, minuteOfDay)
+        return nextEligible(
+            nominal,
+            quietHoursEnabled,
+            quietStartMinutes,
+            quietEndMinutes,
+        )
+    }
+
+    fun nextNominalRun(
+        now: ZonedDateTime,
+        minuteOfDay: Int,
+    ): ZonedDateTime {
         val minute = clampMinuteOfDay(minuteOfDay)
         var next = now.toLocalDate()
             .atTime(minute / 60, minute % 60)
@@ -56,6 +80,46 @@ internal object DailyReviewReminderPolicy {
         return next
     }
 
+    fun isInQuietHours(
+        dateTime: ZonedDateTime,
+        quietHoursEnabled: Boolean,
+        quietStartMinutes: Int,
+        quietEndMinutes: Int,
+    ): Boolean {
+        if (!quietHoursEnabled) return false
+        val minute = dateTime.hour * 60 + dateTime.minute
+        val start = clampMinuteOfDay(quietStartMinutes)
+        val end = clampMinuteOfDay(quietEndMinutes)
+        return if (start <= end) minute in start until end else minute >= start || minute < end
+    }
+
+    fun nextEligible(
+        dateTime: ZonedDateTime,
+        quietHoursEnabled: Boolean,
+        quietStartMinutes: Int,
+        quietEndMinutes: Int,
+    ): ZonedDateTime {
+        if (
+            !isInQuietHours(
+                dateTime,
+                quietHoursEnabled,
+                quietStartMinutes,
+                quietEndMinutes,
+            )
+        ) {
+            return dateTime
+        }
+        val start = clampMinuteOfDay(quietStartMinutes)
+        val end = clampMinuteOfDay(quietEndMinutes)
+        val minute = dateTime.hour * 60 + dateTime.minute
+        val endDay = if (start > end && minute >= start) {
+            dateTime.toLocalDate().plusDays(1)
+        } else {
+            dateTime.toLocalDate()
+        }
+        return endDay.atTime(end / 60, end % 60).atZone(dateTime.zone)
+    }
+
     fun shouldDeliver(
         scheduledAt: ZonedDateTime,
         now: ZonedDateTime,
@@ -64,6 +128,47 @@ internal object DailyReviewReminderPolicy {
         if (now.isBefore(scheduledAt)) return false
         val lateness = Duration.between(scheduledAt.toInstant(), now.toInstant()).toMinutes()
         return lateness in 0..DELIVERY_GRACE_MINUTES
+    }
+
+    fun logicalDayMatchesDelivery(
+        logicalDay: LocalDate,
+        deliveryAt: ZonedDateTime,
+    ): Boolean {
+        val deliveryDay = deliveryAt.toLocalDate()
+        return logicalDay == deliveryDay || logicalDay == deliveryDay.minusDays(1)
+    }
+
+    fun requiresCarryoverMarker(
+        logicalDay: LocalDate,
+        deliveryAt: ZonedDateTime,
+    ): Boolean = deliveryAt.toLocalDate() == logicalDay.plusDays(1)
+
+    fun carryoverRun(
+        logicalDay: LocalDate,
+        now: ZonedDateTime,
+        minuteOfDay: Int,
+        quietHoursEnabled: Boolean,
+        quietStartMinutes: Int,
+        quietEndMinutes: Int,
+    ): ZonedDateTime? {
+        if (
+            logicalDay != now.toLocalDate() &&
+            logicalDay != now.toLocalDate().minusDays(1)
+        ) {
+            return null
+        }
+        val minute = clampMinuteOfDay(minuteOfDay)
+        val nominal = logicalDay
+            .atTime(minute / 60, minute % 60)
+            .atZone(now.zone)
+        val eligible = nextEligible(
+            nominal,
+            quietHoursEnabled,
+            quietStartMinutes,
+            quietEndMinutes,
+        )
+        val delivery = if (eligible.isAfter(now)) eligible else now.plusSeconds(1)
+        return delivery.takeIf { logicalDayMatchesDelivery(logicalDay, it) }
     }
 
     fun shouldPost(
@@ -80,14 +185,30 @@ internal object DailyReviewReminderPolicy {
  */
 object DailyReviewReminders {
     private const val PREFS = "noop_daily_review"
-    private const val ENABLED = "enabled"
+    private const val LEGACY_ENABLED = "enabled"
+    private const val MORNING_ENABLED = "morning_enabled"
+    private const val JOURNAL_ENABLED = "journal_enabled"
+    private const val SPLIT_MIGRATED = "split_migrated_v1"
     private const val MORNING_MINUTES = "morning_minutes"
     private const val EVENING_MINUTES = "evening_minutes"
     private const val MORNING_WORK = "noop_daily_review_morning"
     private const val EVENING_WORK = "noop_daily_review_evening"
+    private const val CARRYOVER_DAY_PREFIX = "carryover_day."
+
+    private val preferenceLock = Any()
 
     fun isEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(ENABLED, false)
+        isMorningEnabled(context) || isJournalEnabled(context)
+
+    fun isMorningEnabled(context: Context): Boolean {
+        migrateLegacyPreferenceIfNeeded(context)
+        return prefs(context).getBoolean(MORNING_ENABLED, false)
+    }
+
+    fun isJournalEnabled(context: Context): Boolean {
+        migrateLegacyPreferenceIfNeeded(context)
+        return prefs(context).getBoolean(JOURNAL_ENABLED, false)
+    }
 
     fun morningMinutes(context: Context): Int =
         DailyReviewReminderPolicy.clampMinuteOfDay(
@@ -113,19 +234,52 @@ object DailyReviewReminders {
      * leaves an apparently-on preference behind.
      */
     fun setEnabled(context: Context, enabled: Boolean): Boolean {
+        return setPreferences(
+            context = context,
+            morningEnabled = enabled,
+            journalEnabled = enabled,
+        )
+    }
+
+    fun setMorningEnabled(context: Context, enabled: Boolean): Boolean =
+        setPreferences(
+            context = context,
+            morningEnabled = enabled,
+            journalEnabled = null,
+        )
+
+    fun setJournalEnabled(context: Context, enabled: Boolean): Boolean =
+        setPreferences(
+            context = context,
+            morningEnabled = null,
+            journalEnabled = enabled,
+        )
+
+    private fun setPreferences(
+        context: Context,
+        morningEnabled: Boolean?,
+        journalEnabled: Boolean?,
+    ): Boolean {
         val appContext = context.applicationContext
-        if (!enabled) {
-            prefs(appContext).edit().putBoolean(ENABLED, false).apply()
-            cancel(appContext)
-            return true
+        migrateLegacyPreferenceIfNeeded(appContext)
+        val requestedMorning = morningEnabled ?: isMorningEnabled(appContext)
+        val requestedJournal = journalEnabled ?: isJournalEnabled(appContext)
+        val enablingNewPreference =
+            (morningEnabled == true && !isMorningEnabled(appContext)) ||
+                (journalEnabled == true && !isJournalEnabled(appContext))
+        if (enablingNewPreference) {
+            DailyReviewReminderNotifier.ensureChannel(appContext)
         }
-        DailyReviewReminderNotifier.ensureChannel(appContext)
-        if (!DailyReviewReminderNotifier.canNotify(appContext)) {
-            prefs(appContext).edit().putBoolean(ENABLED, false).apply()
-            cancel(appContext)
+        if (enablingNewPreference && !DailyReviewReminderNotifier.canNotify(appContext)) {
             return false
         }
-        prefs(appContext).edit().putBoolean(ENABLED, true).apply()
+        val committed = prefs(appContext).edit()
+            .putBoolean(MORNING_ENABLED, requestedMorning)
+            .putBoolean(JOURNAL_ENABLED, requestedJournal)
+            .putBoolean(LEGACY_ENABLED, requestedMorning || requestedJournal)
+            .putBoolean(SPLIT_MIGRATED, true)
+            .commit()
+        if (!committed) return false
         reconcile(appContext)
         return true
     }
@@ -134,32 +288,106 @@ object DailyReviewReminders {
         prefs(context).edit()
             .putInt(MORNING_MINUTES, DailyReviewReminderPolicy.clampMinuteOfDay(minutes))
             .apply()
-        if (isEnabled(context)) scheduleNext(
-            context.applicationContext,
-            DailyReviewKind.MORNING,
-            ZonedDateTime.now(),
-            ExistingWorkPolicy.REPLACE,
-        )
+        if (isMorningEnabled(context)) {
+            rescheduleKind(
+                context = context.applicationContext,
+                kind = DailyReviewKind.MORNING,
+                now = ZonedDateTime.now(),
+                policy = ExistingWorkPolicy.REPLACE,
+                preserveQuietHoursCarryover = true,
+            )
+        }
     }
 
     fun setEveningMinutes(context: Context, minutes: Int) {
         prefs(context).edit()
             .putInt(EVENING_MINUTES, DailyReviewReminderPolicy.clampMinuteOfDay(minutes))
             .apply()
-        if (isEnabled(context)) scheduleNext(
-            context.applicationContext,
-            DailyReviewKind.EVENING,
-            ZonedDateTime.now(),
-            ExistingWorkPolicy.REPLACE,
-        )
+        if (isJournalEnabled(context)) {
+            rescheduleKind(
+                context = context.applicationContext,
+                kind = DailyReviewKind.EVENING,
+                now = ZonedDateTime.now(),
+                policy = ExistingWorkPolicy.REPLACE,
+                preserveQuietHoursCarryover = true,
+            )
+        }
     }
 
     fun reconcile(context: Context) {
+        reconcile(context, ExistingWorkPolicy.REPLACE)
+    }
+
+    /**
+     * Process-start repair keeps an already-enqueued quiet-hours carryover. Explicit preference/time
+     * changes and system clock broadcasts still use [reconcile] to replace obsolete wall-clock work.
+     */
+    fun restore(context: Context) {
+        reconcile(context, ExistingWorkPolicy.KEEP)
+    }
+
+    private fun reconcile(context: Context, policy: ExistingWorkPolicy) {
         val appContext = context.applicationContext
-        if (!isEnabled(appContext)) return
         val now = ZonedDateTime.now()
-        scheduleNext(appContext, DailyReviewKind.MORNING, now, ExistingWorkPolicy.REPLACE)
-        scheduleNext(appContext, DailyReviewKind.EVENING, now, ExistingWorkPolicy.REPLACE)
+        for (kind in DailyReviewKind.entries) {
+            if (isKindEnabled(appContext, kind)) {
+                rescheduleKind(
+                    context = appContext,
+                    kind = kind,
+                    now = now,
+                    policy = policy,
+                    preserveQuietHoursCarryover = true,
+                )
+            } else {
+                cancel(appContext, kind)
+            }
+        }
+    }
+
+    private fun rescheduleKind(
+        context: Context,
+        kind: DailyReviewKind,
+        now: ZonedDateTime,
+        policy: ExistingWorkPolicy,
+        preserveQuietHoursCarryover: Boolean,
+    ) {
+        if (!isKindEnabled(context, kind)) return
+        val carryoverDay = if (preserveQuietHoursCarryover) {
+            carryoverLogicalDay(context, kind)
+        } else {
+            null
+        }
+        if (carryoverDay != null) {
+            val next = DailyReviewReminderPolicy.carryoverRun(
+                logicalDay = carryoverDay,
+                now = now,
+                minuteOfDay = reminderMinutes(context, kind),
+                quietHoursEnabled = NotifPrefs.getBool(context, NotifPrefs.QUIET, false),
+                quietStartMinutes = NotifPrefs.getInt(
+                    context,
+                    NotifPrefs.QUIET_START,
+                    DailyReviewReminderPolicy.DEFAULT_QUIET_START_MINUTES,
+                ),
+                quietEndMinutes = NotifPrefs.getInt(
+                    context,
+                    NotifPrefs.QUIET_END,
+                    DailyReviewReminderPolicy.DEFAULT_QUIET_END_MINUTES,
+                ),
+            )
+            if (next != null) {
+                scheduleAt(
+                    context = context,
+                    kind = kind,
+                    next = next,
+                    policy = policy,
+                    logicalDay = carryoverDay,
+                    quietHoursCarryover = true,
+                )
+                return
+            }
+            clearCarryover(context, kind)
+        }
+        scheduleNext(context, kind, now, policy)
     }
 
     internal fun scheduleNext(
@@ -168,19 +396,57 @@ object DailyReviewReminders {
         now: ZonedDateTime,
         policy: ExistingWorkPolicy,
     ) {
-        if (!isEnabled(context)) return
-        val minute = when (kind) {
-            DailyReviewKind.MORNING -> morningMinutes(context)
-            DailyReviewKind.EVENING -> eveningMinutes(context)
-        }
-        val next = DailyReviewReminderPolicy.nextRun(now, minute)
+        if (!isKindEnabled(context, kind)) return
+        clearCarryover(context, kind)
+        val minute = reminderMinutes(context, kind)
+        val nominal = DailyReviewReminderPolicy.nextNominalRun(
+            now = now,
+            minuteOfDay = minute,
+        )
+        val next = DailyReviewReminderPolicy.nextEligible(
+            dateTime = nominal,
+            quietHoursEnabled = NotifPrefs.getBool(context, NotifPrefs.QUIET, false),
+            quietStartMinutes = NotifPrefs.getInt(
+                context,
+                NotifPrefs.QUIET_START,
+                DailyReviewReminderPolicy.DEFAULT_QUIET_START_MINUTES,
+            ),
+            quietEndMinutes = NotifPrefs.getInt(
+                context,
+                NotifPrefs.QUIET_END,
+                DailyReviewReminderPolicy.DEFAULT_QUIET_END_MINUTES,
+            ),
+        )
+        scheduleAt(
+            context = context,
+            kind = kind,
+            next = next,
+            policy = policy,
+            logicalDay = nominal.toLocalDate(),
+            quietHoursCarryover = DailyReviewReminderPolicy.requiresCarryoverMarker(
+                nominal.toLocalDate(),
+                next,
+            ),
+        )
+    }
+
+    internal fun scheduleAt(
+        context: Context,
+        kind: DailyReviewKind,
+        next: ZonedDateTime,
+        policy: ExistingWorkPolicy,
+        logicalDay: LocalDate = next.toLocalDate(),
+        quietHoursCarryover: Boolean = false,
+    ) {
+        if (!isKindEnabled(context, kind)) return
+        val now = ZonedDateTime.now(next.zone)
         val delayMillis = ChronoUnit.MILLIS.between(now, next).coerceAtLeast(1_000L)
         val request = OneTimeWorkRequestBuilder<DailyReviewReminderWorker>()
             .setInputData(
                 workDataOf(
                     DailyReviewReminderWorker.KIND_KEY to kind.name,
                     DailyReviewReminderWorker.SCHEDULED_AT_KEY to next.toInstant().toEpochMilli(),
-                    DailyReviewReminderWorker.DAY_KEY to next.toLocalDate().toString(),
+                    DailyReviewReminderWorker.DAY_KEY to logicalDay.toString(),
                 ),
             )
             .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
@@ -197,6 +463,9 @@ object DailyReviewReminders {
                 request,
             )
         }
+        if (quietHoursCarryover) {
+            recordCarryover(context, kind, logicalDay)
+        }
     }
 
     internal fun suppress(context: Context, kind: DailyReviewKind) {
@@ -210,14 +479,86 @@ object DailyReviewReminders {
     private fun cancel(context: Context) {
         val workManager = WorkManager.getInstance(context)
         for (kind in DailyReviewKind.entries) {
-            NotificationLifecycleLedger.cancelled(
-                context,
-                lifecycleId(kind),
-                NotificationLifecycleCategory.REMINDER,
-            ) {
-                workManager.cancelUniqueWork(workName(kind))
-                NotificationManagerCompat.from(context).cancel(notificationId(kind))
-            }
+            cancel(context, kind, workManager)
+        }
+    }
+
+    private fun cancel(
+        context: Context,
+        kind: DailyReviewKind,
+        workManager: WorkManager = WorkManager.getInstance(context),
+    ) {
+        clearCarryover(context, kind)
+        NotificationLifecycleLedger.cancelled(
+            context,
+            lifecycleId(kind),
+            NotificationLifecycleCategory.REMINDER,
+        ) {
+            workManager.cancelUniqueWork(workName(kind))
+            NotificationManagerCompat.from(context).cancel(notificationId(kind))
+        }
+    }
+
+    internal fun isKindEnabled(context: Context, kind: DailyReviewKind): Boolean = when (kind) {
+        DailyReviewKind.MORNING -> isMorningEnabled(context)
+        DailyReviewKind.EVENING -> isJournalEnabled(context)
+    }
+
+    private fun reminderMinutes(context: Context, kind: DailyReviewKind): Int = when (kind) {
+        DailyReviewKind.MORNING -> morningMinutes(context)
+        DailyReviewKind.EVENING -> eveningMinutes(context)
+    }
+
+    private fun carryoverKey(kind: DailyReviewKind): String =
+        "$CARRYOVER_DAY_PREFIX${kind.name}"
+
+    private fun carryoverLogicalDay(
+        context: Context,
+        kind: DailyReviewKind,
+    ): LocalDate? = prefs(context).getString(carryoverKey(kind), null)?.let {
+        runCatching { LocalDate.parse(it) }.getOrNull()
+    }
+
+    private fun recordCarryover(
+        context: Context,
+        kind: DailyReviewKind,
+        logicalDay: LocalDate,
+    ) {
+        if (
+            !prefs(context).edit()
+                .putString(carryoverKey(kind), logicalDay.toString())
+                .commit()
+        ) {
+            AppDiagnosticsRecorder.record(
+                "daily_review.carryover_state",
+                fields = mapOf("outcome" to "persist_failed"),
+            )
+        }
+    }
+
+    private fun clearCarryover(context: Context, kind: DailyReviewKind) {
+        val preferences = prefs(context)
+        val key = carryoverKey(kind)
+        if (!preferences.contains(key)) return
+        if (!preferences.edit().remove(key).commit()) {
+            AppDiagnosticsRecorder.record(
+                "daily_review.carryover_state",
+                fields = mapOf("outcome" to "clear_failed"),
+            )
+        }
+    }
+
+    private fun migrateLegacyPreferenceIfNeeded(context: Context) {
+        val appContext = context.applicationContext
+        synchronized(preferenceLock) {
+            val preferences = prefs(appContext)
+            if (preferences.getBoolean(SPLIT_MIGRATED, false)) return
+            val legacyEnabled = preferences.getBoolean(LEGACY_ENABLED, false)
+            preferences.edit()
+                .putBoolean(MORNING_ENABLED, legacyEnabled)
+                .putBoolean(JOURNAL_ENABLED, legacyEnabled)
+                .putBoolean(SPLIT_MIGRATED, true)
+                .commit()
         }
     }
 
@@ -244,19 +585,73 @@ class DailyReviewReminderWorker(appContext: Context, params: WorkerParameters) :
     CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        if (!DailyReviewReminders.isEnabled(applicationContext)) return Result.success()
         val kind = inputData.getString(KIND_KEY)
             ?.let { runCatching { DailyReviewKind.valueOf(it) }.getOrNull() }
             ?: return Result.failure()
+        if (!DailyReviewReminders.isKindEnabled(applicationContext, kind)) {
+            return Result.success()
+        }
         val scheduledAtMillis = inputData.getLong(SCHEDULED_AT_KEY, Long.MIN_VALUE)
         val scheduledDay = inputData.getString(DAY_KEY) ?: return Result.failure()
+        val logicalDay = runCatching { LocalDate.parse(scheduledDay) }
+            .getOrElse { return Result.failure() }
         if (scheduledAtMillis == Long.MIN_VALUE) return Result.failure()
 
         val now = ZonedDateTime.now()
         val scheduledAt = java.time.Instant.ofEpochMilli(scheduledAtMillis).atZone(now.zone)
-        val fresh = scheduledDay == scheduledAt.toLocalDate().toString() &&
+        val fresh = DailyReviewReminderPolicy.logicalDayMatchesDelivery(
+            logicalDay,
+            scheduledAt,
+        ) &&
             DailyReviewReminderPolicy.shouldDeliver(scheduledAt, now)
-        val journalCompleted = if (kind == DailyReviewKind.EVENING && fresh) {
+        if (!fresh) {
+            DailyReviewReminders.suppress(applicationContext, kind)
+            DailyReviewReminders.scheduleNext(
+                applicationContext,
+                kind,
+                now,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
+            )
+            return Result.success()
+        }
+        val quietHoursEnabled =
+            NotifPrefs.getBool(applicationContext, NotifPrefs.QUIET, false)
+        val quietStartMinutes = NotifPrefs.getInt(
+            applicationContext,
+            NotifPrefs.QUIET_START,
+            DailyReviewReminderPolicy.DEFAULT_QUIET_START_MINUTES,
+        )
+        val quietEndMinutes = NotifPrefs.getInt(
+            applicationContext,
+            NotifPrefs.QUIET_END,
+            DailyReviewReminderPolicy.DEFAULT_QUIET_END_MINUTES,
+        )
+        if (
+            DailyReviewReminderPolicy.isInQuietHours(
+                now,
+                quietHoursEnabled,
+                quietStartMinutes,
+                quietEndMinutes,
+            )
+        ) {
+            val deferred = DailyReviewReminderPolicy.nextEligible(
+                now,
+                quietHoursEnabled,
+                quietStartMinutes,
+                quietEndMinutes,
+            )
+            DailyReviewReminders.scheduleAt(
+                applicationContext,
+                kind,
+                deferred,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
+                logicalDay,
+                quietHoursCarryover = true,
+            )
+            DailyReviewReminders.suppress(applicationContext, kind)
+            return Result.success()
+        }
+        val journalCompleted = if (kind == DailyReviewKind.EVENING) {
             try {
                 WhoopRepository.from(applicationContext)
                     .journal(JOURNAL_DEVICE_ID, scheduledDay, scheduledDay)
@@ -268,9 +663,11 @@ class DailyReviewReminderWorker(appContext: Context, params: WorkerParameters) :
             false
         }
 
-        if (DailyReviewReminderPolicy.shouldPost(kind, fresh, journalCompleted)) {
-            if (!DailyReviewReminders.isEnabled(applicationContext)) return Result.success()
-            DailyReviewReminderNotifier.post(applicationContext, kind)
+        if (DailyReviewReminderPolicy.shouldPost(kind, true, journalCompleted)) {
+            if (!DailyReviewReminders.isKindEnabled(applicationContext, kind)) {
+                return Result.success()
+            }
+            DailyReviewReminderNotifier.post(applicationContext, kind, logicalDay)
         } else {
             DailyReviewReminders.suppress(applicationContext, kind)
         }
@@ -304,7 +701,11 @@ class DailyReviewTimeChangeReceiver : BroadcastReceiver() {
             else -> false
         }
         if (!supported) return
-        DailyReviewReminders.reconcile(context)
+        if (intent?.action == Intent.ACTION_DATE_CHANGED) {
+            DailyReviewReminders.restore(context)
+        } else {
+            DailyReviewReminders.reconcile(context)
+        }
     }
 }
 
@@ -328,7 +729,11 @@ internal object DailyReviewReminderNotifier {
     }
 
     @SuppressLint("MissingPermission")
-    fun post(context: Context, kind: DailyReviewKind): Boolean = runCatching {
+    fun post(
+        context: Context,
+        kind: DailyReviewKind,
+        logicalDay: LocalDate,
+    ): Boolean = runCatching {
         ensureChannel(context)
         if (!canNotify(context)) {
             DailyReviewReminders.suppress(context, kind)
@@ -347,7 +752,11 @@ internal object DailyReviewReminderNotifier {
         val openApp = NotificationPlatformIdentity.activityPendingIntent(
             context,
             identity,
-            NotificationRouteBridge.launchIntent(context, route),
+            NotificationRouteBridge.launchIntent(
+                context,
+                route,
+                journalDay = logicalDay.takeIf { kind == DailyReviewKind.EVENING },
+            ),
         )
         val title = context.getString(
             if (kind == DailyReviewKind.MORNING) {
@@ -385,12 +794,13 @@ internal object DailyReviewReminderNotifier {
             )
         }
         if (posted && kind == DailyReviewKind.EVENING) {
-            val fingerprint = "${kind.name.lowercase()}:${java.time.LocalDate.now()}"
+            val fingerprint = "${kind.name.lowercase()}:$logicalDay"
             ContextualActionCenter.presentJournal(
                 context = context,
                 fingerprint = fingerprint,
                 title = title,
                 detail = body,
+                journalDay = logicalDay.toString(),
             )
         }
         posted

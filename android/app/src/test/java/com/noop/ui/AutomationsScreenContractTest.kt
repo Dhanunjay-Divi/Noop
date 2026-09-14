@@ -17,10 +17,21 @@ class AutomationsScreenContractTest {
         assertTrue(source.contains("R.string.automation_morning_recap_help"))
         assertTrue(source.contains("R.string.automation_post_workout_summary_help"))
         assertTrue(source.contains("Lifecycle.Event.ON_RESUME"))
-        assertTrue(source.contains("dailyReviewEnabled = DailyReviewReminders.isEnabled(ctx)"))
         assertTrue(
             source.contains(
-                "dailyReviewEnabled && !DailyReviewReminders.canNotify(ctx)",
+                "morningReviewEnabled = DailyReviewReminders.isMorningEnabled(ctx)",
+            ),
+        )
+        assertTrue(
+            source.contains(
+                "journalReviewEnabled = DailyReviewReminders.isJournalEnabled(ctx)",
+            ),
+        )
+        assertTrue(source.contains("DailyReviewReminders.setMorningEnabled(ctx, true)"))
+        assertTrue(source.contains("DailyReviewReminders.setJournalEnabled(ctx, true)"))
+        assertTrue(
+            source.contains(
+                "(morningReviewEnabled || journalReviewEnabled) &&",
             ),
         )
         assertTrue(source.contains("ScheduledReportNotifier.canNotify(context)"))

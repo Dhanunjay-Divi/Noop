@@ -84,6 +84,11 @@ private enum class AutomationReportKind {
     WORKOUT,
 }
 
+private enum class DailyReviewPreference {
+    MORNING,
+    JOURNAL,
+}
+
 private fun automationReportsCanNotify(context: Context): Boolean {
     return ScheduledReportNotifier.canNotify(context)
 }
@@ -157,13 +162,24 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         )
     }
 
-    // Daily guidance mirrors iOS's explicit opt-in pair: a persisted morning Sleep review and an
-    // evening Journal prompt that checks completion at delivery time.
-    var dailyReviewEnabled by remember { mutableStateOf(DailyReviewReminders.isEnabled(ctx)) }
+    // Morning review and evening Journal are independent, explicit opt-ins. The old pair preference
+    // migrates once to both enabled, after which each schedule follows its own user intent.
+    var morningReviewEnabled by remember {
+        mutableStateOf(DailyReviewReminders.isMorningEnabled(ctx))
+    }
+    var journalReviewEnabled by remember {
+        mutableStateOf(DailyReviewReminders.isJournalEnabled(ctx))
+    }
     var dailyReviewMorning by remember { mutableStateOf(DailyReviewReminders.morningMinutes(ctx)) }
     var dailyReviewEvening by remember { mutableStateOf(DailyReviewReminders.eveningMinutes(ctx)) }
     var dailyReviewNotificationsUnavailable by remember {
-        mutableStateOf(dailyReviewEnabled && !DailyReviewReminders.canNotify(ctx))
+        mutableStateOf(
+            (morningReviewEnabled || journalReviewEnabled) &&
+                !DailyReviewReminders.canNotify(ctx),
+        )
+    }
+    var pendingDailyReviewPermission by remember {
+        mutableStateOf<DailyReviewPreference?>(null)
     }
     val reportsInitiallyAvailable = automationReportsCanNotify(ctx)
     var morningRecapEnabled by remember {
@@ -219,8 +235,23 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     val dailyReviewPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        dailyReviewEnabled = granted && DailyReviewReminders.setEnabled(ctx, true)
-        dailyReviewNotificationsUnavailable = !dailyReviewEnabled
+        val preference = pendingDailyReviewPermission
+        pendingDailyReviewPermission = null
+        val enabled = granted && when (preference) {
+            DailyReviewPreference.MORNING ->
+                DailyReviewReminders.setMorningEnabled(ctx, true)
+            DailyReviewPreference.JOURNAL ->
+                DailyReviewReminders.setJournalEnabled(ctx, true)
+            null -> false
+        }
+        when (preference) {
+            DailyReviewPreference.MORNING -> morningReviewEnabled = enabled
+            DailyReviewPreference.JOURNAL -> journalReviewEnabled = enabled
+            null -> Unit
+        }
+        dailyReviewNotificationsUnavailable =
+            (morningReviewEnabled || journalReviewEnabled) &&
+                !DailyReviewReminders.canNotify(ctx)
     }
     val workoutPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -287,9 +318,11 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                dailyReviewEnabled = DailyReviewReminders.isEnabled(ctx)
+                morningReviewEnabled = DailyReviewReminders.isMorningEnabled(ctx)
+                journalReviewEnabled = DailyReviewReminders.isJournalEnabled(ctx)
                 dailyReviewNotificationsUnavailable =
-                    dailyReviewEnabled && !DailyReviewReminders.canNotify(ctx)
+                    (morningReviewEnabled || journalReviewEnabled) &&
+                        !DailyReviewReminders.canNotify(ctx)
                 reportNotificationsUnavailable =
                     !automationReportsCanNotify(ctx) &&
                         (morningRecapEnabled || postWorkoutSummaryEnabled)
@@ -418,11 +451,24 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         HydrationReminderScheduler.reconcile(ctx)
     }
 
-    fun setDailyReviewEnabled(enabled: Boolean) {
+    fun setDailyReviewPreference(
+        preference: DailyReviewPreference,
+        enabled: Boolean,
+    ) {
         if (!enabled) {
-            dailyReviewEnabled = false
-            dailyReviewNotificationsUnavailable = false
-            DailyReviewReminders.setEnabled(ctx, false)
+            when (preference) {
+                DailyReviewPreference.MORNING -> {
+                    morningReviewEnabled = false
+                    DailyReviewReminders.setMorningEnabled(ctx, false)
+                }
+                DailyReviewPreference.JOURNAL -> {
+                    journalReviewEnabled = false
+                    DailyReviewReminders.setJournalEnabled(ctx, false)
+                }
+            }
+            dailyReviewNotificationsUnavailable =
+                (morningReviewEnabled || journalReviewEnabled) &&
+                    !DailyReviewReminders.canNotify(ctx)
             return
         }
         if (
@@ -430,11 +476,26 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            pendingDailyReviewPermission = preference
             dailyReviewPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
-        dailyReviewEnabled = DailyReviewReminders.setEnabled(ctx, true)
-        dailyReviewNotificationsUnavailable = !dailyReviewEnabled
+        val committed = when (preference) {
+            DailyReviewPreference.MORNING ->
+                DailyReviewReminders.setMorningEnabled(ctx, true)
+            DailyReviewPreference.JOURNAL ->
+                DailyReviewReminders.setJournalEnabled(ctx, true)
+        }
+        when (preference) {
+            DailyReviewPreference.MORNING -> morningReviewEnabled = committed
+            DailyReviewPreference.JOURNAL -> journalReviewEnabled = committed
+        }
+        dailyReviewNotificationsUnavailable =
+            !committed ||
+                (
+                    (morningReviewEnabled || journalReviewEnabled) &&
+                        !DailyReviewReminders.canNotify(ctx)
+                    )
     }
 
     fun setReportPreference(kind: AutomationReportKind, enabled: Boolean) {
@@ -725,17 +786,22 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             icon = Icons.Filled.NotificationsActive,
             title = stringResource(R.string.daily_review_section_title),
             blurb = stringResource(R.string.daily_review_section_body),
-            active = (dailyReviewEnabled && !dailyReviewNotificationsUnavailable) ||
+            active = (
+                (morningReviewEnabled || journalReviewEnabled) &&
+                    !dailyReviewNotificationsUnavailable
+                ) ||
                 morningRecapEnabled ||
                 postWorkoutSummaryEnabled,
         ) {
             ToggleRow(
-                label = stringResource(R.string.daily_review_toggle),
-                help = stringResource(R.string.daily_review_toggle_help),
-                checked = dailyReviewEnabled,
-                onChange = ::setDailyReviewEnabled,
+                label = stringResource(R.string.appwide_daily_review_morning_label),
+                help = stringResource(R.string.appwide_daily_review_morning_help),
+                checked = morningReviewEnabled,
+                onChange = {
+                    setDailyReviewPreference(DailyReviewPreference.MORNING, it)
+                },
             )
-            if (dailyReviewEnabled) {
+            if (morningReviewEnabled) {
                 RowDivider()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -756,6 +822,17 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                         },
                     )
                 }
+            }
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.appwide_daily_review_journal_label),
+                help = stringResource(R.string.appwide_daily_review_journal_help),
+                checked = journalReviewEnabled,
+                onChange = {
+                    setDailyReviewPreference(DailyReviewPreference.JOURNAL, it)
+                },
+            )
+            if (journalReviewEnabled) {
                 RowDivider()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -776,9 +853,11 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                         },
                     )
                 }
+            }
+            if (morningReviewEnabled || journalReviewEnabled) {
                 RowDivider()
                 Text(
-                    stringResource(R.string.daily_review_privacy_note),
+                    stringResource(R.string.appwide_daily_review_quiet_hours_note),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )

@@ -227,6 +227,7 @@ class ContextualPromptDeliveryLedgerTest {
 
         assertFalse(outcome.ownerRemoved)
         assertFalse(outcome.ownedNotificationSlot)
+        assertTrue(outcome.notificationCleanupPending)
         assertEquals(0, cancellationCount)
         assertEquals(delivered, ContextualPromptDeliveryLedger.loadState(prefs))
     }
@@ -623,6 +624,34 @@ class ContextualPromptDeliveryLedgerTest {
 
         assertTrue(outcome.ownerRemoved)
         assertTrue(outcome.ownedNotificationSlot)
+        assertTrue(outcome.notificationCleanupPending)
+        assertTrue(
+            ContextualPromptNotificationSlot.ADAPTIVE_DAY in
+                ContextualPromptDeliveryLedger.loadState(prefs).pendingCancellationSlots,
+        )
+    }
+
+    @Test fun failedFinalCleanupCommitIsReportedAndKeepsTheDurableTombstone() {
+        val delivered = ContextualPromptDeliveryLedger.recordedState(
+            state = ContextualPromptDeliveryState(),
+            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+            nowMillis = 2_000L,
+            identity = "planned-a",
+        )
+        val prefs = FakeSharedPreferences(
+            commitResults = listOf(true, true, false),
+        )
+        assertTrue(ContextualPromptDeliveryLedger.saveState(prefs, delivered))
+
+        val outcome = ContextualPromptDeliveryLedger.reconcileOwnerWithOutcome(
+            prefs = prefs,
+            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+            onNotificationSlotOwnerRemoved = { true },
+        )
+
+        assertTrue(outcome.ownerRemoved)
+        assertTrue(outcome.ownedNotificationSlot)
+        assertTrue(outcome.notificationCleanupPending)
         assertTrue(
             ContextualPromptNotificationSlot.ADAPTIVE_DAY in
                 ContextualPromptDeliveryLedger.loadState(prefs).pendingCancellationSlots,

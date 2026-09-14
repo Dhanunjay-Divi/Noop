@@ -427,6 +427,10 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name="com.noop.notif.AdaptivePlannedWorkoutDecisionReceiver"
+            android:exported="false" />
+
         <!-- Replace the single deferred post-backfill boundary after travel or wall-clock changes. -->
         <receiver
             android:name="com.noop.ble.PostBackfillAnalysisTimeChangeReceiver"

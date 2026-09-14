@@ -76,6 +76,11 @@ struct ContextualNotificationCopy: Equatable, Sendable {
     }
 }
 
+enum AdaptivePlannedWorkoutDecision: String, Equatable, Sendable {
+    case keepCurrentPlan = "keep_current"
+    case reviewLighterOptions = "review_options"
+}
+
 struct ContextualInterventionState: Codable, Equatable, Sendable {
     struct Delivery: Codable, Equatable, Sendable {
         let at: Date
@@ -471,7 +476,10 @@ enum ContextualInterventionCenter {
         content.title = deliveredCopy.title
         content.body = deliveredCopy.body
         content.sound = .default
-        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.categoryIdentifier =
+            candidate.kind == .adaptivePlannedWorkout
+                ? DailyReviewNotifications.plannedWorkoutCategoryID
+                : DailyReviewNotifications.privacyCategoryID
         content.threadIdentifier = "noop.contextual.\(candidate.kind.rawValue)"
         var userInfo: [AnyHashable: Any] = [
             NotificationRouteBridge.userInfoKey: candidate.route.rawValue
@@ -890,6 +898,123 @@ enum ContextualInterventionCenter {
             fingerprint: storedFingerprint
         )
         saveState(state, defaults: defaults)
+    }
+
+    static func plannedWorkoutDecisionIsActionable(
+        fingerprint: String,
+        ownsCurrentAction: Bool,
+        ownsCurrentDelivery: Bool,
+        alreadyResolved: Bool,
+        guidanceEnabled: Bool,
+        plannedWorkoutCalendarEnabled: Bool,
+        calendarPermissionGranted: Bool,
+        calendarCandidateMatches: Bool,
+        now: Date = Date()
+    ) -> Bool {
+        guard let start = plannedWorkoutStartDate(from: fingerprint),
+              start > now
+        else { return false }
+        return (ownsCurrentAction || ownsCurrentDelivery) &&
+            !alreadyResolved &&
+            guidanceEnabled &&
+            plannedWorkoutCalendarEnabled &&
+            calendarPermissionGranted &&
+            calendarCandidateMatches
+    }
+
+    static func plannedWorkoutCalendarCandidateMatches(
+        fingerprint: String,
+        snapshot: PlannedWorkoutCalendarSnapshot?
+    ) -> Bool {
+        guard let snapshot else { return false }
+        let currentFingerprint = [
+            "planned-workout",
+            snapshot.day,
+            String(snapshot.startSec)
+        ].joined(separator: "|")
+        return plannedWorkoutFingerprintsMatch(fingerprint, currentFingerprint)
+    }
+
+    @discardableResult
+    static func acknowledgePlannedWorkoutDecision(
+        fingerprint: String,
+        decision: AdaptivePlannedWorkoutDecision,
+        center: UNUserNotificationCenter = .current(),
+        defaults: UserDefaults = .standard
+    ) async -> Bool {
+        let now = Date()
+        let calendarRefresh = await PlannedWorkoutCalendarStore.shared.refreshOutcome(
+            now: now,
+            force: true
+        )
+        let calendarCandidateMatches: Bool
+        switch calendarRefresh {
+        case .completed(let snapshot):
+            calendarCandidateMatches = plannedWorkoutCalendarCandidateMatches(
+                fingerprint: fingerprint,
+                snapshot: snapshot
+            )
+        case .failed, .superseded:
+            calendarCandidateMatches = false
+        }
+        let key = ContextualInterventionKind.adaptivePlannedWorkout.rawValue
+        let state = loadState(defaults: defaults)
+        let ownsCurrentAction =
+            ContextualActionCenter.shared.ownsPlannedWorkoutDecision(
+                fingerprint: fingerprint
+            )
+        let ownsCurrentDelivery = plannedWorkoutFingerprintsMatch(
+            state.deliveries[key]?.fingerprint,
+            fingerprint
+        )
+        guard plannedWorkoutDecisionIsActionable(
+            fingerprint: fingerprint,
+            ownsCurrentAction: ownsCurrentAction,
+            ownsCurrentDelivery: ownsCurrentDelivery,
+            alreadyResolved:
+                ContextualActionCenter.shared.hasResolvedPlannedWorkoutDecision(
+                    fingerprint: fingerprint
+                ),
+            guidanceEnabled:
+                ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
+            plannedWorkoutCalendarEnabled:
+                PlannedWorkoutCalendarSettings.enabled,
+            calendarPermissionGranted:
+                PlannedWorkoutCalendarStore.hasCurrentReadAccess(),
+            calendarCandidateMatches: calendarCandidateMatches,
+            now: now
+        ) else {
+            AppDiagnosticsRecorder.shared.record(
+                "adaptive_day.planned_workout_decision",
+                fields: ["outcome": "stale"]
+            )
+            return false
+        }
+        recordScheduledPlannedWorkoutDelivery(
+            fingerprint: fingerprint,
+            deliveredAt: Date(),
+            defaults: defaults
+        )
+        AdaptivePlannedWorkoutScheduler.cancelPending(
+            on: center,
+            defaults: defaults
+        )
+        LocalNotificationLifecycle.cancel(
+            identifiers: [
+                plannedWorkoutRequestID,
+                AdaptivePlannedWorkoutScheduler.requestID,
+            ],
+            presented: true,
+            on: center
+        )
+        ContextualActionCenter.shared.resolvePlannedWorkoutDecision(
+            fingerprint: fingerprint
+        )
+        AppDiagnosticsRecorder.shared.record(
+            "adaptive_day.planned_workout_decision",
+            fields: ["outcome": decision.rawValue]
+        )
+        return true
     }
 
     private static func isAuthorized(_ status: UNAuthorizationStatus) -> Bool {
@@ -1466,7 +1591,8 @@ enum AdaptivePlannedWorkoutScheduler {
     static let requestID = "contextual-adaptivePlannedWorkout-boundary"
     static let startSecUserInfoKey = "noop.plannedWorkout.startSec"
     static let evaluationSecUserInfoKey = "noop.plannedWorkout.evaluationSec"
-    static let fingerprintUserInfoKey = "noop.plannedWorkout.fingerprint"
+    nonisolated static let fingerprintUserInfoKey =
+        "noop.plannedWorkout.fingerprint"
     static let evidenceUserInfoKey = "noop.plannedWorkout.evidence"
     static let deliveredStartSecKey = "noop.plannedWorkout.deliveredStartSec"
     static let deliveredFingerprintKey = "noop.plannedWorkout.deliveredFingerprint"

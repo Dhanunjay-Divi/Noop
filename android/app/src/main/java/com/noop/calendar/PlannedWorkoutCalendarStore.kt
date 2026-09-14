@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.CancellationSignal
 import android.provider.CalendarContract
 import androidx.core.content.ContextCompat
 import com.noop.AppDiagnosticsRecorder
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 data class PlannedWorkoutCalendarSnapshot(
@@ -90,6 +92,26 @@ object PlannedWorkoutCalendarStore {
         synchronized(stateLock) {
             _snapshot.value?.revision == expectedRevision
         }
+
+    /**
+     * Serializes a decision commit with snapshot invalidation/publication and samples time inside
+     * that critical section. The commit is deliberately synchronous and must remain bounded.
+     */
+    internal fun <T> commitIfCurrentFuture(
+        expectedSnapshot: PlannedWorkoutCalendarSnapshot,
+        nowMillisProvider: () -> Long = System::currentTimeMillis,
+        commit: (Long) -> T,
+    ): T? = synchronized(stateLock) {
+        val nowMillis = nowMillisProvider()
+        if (
+            _snapshot.value != expectedSnapshot ||
+            expectedSnapshot.startSec <= nowMillis / 1_000L
+        ) {
+            null
+        } else {
+            commit(nowMillis)
+        }
+    }
 
     suspend fun refresh(
         context: Context,
@@ -243,7 +265,31 @@ object PlannedWorkoutCalendarStore {
 
     private class CalendarProviderUnavailableException : Exception()
 
-    private fun query(context: Context, now: ZonedDateTime): QueryResult {
+    private suspend fun query(
+        context: Context,
+        now: ZonedDateTime,
+    ): QueryResult = suspendCancellableCoroutine { continuation ->
+        val cancellationSignal = CancellationSignal()
+        continuation.invokeOnCancellation {
+            cancellationSignal.cancel()
+        }
+        try {
+            val result = queryBlocking(context, now, cancellationSignal)
+            if (continuation.isActive) {
+                continuation.resumeWith(Result.success(result))
+            }
+        } catch (error: Throwable) {
+            if (continuation.isActive) {
+                continuation.resumeWith(Result.failure(error))
+            }
+        }
+    }
+
+    private fun queryBlocking(
+        context: Context,
+        now: ZonedDateTime,
+        cancellationSignal: CancellationSignal,
+    ): QueryResult {
         val startMillis = now.toLocalDate()
             .atStartOfDay(now.zone)
             .toInstant()
@@ -270,6 +316,7 @@ object PlannedWorkoutCalendarStore {
             null,
             null,
             "${CalendarContract.Instances.BEGIN} ASC",
+            cancellationSignal,
         ) ?: throw CalendarProviderUnavailableException()
 
         val candidates = mutableListOf<Pair<Long, Long>>()
@@ -282,6 +329,7 @@ object PlannedWorkoutCalendarStore {
             val attendeeStatusIndex =
                 it.getColumnIndexOrThrow(CalendarContract.Instances.SELF_ATTENDEE_STATUS)
             while (it.moveToNext()) {
+                cancellationSignal.throwIfCanceled()
                 val begin = it.getLong(beginIndex)
                 val end = it.getLong(endIndex)
                 val allDay = it.getInt(allDayIndex) != 0
