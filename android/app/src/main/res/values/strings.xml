@@ -407,7 +407,7 @@
     <string name="l10n_breathe_screen_hrv_rmssd_51014f87">HRV (RMSSD)</string>
     <string name="l10n_breathe_screen_locked_formatday_datems_paces_drift_re_8ebec15b">Locked %1$s · paces drift, re-measure anytime.</string>
     <string name="l10n_breathe_screen_locked_formatday_datems_switch_to_breathe_3efc52c6">Locked %1$s. Switch to Breathe to use it, or re-measure above.</string>
-    <string name="l10n_breathe_screen_not_enough_clean_beat_data_to_865a1260">Not enough clean beat data to lock a pace today. Try again rested, sitting still with the strap snug. For now we\'ll pace you at 5.5 br/min (coherence).</string>
+    <string name="l10n_breathe_screen_not_enough_clean_beat_data_to_865a1260">Not enough clean beat data to lock a pace today. Try again rested, sitting still with Noop Band snug. For now we\'ll pace you at 5.5 br/min (coherence).</string>
     <string name="l10n_breathe_screen_not_now_e4571490">Not now</string>
     <string name="l10n_breathe_screen_pace_7a9a6226">Pace</string>
     <string name="l10n_breathe_screen_quick_sweep_7_min_5d58f88d">Quick sweep · ~7 min</string>
@@ -515,7 +515,7 @@
     <string name="l10n_data_sources_screen_whoop_history_db101974">Wearable History</string>
     <string name="l10n_data_sources_screen_whoop_strap_live_ble_217f7df6">Noop Band (Live Bluetooth)</string>
     <string name="l10n_data_sources_screen_workout_file_gpx_tcx_fit_5469c068">Workout file (GPX / TCX / FIT)</string>
-    <string name="l10n_data_sources_screen_write_the_metrics_noop_computes_from_439940c2">Write the metrics NOOP computes from your strap (resting HR, HRV, SpO₂, </string>
+    <string name="l10n_data_sources_screen_write_the_metrics_noop_computes_from_439940c2">Write the metrics NOOP computes from Noop Band (resting HR, HRV, SpO₂, </string>
     <string name="l10n_data_sources_screen_xiaomi_mi_band_edeab3bc">Xiaomi Mi Band</string>
     <string name="l10n_devices_screen_add_a_device_f90866b8">Add a device</string>
     <string name="l10n_devices_screen_battery_4a9be042">Battery</string>
@@ -863,7 +863,7 @@
     <string name="l10n_scoring_guide_screen_how_your_scores_work_21a0e2be">How your scores work</string>
     <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">NOOP gives you three daily scores (Recovery, Effort and Sleep Score), each on a 0-100 </string>
     <string name="l10n_scoring_guide_screen_scorecardhighlight_4af6985c">scoreCardHighlight</string>
-    <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">These are independent approximations from a consumer strap, built on open science: not </string>
+    <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">These are independent approximations from a consumer wearable, built on open science: not </string>
     <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">NOOP METHOD</string>
     <string name="l10n_settings_screen_advancedchevron_f22dfa01">advancedChevron</string>
     <string name="l10n_settings_screen_note_a2481d6c">· %1$s</string>
@@ -1466,7 +1466,7 @@
     <string name="l10n_how_noop_works_screen_how_your_sleep_is_sorted_6a8e82e0">How your sleep is sorted</string>
     <string name="l10n_how_noop_works_screen_what_recording_means_b896c422">What "recording" means</string>
     <string name="l10n_how_noop_works_screen_where_your_numbers_come_from_e169963a">Where your numbers come from</string>
-    <string name="l10n_hrv_snapshot_screen_a_60_second_snapshot_of_your_35f03f7c">A 60-second snapshot of your beat-to-beat (R-R) intervals from the strap, cleaned </string>
+    <string name="l10n_hrv_snapshot_screen_a_60_second_snapshot_of_your_35f03f7c">A 60-second snapshot of your beat-to-beat (R-R) intervals from Noop Band, cleaned </string>
     <string name="l10n_hrv_snapshot_screen_close_hrv_reading_a29a99a1">Close HRV reading</string>
     <string name="l10n_hrv_snapshot_screen_hrv_reading_a2cf71f3">HRV Reading</string>
     <string name="l10n_insights_screen_charge_d4e1aee4">Recovery</string>
@@ -1556,7 +1556,7 @@
     <string name="l10n_settings_screen_export_raw_log_matched_pair_d65390bf">Export raw + log (matched pair)</string>
     <string name="l10n_settings_screen_export_raw_sensor_data_csv_a171b81e">Export raw sensor data (CSV)</string>
     <string name="l10n_settings_screen_extends_the_sky_behind_the_whole_39bb82cc">Extends the sky behind the whole Today screen, so lowering Card transparency lets it show through every card. Needs the day-cycle background on.</string>
-    <string name="l10n_settings_screen_feel_the_current_time_as_a_8ca41db1">Feel the current time as a sequence of buzzes (#460). Does nothing unless your strap is connected.</string>
+    <string name="l10n_settings_screen_feel_the_current_time_as_a_8ca41db1">Feel the current time as a sequence of buzzes (#460). Does nothing unless Noop Band is connected.</string>
     <string name="l10n_settings_screen_flags_accepted_but_the_enable_sequence_542b2595">Flags accepted, but the enable sequence doesn\'t start a separate live stream. The deep records arrive as part of the normal history sync (#494).</string>
     <string name="l10n_settings_screen_for_a_whoop_4_0_which_df865854">For a legacy band, which sends no step count: NOOP estimates steps from motion, calibrated to your phone. Tap to see how close it is and adjust it.</string>
     <string name="l10n_settings_screen_github_code_releases_issues_and_the_50b41e25">GitHub: code, releases, issues and the wiki.</string>
@@ -1575,7 +1575,7 @@
     <string name="l10n_settings_screen_keep_noop_alive_overnight_e43b2fba">Keep NOOP alive overnight</string>
     <string name="l10n_settings_screen_keep_screen_on_during_a_workout_42d27284">Keep screen on during a workout</string>
     <string name="l10n_settings_screen_keeps_streaming_from_your_strap_with_d31b4af9">Keeps streaming from Noop Band with an ongoing notification, even after you close NOOP. Turn off to disconnect when the app is closed.</string>
-    <string name="l10n_settings_screen_keeps_the_detailed_beat_to_beat_87b78edd">Keeps the detailed beat-to-beat stream running all day and night, not just while a live screen is open, so NOOP captures much more for overnight HRV, recovery and sleep. Uses more battery (your strap streams heart rate continuously). Needs "Keep connected in the background" on.</string>
+    <string name="l10n_settings_screen_keeps_the_detailed_beat_to_beat_87b78edd">Keeps the detailed beat-to-beat stream running all day and night, not just while a live screen is open, so NOOP captures much more for overnight HRV, recovery and sleep. Uses more battery (Noop Band streams heart rate continuously). Needs "Keep connected in the background" on.</string>
     <string name="l10n_settings_screen_live_deeppacketsthissession_type_0x2f_historical_offload_8fef3d84">%1$s type-0x2F historical-offload frame(s) seen outside our sync. These are history (e.g. another app pulling the strap\'s backlog), not a live R22 stream (#494).</string>
     <string name="l10n_settings_screen_live_sessions_beta_2ca3a97f">Live Sessions (beta)</string>
     <string name="l10n_settings_screen_makes_your_whoop_5_0_mg_b26b94c7">Makes your newer band advertise its heart rate as a standard Bluetooth HR sensor, so a Garmin (Edge/watch), Zwift or gym equipment can use it during a workout. Applied on the next connection (and immediately if connected); updates the band broadcast setting. Reversible. 5/MG only.</string>

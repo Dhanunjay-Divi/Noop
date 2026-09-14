@@ -2,9 +2,11 @@
 
 ## Status
 
-- State: `implementation and exact-current-tree local verification complete;
-  hosted checks passed at 0aa7c86c, but protected integration is intentionally
-  withheld while twelve actionable review threads are corrected and reverified`
+- State: `historical UI-audit implementation complete; its late residuals and
+  review corrections passed the exact-current Apple, Android, and server
+  product walls and repository policy wall in the PR 15 data-integrity round;
+  staged review, replacement hosted checks, and protected integration remain
+  pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `ca79cc9c76b194691f93e8f2334ce38200639bde`
@@ -109,12 +111,14 @@ claims.
   both metric rows and profile markers. The regression test uses a neutral
   synthetic key, catches the prior hard-coded-key split, and passes
   idempotently.
-- Excluded stale macOS WindowServer surfaces from evidence. A fresh window-only
-  capture from the exact current build, kept outside Git, shows Recovery 34 as
-  amber `Low`, Sleep 94, Effort 73, and the matching 34% Recovery key metric.
-  Source, object, built-resource, fixture, and presentation tests establish the
-  calibrating and unavailable-Recovery coach states that are not visible in
-  that scored-state capture.
+- Excluded stale macOS WindowServer surfaces from evidence. A later
+  source-to-capture reconciliation also excluded the earlier scored-state
+  capture that showed Recovery 34 as `Low`: the pinned scoring engine defines
+  values below 34 as Low and 34 through 66 as Steady. Current Apple and Android
+  boundary tests agree with that engine contract. The retained exact-current
+  window-only capture proves the unavailable-Recovery coach state: it is
+  neutral, asks the user to connect and wear a band, and does not promise that
+  missing Recovery guides the session.
 - Hosted head `48eec068` found one Apple tooltip and one Android
   workout-zone explanation outside the shared localization catalog. Both now
   use generated app-wide keys across all nine supported locales. The same
@@ -125,15 +129,15 @@ claims.
   instrumentation test, not the product flow: the product keeps **Build
   report** disabled while explicit-opt-in capture is active and decodes the
   review preview asynchronously. The test now waits for both boundaries. Its
-  focused path and the complete API 35 production shell pass locally with 95
-  passes and two intentional private-pilot skips.
+  focused path passed. The final exact-current API 35 production shell now
+  records 103 passes, two intentional private-pilot skips, and zero failures.
 - Pushed correction `b3659ddc` passed the hosted server and Android matrices.
   Hosted Apple run `34736975319` built the macOS app and then found two stale
   test-only expectations: the committed generated catalog contains 728 keys,
   and the localized breathing haptic help is mounted by key rather than an
   English Swift literal. The corrected contracts pass focused tests and the
-  complete local 1,919-test macOS suite with one expected external-fixture skip
-  and zero failures.
+  final exact-current 1,988-test macOS suite with 1,987 passes, one expected
+  external-fixture skip, and zero failures.
 - Hosted Apple run `34743871046` then built the complete iOS production shell
   and executed all 39 UI cases. Its only failures were six assertions
   concentrated in two test-harness paths: the report-snapshot switch was below
@@ -158,6 +162,18 @@ claims.
   expand/rollback compatibility, feedback object retention, and
   account-scoped managed-document generation. These are treated as release
   defects, not administratively resolved.
+- The final source-to-reference pass also found three defects outside the
+  original twenty-item matrix. Android's Coupled surface still had one raw
+  missing token and one hard-coded Sleep label; the notification capacity
+  selector could evict hydration phone fallbacks; and morning recap
+  eligibility ignored quiet hours. The mounted Android strings now use the
+  shared missing token and localized Sleep key, hydration fallback occurrences
+  retain capacity priority, and morning recaps suppress with bounded
+  categorical evidence during quiet hours before becoming eligible later.
+- One new morning-recap test initially inspected only the latest bounded-ledger
+  item even though an earlier valid suppression remained in the ledger. The
+  assertion was corrected to inspect the matching bounded event rather than
+  weakening product behavior; the focused rerun passed.
 
 ## Data, privacy, and medical truth
 
@@ -187,12 +203,12 @@ claims.
 | Audit acceptance matrix | 20 of 20 actionable findings closed: 4 P1 and 16 P2 | Every reported misleading, inaccessible, blank, duplicated, malformed, or inconsistent state has a scoped cross-platform correction | That subjective redesign suggestions or external hardware behavior are complete |
 | Fresh residual presentation checks | Apple `ScreenStateContractTests` and `WeeklyDigestChipStyleTests`: 22 passed; Android `RecoveryBandPresentationTest`: Full and Demo passed | Display rounding and Recovery banding agree at both 34 and 67 boundaries; mounted Apple log labels and missing HRV remain corrected | Physical-device rendering or accessibility traversal |
 | Shared analytics | 1,479 tests passed | Recovery, Daily Signal, adaptive-day, planned-workout, and formatting contracts pass together | Clinical validity or individual physiology |
-| Complete Apple app suite | 1,919 tests passed, one external Xiaomi-fixture skip, zero failures | Current macOS/Apple source, persistence, UI contracts, accessibility, guidance, diagnostics, and lifecycle behavior pass together | Physical iOS background execution, BLE, haptics, or notification presentation |
-| Complete iPhone UI suite | The final exact-current-tree run executed 39 tests with one intentional private-pilot skip and zero failures. Its three-iteration simulator Today-scroll sample averaged 5.286 seconds, CPU 0.157 seconds, and about 38.9 MB peak physical memory. The prior complete run and three isolated five-iteration runs also passed; those independent samples averaged 5.313 and 5.099 seconds respectively. | Current simulator navigation, reporting, accessibility, loading, planner, and scrolling paths are responsive and reachable, and the fixed swipe workload remains repeatable across independent launches | VoiceOver traversal, physical-device frame pacing, thermal pressure, or memory pressure |
-| Android exact-source matrix | Full and Demo unit suites, both lint variants, both APK assemblies, and both instrumentation Kotlin compilations passed; Gradle finished 137 tasks successfully. The authoritative final API 35 XML records 97 production-shell cases with 95 passes, two intentional private-pilot skips, and zero failures. | Both Android variants compile and retain the matched UI, accessibility, loading, privacy, screenshot-consent, and guidance contracts | OEM rendering, TalkBack traversal, background delivery, or signed physical installs |
+| Complete Apple app suite | 1,988 tests total: 1,987 passed, one external Xiaomi-fixture skip, and zero failures | Current macOS/Apple source, persistence, UI contracts, accessibility, guidance, diagnostics, and lifecycle behavior pass together | Physical iOS background execution, BLE, haptics, or notification presentation |
+| Complete iPhone UI suite | The final exact-current-tree run executed 39 tests with 38 passes, one intentional private-pilot skip, and zero failures. Its three-iteration simulator Today-scroll sample averaged 4.487 seconds, CPU 0.152 seconds, and about 65.4 MiB peak physical memory. | Current simulator navigation, reporting, accessibility, loading, planner, and scrolling paths are responsive and reachable, and the fixed swipe workload remains repeatable across one measured launch | VoiceOver traversal, physical-device frame pacing, thermal pressure, memory pressure, or a production performance baseline |
+| Android exact-source matrix | Full and Demo each executed 4,742 unit cases with 4,735 passes, seven intentional skips, and zero failures/errors; both lint variants, both APK assemblies, and both instrumentation Kotlin compilations passed in a 137-task wall. The authoritative API 35 XML records 107 production-shell cases with 105 passes, two intentional private-pilot skips, and zero failures/errors. | Both Android variants compile and retain the matched UI, accessibility, loading, privacy, screenshot-consent, guidance, and production scheduler graph contracts | OEM rendering, TalkBack traversal, process-death recovery, background delivery, or signed physical installs |
 | Additive demo-fixture repair | `AppleDemoSeederTests` executed 6 tests with zero failures after the repair was changed to use a caller-supplied synthetic device key | Existing screenshot databases receive missing age series and profile markers on one coherent device namespace, and a second repair is idempotent | Participant data migration, physical collection, or non-DEBUG runtime behavior |
-| Deterministic visual captures | Eleven nonblank iPhone states generated; collapsed planned-workout normal and accessibility captures manually reviewed. A fresh window-only exact-build macOS capture shows Recovery 34 as amber `Low`, Sleep 94, Effort 73, and the matching 34% Recovery key metric. | Current planner states preserve hierarchy, readable text, and stable controls at tested simulator sizes; the current scored macOS Today state agrees across hero and key metric. | Calibrating-state macOS rendering, physical display behavior, or hardware |
-| Repository policy wall | After the first hosted-head correction, feedback localization, differential and full strict i18n, Ruff check and format, 230 Tools tests, 57 operations records, the 1,246-file health-claims scan, calibration parity, private-data, terminology, required-CI, release-control, legal, distribution, and diff gates pass locally | The implementation remains localized, canonically formatted, claim-bounded, privacy-checked, and release-controlled | Corrected hosted exact-SHA status or legal/clinical approval |
+| Deterministic visual captures | Eleven nonblank iPhone states generated; collapsed planned-workout normal and accessibility captures manually reviewed. The retained exact-current window-only macOS capture shows a neutral unavailable-Recovery state and the evidence-aware connect-and-wear-band coach row. | Current planner states preserve hierarchy, readable text, and stable controls at tested simulator sizes; the mounted unavailable-Recovery coach copy does not claim a missing score guides the session. | Scored-state physical rendering, accessibility traversal, or hardware behavior |
+| Repository policy wall | Feedback localization for 86 strings across nine locales, whole-tree i18n, 230 Tools tests, 49 top-level i18n tests, the 1,252-file health-claims scan, calibration parity, private-data, 17,631 classified terminology occurrences with zero forbidden mappings, required-CI, release-control, legal/distribution, 109 tracked JSON files, syntax for 27 shell scripts, ShellCheck for 25 POSIX/bash scripts, Actionlint, Ruff over 81 server files, 64 operations records, 12 OpenTofu tests, and diff gates pass on the final tree | The implementation remains localized, canonically formatted, claim-bounded, privacy-checked, and release-controlled | Corrected hosted exact-SHA status or legal/clinical approval |
 
 ## Physical device and deployment
 
@@ -215,11 +231,11 @@ claims.
   Android parity correction `80ca5875`; bounded Trends preparation
   `c04ec57c`; deterministic tab test `d3da4e58`; fixture/policy/record closeout
   included in this final local commit
-- Branch and remote state: isolated pull request `#15`; hosted head `d8d0c315`
-  passes every required job except Apple, where run `34743871046` built the
-  complete iOS shell and exposed only the two deterministic UI-harness defects
-  recorded above. The corrected focused and complete local UI suites pass;
-  final exact-SHA checks and protected integration remain required.
+- Branch and remote state: isolated pull request `#15`; its remote head remains
+  historical. The corrected exact-current local Apple, Android, and server
+  product walls and repository policy wall pass; staged review, one
+  consolidated replacement push, fresh exact-SHA checks, and protected
+  integration remain required.
 - Repository visibility verified: not changed by this round
 - Version/build impact: no schema or marketing-version change
 - Release or distribution impact: no artifact released
@@ -240,19 +256,18 @@ claims.
   claimed from source and JVM tests alone.
 - Apple physical VoiceOver, background execution, notification presentation,
   BLE, haptics, battery, and memory-pressure behavior remain external.
-- The stale macOS WindowServer capture cannot prove the current Today surface;
-  it is retained only as tooling evidence and will not be shipped or cited as a
-  product result.
-- The twelve protected-review findings require focused and complete local
-  verification, one consolidated replacement push, fresh exact-head checks,
-  and normal PR integration.
+- Stale macOS WindowServer and pre-boundary-correction scored-state captures
+  cannot prove the current Today surface; they are retained only as tooling
+  evidence and will not be shipped or cited as product results.
+- The late review and residual UI findings passed the exact-current local wall
+  recorded in `2026-09-13-pr15-late-data-integrity-review.md`. One consolidated
+  replacement push, fresh exact-head checks, and normal PR integration remain.
 
 ## Next round
 
-1. Integrate the twelve bounded review corrections, run the focused and full
-   local wall, push once, require fresh hosted exact-SHA checks, resolve only
-   demonstrably addressed conversations, and integrate through the normal
-   protected path.
+1. Push the locally verified replacement head once, require fresh hosted
+   exact-SHA checks, resolve only demonstrably addressed conversations, and
+   integrate through the normal protected path.
 2. Run the recorded VoiceOver/TalkBack, background, BLE, notification, haptic,
    battery, and memory-pressure matrix on representative signed physical builds.
 

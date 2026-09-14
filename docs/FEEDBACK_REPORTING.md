@@ -107,9 +107,29 @@ actual SHA-256, ZIP limits, file allowlist, UTF-8 text, PNG signature,
 app-report metadata, and consent flags. Only then does it return `sent` and a
 short support receipt.
 
-`GET` recovers state after process or network interruption. `DELETE` removes
-the object and marks the report deleted. A deleted capability cannot reserve a
-replacement under the same idempotency key.
+`GET` recovers state after process or network interruption. Recovery returns
+`404` for an unknown or not-yet-committed reservation, so clients keep that
+ambiguous state retryable. It returns `410` only after lifecycle deletion has
+left an active idempotency tombstone. `DELETE` accepts the request as
+`202/deleting`; the lifecycle worker removes the object and finalizes metadata
+only after bounded, delayed absence confirmation. Until then, authenticated
+status recovery continues to report the deletion in progress.
+
+An anonymous identity used for a new reservation must be no more than 22 hours
+55 minutes old. That leaves the complete maximum 28-day server retention,
+five-minute clock-skew allowance, one-day deletion margin, and one-hour provider
+cleanup reserve before Identity Platform's 30-day automatic cleanup boundary.
+The client's automatic continuity window is anchored when the identity first
+binds to the report and is at most 29 days and five minutes. If deletion is
+still unconfirmed after that window, the report remains failed closed and keeps
+the exact identity protected; newer reports use a bounded six-hour wake rather
+than replacing the identity or continuously retrying.
+
+An idempotency key is retired for at most 45 days total from its original
+server reservation, including the report's retention window. Lifecycle deletion
+may replace report metadata with a hash-only tombstone for the remainder of
+that total lifetime. After day 45 the key may be reused; late cleanup never
+starts a second 45-day window.
 
 The server stores a versioned SHA-256 identity digest derived from Firebase
 issuer, tenant, and subject. It never stores the raw Firebase subject. A legacy
@@ -139,9 +159,17 @@ the object. This prevents rejected work from bypassing the concurrency ceiling.
   digest/size, consent flags, state, object generation, and lifecycle times.
 - The default retention window is 28 days and is deployment-configurable from
   1 through 28 days, below Identity Platform's anonymous-account cleanup edge.
-- The lifecycle worker owns deletion at the exact `retained_until` timestamp.
-  The bucket age rule is one day later and is only a coarse safety ceiling, not
-  the primary retention mechanism.
+- A deleted report may leave an idempotency tombstone until day 45 from the
+  original reservation. It stores only client-app identity, principal-hash
+  version and digest, idempotency-key digest, and reservation/expiry
+  timestamps. It stores no report ID, receipt, request or archive digest,
+  object key, capability, user text, screenshot, health value, or report
+  content.
+- The lifecycle worker makes a report eligible for deletion at
+  `retained_until`, then processes it in bounded periodic batches. Completion
+  may occur after that deadline because object deletion and delayed absence
+  confirmation are asynchronous. The bucket age rule is one day later and is
+  only a coarse safety ceiling, not the primary retention mechanism.
 - Object cleanup uses a deletion pass followed by a delayed absence-confirmation
   pass. Metadata is not finalized as deleted from one ambiguous object-store
   response.
@@ -150,7 +178,8 @@ the object. This prevents rejected work from bypassing the concurrency ceiling.
 - Operational logs contain fixed outcomes, platform, size bucket, attachment
   count, file count, and request correlation. They do not contain report IDs,
   capabilities, object keys, URLs, user text, screenshots, health values, or
-  payload bodies.
+  payload bodies. Tombstone retention emits only bounded purge/backlog counts,
+  the bounded age of the oldest expired tombstone, and saturation flags.
 
 An authorized support operator starts from the `NF-...` receipt shown by the
 app and performs an exact metadata lookup:
@@ -197,7 +226,7 @@ incident response, and staged key-rotation evidence all pass.
 | Object metadata or archive is invalid | Terminal rejected state; object deletion attempted | Fixed rejected outcome only |
 | App is closed after Send | OS-supported worker/session continues best effort | Same report capability and idempotency key |
 | User cancels | Worker stops and `DELETE` is attempted | Fixed deletion outcome |
-| Retention expires | Object and metadata state are deleted in bounded batches | Claimed/deleted/failed counts |
+| Retention expires | The report becomes eligible for periodic lifecycle cleanup; object absence is confirmed before metadata removal, and a hash-only idempotency tombstone may remain until day 45 total | Claimed/deleted/failed counts plus bounded expired-tombstone backlog count/age |
 | State file is temporarily unreadable | Preserve item and retry without contacting the server | Local fixed `state_unavailable` outcome |
 | Legacy remote item has unverifiable identity | Fail closed before any status/delete call | Local fixed identity-continuity failure |
 | Reservation admission is drained | Existing reports recover/complete/delete; new reports remain queued | Fixed reservation-disabled outcome |

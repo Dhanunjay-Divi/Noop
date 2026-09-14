@@ -243,7 +243,7 @@ struct CoupledView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             } else {
-                Text("-")
+                Text(StrandFormat.missing)
                     .font(StrandFont.number(48))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
@@ -339,7 +339,9 @@ struct CoupledView: View {
                                             font: StrandFont.number(34),
                                             color: .white)
                             } else {
-                                Text("-").font(StrandFont.number(34)).foregroundStyle(.white)
+                                Text(StrandFormat.missing)
+                                    .font(StrandFont.number(34))
+                                    .foregroundStyle(.white)
                             }
                         }
                         .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
@@ -419,7 +421,7 @@ struct CoupledView: View {
     /// Active calories for the day from the stored whole-day estimate. Never fabricated, a day with no
     /// estimate reads a dash.
     private var caloriesText: String {
-        guard let k = day?.activeKcalEst else { return "-" }
+        guard let k = day?.activeKcalEst else { return StrandFormat.missing }
         return "\(Int(k.rounded())) kcal"
     }
 
@@ -792,7 +794,9 @@ struct CoupledView: View {
 
     /// The optimal band as display text ("14 to 18" / "-"). Byte-identical formatting to Android.
     static func optimalStrainRangeText(recovery: Double?) -> String {
-        guard let band = optimalStrainRange(recovery: recovery) else { return "-" }
+        guard let band = optimalStrainRange(recovery: recovery) else {
+            return StrandFormat.missing
+        }
         return String(localized: "\(band.lowerBound) to \(band.upperBound)")
     }
 }

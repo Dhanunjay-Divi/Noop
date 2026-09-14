@@ -2371,7 +2371,11 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                         )
                     }
                     Text(
-                        text = if (hasLiveHr) "$displayHr bpm" else "-",
+                        text = if (hasLiveHr) {
+                            "$displayHr bpm"
+                        } else {
+                            NoopDisplayFormat.MISSING
+                        },
                         style = NoopType.metricInline,
                         color = if (hasLiveHr) zoneColor else Palette.textTertiary,
                     )
@@ -2414,7 +2418,7 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                                 )
                             } else {
                                 Text(
-                                    text = "-",
+                                    text = NoopDisplayFormat.MISSING,
                                     style = NoopType.display(72f),
                                     color = Palette.textTertiary,
                                 )
@@ -2434,8 +2438,12 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
 
                 // Footer read-out row: Zone · % Max · Max HR · State.
                 HeartRateFooter(
-                    zone = if (hasLiveHr) "Z$zone" else "-",
-                    percentMax = if (hasLiveHr) "${(fraction * 100).roundToInt()}%" else "-",
+                    zone = if (hasLiveHr) "Z$zone" else NoopDisplayFormat.MISSING,
+                    percentMax = if (hasLiveHr) {
+                        "${(fraction * 100).roundToInt()}%"
+                    } else {
+                        NoopDisplayFormat.MISSING
+                    },
                     maxHr = "$hrMax",
                     state = when {
                         hasLiveHr -> "STREAMING"

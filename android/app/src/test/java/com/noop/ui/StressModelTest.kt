@@ -1,5 +1,6 @@
 package com.noop.ui
 
+import com.noop.R
 import com.noop.analytics.DaytimeStress
 import com.noop.analytics.HrvFreqDomain
 import com.noop.analytics.StressIndex
@@ -62,6 +63,57 @@ class StressModelTest {
         val model = StressModel.build(days, mapOf("2026-07-02" to 2.5))
         assertNotNull(model)
         assertEquals("the latest day's stored stress must win over a carry", 2.5, model!!.score, 0.001)
+        assertTrue(model.usingStored)
+        assertEquals(
+            R.string.ui_audit_stress_explanation_stored_high,
+            model.explanationRes,
+        )
+    }
+
+    @Test
+    fun lowVarianceHrvDecreaseUsesItsNormalizedUpwardContributionInTheExplanation() {
+        val history = (1..30).map { index ->
+            day(
+                "2026-08-%02d".format(index),
+                rhr = null,
+                hrv = if (index % 2 == 0) 60.1 else 59.9,
+            )
+        }
+        val model = checkNotNull(
+            StressModel.build(
+                history + day("2026-08-31", rhr = null, hrv = 59.5),
+                emptyMap(),
+            ),
+        )
+
+        assertTrue("normalized HRV decrease should raise the score", model.score > 2.0)
+        assertEquals(
+            R.string.ui_audit_stress_explanation_derived_high_hrv,
+            model.explanationRes,
+        )
+    }
+
+    @Test
+    fun lowVarianceHrvIncreaseUsesItsNormalizedDownwardContributionInTheExplanation() {
+        val history = (1..30).map { index ->
+            day(
+                "2026-08-%02d".format(index),
+                rhr = null,
+                hrv = if (index % 2 == 0) 60.1 else 59.9,
+            )
+        }
+        val model = checkNotNull(
+            StressModel.build(
+                history + day("2026-08-31", rhr = null, hrv = 60.5),
+                emptyMap(),
+            ),
+        )
+
+        assertTrue("normalized HRV increase should lower the score", model.score < 1.0)
+        assertEquals(
+            R.string.ui_audit_stress_explanation_derived_low_hrv,
+            model.explanationRes,
+        )
     }
 
     @Test
@@ -163,6 +215,47 @@ class StressModelTest {
         assertFalse(source.contains("hours <= 0"))
     }
 
+    @Test
+    fun explanationCopyStaysExperimentalAndNonDiagnostic() {
+        val source = stressSource()
+        val resources = appWideSource()
+        val requiredKeys = listOf(
+            "ui_audit_stress_methodology_title",
+            "ui_audit_stress_methodology_stored_summary",
+            "ui_audit_stress_methodology_stored_detail",
+            "ui_audit_stress_methodology_derived_summary",
+            "ui_audit_stress_methodology_derived_detail",
+            "ui_audit_stress_explanation_stored_high",
+            "ui_audit_stress_explanation_stored_medium",
+            "ui_audit_stress_explanation_stored_low",
+            "ui_audit_stress_explanation_derived_high_both",
+            "ui_audit_stress_explanation_derived_high_hrv",
+            "ui_audit_stress_explanation_derived_high_rhr",
+            "ui_audit_stress_explanation_derived_medium_other",
+            "ui_audit_stress_explanation_derived_low_both",
+            "ui_audit_stress_explanation_derived_low_hrv",
+            "ui_audit_stress_explanation_derived_low_rhr",
+        )
+        requiredKeys.forEach { key ->
+            assertTrue(source.contains("R.string.$key"))
+            assertTrue(resources.contains("""name="$key""""))
+        }
+        assertTrue(resources.contains("experimental physiological-load estimate"))
+        assertTrue(resources.contains("not a diagnosis or emotional-stress reading"))
+        assertTrue(resources.contains("does not by itself establish recovery or emotional state"))
+        assertTrue(resources.contains("alongside context and how you feel"))
+        assertFalse(source.contains("A stored experimental physiological-load estimate"))
+        assertFalse(source.contains("Available autonomic markers sit"))
+        assertFalse(source.contains("classic signs of high activation"))
+        assertFalse(source.contains("Your nervous system looks well-recovered"))
+        assertFalse(source.contains("A great day to push"))
+        assertFalse(source.contains("You're in a calm, recovered state"))
+        assertTrue(source.contains("squash(normalizedInputs.total)"))
+        assertTrue(source.contains("normalizedInputs = normalizedInputs"))
+        assertFalse(source.contains("(rhrDelta ?: 0.0) > 1.0"))
+        assertFalse(source.contains("(hrvDelta ?: 0.0) < -1.0"))
+    }
+
     private fun stressSource(): String {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val file = listOf(
@@ -171,5 +264,16 @@ class StressModelTest {
             File(root, "android/app/src/main/java/com/noop/ui/StressScreen.kt"),
         ).firstOrNull(File::isFile)
         return checkNotNull(file) { "Could not locate StressScreen.kt from $root" }.readText()
+    }
+
+    private fun appWideSource(): String {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val file = listOf(
+            File(root, "src/main/res/values/appwide.xml"),
+            File(root, "app/src/main/res/values/appwide.xml"),
+            File(root, "android/app/src/main/res/values/appwide.xml"),
+        ).firstOrNull(File::isFile)
+        return checkNotNull(file) { "Could not locate values/appwide.xml from $root" }
+            .readText()
     }
 }

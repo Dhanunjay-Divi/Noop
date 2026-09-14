@@ -455,4 +455,9 @@
     <string name="l10n_workouts_screen_hrr_explanation_516">這是運動結束時心率與之後心率的變化。正值表示心率下降；破折號表示穿戴式裝置在該分鐘附近沒有記錄足夠的資料。</string>
     <string name="l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2">舊版 Noop Band 的重新啟動指令尚未確認；一般重新啟動會被忽略 (#235)。請逐一傳送候選指令，並同時觀察手環連線日誌與手環本身。「12 秒內未中斷連線」表示手環忽略了該指令。「連線已中斷」表示指令已到達手環，但僅中斷連線並不能證明發生了重新啟動：真正重新啟動時，手環的感測器燈會熄滅幾秒。如果燈一直亮著，則只是連線中斷。此測試不會刪除資料。請分享日誌，協助我們確認正確的指令。</string>
     <string name="l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69">請注意：此測試模式已關閉，因此報告中沒有相關記錄。請開啟該模式，佩戴 Noop Band 重現問題，然後再次產生報告。</string>
+    <string name="health_live_hr_on">即時心率已開啟</string>
+    <string name="health_live_hr_off">即時心率已關閉</string>
+    <string name="health_live_hr_on_detail">此畫面正在顯示高頻率的前景資料流。</string>
+    <string name="health_live_hr_off_detail">穿戴式裝置會保持連線，已儲存的歷史資料也會繼續同步。</string>
+    <string name="health_live_hr_battery_notice">即時追蹤會消耗較多穿戴式裝置與手機電量。離開此畫面時便會停止；運動與其他工作階段會各自管理資料流。</string>
 </resources>

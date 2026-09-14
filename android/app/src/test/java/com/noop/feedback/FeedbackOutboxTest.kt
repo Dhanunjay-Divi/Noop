@@ -64,6 +64,10 @@ class FeedbackOutboxTest {
                 "retained_until",
                 "receipt",
                 "local_archive_removed",
+                "clock_anomaly_observed_at_millis",
+                "reservation_continuity_started_at_millis",
+                "worker_generation",
+                "retry_not_before_millis",
             ),
             json.keys().asSequence().toSet(),
         )
@@ -79,6 +83,10 @@ class FeedbackOutboxTest {
         }
         assertTrue(json.isNull("receipt"))
         assertTrue(json.isNull("retained_until"))
+        assertTrue(json.isNull("clock_anomaly_observed_at_millis"))
+        assertTrue(json.isNull("reservation_continuity_started_at_millis"))
+        assertTrue(json.isNull("worker_generation"))
+        assertTrue(json.isNull("retry_not_before_millis"))
         assertEquals("9.2.1", json.getString("app_version"))
         FeedbackArchive.validate(
             archive = outbox.archive(record),
@@ -122,7 +130,13 @@ class FeedbackOutboxTest {
         val state = stateFile(filesDir, staged.localId)
         state.writeText(
             JSONObject(state.readText())
-                .apply { remove("app_version") }
+                .apply {
+                    remove("app_version")
+                    remove("clock_anomaly_observed_at_millis")
+                    remove("reservation_continuity_started_at_millis")
+                    remove("worker_generation")
+                    remove("retry_not_before_millis")
+                }
                 .toString(),
         )
 
@@ -131,6 +145,43 @@ class FeedbackOutboxTest {
         assertEquals("8.4.1", recovered.appVersion)
         val persisted = JSONObject(state.readText())
         assertEquals("8.4.1", persisted.getString("app_version"))
+    }
+
+    @Test
+    fun previousSchemaAddsReservationContinuityFieldWithoutLosingState() {
+        val filesDir = temporary.newFolder("reservation-continuity-migration")
+        var now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            entries = baseEntries(appVersion = "8.4.1"),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        now += 60_000L
+        outbox.bindIdentity(staged.localId, identitySubjectSha256)
+        val state = stateFile(filesDir, staged.localId)
+        state.writeText(
+            JSONObject(state.readText())
+                .apply {
+                    remove("reservation_continuity_started_at_millis")
+                    remove("worker_generation")
+                    remove("retry_not_before_millis")
+                }
+                .toString(),
+        )
+
+        now += 60_000L
+        val recovered = deterministicOutbox(filesDir) { now }.recover().single()
+
+        assertEquals(staged.localId, recovered.localId)
+        assertEquals("8.4.1", recovered.appVersion)
+        assertEquals(staged.createdAtMillis, recovered.reservationContinuityStartedAtMillis)
+        val persisted = JSONObject(state.readText())
+        assertTrue(persisted.has("reservation_continuity_started_at_millis"))
+        assertEquals(
+            staged.createdAtMillis,
+            persisted.getLong("reservation_continuity_started_at_millis"),
+        )
     }
 
     @Test
@@ -158,6 +209,27 @@ class FeedbackOutboxTest {
     @Test
     fun recoveryConvertsInterruptedUploadToDurableRetry() {
         val filesDir = temporary.newFolder("recovery")
+        var now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        now += FeedbackReservationContinuityPolicy.activeWorkLeaseMillis
+
+        val recovered = deterministicOutbox(filesDir) { now }.recover().single()
+
+        assertEquals(FeedbackState.RETRY_SCHEDULED, recovered.state)
+        assertEquals(FeedbackFailureCategory.INTERRUPTED, recovered.failureCategory)
+        assertEquals(1, recovered.attempt)
+        assertTrue(outbox.archive(recovered).isFile)
+    }
+
+    @Test
+    fun continuityIdentityScanDoesNotInterruptLiveUpload() {
+        val filesDir = temporary.newFolder("continuity-live-upload")
         val outbox = deterministicOutbox(filesDir)
         val staged = outbox.stage(
             baseEntries(),
@@ -165,13 +237,16 @@ class FeedbackOutboxTest {
             includesScreenshot = false,
         )
         outbox.beginUpload(staged.localId, attempt = 1)
+        outbox.bindIdentity(staged.localId, identitySubjectSha256)
 
-        val recovered = FeedbackOutbox(filesDir).recover().single()
-
-        assertEquals(FeedbackState.RETRY_SCHEDULED, recovered.state)
-        assertEquals(FeedbackFailureCategory.INTERRUPTED, recovered.failureCategory)
-        assertEquals(1, recovered.attempt)
-        assertTrue(outbox.archive(recovered).isFile)
+        assertEquals(
+            setOf(identitySubjectSha256),
+            outbox.reservationContinuityIdentitySubjectSha256s(),
+        )
+        assertEquals(
+            FeedbackState.UPLOADING,
+            outbox.load(staged.localId)?.state,
+        )
     }
 
     @Test
@@ -493,9 +568,19 @@ class FeedbackOutboxTest {
         assertFalse(outbox.archive(recovered).exists())
 
         now += 30L * 24L * 60L * 60L * 1_000L
-        val stillPending = outbox.recover().single()
-        assertEquals(FeedbackState.CANCELING, stillPending.state)
-        assertEquals(reportToken, stillPending.serverReportToken)
+        val expired = outbox.recover().single()
+        assertEquals(FeedbackState.CANCEL_FAILED, expired.state)
+        assertEquals(
+            FeedbackFailureCategory.CAPABILITY_EXPIRED,
+            expired.failureCategory,
+        )
+        assertEquals(
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            expired.serverReportId,
+        )
+        assertEquals(reportToken, expired.serverReportToken)
+        assertEquals(identitySubjectSha256, expired.identitySubjectSha256)
+        assertTrue(expired.localArchiveRemoved)
     }
 
     @Test
@@ -640,6 +725,121 @@ class FeedbackOutboxTest {
             FeedbackOutboxException.Reason.STATE_UNAVAILABLE,
             feedbackArchiveReadFailureReason(IOException("synthetic transient read")),
         )
+        assertFalse(
+            feedbackArchiveValidationFailureIsRetryable(
+                FeedbackArchiveException(
+                    FeedbackArchiveException.Reason.DIGEST_MISMATCH,
+                ),
+            ),
+        )
+        assertTrue(
+            feedbackArchiveValidationFailureIsRetryable(
+                FeedbackArchiveException(
+                    FeedbackArchiveException.Reason.WRITE_FAILED,
+                ),
+            ),
+        )
+        assertTrue(
+            feedbackArchiveValidationFailureIsRetryable(
+                IOException("synthetic transient validation read"),
+            ),
+        )
+    }
+
+    @Test
+    fun transientArchiveValidationReadPreservesTheConsentedReportAndArchive() {
+        val filesDir = temporary.newFolder("transient-archive-validation")
+        var validationUnavailable = false
+        val outbox = FeedbackOutbox(
+            filesDir = filesDir,
+            archiveValidator =
+                { archive, expectedBytes, expectedSha256, includesUserNote,
+                    includesScreenshot ->
+                    if (validationUnavailable) {
+                        throw IOException("synthetic validation read failure")
+                    }
+                    FeedbackArchive.validate(
+                        archive = archive,
+                        expectedBytes = expectedBytes,
+                        expectedSha256 = expectedSha256,
+                        includesUserNote = includesUserNote,
+                        includesScreenshot = includesScreenshot,
+                    )
+                },
+        )
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        validationUnavailable = true
+
+        val deferred = outbox.recover().single()
+
+        assertEquals(staged.localId, deferred.localId)
+        assertEquals(FeedbackState.QUEUED, deferred.state)
+        assertTrue(outbox.archive(deferred).isFile)
+        validationUnavailable = false
+        assertEquals(staged.localId, outbox.recover().single().localId)
+    }
+
+    @Test
+    fun progressStateReadDoesNotRevalidateTheImmutableArchive() {
+        val filesDir = temporary.newFolder("progress-state-read")
+        var validationCount = 0
+        var archiveMetadataReadCount = 0
+        val outbox = FeedbackOutbox(
+            filesDir = filesDir,
+            archiveAppVersionReader = {
+                archiveMetadataReadCount += 1
+                "9.2.1"
+            },
+            archiveValidator =
+                { archive, expectedBytes, expectedSha256, includesUserNote,
+                    includesScreenshot ->
+                    validationCount += 1
+                    FeedbackArchive.validate(
+                        archive = archive,
+                        expectedBytes = expectedBytes,
+                        expectedSha256 = expectedSha256,
+                        includesUserNote = includesUserNote,
+                        includesScreenshot = includesScreenshot,
+                    )
+                },
+        )
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val generation = "11111111-2222-4333-8444-555555555555"
+        outbox.prepareWorker(
+            localId = staged.localId,
+            replace = false,
+            generation = generation,
+        )
+        validationCount = 0
+        archiveMetadataReadCount = 0
+
+        assertEquals(
+            null,
+            outbox.loadForProgress(
+                localId = staged.localId,
+                expectedWorkerGeneration = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            ),
+        )
+        assertEquals(
+            staged.localId,
+            outbox.loadForProgress(
+                localId = staged.localId,
+                expectedWorkerGeneration = generation,
+            )?.localId,
+        )
+        assertEquals(0, validationCount)
+        assertEquals(0, archiveMetadataReadCount)
+        assertEquals(staged.localId, outbox.load(staged.localId)?.localId)
+        assertTrue(validationCount > 0)
+        assertTrue(archiveMetadataReadCount > 0)
     }
 
     @Test
@@ -734,6 +934,9 @@ class FeedbackOutboxTest {
         val attempted = outbox.noteCancelAttempt(canceling.localId, attempt = 1)
         assertEquals(1, attempted.attempt)
         assertEquals(1, attempted.cancellationAttempt)
+
+        val repeated = outbox.requestCancel(staged.localId)
+        assertEquals(1, repeated.cancellationAttempt)
     }
 
     @Test
@@ -778,6 +981,10 @@ class FeedbackOutboxTest {
         legacy.remove("identity_subject_sha256")
         legacy.remove("cancellation_attempt")
         legacy.remove("local_archive_removed")
+        legacy.remove("clock_anomaly_observed_at_millis")
+        legacy.remove("reservation_continuity_started_at_millis")
+        legacy.remove("worker_generation")
+        legacy.remove("retry_not_before_millis")
         state.writeText(legacy.toString())
 
         val recovered = outbox.load(staged.localId)!!
@@ -856,6 +1063,760 @@ class FeedbackOutboxTest {
     }
 
     @Test
+    fun reservationContinuityDeadlineIsBoundedAndUsesServerRetention() {
+        val created = 1_789_000_000_000L
+        val retainedUntilMillis = created + TimeUnit.DAYS.toMillis(2)
+        val base = feedbackRecord(
+            state = FeedbackState.UPLOADING,
+            attempt = 1,
+            createdAtMillis = created,
+            retainedUntil = java.time.Instant.ofEpochMilli(retainedUntilMillis).toString(),
+        )
+        val serverBoundDeadline =
+            retainedUntilMillis +
+                FeedbackReservationContinuityPolicy.expirySafetyMarginMillis
+
+        assertEquals(
+            serverBoundDeadline,
+            FeedbackReservationContinuityPolicy.continuityDeadlineMillis(base),
+        )
+        assertEquals(
+            setOf(identitySubjectSha256),
+            FeedbackReservationContinuityPolicy
+                .identitySubjectSha256sRequiringContinuity(
+                    records = listOf(base),
+                    nowMillis = serverBoundDeadline - 1L,
+                ),
+        )
+        assertEquals(
+            setOf(identitySubjectSha256),
+            FeedbackReservationContinuityPolicy
+                .identitySubjectSha256sRequiringContinuity(
+                    records = listOf(base),
+                    nowMillis = serverBoundDeadline,
+                ),
+        )
+
+        val lateServerBound = base.copy(
+            retainedUntil = java.time.Instant.ofEpochMilli(
+                created + TimeUnit.DAYS.toMillis(90),
+            ).toString(),
+        )
+        assertEquals(
+            FeedbackReservationContinuityPolicy
+                .maximumServerRetainedUntilMillis(lateServerBound) +
+                FeedbackReservationContinuityPolicy.expirySafetyMarginMillis,
+            FeedbackReservationContinuityPolicy
+                .continuityDeadlineMillis(lateServerBound),
+        )
+        assertFalse(
+            FeedbackReservationContinuityPolicy.serverRetentionIsValid(
+                record = lateServerBound,
+                retainedUntilMillis = java.time.Instant.parse(
+                    requireNotNull(lateServerBound.retainedUntil),
+                ).toEpochMilli(),
+                nowMillis = created,
+            ),
+        )
+        assertTrue(
+            FeedbackReservationContinuityPolicy.serverRetentionIsValid(
+                record = base,
+                retainedUntilMillis = retainedUntilMillis,
+                nowMillis = created,
+            ),
+        )
+
+        val ambiguous = base.copy(
+            serverReportId = null,
+            serverReportToken = null,
+            retainedUntil = null,
+        )
+        assertEquals(
+            created +
+                FeedbackReservationContinuityPolicy
+                    .maximumAmbiguousBindingLifetimeMillis,
+            FeedbackReservationContinuityPolicy
+                .continuityDeadlineMillis(ambiguous),
+        )
+        val reservationCutoff = created +
+            FeedbackReservationContinuityPolicy
+                .maximumLocalDelayBeforeCancellationMillis
+        assertTrue(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                ambiguous,
+                reservationCutoff - 1L,
+            ),
+        )
+        assertFalse(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                ambiguous,
+                reservationCutoff,
+            ),
+        )
+        val futureUpdated = ambiguous.copy(
+            updatedAtMillis =
+                created +
+                    FeedbackReservationContinuityPolicy.maximumClockSkewMillis +
+                    1L,
+        )
+        assertFalse(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                futureUpdated,
+                created,
+            ),
+        )
+        assertFalse(
+            FeedbackReservationContinuityPolicy.hasActiveWorkLease(
+                futureUpdated,
+                created,
+            ),
+        )
+        assertTrue(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                futureUpdated,
+                futureUpdated.updatedAtMillis -
+                    FeedbackReservationContinuityPolicy.maximumClockSkewMillis,
+            ),
+        )
+    }
+
+    @Test
+    fun futureClockAnomalyRequiresBoundedRemoteCancellation() {
+        val filesDir = temporary.newFolder("future-clock-anomaly")
+        val observedAt = 1_789_000_000_000L
+        val future = observedAt + TimeUnit.DAYS.toMillis(365)
+        var now = future
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        outbox.bindIdentity(staged.localId, identitySubjectSha256)
+
+        now = observedAt
+        val cancelling = outbox.recover().single()
+        assertEquals(FeedbackState.CANCELING, cancelling.state)
+        assertEquals(observedAt, cancelling.clockAnomalyObservedAtMillis)
+        assertEquals(observedAt, cancelling.updatedAtMillis)
+        assertFalse(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                cancelling,
+                observedAt,
+            ),
+        )
+        assertFalse(
+            FeedbackReservationContinuityPolicy.hasActiveWorkLease(
+                cancelling,
+                observedAt,
+            ),
+        )
+        val deadline =
+            observedAt +
+                FeedbackReservationContinuityPolicy
+                    .maximumAmbiguousBindingLifetimeMillis
+        assertEquals(
+            deadline,
+            FeedbackReservationContinuityPolicy
+                .continuityDeadlineMillis(cancelling),
+        )
+
+        now = deadline
+        val unconfirmed = outbox.recover().single()
+        assertEquals(FeedbackState.CANCEL_FAILED, unconfirmed.state)
+        assertEquals(
+            FeedbackFailureCategory.CAPABILITY_EXPIRED,
+            unconfirmed.failureCategory,
+        )
+        assertEquals(identitySubjectSha256, unconfirmed.identitySubjectSha256)
+        assertTrue(unconfirmed.localArchiveRemoved)
+        assertEquals(observedAt, unconfirmed.clockAnomalyObservedAtMillis)
+    }
+
+    @Test
+    fun futureClockAnomalyRemovesNeverAttemptedLocalReport() {
+        val filesDir = temporary.newFolder("future-local-clock-anomaly")
+        val observedAt = 1_789_000_000_000L
+        var now = observedAt + TimeUnit.DAYS.toMillis(365)
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+
+        now = observedAt
+        assertTrue(outbox.recover().isEmpty())
+        assertFalse(stateFile(filesDir, staged.localId).exists())
+    }
+
+    @Test
+    fun secondMaterialClockRollbackPreservesRemoteDeletionContinuity() {
+        val filesDir = temporary.newFolder("second-clock-rollback")
+        val observedAt = 1_789_000_000_000L
+        var now = observedAt + TimeUnit.DAYS.toMillis(365)
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        outbox.bindIdentity(staged.localId, identitySubjectSha256)
+        outbox.saveReservation(
+            localId = staged.localId,
+            serverReportId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            serverReportToken = reportToken,
+        )
+
+        now = observedAt
+        val canceling = outbox.recover().single()
+        assertEquals(FeedbackState.CANCELING, canceling.state)
+        now =
+            observedAt -
+                FeedbackReservationContinuityPolicy.maximumClockSkewMillis -
+                1L
+        assertTrue(
+            FeedbackReservationContinuityPolicy.hasSecondaryClockRollback(
+                canceling,
+                now,
+            ),
+        )
+
+        val preserved = outbox.recover().single()
+        assertEquals(FeedbackState.CANCELING, preserved.state)
+        assertEquals(identitySubjectSha256, preserved.identitySubjectSha256)
+        assertEquals(
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            preserved.serverReportId,
+        )
+        assertEquals(reportToken, preserved.serverReportToken)
+        assertTrue(preserved.localArchiveRemoved)
+        assertTrue(preserved.cancellationAttempt == 0)
+        assertTrue(
+            FeedbackReservationContinuityPolicy.requiresContinuity(
+                preserved,
+                now,
+            ),
+        )
+        assertFalse(
+            FeedbackReservationContinuityPolicy.hasExpired(
+                preserved,
+                now,
+            ),
+        )
+        assertEquals(now, preserved.clockAnomalyObservedAtMillis)
+
+        val recoveredForward =
+            now + FeedbackReservationContinuityPolicy.maximumClockSkewMillis + 10L
+        now = recoveredForward
+        val scheduled = outbox.scheduleCancelRetry(
+            staged.localId,
+            FeedbackFailureCategory.DELETION_PENDING,
+        )
+        assertEquals(recoveredForward, scheduled.updatedAtMillis)
+        val laterRollback =
+            recoveredForward -
+                FeedbackReservationContinuityPolicy.maximumClockSkewMillis -
+                1L
+        assertTrue(
+            FeedbackReservationContinuityPolicy.hasSecondaryClockRollback(
+                scheduled,
+                laterRollback,
+            ),
+        )
+        now = laterRollback
+        val normalizedAgain = outbox.recover().single()
+        assertEquals(laterRollback, normalizedAgain.clockAnomalyObservedAtMillis)
+        assertEquals(laterRollback, normalizedAgain.updatedAtMillis)
+    }
+
+    @Test
+    fun reservationContinuityWaitDoesNotConsumeAutomaticAttempts() {
+        val filesDir = temporary.newFolder("identity-continuity-wait")
+        var now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val blocker = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(blocker.localId, attempt = 1)
+        outbox.bindIdentity(blocker.localId, identitySubjectSha256)
+        val waiting = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+
+        repeat(12) {
+            now += 1_000L
+            outbox.beginUpload(waiting.localId, attempt = 1)
+            val schedule = outbox.scheduleContinuityRetry(
+                waiting.localId,
+                FeedbackReservationAttemptLane.DELIVERY,
+            )
+
+            assertEquals(FeedbackState.RETRY_SCHEDULED, schedule.record.state)
+            assertEquals(FeedbackFailureCategory.IDENTITY, schedule.record.failureCategory)
+            assertEquals(0, schedule.record.attempt)
+            assertEquals(
+                FeedbackReservationContinuityPolicy.maximumRetryDelayMillis,
+                schedule.delayMillis,
+            )
+        }
+    }
+
+    @Test
+    fun boundReservationPendingRefundsAttemptAndPersistsRetryDeadlineAcrossRestart() {
+        val filesDir = temporary.newFolder("bound-delivery-continuity-restart")
+        var now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val firstGeneration = "11111111-2222-4333-8444-555555555555"
+        val nextGeneration = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        outbox.prepareWorker(
+            localId = staged.localId,
+            replace = false,
+            generation = firstGeneration,
+        )
+        outbox.beginUpload(
+            localId = staged.localId,
+            attempt = 1,
+            expectedWorkerGeneration = firstGeneration,
+        )
+        outbox.bindIdentity(
+            localId = staged.localId,
+            identitySubjectSha256 = identitySubjectSha256,
+            expectedWorkerGeneration = firstGeneration,
+        )
+        outbox.saveReservation(
+            localId = staged.localId,
+            serverReportId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            serverReportToken = reportToken,
+            expectedWorkerGeneration = firstGeneration,
+        )
+
+        now += 1_000L
+        val schedule = outbox.scheduleContinuityRetry(
+            localId = staged.localId,
+            lane = FeedbackReservationAttemptLane.DELIVERY,
+            failure = FeedbackFailureCategory.DELETION_PENDING,
+            allowBoundIdentity = true,
+            expectedWorkerGeneration = firstGeneration,
+            nextWorkerGeneration = nextGeneration,
+        )
+
+        assertEquals(FeedbackState.RETRY_SCHEDULED, schedule.record.state)
+        assertEquals(0, schedule.record.attempt)
+        assertEquals(
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            schedule.record.serverReportId,
+        )
+        assertEquals(reportToken, schedule.record.serverReportToken)
+        assertEquals(identitySubjectSha256, schedule.record.identitySubjectSha256)
+        assertEquals(nextGeneration, schedule.record.workerGeneration)
+        assertEquals(
+            now + schedule.delayMillis,
+            schedule.record.retryNotBeforeMillis,
+        )
+
+        now += 250L
+        val recovered = FeedbackOutbox(
+            filesDir = filesDir,
+            nowMillis = { now },
+        ).recover().single()
+        assertEquals(nextGeneration, recovered.workerGeneration)
+        assertEquals(schedule.record.retryNotBeforeMillis, recovered.retryNotBeforeMillis)
+        assertEquals(
+            schedule.delayMillis - 250L,
+            FeedbackScheduler.remainingRetryDelayMillis(recovered, now),
+        )
+    }
+
+    @Test
+    fun supersededWorkerCannotOverwriteReplacementStateOrAttempt() {
+        val filesDir = temporary.newFolder("worker-generation-cas")
+        val outbox = deterministicOutbox(filesDir)
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val firstGeneration = "11111111-2222-4333-8444-555555555555"
+        val replacementGeneration = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        outbox.prepareWorker(
+            localId = staged.localId,
+            replace = false,
+            generation = firstGeneration,
+        )
+        outbox.beginUpload(
+            localId = staged.localId,
+            attempt = 1,
+            expectedWorkerGeneration = firstGeneration,
+        )
+        outbox.scheduleRetry(
+            localId = staged.localId,
+            failure = FeedbackFailureCategory.NETWORK,
+            expectedWorkerGeneration = firstGeneration,
+        )
+        val replacement = outbox.retry(
+            localId = staged.localId,
+            replacementWorkerGeneration = replacementGeneration,
+        )
+
+        try {
+            outbox.beginUpload(
+                localId = staged.localId,
+                attempt = 2,
+                expectedWorkerGeneration = firstGeneration,
+            )
+            fail("A superseded worker must not mutate the replacement record")
+        } catch (_: FeedbackWorkerSupersededException) {
+            // Expected.
+        }
+
+        val current = outbox.load(staged.localId)!!
+        assertEquals(FeedbackState.QUEUED, current.state)
+        assertEquals(0, current.attempt)
+        assertEquals(replacementGeneration, current.workerGeneration)
+        assertEquals(replacement, current)
+    }
+
+    @Test
+    fun reservationContinuityWaitDoesNotConsumeCancellationAttempts() {
+        val filesDir = temporary.newFolder("cancel-identity-continuity-wait")
+        var now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        outbox.requestCancel(staged.localId)
+
+        repeat(12) {
+            now += 1_000L
+            outbox.noteCancelAttempt(staged.localId, attempt = 1)
+            val schedule = outbox.scheduleContinuityRetry(
+                staged.localId,
+                FeedbackReservationAttemptLane.CANCELLATION,
+            )
+
+            assertEquals(
+                FeedbackState.CANCEL_RETRY_SCHEDULED,
+                schedule.record.state,
+            )
+            assertEquals(FeedbackFailureCategory.IDENTITY, schedule.record.failureCategory)
+            assertEquals(1, schedule.record.attempt)
+            assertEquals(0, schedule.record.cancellationAttempt)
+            assertEquals(
+                FeedbackReservationContinuityPolicy.minimumRetryDelayMillis,
+                schedule.delayMillis,
+            )
+        }
+    }
+
+    @Test
+    fun boundReservationPendingPreservesCancellationBudgetUntilExpiry() {
+        val filesDir = temporary.newFolder("cancel-bound-reservation-continuity")
+        var now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        outbox.bindIdentity(staged.localId, identitySubjectSha256)
+        outbox.requestCancel(staged.localId)
+
+        repeat(FeedbackOutbox.MAX_ATTEMPTS + 4) {
+            now += 1_000L
+            outbox.noteCancelAttempt(staged.localId, attempt = 1)
+            val schedule = outbox.scheduleContinuityRetry(
+                localId = staged.localId,
+                lane = FeedbackReservationAttemptLane.CANCELLATION,
+                failure = FeedbackFailureCategory.DELETION_PENDING,
+                allowBoundIdentity = true,
+            )
+
+            assertEquals(
+                FeedbackState.CANCEL_RETRY_SCHEDULED,
+                schedule.record.state,
+            )
+            assertEquals(
+                FeedbackFailureCategory.DELETION_PENDING,
+                schedule.record.failureCategory,
+            )
+            assertEquals(1, schedule.record.attempt)
+            assertEquals(0, schedule.record.cancellationAttempt)
+            assertEquals(
+                identitySubjectSha256,
+                schedule.record.identitySubjectSha256,
+            )
+            assertTrue(schedule.record.localArchiveRemoved)
+        }
+
+        val waiting = outbox.load(staged.localId)!!
+        val deadline = checkNotNull(
+            FeedbackReservationContinuityPolicy.continuityDeadlineMillis(waiting),
+        )
+        now = deadline - 1L
+        assertEquals(
+            null,
+            outbox.markUnconfirmedDeletionIfContinuityExpired(staged.localId),
+        )
+
+        now = deadline
+        val expired =
+            outbox.markUnconfirmedDeletionIfContinuityExpired(staged.localId)
+        requireNotNull(expired)
+        assertEquals(FeedbackState.CANCEL_FAILED, expired.state)
+        assertEquals(
+            FeedbackFailureCategory.CAPABILITY_EXPIRED,
+            expired.failureCategory,
+        )
+        assertEquals(identitySubjectSha256, expired.identitySubjectSha256)
+        assertEquals(null, expired.serverReportId)
+        assertEquals(null, expired.serverReportToken)
+        assertTrue(expired.localArchiveRemoved)
+
+        val retrying = outbox.retry(staged.localId)
+        assertEquals(FeedbackState.CANCELING, retrying.state)
+        val attempted = outbox.noteCancelAttempt(staged.localId, attempt = 1)
+        assertEquals(FeedbackState.CANCELING, attempted.state)
+        assertEquals(1, attempted.cancellationAttempt)
+        assertEquals(identitySubjectSha256, attempted.identitySubjectSha256)
+    }
+
+    @Test
+    fun deliveryContinuityWaitRefundsDeliveryAttemptWhenCancellationRaces() {
+        val filesDir = temporary.newFolder("delivery-cancel-continuity-race")
+        var now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        now += 1_000L
+        outbox.requestCancel(staged.localId)
+
+        val schedule = outbox.scheduleContinuityRetry(
+            staged.localId,
+            FeedbackReservationAttemptLane.DELIVERY,
+        )
+
+        assertEquals(FeedbackState.CANCEL_RETRY_SCHEDULED, schedule.record.state)
+        assertEquals(0, schedule.record.attempt)
+        assertEquals(0, schedule.record.cancellationAttempt)
+        assertEquals(null, schedule.record.identitySubjectSha256)
+        assertEquals(null, schedule.record.serverReportId)
+        assertEquals(null, schedule.record.serverReportToken)
+    }
+
+    @Test
+    fun expiredCancelFailurePreservesIdentityAndKeepsOutboxFailClosed() {
+        val filesDir = temporary.newFolder("identity-continuity-expiry")
+        var now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        outbox.bindIdentity(staged.localId, identitySubjectSha256)
+        outbox.requestCancel(staged.localId)
+        outbox.markCancelFailed(
+            staged.localId,
+            FeedbackFailureCategory.DELETION_PENDING,
+        )
+        now += FeedbackReservationContinuityPolicy
+            .maximumAmbiguousBindingLifetimeMillis
+
+        val expired = outbox.recover().single()
+        assertEquals(FeedbackState.CANCEL_FAILED, expired.state)
+        assertEquals(
+            FeedbackFailureCategory.CAPABILITY_EXPIRED,
+            expired.failureCategory,
+        )
+        assertEquals(null, expired.serverReportId)
+        assertEquals(null, expired.serverReportToken)
+        assertEquals(identitySubjectSha256, expired.identitySubjectSha256)
+        assertTrue(expired.localArchiveRemoved)
+        assertEquals(
+            setOf(identitySubjectSha256),
+            outbox.reservationContinuityIdentitySubjectSha256s(),
+        )
+
+        repeat(FeedbackOutbox.MAX_RECORDS - 1) {
+            outbox.stage(
+                baseEntries(),
+                includesUserNote = false,
+                includesScreenshot = false,
+            )
+        }
+        assertEquals(
+            FeedbackOutbox.MAX_RECORDS,
+            outbox.recover().count { !it.state.terminal },
+        )
+        try {
+            outbox.stage(
+                baseEntries(),
+                includesUserNote = false,
+                includesScreenshot = false,
+            )
+            fail("Unconfirmed remote deletion must keep the outbox fail-closed")
+        } catch (error: FeedbackOutboxException) {
+            assertEquals(FeedbackOutboxException.Reason.FULL, error.reason)
+        }
+    }
+
+    @Test
+    fun expiredIdentityProtectionUsesBoundedRetryWithoutRecoveryWriteChurn() {
+        val filesDir = temporary.newFolder("identity-continuity-expired-delay")
+        var now = 1_789_000_000_000L
+        val outbox = deterministicOutbox(filesDir) { now }
+        val blocker = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(blocker.localId, attempt = 1)
+        val bindingAt = now + 1_000L
+        now = bindingAt
+        outbox.bindIdentity(blocker.localId, identitySubjectSha256)
+        outbox.requestCancel(blocker.localId)
+        outbox.markCancelFailed(
+            blocker.localId,
+            FeedbackFailureCategory.DELETION_PENDING,
+        )
+        now = bindingAt +
+            FeedbackReservationContinuityPolicy.maximumAmbiguousBindingLifetimeMillis
+
+        val expired = outbox.recover().single()
+        assertEquals(FeedbackFailureCategory.CAPABILITY_EXPIRED, expired.failureCategory)
+        val expiredUpdatedAt = expired.updatedAtMillis
+
+        val waiting = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(waiting.localId, attempt = 1)
+        val schedule = outbox.scheduleContinuityRetry(
+            waiting.localId,
+            FeedbackReservationAttemptLane.DELIVERY,
+        )
+        assertEquals(
+            FeedbackReservationContinuityPolicy.maximumRetryDelayMillis,
+            schedule.delayMillis,
+        )
+
+        now += TimeUnit.MINUTES.toMillis(1)
+        val recoveredAgain = outbox.recover()
+            .single { it.localId == blocker.localId }
+        assertEquals(expiredUpdatedAt, recoveredAgain.updatedAtMillis)
+        assertEquals(
+            setOf(identitySubjectSha256),
+            outbox.reservationContinuityIdentitySubjectSha256s(),
+        )
+    }
+
+    @Test
+    fun activeReservationLeaseDefersExpiryButRetryStateDoesNot() {
+        val filesDir = temporary.newFolder("continuity-active-lease")
+        val created = 1_789_000_000_000L
+        var now = created
+        val outbox = deterministicOutbox(filesDir) { now }
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        now = created + 1_000L
+        outbox.beginUpload(staged.localId, attempt = 1)
+        val bindingAt = created + 2_000L
+        now = bindingAt
+        outbox.bindIdentity(staged.localId, identitySubjectSha256)
+        val deadline = bindingAt +
+            FeedbackReservationContinuityPolicy.maximumAmbiguousBindingLifetimeMillis
+        now = deadline - 1_000L
+        outbox.beginUpload(staged.localId, attempt = 1)
+
+        now = deadline
+        val leased = outbox.load(staged.localId)
+        requireNotNull(leased)
+        assertEquals(FeedbackState.UPLOADING, leased.state)
+        assertTrue(
+            FeedbackReservationContinuityPolicy.requiresContinuity(
+                leased,
+                now,
+            ),
+        )
+        assertFalse(
+            FeedbackReservationContinuityPolicy.hasExpired(
+                leased,
+                now,
+            ),
+        )
+        assertEquals(
+            FeedbackReservationContinuityPolicy.activeWorkLeaseMillis - 1_000L,
+            FeedbackReservationContinuityPolicy.retryDelayMillis(
+                records = listOf(leased),
+                nowMillis = now,
+            ),
+        )
+
+        now = deadline + FeedbackReservationContinuityPolicy.activeWorkLeaseMillis
+        val expired = outbox.recover().single()
+        assertEquals(FeedbackState.CANCEL_FAILED, expired.state)
+        assertEquals(
+            FeedbackFailureCategory.CAPABILITY_EXPIRED,
+            expired.failureCategory,
+        )
+        assertEquals(identitySubjectSha256, expired.identitySubjectSha256)
+        assertTrue(expired.localArchiveRemoved)
+
+        val retryFilesDir = temporary.newFolder("continuity-retry-no-lease")
+        now = created
+        val retryOutbox = deterministicOutbox(retryFilesDir) { now }
+        val retry = retryOutbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        now = created + 1_000L
+        retryOutbox.beginUpload(retry.localId, attempt = 1)
+        now = bindingAt
+        retryOutbox.bindIdentity(retry.localId, identitySubjectSha256)
+        now = deadline - 1_000L
+        retryOutbox.scheduleRetry(
+            retry.localId,
+            FeedbackFailureCategory.NETWORK,
+        )
+
+        now = deadline
+        val retryExpired = retryOutbox.recover().single()
+        assertEquals(FeedbackState.CANCEL_FAILED, retryExpired.state)
+        assertEquals(
+            FeedbackFailureCategory.CAPABILITY_EXPIRED,
+            retryExpired.failureCategory,
+        )
+        assertEquals(identitySubjectSha256, retryExpired.identitySubjectSha256)
+        assertTrue(retryExpired.localArchiveRemoved)
+    }
+
+    @Test
     fun persistedServerCredentialsFailClosedToExactProtocolGrammar() {
         val filesDir = temporary.newFolder("credential-validation")
         val outbox = deterministicOutbox(filesDir)
@@ -909,6 +1870,33 @@ class FeedbackOutboxTest {
             serverReportToken = reportToken,
         )
     }
+
+    private fun feedbackRecord(
+        state: FeedbackState,
+        attempt: Int,
+        createdAtMillis: Long,
+        retainedUntil: String?,
+    ) = FeedbackRecord(
+        localId = "11111111-1111-4111-8111-111111111111",
+        requestId = "22222222-2222-4222-8222-222222222222",
+        appVersion = "9.2.1",
+        serverReportId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        serverReportToken = reportToken,
+        identitySubjectSha256 = identitySubjectSha256,
+        archiveSha256 = "a".repeat(64),
+        archiveBytes = 1,
+        includesUserNote = false,
+        includesScreenshot = false,
+        createdAtMillis = createdAtMillis,
+        updatedAtMillis = createdAtMillis,
+        state = state,
+        attempt = attempt,
+        cancellationAttempt = 0,
+        failureCategory = FeedbackFailureCategory.NONE,
+        retainedUntil = retainedUntil,
+        receipt = null,
+        localArchiveRemoved = false,
+    )
 
     private fun commitSent(
         outbox: FeedbackOutbox,

@@ -101,7 +101,7 @@ fresh exact-SHA hosted check cycle, and protected integration.
 | Android Demo variant | `assembleDemoDebug`, complete unit suite, lint, and instrumentation Kotlin compilation passed in 87 tasks | Demo variant and synthetic audit fixtures compile and pass | Physical-device behavior |
 | Server wall | Complete PostgreSQL suite, Ruff, format check, and both locked dependency audits passed on separate disposable databases | Backend contracts remain compatible with the UI-only closeout | Public traffic, provider delivery, and production operations |
 | UI audit contracts | Apple 12/12 and focused Android audit/localization suites passed | All reported P1/P2 presentation branches remain mounted on both clients | Pixel identity on every physical display and font scale |
-| Window-only visual attempt | Kept outside Git under `/tmp/audit_shots`; excluded from release proof because macOS retained stale rendered coach copy despite the loaded object and localization bundle containing only corrected keys | The capture limitation is disclosed rather than hidden | It does not disprove the directly executed source contracts, but it must not be presented as corrected visual evidence |
+| Window-only visual attempt | Kept outside Git under `$HOME/Documents/NOOP-private-audit-2026-09-14`; excluded from release proof because macOS retained stale rendered coach copy despite the loaded object and localization bundle containing only corrected keys | The capture limitation is disclosed rather than hidden | It does not disprove the directly executed source contracts, but it must not be presented as corrected visual evidence |
 
 ## Physical device and deployment
 

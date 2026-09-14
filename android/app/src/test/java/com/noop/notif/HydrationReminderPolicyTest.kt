@@ -1,5 +1,6 @@
 package com.noop.notif
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -200,6 +201,24 @@ class HydrationReminderPolicyTest {
                 "10:480", null, null,
             ),
         )
+    }
+
+    @Test fun finalPhonePostingBoundaryEnforcesQuietHours() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/HydrationReminders.kt"),
+            File(root, "app/src/main/java/com/noop/notif/HydrationReminders.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/HydrationReminders.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("Could not locate HydrationReminders.kt from $root")
+        val notifier = source
+            .substringAfter("object HydrationReminderNotifier")
+            .substringBefore("internal enum class HydrationPhoneOccurrenceResult")
+
+        assertTrue(notifier.contains("if (NotifPrefs.inQuietHours(context))"))
+        assertTrue(notifier.contains("NotificationLifecycleId.HYDRATION"))
+        assertTrue(notifier.contains("NotificationLifecycleState").not())
+        assertTrue(notifier.contains("return false"))
     }
 
     @Test fun workerBeforeCuePostsOnceAndPreventsTheLaterBandOccurrence() {

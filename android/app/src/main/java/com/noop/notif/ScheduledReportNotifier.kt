@@ -10,10 +10,20 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.noop.R
 import com.noop.ui.NoopPrefs
 import com.noop.ui.NoopNotificationRoute
+import com.noop.ui.NotifPrefs
 import com.noop.ui.NotificationRouteBridge
+import java.time.Duration
+import java.time.ZonedDateTime
+import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 /**
@@ -100,12 +110,14 @@ object ScheduledReportPolicy {
         chargeOrRestPresent: Boolean,
         lastNotifiedDay: String?,
         reportDay: String,
+        inQuietHours: Boolean = false,
     ): Boolean =
         enabled &&
             materializedAfterSync &&
             chargeOrRestPresent &&
             reportDay.isNotBlank() &&
-            lastNotifiedDay != reportDay
+            lastNotifiedDay != reportDay &&
+            !inQuietHours
 
     /** A routine report cannot consume its frontier or shared budget unless the OS can accept it. */
     fun deliveryAvailable(
@@ -120,7 +132,51 @@ object ScheduledReportPolicy {
         enabled: Boolean,
         newestWorkoutTs: Long?,
         lastWorkoutTs: Long,
-    ): Boolean = enabled && newestWorkoutTs != null && newestWorkoutTs > lastWorkoutTs
+        inQuietHours: Boolean = false,
+    ): Boolean =
+        enabled &&
+            newestWorkoutTs != null &&
+            newestWorkoutTs > lastWorkoutTs &&
+            !inQuietHours
+
+    fun minuteInWindow(
+        minuteOfDay: Int,
+        startMinutes: Int,
+        endMinutes: Int,
+    ): Boolean {
+        val minute = minuteOfDay.coerceIn(0, 24 * 60 - 1)
+        val start = startMinutes.coerceIn(0, 24 * 60 - 1)
+        val end = endMinutes.coerceIn(0, 24 * 60 - 1)
+        if (start == end) return false
+        return if (start < end) {
+            minute in start until end
+        } else {
+            minute >= start || minute < end
+        }
+    }
+
+    fun nextQuietHoursEnd(
+        now: ZonedDateTime,
+        quietHoursEnabled: Boolean,
+        startMinutes: Int,
+        endMinutes: Int,
+    ): ZonedDateTime? {
+        val minute = now.hour * 60 + now.minute
+        if (!quietHoursEnabled ||
+            !minuteInWindow(minute, startMinutes, endMinutes)
+        ) return null
+
+        val end = endMinutes.coerceIn(0, 24 * 60 - 1)
+        val todayEnd = now.toLocalDate()
+            .atTime(end / 60, end % 60)
+            .atZone(now.zone)
+        return if (todayEnd.isAfter(now)) todayEnd else {
+            now.toLocalDate()
+                .plusDays(1)
+                .atTime(end / 60, end % 60)
+                .atZone(now.zone)
+        }
+    }
 
     /** Privacy-safe title + body for the morning recap. The score arguments are used only as the honest
      *  availability gate: lock-screen copy never includes biometric values. Returns null when neither
@@ -154,6 +210,90 @@ object ScheduledReportPolicy {
         minutes < 60 -> "$minutes min"
         minutes % 60 == 0 -> "${minutes / 60} h"
         else -> "${minutes / 60} h ${minutes % 60} min"
+    }
+}
+
+object ScheduledReportDeferredScheduler {
+    private const val MORNING_WORK_NAME = "noop_deferred_morning_recap"
+    internal const val REPORT_DAY_KEY = "report_day"
+    internal const val COPY_KIND_KEY = "copy_kind"
+
+    fun scheduleMorning(
+        context: Context,
+        reportDay: String,
+        copyKind: ScheduledReportPolicy.MorningCopyKind,
+        now: ZonedDateTime = ZonedDateTime.now(),
+    ): Boolean {
+        val quietHoursEnd = ScheduledReportPolicy.nextQuietHoursEnd(
+            now = now,
+            quietHoursEnabled = NotifPrefs.getBool(context, NotifPrefs.QUIET, false),
+            startMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_START, 22 * 60),
+            endMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_END, 7 * 60),
+        ) ?: return false
+        val delayMillis = Duration.between(
+            now.toInstant(),
+            quietHoursEnd.toInstant(),
+        ).toMillis().coerceAtLeast(1_000L)
+        val request = OneTimeWorkRequestBuilder<DeferredMorningRecapWorker>()
+            .setInputData(
+                workDataOf(
+                    REPORT_DAY_KEY to reportDay,
+                    COPY_KIND_KEY to copyKind.name,
+                ),
+            )
+            .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
+            .build()
+        return NotificationLifecycleLedger.scheduled(
+            context,
+            NotificationLifecycleId.MORNING_REPORT,
+            NotificationLifecycleCategory.STATUS,
+        ) {
+            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                MORNING_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
+        }
+    }
+
+    fun cancelMorning(context: Context) {
+        WorkManager.getInstance(context.applicationContext)
+            .cancelUniqueWork(MORNING_WORK_NAME)
+    }
+}
+
+class DeferredMorningRecapWorker(
+    appContext: Context,
+    params: WorkerParameters,
+) : CoroutineWorker(appContext, params) {
+    override suspend fun doWork(): Result {
+        val reportDay = inputData.getString(
+            ScheduledReportDeferredScheduler.REPORT_DAY_KEY,
+        )?.takeIf { it.isNotBlank() } ?: return Result.failure()
+        val copyKind = inputData.getString(
+            ScheduledReportDeferredScheduler.COPY_KIND_KEY,
+        )?.let {
+            runCatching {
+                ScheduledReportPolicy.MorningCopyKind.valueOf(it)
+            }.getOrNull()
+        } ?: return Result.failure()
+        if (!NoopPrefs.morningReportEnabled(applicationContext) ||
+            NoopPrefs.reportMorningDay(applicationContext) == reportDay
+        ) return Result.success()
+        if (NotifPrefs.inQuietHours(applicationContext)) {
+            ScheduledReportDeferredScheduler.scheduleMorning(
+                context = applicationContext,
+                reportDay = reportDay,
+                copyKind = copyKind,
+            )
+            return Result.success()
+        }
+        ScheduledReportNotifier.onDeferredMorning(
+            context = applicationContext,
+            reportDay = reportDay,
+            copyKind = copyKind,
+        )
+        return Result.success()
     }
 }
 
@@ -201,15 +341,26 @@ object ScheduledReportNotifier {
         // reportDay is the banked night's day (the resolved today-row's `day`), NOT LocalDate.now() — the
         // calendar day rolls at midnight while the row still resolves to last night's until a new night is
         // banked, which re-fired the recap at the start of a new day for late-nighters (#567).
+        val enabled = NoopPrefs.morningReportEnabled(context)
+        val lastNotifiedDay = NoopPrefs.reportMorningDay(context)
         if (!ScheduledReportPolicy.shouldNotifyMorning(
-                enabled = NoopPrefs.morningReportEnabled(context),
+                enabled = enabled,
                 materializedAfterSync = materializedAfterSync,
                 chargeOrRestPresent = chargePct != null || restPct != null,
-                lastNotifiedDay = NoopPrefs.reportMorningDay(context),
+                lastNotifiedDay = lastNotifiedDay,
                 reportDay = reportDay,
             )
         ) return false
-        val copyKind = ScheduledReportPolicy.morningCopyKind(chargePct, restPct) ?: return false
+        val copyKind =
+            ScheduledReportPolicy.morningCopyKind(chargePct, restPct) ?: return false
+        if (NotifPrefs.inQuietHours(context)) {
+            ScheduledReportDeferredScheduler.scheduleMorning(
+                context = context,
+                reportDay = reportDay,
+                copyKind = copyKind,
+            )
+            return false
+        }
         val copy = morningCopy(context, copyKind)
         val lane = PostSyncRoutineNotificationBudget.Lane.MORNING_RECAP
         var reserved = false
@@ -250,10 +401,60 @@ object ScheduledReportNotifier {
             reserved = false
             // Mark fired only after a successful post, so a notifications-disabled night still notifies
             // once they're re-enabled while the same night's row is showing.
+            ScheduledReportDeferredScheduler.cancelMorning(context)
             NoopPrefs.setReportMorningDay(context, reportDay)
             true
         }.onFailure {
             if (reserved) budget?.release(lane)
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.MORNING_REPORT,
+                NotificationLifecycleCategory.STATUS,
+            )
+        }.getOrElse { false }
+    }
+
+    @SuppressLint("MissingPermission")
+    internal fun onDeferredMorning(
+        context: Context,
+        reportDay: String,
+        copyKind: ScheduledReportPolicy.MorningCopyKind,
+    ): Boolean {
+        if (!NoopPrefs.morningReportEnabled(context) ||
+            NoopPrefs.reportMorningDay(context) == reportDay
+        ) return false
+        if (NotifPrefs.inQuietHours(context)) {
+            ScheduledReportDeferredScheduler.scheduleMorning(
+                context = context,
+                reportDay = reportDay,
+                copyKind = copyKind,
+            )
+            return false
+        }
+        return runCatching {
+            ensureChannel(context)
+            if (!canNotify(context)) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.MORNING_REPORT,
+                    NotificationLifecycleCategory.STATUS,
+                )
+                return@runCatching false
+            }
+            val copy = morningCopy(context, copyKind)
+            if (!post(
+                    context,
+                    NotificationPlatformIdentity.NotificationId.MORNING_REPORT,
+                    NotificationPlatformIdentity.ActivityIntent.MORNING_REPORT,
+                    NotificationLifecycleId.MORNING_REPORT,
+                    NoopNotificationRoute.SLEEP,
+                    copy.first,
+                    copy.second,
+                )
+            ) return@runCatching false
+            NoopPrefs.setReportMorningDay(context, reportDay)
+            true
+        }.onFailure {
             NotificationLifecycleLedger.unknown(
                 context,
                 NotificationLifecycleId.MORNING_REPORT,
@@ -290,6 +491,14 @@ object ScheduledReportNotifier {
                 lastWorkoutTs = NoopPrefs.reportLastWorkoutTs(context),
             )
         ) return false
+        if (NotifPrefs.inQuietHours(context)) {
+            NotificationLifecycleLedger.suppressed(
+                context,
+                NotificationLifecycleId.WORKOUT_REPORT,
+                NotificationLifecycleCategory.STATUS,
+            )
+            return false
+        }
         val lane = PostSyncRoutineNotificationBudget.Lane.POST_WORKOUT_SUMMARY
         var reserved = false
         return runCatching {
@@ -354,6 +563,7 @@ object ScheduledReportNotifier {
     }
 
     fun cancelMorning(context: Context) {
+        ScheduledReportDeferredScheduler.cancelMorning(context)
         cancel(
             context,
             NotificationPlatformIdentity.NotificationId.MORNING_REPORT,

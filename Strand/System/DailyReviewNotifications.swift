@@ -623,6 +623,52 @@ enum DailyReviewNotifications {
     }
 }
 
+@MainActor
+enum RoutineNotificationQuietHours {
+    private static let enabledKey = "notif.quietHoursEnabled"
+    private static let startMinutesKey = "notif.quietStartMinutes"
+    private static let endMinutesKey = "notif.quietEndMinutes"
+
+    static func contains(
+        _ date: Date,
+        calendar: Calendar = .current,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        guard defaults.bool(forKey: enabledKey) else { return false }
+        let start = defaults.object(forKey: startMinutesKey) as? Int ?? 22 * 60
+        let end = defaults.object(forKey: endMinutesKey) as? Int ?? 7 * 60
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        let minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        return HydrationReminders.windowContains(
+            minute,
+            start: start,
+            end: end
+        )
+    }
+
+    static func nextEnd(
+        after date: Date,
+        calendar: Calendar = .current,
+        defaults: UserDefaults = .standard
+    ) -> Date? {
+        guard contains(date, calendar: calendar, defaults: defaults) else {
+            return nil
+        }
+        let end = defaults.object(forKey: endMinutesKey) as? Int ?? 7 * 60
+        return calendar.nextDate(
+            after: date,
+            matching: DateComponents(
+                hour: end / 60,
+                minute: end % 60,
+                second: 0
+            ),
+            matchingPolicy: .nextTimePreservingSmallerComponents,
+            repeatedTimePolicy: .first,
+            direction: .forward
+        )
+    }
+}
+
 /// An opt-in recap posted only after a completed wearable sync has materialized a scored night.
 ///
 /// This is distinct from the clock-based morning review reminder above. Delivery follows the data:
@@ -686,13 +732,27 @@ enum MorningRecapNotifications {
         materializedAfterSync: Bool,
         recoveryOrSleepScorePresent: Bool,
         reportDay: String,
-        lastReportDay: String?
+        lastReportDay: String?,
+        inQuietHours: Bool = false
     ) -> Bool {
         enabled
             && materializedAfterSync
             && recoveryOrSleepScorePresent
             && !reportDay.isEmpty
             && reportDay != lastReportDay
+            && !inQuietHours
+    }
+
+    static func isInQuietHours(
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        RoutineNotificationQuietHours.contains(
+            now,
+            calendar: calendar,
+            defaults: defaults
+        )
     }
 
     static func copy(
@@ -769,6 +829,8 @@ enum MorningRecapNotifications {
         recoveryPresent: Bool,
         sleepScorePresent: Bool,
         materializedAfterSync: Bool = true,
+        now: Date = Date(),
+        calendar: Calendar = .current,
         budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         await postIfAuthorized(
@@ -777,6 +839,8 @@ enum MorningRecapNotifications {
             sleepScorePresent: sleepScorePresent,
             materializedAfterSync: materializedAfterSync,
             client: .system,
+            now: now,
+            calendar: calendar,
             budget: budget
         )
     }
@@ -787,19 +851,26 @@ enum MorningRecapNotifications {
         sleepScorePresent: Bool,
         materializedAfterSync: Bool = true,
         client: NotificationClient,
+        now: Date = Date(),
+        calendar: Calendar = .current,
         budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         guard let copy = copy(
             recoveryPresent: recoveryPresent,
             sleepScorePresent: sleepScorePresent
         ) else { return }
+        let lastReportDay = UserDefaults.standard.string(forKey: lastReportDayKey)
         guard shouldNotify(
             enabled: isEnabled,
             materializedAfterSync: materializedAfterSync,
             recoveryOrSleepScorePresent: recoveryPresent || sleepScorePresent,
             reportDay: reportDay,
-            lastReportDay: UserDefaults.standard.string(forKey: lastReportDayKey)
+            lastReportDay: lastReportDay
         ), activeReportDay != reportDay else { return }
+        let deferredUntil = RoutineNotificationQuietHours.nextEnd(
+            after: now,
+            calendar: calendar
+        )
 
         let generation = deliveryGeneration
         activeReportDay = reportDay
@@ -834,8 +905,30 @@ enum MorningRecapNotifications {
         ]
 
         do {
+            let trigger = deferredUntil.map { deliveryDate in
+                UNCalendarNotificationTrigger(
+                    dateMatching: calendar.dateComponents(
+                        [
+                            .calendar,
+                            .timeZone,
+                            .year,
+                            .month,
+                            .day,
+                            .hour,
+                            .minute,
+                            .second,
+                        ],
+                        from: deliveryDate
+                    ),
+                    repeats: false
+                )
+            }
             try await client.add(
-                UNNotificationRequest(identifier: requestID, content: content, trigger: nil)
+                UNNotificationRequest(
+                    identifier: requestID,
+                    content: content,
+                    trigger: trigger
+                )
             )
             guard generation == deliveryGeneration, isEnabled else {
                 client.remove([requestID])
@@ -1029,11 +1122,15 @@ enum PostWorkoutSummaryNotifications {
 
     static func postIfAuthorized(
         newestWorkoutStart: Int?,
+        now: Date = Date(),
+        calendar: Calendar = .current,
         budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         await postIfAuthorized(
             newestWorkoutStart: newestWorkoutStart,
             client: .system,
+            now: now,
+            calendar: calendar,
             budget: budget
         )
     }
@@ -1041,6 +1138,8 @@ enum PostWorkoutSummaryNotifications {
     static func postIfAuthorized(
         newestWorkoutStart: Int?,
         client: NotificationClient,
+        now: Date = Date(),
+        calendar: Calendar = .current,
         budget: PostSyncRoutineNotificationBudget? = nil
     ) async {
         guard isEnabled else {
@@ -1063,6 +1162,16 @@ enum PostWorkoutSummaryNotifications {
             lastWorkoutStart: last
         ), let newestWorkoutStart,
            activeWorkoutStart != newestWorkoutStart else { return }
+        if RoutineNotificationQuietHours.contains(
+            now,
+            calendar: calendar
+        ) {
+            LocalNotificationLifecycle.suppressed(
+                identifier: requestID,
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+            return
+        }
 
         let generation = deliveryGeneration
         activeWorkoutStart = newestWorkoutStart

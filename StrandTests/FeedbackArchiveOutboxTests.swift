@@ -36,7 +36,42 @@ private final class OneShotArchiveRemovalFailureFileManager:
     }
 }
 
+private actor FeedbackAuthorizationGateProbe {
+    private var active = 0
+    private var maximumActive = 0
+
+    func enter() {
+        active += 1
+        maximumActive = max(maximumActive, active)
+    }
+
+    func leave() {
+        active -= 1
+    }
+
+    func observedMaximum() -> Int {
+        maximumActive
+    }
+}
+
 final class FeedbackArchiveOutboxTests: XCTestCase {
+    func testLateUploadCallbacksTreatOnlyDurableEndStatesAsTerminal() {
+        XCTAssertTrue(FeedbackDeliveryState.sent.isTerminal)
+        XCTAssertTrue(FeedbackDeliveryState.cancelled.isTerminal)
+        XCTAssertTrue(FeedbackDeliveryState.failed.isTerminal)
+
+        for state in [
+            FeedbackDeliveryState.queued,
+            .reserving,
+            .uploading,
+            .completing,
+            .retryScheduled,
+            .cancelling,
+        ] {
+            XCTAssertFalse(state.isTerminal, "\(state) must remain actionable")
+        }
+    }
+
     private let stableIdentitySubjectSHA256 =
         "ec30fc0d19bfcf530cef1568030a772991e0ac96633c822987f7932b4a368bcd"
 
@@ -53,6 +88,25 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
                 + "%3Bx-goog-if-generation-match%3Bx-goog-meta-noop-sha256"
                 + "&X-Goog-Signature=abc123"
         )!
+    }
+
+    func testReservationRecoveryKeepsUnknownRetryableAndRetiredTerminal() {
+        XCTAssertEqual(
+            FeedbackReservationRecoveryHTTPPolicy.pendingStatusCodes,
+            [404]
+        )
+        XCTAssertEqual(
+            FeedbackReservationRecoveryHTTPPolicy.terminalStatusCodes,
+            [410]
+        )
+        XCTAssertFalse(
+            FeedbackReservationRecoveryHTTPPolicy.acceptedStatusCodes
+                .contains(404)
+        )
+        XCTAssertTrue(
+            FeedbackReservationRecoveryHTTPPolicy.acceptedStatusCodes
+                .contains(410)
+        )
     }
 
     private func sampleEntries(
@@ -317,6 +371,26 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
         )
     }
 
+    func testIdentityAuthorizationGateSerializesReentrantAsyncWork() async {
+        let gate = FeedbackIdentityAuthorizationGate()
+        let probe = FeedbackAuthorizationGateProbe()
+
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<6 {
+                group.addTask {
+                    await gate.acquire()
+                    await probe.enter()
+                    try? await Task.sleep(for: .milliseconds(10))
+                    await probe.leave()
+                    await gate.release()
+                }
+            }
+        }
+
+        let observedMaximum = await probe.observedMaximum()
+        XCTAssertEqual(observedMaximum, 1)
+    }
+
     func testOutboxBindsIdentityBeforeReservationAndRejectsRotation() async throws {
         let root = temporaryDirectory("feedback-identity-binding")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -454,6 +528,7 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
         let maximumAge =
             FeedbackAnonymousIdentityLifetimePolicy
                 .maximumExistingIdentityAge
+        XCTAssertEqual(maximumAge, 22 * 60 * 60 + 55 * 60)
 
         XCTAssertEqual(
             FeedbackAnonymousIdentityLifetimePolicy.reservationAction(
@@ -497,6 +572,52 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
                 hasActiveBoundReports: true
             ),
             .deferReservation
+        )
+    }
+
+    func testPreviousStateAddsReservationContinuityStartWithoutLosingBinding()
+        async throws {
+        let root = temporaryDirectory("feedback-continuity-start-migration")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: created.addingTimeInterval(1)
+        )
+        let stateURL = root
+            .appendingPathComponent(source.id.uuidString, isDirectory: true)
+            .appendingPathComponent("state.json")
+        var state = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(contentsOf: stateURL)
+            ) as? [String: Any]
+        )
+        state.removeValue(forKey: "reservation_continuity_started_at")
+        try JSONSerialization.data(
+            withJSONObject: state,
+            options: [.sortedKeys]
+        ).write(to: stateURL, options: .atomic)
+
+        let relaunched = FeedbackOutbox(rootURL: root)
+        let records = try await relaunched.records(
+            now: created.addingTimeInterval(2)
+        )
+        let migrated = try XCTUnwrap(records.first)
+
+        XCTAssertEqual(
+            migrated.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+        XCTAssertEqual(
+            migrated.reservationContinuityStartedAt,
+            created
         )
     }
 
@@ -626,6 +747,773 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
             continuitySubjects,
             [stableIdentitySubjectSHA256]
         )
+    }
+
+    func testReservationContinuityDeadlineIsBoundedAndUsesServerRetention()
+        async throws {
+        let root = temporaryDirectory("feedback-continuity-deadline")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: created.addingTimeInterval(2)
+        )
+        let retainedUntil = created.addingTimeInterval(2 * 24 * 60 * 60)
+        let bound = try await outbox.storeReservation(
+            id: source.id,
+            reportID: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            reportToken: String(repeating: "a", count: 40),
+            upload: nil,
+            retainedUntil: retainedUntil,
+            now: created.addingTimeInterval(3)
+        )
+        let serverBoundDeadline = retainedUntil.addingTimeInterval(
+            FeedbackReservationContinuityPolicy.expirySafetyMargin
+        )
+
+        XCTAssertEqual(
+            FeedbackReservationContinuityPolicy.continuityDeadline(for: bound),
+            serverBoundDeadline
+        )
+        XCTAssertEqual(
+            FeedbackReservationContinuityPolicy
+                .identitySubjectSHA256sRequiringContinuity(
+                    in: [bound],
+                    now: serverBoundDeadline.addingTimeInterval(-1)
+                ),
+            [stableIdentitySubjectSHA256]
+        )
+        XCTAssertEqual(
+            FeedbackReservationContinuityPolicy
+                .identitySubjectSHA256sRequiringContinuity(
+                    in: [bound],
+                    now: serverBoundDeadline
+                ),
+            [stableIdentitySubjectSHA256],
+            "An unconfirmed remote deletion must keep the original identity pinned."
+        )
+
+        var lateServerBound = bound
+        lateServerBound.retainedUntil = created.addingTimeInterval(
+            90 * 24 * 60 * 60
+        )
+        XCTAssertEqual(
+            FeedbackReservationContinuityPolicy.continuityDeadline(
+                for: lateServerBound
+            ),
+            FeedbackReservationContinuityPolicy
+                .maximumServerRetainedUntil(for: lateServerBound)
+                .addingTimeInterval(
+                FeedbackReservationContinuityPolicy.expirySafetyMargin
+            )
+        )
+        XCTAssertFalse(
+            FeedbackReservationContinuityPolicy.serverRetentionIsValid(
+                try XCTUnwrap(lateServerBound.retainedUntil),
+                for: lateServerBound,
+                now: created
+            )
+        )
+        XCTAssertTrue(
+            FeedbackReservationContinuityPolicy.serverRetentionIsValid(
+                retainedUntil,
+                for: bound,
+                now: created
+            )
+        )
+
+        var ambiguous = bound
+        ambiguous.reportID = nil
+        ambiguous.reportToken = nil
+        ambiguous.retainedUntil = nil
+        XCTAssertEqual(
+            FeedbackReservationContinuityPolicy.continuityDeadline(
+                for: ambiguous
+            ),
+            created.addingTimeInterval(2).addingTimeInterval(
+                FeedbackReservationContinuityPolicy
+                .maximumAmbiguousBindingLifetime
+            )
+        )
+        let reservationCutoff = created.addingTimeInterval(
+            FeedbackReservationContinuityPolicy
+                .maximumLocalDelayBeforeCancellation
+        )
+        XCTAssertTrue(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                ambiguous,
+                now: reservationCutoff.addingTimeInterval(-1)
+            )
+        )
+        XCTAssertFalse(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                ambiguous,
+                now: reservationCutoff
+            )
+        )
+        var futureUpdated = ambiguous
+        futureUpdated.updatedAt = created.addingTimeInterval(
+            FeedbackReservationContinuityPolicy.maximumClockSkew + 1
+        )
+        XCTAssertFalse(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                futureUpdated,
+                now: created
+            )
+        )
+        XCTAssertFalse(
+            FeedbackReservationContinuityPolicy.hasActiveWorkLease(
+                futureUpdated,
+                now: created
+            )
+        )
+        XCTAssertTrue(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                futureUpdated,
+                now: futureUpdated.updatedAt.addingTimeInterval(
+                    -FeedbackReservationContinuityPolicy.maximumClockSkew
+                )
+            )
+        )
+    }
+
+    func testFutureClockAnomalyRequiresBoundedRemoteCancellation()
+        async throws {
+        let root = temporaryDirectory("feedback-future-clock-anomaly")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let observedAt = Date(timeIntervalSince1970: 1_789_000_000)
+        let future = observedAt.addingTimeInterval(365 * 24 * 60 * 60)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: future
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: future.addingTimeInterval(1)
+        )
+        _ = try await outbox.markReserving(
+            id: source.id,
+            now: future.addingTimeInterval(2)
+        )
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: future.addingTimeInterval(3)
+        )
+
+        let recovered = try await outbox.recover(now: observedAt)
+        let cancelling = try XCTUnwrap(recovered.first)
+        XCTAssertEqual(recovered.count, 1)
+        XCTAssertEqual(cancelling.state, .cancelling)
+        XCTAssertTrue(cancelling.cancelRequested)
+        XCTAssertEqual(cancelling.clockAnomalyObservedAt, observedAt)
+        XCTAssertEqual(cancelling.updatedAt, observedAt)
+        XCTAssertEqual(cancelling.nextRetryAt, observedAt)
+        XCTAssertFalse(
+            FeedbackReservationContinuityPolicy.permitsNewReservation(
+                cancelling,
+                now: observedAt
+            )
+        )
+        XCTAssertFalse(
+            FeedbackReservationContinuityPolicy.hasActiveWorkLease(
+                cancelling,
+                now: observedAt
+            )
+        )
+        let deadline = observedAt.addingTimeInterval(
+            FeedbackReservationContinuityPolicy
+                .maximumAmbiguousBindingLifetime
+        )
+        XCTAssertEqual(
+            FeedbackReservationContinuityPolicy.continuityDeadline(
+                for: cancelling
+            ),
+            deadline
+        )
+
+        let expired = try await outbox.recover(now: deadline)
+        let unconfirmed = try XCTUnwrap(expired.first)
+        XCTAssertEqual(unconfirmed.state, .failed)
+        XCTAssertEqual(unconfirmed.failureKind, .capabilityExpired)
+        XCTAssertTrue(unconfirmed.cancelRequested)
+        XCTAssertEqual(
+            unconfirmed.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+        XCTAssertTrue(unconfirmed.localArchiveIsRemoved)
+        XCTAssertEqual(unconfirmed.clockAnomalyObservedAt, observedAt)
+    }
+
+    func testFutureClockAnomalyRemovesNeverAttemptedLocalReport()
+        async throws {
+        let root = temporaryDirectory("feedback-future-local-clock-anomaly")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let observedAt = Date(timeIntervalSince1970: 1_789_000_000)
+        let future = observedAt.addingTimeInterval(365 * 24 * 60 * 60)
+        let outbox = FeedbackOutbox(rootURL: root)
+        _ = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: future
+        )
+
+        let recovered = try await outbox.recover(now: observedAt)
+        XCTAssertTrue(recovered.isEmpty)
+    }
+
+    func testSecondMaterialClockRollbackPreservesRemoteDeletionContinuity()
+        async throws {
+        let root = temporaryDirectory("feedback-second-clock-rollback")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let observedAt = Date(timeIntervalSince1970: 1_789_000_000)
+        let future = observedAt.addingTimeInterval(365 * 24 * 60 * 60)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: future
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: future.addingTimeInterval(1)
+        )
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: future.addingTimeInterval(2)
+        )
+        _ = try await outbox.storeReservation(
+            id: source.id,
+            reportID: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            reportToken: String(repeating: "a", count: 40),
+            upload: nil,
+            retainedUntil: nil,
+            now: future.addingTimeInterval(3)
+        )
+
+        let recovered = try await outbox.recover(now: observedAt)
+        let cancelling = try XCTUnwrap(recovered.first)
+        XCTAssertEqual(cancelling.state, .cancelling)
+        let rolledBack = observedAt.addingTimeInterval(
+            -FeedbackReservationContinuityPolicy.maximumClockSkew - 1
+        )
+        XCTAssertTrue(
+            FeedbackReservationContinuityPolicy.hasSecondaryClockRollback(
+                cancelling,
+                now: rolledBack
+            )
+        )
+
+        let rolledBackRecords = try await outbox.recover(now: rolledBack)
+        let preserved = try XCTUnwrap(rolledBackRecords.first)
+        XCTAssertEqual(preserved.state, .cancelling)
+        XCTAssertTrue(preserved.cancelRequested)
+        XCTAssertEqual(
+            preserved.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+        XCTAssertEqual(
+            preserved.reportID,
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        )
+        XCTAssertEqual(preserved.reportToken, String(repeating: "a", count: 40))
+        XCTAssertTrue(preserved.localArchiveIsRemoved)
+        XCTAssertTrue(
+            FeedbackReservationContinuityPolicy.requiresContinuity(
+                preserved,
+                now: rolledBack
+            )
+        )
+        XCTAssertFalse(
+            FeedbackReservationContinuityPolicy.hasExpired(
+                preserved,
+                now: rolledBack
+            )
+        )
+        XCTAssertEqual(preserved.clockAnomalyObservedAt, rolledBack)
+        XCTAssertEqual(preserved.nextRetryAt, rolledBack)
+        XCTAssertFalse(
+            FeedbackRetryWakePolicy.shouldWait(
+                preserved,
+                now: rolledBack
+            )
+        )
+
+        let recoveredForward = rolledBack.addingTimeInterval(
+            FeedbackReservationContinuityPolicy.maximumClockSkew + 10
+        )
+        let forward = try await outbox.markCancellationPending(
+            id: source.id,
+            nextRetryAt: recoveredForward.addingTimeInterval(60),
+            now: recoveredForward
+        )
+        XCTAssertEqual(forward.clockAnomalyObservedAt, rolledBack)
+        XCTAssertEqual(forward.updatedAt, recoveredForward)
+
+        let laterRollback = recoveredForward.addingTimeInterval(
+            -FeedbackReservationContinuityPolicy.maximumClockSkew - 1
+        )
+        XCTAssertTrue(
+            FeedbackReservationContinuityPolicy.hasSecondaryClockRollback(
+                forward,
+                now: laterRollback
+            )
+        )
+        let normalizedRecords = try await outbox.recover(now: laterRollback)
+        let normalizedAgain = try XCTUnwrap(normalizedRecords.first)
+        XCTAssertEqual(normalizedAgain.clockAnomalyObservedAt, laterRollback)
+        XCTAssertEqual(normalizedAgain.nextRetryAt, laterRollback)
+    }
+
+    func testReservationContinuityWaitDoesNotConsumeAutomaticAttempts()
+        async throws {
+        let root = temporaryDirectory("feedback-continuity-wait")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+
+        for index in 1...12 {
+            _ = try await outbox.beginAutomaticAttempt(
+                id: source.id,
+                now: created.addingTimeInterval(Double(index * 2))
+            )
+            _ = try await outbox.markReserving(
+                id: source.id,
+                now: created.addingTimeInterval(Double(index * 2 + 1))
+            )
+            let waiting = try await outbox.markReservationContinuityWaiting(
+                id: source.id,
+                lane: .delivery,
+                now: created.addingTimeInterval(Double(index * 2 + 1))
+            )
+            XCTAssertEqual(waiting.state, .retryScheduled)
+            XCTAssertEqual(waiting.failureKind, .identity)
+            XCTAssertEqual(waiting.attemptCount, 0)
+            XCTAssertEqual(
+                waiting.nextRetryAt,
+                created.addingTimeInterval(Double(index * 2 + 2))
+            )
+        }
+    }
+
+    func testReservationContinuityWaitDoesNotConsumeCancellationAttempts()
+        async throws {
+        let root = temporaryDirectory("feedback-cancel-continuity-wait")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await outbox.requestCancellation(
+            id: source.id,
+            now: created.addingTimeInterval(2)
+        )
+
+        for index in 1...12 {
+            _ = try await outbox.beginCancellationAttempt(
+                id: source.id,
+                now: created.addingTimeInterval(Double(index * 2 + 1))
+            )
+            _ = try await outbox.markReserving(
+                id: source.id,
+                now: created.addingTimeInterval(Double(index * 2 + 2))
+            )
+            let waiting = try await outbox.markReservationContinuityWaiting(
+                id: source.id,
+                lane: .cancellation,
+                now: created.addingTimeInterval(Double(index * 2 + 2))
+            )
+            XCTAssertEqual(waiting.state, .cancelling)
+            XCTAssertTrue(waiting.cancelRequested)
+            XCTAssertEqual(waiting.attemptCount, 1)
+            XCTAssertEqual(waiting.cancellationAttempts, 0)
+            XCTAssertEqual(
+                waiting.nextRetryAt,
+                created.addingTimeInterval(Double(index * 2 + 3))
+            )
+        }
+    }
+
+    func testBoundReservationContinuityWaitPreservesDeliveryAttemptBudget()
+        async throws {
+        let root = temporaryDirectory("feedback-bound-continuity-wait")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: created.addingTimeInterval(2)
+        )
+        _ = try await outbox.markReserving(
+            id: source.id,
+            now: created.addingTimeInterval(3)
+        )
+
+        let waiting = try await outbox.markReservationContinuityWaiting(
+            id: source.id,
+            lane: .delivery,
+            allowBoundIdentity: true,
+            failureKind: .reservationUnavailable,
+            now: created.addingTimeInterval(4)
+        )
+
+        XCTAssertEqual(waiting.state, .retryScheduled)
+        XCTAssertEqual(waiting.attemptCount, 0)
+        XCTAssertEqual(waiting.failureKind, .reservationUnavailable)
+        XCTAssertEqual(
+            waiting.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+        XCTAssertFalse(waiting.hasRemoteBinding)
+    }
+
+    func testBoundReservationContinuityWaitPreservesCancellationAttemptBudget()
+        async throws {
+        let root = temporaryDirectory("feedback-bound-cancel-continuity-wait")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: created.addingTimeInterval(2)
+        )
+        _ = try await outbox.requestCancellation(
+            id: source.id,
+            now: created.addingTimeInterval(3)
+        )
+        _ = try await outbox.beginCancellationAttempt(
+            id: source.id,
+            now: created.addingTimeInterval(4)
+        )
+        _ = try await outbox.markReserving(
+            id: source.id,
+            now: created.addingTimeInterval(5)
+        )
+
+        let waiting = try await outbox.markReservationContinuityWaiting(
+            id: source.id,
+            lane: .cancellation,
+            allowBoundIdentity: true,
+            failureKind: .cancellationUnavailable,
+            now: created.addingTimeInterval(6)
+        )
+
+        XCTAssertEqual(waiting.state, .cancelling)
+        XCTAssertEqual(waiting.cancellationAttempts, 0)
+        XCTAssertEqual(waiting.failureKind, .cancellationUnavailable)
+        XCTAssertEqual(
+            waiting.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+        XCTAssertFalse(waiting.hasRemoteBinding)
+    }
+
+    func testDeliveryContinuityWaitRefundsDeliveryAttemptWhenCancellationRaces()
+        async throws {
+        let root = temporaryDirectory("feedback-delivery-cancel-race")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await outbox.markReserving(
+            id: source.id,
+            now: created.addingTimeInterval(2)
+        )
+        _ = try await outbox.requestCancellation(
+            id: source.id,
+            now: created.addingTimeInterval(3)
+        )
+
+        let waiting = try await outbox.markReservationContinuityWaiting(
+            id: source.id,
+            lane: .delivery,
+            now: created.addingTimeInterval(4)
+        )
+        XCTAssertEqual(waiting.state, .cancelling)
+        XCTAssertTrue(waiting.cancelRequested)
+        XCTAssertEqual(waiting.attemptCount, 0)
+        XCTAssertEqual(waiting.cancellationAttempts, 0)
+        XCTAssertFalse(waiting.hasRemoteBinding)
+
+        let cancelled = try await outbox.markCancelled(
+            id: source.id,
+            now: created.addingTimeInterval(5)
+        )
+        XCTAssertEqual(cancelled.state, .cancelled)
+        XCTAssertFalse(cancelled.cancelRequested)
+        XCTAssertEqual(cancelled.attemptCount, 0)
+        XCTAssertFalse(cancelled.hasRemoteBinding)
+    }
+
+    func testExpiredContinuityPreservesUnconfirmedDeletionCapability()
+        async throws {
+        let root = temporaryDirectory("feedback-continuity-expiry")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let limits = FeedbackOutboxLimits(
+            maximumReports: 1,
+            maximumTerminalReports: 1,
+            maximumArchiveBytes: 4 * 1024 * 1024,
+            maximumTotalArchiveBytes: 4 * 1024 * 1024,
+            retention: FeedbackOutboxLimits.production.retention,
+            terminalRetention: 24 * 60 * 60
+        )
+        let outbox = FeedbackOutbox(rootURL: root, limits: limits)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: created.addingTimeInterval(2)
+        )
+        _ = try await outbox.requestCancellation(
+            id: source.id,
+            now: created.addingTimeInterval(3)
+        )
+        _ = try await outbox.markFailed(
+            id: source.id,
+            failureKind: .retryLimit,
+            now: created.addingTimeInterval(4)
+        )
+        let bindingAt = created.addingTimeInterval(2)
+        let deadline = bindingAt.addingTimeInterval(
+            FeedbackReservationContinuityPolicy
+                .maximumAmbiguousBindingLifetime
+        )
+
+        let expiredRecords = try await outbox.records(now: deadline)
+        let expired = try XCTUnwrap(expiredRecords.first)
+        XCTAssertEqual(expired.state, .failed)
+        XCTAssertEqual(expired.failureKind, .capabilityExpired)
+        XCTAssertTrue(expired.cancelRequested)
+        XCTAssertNil(expired.reportID)
+        XCTAssertNil(expired.reportToken)
+        XCTAssertEqual(
+            expired.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+        XCTAssertTrue(expired.localArchiveIsRemoved)
+        let protectedIdentities =
+            try await outbox.reservationContinuityIdentitySubjectSHA256s(
+                now: deadline
+            )
+        XCTAssertEqual(
+            protectedIdentities,
+            [stableIdentitySubjectSHA256]
+        )
+        XCTAssertEqual(
+            FeedbackReservationContinuityPolicy.retryDelay(
+                in: [expired],
+                now: deadline
+            ),
+            FeedbackReservationContinuityPolicy.maximumRetryDelay
+        )
+        let expiredUpdatedAt = expired.updatedAt
+        let recoveredAgain = try await outbox.records(
+            now: deadline.addingTimeInterval(60)
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(recoveredAgain.first).updatedAt,
+            expiredUpdatedAt
+        )
+
+        do {
+            _ = try await outbox.enqueue(
+                entries: sampleEntries(),
+                appVersion: "9.2.1",
+                now: deadline.addingTimeInterval(1)
+            )
+            XCTFail("Unconfirmed remote deletion must keep the outbox fail-closed.")
+        } catch {
+            XCTAssertEqual(error as? FeedbackOutboxError, .outboxFull)
+        }
+
+        let retrying = try await outbox.prepareManualRetry(
+            id: source.id,
+            now: deadline.addingTimeInterval(2)
+        )
+        XCTAssertEqual(retrying.state, .cancelling)
+        XCTAssertTrue(retrying.cancelRequested)
+        XCTAssertEqual(
+            retrying.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+        let attempted = try await outbox.beginCancellationAttempt(
+            id: source.id,
+            now: deadline.addingTimeInterval(3)
+        )
+        XCTAssertEqual(attempted.cancellationAttempts, 1)
+    }
+
+    func testActiveReservationLeaseDefersContinuityExpiryWithoutExtendingRetry()
+        async throws {
+        let root = temporaryDirectory("feedback-continuity-active-lease")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await outbox.beginAutomaticAttempt(
+            id: source.id,
+            now: created.addingTimeInterval(1)
+        )
+        let bindingAt = created.addingTimeInterval(2)
+        _ = try await outbox.bindIdentity(
+            id: source.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: bindingAt
+        )
+        let deadline = bindingAt.addingTimeInterval(
+            FeedbackReservationContinuityPolicy
+                .maximumAmbiguousBindingLifetime
+        )
+        _ = try await outbox.markReserving(
+            id: source.id,
+            now: deadline.addingTimeInterval(-1)
+        )
+
+        let leasedRecords = try await outbox.records(now: deadline)
+        let leased = try XCTUnwrap(leasedRecords.first)
+        XCTAssertEqual(leased.state, .reserving)
+        XCTAssertTrue(
+            FeedbackReservationContinuityPolicy.requiresContinuity(
+                leased,
+                now: deadline
+            )
+        )
+        XCTAssertEqual(
+            FeedbackReservationContinuityPolicy.retryDelay(
+                in: [leased],
+                now: deadline
+            ),
+            FeedbackReservationContinuityPolicy.activeWorkLease - 1
+        )
+
+        let expiredAt = deadline.addingTimeInterval(
+            FeedbackReservationContinuityPolicy.activeWorkLease
+        )
+        let expiredRecords = try await outbox.records(now: expiredAt)
+        let expired = try XCTUnwrap(expiredRecords.first)
+        XCTAssertEqual(expired.state, .failed)
+        XCTAssertEqual(expired.failureKind, .capabilityExpired)
+        XCTAssertTrue(expired.cancelRequested)
+        XCTAssertEqual(
+            expired.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+        XCTAssertTrue(expired.localArchiveIsRemoved)
+        let cancellationRetry = try await outbox.markRetryScheduled(
+            id: source.id,
+            failureKind: .interrupted,
+            nextRetryAt: expiredAt.addingTimeInterval(60),
+            now: expiredAt
+        )
+        XCTAssertEqual(cancellationRetry.state, .retryScheduled)
+        XCTAssertTrue(cancellationRetry.cancelRequested)
+        XCTAssertEqual(
+            cancellationRetry.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+
+        let retryRoot = temporaryDirectory(
+            "feedback-continuity-retry-no-lease"
+        )
+        defer { try? FileManager.default.removeItem(at: retryRoot) }
+        let retryOutbox = FeedbackOutbox(rootURL: retryRoot)
+        let retrySource = try await retryOutbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        _ = try await retryOutbox.beginAutomaticAttempt(
+            id: retrySource.id,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await retryOutbox.bindIdentity(
+            id: retrySource.id,
+            identitySubjectSHA256: stableIdentitySubjectSHA256,
+            now: bindingAt
+        )
+        _ = try await retryOutbox.markRetryScheduled(
+            id: retrySource.id,
+            failureKind: .interrupted,
+            nextRetryAt: deadline.addingTimeInterval(60),
+            now: deadline.addingTimeInterval(-1)
+        )
+        let retryExpiredRecords = try await retryOutbox.records(now: deadline)
+        let retryExpired = try XCTUnwrap(retryExpiredRecords.first)
+        XCTAssertEqual(retryExpired.state, .failed)
+        XCTAssertEqual(retryExpired.failureKind, .capabilityExpired)
+        XCTAssertTrue(retryExpired.cancelRequested)
+        XCTAssertEqual(
+            retryExpired.identitySubjectSHA256,
+            stableIdentitySubjectSHA256
+        )
+        XCTAssertTrue(retryExpired.localArchiveIsRemoved)
     }
 
     func testLegacyServerBindingWithoutIdentityFailsClosedButIsPreserved() async throws {
@@ -883,6 +1771,18 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
             XCTAssertEqual(error as? FeedbackOutboxError, .invalidRecord)
         }
 
+        do {
+            _ = try await outbox.markFailed(
+                id: source.id,
+                failureKind: .reportRejected,
+                unlessCancellationRequested: true,
+                now: created.addingTimeInterval(3)
+            )
+            XCTFail("A rejection response must not overwrite cancellation.")
+        } catch {
+            XCTAssertEqual(error as? FeedbackOutboxError, .invalidRecord)
+        }
+
         _ = try await outbox.markRetryScheduled(
             id: source.id,
             failureKind: .cancellationUnavailable,
@@ -965,6 +1865,7 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
 
         let completing = try await outbox.markCompleting(
             id: source.id,
+            uploadAttemptID: uploading.uploadAttemptID,
             now: created.addingTimeInterval(5)
         )
         XCTAssertEqual(completing.attemptCount, 1)
@@ -1014,6 +1915,12 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
         )
         XCTAssertEqual(cleanupAttempt.attemptCount, 8)
         XCTAssertEqual(cleanupAttempt.cancellationAttempts, 1)
+
+        let repeated = try await outbox.requestCancellation(
+            id: source.id,
+            now: created.addingTimeInterval(22)
+        )
+        XCTAssertEqual(repeated.cancellationAttempts, 1)
     }
 
     func testUploadResumePolicyRejectsCancellationAfterUploadingTransition() async throws {
@@ -1041,6 +1948,112 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
         let cancelling = try await outbox.requestCancellation(id: source.id)
         XCTAssertFalse(FeedbackUploadStartPolicy.permitsResume(cancelling))
         XCTAssertTrue(cancelling.localArchiveIsRemoved)
+    }
+
+    func testUploadTaskContextRoundTripsAndRejectsLegacyDescription() throws {
+        let context = FeedbackUploadTaskContext(
+            reportID: UUID(),
+            attemptID: UUID()
+        )
+
+        XCTAssertEqual(
+            FeedbackUploadTaskContext(
+                taskDescription: context.taskDescription
+            ),
+            context
+        )
+        XCTAssertNil(
+            FeedbackUploadTaskContext(
+                taskDescription: context.reportID.uuidString
+            ),
+            "A report-only legacy task must never be adopted as a current attempt."
+        )
+        XCTAssertNil(
+            FeedbackUploadTaskContext(
+                taskDescription: "noop-feedback-upload-v1|bad|bad"
+            )
+        )
+    }
+
+    func testStaleUploadAttemptCannotMutateManualRetry() async throws {
+        let root = temporaryDirectory("feedback-stale-upload-attempt")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let created = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbox = FeedbackOutbox(rootURL: root)
+        let source = try await outbox.enqueue(
+            entries: sampleEntries(),
+            appVersion: "9.2.1",
+            now: created
+        )
+        let firstAttemptID = UUID()
+        _ = try await outbox.markUploading(
+            id: source.id,
+            attemptID: firstAttemptID,
+            now: created.addingTimeInterval(1)
+        )
+        _ = try await outbox.markFailed(
+            id: source.id,
+            failureKind: .uploadUnavailable,
+            now: created.addingTimeInterval(2)
+        )
+        _ = try await outbox.prepareManualRetry(
+            id: source.id,
+            now: created.addingTimeInterval(3)
+        )
+
+        let secondAttemptID = UUID()
+        let secondAttempt = try await outbox.markUploading(
+            id: source.id,
+            attemptID: secondAttemptID,
+            now: created.addingTimeInterval(4)
+        )
+        XCTAssertEqual(secondAttempt.uploadAttemptID, secondAttemptID)
+
+        do {
+            _ = try await outbox.updateProgress(
+                id: source.id,
+                attemptID: firstAttemptID,
+                fraction: 0.75,
+                now: created.addingTimeInterval(5)
+            )
+            XCTFail("A stale progress callback must be rejected.")
+        } catch {
+            XCTAssertEqual(error as? FeedbackOutboxError, .invalidRecord)
+        }
+        do {
+            _ = try await outbox.markCompleting(
+                id: source.id,
+                uploadAttemptID: firstAttemptID,
+                now: created.addingTimeInterval(6)
+            )
+            XCTFail("A stale completion callback must be rejected.")
+        } catch {
+            XCTAssertEqual(error as? FeedbackOutboxError, .invalidRecord)
+        }
+
+        let persisted = try await outbox.record(
+            id: source.id,
+            now: created.addingTimeInterval(7)
+        )
+        let unchanged = try XCTUnwrap(persisted)
+        XCTAssertEqual(unchanged.state, .uploading)
+        XCTAssertEqual(unchanged.uploadAttemptID, secondAttemptID)
+        XCTAssertEqual(unchanged.uploadProgress, 0)
+
+        let progressed = try await outbox.updateProgress(
+            id: source.id,
+            attemptID: secondAttemptID,
+            fraction: 0.5,
+            now: created.addingTimeInterval(8)
+        )
+        XCTAssertEqual(progressed.uploadProgress, 0.5)
+        let completing = try await outbox.markCompleting(
+            id: source.id,
+            uploadAttemptID: secondAttemptID,
+            now: created.addingTimeInterval(9)
+        )
+        XCTAssertEqual(completing.state, .completing)
+        XCTAssertNil(completing.uploadAttemptID)
     }
 
     func testCancellationPersistsArchiveCleanupFailureAndRecoveryRetries() async throws {
@@ -1390,6 +2403,22 @@ final class FeedbackArchiveOutboxTests: XCTestCase {
         XCTAssertTrue(gate.requestStart())
         gate.complete()
         XCTAssertFalse(gate.requestStart())
+    }
+
+    func testPumpGateCoalescesWorkRequestedDuringAnActiveAttempt() {
+        let first = UUID()
+        let second = UUID()
+        var gate = FeedbackPumpGate()
+
+        XCTAssertTrue(gate.begin(first))
+        XCTAssertFalse(gate.begin(first))
+        XCTAssertFalse(gate.begin(first))
+        XCTAssertTrue(gate.begin(second))
+
+        XCTAssertTrue(gate.finish(first))
+        XCTAssertFalse(gate.finish(second))
+        XCTAssertTrue(gate.begin(first))
+        XCTAssertFalse(gate.finish(first))
     }
 
     func testCorruptedArchiveNeverRecoversAsUploadable() async throws {

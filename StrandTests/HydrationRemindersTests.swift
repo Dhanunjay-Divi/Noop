@@ -421,16 +421,113 @@ final class HydrationRemindersTests: XCTestCase {
             minuteOfDay: 8 * 60,
             localDay: "2026-09-13"
         )
-        let request = HydrationReminders.missedResponseRequest(
-            for: slot,
-            windowMinutes: 10
+        let acceptedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let fallbackID = HydrationReminders.phoneFallbackRequestID(
+            contextKey: slot.token
         )
+        let request = try XCTUnwrap(HydrationReminders.missedResponseRequest(
+            for: slot,
+            windowMinutes: 10,
+            identifier: fallbackID,
+            acceptedAt: acceptedAt
+        ))
         let trigger = try XCTUnwrap(
-            request.trigger as? UNTimeIntervalNotificationTrigger
+            request.trigger as? UNCalendarNotificationTrigger
         )
 
         XCTAssertFalse(trigger.repeats)
-        XCTAssertEqual(trigger.timeInterval, 10 * 60)
+        XCTAssertEqual(
+            HydrationReminders.phoneFallbackFireDate(from: request),
+            acceptedAt.addingTimeInterval(10 * 60)
+        )
+        XCTAssertEqual(request.identifier, fallbackID)
+        XCTAssertEqual(
+            request.content.userInfo[
+                LocalNotificationPriorityMarker.hydrationMissedResponse
+            ] as? Bool,
+            true
+        )
+    }
+
+    func testBandFirstOmitsQuietHourSlotsAndKeepsTheNonQuietHorizon() throws {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: HydrationReminders.enabledKey)
+        defaults.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.doubleTapConfirmEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.bandFirstEnabledKey)
+        defaults.set(21 * 60, forKey: HydrationReminders.activeStartMinutesKey)
+        defaults.set(23 * 60, forKey: HydrationReminders.activeEndMinutesKey)
+        defaults.set(60, forKey: HydrationReminders.intervalMinutesKey)
+        defaults.set(true, forKey: "notif.quietHoursEnabled")
+        defaults.set(22 * 60, forKey: "notif.quietStartMinutes")
+        defaults.set(7 * 60, forKey: "notif.quietEndMinutes")
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 20,
+            minute: 59
+        )))
+
+        let requests = HydrationReminders.bandFirstNotificationRequests(
+            now: now,
+            calendar: calendar,
+            occurrenceCount: 4,
+            defaults: defaults
+        )
+
+        XCTAssertEqual(requests.count, 4)
+        XCTAssertEqual(
+            requests.map(\.identifier),
+            (14...17).map {
+                HydrationReminders.phoneFallbackRequestID(
+                    contextKey: "2026-09-\($0)-1260"
+                )
+            }
+        )
+        XCTAssertTrue(requests.allSatisfy { request in
+            guard let fireDate = HydrationReminders.phoneFallbackFireDate(
+                from: request
+            ) else {
+                return false
+            }
+            return !HydrationReminders.isInQuietHours(
+                fireDate,
+                calendar: calendar,
+                defaults: defaults
+            )
+        })
+    }
+
+    func testMissedResponseIsSuppressedWhenTapWindowEndsInQuietHours() throws {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: "notif.quietHoursEnabled")
+        defaults.set(22 * 60, forKey: "notif.quietStartMinutes")
+        defaults.set(7 * 60, forKey: "notif.quietEndMinutes")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let acceptedAt = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 21,
+            minute: 55
+        )))
+
+        XCTAssertNil(HydrationReminders.missedResponseRequest(
+            for: HydrationReminders.DueSlot(
+                minuteOfDay: 21 * 60 + 55,
+                localDay: "2026-09-14"
+            ),
+            windowMinutes: 10,
+            identifier: "hydration-reminder-phone-fallback-quiet",
+            acceptedAt: acceptedAt,
+            calendar: calendar,
+            defaults: defaults
+        ))
     }
 
     func testBandFirstIsDeferredWhenNotificationCenterAcceptsNoFallback() {
@@ -446,5 +543,219 @@ final class HydrationRemindersTests: XCTestCase {
             HydrationReminders.applyAuthorizedScheduleResult(nil),
             .deferred
         )
+    }
+
+    func testDelayedBandCueReconciliationCannotCreateTwoPhoneAlerts() throws {
+        let fallbackFireDate = Date(timeIntervalSince1970: 1_800_000_360)
+
+        XCTAssertTrue(HydrationReminders.canReplacePhoneFallback(
+            fallbackFireDate: fallbackFireDate,
+            replacementAt: fallbackFireDate.addingTimeInterval(-31)
+        ))
+        XCTAssertFalse(HydrationReminders.canReplacePhoneFallback(
+            fallbackFireDate: fallbackFireDate,
+            replacementAt: fallbackFireDate.addingTimeInterval(-30)
+        ))
+        XCTAssertFalse(HydrationReminders.canReplacePhoneFallback(
+            fallbackFireDate: fallbackFireDate,
+            replacementAt: fallbackFireDate
+        ))
+    }
+
+    func testPhoneFallbackFireDateUsesStoredTimeZoneAfterTravel() throws {
+        let losAngeles = try XCTUnwrap(
+            TimeZone(identifier: "America/Los_Angeles")
+        )
+        var sourceCalendar = Calendar(identifier: .gregorian)
+        sourceCalendar.timeZone = losAngeles
+        let now = try XCTUnwrap(sourceCalendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 13,
+            hour: 7,
+            minute: 59
+        )))
+        let request = try XCTUnwrap(
+            HydrationReminders.bandFirstNotificationRequests(
+                now: now,
+                calendar: sourceCalendar,
+                occurrenceCount: 1
+            ).first
+        )
+        let expected = try XCTUnwrap(sourceCalendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 13,
+            hour: 8,
+            minute: 6
+        )))
+
+        XCTAssertEqual(
+            HydrationReminders.phoneFallbackFireDate(from: request),
+            expected
+        )
+        let trigger = try XCTUnwrap(
+            request.trigger as? UNCalendarNotificationTrigger
+        )
+        XCTAssertEqual(trigger.dateComponents.timeZone, losAngeles)
+    }
+
+    func testPhoneFallbackFireDateSurvivesDSTTransitions() throws {
+        let newYork = try XCTUnwrap(
+            TimeZone(identifier: "America/New_York")
+        )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = newYork
+
+        for components in [
+            DateComponents(
+                year: 2026,
+                month: 3,
+                day: 8,
+                hour: 3,
+                minute: 6
+            ),
+            DateComponents(
+                year: 2026,
+                month: 11,
+                day: 1,
+                hour: 1,
+                minute: 36
+            ),
+        ] {
+            let expected = try XCTUnwrap(calendar.date(from: components))
+            var stored = components
+            stored.calendar = calendar
+            stored.timeZone = newYork
+            let request = UNNotificationRequest(
+                identifier: "hydration-reminder-phone-fallback-dst",
+                content: UNMutableNotificationContent(),
+                trigger: UNCalendarNotificationTrigger(
+                    dateMatching: stored,
+                    repeats: false
+                )
+            )
+
+            XCTAssertEqual(
+                HydrationReminders.phoneFallbackFireDate(from: request),
+                expected
+            )
+        }
+    }
+
+    func testPendingEscalationIsPreservedDuringScheduleReconciliation() async throws {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: HydrationReminders.enabledKey)
+        defaults.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.doubleTapConfirmEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.bandFirstEnabledKey)
+        defaults.set(8 * 60, forKey: HydrationReminders.activeStartMinutesKey)
+        defaults.set(10 * 60, forKey: HydrationReminders.activeEndMinutesKey)
+        defaults.set(60, forKey: HydrationReminders.intervalMinutesKey)
+        let slotToken = "2026-09-13-480"
+        defaults.set(
+            slotToken,
+            forKey: "hydrationReminders.pendingEscalationSlot"
+        )
+        let escalationID = HydrationReminders.phoneFallbackRequestID(
+            contextKey: slotToken
+        )
+        let escalation = try XCTUnwrap(HydrationReminders.missedResponseRequest(
+            for: HydrationReminders.DueSlot(
+                minuteOfDay: 8 * 60,
+                localDay: "2026-09-13"
+            ),
+            windowMinutes: 10,
+            identifier: escalationID
+        ))
+        var pending = [escalationID: escalation]
+        var removals = [[String]]()
+        let client = LocalNotificationCenterClient(
+            pendingRequests: {
+                Array(pending.values)
+            },
+            add: { request in
+                pending[request.identifier] = request
+            },
+            removePending: { identifiers in
+                removals.append(identifiers)
+                identifiers.forEach { pending.removeValue(forKey: $0) }
+            }
+        )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 13,
+            hour: 7,
+            minute: 59
+        )))
+
+        let result = await HydrationReminders.reconcileSchedule(
+            now: now,
+            calendar: calendar,
+            coordinator: LocalNotificationCapacityCoordinator(),
+            client: client
+        )
+
+        XCTAssertTrue(result?.activeIdentifiers.contains(escalationID) == true)
+        XCTAssertNotNil(pending[escalationID])
+        XCTAssertFalse(
+            removals.flatMap { $0 }.contains(escalationID)
+        )
+    }
+
+    func testMissingPendingEscalationIsClearedAndFallbackIsRegenerated() async throws {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: HydrationReminders.enabledKey)
+        defaults.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.doubleTapConfirmEnabledKey)
+        defaults.set(true, forKey: HydrationReminders.bandFirstEnabledKey)
+        defaults.set(8 * 60, forKey: HydrationReminders.activeStartMinutesKey)
+        defaults.set(10 * 60, forKey: HydrationReminders.activeEndMinutesKey)
+        defaults.set(60, forKey: HydrationReminders.intervalMinutesKey)
+        let slotToken = "2026-09-13-480"
+        defaults.set(
+            slotToken,
+            forKey: "hydrationReminders.pendingEscalationSlot"
+        )
+        let fallbackID = HydrationReminders.phoneFallbackRequestID(
+            contextKey: slotToken
+        )
+        var pending = [String: UNNotificationRequest]()
+        let client = LocalNotificationCenterClient(
+            pendingRequests: {
+                Array(pending.values)
+            },
+            add: { request in
+                pending[request.identifier] = request
+            },
+            removePending: { identifiers in
+                identifiers.forEach { pending.removeValue(forKey: $0) }
+            }
+        )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 13,
+            hour: 7,
+            minute: 59
+        )))
+
+        let result = await HydrationReminders.reconcileSchedule(
+            now: now,
+            calendar: calendar,
+            coordinator: LocalNotificationCapacityCoordinator(),
+            client: client
+        )
+
+        XCTAssertNil(defaults.string(
+            forKey: "hydrationReminders.pendingEscalationSlot"
+        ))
+        XCTAssertTrue(result?.activeIdentifiers.contains(fallbackID) == true)
+        XCTAssertNotNil(pending[fallbackID])
     }
 }

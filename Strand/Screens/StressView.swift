@@ -1108,7 +1108,7 @@ struct StressModel {
                     String(localized: "Derived by NOOP from a single wearable export series; not provider-score parity."))
         case .appleHealth:
             return (String(localized: "Apple Health reference"),
-                    String(localized: "Apple Health HRV sampling and method may differ from strap RMSSD, so compare trends within this source only."))
+                    String(localized: "Apple Health HRV sampling and method may differ from wearable RMSSD, so compare trends within this source only."))
         case .localCache:
             return (String(localized: "Local daily reference"), nil)
         }

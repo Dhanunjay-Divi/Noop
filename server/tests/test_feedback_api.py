@@ -572,6 +572,85 @@ def test_feedback_reservation_recovery_is_identity_bound_and_read_only() -> None
     assert missing.status_code == 404
 
 
+def test_feedback_expired_key_is_retryable_until_tombstoned() -> None:
+    archive = _archive()
+    client, _, repository = _client()
+    idempotency_key = str(uuid4())
+    headers = {
+        **_headers(),
+        "Idempotency-Key": idempotency_key,
+    }
+    with client:
+        reserved = client.post(
+            "/v1/feedback/reports/reservations",
+            headers=headers,
+            json=_reservation_payload(archive),
+        )
+        assert reserved.status_code == 201
+        report_id = UUID(reserved.json()["report_id"])
+        report = asyncio.run(
+            repository.get(
+                report_id=report_id,
+                client_app_id=APPLE_APP_ID,
+            )
+        )
+        now = datetime.now(UTC)
+        repository._reports[report_id] = replace(
+            report,
+            status="sent",
+            object_generation=42,
+            completed_at=report.created_at,
+            retained_until=now - timedelta(seconds=1),
+            cleanup_after=None,
+            cleanup_phase=None,
+            cleanup_claimed_at=None,
+            object_absence_confirmed_at=now - timedelta(minutes=1),
+        )
+        expired_replay = client.post(
+            "/v1/feedback/reports/reservations",
+            headers=headers,
+            json=_reservation_payload(archive),
+        )
+        expired_recovery = client.get(
+            f"/v1/feedback/reports/reservations/{idempotency_key}",
+            headers={
+                "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+                "Authorization": f"Bearer {IDENTITY_TOKEN}",
+            },
+        )
+        claim = asyncio.run(repository.claim_expired(now=now, limit=1))[0]
+        assert claim.cleanup_claimed_at is not None
+        assert asyncio.run(
+            repository.finish_expired(
+                report_id=report_id,
+                claim_token=claim.cleanup_claimed_at,
+                deleted_at=now,
+            )
+        )
+
+        tombstoned_replay = client.post(
+            "/v1/feedback/reports/reservations",
+            headers=headers,
+            json=_reservation_payload(archive),
+        )
+        tombstoned_recovery = client.get(
+            f"/v1/feedback/reports/reservations/{idempotency_key}",
+            headers={
+                "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+                "Authorization": f"Bearer {IDENTITY_TOKEN}",
+            },
+        )
+
+    assert expired_replay.status_code == 404
+    assert expired_replay.json() == {"detail": "feedback reservation was not found"}
+    assert expired_recovery.status_code == 404
+    assert expired_recovery.json() == {"detail": "feedback reservation was not found"}
+    assert tombstoned_replay.status_code == 410
+    assert tombstoned_replay.json() == {"detail": "feedback reservation expired"}
+    assert tombstoned_recovery.status_code == 410
+    assert tombstoned_recovery.json() == {"detail": "feedback reservation expired"}
+
+
 def test_feedback_cancel_succeeds_before_an_object_exists() -> None:
     archive = _archive()
     client, _, _ = _client()

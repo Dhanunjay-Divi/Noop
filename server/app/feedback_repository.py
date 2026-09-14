@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -11,6 +12,15 @@ from app.repository import PostgresRepository
 
 
 _CLAIM_LEASE = timedelta(minutes=30)
+# Mobile automatic continuity is bounded to 29 days and five minutes. Give
+# every server reservation a conservative 45-day total key lifetime so cleanup
+# cannot reopen it during that client window, without retaining another 45 days
+# after deletion.
+FEEDBACK_IDEMPOTENCY_KEY_MAXIMUM_LIFETIME = timedelta(days=45)
+FEEDBACK_TOMBSTONE_BACKLOG_COUNT_OBSERVABILITY_MAX = 1_000_000
+_FEEDBACK_TOMBSTONE_BACKLOG_QUERY_LIMIT = (
+    FEEDBACK_TOMBSTONE_BACKLOG_COUNT_OBSERVABILITY_MAX + 1
+)
 _PENDING_CAPABILITY_STATUSES = frozenset({"reserved", "rejected", "deleting"})
 _CLEANUP_DELETE_PENDING = "delete_pending"
 _CLEANUP_CONFIRM_ABSENT = "confirm_absent"
@@ -22,6 +32,10 @@ class FeedbackRepositoryError(Exception):
 
 class FeedbackNotFoundError(FeedbackRepositoryError):
     """The report does not exist for this attested application."""
+
+
+class FeedbackGoneError(FeedbackRepositoryError):
+    """The report expired and its idempotency key remains temporarily retired."""
 
 
 class FeedbackConflictError(FeedbackRepositoryError):
@@ -66,11 +80,42 @@ class FeedbackReport:
     object_absence_confirmed_at: datetime | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class FeedbackIdempotencyTombstone:
+    client_app_id: str
+    principal_hash_version: int
+    principal_hash: str
+    idempotency_hash: str
+    reserved_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackTombstoneRetentionResult:
+    purged_count: int
+    remaining_expired_count: int
+    oldest_expired_age_seconds: int
+
+
 def _require_authorizable_principal(report: FeedbackReport) -> None:
     if report.principal_hash_version != FEEDBACK_PRINCIPAL_HASH_VERSION:
         raise FeedbackConflictError(
             "legacy feedback principal is not remotely authorizable"
         )
+
+
+def _idempotency_key_lifetime_elapsed(
+    report: FeedbackReport,
+    *,
+    now: datetime,
+) -> bool:
+    return report.created_at + FEEDBACK_IDEMPOTENCY_KEY_MAXIMUM_LIFETIME <= now
+
+
+def _retired_idempotency_hash(report: FeedbackReport) -> str:
+    return hashlib.sha256(
+        (f"retired\0{report.report_id}\0{report.idempotency_hash}").encode("utf-8")
+    ).hexdigest()
 
 
 class FeedbackRepository(Protocol):
@@ -110,6 +155,7 @@ class FeedbackRepository(Protocol):
         principal_hash_version: int,
         principal_hash: str,
         idempotency_hash: str,
+        now: datetime | None = None,
     ) -> FeedbackReport: ...
 
     async def mark_sent(
@@ -199,12 +245,22 @@ class FeedbackRepository(Protocol):
         claim_token: datetime,
     ) -> bool: ...
 
+    async def purge_expired_tombstones(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> FeedbackTombstoneRetentionResult: ...
+
 
 class MemoryFeedbackRepository:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._reports: dict[UUID, FeedbackReport] = {}
         self._idempotency: dict[tuple[str, int, str, str], UUID] = {}
+        self._tombstones: dict[
+            tuple[str, int, str, str], FeedbackIdempotencyTombstone
+        ] = {}
 
     async def reserve(
         self,
@@ -226,9 +282,26 @@ class MemoryFeedbackRepository:
             existing_id = self._idempotency.get(key)
             if existing_id is not None:
                 existing = self._reports[existing_id]
-                if existing.request_hash != report.request_hash:
+                if _idempotency_key_lifetime_elapsed(
+                    existing,
+                    now=report.created_at,
+                ):
+                    self._reports[existing_id] = replace(
+                        existing,
+                        idempotency_hash=_retired_idempotency_hash(existing),
+                    )
+                    self._idempotency.pop(key, None)
+                elif existing.retained_until <= report.created_at:
+                    raise FeedbackNotFoundError("feedback reservation was not found")
+                elif existing.request_hash != report.request_hash:
                     raise FeedbackConflictError("feedback idempotency key was reused")
-                return existing, False
+                else:
+                    return existing, False
+            tombstone = self._tombstones.get(key)
+            if tombstone is not None:
+                if tombstone.expires_at > report.created_at:
+                    raise FeedbackGoneError("feedback reservation expired")
+                self._tombstones.pop(key, None)
             quota_start = report.created_at - timedelta(days=1)
             subject_reports = [
                 existing
@@ -379,19 +452,28 @@ class MemoryFeedbackRepository:
         principal_hash_version: int,
         principal_hash: str,
         idempotency_hash: str,
+        now: datetime | None = None,
     ) -> FeedbackReport:
         async with self._lock:
-            report_id = self._idempotency.get(
-                (
-                    client_app_id,
-                    principal_hash_version,
-                    principal_hash,
-                    idempotency_hash,
-                )
+            key = (
+                client_app_id,
+                principal_hash_version,
+                principal_hash,
+                idempotency_hash,
             )
+            report_id = self._idempotency.get(key)
             if report_id is None:
+                reference = now or datetime.now(UTC)
+                tombstone = self._tombstones.get(key)
+                if tombstone is not None:
+                    if tombstone.expires_at <= reference:
+                        self._tombstones.pop(key, None)
+                    else:
+                        raise FeedbackGoneError("feedback reservation expired")
                 raise FeedbackNotFoundError("feedback report was not found")
             report = self._get(report_id, client_app_id)
+            if report.retained_until <= (now or datetime.now(UTC)):
+                raise FeedbackNotFoundError("feedback report was not found")
             _require_authorizable_principal(report)
             return report
 
@@ -662,7 +744,6 @@ class MemoryFeedbackRepository:
         claim_token: datetime,
         deleted_at: datetime,
     ) -> bool:
-        del deleted_at
         async with self._lock:
             report = self._reports.get(report_id)
             if (
@@ -672,16 +753,26 @@ class MemoryFeedbackRepository:
                 or report.retained_until > claim_token
             ):
                 return False
-            self._reports.pop(report_id)
-            self._idempotency.pop(
-                (
-                    report.client_app_id,
-                    report.principal_hash_version,
-                    report.principal_hash,
-                    report.idempotency_hash,
-                ),
-                None,
+            key = (
+                report.client_app_id,
+                report.principal_hash_version,
+                report.principal_hash,
+                report.idempotency_hash,
             )
+            expires_at = report.created_at + FEEDBACK_IDEMPOTENCY_KEY_MAXIMUM_LIFETIME
+            owns_active_key = self._idempotency.get(key) == report_id
+            if owns_active_key and expires_at > deleted_at:
+                self._tombstones[key] = FeedbackIdempotencyTombstone(
+                    client_app_id=report.client_app_id,
+                    principal_hash_version=report.principal_hash_version,
+                    principal_hash=report.principal_hash,
+                    idempotency_hash=report.idempotency_hash,
+                    reserved_at=report.created_at,
+                    expires_at=expires_at,
+                )
+            self._reports.pop(report_id)
+            if owns_active_key:
+                self._idempotency.pop(key, None)
             return True
 
     async def release_expired(
@@ -699,6 +790,62 @@ class MemoryFeedbackRepository:
                 cleanup_claimed_at=None,
             )
             return True
+
+    async def purge_expired_tombstones(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> FeedbackTombstoneRetentionResult:
+        async with self._lock:
+            expired = sorted(
+                (
+                    tombstone
+                    for tombstone in self._tombstones.values()
+                    if tombstone.expires_at <= now
+                ),
+                key=lambda value: (
+                    value.expires_at,
+                    value.client_app_id,
+                    value.principal_hash,
+                    value.idempotency_hash,
+                ),
+            )[:limit]
+            for tombstone in expired:
+                self._tombstones.pop(
+                    (
+                        tombstone.client_app_id,
+                        tombstone.principal_hash_version,
+                        tombstone.principal_hash,
+                        tombstone.idempotency_hash,
+                    ),
+                    None,
+                )
+            remaining = [
+                tombstone
+                for tombstone in self._tombstones.values()
+                if tombstone.expires_at <= now
+            ]
+            oldest_expired_age_seconds = (
+                max(
+                    0,
+                    int(
+                        (
+                            now - min(tombstone.expires_at for tombstone in remaining)
+                        ).total_seconds()
+                    ),
+                )
+                if remaining
+                else 0
+            )
+            return FeedbackTombstoneRetentionResult(
+                purged_count=len(expired),
+                remaining_expired_count=min(
+                    len(remaining),
+                    _FEEDBACK_TOMBSTONE_BACKLOG_QUERY_LIMIT,
+                ),
+                oldest_expired_age_seconds=oldest_expired_age_seconds,
+            )
 
     def _get(self, report_id: UUID, client_app_id: str) -> FeedbackReport:
         report = self._reports.get(report_id)
@@ -756,11 +903,20 @@ class PostgresFeedbackRepository:
                 existing = await replay_candidate()
                 if existing is not None:
                     value = self._row(existing)
-                    if value.request_hash != report.request_hash:
+                    if (
+                        _idempotency_key_lifetime_elapsed(
+                            value,
+                            now=report.created_at,
+                        )
+                        or value.retained_until <= report.created_at
+                    ):
+                        existing = None
+                    elif value.request_hash != report.request_hash:
                         raise FeedbackConflictError(
                             "feedback idempotency key was reused"
                         )
-                    return value, False
+                    else:
+                        return value, False
 
                 await connection.execute(
                     """
@@ -786,11 +942,64 @@ class PostgresFeedbackRepository:
                 existing = await replay_candidate()
                 if existing is not None:
                     value = self._row(existing)
-                    if value.request_hash != report.request_hash:
+                    if _idempotency_key_lifetime_elapsed(
+                        value,
+                        now=report.created_at,
+                    ):
+                        await connection.execute(
+                            """
+                            UPDATE feedback_reports
+                            SET idempotency_hash = $2
+                            WHERE report_id = $1
+                              AND idempotency_hash = $3
+                            """,
+                            value.report_id,
+                            _retired_idempotency_hash(value),
+                            value.idempotency_hash,
+                        )
+                    elif value.retained_until <= report.created_at:
+                        raise FeedbackNotFoundError(
+                            "feedback reservation was not found"
+                        )
+                    elif value.request_hash != report.request_hash:
                         raise FeedbackConflictError(
                             "feedback idempotency key was reused"
                         )
-                    return value, False
+                    else:
+                        return value, False
+                tombstone = await connection.fetchrow(
+                    """
+                    SELECT expires_at
+                    FROM feedback_idempotency_tombstones
+                    WHERE client_app_id = $1
+                      AND principal_hash_version = $2
+                      AND principal_hash = $3
+                      AND idempotency_hash = $4
+                    FOR UPDATE
+                    """,
+                    report.client_app_id,
+                    report.principal_hash_version,
+                    report.principal_hash,
+                    report.idempotency_hash,
+                )
+                if tombstone is not None:
+                    if tombstone["expires_at"] > report.created_at:
+                        raise FeedbackGoneError("feedback reservation expired")
+                    await connection.execute(
+                        """
+                        DELETE FROM feedback_idempotency_tombstones
+                        WHERE client_app_id = $1
+                          AND principal_hash_version = $2
+                          AND principal_hash = $3
+                          AND idempotency_hash = $4
+                          AND expires_at <= $5
+                        """,
+                        report.client_app_id,
+                        report.principal_hash_version,
+                        report.principal_hash,
+                        report.idempotency_hash,
+                        report.created_at,
+                    )
                 quota = await connection.fetchrow(
                     """
                     SELECT
@@ -1098,8 +1307,10 @@ class PostgresFeedbackRepository:
         principal_hash_version: int,
         principal_hash: str,
         idempotency_hash: str,
+        now: datetime | None = None,
     ) -> FeedbackReport:
         pool = self.primary._require_pool()
+        reference = now or datetime.now(UTC)
         row = await pool.fetchrow(
             """
             SELECT *
@@ -1108,13 +1319,46 @@ class PostgresFeedbackRepository:
               AND COALESCE(principal_hash_version, 0) = $2
               AND COALESCE(principal_hash, subject_hash) = $3
               AND idempotency_hash = $4
+              AND retained_until > $5
             """,
             client_app_id,
             principal_hash_version,
             principal_hash,
             idempotency_hash,
+            reference,
         )
         if row is None:
+            tombstone_expires_at = await pool.fetchval(
+                """
+                SELECT expires_at
+                FROM feedback_idempotency_tombstones
+                WHERE client_app_id = $1
+                  AND principal_hash_version = $2
+                  AND principal_hash = $3
+                  AND idempotency_hash = $4
+                """,
+                client_app_id,
+                principal_hash_version,
+                principal_hash,
+                idempotency_hash,
+            )
+            if tombstone_expires_at is not None and tombstone_expires_at > reference:
+                raise FeedbackGoneError("feedback reservation expired")
+            await pool.execute(
+                """
+                DELETE FROM feedback_idempotency_tombstones
+                WHERE client_app_id = $1
+                  AND principal_hash_version = $2
+                  AND principal_hash = $3
+                  AND idempotency_hash = $4
+                  AND expires_at <= $5
+                """,
+                client_app_id,
+                principal_hash_version,
+                principal_hash,
+                idempotency_hash,
+                reference,
+            )
             raise FeedbackNotFoundError("feedback report was not found")
         report = self._row(row)
         _require_authorizable_principal(report)
@@ -1408,20 +1652,93 @@ class PostgresFeedbackRepository:
         claim_token: datetime,
         deleted_at: datetime,
     ) -> bool:
-        del deleted_at
         pool = self.primary._require_pool()
-        result = await pool.fetchval(
-            """
-            DELETE FROM feedback_reports
-            WHERE report_id = $1
-              AND cleanup_claimed_at = $2
-              AND object_absence_confirmed_at IS NOT NULL
-              AND retained_until <= $2
-            RETURNING TRUE
-            """,
-            report_id,
-            claim_token,
-        )
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                identity = await connection.fetchrow(
+                    """
+                    SELECT
+                        client_app_id,
+                        COALESCE(principal_hash_version, 0)
+                            AS principal_hash_version,
+                        COALESCE(principal_hash, subject_hash) AS principal_hash
+                    FROM feedback_reports
+                    WHERE report_id = $1
+                      AND cleanup_claimed_at = $2
+                    """,
+                    report_id,
+                    claim_token,
+                )
+                if identity is None:
+                    return False
+                await connection.execute(
+                    """
+                    SELECT pg_advisory_xact_lock(
+                        hashtextextended('noop-feedback-app:' || $1, 0)
+                    )
+                    """,
+                    identity["client_app_id"],
+                )
+                await connection.execute(
+                    """
+                    SELECT pg_advisory_xact_lock(
+                        hashtextextended(
+                            'noop-feedback:' || $1 || ':' || $2 || ':' || $3,
+                            0
+                        )
+                    )
+                    """,
+                    identity["client_app_id"],
+                    str(identity["principal_hash_version"]),
+                    str(identity["principal_hash"]).strip(),
+                )
+                result = await connection.fetchval(
+                    """
+                    WITH deleted_report AS (
+                        DELETE FROM feedback_reports
+                        WHERE report_id = $1
+                          AND cleanup_claimed_at = $2
+                          AND object_absence_confirmed_at IS NOT NULL
+                          AND retained_until <= $2
+                        RETURNING
+                            client_app_id,
+                            principal_hash_version,
+                            principal_hash,
+                            idempotency_hash,
+                            created_at
+                    ),
+                    retired_key AS (
+                        INSERT INTO feedback_idempotency_tombstones (
+                            client_app_id,
+                            principal_hash_version,
+                            principal_hash,
+                            idempotency_hash,
+                            reserved_at,
+                            expires_at
+                        )
+                        SELECT
+                            client_app_id,
+                            principal_hash_version,
+                            principal_hash,
+                            idempotency_hash,
+                            created_at,
+                            created_at + INTERVAL '45 days'
+                        FROM deleted_report
+                        WHERE created_at + INTERVAL '45 days' > $3::timestamptz
+                        ON CONFLICT (
+                            client_app_id,
+                            principal_hash_version,
+                            principal_hash,
+                            idempotency_hash
+                        ) DO NOTHING
+                        RETURNING TRUE
+                    )
+                    SELECT EXISTS (SELECT 1 FROM deleted_report)
+                    """,
+                    report_id,
+                    claim_token,
+                    deleted_at,
+                )
         return bool(result)
 
     async def release_expired(
@@ -1443,6 +1760,81 @@ class PostgresFeedbackRepository:
             claim_token,
         )
         return bool(result)
+
+    async def purge_expired_tombstones(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> FeedbackTombstoneRetentionResult:
+        pool = self.primary._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                purged = await connection.fetchval(
+                    """
+                    WITH expired AS (
+                        SELECT
+                            client_app_id,
+                            principal_hash_version,
+                            principal_hash,
+                            idempotency_hash
+                        FROM feedback_idempotency_tombstones
+                        WHERE expires_at <= $1
+                        ORDER BY
+                            expires_at,
+                            client_app_id,
+                            principal_hash,
+                            idempotency_hash
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    ),
+                    removed AS (
+                        DELETE FROM feedback_idempotency_tombstones tombstone
+                        USING expired
+                        WHERE tombstone.client_app_id = expired.client_app_id
+                          AND tombstone.principal_hash_version =
+                              expired.principal_hash_version
+                          AND tombstone.principal_hash = expired.principal_hash
+                          AND tombstone.idempotency_hash =
+                              expired.idempotency_hash
+                        RETURNING 1
+                    )
+                    SELECT count(*) FROM removed
+                    """,
+                    now,
+                    limit,
+                )
+                backlog = await connection.fetchrow(
+                    """
+                    WITH remaining AS (
+                        SELECT expires_at
+                        FROM feedback_idempotency_tombstones
+                        WHERE expires_at <= $1
+                        ORDER BY expires_at
+                        LIMIT $2
+                    )
+                    SELECT
+                        count(*) AS remaining_expired_count,
+                        COALESCE(
+                            FLOOR(
+                                EXTRACT(
+                                    EPOCH FROM (
+                                        $1::timestamptz - MIN(expires_at)
+                                    )
+                                )
+                            )::bigint,
+                            0
+                        ) AS oldest_expired_age_seconds
+                    FROM remaining
+                    """,
+                    now,
+                    _FEEDBACK_TOMBSTONE_BACKLOG_QUERY_LIMIT,
+                )
+        return FeedbackTombstoneRetentionResult(
+            purged_count=int(purged or 0),
+            remaining_expired_count=int(backlog["remaining_expired_count"] or 0),
+            oldest_expired_age_seconds=int(backlog["oldest_expired_age_seconds"] or 0),
+        )
 
     async def _update_returning(self, query: str, *arguments: object) -> FeedbackReport:
         pool = self.primary._require_pool()

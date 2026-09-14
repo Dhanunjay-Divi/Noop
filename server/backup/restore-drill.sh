@@ -68,6 +68,10 @@ schema_ok=$(psql \
         ) IS NOT NULL
         AND to_regclass('public.managed_safety_locations') IS NOT NULL
         AND to_regclass('public.managed_safety_push_deliveries') IS NOT NULL
+        AND to_regclass('public.feedback_reports') IS NOT NULL
+        AND to_regclass(
+            'public.feedback_idempotency_tombstones'
+        ) IS NOT NULL
     )::int;")
 if [ "$schema_ok" != "1" ]; then
     echo "restore drill failed schema verification" >&2
@@ -145,6 +149,10 @@ psql \
         ),
         'managed_safety_locations', (
             SELECT count(*) FROM managed_safety_locations
+        ),
+        'feedback_reports', (SELECT count(*) FROM feedback_reports),
+        'feedback_idempotency_tombstones', (
+            SELECT count(*) FROM feedback_idempotency_tombstones
         )
     );"
 

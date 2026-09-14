@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.R
+import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -428,7 +429,7 @@ private fun StressHeroCard(model: StressModel, modifier: Modifier = Modifier) {
 
             // One plain-English line, full width under the vessel row.
             Text(
-                model.explanation,
+                uiString(model.explanationRes),
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
@@ -847,10 +848,13 @@ private fun StressTotalsBar(day: DaytimeStress.Result) {
     }
 }
 
-private enum class StressTotalsBand(val title: String, val color: Color) {
-    Calm("Calm", StressRamp.CALM),         // blue - low stress
-    Moderate("Moderate", StressRamp.STEADY), // green - balanced
-    High("High", StressRamp.TENSE),        // amber - high
+private enum class StressTotalsBand(@StringRes private val titleRes: Int, val color: Color) {
+    Calm(R.string.ui_audit_stress_totals_band_calm, StressRamp.CALM),         // blue - low stress
+    Moderate(R.string.ui_audit_stress_totals_band_moderate, StressRamp.STEADY), // green - balanced
+    High(R.string.ui_audit_stress_totals_band_high, StressRamp.TENSE);        // amber - high
+
+    val title: String
+        get() = uiString(titleRes)
 }
 
 /** One band's share of the scored waking hours as a liquid tube row: a swatch + label on the left, the
@@ -954,7 +958,10 @@ private fun StressTiles(model: StressModel) {
                 modifier = m,
                 label = stringResource(R.string.stress_autonomic_load_label),
                 value = String.format(Locale.US, "%.1f", model.score),
-                caption = "of 3 · ${model.band.title}",
+                caption = uiString(
+                    R.string.ui_audit_stress_score_caption,
+                    model.band.title,
+                ),
                 accent = StressRamp.color(model.score),
             )
         },
@@ -1019,10 +1026,13 @@ private fun MarkerTile(
     if (delta != null && kotlin.math.abs(delta) >= 0.5) {
         val up = delta > 0
         val isStressful = (up == higherIsStress)
-        deltaText = "${if (up) "+" else "−"}${kotlin.math.abs(delta).roundToInt()} vs base"
+        deltaText = uiString(
+            R.string.ui_audit_stress_delta_vs_baseline,
+            "${if (up) "+" else "−"}${kotlin.math.abs(delta).roundToInt()}",
+        )
         deltaColor = if (isStressful) Palette.statusWarning else Palette.statusPositive
     } else {
-        deltaText = "at baseline"
+        deltaText = uiString(R.string.ui_audit_stress_at_baseline)
         deltaColor = Palette.textTertiary
     }
     StatTile(
@@ -1129,30 +1139,32 @@ private fun androidx.compose.foundation.layout.RowScope.TrendFooterItem(label: S
 private fun StressMethodologyCard(model: StressModel, modifier: Modifier = Modifier) {
     NoopCard(tint = Palette.stressColor, modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Overline("How this is computed")
+            Overline(uiString(R.string.ui_audit_stress_methodology_title))
             Text(
                 if (model.usingStored) {
-                    "Today's value is your recorded daily stress score (0-3)."
+                    uiString(R.string.ui_audit_stress_methodology_stored_summary)
                 } else {
-                    "Stress is derived from two autonomic signals."
+                    uiString(R.string.ui_audit_stress_methodology_derived_summary)
                 },
                 style = NoopType.body,
                 color = Palette.textPrimary,
             )
             Text(
-                uiString(R.string.l10n_stress_screen_we_compare_today_s_resting_heart_a9cd0955) +
-                    "baseline. A higher-than-usual resting HR and a lower-than-usual HRV " +
-                    "both push the score up, classic signs the body is activated. The " +
-                    "combined shift is mapped onto a 0-3 scale: 0 is calm, 1.5 sits at " +
-                    "your baseline, 3 is highly activated.",
+                uiString(
+                    if (model.usingStored) {
+                        R.string.ui_audit_stress_methodology_stored_detail
+                    } else {
+                        R.string.ui_audit_stress_methodology_derived_detail
+                    },
+                ),
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
             HorizontalDivider(color = Palette.hairline)
             Row(modifier = Modifier.fillMaxWidth()) {
                 BandLegend("0-1", StressBand.Low.title, StressRamp.CALM)
-                BandLegend("1-2", "MEDIUM", StressRamp.STEADY)
-                BandLegend("2-3", "HIGH", StressRamp.TENSE)
+                BandLegend("1-2", StressBand.Medium.title, StressRamp.STEADY)
+                BandLegend("2-3", StressBand.High.title, StressRamp.TENSE)
             }
         }
     }
@@ -1209,17 +1221,13 @@ private fun StressEmpty() {
 
 // MARK: - Stress band
 
-internal enum class StressBand(private val fallbackTitle: String, val tone: StrandTone) {
-    Low("LOW", StrandTone.Positive),
-    Medium("MEDIUM", StrandTone.Warning),
-    High("HIGH", StrandTone.Critical);
+internal enum class StressBand(@StringRes private val titleRes: Int, val tone: StrandTone) {
+    Low(R.string.appwide_stress_band_light_load, StrandTone.Positive),
+    Medium(R.string.appwide_sleep_stress_band_medium, StrandTone.Warning),
+    High(R.string.appwide_sleep_stress_band_high, StrandTone.Critical);
 
     val title: String
-        get() = if (this == Low) {
-            uiString(R.string.appwide_stress_band_light_load)
-        } else {
-            fallbackTitle
-        }
+        get() = uiString(titleRes)
 
     companion object {
         fun forScore(score: Double): StressBand = when {
@@ -1275,7 +1283,7 @@ internal enum class StressRange(val label: String, val days: Int?) {
 internal class StressModel private constructor(
     val score: Double,            // 0–3 (today)
     val band: StressBand,
-    val explanation: String,
+    @StringRes val explanationRes: Int,
     val rhrToday: Int?,
     val hrvToday: Double?,
     val rhrDelta: Double?,        // today − baseline mean (bpm)
@@ -1331,8 +1339,16 @@ internal class StressModel private constructor(
             val storedToday = stored[today.day]
             if (storedToday == null && !derivedAvailable) return null
 
+            val normalizedInputs = normalizedInputs(
+                rhrToday = rhrT,
+                meanRHR = meanRHR,
+                sdRHR = sdRHR,
+                hrvToday = hrvT,
+                meanHRV = meanHRV,
+                sdHRV = sdHRV,
+            )
             val derivedToday: Double? = if (derivedAvailable) {
-                squash(rawScore(rhrT, meanRHR, sdRHR, hrvT, meanHRV, sdHRV))
+                squash(normalizedInputs.total)
             } else {
                 null
             }
@@ -1342,7 +1358,11 @@ internal class StressModel private constructor(
             val band = StressBand.forScore(s)
             val rhrDelta = if (rhrT != null && meanRHR != null) rhrT - meanRHR else null
             val hrvDelta = if (hrvT != null && meanHRV != null) hrvT - meanHRV else null
-            val explanation = explanation(band, rhrDelta, hrvDelta)
+            val explanationRes = explanationRes(
+                band = band,
+                normalizedInputs = normalizedInputs,
+                usingStored = usingStored,
+            )
 
             // Full daily proxy history: stored value if present for the day, else the
             // z-score derivation against the SAME baseline so the line is comparable.
@@ -1376,7 +1396,7 @@ internal class StressModel private constructor(
             return StressModel(
                 score = s,
                 band = band,
-                explanation = explanation,
+                explanationRes = explanationRes,
                 rhrToday = today.restingHr,
                 hrvToday = hrvT,
                 rhrDelta = rhrDelta,
@@ -1400,46 +1420,90 @@ internal class StressModel private constructor(
             return sqrt(v)
         }
 
+        private data class NormalizedStressInputs(
+            val rhr: Double?,
+            val hrv: Double?,
+        ) {
+            val total: Double = (rhr ?: 0.0) + (hrv ?: 0.0)
+        }
+
+        /**
+         * The exact normalized terms used by both the displayed score and its explanation.
+         * Positive values raise the estimate: RHR above baseline and HRV below baseline.
+         */
+        private fun normalizedInputs(
+            rhrToday: Double?, meanRHR: Double?, sdRHR: Double,
+            hrvToday: Double?, meanHRV: Double?, sdHRV: Double,
+        ): NormalizedStressInputs = NormalizedStressInputs(
+            rhr = if (rhrToday != null && meanRHR != null && sdRHR > 0.0001) {
+                (rhrToday - meanRHR) / sdRHR
+            } else {
+                null
+            },
+            hrv = if (hrvToday != null && meanHRV != null && sdHRV > 0.0001) {
+                (meanHRV - hrvToday) / sdHRV
+            } else {
+                null
+            },
+        )
+
         /** Combined autonomic z-score. RHR-up and HRV-down both push it positive. */
         private fun rawScore(
             rhrToday: Double?, meanRHR: Double?, sdRHR: Double,
             hrvToday: Double?, meanHRV: Double?, sdHRV: Double,
-        ): Double {
-            var sum = 0.0
-            if (rhrToday != null && meanRHR != null && sdRHR > 0.0001) {
-                sum += (rhrToday - meanRHR) / sdRHR        // up = stress
-            }
-            if (hrvToday != null && meanHRV != null && sdHRV > 0.0001) {
-                sum += (meanHRV - hrvToday) / sdHRV        // down = stress
-            }
-            return sum
-        }
+        ): Double = normalizedInputs(
+            rhrToday = rhrToday,
+            meanRHR = meanRHR,
+            sdRHR = sdRHR,
+            hrvToday = hrvToday,
+            meanHRV = meanHRV,
+            sdHRV = sdHRV,
+        ).total
 
         /** Logistic squash of the raw z-sum onto 0–3 (baseline 0 → 1.5). */
         private fun squash(raw: Double): Double =
             (3.0 / (1.0 + exp(-raw))).coerceIn(0.0, 3.0)
 
-        private fun explanation(band: StressBand, rhrDelta: Double?, hrvDelta: Double?): String {
-            val rhrUp = (rhrDelta ?: 0.0) > 1.0
-            val hrvDn = (hrvDelta ?: 0.0) < -1.0
-            val hrvUp = (hrvDelta ?: 0.0) > 1.0
-            val rhrDn = (rhrDelta ?: 0.0) < -1.0
-            return when (band) {
-                StressBand.High -> when {
-                    rhrUp && hrvDn -> "Resting HR is elevated and HRV is below your baseline, both classic signs of high activation. Prioritise rest, hydration and an easy day."
-                    hrvDn -> "HRV has dropped well below your baseline, pointing to elevated stress or fatigue. Ease off and give your body time to recover."
-                    rhrUp -> "Resting heart rate is running high versus your norm. Your body is under load today. Keep effort light."
-                    else -> "Your autonomic markers are skewed toward stress today. Treat it as a recovery-focused day."
+        @StringRes
+        private fun explanationRes(
+            band: StressBand,
+            normalizedInputs: NormalizedStressInputs,
+            usingStored: Boolean,
+        ): Int {
+            if (usingStored) {
+                return when (band) {
+                    StressBand.High ->
+                        R.string.ui_audit_stress_explanation_stored_high
+                    StressBand.Medium ->
+                        R.string.ui_audit_stress_explanation_stored_medium
+                    StressBand.Low ->
+                        R.string.ui_audit_stress_explanation_stored_low
                 }
-                StressBand.Medium -> when {
-                    rhrUp || hrvDn -> "Slightly off baseline (${if (rhrUp) "resting HR is a touch high" else "HRV is a little low"}), so you're moderately activated. Nothing alarming; just don't overreach."
-                    else -> "You're sitting around your typical autonomic baseline: moderate stress, a normal, balanced day."
+            }
+            val rhr = normalizedInputs.rhr ?: 0.0
+            val hrv = normalizedInputs.hrv ?: 0.0
+            return when {
+                normalizedInputs.total > 0.0 -> when {
+                    rhr > 0.0 && hrv > 0.0 ->
+                        R.string.ui_audit_stress_explanation_derived_high_both
+                    hrv > 0.0 ->
+                        R.string.ui_audit_stress_explanation_derived_high_hrv
+                    rhr > 0.0 ->
+                        R.string.ui_audit_stress_explanation_derived_high_rhr
+                    else ->
+                        R.string.ui_audit_stress_explanation_derived_medium_other
                 }
-                StressBand.Low -> when {
-                    rhrDn && hrvUp -> "Resting heart rate is low and HRV is up. Your nervous system looks well-recovered and calm. A great day to push if you want to."
-                    hrvUp -> "HRV is above baseline, a sign of a relaxed, well-recovered nervous system. Stress is low."
-                    else -> "Resting heart rate and HRV are sitting at or below baseline: low physiological stress. You're in a calm, recovered state."
+                normalizedInputs.total < 0.0 -> when {
+                    rhr < 0.0 && hrv < 0.0 ->
+                        R.string.ui_audit_stress_explanation_derived_low_both
+                    hrv < 0.0 ->
+                        R.string.ui_audit_stress_explanation_derived_low_hrv
+                    rhr < 0.0 ->
+                        R.string.ui_audit_stress_explanation_derived_low_rhr
+                    else ->
+                        R.string.ui_audit_stress_explanation_derived_medium_other
                 }
+                else -> R.string.ui_audit_stress_explanation_derived_medium_other
             }
         }
     }

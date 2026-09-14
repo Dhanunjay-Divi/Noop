@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -15,12 +16,17 @@ from app.feedback_lifecycle import (
     run_feedback_cleanup_once,
     run_feedback_lifecycle_once,
     run_feedback_retention_once,
+    run_feedback_tombstone_retention_once,
 )
 from app.feedback_repository import (
+    FEEDBACK_IDEMPOTENCY_KEY_MAXIMUM_LIFETIME,
     FeedbackConflictError,
+    FeedbackGoneError,
+    FeedbackIdempotencyTombstone,
     FeedbackNotFoundError,
     FeedbackQuotaExceededError,
     FeedbackReport,
+    FeedbackTombstoneRetentionResult,
     MemoryFeedbackRepository,
 )
 from app.managed_object_store import (
@@ -88,6 +94,19 @@ class TrackingLifecycleRepository(MemoryFeedbackRepository):
     async def claim_expired(self, **kwargs):
         self.retention_claimed = True
         return await super().claim_expired(**kwargs)
+
+
+class SaturatedTombstoneRetentionRepository(MemoryFeedbackRepository):
+    async def purge_expired_tombstones(self, **_kwargs):
+        return FeedbackTombstoneRetentionResult(
+            purged_count=20,
+            remaining_expired_count=(
+                feedback_lifecycle._TOMBSTONE_REMAINING_COUNT_OBSERVABILITY_MAX + 1
+            ),
+            oldest_expired_age_seconds=(
+                feedback_lifecycle._TOMBSTONE_AGE_OBSERVABILITY_MAX_SECONDS + 1
+            ),
+        )
 
 
 class StaleMigrationPrimary:
@@ -371,6 +390,277 @@ async def test_feedback_retention_requires_confirmed_absence_before_metadata_del
             client_app_id=current.client_app_id,
         )
     ).status == "reserved"
+
+
+async def test_feedback_retention_retires_idempotency_key_for_bounded_window() -> None:
+    now = datetime.now(UTC)
+    repository = MemoryFeedbackRepository()
+    expired = _report(
+        now=now,
+        status="sent",
+        retained_until=now - timedelta(seconds=1),
+        upload_expires_at=now - timedelta(days=28),
+        suffix="q",
+        object_absence_confirmed_at=now - timedelta(minutes=1),
+    )
+    await repository.reserve(report=expired)
+    pre_delete_replay = _report(
+        now=now,
+        status="reserved",
+        retained_until=now + timedelta(days=28),
+        upload_expires_at=now + timedelta(minutes=15),
+        suffix="q",
+        created_at=now,
+    )
+    with pytest.raises(FeedbackNotFoundError):
+        await repository.reserve(report=pre_delete_replay)
+    with pytest.raises(FeedbackNotFoundError):
+        await repository.get_by_idempotency(
+            client_app_id=expired.client_app_id,
+            principal_hash_version=expired.principal_hash_version,
+            principal_hash=expired.principal_hash,
+            idempotency_hash=expired.idempotency_hash,
+            now=now,
+        )
+    claim = (await repository.claim_expired(now=now, limit=1))[0]
+    assert claim.cleanup_claimed_at is not None
+    assert await repository.finish_expired(
+        report_id=expired.report_id,
+        claim_token=claim.cleanup_claimed_at,
+        deleted_at=now,
+    )
+
+    replay = _report(
+        now=now + timedelta(seconds=1),
+        status="reserved",
+        retained_until=now + timedelta(days=28),
+        upload_expires_at=now + timedelta(minutes=15),
+        suffix="q",
+        created_at=now + timedelta(seconds=1),
+    )
+    with pytest.raises(FeedbackGoneError):
+        await repository.reserve(report=replay)
+    with pytest.raises(FeedbackGoneError):
+        await repository.get_by_idempotency(
+            client_app_id=expired.client_app_id,
+            principal_hash_version=expired.principal_hash_version,
+            principal_hash=expired.principal_hash,
+            idempotency_hash=expired.idempotency_hash,
+            now=now + timedelta(seconds=1),
+        )
+
+    expires_at = expired.created_at + FEEDBACK_IDEMPOTENCY_KEY_MAXIMUM_LIFETIME
+    assert await run_feedback_tombstone_retention_once(
+        repository=repository,
+        limit=10,
+        now=expires_at - timedelta(microseconds=1),
+    ) == FeedbackTombstoneRetentionResult(
+        purged_count=0,
+        remaining_expired_count=0,
+        oldest_expired_age_seconds=0,
+    )
+    assert await run_feedback_tombstone_retention_once(
+        repository=repository,
+        limit=10,
+        now=expires_at,
+    ) == FeedbackTombstoneRetentionResult(
+        purged_count=1,
+        remaining_expired_count=0,
+        oldest_expired_age_seconds=0,
+    )
+    replacement = _report(
+        now=expires_at,
+        status="reserved",
+        retained_until=expires_at + timedelta(days=28),
+        upload_expires_at=expires_at + timedelta(minutes=15),
+        suffix="q",
+        created_at=expires_at,
+    )
+    reserved, created = await repository.reserve(report=replacement)
+    assert created is True
+    assert reserved.report_id == replacement.report_id
+
+
+async def test_feedback_tombstone_retention_reports_post_purge_backlog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(UTC).replace(microsecond=0)
+    repository = MemoryFeedbackRepository()
+    events: list[tuple[str, dict[str, object]]] = []
+    for offset, age_seconds in enumerate((180, 120, 60), start=1):
+        principal_hash = hashlib.sha256(f"principal-{offset}".encode()).hexdigest()
+        idempotency_hash = hashlib.sha256(f"key-{offset}".encode()).hexdigest()
+        expires_at = now - timedelta(seconds=age_seconds)
+        key = (
+            "1:123456789012:ios:0123456789abcdef",
+            1,
+            principal_hash,
+            idempotency_hash,
+        )
+        repository._tombstones[key] = FeedbackIdempotencyTombstone(
+            client_app_id=key[0],
+            principal_hash_version=key[1],
+            principal_hash=key[2],
+            idempotency_hash=key[3],
+            reserved_at=(expires_at - FEEDBACK_IDEMPOTENCY_KEY_MAXIMUM_LIFETIME),
+            expires_at=expires_at,
+        )
+
+    monkeypatch.setattr(
+        feedback_lifecycle,
+        "emit_operational_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    result = await run_feedback_tombstone_retention_once(
+        repository=repository,
+        limit=1,
+        now=now,
+    )
+
+    assert result == FeedbackTombstoneRetentionResult(
+        purged_count=1,
+        remaining_expired_count=2,
+        oldest_expired_age_seconds=120,
+    )
+    assert events == [
+        (
+            "feedback.idempotency_tombstone_retention",
+            {
+                "service": "noop-feedback-lifecycle",
+                "outcome": "backlog_remaining",
+                "purged_count": 1,
+                "remaining_expired_count": 2,
+                "remaining_expired_count_saturated": False,
+                "oldest_expired_age_seconds": 120,
+                "oldest_expired_age_saturated": False,
+            },
+        )
+    ]
+    assert principal_hash not in repr(events)
+    assert idempotency_hash not in repr(events)
+
+
+async def test_feedback_tombstone_retention_observability_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        feedback_lifecycle,
+        "emit_operational_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    result = await run_feedback_tombstone_retention_once(
+        repository=SaturatedTombstoneRetentionRepository(),
+        limit=20,
+    )
+
+    assert result.remaining_expired_count == (
+        feedback_lifecycle._TOMBSTONE_REMAINING_COUNT_OBSERVABILITY_MAX + 1
+    )
+    assert events[0][1]["remaining_expired_count"] == (
+        feedback_lifecycle._TOMBSTONE_REMAINING_COUNT_OBSERVABILITY_MAX
+    )
+    assert events[0][1]["remaining_expired_count_saturated"] is True
+    assert events[0][1]["oldest_expired_age_seconds"] == (
+        feedback_lifecycle._TOMBSTONE_AGE_OBSERVABILITY_MAX_SECONDS
+    )
+    assert events[0][1]["oldest_expired_age_saturated"] is True
+
+
+async def test_feedback_retention_skips_already_expired_tombstone_horizon() -> None:
+    now = datetime.now(UTC)
+    repository = MemoryFeedbackRepository()
+    expired = _report(
+        now=now,
+        status="sent",
+        retained_until=now - timedelta(days=17),
+        upload_expires_at=now - timedelta(days=44),
+        suffix="z",
+        created_at=(
+            now - FEEDBACK_IDEMPOTENCY_KEY_MAXIMUM_LIFETIME - timedelta(seconds=1)
+        ),
+        object_absence_confirmed_at=now - timedelta(days=17),
+    )
+    await repository.reserve(report=expired)
+    repository._reports[expired.report_id] = replace(
+        expired,
+        cleanup_claimed_at=now,
+    )
+
+    assert await repository.finish_expired(
+        report_id=expired.report_id,
+        claim_token=now,
+        deleted_at=now,
+    )
+    replacement = replace(
+        expired,
+        report_id=uuid4(),
+        status="reserved",
+        created_at=now,
+        upload_expires_at=now + timedelta(minutes=15),
+        retained_until=now + timedelta(days=28),
+        completed_at=None,
+        cleanup_after=now + timedelta(minutes=20),
+        cleanup_phase="delete_pending",
+        cleanup_claimed_at=None,
+        object_absence_confirmed_at=None,
+    )
+    reserved, created = await repository.reserve(report=replacement)
+    assert created is True
+    assert reserved.report_id == replacement.report_id
+
+
+async def test_lingering_report_releases_key_at_total_lifetime() -> None:
+    now = datetime.now(UTC)
+    repository = MemoryFeedbackRepository()
+    created_at = now - FEEDBACK_IDEMPOTENCY_KEY_MAXIMUM_LIFETIME
+    lingering = _report(
+        now=now,
+        status="sent",
+        retained_until=created_at + timedelta(days=28),
+        upload_expires_at=created_at + timedelta(minutes=15),
+        suffix="y",
+        created_at=created_at,
+        object_absence_confirmed_at=now - timedelta(minutes=1),
+    )
+    await repository.reserve(report=lingering)
+
+    replacement = _report(
+        now=now,
+        status="reserved",
+        retained_until=now + timedelta(days=28),
+        upload_expires_at=now + timedelta(minutes=15),
+        suffix="y",
+        created_at=now,
+    )
+    reserved, created = await repository.reserve(report=replacement)
+
+    assert created is True
+    assert reserved.report_id == replacement.report_id
+    assert (
+        repository._reports[lingering.report_id].idempotency_hash
+        != lingering.idempotency_hash
+    )
+    repository._reports[lingering.report_id] = replace(
+        repository._reports[lingering.report_id],
+        cleanup_claimed_at=now,
+    )
+    assert await repository.finish_expired(
+        report_id=lingering.report_id,
+        claim_token=now,
+        deleted_at=now,
+    )
+    recovered = await repository.get_by_idempotency(
+        client_app_id=replacement.client_app_id,
+        principal_hash_version=replacement.principal_hash_version,
+        principal_hash=replacement.principal_hash,
+        idempotency_hash=replacement.idempotency_hash,
+        now=now,
+    )
+    assert recovered.report_id == replacement.report_id
+    assert repository._tombstones == {}
 
 
 async def test_retention_confirmation_repository_blocks_early_cleanup_claim() -> None:

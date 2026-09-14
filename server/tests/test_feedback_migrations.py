@@ -78,6 +78,44 @@ def test_feedback_migration_040_is_manifested_schema_evolution() -> None:
     assert "DROP INDEX IF EXISTS feedback_reports_subject_quota_idx" not in sql
 
 
+def test_feedback_migration_042_is_bounded_hash_only_tombstone_storage() -> None:
+    migration = MIGRATIONS / "042_feedback_idempotency_tombstones.sql"
+    checksum = hashlib.sha256(migration.read_bytes()).hexdigest()
+    manifest = {
+        version: digest
+        for digest, version in (
+            line.split()
+            for line in MANIFEST.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+    }
+    sql = migration.read_text(encoding="utf-8")
+    table_contract = sql.split(
+        "CREATE OR REPLACE FUNCTION noop_feedback_report_retire_idempotency",
+        maxsplit=1,
+    )[0]
+
+    assert manifest[migration.name] == checksum
+    assert "CREATE TABLE feedback_idempotency_tombstones" in table_contract
+    assert "client_app_id text NOT NULL" in table_contract
+    assert "principal_hash char(64) NOT NULL" in table_contract
+    assert "idempotency_hash char(64) NOT NULL" in table_contract
+    assert "request_hash" not in table_contract
+    assert "reserved_at timestamptz NOT NULL" in table_contract
+    assert "expires_at = reserved_at + INTERVAL '45 days'" in table_contract
+    assert "deleted_at" not in table_contract
+    assert "report_id" not in table_contract
+    assert "subject_hash" not in table_contract
+    assert "receipt" not in table_contract
+    assert "object_key" not in table_contract
+    assert "archive_sha256" not in table_contract
+    assert "noop_feedback_report_retire_idempotency" in sql
+    assert "BEFORE DELETE ON feedback_reports" in sql
+    assert "COALESCE(OLD.principal_hash, OLD.subject_hash)" in sql
+    assert "OLD.created_at + INTERVAL '45 days'" in sql
+    assert "ON CONFLICT" in sql
+
+
 def test_feedback_migration_v0_identity_is_ambiguous_and_fails_closed() -> None:
     legacy_hash = _identity(tenant="tenant-a").subject_hash
 
@@ -288,4 +326,7 @@ async def test_feedback_migration_039_to_040_preserves_legacy_row() -> None:
             assert rollback_updated["cleanup_after"] is None
             assert rollback_updated["cleanup_phase"] is None
     finally:
-        await connection.close()
+        try:
+            await connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        finally:
+            await connection.close()

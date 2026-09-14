@@ -1341,7 +1341,7 @@ class WhoopBleClient(
         fun timeoutSyncError(futureClockBanner: String?, bankedThisOffload: Boolean): String? =
             futureClockBanner
                 ?: if (bankedThisOffload) null
-                else "Sync interrupted - the strap went quiet. It will retry on the next sync."
+                else "Sync interrupted - the band went quiet. It will retry on the next sync."
 
         /**
          * Pure classification of a COMPLETED (HISTORY_COMPLETE) offload, extracted from exitBackfilling
@@ -1650,9 +1650,9 @@ class WhoopBleClient(
          */
         fun futureDatedStrapBanner(strapNewestTs: Long?, wallNowUnix: Long): String? =
             if (!isFutureDatedNewest(strapNewestTs, wallNowUnix)) null
-            else "Synced, but your strap's clock is set in the future - its banked history is dated ahead of " +
+            else "Synced, but your band's clock is set in the future - its banked history is dated ahead of " +
                 "today, so NOOP can't trust those timestamps and didn't import them (importing them would " +
-                "misfile your data days or years ahead). Fully charge the strap to 100% and power-cycle it so " +
+                "misfile your data days or years ahead). Fully charge the band to 100% and power-cycle it so " +
                 "its clock re-syncs, then reconnect."
 
         /**
@@ -2908,7 +2908,7 @@ class WhoopBleClient(
             _state.update { it.copy(
                 scanning = false,
                 statusNote = "This device has no Bluetooth LE. NOOP has to run on a real phone with " +
-                    "Bluetooth, near your strap. It can't connect from an emulator or virtual device.") }
+                    "Bluetooth, near Noop Band. It can't connect from an emulator or virtual device.") }
             return
         }
         if (!adp.isEnabled) {
@@ -3774,7 +3774,7 @@ class WhoopBleClient(
             return
         }
         if (!_state.value.connected || !_state.value.bonded) {
-            _state.update { it.copy(renameStatus = "Connect and pair your strap first.") }
+            _state.update { it.copy(renameStatus = "Connect and pair Noop Band first.") }
             return
         }
         if (name.isEmpty()) {
@@ -3789,7 +3789,7 @@ class WhoopBleClient(
         send(CommandNumber.SET_ADVERTISING_NAME, payload, withResponse = true)
         log("Strap rename: wrote advertising name=$clamped")
         _state.update { it.copy(
-            renameStatus = "Sent - your strap will reboot to apply, then reconnect with the new name.",
+            renameStatus = "Sent - the band will reboot to apply, then reconnect with the new name.",
         ) }
     }
 
@@ -4932,7 +4932,7 @@ class WhoopBleClient(
                 _state.update { it.copy(
                     whoop5Detected = true,
                     statusNote = "Newer compatible band connected - experimental. After bonding, NOOP brings up live " +
-                        "heart rate from the strap's realtime stream. Deeper metrics (recovery, strain, " +
+                        "heart rate from the band's realtime stream. Deeper metrics (recovery, strain, " +
                         "sleep) are still being validated. Legacy compatible bands have full support today.",
                 ) }
                 cmdCharacteristic = whoop5.getCharacteristic(WHOOP5_CMD_WRITE_CHAR)
@@ -7006,7 +7006,7 @@ class WhoopBleClient(
                 // the two platforms never disagree on which banner a given sync shows.
                 lastSyncError = when {
                     bankedNothing && sustainedEmpty ->
-                        "Synced, but your strap had no stored history to hand over - only its diagnostic output. This usually means its clock has lost sync, so it isn't saving data to flash. Fully charge it to 100%, then reconnect, and it should start banking again."
+                        "Synced, but your band had no stored history to hand over - only its diagnostic output. This usually means its clock has lost sync, so it isn't saving data to flash. Fully charge it to 100%, then reconnect, and it should start banking again."
                     bankedNothing -> null   // banked nothing but not yet sustained — stay silent (matches Swift)
                     // #324/#928: the strap banked records but its newest is dated implausibly in the future
                     // (RTC relatched ahead). #773 drops the samples so nothing is misfiled, but this path
@@ -7237,7 +7237,7 @@ class WhoopBleClient(
         payload[0] = 0x01
         System.arraycopy(endData, 0, payload, 1, endData.size)
         send(CommandNumber.HISTORICAL_DATA_RESULT, payload, withResponse = true)
-        // Progress signal for the "Syncing strap history…" UI (#77). The per-session count remains
+        // Progress signal for the "Syncing Noop Band history…" UI (#77). The per-session count remains
         // separate for outcome classification; the visible count spans auto-continue slices.
         ackedChunksThisSession += 1
         if (trimAdvanced) {
@@ -7441,7 +7441,7 @@ class WhoopBleClient(
         ioScope.launch { flushLive(); flushStandardHr() }
 
         // Reset all per-connection state and clear UI flags (incl. the syncing pill — a dropped link
-        // mid-offload must not leave "Syncing strap history…" stuck on, #77). clearedBiometrics() also
+        // mid-offload must not leave "Syncing Noop Band history…" stuck on, #77). clearedBiometrics() also
         // blanks HR / R-R / the rolling buffer so a stale heart rate or R-R strip can't outlive the link
         // (parity with macOS LiveState.clearBiometrics — PR#191; the Android client previously cleared
         // `charging` but left heartRate/rr stale).

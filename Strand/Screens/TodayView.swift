@@ -4951,7 +4951,7 @@ struct TodayView: View {
 
     /// A short recovery state word for the synthesis hero.
     private func synthesisWord(_ score: Double?) -> String {
-        guard let score else { return String(localized: "No Data") }
+        guard let score else { return StrandFormat.missing }
         return RecoveryBandPresentation.label(for: score)
     }
 

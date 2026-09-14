@@ -374,7 +374,7 @@
     <string name="l10n_breathe_screen_hrv_rmssd_51014f87">HRV (RMSSD)</string>
     <string name="l10n_breathe_screen_locked_formatday_datems_paces_drift_re_8ebec15b">锁定于 %1$s · 最佳节奏会随时间推移漂移，请随时重新测量。</string>
     <string name="l10n_breathe_screen_locked_formatday_datems_switch_to_breathe_3efc52c6">锁定于 %1$s。切换到“呼吸放松”以使用它，或在上方重新测量。</string>
-    <string name="l10n_breathe_screen_not_enough_clean_beat_data_to_865a1260">今天没有足够干净的心跳数据来锁定呼吸节奏。请在休息、静坐且手环佩戴紧密时再试一次。目前，我们将以 5.5 次/分钟（相干呼吸法）的默认节奏引导您。</string>
+    <string name="l10n_breathe_screen_not_enough_clean_beat_data_to_865a1260">今天没有足够干净的心跳数据来锁定呼吸节奏。请在休息、静坐且 Noop Band 佩戴贴合时再试一次。目前，我们将以 5.5 次/分钟（相干呼吸法）的默认节奏引导您。</string>
     <string name="l10n_breathe_screen_not_now_e4571490">暂不</string>
     <string name="l10n_breathe_screen_pace_7a9a6226">节奏</string>
     <string name="l10n_breathe_screen_quick_sweep_7_min_5d58f88d">快速扫描 · 约 7 分钟</string>
@@ -811,7 +811,7 @@
     <string name="l10n_scoring_guide_screen_how_your_scores_work_21a0e2be">评分是如何计算的</string>
     <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">NOOP 每天会为您提供三个维度的评分（恢复、负荷与睡眠评分），每项满分为 100。</string>
     <string name="l10n_scoring_guide_screen_scorecardhighlight_4af6985c">评分卡高亮色</string>
-    <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">这些是基于公开科学研究、从消费级手环数据中推算出的独立评估值：并非绝对权威，仅供参考。</string>
+    <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">这些是基于公开科学研究、从消费级可穿戴设备数据中推算出的独立评估值：并非绝对权威，仅供参考。</string>
     <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">NOOP 方法</string>
     <string name="l10n_settings_screen_advancedchevron_f22dfa01">高级选项</string>
     <string name="l10n_settings_screen_note_a2481d6c">· %1$s</string>
@@ -1410,7 +1410,7 @@
     <string name="l10n_how_noop_works_screen_how_your_sleep_is_sorted_6a8e82e0">你的睡眠是如何分类的</string>
     <string name="l10n_how_noop_works_screen_what_recording_means_b896c422">“数据记录”意味着什么</string>
     <string name="l10n_how_noop_works_screen_where_your_numbers_come_from_e169963a">你的各项数据是怎么来的</string>
-    <string name="l10n_hrv_snapshot_screen_a_60_second_snapshot_of_your_35f03f7c">一份基于手环 60 秒连续捕获的心跳间期(R-R)数据的快照，已进行降噪处理...</string>
+    <string name="l10n_hrv_snapshot_screen_a_60_second_snapshot_of_your_35f03f7c">一份基于 Noop Band 60 秒连续捕获的心跳间期 (R-R) 数据的快照，已进行降噪处理...</string>
     <string name="l10n_hrv_snapshot_screen_close_hrv_reading_a29a99a1">关闭 HRV 测量</string>
     <string name="l10n_hrv_snapshot_screen_hrv_reading_a2cf71f3">HRV 测量</string>
     <string name="l10n_hydration_reminders_hydration_check_in_f93a58b5">补水提醒</string>

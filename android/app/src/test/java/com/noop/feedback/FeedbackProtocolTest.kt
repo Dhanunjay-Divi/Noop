@@ -138,6 +138,29 @@ class FeedbackProtocolTest {
     }
 
     @Test
+    fun reservationRecoveryDistinguishesPendingFromRetiredKeys() = runTest {
+        try {
+            apiReturning("", responseCode = 404).recoverReservation(
+                authorization = authorization,
+                idempotencyKey = UUID.randomUUID(),
+            )
+            fail("An unknown reservation remains retryable.")
+        } catch (_: FeedbackProtocolException.ReservationPending) {
+            // Expected: a reservation may still commit after this response.
+        }
+
+        try {
+            apiReturning("", responseCode = 410).recoverReservation(
+                authorization = authorization,
+                idempotencyKey = UUID.randomUUID(),
+            )
+            fail("A retired reservation must be terminal.")
+        } catch (_: FeedbackProtocolException.ReservationGone) {
+            // Expected: the server retained proof that this key was retired.
+        }
+    }
+
+    @Test
     fun reportTokenGrammarMatchesLegacyAndVersionedServerCapabilities() = runTest {
         for (valid in listOf(
             "a".repeat(43),
@@ -222,17 +245,18 @@ class FeedbackProtocolTest {
     }
 
     @Test
-    fun statusNotFoundIsAuthoritativeDeletion() = runTest {
+    fun statusNotFoundRemainsAmbiguousUntilReservationRecovery() = runTest {
         listOf(404, 410).forEach { statusCode ->
-            val status = apiReturning("", responseCode = statusCode).status(
-                authorization,
-                "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-                reportToken,
-            )
-
-            assertEquals("deleted", status.status)
-            assertNull(status.receipt)
-            assertNull(status.retainedUntil)
+            try {
+                apiReturning("", responseCode = statusCode).status(
+                    authorization,
+                    "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+                    reportToken,
+                )
+                fail("Status absence must not prove deletion")
+            } catch (_: FeedbackProtocolException.ReservationPending) {
+                // Recover by idempotency before changing local ownership.
+            }
         }
     }
 

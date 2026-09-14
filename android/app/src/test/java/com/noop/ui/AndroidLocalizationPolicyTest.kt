@@ -98,7 +98,7 @@ class AndroidLocalizationPolicyTest {
                 """string:(profile_(bmi_|target_weight_)|vital_range_summary_).*|""" +
                 """string:(widget_hrv|trends_effort|l10n_today_screen_(recovery_ea924f72|sleep_3cac34e6|resting_hr_26677094|blood_oxygen_a8ad9ff5|respiratory_1cd8c175|steps_cdde4f20|weight_69c0b815|calories_3e62ecfe))|""" +
                 """string:(l10n_devices_screen_(the_whoop_4_0_reboot_frame_690a8ff2|waiting_for_the_straps_reply_5a06e7ac)|l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff|l10n_test_centre_screen_(heads_up_this_test_mode_is_8b82ed69|share_strap_log_for_bug_reports_b9802500)|l10n_settings_screen_share_strap_log_for_bug_reports_b9802500|l10n_workouts_screen_hrr_explanation_516)|""" +
-                """string:(nav_alarms|today_calibration_valid_hrv_progress|sleep_stage_detail_withheld|stale_sync_.*|changelog_.*|whats_new_.*|app_report_.*|managed_friends_delete_body|managed_cloud_error_forbidden)""",
+                """string:(nav_alarms|today_calibration_valid_hrv_progress|sleep_stage_detail_withheld|stale_sync_.*|health_live_hr_.*|changelog_.*|whats_new_.*|app_report_.*|managed_friends_delete_body|managed_cloud_error_forbidden)""",
         )
         val unscopedKeys = expectedKeys.filterNot(allowed::matches)
 

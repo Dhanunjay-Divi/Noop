@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TimeoutSyncErrorTest {
-    private val interrupted = "Sync interrupted - the strap went quiet. It will retry on the next sync."
+    private val interrupted = "Sync interrupted - the band went quiet. It will retry on the next sync."
 
     @Test
     fun productiveTimeoutRaisesNoBanner() {

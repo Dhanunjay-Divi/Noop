@@ -1,9 +1,14 @@
 package com.noop.ui
 
+import com.noop.R
+import com.noop.analytics.ChargeDriverValueFormat
 import com.noop.analytics.ScoreConfidence
 import com.noop.data.DailyMetric
+import java.io.File
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.Locale
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -83,6 +88,124 @@ class RecoveryDriversUiTest {
         assertEquals("0", chargeDriverPointLabel(0))
     }
 
+    @Test fun recoveryDriverNumbersUseTheActiveLocaleAndPreserveSignedDeviation() {
+        assertEquals(
+            "15,2",
+            recoveryDriverNumberText(
+                15.2,
+                ChargeDriverValueFormat.BREATHS_PER_MINUTE,
+                Locale.GERMANY,
+            ),
+        )
+        assertEquals(
+            "+0,4",
+            recoveryDriverNumberText(
+                0.4,
+                ChargeDriverValueFormat.CELSIUS_DEVIATION,
+                Locale.GERMANY,
+            ),
+        )
+        assertEquals(
+            "−0,4",
+            recoveryDriverNumberText(
+                -0.4,
+                ChargeDriverValueFormat.CELSIUS_DEVIATION,
+                Locale.GERMANY,
+            ),
+        )
+    }
+
+    @Test fun germanRespiratoryAndSkinTemperatureOutputHasLocalizedUnitsAndNoEnglishBaselineSuffix() {
+        val respiratory = renderResource(
+            folder = "values-de",
+            key = "ui_audit_recovery_driver_value_breaths_per_minute",
+            argument = recoveryDriverNumberText(
+                15.2,
+                ChargeDriverValueFormat.BREATHS_PER_MINUTE,
+                Locale.GERMANY,
+            ),
+        )
+        val skinTemperature = renderResource(
+            folder = "values-de",
+            key = "ui_audit_recovery_driver_value_celsius_deviation",
+            argument = recoveryDriverNumberText(
+                -0.4,
+                ChargeDriverValueFormat.CELSIUS_DEVIATION,
+                Locale.GERMANY,
+            ),
+        )
+
+        assertEquals("15,2 Atemzüge/min", respiratory)
+        assertEquals("−0,4 °C", skinTemperature)
+        assertFalse(respiratory.contains("br/min"))
+        assertFalse(skinTemperature.contains("vs baseline", ignoreCase = true))
+    }
+
+    @Test fun everyDriverValueFormatHasALocalizedPresentationMapping() {
+        val expected = mapOf(
+            ChargeDriverValueFormat.MILLISECONDS to
+                R.string.ui_audit_recovery_driver_value_milliseconds,
+            ChargeDriverValueFormat.BEATS_PER_MINUTE to
+                R.string.ui_audit_recovery_driver_value_beats_per_minute,
+            ChargeDriverValueFormat.PERCENT to
+                R.string.ui_audit_recovery_driver_value_percent,
+            ChargeDriverValueFormat.BREATHS_PER_MINUTE to
+                R.string.ui_audit_recovery_driver_value_breaths_per_minute,
+            ChargeDriverValueFormat.CELSIUS_DEVIATION to
+                R.string.ui_audit_recovery_driver_value_celsius_deviation,
+        )
+
+        expected.forEach { (format, resource) ->
+            assertEquals(resource, recoveryDriverValueFormatRes(format))
+        }
+    }
+
+    @Test fun everyCanonicalDriverLabelHasALocalizedPresentationMapping() {
+        val expected = mapOf(
+            "Heart rate variability" to R.string.appwide_day_overview_hrv,
+            "Resting heart rate" to R.string.appwide_day_overview_resting_heart_rate,
+            "Sleep quality" to R.string.appwide_day_overview_sleep,
+            "Respiratory rate" to R.string.appwide_day_overview_respiratory_rate,
+            "Skin temperature" to R.string.appwide_day_overview_skin_temperature,
+        )
+
+        expected.forEach { (label, resource) ->
+            assertEquals(resource, recoveryDriverLabelRes(label))
+        }
+        assertEquals(null, recoveryDriverLabelRes("Future signal"))
+    }
+
+    @Test fun everyCanonicalDriverVerdictHasALocalizedPresentationMapping() {
+        val expected = mapOf(
+            "above baseline, supporting recovery" to
+                R.string.ui_audit_recovery_driver_verdict_above_supporting,
+            "at baseline" to R.string.ui_audit_recovery_driver_verdict_at_baseline,
+            "below baseline, limiting recovery" to
+                R.string.ui_audit_recovery_driver_verdict_below_limiting,
+            "below baseline, supporting recovery" to
+                R.string.ui_audit_recovery_driver_verdict_below_supporting,
+            "above baseline, limiting recovery" to
+                R.string.ui_audit_recovery_driver_verdict_above_limiting,
+            "a typical night" to R.string.ui_audit_recovery_driver_verdict_typical_night,
+            "sleep quality supported recovery" to
+                R.string.ui_audit_recovery_driver_verdict_sleep_supported,
+            "sleep quality was neutral" to
+                R.string.ui_audit_recovery_driver_verdict_sleep_neutral,
+            "sleep quality limited recovery" to
+                R.string.ui_audit_recovery_driver_verdict_sleep_limited,
+            "near baseline" to R.string.ui_audit_recovery_driver_verdict_near_baseline,
+            "warmer than baseline, limiting recovery" to
+                R.string.ui_audit_recovery_driver_verdict_warmer_limiting,
+            "cooler than baseline, limiting recovery" to
+                R.string.ui_audit_recovery_driver_verdict_cooler_limiting,
+        )
+
+        expected.forEach { (verdict, resource) ->
+            assertEquals(resource, recoveryDriverVerdictRes(verdict))
+        }
+        assertEquals(null, recoveryDriverVerdictRes("Future verdict"))
+    }
+
     @Test fun displayedAndFutureRowsCannotRewriteExplanationBaseline() {
         val prior = (1..6).map { day("2026-01-%02d".format(it), hrv = 50.0, rhr = 60) }
         val displayed = day("2026-01-10", hrv = 100.0, rhr = 40, recovery = 70.0)
@@ -91,12 +214,14 @@ class RecoveryDriversUiTest {
         val drivers = recoveryChargeDrivers(prior + displayed + future, displayed)
 
         assertEquals(
-            "50 ms baseline",
-            drivers.first { it.label == "Heart rate variability" }.baselineText,
+            50.0,
+            drivers.first { it.label == "Heart rate variability" }.baseline!!,
+            0.0,
         )
         assertEquals(
-            "60 bpm baseline",
-            drivers.first { it.label == "Resting heart rate" }.baselineText,
+            60.0,
+            drivers.first { it.label == "Resting heart rate" }.baseline!!,
+            0.0,
         )
     }
 
@@ -114,12 +239,28 @@ class RecoveryDriversUiTest {
         )
 
         assertEquals(
-            "70 ms baseline",
-            drivers.first { it.label == "Heart rate variability" }.baselineText,
+            70.0,
+            drivers.first { it.label == "Heart rate variability" }.baseline!!,
+            0.0,
         )
         assertEquals(
-            "55 bpm baseline",
-            drivers.first { it.label == "Resting heart rate" }.baselineText,
+            55.0,
+            drivers.first { it.label == "Resting heart rate" }.baseline!!,
+            0.0,
         )
+    }
+
+    private fun renderResource(folder: String, key: String, argument: String): String {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val file = listOf(
+            File(root, "src/main/res/$folder/appwide.xml"),
+            File(root, "app/src/main/res/$folder/appwide.xml"),
+            File(root, "android/app/src/main/res/$folder/appwide.xml"),
+        ).firstOrNull(File::isFile)
+        val xml = checkNotNull(file) { "Could not locate $folder/appwide.xml from $root" }.readText()
+        val value = checkNotNull(
+            Regex("""<string name="$key">(.*?)</string>""").find(xml)?.groupValues?.get(1),
+        ) { "Missing $folder/$key" }
+        return value.replace("%1\$s", argument).replace("%%", "%")
     }
 }

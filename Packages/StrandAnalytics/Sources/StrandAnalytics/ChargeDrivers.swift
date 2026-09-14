@@ -209,7 +209,9 @@ extension RecoveryScorer {
                 baselineText: usableRestBaseline == nil
                     ? ""
                     : "\(Int((center * 100).rounded()))% baseline",
-                verdict: sleepVerdict(sleepPerf: sp, center: center)))
+                verdict: usableRestBaseline == nil
+                    ? sleepSignalVerdict(sleepPerf: sp, center: center)
+                    : sleepVerdict(sleepPerf: sp, center: center)))
         }
 
         // ── Respiration (lower vs baseline supports recovery) ────────────────────
@@ -276,6 +278,12 @@ extension RecoveryScorer {
         if sleepPerf > reference { return "above baseline, supporting recovery" }
         if sleepPerf < reference { return "below baseline, limiting recovery" }
         return "a typical night"
+    }
+
+    static func sleepSignalVerdict(sleepPerf: Double, center: Double) -> String {
+        if sleepPerf > center { return "sleep quality supported recovery" }
+        if sleepPerf < center { return "sleep quality limited recovery" }
+        return "sleep quality was neutral"
     }
 
     static func skinTempVerdict(_ dev: Double) -> String {

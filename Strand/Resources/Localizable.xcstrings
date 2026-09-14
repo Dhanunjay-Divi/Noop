@@ -924,10 +924,10 @@
         "pt-PT": { "stringUnit": { "state": "translated", "value": "Aviso de responsabilidade" } }
       }
     },
-    "HRV is read-only. NOOP will not label strap RMSSD as Apple Health SDNN; they are different HRV statistics.": {
+    "HRV is read-only. NOOP will not label wearable RMSSD as Apple Health SDNN; they are different HRV statistics.": {
       "localizations": {
         "de": { "stringUnit": { "state": "translated", "value": "HRV ist schreibgeschützt. NOOP bezeichnet den RMSSD des Bands nicht als Apple-Health-SDNN; es sind unterschiedliche HRV-Statistiken." } },
-        "en": { "stringUnit": { "state": "translated", "value": "HRV is read-only. NOOP will not label strap RMSSD as Apple Health SDNN; they are different HRV statistics." } },
+        "en": { "stringUnit": { "state": "translated", "value": "HRV is read-only. NOOP will not label wearable RMSSD as Apple Health SDNN; they are different HRV statistics." } },
         "es": { "stringUnit": { "state": "translated", "value": "La VFC es de solo lectura. NOOP no etiquetará el RMSSD de la pulsera como SDNN de Apple Health; son estadísticas de VFC diferentes." } },
         "fr": { "stringUnit": { "state": "translated", "value": "La VFC est en lecture seule. NOOP ne présente pas le RMSSD du bracelet comme le SDNN d’Apple Santé : ce sont deux statistiques de VFC différentes." } },
         "it": { "stringUnit": { "state": "translated", "value": "L’HRV è in sola lettura. NOOP non etichetta l’RMSSD del bracciale come SDNN di Apple Salute; sono statistiche HRV diverse." } },
@@ -157419,6 +157419,162 @@
         }
       }
     },
+    "sleep quality limited recovery": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Schlafqualität begrenzte die Erholung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "la calidad del sueño limitó la recuperación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "la qualité du sommeil a limité la récupération"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "la qualità del sonno ha limitato il recupero"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a qualidade do sono limitou a recuperação"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "качество сна ограничило восстановление"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "睡眠质量限制了恢复"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "睡眠品質限制了恢復"
+          }
+        }
+      }
+    },
+    "sleep quality supported recovery": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Schlafqualität unterstützte die Erholung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "la calidad del sueño favoreció la recuperación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "la qualité du sommeil a favorisé la récupération"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "la qualità del sonno ha favorito il recupero"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a qualidade do sono favoreceu a recuperação"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "качество сна поддержало восстановление"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "睡眠质量有助于恢复"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "睡眠品質有助於恢復"
+          }
+        }
+      }
+    },
+    "sleep quality was neutral": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Schlafqualität war neutral"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "la calidad del sueño fue neutral"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "la qualité du sommeil était neutre"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "la qualità del sonno è stata neutra"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a qualidade do sono foi neutra"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "качество сна было нейтральным"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "睡眠质量对恢复影响中性"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "睡眠品質對恢復影響中性"
+          }
+        }
+      }
+    },
     "sleep debt": {
       "localizations": {
         "de": {
@@ -166325,30 +166481,36 @@
         }
       }
     },
-    "That's why a watch-only Recovery starts out “Calibrating”. NOOP needs about seven nights of your HRV to learn what normal looks like for you. Until it has them it withholds the score rather than guess. Once the baseline is set, your Recovery appears with its confidence, on the same 0-100 scale as a strap's.": {
+    "That's why a watch-only Recovery starts out “Calibrating”. NOOP needs about seven nights of your HRV to learn what normal looks like for you. Until it has them it withholds the score rather than guess. Once the baseline is set, your Recovery appears with its confidence on NOOP's 0-100 scale.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aus diesem Grund beginnt eine Nur-Uhr-Wiederherstellung mit der „Kalibrierung“. NOOP benötigt etwa sieben Nächte Ihres HRV, um zu lernen, wie normal für Sie aussieht. Bis es sie hat, hält es die Punktzahl zurück, anstatt zu raten. Sobald die Grundlinie festgelegt ist, erscheint Ihre Erholung mit ihrem Selbstvertrauen auf der gleichen Skala von 0 bis 100 wie die eines Riemens."
+            "value": "Aus diesem Grund beginnt eine Nur-Uhr-Wiederherstellung mit der „Kalibrierung“. NOOP benötigt etwa sieben Nächte Ihrer HRV, um zu lernen, was für Sie normal ist. Bis dahin wird der Wert zurückgehalten, statt zu raten. Sobald die Grundlinie feststeht, erscheint Ihre Erholung mit ihrer Vertrauensangabe auf der NOOP-Skala von 0 bis 100."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That's why a watch-only Recovery starts out “Calibrating”. NOOP needs about seven nights of your HRV to learn what normal looks like for you. Until it has them it withholds the score rather than guess. Once the baseline is set, your Recovery appears with its confidence on NOOP's 0-100 scale."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Es por eso que una recuperación de solo visualización comienza \"Calibrando\". NOOP necesita aproximadamente siete noches de su HRV para aprender cómo es lo normal para usted. Hasta que los tiene, retiene la puntuación en lugar de adivinar. Una vez establecida la línea de base, tu recuperación aparece con su confianza, en la misma escala de 0 a 100 que la de una correa."
+            "value": "Por eso, una recuperación basada solo en el reloj comienza como «Calibrando». NOOP necesita unas siete noches de tu VFC para aprender qué es normal para ti. Hasta entonces, no muestra una puntuación en lugar de adivinar. Una vez establecida la referencia, tu recuperación aparece con su nivel de confianza en la escala de 0 a 100 de NOOP."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "C'est pourquoi une récupération pour la montre uniquement commence par « Calibrage ». NOOP a besoin d'environ sept nuits de votre HRV pour savoir à quoi ressemble la normale pour vous. Jusqu'à ce qu'il les ait, il retient le score plutôt que de le deviner. Une fois la ligne de base définie, votre récupération apparaît avec confiance, sur la même échelle de 0 à 100 que celle d'un bracelet."
+            "value": "C’est pourquoi une récupération basée uniquement sur la montre commence par « Calibrage ». NOOP a besoin d’environ sept nuits de VFC pour apprendre votre niveau habituel. Jusque-là, le score reste masqué plutôt que d’être estimé. Une fois la référence établie, votre récupération s’affiche avec son niveau de confiance sur l’échelle NOOP de 0 à 100."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "É por isso que uma recuperação apenas de observação começa “Calibrando”. NOOP precisa de cerca de sete noites do seu HRV para saber como é normal para si. Até os ter, retém a pontuação em vez de adivinhar. Assim que a linha de base estiver definida, a sua recuperação aparecerá com confiança, na mesma escala de 0 a 100 de uma cinta."
+            "value": "É por isso que uma Recuperação baseada apenas no relógio começa em «Calibração». O NOOP precisa de cerca de sete noites de VFC para aprender o que é normal para si. Até lá, não apresenta uma pontuação em vez de adivinhar. Quando a linha de base estiver definida, a Recuperação aparece com o respetivo nível de confiança na escala NOOP de 0 a 100."
           }
         }
       }

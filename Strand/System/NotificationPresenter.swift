@@ -275,6 +275,18 @@ struct LocalNotificationCenterClient {
     }
 }
 
+enum LocalNotificationReplacementResult: Equatable {
+    case accepted
+    case existingUnavailable
+    case stale
+    case cancelledAfterReplacement
+    case failed
+}
+
+enum LocalNotificationPriorityMarker {
+    static let hydrationMissedResponse = "noop.hydration.missed_response"
+}
+
 enum LocalNotificationCapacityPolicy {
     static let systemCapacity = 64
     static let reservedPrioritySlots = 4
@@ -454,7 +466,10 @@ enum LocalNotificationCapacityPolicy {
         }
         if identifier.hasPrefix("smart-alarm-")
             || identifier == "strain-target"
-            || identifier == "hydration-reminder-missed-response" {
+            || identifier == "hydration-reminder-missed-response"
+            || request.content.userInfo[
+                LocalNotificationPriorityMarker.hydrationMissedResponse
+            ] as? Bool == true {
             return .userExplicit
         }
         if request.trigger == nil {
@@ -739,6 +754,39 @@ final class LocalNotificationCapacityCoordinator {
         return result
     }
 
+    func replacePending(
+        _ request: UNNotificationRequest,
+        matchingExisting: @MainActor (UNNotificationRequest) -> Bool,
+        isStillCurrent: @MainActor () -> Bool = { true },
+        didAccept: @MainActor () -> Void = {},
+        client: LocalNotificationCenterClient
+    ) async -> LocalNotificationReplacementResult {
+        await acquire()
+        defer { release() }
+
+        guard isStillCurrent() else { return .stale }
+        let pending = await client.pendingRequests()
+        guard isStillCurrent() else { return .stale }
+        guard let existing = pending.first(where: {
+            $0.identifier == request.identifier
+        }),
+        matchingExisting(existing) else {
+            return .existingUnavailable
+        }
+
+        do {
+            try await client.add(request)
+        } catch {
+            return .failed
+        }
+        guard isStillCurrent() else {
+            client.removePending([request.identifier])
+            return .cancelledAfterReplacement
+        }
+        didAccept()
+        return .accepted
+    }
+
     private func acquire() async {
         guard isReconciling else {
             isReconciling = true
@@ -862,6 +910,60 @@ enum LocalNotificationLifecycle {
         Task { @MainActor in
             _ = try? await schedule(request, on: center)
         }
+    }
+
+    @MainActor
+    static func replacePending(
+        _ request: UNNotificationRequest,
+        matchingExisting: @MainActor (UNNotificationRequest) -> Bool = {
+            _ in true
+        },
+        coordinator: LocalNotificationCapacityCoordinator? = nil,
+        isStillCurrent: @MainActor () -> Bool = { true },
+        didAccept: @MainActor () -> Void = {},
+        client: LocalNotificationCenterClient
+    ) async -> LocalNotificationReplacementResult {
+        let result = await (coordinator ?? .shared).replacePending(
+            request,
+            matchingExisting: matchingExisting,
+            isStillCurrent: isStillCurrent,
+            didAccept: didAccept,
+            client: client
+        )
+        switch result {
+        case .accepted:
+            record(request, state: .scheduled)
+        case .failed:
+            record(request, state: .unknown)
+        case .cancelledAfterReplacement:
+            LocalNotificationLifecycleLedger.shared.recordCancellation(
+                identifier: request.identifier
+            )
+        case .existingUnavailable, .stale:
+            break
+        }
+        return result
+    }
+
+    @MainActor
+    static func replacePending(
+        _ request: UNNotificationRequest,
+        matchingExisting: @MainActor (UNNotificationRequest) -> Bool = {
+            _ in true
+        },
+        coordinator: LocalNotificationCapacityCoordinator? = nil,
+        isStillCurrent: @MainActor () -> Bool = { true },
+        didAccept: @MainActor () -> Void = {},
+        on center: UNUserNotificationCenter = .current()
+    ) async -> LocalNotificationReplacementResult {
+        await replacePending(
+            request,
+            matchingExisting: matchingExisting,
+            coordinator: coordinator,
+            isStillCurrent: isStillCurrent,
+            didAccept: didAccept,
+            client: .system(center: center)
+        )
     }
 
     static func cancel(

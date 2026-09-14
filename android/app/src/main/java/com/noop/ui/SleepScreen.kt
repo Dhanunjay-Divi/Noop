@@ -1142,7 +1142,10 @@ private fun RestHero(
     imported: Boolean,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Sleep Score", overline = overline)
+        SectionHeader(
+            uiString(R.string.appwide_day_overview_sleep_score),
+            overline = overline,
+        )
         Box(
             modifier = Modifier
                 .fillMaxWidth()

@@ -45,6 +45,7 @@ internal enum class FeedbackFailureCategory(val wireValue: String) {
     CONFIGURATION("configuration"),
     INTERRUPTED("interrupted"),
     DELETION_PENDING("deletion_pending"),
+    CAPABILITY_EXPIRED("capability_expired"),
     OUTBOX_FULL("outbox_full"),
     UNKNOWN("unknown"),
 }
@@ -69,6 +70,10 @@ internal data class FeedbackRecord(
     val retainedUntil: String?,
     val receipt: String?,
     val localArchiveRemoved: Boolean,
+    val clockAnomalyObservedAtMillis: Long? = null,
+    val reservationContinuityStartedAtMillis: Long? = null,
+    val workerGeneration: String? = null,
+    val retryNotBeforeMillis: Long? = null,
 )
 
 internal sealed interface FeedbackCompletionCommit {
@@ -88,6 +93,9 @@ internal data class FeedbackStateFileMetadata(
     val size: Long,
 )
 
+internal typealias FeedbackArchiveValidator =
+    (File, Long, String?, Boolean, Boolean) -> Unit
+
 internal class FeedbackOutboxException(
     val reason: Reason,
 ) : Exception("Feedback outbox rejected: ${reason.wireValue}") {
@@ -100,6 +108,9 @@ internal class FeedbackOutboxException(
         WRITE_FAILED("write_failed"),
     }
 }
+
+internal class FeedbackWorkerSupersededException :
+    Exception("Feedback worker was superseded.")
 
 internal object FeedbackStateMachine {
     fun canTransition(from: FeedbackState, to: FeedbackState): Boolean =
@@ -152,20 +163,226 @@ internal object FeedbackStateMachine {
 }
 
 internal object FeedbackReservationContinuityPolicy {
+    val maximumLocalDelayBeforeCancellationMillis = DAYS_14_MILLIS
+    val maximumRemoteRetentionMillis = DAYS_28_MILLIS
+    val expirySafetyMarginMillis = DAY_MILLIS
+    val maximumAmbiguousBindingLifetimeMillis =
+        maximumRemoteRetentionMillis +
+            FeedbackAnonymousIdentityLifetimePolicy.maximumClockSkewMillis +
+            expirySafetyMarginMillis
+    val maximumRetryDelayMillis = 6L * 60L * 60L * 1_000L
+    val minimumRetryDelayMillis = 1_000L
+    val activeWorkLeaseMillis = 60L * 60L * 1_000L
+    val maximumClockSkewMillis =
+        FeedbackAnonymousIdentityLifetimePolicy.maximumClockSkewMillis
+
     // A nonterminal local binding may own an accepted reservation whose
     // response was lost, even when no server report ID has been persisted.
     fun identitySubjectSha256sRequiringContinuity(
         records: List<FeedbackRecord>,
+        nowMillis: Long = System.currentTimeMillis(),
     ): Set<String> =
         records
             .asSequence()
-            .filterNot { it.state.terminal }
+            .filter(::requiresIdentityProtection)
             .mapNotNull(FeedbackRecord::identitySubjectSha256)
             .toSet()
 
+    fun continuityDeadlineMillis(record: FeedbackRecord): Long? {
+        if (!hasPossibleRemoteReservation(record)) return null
+        val retainedDeadline = record.retainedUntil
+            ?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
+            ?.coerceAtMost(maximumServerRetainedUntilMillis(record))
+            ?.let { boundedAdd(it, expirySafetyMarginMillis) }
+        return retainedDeadline ?: boundedAdd(
+            reservationContinuityStartMillis(record),
+            maximumAmbiguousBindingLifetimeMillis,
+        )
+    }
+
+    fun maximumServerRetainedUntilMillis(record: FeedbackRecord): Long =
+        boundedAdd(
+            reservationContinuityStartMillis(record),
+            maximumRemoteRetentionMillis + maximumClockSkewMillis,
+        )
+
+    fun boundedServerRetainedUntilMillis(
+        record: FeedbackRecord,
+        retainedUntilMillis: Long,
+        nowMillis: Long,
+    ): Long =
+        retainedUntilMillis.coerceAtMost(
+            maximumAcceptedServerRetainedUntilMillis(record, nowMillis),
+        )
+
+    fun maximumAcceptedServerRetainedUntilMillis(
+        record: FeedbackRecord,
+        nowMillis: Long,
+    ): Long =
+        minOf(
+            maximumServerRetainedUntilMillis(record),
+            boundedAdd(
+                nowMillis,
+                maximumRemoteRetentionMillis + maximumClockSkewMillis,
+            ),
+        )
+
+    fun serverRetentionIsValid(
+        record: FeedbackRecord,
+        retainedUntilMillis: Long,
+        nowMillis: Long,
+    ): Boolean =
+        retainedUntilMillis >= boundedSubtract(
+            nowMillis,
+            maximumClockSkewMillis,
+        ) &&
+            retainedUntilMillis <=
+            maximumAcceptedServerRetainedUntilMillis(record, nowMillis)
+
+    fun permitsNewReservation(record: FeedbackRecord, nowMillis: Long): Boolean =
+        !hasClockAnomaly(record, nowMillis) &&
+            nowMillis >= boundedSubtract(
+            record.createdAtMillis,
+            maximumClockSkewMillis,
+        ) &&
+            nowMillis >= boundedSubtract(
+                record.updatedAtMillis,
+                maximumClockSkewMillis,
+            ) &&
+            nowMillis < boundedAdd(
+                record.createdAtMillis,
+                maximumLocalDelayBeforeCancellationMillis,
+            )
+
+    fun requiresContinuity(record: FeedbackRecord, nowMillis: Long): Boolean =
+        record.identitySubjectSha256 != null &&
+            continuityDeadlineMillis(record)?.let {
+                nowMillis < it || hasActiveWorkLease(record, nowMillis)
+            } == true
+
+    fun requiresIdentityProtection(record: FeedbackRecord): Boolean =
+        record.identitySubjectSha256 != null &&
+            hasPossibleRemoteReservation(record)
+
+    fun hasExpired(record: FeedbackRecord, nowMillis: Long): Boolean =
+        continuityDeadlineMillis(record)?.let {
+            nowMillis >= it && !hasActiveWorkLease(record, nowMillis)
+        } == true
+
+    fun retryDelayMillis(
+        records: List<FeedbackRecord>,
+        nowMillis: Long,
+    ): Long {
+        val protectedRecords = records.filter(::requiresIdentityProtection)
+        val earliestRemaining = protectedRecords
+            .asSequence()
+            .filter { requiresContinuity(it, nowMillis) }
+            .mapNotNull { effectiveRetryTargetMillis(it, nowMillis) }
+            .map { it - nowMillis }
+            .minOrNull()
+            ?: return if (protectedRecords.isEmpty()) {
+                minimumRetryDelayMillis
+            } else {
+                maximumRetryDelayMillis
+            }
+        return earliestRemaining
+            .coerceAtLeast(minimumRetryDelayMillis)
+            .coerceAtMost(maximumRetryDelayMillis)
+    }
+
     fun requiresIdentityLifetimeCheck(record: FeedbackRecord): Boolean =
         record.identitySubjectSha256 == null
+
+    fun hasPossibleRemoteReservation(record: FeedbackRecord): Boolean =
+        !record.state.terminal &&
+            (
+                record.identitySubjectSha256 != null ||
+                    record.serverReportId != null ||
+                    record.serverReportToken != null ||
+                    record.attempt > 0
+                )
+
+    fun hasActiveWorkLease(
+        record: FeedbackRecord,
+        nowMillis: Long,
+    ): Boolean =
+        record.clockAnomalyObservedAtMillis == null &&
+            record.state in setOf(
+            FeedbackState.UPLOADING,
+            FeedbackState.CANCELING,
+        ) &&
+            record.updatedAtMillis <= boundedAdd(
+                nowMillis,
+                maximumClockSkewMillis,
+            ) &&
+            nowMillis < boundedAdd(
+                record.updatedAtMillis,
+                activeWorkLeaseMillis,
+            )
+
+    private fun effectiveRetryTargetMillis(
+        record: FeedbackRecord,
+        nowMillis: Long,
+    ): Long? {
+        val deadline = continuityDeadlineMillis(record) ?: return null
+        if (!hasActiveWorkLease(record, nowMillis)) return deadline
+        return maxOf(
+            deadline,
+            boundedAdd(record.updatedAtMillis, activeWorkLeaseMillis),
+        )
+    }
+
+    fun needsClockAnomalyNormalization(
+        record: FeedbackRecord,
+        nowMillis: Long,
+    ): Boolean =
+        record.clockAnomalyObservedAtMillis == null &&
+            (
+                record.createdAtMillis > boundedAdd(nowMillis, maximumClockSkewMillis) ||
+                    record.updatedAtMillis > boundedAdd(nowMillis, maximumClockSkewMillis)
+                )
+
+    fun hasClockAnomaly(
+        record: FeedbackRecord,
+        nowMillis: Long,
+    ): Boolean =
+        record.clockAnomalyObservedAtMillis != null ||
+            needsClockAnomalyNormalization(record, nowMillis)
+
+    fun hasSecondaryClockRollback(
+        record: FeedbackRecord,
+        nowMillis: Long,
+    ): Boolean =
+        record.clockAnomalyObservedAtMillis?.let {
+            val highWater = maxOf(it, record.updatedAtMillis)
+            nowMillis < boundedSubtract(highWater, maximumClockSkewMillis)
+        } == true
+
+    private fun reservationContinuityStartMillis(record: FeedbackRecord): Long =
+        record.reservationContinuityStartedAtMillis
+            ?: record.clockAnomalyObservedAtMillis
+            ?: record.createdAtMillis
+
+    private fun boundedSubtract(value: Long, decrement: Long): Long =
+        if (value < Long.MIN_VALUE + decrement) Long.MIN_VALUE else value - decrement
+
+    private fun boundedAdd(value: Long, increment: Long): Long =
+        if (value > Long.MAX_VALUE - increment) Long.MAX_VALUE else value + increment
+
+    private const val DAY_MILLIS = 24L * 60L * 60L * 1_000L
+    private const val DAYS_14_MILLIS = 14L * DAY_MILLIS
+    private const val DAYS_28_MILLIS = 28L * DAY_MILLIS
 }
+
+internal enum class FeedbackReservationAttemptLane {
+    DELIVERY,
+    CANCELLATION,
+}
+
+internal data class FeedbackContinuityRetrySchedule(
+    val record: FeedbackRecord,
+    val delayMillis: Long,
+)
 
 /**
  * App-private durable feedback queue. Each report owns a sealed `archive.zip` and a small atomic
@@ -183,6 +400,16 @@ internal class FeedbackOutbox(
     private val stateReader: (File) -> String = { it.readText(Charsets.UTF_8) },
     private val archiveAppVersionReader: ((File) -> String?)? = null,
     private val archiveDeleter: (File) -> Boolean = File::delete,
+    private val archiveValidator: FeedbackArchiveValidator =
+        { archive, expectedBytes, expectedSha256, includesUserNote, includesScreenshot ->
+            FeedbackArchive.validate(
+                archive = archive,
+                expectedBytes = expectedBytes,
+                expectedSha256 = expectedSha256,
+                includesUserNote = includesUserNote,
+                includesScreenshot = includesScreenshot,
+            )
+        },
 ) {
     private val root = File(filesDir, "feedback/outbox")
 
@@ -248,6 +475,10 @@ internal class FeedbackOutbox(
                 retainedUntil = null,
                 receipt = null,
                 localArchiveRemoved = false,
+                clockAnomalyObservedAtMillis = null,
+                reservationContinuityStartedAtMillis = null,
+                workerGeneration = null,
+                retryNotBeforeMillis = null,
             )
             writeRecordLocked(record)
             recordTransition(null, record)
@@ -279,7 +510,32 @@ internal class FeedbackOutbox(
 
     fun load(localId: String): FeedbackRecord? = synchronized(lock) {
         canonicalUuid(localId) ?: return@synchronized null
+        ensureRoot()
+        recoverLocked()
+        pruneTerminalLocked()
         loadRecordLocked(reportDirectory(localId))?.record
+    }
+
+    /**
+     * Lightweight state-only read for transient UI progress. It deliberately skips archive recovery,
+     * hashing, and pruning so an upload callback cannot repeatedly reread a large immutable ZIP.
+     */
+    fun loadForProgress(
+        localId: String,
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord? = synchronized(lock) {
+        canonicalUuid(localId) ?: return@synchronized null
+        ensureRoot()
+        val record = loadRecordLocked(
+            directory = reportDirectory(localId),
+            readArchiveMetadata = false,
+        )?.record ?: return@synchronized null
+        if (expectedWorkerGeneration != null &&
+            record.workerGeneration != canonicalUuid(expectedWorkerGeneration)
+        ) {
+            return@synchronized null
+        }
+        record
     }
 
     fun reservationContinuityIdentitySubjectSha256s(): Set<String> =
@@ -287,23 +543,60 @@ internal class FeedbackOutbox(
             ensureRoot()
             recoverLocked()
             pruneTerminalLocked()
+            val now = nowMillis()
             FeedbackReservationContinuityPolicy
                 .identitySubjectSha256sRequiringContinuity(
                     loadRecordsLocked().map(StoredRecord::record),
+                    nowMillis = now,
                 )
         }
 
     fun archive(record: FeedbackRecord): File = File(reportDirectory(record.localId), ARCHIVE_FILE)
 
-    fun beginUpload(localId: String, attempt: Int): FeedbackRecord = update(localId) {
+    fun prepareWorker(
+        localId: String,
+        replace: Boolean,
+        generation: String = UUID.randomUUID().toString().lowercase(Locale.US),
+    ): FeedbackRecord = synchronized(lock) {
+        ensureRoot()
+        val current = recordForUpdateLocked(localId)
+        if (current.state.terminal) {
+            throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_TRANSITION)
+        }
+        if (!replace && current.workerGeneration != null) {
+            return@synchronized current
+        }
+        val canonicalGeneration = canonicalUuid(generation)
+            ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+        updateLocked(current) {
+            it.copy(
+                workerGeneration = canonicalGeneration,
+                retryNotBeforeMillis = if (replace) null else it.retryNotBeforeMillis,
+            )
+        }
+    }
+
+    fun beginUpload(
+        localId: String,
+        attempt: Int,
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord = update(localId, expectedWorkerGeneration) {
+        if (FeedbackReservationContinuityPolicy.hasExpired(it, nowMillis())) {
+            throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_TRANSITION)
+        }
         it.copy(
             state = FeedbackState.UPLOADING,
             attempt = attempt.coerceIn(1, MAX_ATTEMPTS),
             failureCategory = FeedbackFailureCategory.NONE,
+            retryNotBeforeMillis = null,
         )
     }
 
-    fun noteCancelAttempt(localId: String, attempt: Int): FeedbackRecord = update(localId) {
+    fun noteCancelAttempt(
+        localId: String,
+        attempt: Int,
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord = update(localId, expectedWorkerGeneration) {
         val target = when (it.state) {
             FeedbackState.CANCEL_RETRY_SCHEDULED,
             FeedbackState.CANCEL_FAILED,
@@ -317,24 +610,35 @@ internal class FeedbackOutbox(
             state = target,
             cancellationAttempt = attempt.coerceIn(1, MAX_ATTEMPTS),
             failureCategory = FeedbackFailureCategory.NONE,
+            retryNotBeforeMillis = null,
         )
     }
 
-    fun bindIdentity(localId: String, identitySubjectSha256: String): FeedbackRecord =
-        update(localId) {
+    fun bindIdentity(
+        localId: String,
+        identitySubjectSha256: String,
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord =
+        update(localId, expectedWorkerGeneration) {
             if (it.identitySubjectSha256 != null &&
                 it.identitySubjectSha256 != identitySubjectSha256
             ) {
                 throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
             }
-            it.copy(identitySubjectSha256 = identitySubjectSha256)
+            it.copy(
+                identitySubjectSha256 = identitySubjectSha256,
+                reservationContinuityStartedAtMillis =
+                    it.reservationContinuityStartedAtMillis ?: nowMillis(),
+            )
         }
 
     fun saveReservation(
         localId: String,
         serverReportId: String,
         serverReportToken: String,
-    ): FeedbackRecord = update(localId) {
+        retainedUntil: String? = null,
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord = update(localId, expectedWorkerGeneration) {
         if (it.identitySubjectSha256 == null) {
             throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
         }
@@ -346,46 +650,152 @@ internal class FeedbackOutbox(
         it.copy(
             serverReportId = serverReportId,
             serverReportToken = serverReportToken,
+            retainedUntil = retainedUntil ?: it.retainedUntil,
         )
     }
 
     fun scheduleRetry(
         localId: String,
         failure: FeedbackFailureCategory,
-    ): FeedbackRecord = update(localId) {
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord = update(localId, expectedWorkerGeneration) {
         it.copy(
             state = FeedbackState.RETRY_SCHEDULED,
             failureCategory = failure,
+            retryNotBeforeMillis = null,
         )
+    }
+
+    fun scheduleContinuityRetry(
+        localId: String,
+        lane: FeedbackReservationAttemptLane,
+        failure: FeedbackFailureCategory = FeedbackFailureCategory.IDENTITY,
+        allowBoundIdentity: Boolean = false,
+        expectedWorkerGeneration: String? = null,
+        nextWorkerGeneration: String =
+            UUID.randomUUID().toString().lowercase(Locale.US),
+    ): FeedbackContinuityRetrySchedule = synchronized(lock) {
+        ensureRoot()
+        val current = recordForUpdateLocked(localId, expectedWorkerGeneration)
+        val cancellationRaced =
+            lane == FeedbackReservationAttemptLane.DELIVERY &&
+                current.state == FeedbackState.CANCELING
+        val validLaneState = when (lane) {
+            FeedbackReservationAttemptLane.DELIVERY ->
+                current.state == FeedbackState.UPLOADING || cancellationRaced
+            FeedbackReservationAttemptLane.CANCELLATION ->
+                current.state == FeedbackState.CANCELING &&
+                    current.cancellationAttempt > 0
+        }
+        if (!validLaneState ||
+            (
+                allowBoundIdentity &&
+                    current.identitySubjectSha256 == null
+                ) ||
+            (
+                !allowBoundIdentity &&
+                    current.identitySubjectSha256 != null
+                ) ||
+            (
+                !allowBoundIdentity &&
+                    (
+                        current.serverReportId != null ||
+                            current.serverReportToken != null
+                        )
+                ) ||
+            (lane == FeedbackReservationAttemptLane.DELIVERY &&
+                current.attempt <= 0)
+        ) {
+            throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_TRANSITION)
+        }
+        val now = nowMillis()
+        val delay = FeedbackReservationContinuityPolicy.retryDelayMillis(
+            records = loadRecordsLocked().map(StoredRecord::record),
+            nowMillis = now,
+        )
+        val canonicalNextGeneration = canonicalUuid(nextWorkerGeneration)
+            ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+        val retryNotBeforeMillis =
+            if (now > Long.MAX_VALUE - delay) Long.MAX_VALUE else now + delay
+        val updated = updateLocked(current) {
+            it.copy(
+                state = if (cancellationRaced ||
+                    lane == FeedbackReservationAttemptLane.CANCELLATION
+                ) {
+                    FeedbackState.CANCEL_RETRY_SCHEDULED
+                } else {
+                    FeedbackState.RETRY_SCHEDULED
+                },
+                attempt = if (lane == FeedbackReservationAttemptLane.DELIVERY) {
+                    (it.attempt - 1).coerceAtLeast(0)
+                } else {
+                    it.attempt
+                },
+                cancellationAttempt =
+                if (lane == FeedbackReservationAttemptLane.CANCELLATION) {
+                    (it.cancellationAttempt - 1).coerceAtLeast(0)
+                } else {
+                    it.cancellationAttempt
+                },
+                failureCategory = failure,
+                workerGeneration = canonicalNextGeneration,
+                retryNotBeforeMillis = retryNotBeforeMillis,
+            )
+        }
+        FeedbackContinuityRetrySchedule(updated, delay)
+    }
+
+    fun markUnconfirmedDeletionIfContinuityExpired(
+        localId: String,
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord? {
+        val expired = synchronized(lock) {
+            ensureRoot()
+            val current = recordForUpdateLocked(localId, expectedWorkerGeneration)
+            val now = nowMillis()
+            if (!FeedbackReservationContinuityPolicy.hasExpired(current, now)) {
+                return@synchronized null
+            }
+            expireContinuityAsUnconfirmedDeletionLocked(current, now)
+        } ?: return null
+        return persistArchiveCleanupOutcome(expired)
     }
 
     fun scheduleCancelRetry(
         localId: String,
         failure: FeedbackFailureCategory,
-    ): FeedbackRecord = update(localId) {
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord = update(localId, expectedWorkerGeneration) {
         it.copy(
             state = FeedbackState.CANCEL_RETRY_SCHEDULED,
             failureCategory = failure,
+            retryNotBeforeMillis = null,
         )
     }
 
     fun markFailed(
         localId: String,
         failure: FeedbackFailureCategory,
-    ): FeedbackRecord = update(localId) {
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord = update(localId, expectedWorkerGeneration) {
         it.copy(
             state = FeedbackState.FAILED,
             failureCategory = failure,
+            workerGeneration = null,
+            retryNotBeforeMillis = null,
         )
     }
 
     fun markCancelFailed(
         localId: String,
         failure: FeedbackFailureCategory,
-    ): FeedbackRecord = update(localId) {
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord = update(localId, expectedWorkerGeneration) {
         it.copy(
             state = FeedbackState.CANCEL_FAILED,
             failureCategory = failure,
+            workerGeneration = null,
+            retryNotBeforeMillis = null,
         )
     }
 
@@ -393,10 +803,11 @@ internal class FeedbackOutbox(
         localId: String,
         receipt: String,
         retainedUntil: String,
+        expectedWorkerGeneration: String? = null,
     ): FeedbackCompletionCommit {
         val commit = synchronized(lock) {
             ensureRoot()
-            val current = recordForUpdateLocked(localId)
+            val current = recordForUpdateLocked(localId, expectedWorkerGeneration)
             if (current.state in cancellationStates) {
                 FeedbackCompletionCommit.CancellationRequired(current)
             } else {
@@ -408,6 +819,8 @@ internal class FeedbackOutbox(
                             failureCategory = FeedbackFailureCategory.NONE,
                             retainedUntil = retainedUntil,
                             receipt = receipt,
+                            workerGeneration = null,
+                            retryNotBeforeMillis = null,
                         )
                     },
                 )
@@ -423,28 +836,45 @@ internal class FeedbackOutbox(
         }
     }
 
-    fun requestCancel(localId: String): FeedbackRecord {
-        val record = update(localId) {
+    fun requestCancel(
+        localId: String,
+        expectedWorkerGeneration: String? = null,
+        replacementWorkerGeneration: String? = null,
+    ): FeedbackRecord {
+        val canonicalReplacement = replacementWorkerGeneration?.let {
+            canonicalUuid(it)
+                ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+        }
+        val record = update(localId, expectedWorkerGeneration) {
             if (it.state.terminal) {
                 throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_TRANSITION)
             }
+            val alreadyCanceling = it.state in cancellationStates
             it.copy(
                 state = FeedbackState.CANCELING,
-                cancellationAttempt = 0,
+                cancellationAttempt =
+                    if (alreadyCanceling) it.cancellationAttempt else 0,
                 failureCategory = FeedbackFailureCategory.NONE,
+                workerGeneration = canonicalReplacement ?: it.workerGeneration,
+                retryNotBeforeMillis = null,
             )
         }
         return persistArchiveCleanupOutcome(record)
     }
 
-    fun markCanceled(localId: String): FeedbackRecord {
-        val record = update(localId) {
+    fun markCanceled(
+        localId: String,
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord {
+        val record = update(localId, expectedWorkerGeneration) {
             it.copy(
                 serverReportToken = null,
                 state = FeedbackState.CANCELED,
                 failureCategory = FeedbackFailureCategory.NONE,
                 retainedUntil = null,
                 receipt = null,
+                workerGeneration = null,
+                retryNotBeforeMillis = null,
             )
         }
         val cleaned = persistArchiveCleanupOutcome(record)
@@ -452,42 +882,68 @@ internal class FeedbackOutbox(
         return cleaned
     }
 
-    fun retry(localId: String): FeedbackRecord = update(localId) {
-        val state = when (it.state) {
-            FeedbackState.FAILED,
-            FeedbackState.RETRY_SCHEDULED,
-            -> FeedbackState.QUEUED
-            FeedbackState.CANCEL_FAILED,
-            FeedbackState.CANCEL_RETRY_SCHEDULED,
-            -> FeedbackState.CANCELING
-            else -> throw FeedbackOutboxException(
-                FeedbackOutboxException.Reason.INVALID_TRANSITION,
+    fun retry(
+        localId: String,
+        replacementWorkerGeneration: String? = null,
+    ): FeedbackRecord {
+        val canonicalReplacement = replacementWorkerGeneration?.let {
+            canonicalUuid(it)
+                ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+        }
+        return update(localId) {
+            val state = when (it.state) {
+                FeedbackState.FAILED,
+                FeedbackState.RETRY_SCHEDULED,
+                -> FeedbackState.QUEUED
+                FeedbackState.CANCEL_FAILED,
+                FeedbackState.CANCEL_RETRY_SCHEDULED,
+                -> FeedbackState.CANCELING
+                else -> throw FeedbackOutboxException(
+                    FeedbackOutboxException.Reason.INVALID_TRANSITION,
+                )
+            }
+            val retryingCancellation = state == FeedbackState.CANCELING
+            it.copy(
+                state = state,
+                attempt = if (retryingCancellation) it.attempt else 0,
+                cancellationAttempt = if (retryingCancellation) 0 else it.cancellationAttempt,
+                failureCategory = FeedbackFailureCategory.NONE,
+                workerGeneration = canonicalReplacement ?: it.workerGeneration,
+                retryNotBeforeMillis = null,
             )
         }
-        val retryingCancellation = state == FeedbackState.CANCELING
-        it.copy(
-            state = state,
-            attempt = if (retryingCancellation) it.attempt else 0,
-            cancellationAttempt = if (retryingCancellation) 0 else it.cancellationAttempt,
-            failureCategory = FeedbackFailureCategory.NONE,
-        )
     }
 
     private fun update(
         localId: String,
+        expectedWorkerGeneration: String? = null,
         transform: (FeedbackRecord) -> FeedbackRecord,
     ): FeedbackRecord = synchronized(lock) {
         ensureRoot()
-        updateLocked(recordForUpdateLocked(localId), transform)
+        updateLocked(
+            recordForUpdateLocked(localId, expectedWorkerGeneration),
+            transform,
+        )
     }
 
-    private fun recordForUpdateLocked(localId: String): FeedbackRecord {
+    private fun recordForUpdateLocked(
+        localId: String,
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackRecord {
         val canonical = canonicalUuid(localId)
             ?: throw FeedbackOutboxException(
                 FeedbackOutboxException.Reason.INVALID_RECORD,
             )
-        return loadRecordLocked(reportDirectory(canonical))?.record
+        val record = loadRecordLocked(reportDirectory(canonical))?.record
             ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.RECORD_NOT_FOUND)
+        if (expectedWorkerGeneration != null) {
+            val canonicalGeneration = canonicalUuid(expectedWorkerGeneration)
+                ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+            if (record.workerGeneration != canonicalGeneration) {
+                throw FeedbackWorkerSupersededException()
+            }
+        }
+        return record
     }
 
     private fun updateLocked(
@@ -507,6 +963,9 @@ internal class FeedbackOutbox(
             updated.createdAtMillis != current.createdAtMillis ||
             (current.identitySubjectSha256 != null &&
                 updated.identitySubjectSha256 != current.identitySubjectSha256) ||
+            (current.clockAnomalyObservedAtMillis != null &&
+                updated.clockAnomalyObservedAtMillis !=
+                current.clockAnomalyObservedAtMillis) ||
             !FeedbackStateMachine.canTransition(current.state, updated.state)
         ) {
             throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_TRANSITION)
@@ -560,8 +1019,90 @@ internal class FeedbackOutbox(
 
         loaded.forEach { stored ->
             var record = stored.record
-            if (stored.needsAppVersionMigration) {
+            val now = nowMillis()
+            if (record.identitySubjectSha256 != null &&
+                record.reservationContinuityStartedAtMillis == null
+            ) {
+                record = record.copy(
+                    reservationContinuityStartedAtMillis =
+                        minOf(record.createdAtMillis, record.updatedAtMillis, now),
+                )
+            }
+            if (stored.needsPersistenceMigration || record != stored.record) {
                 writeRecordLocked(record)
+            }
+            if (FeedbackReservationContinuityPolicy.needsClockAnomalyNormalization(
+                    record,
+                    now,
+                )
+            ) {
+                if (record.state.terminal) {
+                    record = record.copy(
+                        clockAnomalyObservedAtMillis = now,
+                        updatedAtMillis = now,
+                    )
+                    writeRecordLocked(record)
+                    AppDiagnosticsRecorder.record(
+                        "feedback.clock_anomaly",
+                        fields = mapOf("outcome" to "terminal_normalized"),
+                    )
+                } else if (
+                    FeedbackReservationContinuityPolicy
+                        .hasPossibleRemoteReservation(record)
+                ) {
+                    val canceling = record.copy(
+                        clockAnomalyObservedAtMillis = now,
+                        reservationContinuityStartedAtMillis =
+                            minOf(
+                                record.reservationContinuityStartedAtMillis ?: now,
+                                now,
+                            ),
+                        updatedAtMillis = now,
+                        state = FeedbackState.CANCELING,
+                        cancellationAttempt =
+                            if (record.state in cancellationStates) {
+                                record.cancellationAttempt
+                            } else {
+                                0
+                            },
+                        failureCategory = FeedbackFailureCategory.NONE,
+                    )
+                    writeRecordLocked(canceling)
+                    persistArchiveCleanupOutcome(canceling)
+                    recordTransition(record, canceling)
+                    AppDiagnosticsRecorder.record(
+                        "feedback.clock_anomaly",
+                        fields = mapOf("outcome" to "cancellation_required"),
+                    )
+                    return@forEach
+                } else {
+                    stored.directory.deleteRecursively()
+                    AppDiagnosticsRecorder.record(
+                        "feedback.clock_anomaly",
+                        fields = mapOf("outcome" to "local_record_removed"),
+                    )
+                    return@forEach
+                }
+            }
+            if (FeedbackReservationContinuityPolicy.hasSecondaryClockRollback(
+                    record,
+                    now,
+                )
+            ) {
+                val normalized = record.copy(
+                    clockAnomalyObservedAtMillis = now,
+                    reservationContinuityStartedAtMillis =
+                        record.reservationContinuityStartedAtMillis?.let {
+                            minOf(it, now)
+                        },
+                    updatedAtMillis = now,
+                )
+                writeRecordLocked(normalized)
+                AppDiagnosticsRecorder.record(
+                    "feedback.clock_anomaly",
+                    fields = mapOf("outcome" to "secondary_normalized"),
+                )
+                record = normalized
             }
             if (record.state.terminal) {
                 record = persistArchiveCleanupOutcome(record)
@@ -572,8 +1113,18 @@ internal class FeedbackOutbox(
                 }
                 return@forEach
             }
+            if (FeedbackReservationContinuityPolicy.hasExpired(record, now)) {
+                persistArchiveCleanupOutcome(
+                    expireContinuityAsUnconfirmedDeletionLocked(record, now),
+                )
+                return@forEach
+            }
             if (record.state !in cancellationStates &&
-                nowMillis() - record.createdAtMillis >= ACTIVE_RETENTION_MILLIS
+                now - record.createdAtMillis >= ACTIVE_RETENTION_MILLIS &&
+                !FeedbackReservationContinuityPolicy.hasActiveWorkLease(
+                    record,
+                    now,
+                )
             ) {
                 if ((record.serverReportId != null && record.serverReportToken != null) ||
                     record.attempt > 0
@@ -598,20 +1149,34 @@ internal class FeedbackOutbox(
                 return@forEach
             }
             val archive = archive(record)
-            val validArchive = runCatching {
-                FeedbackArchive.validate(
-                    archive = archive,
-                    expectedBytes = record.archiveBytes,
-                    expectedSha256 = record.archiveSha256,
-                    includesUserNote = record.includesUserNote,
-                    includesScreenshot = record.includesScreenshot,
+            val validationFailure = try {
+                archiveValidator(
+                    archive,
+                    record.archiveBytes,
+                    record.archiveSha256,
+                    record.includesUserNote,
+                    record.includesScreenshot,
                 )
-            }.isSuccess
-            if (!validArchive) {
+                null
+            } catch (error: Exception) {
+                error
+            }
+            if (validationFailure != null &&
+                feedbackArchiveValidationFailureIsRetryable(validationFailure)
+            ) {
+                AppDiagnosticsRecorder.record(
+                    "feedback.archive_recovery",
+                    fields = mapOf("outcome" to "deferred"),
+                )
+                return@forEach
+            }
+            if (validationFailure != null) {
                 runCatching {
                     val failed = record.copy(
                         state = FeedbackState.FAILED,
                         failureCategory = FeedbackFailureCategory.ARCHIVE_INVALID,
+                        workerGeneration = null,
+                        retryNotBeforeMillis = null,
                     )
                     if (FeedbackStateMachine.canTransition(record.state, failed.state)) {
                         writeRecordLocked(failed)
@@ -621,7 +1186,13 @@ internal class FeedbackOutbox(
                         stored.directory.deleteRecursively()
                     }
                 }
-            } else if (record.state == FeedbackState.UPLOADING) {
+            } else if (
+                record.state == FeedbackState.UPLOADING &&
+                !FeedbackReservationContinuityPolicy.hasActiveWorkLease(
+                    record,
+                    now,
+                )
+            ) {
                 val recovered = record.copy(
                     state = FeedbackState.RETRY_SCHEDULED,
                     failureCategory = FeedbackFailureCategory.INTERRUPTED,
@@ -630,6 +1201,34 @@ internal class FeedbackOutbox(
                 recordTransition(record, recovered)
             }
         }
+    }
+
+    private fun expireContinuityAsUnconfirmedDeletionLocked(
+        record: FeedbackRecord,
+        nowMillis: Long,
+    ): FeedbackRecord {
+        if (record.state == FeedbackState.CANCEL_FAILED &&
+            record.failureCategory == FeedbackFailureCategory.CAPABILITY_EXPIRED
+        ) {
+            return record
+        }
+        val expired = record.copy(
+            updatedAtMillis = maxOf(nowMillis, record.updatedAtMillis),
+            state = FeedbackState.CANCEL_FAILED,
+            failureCategory = FeedbackFailureCategory.CAPABILITY_EXPIRED,
+            workerGeneration = null,
+            retryNotBeforeMillis = null,
+        )
+        // A local continuity deadline cannot prove that the server copy was
+        // deleted. Preserve the capability and fail closed until a retry gets
+        // an explicit terminal response.
+        writeRecordLocked(expired)
+        recordTransition(record, expired)
+        AppDiagnosticsRecorder.record(
+            "feedback.identity_continuity_expired",
+            fields = mapOf("outcome" to "deletion_unconfirmed"),
+        )
+        return expired
     }
 
     private fun pruneTerminalLocked() {
@@ -646,8 +1245,11 @@ internal class FeedbackOutbox(
             .filter(File::isDirectory)
             .mapNotNull(::loadRecordLocked)
 
-    private fun loadRecordLocked(directory: File): StoredRecord? {
-        var needsAppVersionMigration = false
+    private fun loadRecordLocked(
+        directory: File,
+        readArchiveMetadata: Boolean = true,
+    ): StoredRecord? {
+        var needsPersistenceMigration = false
         val stateFile = File(directory, STATE_FILE)
         val metadata = try {
             stateMetadataReader(stateFile)
@@ -665,23 +1267,55 @@ internal class FeedbackOutbox(
         val record = try {
             val json = JSONObject(serialized)
             val keys = json.keys().asSequence().toSet()
-            val legacy = keys == legacyPersistedKeys
-            val preAppVersion = keys == preAppVersionPersistedKeys
-            if (!legacy && !preAppVersion && keys != persistedKeys) {
+            val legacy =
+                keys == legacyPersistedKeys ||
+                    keys == legacyWithClockAnomalyPersistedKeys
+            val preAppVersion =
+                keys == preAppVersionPersistedKeys ||
+                    keys == preAppVersionWithClockAnomalyPersistedKeys
+            val preClockAnomaly = keys == preClockAnomalyPersistedKeys
+            val preReservationContinuity =
+                keys == preReservationContinuityPersistedKeys
+            val preWorkerGeneration =
+                keys == preWorkerGenerationPersistedKeys
+            if (!legacy &&
+                !preAppVersion &&
+                !preClockAnomaly &&
+                !preReservationContinuity &&
+                !preWorkerGeneration &&
+                keys != persistedKeys
+            ) {
                 throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
             }
+            val hasClockAnomalyField =
+                keys == persistedKeys ||
+                    keys == preWorkerGenerationPersistedKeys ||
+                    keys == preReservationContinuityPersistedKeys ||
+                    keys == preAppVersionWithClockAnomalyPersistedKeys ||
+                    keys == legacyWithClockAnomalyPersistedKeys
+            val hasReservationContinuityField =
+                keys == persistedKeys ||
+                    keys == preWorkerGenerationPersistedKeys
+            val hasWorkerGenerationFields = keys == persistedKeys
             val storedAttempt = json.getInt("attempt")
             val state = FeedbackState.entries.first {
                 it.wireValue == json.getString("state")
             }
-            val storedAppVersion = if (keys == persistedKeys) {
+            val storedAppVersion = if (
+                preClockAnomaly ||
+                preReservationContinuity ||
+                preWorkerGeneration ||
+                keys == persistedKeys
+            ) {
                 json.nullableString("app_version")
             } else {
                 null
             }
-            val archiveAppVersion = archiveAppVersion(
-                File(directory, ARCHIVE_FILE),
-            )
+            val archiveAppVersion = if (readArchiveMetadata) {
+                archiveAppVersion(File(directory, ARCHIVE_FILE))
+            } else {
+                null
+            }
             if (storedAppVersion != null &&
                 archiveAppVersion != null &&
                 storedAppVersion != archiveAppVersion
@@ -722,10 +1356,35 @@ internal class FeedbackOutbox(
                 } else {
                     json.getBoolean("local_archive_removed")
                 },
+                clockAnomalyObservedAtMillis = if (hasClockAnomalyField) {
+                    json.nullableLong("clock_anomaly_observed_at_millis")
+                } else {
+                    null
+                },
+                reservationContinuityStartedAtMillis =
+                    if (hasReservationContinuityField) {
+                        json.nullableLong(
+                            "reservation_continuity_started_at_millis",
+                        )
+                    } else {
+                        null
+                    },
+                workerGeneration = if (hasWorkerGenerationFields) {
+                    json.nullableString("worker_generation")
+                } else {
+                    null
+                },
+                retryNotBeforeMillis = if (hasWorkerGenerationFields) {
+                    json.nullableLong("retry_not_before_millis")
+                } else {
+                    null
+                },
             ).also { record ->
                 validateRecord(record)
-                needsAppVersionMigration =
-                    keys != persistedKeys && record.appVersion != null
+                needsPersistenceMigration =
+                    readArchiveMetadata &&
+                        keys != persistedKeys &&
+                        record.appVersion != null
             }
         } catch (error: FeedbackOutboxException) {
             throw error
@@ -738,7 +1397,7 @@ internal class FeedbackOutbox(
         return StoredRecord(
             directory = directory,
             record = record,
-            needsAppVersionMigration = needsAppVersionMigration,
+            needsPersistenceMigration = needsPersistenceMigration,
         )
     }
 
@@ -770,6 +1429,22 @@ internal class FeedbackOutbox(
             .put("retained_until", record.retainedUntil ?: JSONObject.NULL)
             .put("receipt", record.receipt ?: JSONObject.NULL)
             .put("local_archive_removed", record.localArchiveRemoved)
+            .put(
+                "clock_anomaly_observed_at_millis",
+                record.clockAnomalyObservedAtMillis ?: JSONObject.NULL,
+            )
+            .put(
+                "reservation_continuity_started_at_millis",
+                record.reservationContinuityStartedAtMillis ?: JSONObject.NULL,
+            )
+            .put(
+                "worker_generation",
+                record.workerGeneration ?: JSONObject.NULL,
+            )
+            .put(
+                "retry_not_before_millis",
+                record.retryNotBeforeMillis ?: JSONObject.NULL,
+            )
             .toString()
         try {
             FileOutputStream(temporary).use { output ->
@@ -797,7 +1472,27 @@ internal class FeedbackOutbox(
             record.attempt !in 0..MAX_ATTEMPTS ||
             record.cancellationAttempt !in 0..MAX_ATTEMPTS ||
             record.createdAtMillis <= 0L ||
-            record.updatedAtMillis < record.createdAtMillis ||
+            (
+                record.updatedAtMillis < record.createdAtMillis &&
+                    record.clockAnomalyObservedAtMillis == null
+                ) ||
+            record.clockAnomalyObservedAtMillis?.let {
+                it <= 0L || record.updatedAtMillis < it
+            } == true ||
+            record.reservationContinuityStartedAtMillis?.let {
+                it <= 0L || record.identitySubjectSha256 == null
+            } == true ||
+            record.workerGeneration?.let(::canonicalUuid) != record.workerGeneration ||
+            record.retryNotBeforeMillis?.let {
+                it <= 0L ||
+                    record.workerGeneration == null ||
+                    record.state !in setOf(
+                        FeedbackState.RETRY_SCHEDULED,
+                        FeedbackState.CANCEL_RETRY_SCHEDULED,
+                    )
+            } == true ||
+            (record.state.terminal &&
+                (record.workerGeneration != null || record.retryNotBeforeMillis != null)) ||
             record.serverReportId?.let(::canonicalUuid) != record.serverReportId ||
             record.serverReportToken?.matches(SERVER_TOKEN) == false ||
             record.identitySubjectSha256?.matches(SHA256) == false ||
@@ -925,7 +1620,7 @@ internal class FeedbackOutbox(
     private data class StoredRecord(
         val directory: File,
         val record: FeedbackRecord,
-        val needsAppVersionMigration: Boolean,
+        val needsPersistenceMigration: Boolean,
     )
 
     companion object {
@@ -980,7 +1675,23 @@ internal class FeedbackOutbox(
             "receipt",
             "local_archive_removed",
         )
-        private val persistedKeys = preAppVersionPersistedKeys + "app_version"
+        private val preClockAnomalyPersistedKeys =
+            preAppVersionPersistedKeys + "app_version"
+        private val legacyWithClockAnomalyPersistedKeys =
+            legacyPersistedKeys + "clock_anomaly_observed_at_millis"
+        private val preAppVersionWithClockAnomalyPersistedKeys =
+            preAppVersionPersistedKeys + "clock_anomaly_observed_at_millis"
+        private val preReservationContinuityPersistedKeys =
+            preClockAnomalyPersistedKeys + "clock_anomaly_observed_at_millis"
+        private val preWorkerGenerationPersistedKeys =
+            preReservationContinuityPersistedKeys +
+                "reservation_continuity_started_at_millis"
+        private val persistedKeys =
+            preWorkerGenerationPersistedKeys +
+                setOf(
+                    "worker_generation",
+                    "retry_not_before_millis",
+                )
         private val cancellationStates = setOf(
             FeedbackState.CANCELING,
             FeedbackState.CANCEL_RETRY_SCHEDULED,
@@ -1005,7 +1716,7 @@ internal class FeedbackOutbox(
         else ->
             (record.serverReportId == null) == (record.serverReportToken == null) &&
                 record.receipt == null &&
-                record.retainedUntil == null
+                (record.retainedUntil == null || record.serverReportId != null)
     }
 
     private fun validInstant(value: String): Boolean =
@@ -1086,8 +1797,17 @@ internal fun feedbackArchiveReadFailureReason(
         FeedbackOutboxException.Reason.STATE_UNAVAILABLE
     }
 
+internal fun feedbackArchiveValidationFailureIsRetryable(
+    error: Exception,
+): Boolean =
+    error !is FeedbackArchiveException ||
+        error.reason == FeedbackArchiveException.Reason.WRITE_FAILED
+
 private fun JSONObject.nullableString(name: String): String? =
     if (isNull(name)) null else getString(name)
+
+private fun JSONObject.nullableLong(name: String): Long? =
+    if (isNull(name)) null else getLong(name)
 
 private fun readFeedbackStateFileMetadata(file: File): FeedbackStateFileMetadata? = try {
     val attributes = Files.readAttributes(

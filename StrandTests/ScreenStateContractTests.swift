@@ -19,6 +19,37 @@ final class ScreenStateContractTests: XCTestCase {
         )
     }
 
+    func testFeedbackUploadCallbacksDropTerminalRacesBeforeDiagnostics() throws {
+        let coordinator = try sourceText(
+            "StrandiOS/System/FeedbackUploadCoordinator.swift"
+        )
+
+        XCTAssertTrue(coordinator.contains("current.state == .uploading"))
+        XCTAssertTrue(
+            coordinator.contains(
+                "current.uploadAttemptID == context.attemptID else"
+            )
+        )
+        XCTAssertTrue(coordinator.contains("record.state == .uploading"))
+        XCTAssertTrue(
+            coordinator.contains(
+                "record.uploadAttemptID == context.attemptID else"
+            )
+        )
+        XCTAssertTrue(coordinator.contains(
+            "if activeUploadAttempts[context.reportID] == context.attemptID"
+        ))
+        XCTAssertTrue(coordinator.contains(
+            "activeUploadAttempts.removeValue(forKey: context.reportID)"
+        ))
+        XCTAssertTrue(coordinator.contains("case .suspended:"))
+        XCTAssertTrue(coordinator.contains("task.resume()"))
+        XCTAssertTrue(coordinator.contains(
+            "await cancelBackgroundUploadTasks(for: id)"
+        ))
+        XCTAssertTrue(coordinator.contains("guard pumpGate.begin(id) else"))
+    }
+
     func testStateCardHasMotionAndAccessibilityFallbacks() throws {
         let source = try sourceText("Strand/Screens/ScreenScaffold.swift")
 
@@ -72,6 +103,9 @@ final class ScreenStateContractTests: XCTestCase {
         )
         XCTAssertTrue(trends.contains("noop.trends.failure"))
         XCTAssertTrue(trends.contains("action: retryTrends"))
+        XCTAssertTrue(trends.contains("trendsLoadingSkeleton"))
+        XCTAssertTrue(trends.contains("noop.trends.loading"))
+        XCTAssertTrue(trends.contains("weeklyDigestLoadingSkeleton"))
         XCTAssertTrue(trends.contains("outcome = \"timed_out\""))
         XCTAssertTrue(trends.contains("Task.detached(priority: .userInitiated)"))
         XCTAssertTrue(trends.contains("@State private var trendsSnapshotCache = SnapshotCache(capacity: 6)"))
@@ -119,6 +153,7 @@ final class ScreenStateContractTests: XCTestCase {
     func testAuditedCoreSurfacesUseTheSharedMissingValueToken() throws {
         let auditedPaths = [
             "Strand/Liquid/LiquidTodayView.swift",
+            "Strand/Screens/CoupledView.swift",
             "Strand/Screens/FriendsView.swift",
             "Strand/Screens/HealthView.swift",
             "Strand/Screens/LiveView.swift",
@@ -136,6 +171,8 @@ final class ScreenStateContractTests: XCTestCase {
             #"return "–""#,
             #"== "-""#,
             #"== "–""#,
+            #"Text("-")"#,
+            #"String(localized: "No Data")"#,
         ]
 
         for path in auditedPaths {

@@ -9,8 +9,12 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from app.config import Settings
-from app.feedback_repository import FeedbackRepository
-from app.feedback_repository import PostgresFeedbackRepository
+from app.feedback_repository import (
+    FEEDBACK_TOMBSTONE_BACKLOG_COUNT_OBSERVABILITY_MAX,
+    FeedbackRepository,
+    FeedbackTombstoneRetentionResult,
+    PostgresFeedbackRepository,
+)
 from app.managed_object_store import (
     GCSV4ObjectStore,
     IAMBlobSigner,
@@ -20,6 +24,12 @@ from app.managed_object_store import (
 )
 from app.observability import emit_operational_event
 from app.repository import PostgresRepository
+
+
+_TOMBSTONE_REMAINING_COUNT_OBSERVABILITY_MAX = (
+    FEEDBACK_TOMBSTONE_BACKLOG_COUNT_OBSERVABILITY_MAX
+)
+_TOMBSTONE_AGE_OBSERVABILITY_MAX_SECONDS = 366 * 24 * 60 * 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +42,7 @@ class FeedbackLifecycleResult:
     retention_deleted: int = 0
     retention_rescheduled: int = 0
     retention_failed: int = 0
+    tombstones_purged: int = 0
     stage_failures: int = 0
 
 
@@ -209,6 +220,44 @@ async def run_feedback_retention_once(
     }
 
 
+async def run_feedback_tombstone_retention_once(
+    *,
+    repository: FeedbackRepository,
+    limit: int,
+    now: datetime | None = None,
+) -> FeedbackTombstoneRetentionResult:
+    reference = now or datetime.now(UTC)
+    result = await repository.purge_expired_tombstones(
+        now=reference,
+        limit=limit,
+    )
+    remaining_count = min(
+        result.remaining_expired_count,
+        _TOMBSTONE_REMAINING_COUNT_OBSERVABILITY_MAX,
+    )
+    oldest_age_seconds = min(
+        result.oldest_expired_age_seconds,
+        _TOMBSTONE_AGE_OBSERVABILITY_MAX_SECONDS,
+    )
+    emit_operational_event(
+        "feedback.idempotency_tombstone_retention",
+        service="noop-feedback-lifecycle",
+        outcome=(
+            "backlog_remaining" if result.remaining_expired_count > 0 else "completed"
+        ),
+        purged_count=result.purged_count,
+        remaining_expired_count=remaining_count,
+        remaining_expired_count_saturated=(
+            result.remaining_expired_count > remaining_count
+        ),
+        oldest_expired_age_seconds=oldest_age_seconds,
+        oldest_expired_age_saturated=(
+            result.oldest_expired_age_seconds > oldest_age_seconds
+        ),
+    )
+    return result
+
+
 async def run_feedback_lifecycle_once(
     *,
     repository: FeedbackRepository,
@@ -229,6 +278,11 @@ async def run_feedback_lifecycle_once(
             )
     cleanup = {"claimed": 0, "deleted": 0, "rescheduled": 0, "failed": 0}
     retention = {"claimed": 0, "deleted": 0, "rescheduled": 0, "failed": 0}
+    tombstone_retention = FeedbackTombstoneRetentionResult(
+        purged_count=0,
+        remaining_expired_count=0,
+        oldest_expired_age_seconds=0,
+    )
     stage_failures = 0
     try:
         cleanup = await run_feedback_cleanup_once(
@@ -268,6 +322,23 @@ async def run_feedback_lifecycle_once(
             outcome="failed",
             failure_kind="retention_stage_failed",
         )
+    try:
+        tombstone_retention = await run_feedback_tombstone_retention_once(
+            repository=repository,
+            limit=batch_size,
+            now=now,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        stage_failures += 1
+        emit_operational_event(
+            "feedback.lifecycle_stage",
+            service="noop-feedback-lifecycle",
+            severity="ERROR",
+            outcome="failed",
+            failure_kind="tombstone_retention_stage_failed",
+        )
     return FeedbackLifecycleResult(
         cleanup_claimed=cleanup["claimed"],
         cleanup_deleted=cleanup["deleted"],
@@ -277,6 +348,7 @@ async def run_feedback_lifecycle_once(
         retention_deleted=retention["deleted"],
         retention_rescheduled=retention["rescheduled"],
         retention_failed=retention["failed"],
+        tombstones_purged=tombstone_retention.purged_count,
         stage_failures=stage_failures,
     )
 
@@ -385,6 +457,7 @@ def main() -> None:
         retention_deleted=result.retention_deleted,
         retention_rescheduled=result.retention_rescheduled,
         retention_failed=result.retention_failed,
+        tombstones_purged=result.tombstones_purged,
         stage_failures=result.stage_failures,
     )
     if failures:

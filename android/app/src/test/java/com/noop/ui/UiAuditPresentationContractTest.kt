@@ -31,9 +31,33 @@ class UiAuditPresentationContractTest {
         return match.groupValues[1].trim()
     }
 
+    private fun appWideResource(folder: String, name: String): String {
+        val xml = source("src/main/res/$folder/appwide.xml")
+        val match = Regex(
+            """<string\s+name="${Regex.escape(name)}"[^>]*>(.*?)</string>""",
+            RegexOption.DOT_MATCHES_ALL,
+        ).find(xml)
+        requireNotNull(match) { "Missing $name in $folder/appwide.xml" }
+        return match.groupValues[1].trim()
+    }
+
+    private fun pluralQuantities(folder: String, name: String): Map<String, String> {
+        val xml = source("src/main/res/$folder/appwide.xml")
+        val block = Regex(
+            """<plurals\s+name="${Regex.escape(name)}"[^>]*>(.*?)</plurals>""",
+            RegexOption.DOT_MATCHES_ALL,
+        ).find(xml)?.groupValues?.get(1)
+        requireNotNull(block) { "Missing $name in $folder/appwide.xml" }
+        return Regex(
+            """<item\s+quantity="([^"]+)"[^>]*>(.*?)</item>""",
+            RegexOption.DOT_MATCHES_ALL,
+        ).findAll(block).associate { it.groupValues[1] to it.groupValues[2].trim() }
+    }
+
     @Test
     fun auditedCoreSurfacesUseSharedMissingValueToken() {
         val auditedPaths = listOf(
+            "src/main/java/com/noop/ui/CoupledScreen.kt",
             "src/main/java/com/noop/ui/FriendsScreen.kt",
             "src/main/java/com/noop/ui/HealthScreen.kt",
             "src/main/java/com/noop/ui/LiveScreen.kt",
@@ -49,12 +73,18 @@ class UiAuditPresentationContractTest {
         val forbidden = listOf(
             "?: \"-\"",
             "?: \"–\"",
+            "else \"-\"",
+            "else \"–\"",
+            "text = \"-\"",
+            "text = \"–\"",
             "return \"-\"",
             "return \"–\"",
             "== \"-\"",
             "== \"–\"",
             "SLEEP_MISSING_VALUE",
             "vs typical -",
+            "private const val NO_DATA = \"No Data\"",
+            "private const val COUPLED_NO_DATA = \"No Data\"",
         )
 
         auditedPaths.forEach { path ->
@@ -68,6 +98,7 @@ class UiAuditPresentationContractTest {
         }
 
         assertTrue(source("src/main/java/com/noop/ui/TodayScreen.kt").contains("NoopDisplayFormat.MISSING"))
+        assertTrue(source("src/main/java/com/noop/ui/HealthScreen.kt").contains("NoopDisplayFormat.MISSING"))
         assertTrue(source("src/main/java/com/noop/ui/SleepScreen.kt").contains("NoopDisplayFormat.MISSING"))
         assertTrue(source("src/main/java/com/noop/ui/SleepFormatting.kt").contains("NoopDisplayFormat.MISSING"))
         assertTrue(source("src/main/java/com/noop/ui/SleepModelLogic.kt").contains("NoopDisplayFormat.MISSING"))
@@ -128,6 +159,67 @@ class UiAuditPresentationContractTest {
         )
         assertFalse(appViewModel.contains("after your strap synced"))
         assertTrue(appViewModel.contains("after your band synced"))
+
+        val mountedBandSources = listOf(
+            "src/main/java/com/noop/ble/Backfiller.kt",
+            "src/main/java/com/noop/ble/WhoopBleClient.kt",
+            "src/main/java/com/noop/ble/WhoopConnectionService.kt",
+        ).joinToString("\n") { source(it) }
+        listOf(
+            "Strap ${'$'}{",
+            "Syncing strap history",
+            "the strap went quiet",
+            "your strap's clock",
+            "charge the strap",
+            "near your strap",
+            "pair your strap",
+            "your strap will reboot",
+            "strap's realtime stream",
+            "your strap had no stored history",
+        ).forEach { phrase ->
+            assertFalse(
+                "Mounted primary-band copy still contains $phrase",
+                mountedBandSources.contains(phrase),
+            )
+        }
+
+        val primaryBandKeys = listOf(
+            "l10n_data_sources_screen_write_the_metrics_noop_computes_from_439940c2",
+            "l10n_settings_screen_feel_the_current_time_as_a_8ca41db1",
+            "l10n_settings_screen_keeps_the_detailed_beat_to_beat_87b78edd",
+        )
+        listOf("values", "values-de", "values-es", "values-fr", "values-pt-rPT")
+            .forEach { folder ->
+                primaryBandKeys.forEach { key ->
+                    assertTrue(
+                        "$folder/$key must name Noop Band explicitly",
+                        stringResource(folder, key).contains("Noop Band"),
+                    )
+                }
+            }
+    }
+
+    @Test
+    fun sleepHeroUsesLocalizedScoreHeading() {
+        val sleep = source("src/main/java/com/noop/ui/SleepScreen.kt")
+        val coupled = source("src/main/java/com/noop/ui/CoupledScreen.kt")
+
+        assertTrue(
+            sleep.contains(
+                "uiString(R.string.appwide_day_overview_sleep_score)",
+            ),
+        )
+        assertFalse(sleep.contains("SectionHeader(\"Sleep Score\""))
+        assertTrue(
+            coupled.contains(
+                "uiString(R.string.appwide_day_overview_sleep_score)",
+            ),
+        )
+        assertFalse(
+            coupled.contains(
+                "uiString(R.string.l10n_coupled_screen_sleep_performance_4611539f)",
+            ),
+        )
     }
 
     @Test
@@ -349,8 +441,13 @@ class UiAuditPresentationContractTest {
 
         val stress = source("src/main/java/com/noop/ui/StressScreen.kt")
         assertTrue(stress.contains("appwide_stress_band_light_load"))
-        assertTrue(stress.contains("appwide_common_vs_baseline"))
-        assertTrue(stress.contains("""caption = "of 3 · ${'$'}{model.band.title}""""))
+        assertTrue(stress.contains("ui_audit_stress_score_caption"))
+        assertTrue(stress.contains("ui_audit_stress_delta_vs_baseline"))
+        assertTrue(stress.contains("ui_audit_stress_at_baseline"))
+        assertFalse(stress.contains("""caption = "of 3 · ${'$'}{model.band.title}""""))
+        assertFalse(stress.contains("""BandLegend("1-2", "MEDIUM""""))
+        assertFalse(stress.contains("""BandLegend("2-3", "HIGH""""))
+        assertFalse(stress.contains("""deltaText = "at baseline""""))
 
         val today = source("src/main/java/com/noop/ui/TodayScreen.kt")
         assertTrue(today.contains("appwide_charge_confidence_reliable"))
@@ -366,12 +463,198 @@ class UiAuditPresentationContractTest {
         assertTrue(health.contains("appwide_health_live_hr_disconnected"))
         assertTrue(health.contains("NoopDisplayFormat.MISSING"))
         val sleep = source("src/main/java/com/noop/ui/SleepScreen.kt")
-        assertTrue(sleep.contains("""SectionHeader("Sleep Score", overline = overline)"""))
+        assertTrue(sleep.contains("uiString(R.string.appwide_day_overview_sleep_score)"))
         assertTrue(sleep.contains("appwide_sleep_imported_confidence_note"))
         assertTrue(sleep.contains("tint = Palette.textTertiary"))
         assertTrue(
             source("src/main/java/com/noop/ui/ManagedCloudCard.kt")
                 .contains("ManagedCloudEvidenceRow("),
         )
+    }
+
+    @Test
+    fun stressAndRecoveryDriverAccessibilityAreLocalizedAcrossAllNineLocales() {
+        val folders = listOf(
+            "values", "values-de", "values-es", "values-fr", "values-it",
+            "values-pt-rPT", "values-ru", "values-zh", "values-zh-rTW",
+        )
+        val stringKeys = listOf(
+            "ui_audit_stress_score_caption",
+            "ui_audit_stress_delta_vs_baseline",
+            "ui_audit_stress_at_baseline",
+            "ui_audit_stress_totals_band_calm",
+            "ui_audit_stress_totals_band_moderate",
+            "ui_audit_stress_totals_band_high",
+            "ui_audit_stress_methodology_title",
+            "ui_audit_stress_methodology_stored_summary",
+            "ui_audit_stress_methodology_stored_detail",
+            "ui_audit_stress_methodology_derived_summary",
+            "ui_audit_stress_methodology_derived_detail",
+            "ui_audit_stress_explanation_stored_high",
+            "ui_audit_stress_explanation_stored_medium",
+            "ui_audit_stress_explanation_stored_low",
+            "ui_audit_stress_explanation_derived_high_both",
+            "ui_audit_stress_explanation_derived_high_hrv",
+            "ui_audit_stress_explanation_derived_high_rhr",
+            "ui_audit_stress_explanation_derived_high_other",
+            "ui_audit_stress_explanation_derived_medium_rhr",
+            "ui_audit_stress_explanation_derived_medium_hrv",
+            "ui_audit_stress_explanation_derived_medium_other",
+            "ui_audit_stress_explanation_derived_low_both",
+            "ui_audit_stress_explanation_derived_low_hrv",
+            "ui_audit_stress_explanation_derived_low_rhr",
+            "ui_audit_stress_explanation_derived_low_other",
+            "ui_audit_recovery_driver_baseline_format",
+            "ui_audit_recovery_driver_verdict_above_supporting",
+            "ui_audit_recovery_driver_verdict_at_baseline",
+            "ui_audit_recovery_driver_verdict_below_limiting",
+            "ui_audit_recovery_driver_verdict_below_supporting",
+            "ui_audit_recovery_driver_verdict_above_limiting",
+            "ui_audit_recovery_driver_verdict_typical_night",
+            "ui_audit_recovery_driver_verdict_near_baseline",
+            "ui_audit_recovery_driver_verdict_warmer_limiting",
+            "ui_audit_recovery_driver_verdict_cooler_limiting",
+        )
+        val valueFormatKeys = listOf(
+            "ui_audit_recovery_driver_value_milliseconds",
+            "ui_audit_recovery_driver_value_beats_per_minute",
+            "ui_audit_recovery_driver_value_percent",
+            "ui_audit_recovery_driver_value_breaths_per_minute",
+            "ui_audit_recovery_driver_value_celsius_deviation",
+        )
+        val labelKeys = listOf(
+            "appwide_day_overview_hrv",
+            "appwide_day_overview_resting_heart_rate",
+            "appwide_day_overview_sleep",
+            "appwide_day_overview_respiratory_rate",
+            "appwide_day_overview_skin_temperature",
+        )
+        val pluralKeys = listOf(
+            "ui_audit_recovery_driver_accessibility_with_baseline",
+            "ui_audit_recovery_driver_accessibility_without_baseline",
+        )
+        val placeholder = Regex("""%\d+\${'$'}s""")
+        val baseStrings = stringKeys.associateWith { appWideResource("values", it) }
+        val baseStringPlaceholderCounts = baseStrings.mapValues {
+            placeholder.findAll(it.value).count()
+        }
+        val baseValueFormats = valueFormatKeys.associateWith {
+            appWideResource("values", it)
+        }
+
+        folders.forEach { folder ->
+            stringKeys.forEach { key ->
+                val value = appWideResource(folder, key)
+                assertTrue("$folder/$key must not be blank", value.isNotBlank())
+                if (folder != "values") {
+                    assertFalse(
+                        "$folder/$key must not use the English fallback",
+                        value == baseStrings.getValue(key),
+                    )
+                }
+                assertEquals(
+                    "$folder/$key placeholder count",
+                    baseStringPlaceholderCounts.getValue(key),
+                    placeholder.findAll(value).count(),
+                )
+            }
+            valueFormatKeys.forEach { key ->
+                val value = appWideResource(folder, key)
+                assertTrue("$folder/$key must not be blank", value.isNotBlank())
+                assertEquals(
+                    "$folder/$key placeholder count",
+                    1,
+                    placeholder.findAll(value).count(),
+                )
+                if (
+                    folder != "values" &&
+                    key == "ui_audit_recovery_driver_value_breaths_per_minute"
+                ) {
+                    assertFalse(
+                        "$folder/$key must not use the English unit",
+                        value == baseValueFormats.getValue(key),
+                    )
+                }
+            }
+            labelKeys.forEach { key ->
+                assertTrue(
+                    "$folder/$key driver label must not be blank",
+                    appWideResource(folder, key).isNotBlank(),
+                )
+            }
+            pluralKeys.forEach { key ->
+                val quantities = pluralQuantities(folder, key)
+                assertTrue("$folder/$key requires an other form", "other" in quantities)
+                if (folder !in setOf("values-zh", "values-zh-rTW")) {
+                    assertTrue("$folder/$key requires a one form", "one" in quantities)
+                }
+                val expectedPlaceholders = if (key.endsWith("_with_baseline")) 5 else 4
+                quantities.forEach { (quantity, value) ->
+                    assertEquals(
+                        "$folder/$key/$quantity placeholder count",
+                        expectedPlaceholders,
+                        placeholder.findAll(value).count(),
+                    )
+                }
+            }
+        }
+
+        pluralKeys.forEach { key ->
+            assertEquals(
+                "$key must cover Russian plural grammar",
+                setOf("one", "few", "many", "other"),
+                pluralQuantities("values-ru", key).keys,
+            )
+        }
+
+        val today = source("src/main/java/com/noop/ui/TodayScreen.kt")
+        assertTrue(today.contains("recoveryDriverLabelRes(driver.label)"))
+        assertTrue(today.contains("recoveryDriverVerdictRes(driver.verdict)"))
+        assertTrue(today.contains("recoveryDriverValueFormatRes(driver.valueFormat)"))
+        assertTrue(today.contains("recoveryDriverNumberText(driver.value"))
+        assertTrue(today.contains("uiPlural("))
+        assertTrue(today.contains("ui_audit_recovery_driver_baseline_format"))
+        assertTrue(today.contains("Text(localizedLabel"))
+        assertTrue(today.contains("Text(localizedVerdict"))
+        assertTrue(today.contains("Text(valueText"))
+        assertTrue(today.contains("Text(localizedBaseline"))
+        assertTrue(today.contains("Modifier.clearAndSetSemantics"))
+        assertFalse(today.contains("""trailing = "vs your baseline""""))
+        assertFalse(today.contains("""removeSuffix(" baseline")"""))
+        assertFalse(today.contains("Text(driver.label"))
+        assertFalse(today.contains("Text(driver.verdict"))
+        assertFalse(today.contains("driver.valueText"))
+        assertFalse(today.contains("driver.baselineText"))
+        assertFalse(today.contains("""${'$'}signed points, ${'$'}{driver.verdict}"""))
+
+        val drivers = source("src/main/java/com/noop/analytics/RecoveryDrivers.kt")
+        assertTrue(drivers.contains("ChargeDriverValueFormat.BREATHS_PER_MINUTE"))
+        assertTrue(drivers.contains("ChargeDriverValueFormat.CELSIUS_DEVIATION"))
+        assertFalse(drivers.contains("Locale.US"))
+        assertFalse(drivers.contains("vs baseline"))
+    }
+
+    @Test
+    fun liveHeartRateCopyDoesNotFallBackToEnglishInPreviouslyMissingLocales() {
+        val folders = listOf("values-it", "values-ru", "values-zh", "values-zh-rTW")
+        val keys = listOf(
+            "health_live_hr_on",
+            "health_live_hr_off",
+            "health_live_hr_on_detail",
+            "health_live_hr_off_detail",
+            "health_live_hr_battery_notice",
+        )
+        val base = keys.associateWith { stringResource("values", it) }
+
+        folders.forEach { folder ->
+            keys.forEach { key ->
+                val localized = stringResource(folder, key)
+                assertTrue("$folder/$key must not be blank", localized.isNotBlank())
+                assertFalse(
+                    "$folder/$key must not use the English fallback",
+                    localized == base.getValue(key),
+                )
+            }
+        }
     }
 }

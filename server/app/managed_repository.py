@@ -4861,9 +4861,7 @@ class PostgresManagedRepository:
                     "data_classes": request.data_classes,
                     "document_kinds": request.document_kinds,
                     "include_documents": request.include_documents,
-                    "include_deleted_documents": (
-                        request.include_deleted_documents
-                    ),
+                    "include_deleted_documents": (request.include_deleted_documents),
                     "start": (
                         request.start.isoformat() if request.start is not None else None
                     ),

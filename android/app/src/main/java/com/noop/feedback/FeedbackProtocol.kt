@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Authenticator
 import okhttp3.Call
@@ -120,10 +121,16 @@ internal object FeedbackAnonymousIdentityLifetimePolicy {
         TimeUnit.DAYS.toMillis(28)
     val replacementSafetyMarginMillis =
         TimeUnit.DAYS.toMillis(1)
+    val maximumClockSkewMillis =
+        TimeUnit.MINUTES.toMillis(5)
+    val providerCleanupSafetyReserveMillis =
+        TimeUnit.HOURS.toMillis(1)
     val maximumExistingIdentityAgeMillis =
         identityPlatformCleanupAgeMillis -
             maximumReportRetentionMillis -
-            replacementSafetyMarginMillis
+            replacementSafetyMarginMillis -
+            maximumClockSkewMillis -
+            providerCleanupSafetyReserveMillis
 
     fun reservationAction(
         identityCreatedAtMillis: Long?,
@@ -179,8 +186,12 @@ internal sealed class FeedbackProtocolException(
         FeedbackProtocolException("App attestation is unavailable.", cause)
     class Identity(cause: Throwable? = null) :
         FeedbackProtocolException("Feedback identity is unavailable.", cause)
+    class ReservationContinuityPending :
+        FeedbackProtocolException("Feedback identity reservation is waiting.")
     class ReservationPending :
         FeedbackProtocolException("Feedback reservation state is still pending.")
+    class ReservationGone :
+        FeedbackProtocolException("Feedback reservation is retired.")
     class Http(val statusCode: Int) :
         FeedbackProtocolException("Feedback request was rejected.")
     class InvalidResponse :
@@ -189,6 +200,16 @@ internal sealed class FeedbackProtocolException(
 
 internal interface FeedbackAuthorizationProvider {
     suspend fun authorization(forceRefresh: Boolean): FeedbackAuthorization
+
+    suspend fun <T> authorizationAndBind(
+        forceRefresh: Boolean,
+        bind: suspend (FeedbackAuthorization) -> T,
+    ): T = bind(authorization(forceRefresh))
+}
+
+internal object FeedbackIdentityCreationPolicy {
+    fun permitsCreation(allowIdentityReplacement: Boolean): Boolean =
+        allowIdentityReplacement
 }
 
 /**
@@ -200,15 +221,29 @@ internal class FirebaseFeedbackAuthorizationProvider(
     context: Context,
     private val allowIdentityReplacement: Boolean = false,
     private val enforceReservationIdentityLifetime: Boolean = false,
-    private val reservationContinuityIdentitySubjectSha256s: Set<String> =
-        emptySet(),
+    private val reservationContinuityIdentitySubjectSha256s: () -> Set<String> =
+        { emptySet() },
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) : FeedbackAuthorizationProvider {
     private val appContext = context.applicationContext
 
-    override suspend fun authorization(forceRefresh: Boolean): FeedbackAuthorization {
+    override suspend fun authorization(forceRefresh: Boolean): FeedbackAuthorization =
+        identityLock.withLock {
+            authorizationLocked(forceRefresh)
+        }
+
+    override suspend fun <T> authorizationAndBind(
+        forceRefresh: Boolean,
+        bind: suspend (FeedbackAuthorization) -> T,
+    ): T = identityLock.withLock {
+        bind(authorizationLocked(forceRefresh))
+    }
+
+    private suspend fun authorizationLocked(
+        forceRefresh: Boolean,
+    ): FeedbackAuthorization {
         val runtime = runtime()
-        val (user, identity) = identity(runtime.auth, forceRefresh)
+        val (user, identity) = identityLocked(runtime.auth, forceRefresh)
         val appCheck = try {
             runtime.appCheck.getAppCheckToken(forceRefresh).awaitManaged().token
                 .takeIf { it.isNotBlank() && it.length <= MAX_TOKEN_LENGTH }
@@ -229,8 +264,13 @@ internal class FirebaseFeedbackAuthorizationProvider(
 
     private suspend fun identityUser(
         auth: FirebaseAuth,
-    ): Pair<FirebaseUser, Boolean> =
-        auth.currentUser?.let { it to false } ?: try {
+        allowCreation: Boolean,
+    ): Pair<FirebaseUser, Boolean> {
+        auth.currentUser?.let { return it to false }
+        if (!FeedbackIdentityCreationPolicy.permitsCreation(allowCreation)) {
+            throw FeedbackProtocolException.Identity()
+        }
+        return try {
             val user = auth.signInAnonymously().awaitManaged().user
                 ?: throw FeedbackProtocolException.Identity()
             user to true
@@ -239,64 +279,63 @@ internal class FirebaseFeedbackAuthorizationProvider(
         } catch (error: Exception) {
             throw FeedbackProtocolException.Identity(error)
         }
+    }
 
-    private suspend fun identity(
+    private suspend fun identityLocked(
         auth: FirebaseAuth,
         forceRefresh: Boolean,
     ): Pair<FirebaseUser, String> {
-        identityLock.lock()
-        try {
-            var (user, createdNow) = identityUser(auth)
-            var subjectSha256 = validatedIdentitySubjectSha256(user)
-            if (enforceReservationIdentityLifetime) {
-                val now = nowMillis()
-                when (
-                    FeedbackAnonymousIdentityProviderPolicy.reservationAction(
-                        enforceLifetime =
-                            enforceReservationIdentityLifetime,
-                        identityCreatedAtMillis = if (createdNow) {
-                            now
-                        } else {
-                            user.metadata?.creationTimestamp
-                        },
-                        nowMillis = now,
+        var (user, createdNow) = identityUser(
+            auth,
+            allowCreation = allowIdentityReplacement,
+        )
+        var subjectSha256 = validatedIdentitySubjectSha256(user)
+        if (enforceReservationIdentityLifetime) {
+            val now = nowMillis()
+            when (
+                FeedbackAnonymousIdentityProviderPolicy.reservationAction(
+                    enforceLifetime =
+                        enforceReservationIdentityLifetime,
+                    identityCreatedAtMillis = if (createdNow) {
+                        now
+                    } else {
+                        user.metadata?.creationTimestamp
+                    },
+                    nowMillis = now,
+                    identitySubjectSha256 = subjectSha256,
+                    reservationContinuityIdentitySubjectSha256s =
+                        reservationContinuityIdentitySubjectSha256s(),
+                )
+            ) {
+                FeedbackReservationIdentityAction.REUSE -> Unit
+                FeedbackReservationIdentityAction.REPLACE -> {
+                    if (!allowIdentityReplacement) {
+                        throw FeedbackProtocolException.Identity()
+                    }
+                    user = replaceIdentity(auth)
+                    subjectSha256 = validatedIdentitySubjectSha256(user)
+                }
+                FeedbackReservationIdentityAction.DEFER ->
+                    throw FeedbackProtocolException.ReservationContinuityPending()
+            }
+        }
+        return try {
+            user to identityToken(user, forceRefresh)
+        } catch (error: FeedbackProtocolException.Identity) {
+            val cause = error.cause
+            if (!allowIdentityReplacement ||
+                !permitsIdentityReplacement(cause) ||
+                !FeedbackAnonymousIdentityProviderPolicy
+                    .permitsStaleIdentityReplacement(
                         identitySubjectSha256 = subjectSha256,
                         reservationContinuityIdentitySubjectSha256s =
-                            reservationContinuityIdentitySubjectSha256s,
+                            reservationContinuityIdentitySubjectSha256s(),
                     )
-                ) {
-                    FeedbackReservationIdentityAction.REUSE -> Unit
-                    FeedbackReservationIdentityAction.REPLACE -> {
-                        if (!allowIdentityReplacement) {
-                            throw FeedbackProtocolException.Identity()
-                        }
-                        user = replaceIdentity(auth)
-                        subjectSha256 = validatedIdentitySubjectSha256(user)
-                    }
-                    FeedbackReservationIdentityAction.DEFER ->
-                        throw FeedbackProtocolException.Identity()
-                }
+            ) {
+                throw error
             }
-            return try {
-                user to identityToken(user, forceRefresh)
-            } catch (error: FeedbackProtocolException.Identity) {
-                val cause = error.cause
-                if (!allowIdentityReplacement ||
-                    !permitsIdentityReplacement(cause) ||
-                    !FeedbackAnonymousIdentityProviderPolicy
-                        .permitsStaleIdentityReplacement(
-                            identitySubjectSha256 = subjectSha256,
-                            reservationContinuityIdentitySubjectSha256s =
-                                reservationContinuityIdentitySubjectSha256s,
-                        )
-                ) {
-                    throw error
-                }
-                val replacement = replaceIdentity(auth)
-                replacement to identityToken(replacement, forceRefresh = true)
-            }
-        } finally {
-            identityLock.unlock()
+            val replacement = replaceIdentity(auth)
+            replacement to identityToken(replacement, forceRefresh = true)
         }
     }
 
@@ -481,7 +520,12 @@ internal class FeedbackApiClient(
             body = null,
         )
         execute(request).use { response ->
-            if (response.code == 404) return null
+            if (response.code == 404) {
+                throw FeedbackProtocolException.ReservationPending()
+            }
+            if (response.code == 410) {
+                throw FeedbackProtocolException.ReservationGone()
+            }
             if (!response.isSuccessful) {
                 throw FeedbackProtocolException.Http(response.code)
             }
@@ -565,7 +609,7 @@ internal class FeedbackApiClient(
         )
         execute(request).use { response ->
             if (response.code in setOf(404, 410)) {
-                return FeedbackRemoteStatus("deleted", receipt = null, retainedUntil = null)
+                throw FeedbackProtocolException.ReservationPending()
             }
             if (!response.isSuccessful) {
                 throw FeedbackProtocolException.Http(response.code)

@@ -781,14 +781,6 @@
       "steps / motion unit"
     ],
     [
-      "android/app/src/main/java/com/noop/ui/StressScreen.kt",
-      "Stress is derived from two autonomic signals."
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/StressScreen.kt",
-      "Today's value is your recorded daily stress score (0-3)."
-    ],
-    [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
       "CALIBRATING"
     ],

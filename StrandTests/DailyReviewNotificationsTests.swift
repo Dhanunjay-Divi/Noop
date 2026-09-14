@@ -358,6 +358,60 @@ final class LocalNotificationCapacityTests: XCTestCase {
         )
     }
 
+    func testRoutineHydrationPhoneFallbackDoesNotDisplaceExplicitRequests() {
+        let fallback = request(
+            identifier: "hydration-reminder-phone-fallback-20260914T0900",
+            interval: 3_600
+        )
+        let explicit = request(
+            identifier: "smart-alarm-user-selected",
+            interval: 7_200
+        )
+
+        let plan = LocalNotificationCapacityPolicy.plan(
+            existingRequests: [],
+            candidateRequests: [fallback, explicit],
+            replacingIdentifiers: [],
+            capacity: 1,
+            reservedPrioritySlots: 1,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: fallback),
+            .routine
+        )
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: explicit),
+            .userExplicit
+        )
+        XCTAssertEqual(
+            plan.selectedCandidateRequests.map(\.identifier),
+            [explicit.identifier]
+        )
+    }
+
+    func testMissedHydrationResponseRemainsUserExplicit() {
+        let content = UNMutableNotificationContent()
+        content.userInfo = [
+            LocalNotificationPriorityMarker.hydrationMissedResponse: true
+        ]
+        let escalation = UNNotificationRequest(
+            identifier: "hydration-reminder-phone-fallback-20260914T0900",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(
+                timeInterval: 3_600,
+                repeats: false
+            )
+        )
+
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: escalation),
+            .userExplicit
+        )
+    }
+
     func testStaleSyncIsMaintenanceAndLosesCapacityBeforeRoutine() {
         let staleSync = request(
             identifier: "noop.band-sync.stale",
@@ -715,6 +769,77 @@ final class LocalNotificationCapacityTests: XCTestCase {
         )
         XCTAssertFalse(encoded.contains("sensitive"))
         XCTAssertFalse(encoded.contains("private measurement"))
+    }
+
+    func testDirectReplacementKeepsIdentifierAndDoesNotRemoveFirst() async {
+        let stableID = "hydration-reminder-phone-fallback-slot"
+        let existing = request(
+            identifier: stableID,
+            interval: 60,
+            body: "fallback"
+        )
+        let replacement = request(
+            identifier: stableID,
+            interval: 600,
+            body: "missed response"
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: [existing]
+        )
+        var accepted = false
+
+        let result = await LocalNotificationLifecycle.replacePending(
+            replacement,
+            coordinator: LocalNotificationCapacityCoordinator(),
+            didAccept: {
+                accepted = center.requests[stableID]?.content.body
+                    == "missed response"
+            },
+            client: center.client
+        )
+
+        XCTAssertEqual(result, .accepted)
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(
+            center.requests[stableID]?.content.body,
+            "missed response"
+        )
+        XCTAssertTrue(center.removalBatches.isEmpty)
+        XCTAssertEqual(center.mutationLog, ["add:missed response"])
+    }
+
+    func testDirectReplacementFailureLeavesExistingRequestIntact() async {
+        let stableID = "hydration-reminder-phone-fallback-slot"
+        let existing = request(
+            identifier: stableID,
+            interval: 60,
+            body: "fallback"
+        )
+        let replacement = request(
+            identifier: stableID,
+            interval: 600,
+            body: "missed response"
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: [existing],
+            failingIdentifiers: [stableID]
+        )
+        var accepted = false
+
+        let result = await LocalNotificationLifecycle.replacePending(
+            replacement,
+            coordinator: LocalNotificationCapacityCoordinator(),
+            didAccept: {
+                accepted = true
+            },
+            client: center.client
+        )
+
+        XCTAssertEqual(result, .failed)
+        XCTAssertFalse(accepted)
+        XCTAssertEqual(center.requests[stableID]?.content.body, "fallback")
+        XCTAssertTrue(center.removalBatches.isEmpty)
+        XCTAssertTrue(center.mutationLog.isEmpty)
     }
 
     private func request(
@@ -1452,6 +1577,9 @@ final class MorningRecapNotificationsTests: XCTestCase {
     private let keys = [
         MorningRecapNotifications.enabledKey,
         MorningRecapNotifications.lastReportDayKey,
+        "notif.quietHoursEnabled",
+        "notif.quietStartMinutes",
+        "notif.quietEndMinutes",
     ]
 
     override func setUp() {
@@ -1492,6 +1620,14 @@ final class MorningRecapNotificationsTests: XCTestCase {
             recoveryOrSleepScorePresent: true,
             reportDay: "2026-08-28",
             lastReportDay: "2026-08-28"
+        ))
+        XCTAssertFalse(MorningRecapNotifications.shouldNotify(
+            enabled: true,
+            materializedAfterSync: true,
+            recoveryOrSleepScorePresent: true,
+            reportDay: "2026-08-28",
+            lastReportDay: nil,
+            inQuietHours: true
         ))
     }
 
@@ -1624,6 +1760,61 @@ final class MorningRecapNotificationsTests: XCTestCase {
             "2026-09-11"
         )
     }
+
+    func testQuietHoursScheduleRecapForTheConfiguredEnd() async throws {
+        let notifications = MorningRecapNotificationClientSpy(status: .authorized)
+        UserDefaults.standard.set(true, forKey: MorningRecapNotifications.enabledKey)
+        UserDefaults.standard.set(true, forKey: "notif.quietHoursEnabled")
+        UserDefaults.standard.set(22 * 60, forKey: "notif.quietStartMinutes")
+        UserDefaults.standard.set(7 * 60, forKey: "notif.quietEndMinutes")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let quietNow = calendar.date(
+            from: DateComponents(
+                year: 2026,
+                month: 9,
+                day: 14,
+                hour: 23
+            )
+        )!
+
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-09-14",
+            recoveryPresent: true,
+            sleepScorePresent: false,
+            client: notifications.client,
+            now: quietNow,
+            calendar: calendar
+        )
+
+        let request = try XCTUnwrap(notifications.requests["morning-recap"])
+        let trigger = try XCTUnwrap(
+            request.trigger as? UNCalendarNotificationTrigger
+        )
+        XCTAssertFalse(trigger.repeats)
+        XCTAssertEqual(trigger.dateComponents.year, 2026)
+        XCTAssertEqual(trigger.dateComponents.month, 9)
+        XCTAssertEqual(trigger.dateComponents.day, 15)
+        XCTAssertEqual(trigger.dateComponents.hour, 7)
+        XCTAssertEqual(trigger.dateComponents.minute, 0)
+        XCTAssertEqual(
+            UserDefaults.standard.string(
+                forKey: MorningRecapNotifications.lastReportDayKey
+            ),
+            "2026-09-14"
+        )
+
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-09-14",
+            recoveryPresent: true,
+            sleepScorePresent: false,
+            client: notifications.client,
+            now: quietNow,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(notifications.requests.count, 1)
+    }
 }
 
 @MainActor
@@ -1632,6 +1823,9 @@ final class PostWorkoutSummaryNotificationsTests: XCTestCase {
         PostWorkoutSummaryNotifications.enabledKey,
         PostWorkoutSummaryNotifications.lastWorkoutStartKey,
         PostWorkoutSummaryNotifications.frontierInitializedKey,
+        "notif.quietHoursEnabled",
+        "notif.quietStartMinutes",
+        "notif.quietEndMinutes",
     ]
 
     override func setUp() {
@@ -1843,6 +2037,64 @@ final class PostWorkoutSummaryNotificationsTests: XCTestCase {
             UserDefaults.standard.bool(
                 forKey: PostWorkoutSummaryNotifications.frontierInitializedKey
             )
+        )
+    }
+
+    func testQuietHoursKeepWorkoutEligibleForTheNextSync() async throws {
+        let notifications = PostWorkoutNotificationClientSpy(status: .authorized)
+        UserDefaults.standard.set(
+            true,
+            forKey: PostWorkoutSummaryNotifications.enabledKey
+        )
+        UserDefaults.standard.set(
+            true,
+            forKey: PostWorkoutSummaryNotifications.frontierInitializedKey
+        )
+        UserDefaults.standard.set(
+            100,
+            forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+        )
+        UserDefaults.standard.set(true, forKey: "notif.quietHoursEnabled")
+        UserDefaults.standard.set(22 * 60, forKey: "notif.quietStartMinutes")
+        UserDefaults.standard.set(7 * 60, forKey: "notif.quietEndMinutes")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let quietNow = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 23
+        )))
+
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 101,
+            client: notifications.client,
+            now: quietNow,
+            calendar: calendar
+        )
+
+        XCTAssertTrue(notifications.requests.isEmpty)
+        XCTAssertEqual(
+            UserDefaults.standard.integer(
+                forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+            ),
+            100
+        )
+
+        UserDefaults.standard.set(false, forKey: "notif.quietHoursEnabled")
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 101,
+            client: notifications.client,
+            now: quietNow,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(notifications.requests.count, 1)
+        XCTAssertEqual(
+            UserDefaults.standard.integer(
+                forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+            ),
+            101
         )
     }
 }

@@ -155,6 +155,7 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "037_managed_document_contract_v2_activate.sql" in smoke
     assert "038_managed_safety_band_sos.sql" in smoke
     assert "041_managed_safety_writer_compatibility.sql" in smoke
+    assert "042_feedback_idempotency_tombstones.sql" in smoke
     assert "managed_document_contract_v2_readiness" in smoke
     assert "content contract activated before client readiness" in smoke
     assert "managed Safety quota writer compatibility is missing" in smoke
@@ -170,6 +171,125 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "orphaned installation device ownership was restored" in smoke
     assert "profile without installation ownership was restored" in smoke
     assert "orphaned Safety replay tombstone was restored" in smoke
+
+
+def test_restore_smoke_requires_feedback_tombstone_schema_contract() -> None:
+    smoke = (BACKUP_ROOT / "restore-application-smoke.sql").read_text(encoding="utf-8")
+    normalized_smoke = " ".join(smoke.split())
+
+    assert "to_regclass('public.feedback_reports')" in smoke
+    assert "feedback reports table is missing" in smoke
+    for column_name, expected_type in (
+        ("report_id", "uuid"),
+        ("client_app_id", "text"),
+        ("subject_hash", "character(64)"),
+        ("principal_hash_version", "smallint"),
+        ("principal_hash", "character(64)"),
+        ("idempotency_hash", "character(64)"),
+        ("request_hash", "character(64)"),
+        ("platform", "text"),
+        ("app_version", "text"),
+        ("archive_bytes", "integer"),
+        ("archive_sha256", "character(64)"),
+        ("includes_user_note", "boolean"),
+        ("includes_screenshot", "boolean"),
+        ("receipt", "character varying(19)"),
+        ("object_key", "text"),
+        ("status", "text"),
+        ("object_generation", "bigint"),
+        ("created_at", "timestamp with time zone"),
+        ("upload_expires_at", "timestamp with time zone"),
+        ("completed_at", "timestamp with time zone"),
+        ("retained_until", "timestamp with time zone"),
+        ("deleted_at", "timestamp with time zone"),
+        ("cleanup_after", "timestamp with time zone"),
+        ("cleanup_phase", "text"),
+        ("cleanup_claimed_at", "timestamp with time zone"),
+        ("object_absence_confirmed_at", "timestamp with time zone"),
+    ):
+        assert f"('{column_name}', '{expected_type}'" in normalized_smoke
+    assert "column_state.attnotnull IS DISTINCT FROM" in smoke
+    assert "feedback reports runtime column contract is missing or invalid" in smoke
+    for constraint_name in (
+        "feedback_completion_consistent",
+        "feedback_cleanup_phase_valid",
+        "feedback_time_order",
+        "feedback_cleanup_consistent",
+        "feedback_cleanup_claim_consistent",
+        "feedback_absence_confirmation_consistent",
+        "feedback_reports_client_app_id_subject_hash_idempotency_has_key",
+        "feedback_reports_principal_idempotency_unique",
+        "feedback_reports_receipt_key",
+        "feedback_reports_object_key_key",
+    ):
+        assert constraint_name in smoke
+    assert (
+        "feedback report runtime constraint is missing, unvalidated, or invalid"
+        in smoke
+    )
+    assert "feedback_report_compatibility" in smoke
+    assert "feedback_report_retire_idempotency" in smoke
+    assert "feedback report runtime trigger is missing or disabled" in smoke
+    for index_name in (
+        "feedback_reports_retention_idx",
+        "feedback_reports_status_idx",
+        "feedback_reports_subject_quota_idx",
+        "feedback_reports_cleanup_v2_idx",
+        "feedback_reports_principal_quota_idx",
+        "feedback_reports_app_quota_idx",
+    ):
+        assert index_name in smoke
+    assert "index_row.relnamespace = 'public'::regnamespace" in smoke
+    assert "feedback report runtime index is missing or invalid" in smoke
+    assert "to_regclass('public.feedback_idempotency_tombstones')" in smoke
+    assert "JOIN pg_attribute column_state" in smoke
+    assert "column_state.attnotnull" in smoke
+    assert "('reserved_at', 'timestamp with time zone')" in smoke
+    assert "('expires_at', 'timestamp with time zone')" in smoke
+    for constraint_name in (
+        "feedback_tombstone_client_app_id_bounded",
+        "feedback_tombstone_principal_version_supported",
+        "feedback_tombstone_principal_hash_format",
+        "feedback_tombstone_idempotency_hash_format",
+        "feedback_tombstone_time_order",
+    ):
+        assert constraint_name in smoke
+    assert "feedback_idempotency_tombstones_pkey" in smoke
+    assert (
+        "PRIMARY KEY (client_app_id, principal_hash_version, principal_hash, "
+        "idempotency_hash)"
+    ) in smoke
+    assert "feedback_idempotency_tombstones_expiry_idx" in smoke
+    assert "JOIN pg_am access_method" in smoke
+    assert "access_method.amname = 'btree'" in smoke
+    assert "index_state.indisvalid" in smoke
+    assert "index_state.indisready" in smoke
+    assert "(expires_at, client_app_id, principal_hash, idempotency_hash)" in smoke
+    for expected_definition in (
+        "CHECK (char_length(client_app_id) >= 8 AND char_length(client_app_id) <= 256)",
+        "CHECK (principal_hash_version = ANY (ARRAY[0, 1]))",
+        "CHECK (principal_hash ~ '^[0-9a-f]{64}$'::text)",
+        "CHECK (idempotency_hash ~ '^[0-9a-f]{64}$'::text)",
+        "CHECK (expires_at = (reserved_at + '45 days'::interval) "
+        "AND expires_at > reserved_at)",
+    ):
+        assert expected_definition in smoke
+    assert (
+        "feedback tombstone check constraint is missing, unvalidated, or invalid"
+        in smoke
+    )
+    assert (
+        "feedback tombstone lifecycle timestamp is missing, nullable, or not" in smoke
+    )
+    assert "feedback tombstone primary key is missing or invalid" in smoke
+    assert "feedback tombstone expiry index is missing or invalid" in smoke
+
+    drill = (BACKUP_ROOT / "restore-drill.sh").read_text(encoding="utf-8")
+    assert "to_regclass('public.feedback_reports')" in drill
+    assert "to_regclass(" in drill
+    assert "'public.feedback_idempotency_tombstones'" in drill
+    assert "'feedback_reports', (SELECT count(*) FROM feedback_reports)" in drill
+    assert "'feedback_idempotency_tombstones'" in drill
 
 
 def _manifest_entries(path: Path) -> dict[str, str]:
@@ -255,7 +375,7 @@ def test_restore_smoke_selects_postgresql_overlay_manifest(tmp_path: Path) -> No
 printf '%s\\n' "$*" >>"{calls}"
 case "$*" in
   *"SELECT count(*) FROM noop_schema_migrations;"*)
-    printf '41\\n'
+    printf '42\\n'
     ;;
   *"--file=-"*)
     cat >/dev/null

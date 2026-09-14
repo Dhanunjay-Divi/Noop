@@ -52,6 +52,38 @@ final class ChargeDriversTests: XCTestCase {
         XCTAssertTrue(drivers.contains { $0.label == "Heart rate variability" })
     }
 
+    func testSleepWithoutLearnedBaselineDescribesContributionNotPersonalBaseline() {
+        let supportive = RecoveryScorer.chargeDrivers(
+            hrv: 55, rhr: 55, resp: nil,
+            hrvBaseline: baseline(mean: 50, sigma: 6), rhrBaseline: nil,
+            respBaseline: nil, sleepPerf: 0.95, restQualityBaseline: nil
+        ).first { $0.label == "Sleep quality" }!
+        let limiting = RecoveryScorer.chargeDrivers(
+            hrv: 55, rhr: 55, resp: nil,
+            hrvBaseline: baseline(mean: 50, sigma: 6), rhrBaseline: nil,
+            respBaseline: nil, sleepPerf: 0.50, restQualityBaseline: nil
+        ).first { $0.label == "Sleep quality" }!
+
+        XCTAssertEqual(supportive.baselineText, "")
+        XCTAssertEqual(supportive.verdict, "sleep quality supported recovery")
+        XCTAssertEqual(limiting.baselineText, "")
+        XCTAssertEqual(limiting.verdict, "sleep quality limited recovery")
+        XCTAssertFalse(supportive.verdict.contains("baseline"))
+        XCTAssertFalse(limiting.verdict.contains("baseline"))
+    }
+
+    func testSleepWithLearnedBaselineKeepsPersonalComparisonCopy() {
+        let sleep = RecoveryScorer.chargeDrivers(
+            hrv: 55, rhr: 55, resp: nil,
+            hrvBaseline: baseline(mean: 50, sigma: 6), rhrBaseline: nil,
+            respBaseline: nil, sleepPerf: 0.90,
+            restQualityBaseline: baseline(mean: 0.80, sigma: 0.05)
+        ).first { $0.label == "Sleep quality" }!
+
+        XCTAssertEqual(sleep.baselineText, "80% baseline")
+        XCTAssertEqual(sleep.verdict, "above baseline, supporting recovery")
+    }
+
     // MARK: - Sign correctness (the term's real direction)
 
     func testGoodInputsGivePositiveContributions() {

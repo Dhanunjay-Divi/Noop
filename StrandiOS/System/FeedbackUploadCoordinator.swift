@@ -15,6 +15,7 @@ private enum FeedbackFirebaseError: Error {
     case configuration
     case appCheck
     case identity
+    case identityReservationDeferred
     case identityContinuity
 }
 
@@ -172,16 +173,24 @@ private enum FeedbackFirebaseAuthorizationProvider {
         reservationContinuityIdentitySubjectSHA256s: Set<String>
     ) async throws -> FeedbackFirebaseAuthorization {
         let runtime = try runtime()
-        let identity = try await identityAuthorization(
-            runtime.auth,
-            forceRefresh: forceRefresh,
-            allowReplacement: allowIdentityReplacement,
-            expectedSubjectSHA256: expectedIdentitySubjectSHA256,
-            enforceReservationIdentityLifetime:
-                enforceReservationIdentityLifetime,
-            reservationContinuityIdentitySubjectSHA256s:
-                reservationContinuityIdentitySubjectSHA256s
-        )
+        await identityGate.acquire()
+        let identity: IdentityAuthorization
+        do {
+            identity = try await identityAuthorization(
+                runtime.auth,
+                forceRefresh: forceRefresh,
+                allowReplacement: allowIdentityReplacement,
+                expectedSubjectSHA256: expectedIdentitySubjectSHA256,
+                enforceReservationIdentityLifetime:
+                    enforceReservationIdentityLifetime,
+                reservationContinuityIdentitySubjectSHA256s:
+                    reservationContinuityIdentitySubjectSHA256s
+            )
+            await identityGate.release()
+        } catch {
+            await identityGate.release()
+            throw error
+        }
         let appCheckToken = try await appCheckToken(
             runtime.appCheck,
             forceRefresh: forceRefresh
@@ -253,7 +262,7 @@ private enum FeedbackFirebaseAuthorizationProvider {
                     expected: nil
                 )
             case .deferReservation:
-                throw FeedbackFirebaseError.identity
+                throw FeedbackFirebaseError.identityReservationDeferred
             }
         }
         do {
@@ -417,21 +426,31 @@ private enum FeedbackFirebaseAuthorizationProvider {
     }
 
     private static let firebaseAppName = "noop-feedback"
+    private static let identityGate = FeedbackIdentityAuthorizationGate()
+}
+
+private enum FeedbackFailureScheduling {
+    case normal
+    case identityContinuityWait
+    case reservationContinuityWait
 }
 
 private struct FeedbackTransportFailure: Error {
     let kind: FeedbackFailureKind
     let retryable: Bool
     let statusCode: Int?
+    let scheduling: FeedbackFailureScheduling
 
     init(
         kind: FeedbackFailureKind,
         retryable: Bool,
-        statusCode: Int? = nil
+        statusCode: Int? = nil,
+        scheduling: FeedbackFailureScheduling = .normal
     ) {
         self.kind = kind
         self.retryable = retryable
         self.statusCode = statusCode
+        self.scheduling = scheduling
     }
 }
 
@@ -525,7 +544,7 @@ private final class FeedbackBackgroundSessionDelegate:
         _ = bytesSent
         Task {
             await FeedbackUploadCoordinator.shared.handleUploadProgress(
-                localID: task.taskDescription,
+                taskDescription: task.taskDescription,
                 sent: totalBytesSent,
                 expected: totalBytesExpectedToSend
             )
@@ -541,7 +560,7 @@ private final class FeedbackBackgroundSessionDelegate:
         pendingCompletions.enter()
         Task {
             await FeedbackUploadCoordinator.shared.handleUploadCompletion(
-                localID: task.taskDescription,
+                taskDescription: task.taskDescription,
                 statusCode: (task.response as? HTTPURLResponse)?.statusCode,
                 failed: error != nil
             )
@@ -589,8 +608,8 @@ actor FeedbackUploadCoordinator {
     private let apiSession: URLSession
     private let backgroundSession: URLSession
     private var startupRecoveryGate = FeedbackStartupRecoveryGate()
-    private var pumping = Set<UUID>()
-    private var activeUploadIDs = Set<UUID>()
+    private var pumpGate = FeedbackPumpGate()
+    private var activeUploadAttempts: [UUID: UUID] = [:]
     private var retryTasks: [UUID: Task<Void, Never>] = [:]
     private var backgroundCompletionGate = FeedbackBackgroundCompletionGate()
 
@@ -669,11 +688,14 @@ actor FeedbackUploadCoordinator {
         let recordsByID = Dictionary(
             uniqueKeysWithValues: records.map { ($0.id, $0) }
         )
-        var taskIDs = Set<UUID>()
+        var activeTaskContexts = Set<FeedbackUploadTaskContext>()
         for task in tasks {
-            guard let raw = task.taskDescription,
-                  let id = UUID(uuidString: raw),
-                  let record = recordsByID[id] else {
+            guard let context = FeedbackUploadTaskContext(
+                taskDescription: task.taskDescription
+            ),
+            task is URLSessionUploadTask,
+            let record = recordsByID[context.reportID],
+            record.uploadAttemptID == context.attemptID else {
                 task.cancel()
                 continue
             }
@@ -681,12 +703,33 @@ actor FeedbackUploadCoordinator {
                 task.cancel()
                 continue
             }
-            taskIDs.insert(id)
-            activeUploadIDs.insert(id)
+            guard activeUploadAttempts[context.reportID] == nil else {
+                task.cancel()
+                continue
+            }
+            switch task.state {
+            case .running:
+                break
+            case .suspended:
+                task.resume()
+            case .canceling, .completed:
+                task.cancel()
+                continue
+            @unknown default:
+                task.cancel()
+                continue
+            }
+            activeTaskContexts.insert(context)
+            activeUploadAttempts[context.reportID] = context.attemptID
         }
 
         notifyChange()
-        for record in records {
+        for recoveredRecord in records {
+            guard let record = try? await outbox.record(
+                id: recoveredRecord.id
+            ) else {
+                continue
+            }
             if !FeedbackIdentityContinuityPolicy.canContactRemote(record) {
                 switch record.state {
                 case .sent, .cancelled, .failed:
@@ -712,7 +755,14 @@ actor FeedbackUploadCoordinator {
                     continue
                 }
             }
-            if record.state == .uploading, taskIDs.contains(record.id) {
+            if record.state == .uploading,
+               let attemptID = record.uploadAttemptID,
+               activeTaskContexts.contains(
+                   FeedbackUploadTaskContext(
+                       reportID: record.id,
+                       attemptID: attemptID
+                   )
+               ) {
                 continue
             }
             if record.state == .uploading {
@@ -720,7 +770,10 @@ actor FeedbackUploadCoordinator {
                     continue
                 }
                 do {
-                    _ = try await outbox.markCompleting(id: record.id)
+                    _ = try await outbox.markCompleting(
+                        id: record.id,
+                        uploadAttemptID: record.uploadAttemptID
+                    )
                     notifyChange()
                     await complete(
                         id: record.id,
@@ -737,9 +790,11 @@ actor FeedbackUploadCoordinator {
                 }
                 continue
             }
-            if shouldPump(record, now: Date()) {
+            let now = Date()
+            if shouldPump(record, now: now) {
                 Task { await self.pump(id: record.id) }
-            } else if let nextRetryAt = record.nextRetryAt {
+            } else if FeedbackRetryWakePolicy.shouldWait(record, now: now),
+                      let nextRetryAt = record.nextRetryAt {
                 scheduleRetryWake(id: record.id, at: nextRetryAt)
             }
         }
@@ -779,6 +834,7 @@ actor FeedbackUploadCoordinator {
         retryTasks[id] = nil
         do {
             _ = try await outbox.prepareManualRetry(id: id)
+            await cancelBackgroundUploadTasks(for: id)
             FeedbackDiagnostics.record(
                 state: .queued,
                 outcome: .completed
@@ -804,11 +860,7 @@ actor FeedbackUploadCoordinator {
                 outcome: .completed
             )
             notifyChange()
-            for task in await allBackgroundTasks()
-            where task.taskDescription == id.uuidString {
-                task.cancel()
-            }
-            activeUploadIDs.remove(id)
+            await cancelBackgroundUploadTasks(for: id)
             await pump(id: id)
         } catch {
             FeedbackDiagnostics.record(
@@ -856,40 +908,62 @@ actor FeedbackUploadCoordinator {
     }
 
     func handleUploadProgress(
-        localID: String?,
+        taskDescription: String?,
         sent: Int64,
         expected: Int64
     ) async {
-        guard let localID,
-              let id = UUID(uuidString: localID),
-              expected > 0 else { return }
+        guard let context = FeedbackUploadTaskContext(
+            taskDescription: taskDescription
+        ),
+        expected > 0,
+        let current = try? await outbox.record(id: context.reportID),
+        current.state == .uploading,
+        current.uploadAttemptID == context.attemptID else {
+            return
+        }
         do {
-            _ = try await outbox.updateProgress(
-                id: id,
+            let updated = try await outbox.updateProgress(
+                id: context.reportID,
+                attemptID: context.attemptID,
                 fraction: Double(sent) / Double(expected)
             )
-            notifyChange()
+            if updated != current {
+                notifyChange()
+            }
         } catch {
             return
         }
     }
 
     func handleUploadCompletion(
-        localID: String?,
+        taskDescription: String?,
         statusCode: Int?,
         failed: Bool
     ) async {
-        guard let localID,
-              let id = UUID(uuidString: localID) else { return }
-        activeUploadIDs.remove(id)
-        guard let record = try? await outbox.record(id: id) else { return }
+        guard let context = FeedbackUploadTaskContext(
+            taskDescription: taskDescription
+        ) else {
+            return
+        }
+        if activeUploadAttempts[context.reportID] == context.attemptID {
+            activeUploadAttempts.removeValue(forKey: context.reportID)
+        }
+        guard let record = try? await outbox.record(id: context.reportID),
+        record.state == .uploading,
+        record.uploadAttemptID == context.attemptID else {
+            return
+        }
+        let id = context.reportID
         if record.cancelRequested {
             await pump(id: id)
             return
         }
         if statusCode == 412 {
             do {
-                _ = try await outbox.markCompleting(id: id)
+                _ = try await outbox.markCompleting(
+                    id: id,
+                    uploadAttemptID: context.attemptID
+                )
                 notifyChange()
                 await complete(id: id, missingUploadFallsBack: false)
             } catch {
@@ -924,7 +998,10 @@ actor FeedbackUploadCoordinator {
         }
 
         do {
-            _ = try await outbox.markCompleting(id: id)
+            _ = try await outbox.markCompleting(
+                id: id,
+                uploadAttemptID: context.attemptID
+            )
             FeedbackDiagnostics.record(
                 state: .completing,
                 outcome: .completed
@@ -943,8 +1020,12 @@ actor FeedbackUploadCoordinator {
     }
 
     private func pump(id: UUID) async {
-        guard pumping.insert(id).inserted else { return }
-        defer { pumping.remove(id) }
+        guard pumpGate.begin(id) else { return }
+        defer {
+            if pumpGate.finish(id) {
+                Task { await self.pump(id: id) }
+            }
+        }
         guard let record = try? await outbox.record(id: id) else { return }
 
         if !FeedbackIdentityContinuityPolicy.canContactRemote(record) {
@@ -974,7 +1055,9 @@ actor FeedbackUploadCoordinator {
         }
 
         if record.cancelRequested || record.state == .cancelling {
-            if let nextRetryAt = record.nextRetryAt, nextRetryAt > Date() {
+            let now = Date()
+            if FeedbackRetryWakePolicy.shouldWait(record, now: now),
+               let nextRetryAt = record.nextRetryAt {
                 scheduleRetryWake(id: id, at: nextRetryAt)
                 return
             }
@@ -986,12 +1069,16 @@ actor FeedbackUploadCoordinator {
         case .sent, .cancelled, .failed, .uploading:
             return
         case .retryScheduled:
-            if let nextRetryAt = record.nextRetryAt, nextRetryAt > Date() {
+            let now = Date()
+            if FeedbackRetryWakePolicy.shouldWait(record, now: now),
+               let nextRetryAt = record.nextRetryAt {
                 scheduleRetryWake(id: id, at: nextRetryAt)
                 return
             }
         case .completing:
-            if let nextRetryAt = record.nextRetryAt, nextRetryAt > Date() {
+            let now = Date()
+            if FeedbackRetryWakePolicy.shouldWait(record, now: now),
+               let nextRetryAt = record.nextRetryAt {
                 scheduleRetryWake(id: id, at: nextRetryAt)
                 return
             }
@@ -1059,6 +1146,44 @@ actor FeedbackUploadCoordinator {
                     retryable: false
                 )
             }
+            if !forCancellation,
+               let latest = try await outbox.record(id: id),
+               FeedbackCompletionRacePolicy.action(for: latest)
+                == .cancelRemote {
+                await cancelRemote(latest)
+                return
+            }
+            if forCancellation
+                || !FeedbackReservationContinuityPolicy.permitsNewReservation(
+                    record,
+                    now: Date()
+                ) {
+                let recovered = try await recoverReservationReference(
+                    configuration: configuration,
+                    record: record,
+                    authorization: prepared.authorization,
+                    identitySubjectSHA256: identitySubjectSHA256
+                )
+                guard let recovered else {
+                    _ = try await outbox.markCancelled(id: id)
+                    FeedbackDiagnostics.record(
+                        state: .cancelled,
+                        outcome: .completed
+                    )
+                    notifyChange()
+                    return
+                }
+                let stored = try await storeRecoveredReservation(
+                    recovered,
+                    id: id
+                )
+                let cancelling = stored.cancelRequested
+                    ? stored
+                    : try await outbox.requestCancellation(id: id)
+                notifyChange()
+                await cancelRemote(cancelling)
+                return
+            }
             let body = FeedbackReservationRequest(
                 schemaVersion: 1,
                 platform: "ios",
@@ -1096,6 +1221,38 @@ actor FeedbackUploadCoordinator {
                     kind: .invalidResponse,
                     retryable: false
                 )
+            }
+            let responseNow = Date()
+            if !FeedbackReservationContinuityPolicy.serverRetentionIsValid(
+                retainedUntil,
+                for: record,
+                now: responseNow
+            ) {
+                let latest = try await outbox.record(id: id) ?? record
+                let cancelling = latest.cancelRequested
+                    ? latest
+                    : try await outbox.requestCancellation(
+                        id: id,
+                        now: responseNow
+                    )
+                let stored = try await outbox.storeReservation(
+                    id: id,
+                    reportID: reportID,
+                    reportToken: response.reportToken,
+                    upload: nil,
+                    retainedUntil: FeedbackReservationContinuityPolicy
+                        .boundedServerRetainedUntil(
+                            retainedUntil,
+                            for: record,
+                            now: responseNow
+                        ),
+                    now: responseNow
+                )
+                notifyChange()
+                await cancelRemote(
+                    stored.cancelRequested ? stored : cancelling
+                )
+                return
             }
             switch response.status {
             case .reserved:
@@ -1160,7 +1317,8 @@ actor FeedbackUploadCoordinator {
                     failure: FeedbackTransportFailure(
                         kind: .cancellationUnavailable,
                         retryable: failure.retryable,
-                        statusCode: failure.statusCode
+                        statusCode: failure.statusCode,
+                        scheduling: failure.scheduling
                     )
                 )
             } else {
@@ -1169,11 +1327,98 @@ actor FeedbackUploadCoordinator {
         }
     }
 
+    private func recoverReservationReference(
+        configuration: FeedbackAPIConfiguration,
+        record: FeedbackOutboxRecord,
+        authorization: FeedbackFirebaseAuthorization,
+        identitySubjectSHA256: String
+    ) async throws -> FeedbackReservationResponse? {
+        let responseData: Data
+        do {
+            responseData = try await apiRequest(
+                configuration: configuration,
+                path:
+                    "v1/feedback/reports/reservations/"
+                    + record.idempotencyKey,
+                method: "GET",
+                body: nil,
+                idempotencyKey: nil,
+                reportToken: nil,
+                authorization: authorization,
+                expectedIdentitySubjectSHA256: identitySubjectSHA256,
+                acceptedStatusCodes:
+                    FeedbackReservationRecoveryHTTPPolicy.acceptedStatusCodes,
+                emptyBodyStatusCodes:
+                    FeedbackReservationRecoveryHTTPPolicy.terminalStatusCodes,
+                retryableStatusCodes:
+                    FeedbackReservationRecoveryHTTPPolicy.pendingStatusCodes
+            )
+        } catch let failure as FeedbackTransportFailure
+            where failure.statusCode.map({
+                FeedbackReservationRecoveryHTTPPolicy.pendingStatusCodes
+                    .contains($0)
+            }) == true {
+            throw FeedbackTransportFailure(
+                kind: failure.kind,
+                retryable: true,
+                statusCode: failure.statusCode,
+                scheduling: .reservationContinuityWait
+            )
+        }
+        guard !responseData.isEmpty else { return nil }
+        let response = try decode(
+            FeedbackReservationResponse.self,
+            from: responseData
+        )
+        guard response.upload == nil else {
+            throw FeedbackTransportFailure(
+                kind: .invalidResponse,
+                retryable: false
+            )
+        }
+        return response
+    }
+
+    private func storeRecoveredReservation(
+        _ response: FeedbackReservationResponse,
+        id: UUID
+    ) async throws -> FeedbackOutboxRecord {
+        guard let current = try await outbox.record(id: id),
+              let reportID =
+                FeedbackProtocolValidation.canonicalReportID(
+                    response.reportID
+                ),
+              FeedbackProtocolValidation.validReportToken(
+                  response.reportToken
+              ),
+              let retainedUntil = feedbackDate(response.retainedUntil) else {
+            throw FeedbackTransportFailure(
+                kind: .invalidResponse,
+                retryable: false
+            )
+        }
+        let stored = try await outbox.storeReservation(
+            id: id,
+            reportID: reportID,
+            reportToken: response.reportToken,
+            upload: nil,
+            retainedUntil: FeedbackReservationContinuityPolicy
+                .boundedServerRetainedUntil(
+                    retainedUntil,
+                    for: current,
+                    now: Date()
+                )
+        )
+        notifyChange()
+        return stored
+    }
+
     private func startUpload(
         record: FeedbackOutboxRecord,
         capability: FeedbackUploadCapability
     ) async {
-        guard !activeUploadIDs.contains(record.id) else { return }
+        guard activeUploadAttempts[record.id] == nil else { return }
+        var startedContext: FeedbackUploadTaskContext?
         do {
             guard let current = try await outbox.record(id: record.id) else {
                 return
@@ -1210,20 +1455,34 @@ actor FeedbackUploadCoordinator {
             )
             request.httpMethod = validatedCapability.method
             request.allHTTPHeaderFields = validatedCapability.headers
-            _ = try await outbox.markUploading(id: current.id)
+            let uploading = try await outbox.markUploading(id: current.id)
+            guard let attemptID = uploading.uploadAttemptID else {
+                throw FeedbackTransportFailure(
+                    kind: .interrupted,
+                    retryable: true
+                )
+            }
+            let context = FeedbackUploadTaskContext(
+                reportID: current.id,
+                attemptID: attemptID
+            )
+            startedContext = context
             guard let latest = try await outbox.record(id: current.id) else {
                 return
             }
-            guard FeedbackUploadStartPolicy.permitsResume(latest) else {
-                await cancelRemote(latest)
+            guard latest.uploadAttemptID == attemptID,
+                  FeedbackUploadStartPolicy.permitsResume(latest) else {
+                if latest.cancelRequested || latest.state == .cancelling {
+                    await cancelRemote(latest)
+                }
                 return
             }
             let task = backgroundSession.uploadTask(
                 with: request,
                 fromFile: archiveURL
             )
-            task.taskDescription = current.id.uuidString
-            activeUploadIDs.insert(current.id)
+            task.taskDescription = context.taskDescription
+            activeUploadAttempts[current.id] = attemptID
             FeedbackDiagnostics.record(
                 state: .uploading,
                 outcome: .completed
@@ -1231,7 +1490,13 @@ actor FeedbackUploadCoordinator {
             notifyChange()
             task.resume()
         } catch {
-            activeUploadIDs.remove(record.id)
+            if let startedContext,
+               activeUploadAttempts[startedContext.reportID]
+                == startedContext.attemptID {
+                activeUploadAttempts.removeValue(
+                    forKey: startedContext.reportID
+                )
+            }
             await scheduleFailure(
                 id: record.id,
                 failure: classify(
@@ -1268,6 +1533,14 @@ actor FeedbackUploadCoordinator {
                     retryable: false
                 )
             }
+            guard let current = try await outbox.record(id: id) else {
+                return
+            }
+            if FeedbackCompletionRacePolicy.action(for: current)
+                == .cancelRemote {
+                await cancelRemote(current)
+                return
+            }
             let responseData = try await apiRequest(
                 configuration: configuration,
                 path: "v1/feedback/reports/\(reportID)/complete",
@@ -1292,6 +1565,18 @@ actor FeedbackUploadCoordinator {
                 )
             }
             guard let latest = try await outbox.record(id: id) else {
+                return
+            }
+            if !FeedbackReservationContinuityPolicy.serverRetentionIsValid(
+                retainedUntil,
+                for: latest,
+                now: Date()
+            ) {
+                let cancelling = latest.cancelRequested
+                    ? latest
+                    : try await outbox.requestCancellation(id: id)
+                notifyChange()
+                await cancelRemote(cancelling)
                 return
             }
             if FeedbackCompletionRacePolicy.action(for: latest)
@@ -1355,9 +1640,17 @@ actor FeedbackUploadCoordinator {
                 acceptedStatusCodes: Set(200...299).union([404]),
                 emptyBodyStatusCodes: [404]
             )
+            guard let latest = try await outbox.record(id: record.id) else {
+                return
+            }
+            if FeedbackCompletionRacePolicy.action(for: latest)
+                == .cancelRemote {
+                await cancelRemote(latest)
+                return
+            }
             guard !responseData.isEmpty else {
                 switch FeedbackRemoteAbsencePolicy.statusAction(
-                    for: record,
+                    for: latest,
                     authorizedIdentitySubjectSHA256:
                         authorization.identitySubjectSHA256
                 ) {
@@ -1380,6 +1673,19 @@ actor FeedbackUploadCoordinator {
                     kind: .invalidResponse,
                     retryable: false
                 )
+            }
+            if !FeedbackReservationContinuityPolicy.serverRetentionIsValid(
+                retainedUntil,
+                for: record,
+                now: Date()
+            ) {
+                let latest = try await outbox.record(id: record.id) ?? record
+                let cancelling = latest.cancelRequested
+                    ? latest
+                    : try await outbox.requestCancellation(id: record.id)
+                notifyChange()
+                await cancelRemote(cancelling)
+                return
             }
             switch response.status {
             case .sent:
@@ -1433,10 +1739,21 @@ actor FeedbackUploadCoordinator {
                     )
                 }
             case .rejected:
-                _ = try await outbox.markFailed(
-                    id: record.id,
-                    failureKind: .reportRejected
-                )
+                do {
+                    _ = try await outbox.markFailed(
+                        id: record.id,
+                        failureKind: .reportRejected,
+                        unlessCancellationRequested: true
+                    )
+                } catch {
+                    if let latest = try await outbox.record(id: record.id),
+                       FeedbackCompletionRacePolicy.action(for: latest)
+                        == .cancelRemote {
+                        await cancelRemote(latest)
+                        return
+                    }
+                    throw error
+                }
                 FeedbackDiagnostics.record(
                     state: .failed,
                     outcome: .rejected,
@@ -1653,7 +1970,43 @@ actor FeedbackUploadCoordinator {
         id: UUID,
         failure: FeedbackTransportFailure
     ) async {
-        guard let record = try? await outbox.record(id: id) else { return }
+        guard let record = try? await outbox.record(id: id),
+              !record.state.isTerminal else { return }
+        if failure.scheduling != .normal {
+            do {
+                let isReservationWait =
+                    failure.scheduling == .reservationContinuityWait
+                let waiting = try await outbox
+                    .markReservationContinuityWaiting(
+                        id: id,
+                        lane: .delivery,
+                        allowBoundIdentity: isReservationWait,
+                        failureKind: failure.kind
+                    )
+                AppDiagnosticsRecorder.shared.record(
+                    isReservationWait
+                        ? "feedback.reservation_continuity_wait"
+                        : "feedback.identity_continuity_wait",
+                    fields: ["outcome": "deferred"]
+                )
+                FeedbackDiagnostics.record(
+                    state: .retryScheduled,
+                    outcome: .deferred,
+                    failureKind: failure.kind
+                )
+                notifyChange()
+                if waiting.cancelRequested {
+                    await cancelRemote(waiting)
+                    return
+                }
+                if let nextRetryAt = waiting.nextRetryAt {
+                    scheduleRetryWake(id: id, at: nextRetryAt)
+                }
+                return
+            } catch {
+                // Continue through the normal durable failure path.
+            }
+        }
         if record.cancelRequested {
             await cancelRemote(record)
             return
@@ -1700,7 +2053,8 @@ actor FeedbackUploadCoordinator {
         id: UUID,
         failure: FeedbackTransportFailure
     ) async {
-        guard let record = try? await outbox.record(id: id) else { return }
+        guard let record = try? await outbox.record(id: id),
+              !record.state.isTerminal else { return }
         if record.cancelRequested {
             await cancelRemote(record)
             return
@@ -1749,6 +2103,37 @@ actor FeedbackUploadCoordinator {
     ) async {
         guard let record = try? await outbox.record(id: id),
               record.cancelRequested else { return }
+        if failure.scheduling != .normal {
+            do {
+                let isReservationWait =
+                    failure.scheduling == .reservationContinuityWait
+                let waiting = try await outbox
+                    .markReservationContinuityWaiting(
+                        id: id,
+                        lane: .cancellation,
+                        allowBoundIdentity: isReservationWait,
+                        failureKind: failure.kind
+                    )
+                AppDiagnosticsRecorder.shared.record(
+                    isReservationWait
+                        ? "feedback.reservation_continuity_wait"
+                        : "feedback.identity_continuity_wait",
+                    fields: ["outcome": "deferred"]
+                )
+                FeedbackDiagnostics.record(
+                    state: .cancelling,
+                    outcome: .deferred,
+                    failureKind: failure.kind
+                )
+                notifyChange()
+                if let nextRetryAt = waiting.nextRetryAt {
+                    scheduleRetryWake(id: id, at: nextRetryAt)
+                }
+                return
+            } catch {
+                // Continue through the normal durable cancellation path.
+            }
+        }
         if failure.retryable,
            record.cancellationAttempts
             < FeedbackRetryPolicy.maximumAutomaticAttempts {
@@ -1921,6 +2306,12 @@ actor FeedbackUploadCoordinator {
                 kind: .identity,
                 retryable: false
             )
+        } catch FeedbackFirebaseError.identityReservationDeferred {
+            throw FeedbackTransportFailure(
+                kind: .identity,
+                retryable: true,
+                scheduling: .identityContinuityWait
+            )
         } catch FeedbackFirebaseError.identity {
             throw FeedbackTransportFailure(
                 kind: .identity,
@@ -1945,6 +2336,7 @@ actor FeedbackUploadCoordinator {
         expectedIdentitySubjectSHA256: String,
         acceptedStatusCodes: Set<Int> = Set(200...299),
         emptyBodyStatusCodes: Set<Int> = [],
+        retryableStatusCodes: Set<Int> = [],
         refreshedAuthorization: Bool = false
     ) async throws -> Data {
         guard authorization.identitySubjectSHA256
@@ -2034,6 +2426,7 @@ actor FeedbackUploadCoordinator {
                     expectedIdentitySubjectSHA256,
                 acceptedStatusCodes: acceptedStatusCodes,
                 emptyBodyStatusCodes: emptyBodyStatusCodes,
+                retryableStatusCodes: retryableStatusCodes,
                 refreshedAuthorization: true
             )
         }
@@ -2042,7 +2435,8 @@ actor FeedbackUploadCoordinator {
                 kind: (400...499).contains(http.statusCode)
                     ? .reservationRejected
                     : .reservationUnavailable,
-                retryable: http.statusCode == 408
+                retryable: retryableStatusCodes.contains(http.statusCode)
+                    || http.statusCode == 408
                     || http.statusCode == 429
                     || (500...599).contains(http.statusCode),
                 statusCode: http.statusCode
@@ -2080,13 +2474,17 @@ actor FeedbackUploadCoordinator {
             case .reservationRejected, .uploadRejected, .completionRejected:
                 return FeedbackTransportFailure(
                     kind: rejected,
-                    retryable: failure.retryable
+                    retryable: failure.retryable,
+                    statusCode: failure.statusCode,
+                    scheduling: failure.scheduling
                 )
             case .reservationUnavailable, .uploadUnavailable,
                     .completionUnavailable:
                 return FeedbackTransportFailure(
                     kind: unavailable,
-                    retryable: failure.retryable
+                    retryable: failure.retryable,
+                    statusCode: failure.statusCode,
+                    scheduling: failure.scheduling
                 )
             default:
                 return failure
@@ -2115,9 +2513,9 @@ actor FeedbackUploadCoordinator {
         case .queued, .reserving:
             return true
         case .completing:
-            return record.nextRetryAt.map { $0 <= now } ?? true
+            return !FeedbackRetryWakePolicy.shouldWait(record, now: now)
         case .retryScheduled:
-            return record.nextRetryAt.map { $0 <= now } ?? true
+            return !FeedbackRetryWakePolicy.shouldWait(record, now: now)
         case .uploading, .sent, .failed, .cancelled, .cancelling:
             return false
         }
@@ -2127,6 +2525,21 @@ actor FeedbackUploadCoordinator {
         await withCheckedContinuation { continuation in
             backgroundSession.getAllTasks {
                 continuation.resume(returning: $0)
+            }
+        }
+    }
+
+    private func cancelBackgroundUploadTasks(for id: UUID) async {
+        activeUploadAttempts.removeValue(forKey: id)
+        for task in await allBackgroundTasks() {
+            let context = FeedbackUploadTaskContext(
+                taskDescription: task.taskDescription
+            )
+            let legacyReportID = task.taskDescription.flatMap {
+                UUID(uuidString: $0)
+            }
+            if context?.reportID == id || legacyReportID == id {
+                task.cancel()
             }
         }
     }

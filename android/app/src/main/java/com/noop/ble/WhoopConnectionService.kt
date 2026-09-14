@@ -122,7 +122,7 @@ internal fun connectionNotificationDetail(
     add(if (connected) "Streaming in the background" else "Keeping the link open")
     recoveryPct?.let { add("Recovery ${it.roundToInt()}%") }
     effort?.let { add("Effort ${it.roundToInt()}") }
-    batteryPct?.let { add("Strap ${it.roundToInt()}%") }
+    batteryPct?.let { add("Noop Band ${it.roundToInt()}%") }
 }.joinToString("  ·  ")
 
 class WhoopConnectionService : Service() {
@@ -875,7 +875,7 @@ class WhoopConnectionService : Service() {
         val title = when {
             safetyLocationActive -> "Safety location sharing active"
             !state.connected   -> "Reconnecting to Noop Band…"
-            state.backfilling  -> "Syncing strap history…"
+            state.backfilling  -> "Syncing Noop Band history…"
             else               -> "Connected to Noop Band"
         }
         val detail =

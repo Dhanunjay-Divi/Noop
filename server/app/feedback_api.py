@@ -28,6 +28,7 @@ from app.feedback_models import (
 )
 from app.feedback_repository import (
     FeedbackConflictError,
+    FeedbackGoneError,
     FeedbackNotFoundError,
     FeedbackQuotaExceededError,
     FeedbackReport,
@@ -279,7 +280,13 @@ def feedback_router(
                     principal=principal,
                     idempotency_key=idempotency_key,
                 ),
+                now=datetime.now(UTC),
             )
+        except FeedbackGoneError:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="feedback reservation expired",
+            ) from None
         except FeedbackNotFoundError:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -427,6 +434,28 @@ def feedback_router(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="feedback submission quota was reached",
                 headers={"Retry-After": "3600"},
+            ) from None
+        except FeedbackGoneError:
+            emit_operational_event(
+                "feedback.reservation",
+                service="noop-managed-api",
+                outcome="rejected",
+                failure_kind="idempotency_key_retired",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="feedback reservation expired",
+            ) from None
+        except FeedbackNotFoundError:
+            emit_operational_event(
+                "feedback.reservation",
+                service="noop-managed-api",
+                outcome="deferred",
+                failure_kind="retention_cleanup_pending",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="feedback reservation was not found",
             ) from None
         except FeedbackConflictError:
             raise HTTPException(

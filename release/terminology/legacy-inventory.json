@@ -3,9 +3,9 @@
     "compatibility": 1709,
     "core": 4983,
     "customer": 815,
-    "fixture": 5505,
+    "fixture": 5507,
     "generated": 20,
-    "historical": 3062,
+    "historical": 3060,
     "import": 870,
     "persisted": 667
   },
@@ -8516,17 +8516,17 @@
         246,
         321,
         394,
-        1653,
-        1654,
-        1663,
-        1681,
-        1697,
-        1833,
-        1852,
-        1909,
-        1921,
-        1933,
-        1963
+        1762,
+        1763,
+        1772,
+        1790,
+        1806,
+        1942,
+        1961,
+        2018,
+        2030,
+        2042,
+        2072
       ],
       "occurrenceCount": 20,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/ManagedSyncDocumentsTests.swift",
@@ -12447,38 +12447,38 @@
         147549,
         148244,
         148245,
-        159410,
-        162441,
-        162442,
-        162443,
-        163052,
-        163341,
-        163341,
-        163341,
-        163848,
-        164057,
-        164086,
-        164245,
-        164274,
-        164275,
-        166972,
-        167897,
-        169690,
-        170307,
-        170307,
-        170924,
-        171345,
-        171346,
-        171346,
-        171375,
-        171376,
-        171993,
-        172452,
-        172487,
-        172556,
-        172761,
-        172975,
-        173321
+        159566,
+        162597,
+        162598,
+        162599,
+        163208,
+        163497,
+        163497,
+        163497,
+        164004,
+        164213,
+        164242,
+        164401,
+        164430,
+        164431,
+        167134,
+        168059,
+        169852,
+        170469,
+        170469,
+        171086,
+        171507,
+        171508,
+        171508,
+        171537,
+        171538,
+        172155,
+        172614,
+        172649,
+        172718,
+        172923,
+        173137,
+        173484
       ],
       "occurrenceCount": 182,
       "path": "Strand/Resources/Localizable.xcstrings",
@@ -12736,12 +12736,12 @@
     {
       "category": "core",
       "lineNumbers": [
-        50,
-        53,
-        56,
-        79,
-        87,
-        108
+        51,
+        54,
+        57,
+        80,
+        88,
+        109
       ],
       "occurrenceCount": 6,
       "path": "Strand/Screens/DashboardCards.swift",
@@ -13662,14 +13662,14 @@
         4356,
         4670,
         4810,
-        5000,
         5001,
         5002,
-        5004,
-        5080,
-        5259,
-        5710,
-        5711
+        5003,
+        5005,
+        5081,
+        5260,
+        5711,
+        5712
       ],
       "occurrenceCount": 67,
       "path": "Strand/Screens/TodayView.swift",
@@ -14348,7 +14348,7 @@
       "category": "core",
       "lineNumbers": [
         7,
-        519
+        548
       ],
       "occurrenceCount": 2,
       "path": "Strand/System/HydrationReminders.swift",
@@ -15889,12 +15889,12 @@
       "category": "historical",
       "lineNumbers": [
         3,
-        508,
-        508,
-        511,
-        511,
-        1067,
-        1176
+        549,
+        549,
+        552,
+        552,
+        1108,
+        1217
       ],
       "occurrenceCount": 7,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -15907,8 +15907,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        832,
-        1411
+        873,
+        1452
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -17439,7 +17439,7 @@
       "category": "core",
       "lineNumbers": [
         233,
-        1471
+        1463
       ],
       "occurrenceCount": 2,
       "path": "Tools/i18n_audit_baseline.json",
@@ -22671,7 +22671,7 @@
     {
       "category": "core",
       "lineNumbers": [
-        538
+        650
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/notif/HydrationReminders.kt",
@@ -24463,7 +24463,7 @@
     {
       "category": "core",
       "lineNumbers": [
-        176
+        175
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/ui/CoupledScreen.kt",
@@ -24475,11 +24475,11 @@
     {
       "category": "persisted",
       "lineNumbers": [
+        107,
         108,
-        109,
-        119,
-        128,
-        165
+        118,
+        127,
+        164
       ],
       "occurrenceCount": 5,
       "path": "android/app/src/main/java/com/noop/ui/CoupledScreen.kt",
@@ -24793,10 +24793,10 @@
         1446,
         1452,
         1540,
-        3191,
-        3448,
-        3449,
-        3490
+        3199,
+        3456,
+        3457,
+        3498
       ],
       "occurrenceCount": 13,
       "path": "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
@@ -24811,11 +24811,11 @@
       "category": "persisted",
       "lineNumbers": [
         780,
-        3383,
-        3407,
-        3456,
-        3472,
-        3494
+        3391,
+        3415,
+        3464,
+        3480,
+        3502
       ],
       "occurrenceCount": 6,
       "path": "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
@@ -25501,12 +25501,12 @@
         489,
         763,
         773,
-        1502,
-        1714,
-        1714,
-        1731,
-        1912,
-        1913
+        1505,
+        1717,
+        1717,
+        1734,
+        1915,
+        1916
       ],
       "occurrenceCount": 12,
       "path": "android/app/src/main/java/com/noop/ui/SleepScreen.kt",
@@ -25633,14 +25633,14 @@
     {
       "category": "core",
       "lineNumbers": [
-        76,
-        572,
-        624,
-        1233,
-        1235,
-        1242,
+        77,
+        573,
+        625,
+        1241,
         1243,
-        1244
+        1250,
+        1251,
+        1252
       ],
       "occurrenceCount": 8,
       "path": "android/app/src/main/java/com/noop/ui/StressScreen.kt",
@@ -25653,8 +25653,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        91,
-        116
+        92,
+        117
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ui/StressScreen.kt",
@@ -25842,64 +25842,64 @@
     {
       "category": "core",
       "lineNumbers": [
-        217,
-        563,
-        938,
-        999,
-        1061,
-        1062,
-        1352,
-        1353,
+        218,
+        565,
+        940,
+        1001,
+        1063,
+        1064,
+        1354,
         1355,
-        1402,
-        1447,
-        1590,
-        1591,
-        1636,
-        1694,
-        1832,
+        1357,
+        1404,
+        1449,
+        1592,
+        1593,
+        1638,
+        1696,
         1834,
-        1855,
-        1867,
-        1868,
-        1868,
-        1943,
-        2478,
-        2664,
-        4709,
-        5414,
-        5479,
-        5867,
+        1836,
+        1857,
+        1869,
+        1870,
+        1870,
+        1945,
+        2480,
+        2666,
+        4711,
+        5416,
+        5481,
         5869,
-        5893,
-        6022,
-        6387,
-        6470,
+        5871,
+        5895,
+        6024,
+        6389,
         6472,
-        6542,
-        6575,
-        6604,
-        6605,
+        6474,
+        6544,
+        6577,
+        6606,
         6607,
-        6639,
-        6653,
-        6662,
-        6663,
-        6737,
-        6781,
-        6864,
-        6891,
-        7654,
-        7849,
-        7900,
-        8233,
-        8234,
-        8244,
-        8740,
-        9150,
-        9150,
-        9219,
-        9259
+        6609,
+        6641,
+        6655,
+        6664,
+        6665,
+        6739,
+        6783,
+        6866,
+        6893,
+        7775,
+        7970,
+        8021,
+        8354,
+        8355,
+        8365,
+        8861,
+        9271,
+        9271,
+        9340,
+        9380
       ],
       "occurrenceCount": 58,
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -25923,11 +25923,11 @@
     {
       "category": "customer",
       "lineNumbers": [
-        1884,
-        1884,
-        5964,
-        9267,
-        9267
+        1886,
+        1886,
+        5966,
+        9388,
+        9388
       ],
       "occurrenceCount": 5,
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -25943,28 +25943,28 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        996,
         998,
-        999,
-        1011,
-        1083,
-        1131,
-        1419,
-        1445,
-        1445,
+        1000,
+        1001,
+        1013,
+        1085,
+        1133,
+        1421,
         1447,
-        1501,
-        1573,
-        1589,
-        1589,
-        1602,
-        1634,
-        1634,
+        1447,
+        1449,
+        1503,
+        1575,
+        1591,
+        1591,
+        1604,
         1636,
-        1637,
-        1773,
-        8233,
-        8234
+        1636,
+        1638,
+        1639,
+        1775,
+        8354,
+        8355
       ],
       "occurrenceCount": 22,
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -33321,9 +33321,9 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        28,
-        73,
-        75
+        33,
+        78,
+        80
       ],
       "occurrenceCount": 3,
       "path": "android/app/src/test/java/com/noop/ui/RecoveryDriversUiTest.kt",
@@ -33532,8 +33532,8 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        32,
-        59
+        33,
+        60
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/test/java/com/noop/ui/StressModelTest.kt",
@@ -33625,14 +33625,18 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        174,
-        207
+        165,
+        166,
+        266,
+        299
       ],
-      "occurrenceCount": 2,
+      "occurrenceCount": 4,
       "path": "android/app/src/test/java/com/noop/ui/UiAuditPresentationContractTest.kt",
-      "sha256": "a44e201672049185bd70f1944078dcfa6b240eaff651f43fa30c29316dc53f65",
+      "sha256": "5b9d731edec63d524eb1047b5ed6e58de9f35c6c08fb9189ec3b08db66e18fec",
       "tokenCounts": {
-        "whoop_4_0_reboot_frame_690a8ff2": 2
+        "whoop_4_0_reboot_frame_690a8ff2": 2,
+        "whoopbleclient": 1,
+        "whoopconnectionservice": 1
       }
     },
     {
@@ -35606,19 +35610,6 @@
     {
       "category": "historical",
       "lineNumbers": [
-        183,
-        271
-      ],
-      "occurrenceCount": 2,
-      "path": "docs/ops/ACTIVE.md",
-      "sha256": "fbec21407a53d5edd23f186fc8cc1a0657812d55a2096a0eeb6c743e1909daef",
-      "tokenCounts": {
-        "whoopstore": 2
-      }
-    },
-    {
-      "category": "historical",
-      "lineNumbers": [
         36,
         42,
         61
@@ -35871,9 +35862,9 @@
     {
       "category": "historical",
       "lineNumbers": [
-        19,
-        55,
-        55
+        20,
+        56,
+        56
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/rounds/INDEX.md",

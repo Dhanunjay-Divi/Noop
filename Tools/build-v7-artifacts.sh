@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# One-shot v7.0.0 release-artifact build: mac universal + iOS unsigned + Android full,
-# each anonymized + leak-checked. Writes dist/NOOP-v7.0.0-{macos.zip,.ipa,.apk}.
-set -uo pipefail
-cd ~/Documents/Strand
+# One-shot release-artifact build: mac universal + iOS unsigned + Android full,
+# each anonymized + leak-checked.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
 # ── Anonymity source guard ─────────────────────────────────────────────────────
 # A maintainer name or home path must never reach a release. This is a build-from-
@@ -30,16 +32,28 @@ VER="${1:-7.0.1}"
 DIST="dist"; mkdir -p "$DIST"
 HOMEPATH="$HOME"
 ok_mac=0; ok_ios=0; ok_apk=0
+rm -f \
+  "$DIST/NOOP-v$VER-macos.zip" \
+  "$DIST/NOOP-v$VER.ipa" \
+  "$DIST/NOOP-v$VER.apk"
 
 echo "═══ xcodegen ═══"
-xcodegen generate >/tmp/v7a-xcodegen.log 2>&1 && echo "xcodegen OK" || { echo "xcodegen FAILED"; tail -5 /tmp/v7a-xcodegen.log; }
+if xcodegen generate >/tmp/v7a-xcodegen.log 2>&1; then
+  echo "xcodegen OK"
+else
+  echo "xcodegen FAILED"
+  tail -5 /tmp/v7a-xcodegen.log
+  exit 1
+fi
 
 # ── macOS universal ───────────────────────────────────────────────────────────
 echo "═══ macOS (universal Release) ═══"
 rm -rf build/dd
-xcodebuild -scheme Strand -configuration Release -derivedDataPath build/dd \
+if ! xcodebuild -scheme Strand -configuration Release -derivedDataPath build/dd \
   -destination 'generic/platform=macOS' ARCHS="x86_64 arm64" ONLY_ACTIVE_ARCH=NO \
-  CODE_SIGNING_ALLOWED=NO build >/tmp/v7a-mac.log 2>&1
+  CODE_SIGNING_ALLOWED=NO build >/tmp/v7a-mac.log 2>&1; then
+  echo "  macOS build command failed"
+fi
 MACAPP="build/dd/Build/Products/Release/NOOP.app"
 if [ -d "$MACAPP" ]; then
   echo "  built. lipo: $(lipo -info "$MACAPP/Contents/MacOS/NOOP" 2>/dev/null | sed 's#.*: ##')"
@@ -61,8 +75,10 @@ rm -rf build/ios-dd
 # NOOP.app/Watch/NOOPWatch.app, and forcing the iOS SDK on the whole scheme would compile the
 # watch targets against iOS (where watch-only widget families like .accessoryCorner do not exist).
 # The destination lets each target build for its own platform; output still lands in Release-iphoneos.
-xcodebuild -scheme NOOPiOS -configuration Release -destination 'generic/platform=iOS' \
-  -derivedDataPath build/ios-dd CODE_SIGNING_ALLOWED=NO build >/tmp/v7a-ios.log 2>&1
+if ! xcodebuild -scheme NOOPiOS -configuration Release -destination 'generic/platform=iOS' \
+  -derivedDataPath build/ios-dd CODE_SIGNING_ALLOWED=NO build >/tmp/v7a-ios.log 2>&1; then
+  echo "  iOS build command failed"
+fi
 IOSAPP="build/ios-dd/Build/Products/Release-iphoneos/NOOP.app"
 if [ -d "$IOSAPP" ]; then
   echo "  built."
@@ -89,8 +105,11 @@ else echo "  ✗ iOS build FAILED"; grep -E 'error:' /tmp/v7a-ios.log | sed 's#.
 # ── Android full release ───────────────────────────────────────────────────────
 echo "═══ Android (assembleFullRelease) ═══"
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-( cd android && ./gradlew assembleFullRelease ) >/tmp/v7a-android.log 2>&1
 APK="android/app/build/outputs/apk/full/release/app-full-release.apk"
+rm -f "$APK"
+if ! ( cd android && ./gradlew assembleFullRelease ) >/tmp/v7a-android.log 2>&1; then
+  echo "  Android build command failed"
+fi
 if [ -f "$APK" ]; then
   cp "$APK" "$DIST/NOOP-v$VER.apk" && ok_apk=1
   echo "  ✓ dist/NOOP-v$VER.apk ($(( $(stat -f '%z' "$DIST/NOOP-v$VER.apk")/1024/1024 ))MB)"
@@ -98,5 +117,9 @@ else echo "  ✗ Android build FAILED"; grep -iE 'error|FAILURE|what went wrong'
 
 echo ""
 echo "═══ ARTIFACT SUMMARY ═══  mac=$ok_mac ios=$ok_ios apk=$ok_apk"
-ls -la "$DIST"/NOOP-v$VER* 2>/dev/null
+ls -la "$DIST"/NOOP-v"$VER"* 2>/dev/null
+if [ "$ok_mac" -ne 1 ] || [ "$ok_ios" -ne 1 ] || [ "$ok_apk" -ne 1 ]; then
+  echo "═══ V7 ARTIFACTS FAILED ═══" >&2
+  exit 1
+fi
 echo "═══ V7 ARTIFACTS DONE ═══"

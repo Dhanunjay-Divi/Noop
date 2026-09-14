@@ -199,6 +199,7 @@ import com.noop.analytics.Baselines
 import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.ChargeDriver
+import com.noop.analytics.ChargeDriverValueFormat
 import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.DailyEffortGuidance
 import com.noop.analytics.DailySignalStatus
@@ -226,6 +227,7 @@ import com.noop.weather.TodayWeatherCondition
 import com.noop.weather.TodayWeatherState
 import com.noop.weather.TodayWeatherStatus
 import com.noop.weather.TodayWeatherStore
+import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -7528,7 +7530,7 @@ private fun RecoveryDriversSection(
             horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
         ) {
             Box(modifier = Modifier.weight(1f)) {
-                SectionHeader("What shaped it", overline = overline, trailing = "vs your baseline")
+                SectionHeader("What shaped it", overline = overline)
             }
             ChargeConfidencePill(tier)
         }
@@ -7573,13 +7575,47 @@ private fun DriverRow(driver: ChargeDriver) {
         else -> Palette.textTertiary
     }
     val signed = chargeDriverPointLabel(driver.deltaPoints)
+    val localizedLabel = recoveryDriverLabelRes(driver.label)?.let(::uiString) ?: driver.label
+    val localizedVerdict = recoveryDriverVerdictRes(driver.verdict)?.let(::uiString) ?: driver.verdict
+    val locale = LocalConfiguration.current.locales[0]
+    val valueText = uiString(
+        recoveryDriverValueFormatRes(driver.valueFormat),
+        recoveryDriverNumberText(driver.value, driver.valueFormat, locale),
+    )
+    val baselineValue = driver.baseline?.let { baseline ->
+        uiString(
+            recoveryDriverValueFormatRes(driver.valueFormat),
+            recoveryDriverNumberText(baseline, driver.valueFormat, locale),
+        )
+    }.orEmpty()
+    val localizedBaseline = baselineValue.takeIf(String::isNotEmpty)?.let {
+        uiString(R.string.ui_audit_recovery_driver_baseline_format, it)
+    }.orEmpty()
+    val accessibilityDescription = if (baselineValue.isEmpty()) {
+        uiPlural(
+            R.plurals.ui_audit_recovery_driver_accessibility_without_baseline,
+            kotlin.math.abs(driver.deltaPoints),
+            localizedLabel,
+            valueText,
+            signed,
+            localizedVerdict,
+        )
+    } else {
+        uiPlural(
+            R.plurals.ui_audit_recovery_driver_accessibility_with_baseline,
+            kotlin.math.abs(driver.deltaPoints),
+            localizedLabel,
+            valueText,
+            baselineValue,
+            signed,
+            localizedVerdict,
+        )
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.semantics {
-            contentDescription =
-                uiString(R.string.l10n_today_screen_driver_label_driver_valuetext_driver_baselinetext_067bc963, driver.label, driver.valueText, driver.baselineText) +
-                    "$signed points, ${driver.verdict}"
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = accessibilityDescription
         },
     ) {
         // Signed-point delta chip with a direction glyph.
@@ -7602,12 +7638,14 @@ private fun DriverRow(driver: ChargeDriver) {
             Text(uiString(R.string.l10n_today_screen_signed_pts_5ea85678, signed), style = NoopType.captionNumber, color = tone)
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(driver.label, style = NoopType.headline, color = Palette.textPrimary)
-            Text(driver.verdict, style = NoopType.footnote, color = Palette.textSecondary)
+            Text(localizedLabel, style = NoopType.headline, color = Palette.textPrimary)
+            Text(localizedVerdict, style = NoopType.footnote, color = Palette.textSecondary)
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(driver.valueText, style = NoopType.captionNumber, color = Palette.textPrimary)
-            Text(driver.baselineText, style = NoopType.footnote, color = Palette.textTertiary)
+            Text(valueText, style = NoopType.captionNumber, color = Palette.textPrimary)
+            if (localizedBaseline.isNotEmpty()) {
+                Text(localizedBaseline, style = NoopType.footnote, color = Palette.textTertiary)
+            }
         }
     }
 }
@@ -7616,6 +7654,89 @@ internal fun chargeDriverPointLabel(deltaPoints: Int): String = when {
     deltaPoints > 0 -> "+$deltaPoints"
     deltaPoints < 0 -> "−${kotlin.math.abs(deltaPoints)}"
     else -> "0"
+}
+
+internal fun recoveryDriverNumberText(
+    value: Double,
+    valueFormat: ChargeDriverValueFormat,
+    locale: Locale,
+): String {
+    val fractionDigits = when (valueFormat) {
+        ChargeDriverValueFormat.BREATHS_PER_MINUTE,
+        ChargeDriverValueFormat.CELSIUS_DEVIATION,
+        -> 1
+        else -> 0
+    }
+    val formatter = NumberFormat.getNumberInstance(locale).apply {
+        isGroupingUsed = false
+        minimumFractionDigits = fractionDigits
+        maximumFractionDigits = fractionDigits
+    }
+    val magnitude = if (valueFormat == ChargeDriverValueFormat.CELSIUS_DEVIATION) {
+        kotlin.math.abs(value)
+    } else {
+        value
+    }
+    val number = if (fractionDigits == 0) {
+        formatter.format(magnitude.roundToInt())
+    } else {
+        formatter.format(magnitude)
+    }
+    return when {
+        valueFormat != ChargeDriverValueFormat.CELSIUS_DEVIATION -> number
+        value < 0.0 -> "−$number"
+        else -> "+$number"
+    }
+}
+
+@StringRes
+internal fun recoveryDriverValueFormatRes(valueFormat: ChargeDriverValueFormat): Int = when (valueFormat) {
+    ChargeDriverValueFormat.MILLISECONDS ->
+        R.string.ui_audit_recovery_driver_value_milliseconds
+    ChargeDriverValueFormat.BEATS_PER_MINUTE ->
+        R.string.ui_audit_recovery_driver_value_beats_per_minute
+    ChargeDriverValueFormat.PERCENT ->
+        R.string.ui_audit_recovery_driver_value_percent
+    ChargeDriverValueFormat.BREATHS_PER_MINUTE ->
+        R.string.ui_audit_recovery_driver_value_breaths_per_minute
+    ChargeDriverValueFormat.CELSIUS_DEVIATION ->
+        R.string.ui_audit_recovery_driver_value_celsius_deviation
+}
+
+@StringRes
+internal fun recoveryDriverLabelRes(label: String): Int? = when (label) {
+    "Heart rate variability" -> R.string.appwide_day_overview_hrv
+    "Resting heart rate" -> R.string.appwide_day_overview_resting_heart_rate
+    "Sleep quality" -> R.string.appwide_day_overview_sleep
+    "Respiratory rate" -> R.string.appwide_day_overview_respiratory_rate
+    "Skin temperature" -> R.string.appwide_day_overview_skin_temperature
+    else -> null
+}
+
+@StringRes
+internal fun recoveryDriverVerdictRes(verdict: String): Int? = when (verdict) {
+    "above baseline, supporting recovery" ->
+        R.string.ui_audit_recovery_driver_verdict_above_supporting
+    "at baseline" -> R.string.ui_audit_recovery_driver_verdict_at_baseline
+    "below baseline, limiting recovery" ->
+        R.string.ui_audit_recovery_driver_verdict_below_limiting
+    "below baseline, supporting recovery" ->
+        R.string.ui_audit_recovery_driver_verdict_below_supporting
+    "above baseline, limiting recovery" ->
+        R.string.ui_audit_recovery_driver_verdict_above_limiting
+    "a typical night" -> R.string.ui_audit_recovery_driver_verdict_typical_night
+    "sleep quality supported recovery" ->
+        R.string.ui_audit_recovery_driver_verdict_sleep_supported
+    "sleep quality was neutral" ->
+        R.string.ui_audit_recovery_driver_verdict_sleep_neutral
+    "sleep quality limited recovery" ->
+        R.string.ui_audit_recovery_driver_verdict_sleep_limited
+    "near baseline" -> R.string.ui_audit_recovery_driver_verdict_near_baseline
+    "warmer than baseline, limiting recovery" ->
+        R.string.ui_audit_recovery_driver_verdict_warmer_limiting
+    "cooler than baseline, limiting recovery" ->
+        R.string.ui_audit_recovery_driver_verdict_cooler_limiting
+    else -> null
 }
 
 // MARK: - Recovery contributors (README screen #5), labelled progress bars
@@ -9754,7 +9875,7 @@ private fun intString(v: Double): String {
     return if (kotlin.math.abs(n) >= 1000) String.format(Locale.US, "%,d", n) else "$n"
 }
 
-private const val NO_DATA = "No Data"
+private const val NO_DATA = NoopDisplayFormat.MISSING
 
 /** The dashboard-card placeholder for a baseline-relative metric (Stress) that is still seeding its window,  *  an honest "building your baseline" state rather than a bare dash (#706/#684). Rendered dimmed like NO_DATA. */
 private const val STRESS_CALIBRATING = "Calibrating"

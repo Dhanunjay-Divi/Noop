@@ -50,6 +50,10 @@ enum FeedbackDeliveryState: String, Codable, CaseIterable {
             return true
         }
     }
+
+    var isTerminal: Bool {
+        self == .sent || self == .cancelled || self == .failed
+    }
 }
 
 enum FeedbackFailureKind: String, Codable, CaseIterable {
@@ -73,6 +77,13 @@ enum FeedbackFailureKind: String, Codable, CaseIterable {
     case retryLimit = "retry_limit"
 }
 
+enum FeedbackReservationRecoveryHTTPPolicy {
+    static let pendingStatusCodes: Set<Int> = [404]
+    static let terminalStatusCodes: Set<Int> = [410]
+    static let acceptedStatusCodes =
+        Set(200...299).union(terminalStatusCodes)
+}
+
 struct FeedbackUploadCapability: Codable, Equatable {
     let method: String
     let url: String
@@ -82,6 +93,41 @@ struct FeedbackUploadCapability: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case method, url, headers
         case expiresAt = "expires_at"
+    }
+}
+
+struct FeedbackUploadTaskContext: Equatable, Hashable, Sendable {
+    private static let prefix = "noop-feedback-upload-v1"
+
+    let reportID: UUID
+    let attemptID: UUID
+
+    init(reportID: UUID, attemptID: UUID) {
+        self.reportID = reportID
+        self.attemptID = attemptID
+    }
+
+    init?(taskDescription: String?) {
+        guard let taskDescription else { return nil }
+        let parts = taskDescription.split(
+            separator: "|",
+            omittingEmptySubsequences: false
+        )
+        guard parts.count == 3,
+              parts[0] == Self.prefix,
+              let reportID = UUID(uuidString: String(parts[1])),
+              let attemptID = UUID(uuidString: String(parts[2])) else {
+            return nil
+        }
+        self.init(reportID: reportID, attemptID: attemptID)
+    }
+
+    var taskDescription: String {
+        [
+            Self.prefix,
+            reportID.uuidString.lowercased(),
+            attemptID.uuidString.lowercased(),
+        ].joined(separator: "|")
     }
 }
 
@@ -115,6 +161,9 @@ struct FeedbackOutboxRecord: Codable, Equatable, Identifiable {
     var receipt: String?
     var cancelRequested: Bool
     var localArchiveRemoved: Bool?
+    var clockAnomalyObservedAt: Date?
+    var reservationContinuityStartedAt: Date? = nil
+    var uploadAttemptID: UUID? = nil
 
     var includesUserNote: Bool {
         archiveManifest.includesUserNote
@@ -163,6 +212,10 @@ struct FeedbackOutboxRecord: Codable, Equatable, Identifiable {
         case retainedUntil = "retained_until"
         case cancelRequested = "cancel_requested"
         case localArchiveRemoved = "local_archive_removed"
+        case clockAnomalyObservedAt = "clock_anomaly_observed_at"
+        case reservationContinuityStartedAt =
+            "reservation_continuity_started_at"
+        case uploadAttemptID = "upload_attempt_id"
     }
 }
 
@@ -243,6 +296,47 @@ struct FeedbackStartupRecoveryGate {
     }
 }
 
+struct FeedbackPumpGate {
+    private var active = Set<UUID>()
+    private var pending = Set<UUID>()
+
+    mutating func begin(_ id: UUID) -> Bool {
+        guard active.insert(id).inserted else {
+            pending.insert(id)
+            return false
+        }
+        return true
+    }
+
+    mutating func finish(_ id: UUID) -> Bool {
+        active.remove(id)
+        return pending.remove(id) != nil
+    }
+}
+
+actor FeedbackIdentityAuthorizationGate {
+    private var isLocked = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !isLocked {
+            isLocked = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !waiters.isEmpty else {
+            isLocked = false
+            return
+        }
+        waiters.removeFirst().resume()
+    }
+}
+
 enum FeedbackUploadStartPolicy {
     static func permitsResume(_ record: FeedbackOutboxRecord) -> Bool {
         record.state == .uploading
@@ -300,10 +394,14 @@ enum FeedbackAnonymousIdentityLifetimePolicy {
         28 * 24 * 60 * 60
     static let replacementSafetyMargin: TimeInterval =
         24 * 60 * 60
+    static let maximumClockSkew: TimeInterval = 5 * 60
+    static let providerCleanupSafetyReserve: TimeInterval = 60 * 60
     static let maximumExistingIdentityAge: TimeInterval =
         identityPlatformCleanupAge
             - maximumReportRetention
             - replacementSafetyMargin
+            - maximumClockSkew
+            - providerCleanupSafetyReserve
 
     static func reservationAction(
         identityCreatedAt: Date?,
@@ -354,20 +452,159 @@ enum FeedbackAnonymousIdentityProviderPolicy {
 }
 
 enum FeedbackReservationContinuityPolicy {
+    static let maximumLocalDelayBeforeCancellation =
+        FeedbackOutboxLimits.production.retention
+    static let maximumRemoteRetention =
+        FeedbackAnonymousIdentityLifetimePolicy.maximumReportRetention
+    static let expirySafetyMargin =
+        FeedbackAnonymousIdentityLifetimePolicy.replacementSafetyMargin
+    static let maximumAmbiguousBindingLifetime =
+        maximumRemoteRetention
+            + FeedbackAnonymousIdentityLifetimePolicy.maximumClockSkew
+            + expirySafetyMargin
+    static let maximumRetryDelay: TimeInterval = 6 * 60 * 60
+    static let minimumRetryDelay: TimeInterval = 1
+    static let activeWorkLease: TimeInterval = 60 * 60
+    static let maximumClockSkew =
+        FeedbackAnonymousIdentityLifetimePolicy.maximumClockSkew
+
     // A nonterminal local binding may own an accepted reservation whose
     // response was lost, even when no server report ID has been persisted.
     static func identitySubjectSHA256sRequiringContinuity(
-        in records: [FeedbackOutboxRecord]
+        in records: [FeedbackOutboxRecord],
+        now: Date = Date()
     ) -> Set<String> {
-        Set(
+        _ = now
+        return Set(
             records.compactMap { record in
-                switch record.state {
-                case .sent, .cancelled:
-                    return nil
-                default:
-                    return record.identitySubjectSHA256
-                }
+                guard requiresIdentityProtection(record) else { return nil }
+                return record.identitySubjectSHA256
             }
+        )
+    }
+
+    static func continuityDeadline(
+        for record: FeedbackOutboxRecord
+    ) -> Date? {
+        guard hasPossibleRemoteReservation(record) else { return nil }
+        if let retainedUntil = record.retainedUntil {
+            return boundedServerRetainedUntil(
+                retainedUntil,
+                for: record
+            ).addingTimeInterval(expirySafetyMargin)
+        }
+        return reservationContinuityStart(for: record).addingTimeInterval(
+            maximumAmbiguousBindingLifetime
+        )
+    }
+
+    static func maximumServerRetainedUntil(
+        for record: FeedbackOutboxRecord
+    ) -> Date {
+        reservationContinuityStart(for: record).addingTimeInterval(
+            maximumRemoteRetention + maximumClockSkew
+        )
+    }
+
+    static func maximumAcceptedServerRetainedUntil(
+        for record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Date {
+        min(
+            maximumServerRetainedUntil(for: record),
+            now.addingTimeInterval(
+                maximumRemoteRetention + maximumClockSkew
+            )
+        )
+    }
+
+    static func boundedServerRetainedUntil(
+        _ retainedUntil: Date,
+        for record: FeedbackOutboxRecord,
+        now: Date? = nil
+    ) -> Date {
+        let maximum = now.map {
+            maximumAcceptedServerRetainedUntil(for: record, now: $0)
+        } ?? maximumServerRetainedUntil(for: record)
+        return min(retainedUntil, maximum)
+    }
+
+    static func serverRetentionIsValid(
+        _ retainedUntil: Date,
+        for record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Bool {
+        retainedUntil >= now.addingTimeInterval(-maximumClockSkew)
+            && retainedUntil <= maximumAcceptedServerRetainedUntil(
+                for: record,
+                now: now
+            )
+    }
+
+    static func permitsNewReservation(
+        _ record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Bool {
+        !hasClockAnomaly(record, now: now)
+            && now >= record.createdAt.addingTimeInterval(-maximumClockSkew)
+            && now >= record.updatedAt.addingTimeInterval(-maximumClockSkew)
+            && now < record.createdAt.addingTimeInterval(
+                maximumLocalDelayBeforeCancellation
+            )
+    }
+
+    static func requiresContinuity(
+        _ record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Bool {
+        guard record.identitySubjectSHA256 != nil,
+              let deadline = continuityDeadline(for: record) else {
+            return false
+        }
+        return now < deadline || hasActiveWorkLease(record, now: now)
+    }
+
+    static func requiresIdentityProtection(
+        _ record: FeedbackOutboxRecord
+    ) -> Bool {
+        record.identitySubjectSHA256 != nil
+            && hasPossibleRemoteReservation(record)
+    }
+
+    static func hasExpired(
+        _ record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Bool {
+        guard let deadline = continuityDeadline(for: record) else {
+            return false
+        }
+        return now >= deadline && !hasActiveWorkLease(record, now: now)
+    }
+
+    static func retryDelay(
+        in records: [FeedbackOutboxRecord],
+        now: Date
+    ) -> TimeInterval {
+        let protectedRecords = records.filter(requiresIdentityProtection)
+        let earliestRemaining = protectedRecords.compactMap {
+            record -> TimeInterval? in
+            guard requiresContinuity(record, now: now),
+                  let deadline = effectiveRetryTarget(
+                      for: record,
+                      now: now
+                  ) else {
+                return nil
+            }
+            return deadline.timeIntervalSince(now)
+        }.min()
+        guard let earliestRemaining else {
+            return protectedRecords.isEmpty
+                ? minimumRetryDelay
+                : maximumRetryDelay
+        }
+        return min(
+            maximumRetryDelay,
+            max(minimumRetryDelay, earliestRemaining)
         )
     }
 
@@ -376,6 +613,113 @@ enum FeedbackReservationContinuityPolicy {
     ) -> Bool {
         record.identitySubjectSHA256 == nil
     }
+
+    static func hasPossibleRemoteReservation(
+        _ record: FeedbackOutboxRecord
+    ) -> Bool {
+        switch record.state {
+        case .sent, .cancelled:
+            return false
+        default:
+            return record.identitySubjectSHA256 != nil
+                || record.hasRemoteBinding
+                || record.attemptCount > 0
+        }
+    }
+
+    static func hasActiveWorkLease(
+        _ record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Bool {
+        guard record.clockAnomalyObservedAt == nil,
+              record.nextRetryAt == nil,
+              record.updatedAt <= now.addingTimeInterval(maximumClockSkew),
+              now < record.updatedAt.addingTimeInterval(activeWorkLease) else {
+            return false
+        }
+        switch record.state {
+        case .reserving, .uploading, .completing, .cancelling:
+            return true
+        case .queued, .retryScheduled, .sent, .cancelled, .failed:
+            return false
+        }
+    }
+
+    private static func effectiveRetryTarget(
+        for record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Date? {
+        guard let deadline = continuityDeadline(for: record) else {
+            return nil
+        }
+        guard hasActiveWorkLease(record, now: now) else {
+            return deadline
+        }
+        return max(
+            deadline,
+            record.updatedAt.addingTimeInterval(activeWorkLease)
+        )
+    }
+
+    static func needsClockAnomalyNormalization(
+        _ record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Bool {
+        record.clockAnomalyObservedAt == nil
+            && (
+                record.createdAt > now.addingTimeInterval(maximumClockSkew)
+                    || record.consentConfirmedAt
+                        > now.addingTimeInterval(maximumClockSkew)
+                    || record.updatedAt
+                        > now.addingTimeInterval(maximumClockSkew)
+            )
+    }
+
+    static func hasClockAnomaly(
+        _ record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Bool {
+        record.clockAnomalyObservedAt != nil
+            || needsClockAnomalyNormalization(record, now: now)
+    }
+
+    static func hasSecondaryClockRollback(
+        _ record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Bool {
+        guard let observedAt = record.clockAnomalyObservedAt else {
+            return false
+        }
+        let highWater = max(observedAt, record.updatedAt)
+        return now < highWater.addingTimeInterval(-maximumClockSkew)
+    }
+
+    private static func reservationContinuityStart(
+        for record: FeedbackOutboxRecord
+    ) -> Date {
+        record.reservationContinuityStartedAt
+            ?? record.clockAnomalyObservedAt
+            ?? record.createdAt
+    }
+}
+
+enum FeedbackRetryWakePolicy {
+    static func shouldWait(
+        _ record: FeedbackOutboxRecord,
+        now: Date
+    ) -> Bool {
+        guard let nextRetryAt = record.nextRetryAt,
+              nextRetryAt > now else {
+            return false
+        }
+        return !FeedbackReservationContinuityPolicy
+            .hasSecondaryClockRollback(record, now: now)
+    }
+}
+
+enum FeedbackReservationAttemptLane {
+    case delivery
+    case cancellation
 }
 
 enum FeedbackRemoteAbsenceAction: Equatable {
@@ -569,7 +913,10 @@ actor FeedbackOutbox {
                 retainedUntil: nil,
                 receipt: nil,
                 cancelRequested: false,
-                localArchiveRemoved: false
+                localArchiveRemoved: false,
+                clockAnomalyObservedAt: nil,
+                reservationContinuityStartedAt: nil,
+                uploadAttemptID: nil
             )
             try persist(record, in: temporaryDirectory)
             try FeedbackOutboxFileSecurity.protectArchive(archiveURL)
@@ -614,6 +961,7 @@ actor FeedbackOutbox {
                     record.state = .failed
                     record.failureKind = .archiveIntegrity
                     record.nextRetryAt = nil
+                    record.uploadAttemptID = nil
                     record.updatedAt = now
                     changed = true
                 }
@@ -623,11 +971,13 @@ actor FeedbackOutbox {
                 record.state = .retryScheduled
                 record.failureKind = .interrupted
                 record.nextRetryAt = now
+                record.uploadAttemptID = nil
                 record.updatedAt = now
                 changed = true
             } else if record.state == .completing {
                 record.failureKind = .interrupted
                 record.nextRetryAt = now
+                record.uploadAttemptID = nil
                 record.updatedAt = now
                 changed = true
             }
@@ -651,7 +1001,8 @@ actor FeedbackOutbox {
     ) throws -> Set<String> {
         FeedbackReservationContinuityPolicy
             .identitySubjectSHA256sRequiringContinuity(
-                in: try records(now: now)
+                in: try records(now: now),
+                now: now
             )
     }
 
@@ -659,8 +1010,13 @@ actor FeedbackOutbox {
         try records(now: now).first { !isTerminal($0.state) }
     }
 
-    func record(id: UUID) throws -> FeedbackOutboxRecord? {
-        try loadRecord(id)
+    func record(
+        id: UUID,
+        now: Date = Date()
+    ) throws -> FeedbackOutboxRecord? {
+        try ensureRoot()
+        try cleanup(now: now)
+        return try loadRecord(id)
     }
 
     func verifiedArchiveURL(id: UUID) throws -> URL {
@@ -676,11 +1032,16 @@ actor FeedbackOutbox {
         now: Date = Date()
     ) throws -> FeedbackOutboxRecord {
         guard let current = try loadRecord(id),
-              !isTerminal(current.state) else {
+              !isTerminal(current.state),
+              !FeedbackReservationContinuityPolicy.hasExpired(
+                  current,
+                  now: now
+              ) else {
             throw FeedbackOutboxError.invalidRecord
         }
         return try update(id: id) { record in
             record.attemptCount += 1
+            record.nextRetryAt = nil
             record.updatedAt = now
         }
     }
@@ -697,17 +1058,20 @@ actor FeedbackOutbox {
         }
         return try update(id: id) { record in
             record.cancellationAttemptCount = record.cancellationAttempts + 1
+            record.nextRetryAt = nil
+            record.uploadAttemptID = nil
             record.updatedAt = now
         }
     }
 
     @discardableResult
     func markReserving(id: UUID, now: Date = Date()) throws -> FeedbackOutboxRecord {
-        try update(id: id) { record in
+        return try update(id: id) { record in
             record.state = record.cancelRequested ? .cancelling : .reserving
             record.uploadProgress = 0
             record.nextRetryAt = nil
             record.failureKind = nil
+            record.uploadAttemptID = nil
             record.updatedAt = now
         }
     }
@@ -728,6 +1092,9 @@ actor FeedbackOutbox {
         }
         return try update(id: id) { record in
             record.identitySubjectSHA256 = identitySubjectSHA256
+            if record.reservationContinuityStartedAt == nil {
+                record.reservationContinuityStartedAt = now
+            }
             record.updatedAt = max(record.updatedAt, now)
         }
     }
@@ -752,6 +1119,7 @@ actor FeedbackOutbox {
             record.reportToken = reportToken
             record.upload = upload
             record.retainedUntil = retainedUntil
+            record.uploadAttemptID = nil
             if !record.cancelRequested {
                 record.state = .queued
                 record.uploadProgress = 0
@@ -763,7 +1131,11 @@ actor FeedbackOutbox {
     }
 
     @discardableResult
-    func markUploading(id: UUID, now: Date = Date()) throws -> FeedbackOutboxRecord {
+    func markUploading(
+        id: UUID,
+        attemptID: UUID = UUID(),
+        now: Date = Date()
+    ) throws -> FeedbackOutboxRecord {
         guard let current = try loadRecord(id),
               !current.cancelRequested,
               !isTerminal(current.state) else {
@@ -774,6 +1146,7 @@ actor FeedbackOutbox {
             record.uploadProgress = 0
             record.nextRetryAt = nil
             record.failureKind = nil
+            record.uploadAttemptID = attemptID
             record.updatedAt = now
         }
     }
@@ -781,6 +1154,7 @@ actor FeedbackOutbox {
     @discardableResult
     func updateProgress(
         id: UUID,
+        attemptID: UUID,
         fraction: Double,
         now: Date = Date()
     ) throws -> FeedbackOutboxRecord {
@@ -789,7 +1163,12 @@ actor FeedbackOutbox {
         }
         let bounded = min(1, max(0, fraction))
         guard current.state == .uploading,
+              current.uploadAttemptID == attemptID,
               bounded == 1 || bounded - current.uploadProgress >= 0.02 else {
+            if current.state == .uploading,
+               current.uploadAttemptID != attemptID {
+                throw FeedbackOutboxError.invalidRecord
+            }
             return current
         }
         return try update(id: id) { record in
@@ -799,9 +1178,14 @@ actor FeedbackOutbox {
     }
 
     @discardableResult
-    func markCompleting(id: UUID, now: Date = Date()) throws -> FeedbackOutboxRecord {
+    func markCompleting(
+        id: UUID,
+        uploadAttemptID: UUID? = nil,
+        now: Date = Date()
+    ) throws -> FeedbackOutboxRecord {
         guard let current = try loadRecord(id),
               !current.cancelRequested,
+              current.uploadAttemptID == uploadAttemptID,
               !isTerminal(current.state) else {
             throw FeedbackOutboxError.invalidRecord
         }
@@ -810,6 +1194,7 @@ actor FeedbackOutbox {
             record.uploadProgress = 1
             record.nextRetryAt = nil
             record.failureKind = nil
+            record.uploadAttemptID = nil
             record.updatedAt = now
         }
     }
@@ -821,11 +1206,75 @@ actor FeedbackOutbox {
         nextRetryAt: Date,
         now: Date = Date()
     ) throws -> FeedbackOutboxRecord {
-        try update(id: id) { record in
+        guard let current = try loadRecord(id),
+              !isTerminal(current.state) else {
+            throw FeedbackOutboxError.invalidRecord
+        }
+        return try update(id: id) { record in
             record.state = .retryScheduled
             record.failureKind = failureKind
             record.nextRetryAt = nextRetryAt
+            record.uploadAttemptID = nil
             record.updatedAt = now
+        }
+    }
+
+    @discardableResult
+    func markReservationContinuityWaiting(
+        id: UUID,
+        lane: FeedbackReservationAttemptLane,
+        allowBoundIdentity: Bool = false,
+        failureKind: FeedbackFailureKind = .identity,
+        now: Date = Date()
+    ) throws -> FeedbackOutboxRecord {
+        try ensureRoot()
+        try cleanup(now: now)
+        let current = try loadRecord(id)
+        let identityMatchesWait =
+            allowBoundIdentity
+                ? current?.identitySubjectSHA256 != nil
+                : current?.identitySubjectSHA256 == nil
+        guard let current,
+              identityMatchesWait,
+              !current.hasRemoteBinding else {
+            throw FeedbackOutboxError.invalidRecord
+        }
+        switch lane {
+        case .delivery:
+            guard current.attemptCount > 0,
+                  current.state == .reserving
+                    || (current.cancelRequested
+                        && current.state == .cancelling) else {
+                throw FeedbackOutboxError.invalidRecord
+            }
+        case .cancellation:
+            guard current.cancelRequested,
+                  current.state == .cancelling,
+                  current.cancellationAttempts > 0 else {
+                throw FeedbackOutboxError.invalidRecord
+            }
+        }
+        let delay = FeedbackReservationContinuityPolicy.retryDelay(
+            in: try loadRecords(),
+            now: now
+        )
+        return try update(id: id) { record in
+            switch lane {
+            case .delivery:
+                record.attemptCount = max(0, record.attemptCount - 1)
+                record.state =
+                    record.cancelRequested ? .cancelling : .retryScheduled
+            case .cancellation:
+                record.state = .cancelling
+                record.cancellationAttemptCount = max(
+                    0,
+                    record.cancellationAttempts - 1
+                )
+            }
+            record.failureKind = failureKind
+            record.nextRetryAt = now.addingTimeInterval(delay)
+            record.uploadAttemptID = nil
+            record.updatedAt = max(record.updatedAt, now)
         }
     }
 
@@ -836,11 +1285,16 @@ actor FeedbackOutbox {
         nextRetryAt: Date,
         now: Date = Date()
     ) throws -> FeedbackOutboxRecord {
-        try update(id: id) { record in
+        guard let current = try loadRecord(id),
+              !isTerminal(current.state) else {
+            throw FeedbackOutboxError.invalidRecord
+        }
+        return try update(id: id) { record in
             record.state = .completing
             record.uploadProgress = 1
             record.failureKind = failureKind
             record.nextRetryAt = nextRetryAt
+            record.uploadAttemptID = nil
             record.updatedAt = now
         }
     }
@@ -849,12 +1303,21 @@ actor FeedbackOutbox {
     func markFailed(
         id: UUID,
         failureKind: FeedbackFailureKind,
+        unlessCancellationRequested: Bool = false,
         now: Date = Date()
     ) throws -> FeedbackOutboxRecord {
-        try update(id: id) { record in
+        guard let current = try loadRecord(id),
+              !isTerminal(current.state),
+              !(unlessCancellationRequested
+                  && (current.cancelRequested
+                      || current.state == .cancelling)) else {
+            throw FeedbackOutboxError.invalidRecord
+        }
+        return try update(id: id) { record in
             record.state = .failed
             record.failureKind = failureKind
             record.nextRetryAt = nil
+            record.uploadAttemptID = nil
             record.updatedAt = now
         }
     }
@@ -864,7 +1327,11 @@ actor FeedbackOutbox {
         id: UUID,
         now: Date = Date()
     ) throws -> FeedbackOutboxRecord {
-        try update(id: id) { record in
+        guard let current = try loadRecord(id),
+              !isTerminal(current.state) else {
+            throw FeedbackOutboxError.invalidRecord
+        }
+        return try update(id: id) { record in
             record.state = record.cancelRequested ? .cancelling : .queued
             record.uploadProgress = 0
             if record.cancelRequested {
@@ -874,6 +1341,7 @@ actor FeedbackOutbox {
             }
             record.nextRetryAt = nil
             record.failureKind = nil
+            record.uploadAttemptID = nil
             record.updatedAt = now
         }
     }
@@ -887,13 +1355,17 @@ actor FeedbackOutbox {
               !isTerminal(current.state) else {
             throw FeedbackOutboxError.invalidRecord
         }
+        let alreadyRequested = current.cancelRequested
         let record = try update(id: id) { record in
             record.cancelRequested = true
             record.state = .cancelling
-            record.cancellationAttemptCount = 0
             record.upload = nil
-            record.nextRetryAt = nil
-            record.failureKind = nil
+            record.uploadAttemptID = nil
+            if !alreadyRequested {
+                record.cancellationAttemptCount = 0
+                record.nextRetryAt = nil
+                record.failureKind = nil
+            }
             record.updatedAt = now
         }
         return persistArchiveCleanupOutcome(for: record)
@@ -914,6 +1386,7 @@ actor FeedbackOutbox {
             record.state = .cancelling
             record.uploadProgress = 0
             record.upload = nil
+            record.uploadAttemptID = nil
             record.nextRetryAt = nextRetryAt
             record.failureKind = nil
             record.updatedAt = now
@@ -940,6 +1413,7 @@ actor FeedbackOutbox {
             record.retainedUntil = retainedUntil
             record.reportToken = nil
             record.upload = nil
+            record.uploadAttemptID = nil
             record.nextRetryAt = nil
             record.failureKind = nil
             record.cancelRequested = false
@@ -958,6 +1432,7 @@ actor FeedbackOutbox {
             record.uploadProgress = 0
             record.reportToken = nil
             record.upload = nil
+            record.uploadAttemptID = nil
             record.nextRetryAt = nil
             record.failureKind = nil
             record.cancelRequested = false
@@ -1099,6 +1574,80 @@ actor FeedbackOutbox {
         try removeTemporaryDirectories()
         var records = try loadRecords()
         for var record in records {
+            if record.identitySubjectSHA256 != nil,
+               record.reservationContinuityStartedAt == nil {
+                record.reservationContinuityStartedAt = min(
+                    record.createdAt,
+                    min(record.updatedAt, now)
+                )
+                try persist(record)
+            }
+
+            if FeedbackReservationContinuityPolicy
+                .needsClockAnomalyNormalization(record, now: now) {
+                if isTerminal(record.state) {
+                    record.clockAnomalyObservedAt = now
+                    record.updatedAt = now
+                    try persist(record)
+                    AppDiagnosticsRecorder.shared.record(
+                        "feedback.clock_anomaly",
+                        fields: ["outcome": "terminal_normalized"]
+                    )
+                } else if FeedbackReservationContinuityPolicy
+                    .hasPossibleRemoteReservation(record) {
+                    record.clockAnomalyObservedAt = now
+                    record.reservationContinuityStartedAt = min(
+                        record.reservationContinuityStartedAt ?? now,
+                        now
+                    )
+                    record.state = .cancelling
+                    record.uploadProgress = 0
+                    if !record.cancelRequested {
+                        record.cancellationAttemptCount = 0
+                    }
+                    record.nextRetryAt = now
+                    record.failureKind = nil
+                    record.upload = nil
+                    record.uploadAttemptID = nil
+                    record.cancelRequested = true
+                    record.updatedAt = now
+                    try persist(record)
+                    _ = persistArchiveCleanupOutcome(for: record)
+                    AppDiagnosticsRecorder.shared.record(
+                        "feedback.clock_anomaly",
+                        fields: ["outcome": "cancellation_required"]
+                    )
+                    continue
+                } else {
+                    try? fileManager.removeItem(at: reportDirectory(record.id))
+                    AppDiagnosticsRecorder.shared.record(
+                        "feedback.clock_anomaly",
+                        fields: ["outcome": "local_record_removed"]
+                    )
+                    continue
+                }
+            }
+
+            if FeedbackReservationContinuityPolicy
+                .hasSecondaryClockRollback(record, now: now),
+               !isTerminal(record.state) {
+                record.clockAnomalyObservedAt = now
+                if let continuityStartedAt =
+                    record.reservationContinuityStartedAt,
+                   continuityStartedAt > now {
+                    record.reservationContinuityStartedAt = now
+                }
+                if record.nextRetryAt.map({ $0 > now }) == true {
+                    record.nextRetryAt = now
+                }
+                record.updatedAt = now
+                try persist(record)
+                AppDiagnosticsRecorder.shared.record(
+                    "feedback.clock_anomaly",
+                    fields: ["outcome": "secondary_normalized"]
+                )
+            }
+
             let age = now.timeIntervalSince(record.createdAt)
             let terminalAge = now.timeIntervalSince(record.updatedAt)
 
@@ -1110,12 +1659,45 @@ actor FeedbackOutbox {
                 continue
             }
 
-            guard age >= limits.retention, !record.cancelRequested else {
+            if FeedbackReservationContinuityPolicy.hasExpired(
+                record,
+                now: now
+            ) {
+                if record.state == .failed,
+                   record.failureKind == .capabilityExpired,
+                   record.cancelRequested {
+                    _ = persistArchiveCleanupOutcome(for: record)
+                    continue
+                }
+                record.state = .failed
+                record.uploadProgress = 0
+                record.upload = nil
+                record.uploadAttemptID = nil
+                record.nextRetryAt = nil
+                record.failureKind = .capabilityExpired
+                record.cancelRequested = true
+                record.updatedAt = max(record.updatedAt, now)
+                try persist(record)
+                _ = persistArchiveCleanupOutcome(for: record)
+                AppDiagnosticsRecorder.shared.record(
+                    "feedback.identity_continuity_expired",
+                    fields: ["outcome": "deletion_unconfirmed"]
+                )
+                continue
+            }
+
+            guard age >= limits.retention,
+                  !record.cancelRequested,
+                  !FeedbackReservationContinuityPolicy.hasActiveWorkLease(
+                      record,
+                      now: now
+                  ) else {
                 continue
             }
 
             record.uploadProgress = 0
             record.upload = nil
+            record.uploadAttemptID = nil
             record.nextRetryAt = now
             record.failureKind = nil
             record.updatedAt = now

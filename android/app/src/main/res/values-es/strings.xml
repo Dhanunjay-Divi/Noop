@@ -205,7 +205,7 @@
     <string name="l10n_breathe_screen_hrv_rmssd_51014f87">HRV (RMSSD)</string>
     <string name="l10n_breathe_screen_locked_formatday_datems_paces_drift_re_8ebec15b">Cierre %1$s · velocidades deriva, re-medida en cualquier momento.</string>
     <string name="l10n_breathe_screen_locked_formatday_datems_switch_to_breathe_3efc52c6">Cerrado %1$s. Cambia a Respirar para usarlo, o re-medir arriba.</string>
-    <string name="l10n_breathe_screen_not_enough_clean_beat_data_to_865a1260">No hay suficientes latidos limpios para fijar un ritmo hoy. Vuelve a intentarlo descansado, sentado y quieto con la pulsera bien ajustada. Por ahora te marcaremos un ritmo de 5.5 resp/min (coherencia).</string>
+    <string name="l10n_breathe_screen_not_enough_clean_beat_data_to_865a1260">No hay suficientes latidos limpios para fijar un ritmo hoy. Vuelve a intentarlo descansado, sentado y quieto con Noop Band bien ajustada. Por ahora te marcaremos un ritmo de 5.5 resp/min (coherencia).</string>
     <string name="l10n_breathe_screen_not_now_e4571490">Ahora no</string>
     <string name="l10n_breathe_screen_pace_7a9a6226">Ritmo</string>
     <string name="l10n_breathe_screen_quick_sweep_7_min_5d58f88d">Barrido rápido · ~7 min</string>
@@ -313,7 +313,7 @@
     <string name="l10n_data_sources_screen_whoop_history_db101974">Historia Noop Band</string>
     <string name="l10n_data_sources_screen_whoop_strap_live_ble_217f7df6">Pulsera Noop Band (BLE en vivo)</string>
     <string name="l10n_data_sources_screen_workout_file_gpx_tcx_fit_5469c068">Archivo de entrenamiento (GPX / TCX / FIT)</string>
-    <string name="l10n_data_sources_screen_write_the_metrics_noop_computes_from_439940c2">Escriba los métricas NOOP computes de su correa (resting HR, HRV, SpO2,</string>
+    <string name="l10n_data_sources_screen_write_the_metrics_noop_computes_from_439940c2">Escribe las métricas que NOOP calcula a partir de Noop Band (FC en reposo, VFC, SpO₂, </string>
     <string name="l10n_data_sources_screen_xiaomi_mi_band_edeab3bc">Xiaomi Mi Band</string>
     <string name="l10n_devices_screen_add_a_device_f90866b8">Añadir un dispositivo</string>
     <string name="l10n_devices_screen_battery_4a9be042">Batería</string>
@@ -661,7 +661,7 @@
     <string name="l10n_scoring_guide_screen_how_your_scores_work_21a0e2be">Cómo funcionan tus puntuaciones</string>
     <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">NOOP ofrece tres puntuaciones diarias (Recuperación, Esfuerzo y Puntuación de sueño), cada una de 0 a 100.</string>
     <string name="l10n_scoring_guide_screen_scorecardhighlight_4af6985c">puntuaciónCardHighlight</string>
-    <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">Estas son aproximaciones independientes de una correa de consumo, construida sobre ciencia abierta: no</string>
+    <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">Estas son aproximaciones independientes de un dispositivo wearable de consumo, construidas sobre ciencia abierta: no</string>
     <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">MÉTODO NOOP</string>
     <string name="l10n_settings_screen_advancedchevron_f22dfa01">avanzadoChevron</string>
     <string name="l10n_settings_screen_note_a2481d6c">· %1$s</string>
@@ -1264,7 +1264,7 @@
     <string name="l10n_how_noop_works_screen_how_your_sleep_is_sorted_6a8e82e0">Cómo se clasifica tu sueño</string>
     <string name="l10n_how_noop_works_screen_what_recording_means_b896c422">Qué significa "grabando"</string>
     <string name="l10n_how_noop_works_screen_where_your_numbers_come_from_e169963a">De dónde vienen tus números</string>
-    <string name="l10n_hrv_snapshot_screen_a_60_second_snapshot_of_your_35f03f7c">Una instantánea de 60 segundos de su ritmo a calor (R-R) intervalos de la correa, limpiado</string>
+    <string name="l10n_hrv_snapshot_screen_a_60_second_snapshot_of_your_35f03f7c">Una instantánea de 60 segundos de tus intervalos entre latidos (R-R) de Noop Band, depurada</string>
     <string name="l10n_hrv_snapshot_screen_close_hrv_reading_a29a99a1">Cerrar lectura de VFC</string>
     <string name="l10n_hrv_snapshot_screen_hrv_reading_a2cf71f3">Lectura de VFC</string>
     <string name="l10n_insights_screen_charge_d4e1aee4">Recuperación</string>
@@ -1354,7 +1354,7 @@
     <string name="l10n_settings_screen_export_raw_log_matched_pair_d65390bf">Exportar crudo + tronco (palabra empaquetada)</string>
     <string name="l10n_settings_screen_export_raw_sensor_data_csv_a171b81e">Exportar datos en bruto del sensor (CSV)</string>
     <string name="l10n_settings_screen_extends_the_sky_behind_the_whole_39bb82cc">Extiende el cielo detrás de toda la pantalla Hoy, de modo que al reducir la Transparencia de las tarjetas se vea a través de cada tarjeta. Requiere que el fondo según el ciclo del día esté activado.</string>
-    <string name="l10n_settings_screen_feel_the_current_time_as_a_8ca41db1">Siente el tiempo actual como una secuencia de zumbidos (#460). No hace nada a menos que su correa esté conectada.</string>
+    <string name="l10n_settings_screen_feel_the_current_time_as_a_8ca41db1">Siente la hora actual como una secuencia de vibraciones (#460). Solo funciona cuando Noop Band está conectado.</string>
     <string name="l10n_settings_screen_flags_accepted_but_the_enable_sequence_542b2595">Indicadores aceptados, pero la secuencia de activación no inicia una transmisión en vivo separada. Los registros profundos llegan como parte de la sincronización normal del historial (#494).</string>
     <string name="l10n_settings_screen_for_a_whoop_4_0_which_df865854">Para una Noop Band 4.0, que no envía recuento de pasos: NOOP estima los pasos a partir del movimiento, calibrado con tu teléfono. Toca para ver qué tan preciso es y ajustarlo.</string>
     <string name="l10n_settings_screen_github_code_releases_issues_and_the_50b41e25">GitHub: código, versiones, issues y la wiki.</string>
@@ -1373,7 +1373,7 @@
     <string name="l10n_settings_screen_keep_noop_alive_overnight_e43b2fba">Mantén a NOOP vivo durante la noche</string>
     <string name="l10n_settings_screen_keep_screen_on_during_a_workout_42d27284">Mantener la pantalla encendida durante un entrenamiento</string>
     <string name="l10n_settings_screen_keeps_streaming_from_your_strap_with_d31b4af9">Sigue recibiendo datos de Noop Band mediante una notificación permanente, incluso después de cerrar NOOP. Desactívalo para desconectar al cerrar la app.</string>
-    <string name="l10n_settings_screen_keeps_the_detailed_beat_to_beat_87b78edd">Mantiene el flujo de ritmo a calor detallado funcionando todo el día y la noche, no sólo mientras una pantalla en vivo está abierta, por lo que NOOP captura mucho más para la noche a la noche HRV, recuperación y sueño. Usa más batería (su correa fluye frecuencia cardíaca continuamente). Necesita "Mantener conectado en el fondo" en.</string>
+    <string name="l10n_settings_screen_keeps_the_detailed_beat_to_beat_87b78edd">Mantiene el flujo detallado latido a latido durante todo el día y la noche, no solo con una pantalla en directo abierta. Así NOOP capta más datos para la VFC nocturna, la recuperación y el sueño. Usa más batería porque Noop Band transmite la frecuencia cardiaca continuamente. Requiere «Mantener conectado en segundo plano».</string>
     <string name="l10n_settings_screen_live_deeppacketsthissession_type_0x2f_historical_offload_8fef3d84">%1$s tipo-0x2F marco de descarga histórica(s) visto fuera de nuestra sincronización. Estos son historia (por ejemplo, otra aplicación que tira del atraso de la correa), no un flujo R22 vivo (#494).</string>
     <string name="l10n_settings_screen_live_sessions_beta_2ca3a97f">Live Sessions (beta)</string>
     <string name="l10n_settings_screen_makes_your_whoop_5_0_mg_b26b94c7">Hace que su Noop Band 5.0/MG anuncie su frecuencia cardíaca como un sensor Bluetooth HR estándar, por lo que un Garmin (Edge/watch), Zwift o equipo de gimnasio pueden utilizarlo durante un entrenamiento. Aplicado en la siguiente conexión (y inmediatamente si está conectado); escribe la bandera Noop Band live hr in adv ind pkt de la correa. Reversible. 5/MG solamente.</string>

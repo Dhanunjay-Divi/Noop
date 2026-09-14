@@ -458,6 +458,14 @@ object HydrationReminderNotifier {
 
     @SuppressLint("MissingPermission")
     internal fun post(context: Context, slot: String): Boolean = runCatching {
+        if (NotifPrefs.inQuietHours(context)) {
+            NotificationLifecycleLedger.suppressed(
+                context,
+                NotificationLifecycleId.HYDRATION,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            return false
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED

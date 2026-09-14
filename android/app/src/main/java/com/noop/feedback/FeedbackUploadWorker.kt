@@ -7,10 +7,14 @@ import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.await
 import androidx.work.workDataOf
 import com.noop.AppDiagnosticsRecorder
+import java.io.IOException
+import java.time.Instant
 import java.util.LinkedHashMap
 import java.util.Locale
 import java.util.UUID
@@ -21,6 +25,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 internal data class FeedbackRuntimeStatus(
@@ -95,6 +101,8 @@ internal object FeedbackRuntimeStatusPolicy {
 internal data class FeedbackRetryDecision(
     val category: FeedbackFailureCategory,
     val retryAutomatically: Boolean,
+    val preservesAttemptBudget: Boolean = false,
+    val allowsBoundIdentityContinuity: Boolean = false,
 )
 
 internal object FeedbackRetryPolicy {
@@ -105,8 +113,19 @@ internal object FeedbackRetryPolicy {
             FeedbackRetryDecision(FeedbackFailureCategory.ATTESTATION, true)
         is FeedbackProtocolException.Identity ->
             FeedbackRetryDecision(FeedbackFailureCategory.IDENTITY, true)
+        is FeedbackProtocolException.ReservationContinuityPending ->
+            FeedbackRetryDecision(
+                category = FeedbackFailureCategory.IDENTITY,
+                retryAutomatically = true,
+                preservesAttemptBudget = true,
+            )
         is FeedbackProtocolException.ReservationPending ->
-            FeedbackRetryDecision(FeedbackFailureCategory.DELETION_PENDING, true)
+            FeedbackRetryDecision(
+                category = FeedbackFailureCategory.DELETION_PENDING,
+                retryAutomatically = true,
+                preservesAttemptBudget = true,
+                allowsBoundIdentityContinuity = true,
+            )
         is FeedbackProtocolException.Configuration ->
             FeedbackRetryDecision(FeedbackFailureCategory.CONFIGURATION, false)
         is FeedbackProtocolException.InvalidResponse ->
@@ -119,9 +138,19 @@ internal object FeedbackRetryPolicy {
                 FeedbackRetryDecision(FeedbackFailureCategory.SERVER_REJECTED, false)
         }
         is FeedbackArchiveException ->
-            FeedbackRetryDecision(FeedbackFailureCategory.ARCHIVE_INVALID, false)
-        is FeedbackOutboxException ->
-            FeedbackRetryDecision(FeedbackFailureCategory.UNKNOWN, false)
+            if (feedbackArchiveValidationFailureIsRetryable(error)) {
+                FeedbackRetryDecision(FeedbackFailureCategory.INTERRUPTED, true)
+            } else {
+                FeedbackRetryDecision(FeedbackFailureCategory.ARCHIVE_INVALID, false)
+            }
+        is IOException ->
+            FeedbackRetryDecision(FeedbackFailureCategory.INTERRUPTED, true)
+        is FeedbackOutboxException -> when (error.reason) {
+            FeedbackOutboxException.Reason.STATE_UNAVAILABLE,
+            FeedbackOutboxException.Reason.WRITE_FAILED,
+            -> FeedbackRetryDecision(FeedbackFailureCategory.INTERRUPTED, true)
+            else -> FeedbackRetryDecision(FeedbackFailureCategory.UNKNOWN, false)
+        }
         else -> FeedbackRetryDecision(FeedbackFailureCategory.UNKNOWN, false)
     }
 
@@ -139,7 +168,43 @@ internal object FeedbackRetryPolicy {
         attempt: Int,
     ): Boolean = decision.retryAutomatically && attempt < FeedbackOutbox.MAX_ATTEMPTS
 
+    fun nextDeliveryAttempt(persistedAttempt: Int): Int = persistedAttempt + 1
+
     fun nextCancellationAttempt(persistedAttempt: Int): Int = persistedAttempt + 1
+}
+
+internal data class FeedbackServerRetentionDecision(
+    val retainedUntil: String,
+    val accepted: Boolean,
+)
+
+internal object FeedbackServerRetentionResponsePolicy {
+    fun evaluate(
+        record: FeedbackRecord,
+        retainedUntil: String,
+        nowMillis: Long,
+    ): FeedbackServerRetentionDecision {
+        val retainedUntilMillis = runCatching {
+            Instant.parse(retainedUntil).toEpochMilli()
+        }.getOrElse {
+            throw FeedbackProtocolException.InvalidResponse()
+        }
+        val accepted = FeedbackReservationContinuityPolicy.serverRetentionIsValid(
+            record = record,
+            retainedUntilMillis = retainedUntilMillis,
+            nowMillis = nowMillis,
+        )
+        val bounded = FeedbackReservationContinuityPolicy
+            .boundedServerRetainedUntilMillis(
+                record = record,
+                retainedUntilMillis = retainedUntilMillis,
+                nowMillis = nowMillis,
+            )
+        return FeedbackServerRetentionDecision(
+            retainedUntil = Instant.ofEpochMilli(bounded).toString(),
+            accepted = accepted,
+        )
+    }
 }
 
 internal enum class FeedbackStateReadOutcome(val wireValue: String) {
@@ -198,6 +263,13 @@ internal class FeedbackAuthorizedSession(
         return feedbackIdentitySubjectSha256(authorization.identitySubject)
     }
 
+    suspend fun <T> bindIdentity(
+        bind: suspend (identitySubjectSha256: String) -> T,
+    ): T = provider.authorizationAndBind(forceRefresh = false) { authorization ->
+        val accepted = accept(authorization)
+        bind(feedbackIdentitySubjectSha256(accepted.identitySubject))
+    }
+
     suspend fun <T> request(
         operation: suspend (FeedbackAuthorization) -> T,
     ): T {
@@ -245,6 +317,10 @@ internal class FeedbackAttemptClient(
     )
 
     suspend fun identitySubjectSha256(): String = authorization.identitySubjectSha256()
+
+    suspend fun <T> bindIdentity(
+        bind: suspend (identitySubjectSha256: String) -> T,
+    ): T = authorization.bindIdentity(bind)
 
     suspend fun reserve(
         idempotencyKey: UUID,
@@ -376,24 +452,108 @@ internal object FeedbackCancellationPolicy {
         record.serverReportId == null && record.attempt > 0
 }
 
+internal sealed interface FeedbackDeliveryReservationRecovery {
+    data class Recovered(
+        val reservation: FeedbackReservation,
+    ) : FeedbackDeliveryReservationRecovery
+
+    data class Retired(
+        val record: FeedbackRecord,
+    ) : FeedbackDeliveryReservationRecovery
+}
+
+internal object FeedbackDeliveryReservationReconciler {
+    suspend fun reconcile(
+        outbox: FeedbackOutbox,
+        record: FeedbackRecord,
+        client: FeedbackAttemptClient,
+        idempotencyKey: UUID,
+        expectedWorkerGeneration: String? = null,
+    ): FeedbackDeliveryReservationRecovery {
+        val reservation = try {
+            client.recoverReservation(idempotencyKey)
+        } catch (_: FeedbackProtocolException.ReservationGone) {
+            val canceling = outbox.requestCancel(
+                localId = record.localId,
+                expectedWorkerGeneration = expectedWorkerGeneration,
+            )
+            return FeedbackDeliveryReservationRecovery.Retired(
+                outbox.markCanceled(
+                    localId = canceling.localId,
+                    expectedWorkerGeneration = expectedWorkerGeneration,
+                ),
+            )
+        } ?: throw FeedbackProtocolException.ReservationPending()
+        return FeedbackDeliveryReservationRecovery.Recovered(reservation)
+    }
+}
+
 internal object FeedbackCancellationReconciler {
     suspend fun reconcile(
         outbox: FeedbackOutbox,
         record: FeedbackRecord,
         client: FeedbackAttemptClient,
+        expectedWorkerGeneration: String? = null,
     ): FeedbackRecord {
         if (!FeedbackCancellationPolicy.requiresReservationReconciliation(record)) return record
-        val identityBound = outbox.bindIdentity(
-            localId = record.localId,
-            identitySubjectSha256 = client.identitySubjectSha256(),
+        val identityBound = client.bindIdentity { identitySubjectSha256 ->
+            outbox.bindIdentity(
+                localId = record.localId,
+                identitySubjectSha256 = identitySubjectSha256,
+                expectedWorkerGeneration = expectedWorkerGeneration,
+            )
+        }
+        val reservation = try {
+            client.recoverReservation(
+                idempotencyKey = UUID.fromString(identityBound.requestId),
+            )
+        } catch (_: FeedbackProtocolException.ReservationGone) {
+            return outbox.markCanceled(
+                localId = identityBound.localId,
+                expectedWorkerGeneration = expectedWorkerGeneration,
+            )
+        } ?: throw FeedbackProtocolException.ReservationPending()
+        val retention = FeedbackServerRetentionResponsePolicy.evaluate(
+            record = identityBound,
+            retainedUntil = reservation.retainedUntil,
+            nowMillis = System.currentTimeMillis(),
         )
-        val reservation = client.recoverReservation(
-            idempotencyKey = UUID.fromString(identityBound.requestId),
-        ) ?: throw FeedbackProtocolException.ReservationPending()
         return outbox.saveReservation(
             localId = identityBound.localId,
             serverReportId = reservation.reportId,
             serverReportToken = reservation.reportToken,
+            retainedUntil = retention.retainedUntil,
+            expectedWorkerGeneration = expectedWorkerGeneration,
+        )
+    }
+}
+
+internal object FeedbackBoundCancellationReconciler {
+    suspend fun reconcile(
+        client: FeedbackAttemptClient,
+        reportId: String,
+        reportToken: String,
+    ): FeedbackRemoteStatus {
+        val current = try {
+            client.status(
+                reportId = reportId,
+                reportToken = reportToken,
+            )
+        } catch (_: FeedbackProtocolException.ReservationPending) {
+            null
+        }
+        if (current != null) {
+            when (FeedbackRemoteStatusPolicy.recoverCancellation(current.status)) {
+                FeedbackRemoteAction.MARK_DELETED,
+                FeedbackRemoteAction.WAIT_FOR_DELETE,
+                -> return current
+                FeedbackRemoteAction.REQUEST_DELETE -> Unit
+                else -> throw FeedbackProtocolException.InvalidResponse()
+            }
+        }
+        return client.cancel(
+            reportId = reportId,
+            reportToken = reportToken,
         )
     }
 }
@@ -412,50 +572,154 @@ internal object FeedbackReservationRequestFactory {
 
 internal object FeedbackScheduler {
     internal const val INPUT_LOCAL_ID = "local_id"
+    internal const val INPUT_WORKER_GENERATION = "worker_generation"
     internal const val PROGRESS_STAGE = "stage"
     internal const val PROGRESS_PERCENT = "percent"
     private const val WORK_PREFIX = "noop_feedback_upload_v1:"
+    private const val GENERATION_TAG_PREFIX = "noop_feedback_generation:"
 
     private val constraints = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.CONNECTED)
         .build()
 
-    fun enqueue(context: Context, record: FeedbackRecord, replace: Boolean = false) {
+    fun enqueue(
+        context: Context,
+        record: FeedbackRecord,
+        replace: Boolean = false,
+    ): FeedbackRecord {
+        val prepared = FeedbackOutbox.from(context).prepareWorker(
+            localId = record.localId,
+            replace = replace,
+        )
+        enqueuePrepared(
+            context = context,
+            record = prepared,
+            policy = if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+            delayMillis = remainingRetryDelayMillis(prepared),
+        )
+        return prepared
+    }
+
+    private fun enqueuePrepared(
+        context: Context,
+        record: FeedbackRecord,
+        policy: ExistingWorkPolicy,
+        delayMillis: Long,
+    ) {
+        val generation = record.workerGeneration
+            ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
         FeedbackRuntimeStatusBus.publish(record, progressFor(record.state))
         val request = OneTimeWorkRequestBuilder<FeedbackUploadWorker>()
-            .setInputData(workDataOf(INPUT_LOCAL_ID to record.localId))
+            .setInputData(
+                workDataOf(
+                    INPUT_LOCAL_ID to record.localId,
+                    INPUT_WORKER_GENERATION to generation,
+                ),
+            )
             .setConstraints(constraints)
+            .setInitialDelay(delayMillis.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .addTag(generationTag(generation))
             .build()
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             workName(record.localId),
-            if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+            policy,
             request,
         )
     }
 
+    suspend fun enqueueContinuityRetry(
+        context: Context,
+        record: FeedbackRecord,
+        delayMillis: Long,
+    ) {
+        val generation = record.workerGeneration
+            ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
+        val persistedDelay = remainingRetryDelayMillis(record)
+        val effectiveDelay = if (record.retryNotBeforeMillis != null) {
+            persistedDelay
+        } else {
+            delayMillis
+        }
+        val request = OneTimeWorkRequestBuilder<FeedbackUploadWorker>()
+            .setInputData(
+                workDataOf(
+                    INPUT_LOCAL_ID to record.localId,
+                    INPUT_WORKER_GENERATION to generation,
+                ),
+            )
+            .setConstraints(constraints)
+            .setInitialDelay(
+                effectiveDelay.coerceAtLeast(0L),
+                TimeUnit.MILLISECONDS,
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .addTag(generationTag(generation))
+            .build()
+        FeedbackRuntimeStatusBus.publish(record, progressFor(record.state))
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            workName(record.localId),
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            request,
+        ).await()
+    }
+
     fun retry(context: Context, localId: String): FeedbackRecord {
-        val record = FeedbackOutbox.from(context).retry(localId)
-        enqueue(context, record, replace = true)
+        val generation = UUID.randomUUID().toString().lowercase(Locale.US)
+        val record = FeedbackOutbox.from(context).retry(
+            localId = localId,
+            replacementWorkerGeneration = generation,
+        )
+        enqueuePrepared(
+            context = context,
+            record = record,
+            policy = ExistingWorkPolicy.REPLACE,
+            delayMillis = 0L,
+        )
         return record
     }
 
     fun cancel(context: Context, localId: String): FeedbackRecord {
-        val record = FeedbackOutbox.from(context).requestCancel(localId)
-        enqueue(context, record, replace = true)
+        val generation = UUID.randomUUID().toString().lowercase(Locale.US)
+        val record = FeedbackOutbox.from(context).requestCancel(
+            localId = localId,
+            replacementWorkerGeneration = generation,
+        )
+        enqueuePrepared(
+            context = context,
+            record = record,
+            policy = ExistingWorkPolicy.REPLACE,
+            delayMillis = 0L,
+        )
         return record
     }
 
     /** Repairs the narrow crash window between atomic staging and WorkManager enqueue. */
     fun reconcile(context: Context) {
-        FeedbackOutbox.from(context).recover().forEach { record ->
+        val appContext = context.applicationContext
+        val outbox = FeedbackOutbox.from(appContext)
+        val workManager = WorkManager.getInstance(appContext)
+        outbox.recover().forEach { record ->
             when (record.state) {
                 FeedbackState.QUEUED,
                 FeedbackState.UPLOADING,
                 FeedbackState.RETRY_SCHEDULED,
                 FeedbackState.CANCELING,
                 FeedbackState.CANCEL_RETRY_SCHEDULED,
-                -> enqueue(context, record)
+                -> {
+                    val prepared = outbox.prepareWorker(
+                        localId = record.localId,
+                        replace = false,
+                    )
+                    if (!hasUnfinishedGeneration(workManager, prepared)) {
+                        enqueuePrepared(
+                            context = appContext,
+                            record = prepared,
+                            policy = ExistingWorkPolicy.APPEND_OR_REPLACE,
+                            delayMillis = remainingRetryDelayMillis(prepared),
+                        )
+                    }
+                }
                 FeedbackState.FAILED,
                 FeedbackState.CANCEL_FAILED,
                 FeedbackState.SENT,
@@ -467,6 +731,38 @@ internal object FeedbackScheduler {
 
     internal fun workName(localId: String): String =
         "$WORK_PREFIX${UUID.fromString(localId).toString().lowercase(Locale.US)}"
+
+    internal fun generationTag(generation: String): String =
+        "$GENERATION_TAG_PREFIX${UUID.fromString(generation).toString().lowercase(Locale.US)}"
+
+    internal fun remainingRetryDelayMillis(
+        record: FeedbackRecord,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): Long = record.retryNotBeforeMillis
+        ?.let { retryAt ->
+            if (retryAt <= nowMillis) 0L else retryAt - nowMillis
+        }
+        ?: 0L
+
+    private fun hasUnfinishedGeneration(
+        workManager: WorkManager,
+        record: FeedbackRecord,
+    ): Boolean {
+        val generation = record.workerGeneration ?: return false
+        val tag = generationTag(generation)
+        return runCatching {
+            runBlocking {
+                workManager.getWorkInfosForUniqueWorkFlow(workName(record.localId))
+                    .first()
+            }.any { info ->
+                    info.state !in setOf(
+                        WorkInfo.State.SUCCEEDED,
+                        WorkInfo.State.FAILED,
+                        WorkInfo.State.CANCELLED,
+                    ) && tag in info.tags
+                }
+        }.getOrDefault(false)
+    }
 
     internal fun progressFor(state: FeedbackState): Int = when (state) {
         FeedbackState.QUEUED,
@@ -490,6 +786,9 @@ class FeedbackUploadWorker(
         val localId = inputData.getString(FeedbackScheduler.INPUT_LOCAL_ID)
             ?.let { runCatching { UUID.fromString(it).toString().lowercase(Locale.US) }.getOrNull() }
             ?: return@withContext Result.failure()
+        val workerGeneration = inputData.getString(FeedbackScheduler.INPUT_WORKER_GENERATION)
+            ?.let { runCatching { UUID.fromString(it).toString().lowercase(Locale.US) }.getOrNull() }
+            ?: return@withContext Result.failure()
         val outbox = FeedbackOutbox.from(applicationContext)
         val initial = try {
             outbox.load(localId)
@@ -510,42 +809,78 @@ class FeedbackUploadWorker(
                 Result.failure()
             }
         } ?: return@withContext Result.success()
-        when (initial.state) {
-            FeedbackState.SENT,
-            FeedbackState.CANCELED,
-            FeedbackState.FAILED,
-            FeedbackState.CANCEL_FAILED,
-            -> {
-                FeedbackRuntimeStatusBus.publish(
-                    initial,
-                    FeedbackScheduler.progressFor(initial.state),
-                )
-                return@withContext Result.success()
+        if (initial.workerGeneration != workerGeneration) {
+            AppDiagnosticsRecorder.record(
+                "feedback.worker_generation",
+                fields = mapOf("outcome" to "superseded"),
+            )
+            return@withContext Result.success()
+        }
+        try {
+            when (initial.state) {
+                FeedbackState.SENT,
+                FeedbackState.CANCELED,
+                FeedbackState.FAILED,
+                FeedbackState.CANCEL_FAILED,
+                -> {
+                    FeedbackRuntimeStatusBus.publish(
+                        initial,
+                        FeedbackScheduler.progressFor(initial.state),
+                    )
+                    return@withContext Result.success()
+                }
+                FeedbackState.CANCELING,
+                FeedbackState.CANCEL_RETRY_SCHEDULED,
+                -> return@withContext cancelReport(outbox, initial, workerGeneration)
+                else -> uploadReport(outbox, initial, workerGeneration)
             }
-            FeedbackState.CANCELING,
-            FeedbackState.CANCEL_RETRY_SCHEDULED,
-            -> return@withContext cancelReport(outbox, initial)
-            else -> uploadReport(outbox, initial)
+        } catch (error: Throwable) {
+            if (!error.isWorkerSuperseded()) throw error
+            AppDiagnosticsRecorder.record(
+                "feedback.worker_generation",
+                fields = mapOf("outcome" to "superseded"),
+            )
+            Result.success()
         }
     }
 
     private suspend fun uploadReport(
         outbox: FeedbackOutbox,
         initial: FeedbackRecord,
+        workerGeneration: String,
     ): Result {
-        val attempt = maxOf(initial.attempt + 1, runAttemptCount + 1)
+        finishExpiredContinuityAsUnconfirmedDeletion(
+            outbox,
+            initial,
+            workerGeneration,
+        )?.let {
+            return it
+        }
+        val attempt = FeedbackRetryPolicy.nextDeliveryAttempt(initial.attempt)
         if (attempt > FeedbackOutbox.MAX_ATTEMPTS) {
             return failPermanently(
                 outbox,
                 initial.localId,
                 FeedbackFailureCategory.UNKNOWN,
                 cancel = false,
+                workerGeneration = workerGeneration,
             )
         }
         val uploading = try {
-            outbox.beginUpload(initial.localId, attempt)
+            outbox.beginUpload(
+                localId = initial.localId,
+                attempt = attempt,
+                expectedWorkerGeneration = workerGeneration,
+            )
         } catch (error: Throwable) {
-            return handleFailure(outbox, initial.localId, attempt, error, cancel = false)
+            return handleFailure(
+                outbox,
+                initial.localId,
+                attempt,
+                error,
+                cancel = false,
+                workerGeneration = workerGeneration,
+            )
         }
         publishProgress(uploading, "reserving", 5)
         if (!FeedbackIdentityContinuityPolicy.canContactRemote(uploading)) {
@@ -554,9 +889,11 @@ class FeedbackUploadWorker(
                 localId = uploading.localId,
                 category = FeedbackFailureCategory.IDENTITY,
                 cancel = false,
+                workerGeneration = workerGeneration,
             )
         }
 
+        var activeClient: FeedbackAttemptClient? = null
         return try {
             val archive = outbox.archive(uploading)
             FeedbackArchive.validate(
@@ -569,11 +906,11 @@ class FeedbackUploadWorker(
             val configuration = FeedbackConfiguration.load()
                 ?: throw FeedbackProtocolException.Configuration()
             val client = feedbackClient(
+                outbox = outbox,
                 record = uploading,
                 configuration = configuration,
-                reservationContinuityIdentitySubjectSha256s =
-                    outbox.reservationContinuityIdentitySubjectSha256s(),
             )
+            activeClient = client
             val reservationRequest = FeedbackReservationRequestFactory.from(uploading)
             val idempotencyKey = UUID.fromString(uploading.requestId)
 
@@ -582,35 +919,116 @@ class FeedbackUploadWorker(
                     outbox = outbox,
                     record = uploading,
                     client = client,
+                    workerGeneration = workerGeneration,
                 )?.let { return it }
             }
 
             val currentBeforeReservation = outbox.load(uploading.localId)
                 ?: return Result.success()
             if (currentBeforeReservation.state.isCancellationState()) {
-                return cancelReport(outbox, currentBeforeReservation, client)
+                return cancelReport(
+                    outbox,
+                    currentBeforeReservation,
+                    workerGeneration,
+                    client,
+                )
             }
-            val identityBound = bindIdentity(outbox, currentBeforeReservation, client)
+            val identityBound = bindIdentity(
+                outbox,
+                currentBeforeReservation,
+                client,
+                workerGeneration,
+            )
             if (identityBound.state.isCancellationState()) {
-                return cancelReport(outbox, identityBound, client)
+                return cancelReport(outbox, identityBound, workerGeneration, client)
             }
             val currentBeforeRemoteReservation = outbox.load(identityBound.localId)
                 ?: return Result.success()
             if (currentBeforeRemoteReservation.state.isCancellationState()) {
-                return cancelReport(outbox, currentBeforeRemoteReservation, client)
+                return cancelReport(
+                    outbox,
+                    currentBeforeRemoteReservation,
+                    workerGeneration,
+                    client,
+                )
+            }
+            if (!FeedbackReservationContinuityPolicy.permitsNewReservation(
+                    currentBeforeRemoteReservation,
+                    System.currentTimeMillis(),
+                )
+            ) {
+                val recovered = when (
+                    val recovery = FeedbackDeliveryReservationReconciler.reconcile(
+                        outbox = outbox,
+                        record = currentBeforeRemoteReservation,
+                        client = client,
+                        idempotencyKey = idempotencyKey,
+                        expectedWorkerGeneration = workerGeneration,
+                    )
+                ) {
+                    is FeedbackDeliveryReservationRecovery.Recovered ->
+                        recovery.reservation
+                    is FeedbackDeliveryReservationRecovery.Retired -> {
+                        publishProgress(recovery.record, "canceled", 0)
+                        return Result.success()
+                    }
+                }
+                val retention = FeedbackServerRetentionResponsePolicy.evaluate(
+                    record = currentBeforeRemoteReservation,
+                    retainedUntil = recovered.retainedUntil,
+                    nowMillis = System.currentTimeMillis(),
+                )
+                val canceling = outbox.requestCancel(
+                    localId = currentBeforeRemoteReservation.localId,
+                    expectedWorkerGeneration = workerGeneration,
+                )
+                val stored = outbox.saveReservation(
+                    localId = currentBeforeRemoteReservation.localId,
+                    serverReportId = recovered.reportId,
+                    serverReportToken = recovered.reportToken,
+                    retainedUntil = retention.retainedUntil,
+                    expectedWorkerGeneration = workerGeneration,
+                )
+                return cancelReport(
+                    outbox,
+                    if (stored.state.isCancellationState()) stored else canceling,
+                    workerGeneration,
+                    client,
+                )
             }
 
             val reservation = client.reserve(
                 idempotencyKey = idempotencyKey,
                 request = reservationRequest,
             )
+            val retention = FeedbackServerRetentionResponsePolicy.evaluate(
+                record = currentBeforeRemoteReservation,
+                retainedUntil = reservation.retainedUntil,
+                nowMillis = System.currentTimeMillis(),
+            )
+            if (!retention.accepted) {
+                outbox.requestCancel(
+                    localId = currentBeforeRemoteReservation.localId,
+                    expectedWorkerGeneration = workerGeneration,
+                )
+                val stored = outbox.saveReservation(
+                    localId = currentBeforeRemoteReservation.localId,
+                    serverReportId = reservation.reportId,
+                    serverReportToken = reservation.reportToken,
+                    retainedUntil = retention.retainedUntil,
+                    expectedWorkerGeneration = workerGeneration,
+                )
+                return cancelReport(outbox, stored, workerGeneration, client)
+            }
             val reserved = outbox.saveReservation(
-                uploading.localId,
-                reservation.reportId,
-                reservation.reportToken,
+                localId = uploading.localId,
+                serverReportId = reservation.reportId,
+                serverReportToken = reservation.reportToken,
+                retainedUntil = retention.retainedUntil,
+                expectedWorkerGeneration = workerGeneration,
             )
             if (reserved.state.isCancellationState()) {
-                return cancelReport(outbox, reserved, client)
+                return cancelReport(outbox, reserved, workerGeneration, client)
             }
 
             if (reservation.status != "reserved") {
@@ -618,31 +1036,14 @@ class FeedbackUploadWorker(
                     reportId = reservation.reportId,
                     reportToken = reservation.reportToken,
                 )
-                return when (FeedbackRemoteStatusPolicy.recoverUpload(remote.status)) {
-                    FeedbackRemoteAction.MARK_SENT ->
-                        commitRemoteSent(outbox, reserved.localId, remote, client)
-                    FeedbackRemoteAction.MARK_DELETED -> {
-                        val canceling = outbox.requestCancel(reserved.localId)
-                        val canceled = outbox.markCanceled(canceling.localId)
-                        publishProgress(canceled, "canceled", 0)
-                        Result.success()
-                    }
-                    FeedbackRemoteAction.REJECT ->
-                        failPermanently(
-                            outbox,
-                            reserved.localId,
-                            FeedbackFailureCategory.SERVER_REJECTED,
-                            cancel = false,
-                        )
-                    FeedbackRemoteAction.REQUEST_DELETE -> {
-                        val canceling = outbox.requestCancel(reserved.localId)
-                        cancelReport(outbox, canceling, client)
-                    }
-                    FeedbackRemoteAction.CONTINUE_UPLOAD ->
-                        throw FeedbackProtocolException.InvalidResponse()
-                    FeedbackRemoteAction.WAIT_FOR_DELETE ->
-                        throw FeedbackProtocolException.InvalidResponse()
-                }
+                return applyRemoteStatus(
+                    outbox,
+                    reserved,
+                    remote,
+                    client,
+                    workerGeneration,
+                )
+                    ?: throw FeedbackProtocolException.InvalidResponse()
             }
             val upload = reservation.upload
                 ?: throw FeedbackProtocolException.InvalidResponse()
@@ -659,7 +1060,12 @@ class FeedbackUploadWorker(
                     ) { sent, total ->
                         val percent = FeedbackRetryPolicy.uploadProgress(sent, total)
                         if (progressThrottler.shouldPublish(percent)) {
-                            publishTransientProgress(outbox, reserved.localId, percent)
+                            publishTransientProgress(
+                                outbox,
+                                reserved.localId,
+                                workerGeneration,
+                                percent,
+                            )
                         }
                     }
                 },
@@ -671,17 +1077,39 @@ class FeedbackUploadWorker(
                     if (refreshed.status != "reserved" || refreshed.upload == null) {
                         throw FeedbackProtocolException.InvalidResponse()
                     }
+                    val refreshedRetention =
+                        FeedbackServerRetentionResponsePolicy.evaluate(
+                            record = reserved,
+                            retainedUntil = refreshed.retainedUntil,
+                            nowMillis = System.currentTimeMillis(),
+                        )
+                    if (!refreshedRetention.accepted) {
+                        outbox.requestCancel(
+                            localId = reserved.localId,
+                            expectedWorkerGeneration = workerGeneration,
+                        )
+                        outbox.saveReservation(
+                            localId = reserved.localId,
+                            serverReportId = refreshed.reportId,
+                            serverReportToken = refreshed.reportToken,
+                            retainedUntil = refreshedRetention.retainedUntil,
+                            expectedWorkerGeneration = workerGeneration,
+                        )
+                        throw FeedbackProtocolException.ReservationPending()
+                    }
                     outbox.saveReservation(
-                        reserved.localId,
-                        refreshed.reportId,
-                        refreshed.reportToken,
+                        localId = reserved.localId,
+                        serverReportId = refreshed.reportId,
+                        serverReportToken = refreshed.reportToken,
+                        retainedUntil = refreshedRetention.retainedUntil,
+                        expectedWorkerGeneration = workerGeneration,
                     )
                     refreshed.upload
                 },
             )
             val beforeComplete = outbox.load(reserved.localId) ?: return Result.success()
             if (beforeComplete.state.isCancellationState()) {
-                return cancelReport(outbox, beforeComplete, client)
+                return cancelReport(outbox, beforeComplete, workerGeneration, client)
             }
 
             publishProgress(beforeComplete, "finalizing", 95)
@@ -689,11 +1117,30 @@ class FeedbackUploadWorker(
                 reportId = reservation.reportId,
                 reportToken = reservation.reportToken,
             )
-            commitRemoteSent(outbox, reserved.localId, completed, client)
+            commitRemoteSent(
+                outbox,
+                reserved.localId,
+                completed,
+                client,
+                workerGeneration,
+            )
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            handleFailure(outbox, uploading.localId, attempt, error, cancel = false)
+            val current = runCatching {
+                outbox.load(uploading.localId)
+            }.getOrNull()
+            if (current?.state?.isCancellationState() == true) {
+                return cancelReport(outbox, current, workerGeneration, activeClient)
+            }
+            handleFailure(
+                outbox,
+                uploading.localId,
+                attempt,
+                error,
+                cancel = false,
+                workerGeneration = workerGeneration,
+            )
         }
     }
 
@@ -701,22 +1148,108 @@ class FeedbackUploadWorker(
         outbox: FeedbackOutbox,
         record: FeedbackRecord,
         client: FeedbackAttemptClient,
+        workerGeneration: String,
     ): Result? {
-        val reportId = record.serverReportId
+        var activeRecord = record
+        var reportId = record.serverReportId
             ?: throw FeedbackProtocolException.InvalidResponse()
-        val reportToken = record.serverReportToken
+        var reportToken = record.serverReportToken
             ?: throw FeedbackProtocolException.InvalidResponse()
-        val current = client.status(reportId, reportToken)
-        applyRemoteStatus(outbox, record, current, client)?.let { return it }
+        val current = try {
+            client.status(reportId, reportToken)
+        } catch (_: FeedbackProtocolException.ReservationPending) {
+            when (
+                val recovery = FeedbackDeliveryReservationReconciler.reconcile(
+                    outbox = outbox,
+                    record = record,
+                    client = client,
+                    idempotencyKey = UUID.fromString(record.requestId),
+                    expectedWorkerGeneration = workerGeneration,
+                )
+            ) {
+                is FeedbackDeliveryReservationRecovery.Retired -> {
+                    publishProgress(recovery.record, "canceled", 0)
+                    return Result.success()
+                }
+                is FeedbackDeliveryReservationRecovery.Recovered -> {
+                    val reservation = recovery.reservation
+                    val retention = FeedbackServerRetentionResponsePolicy.evaluate(
+                        record = record,
+                        retainedUntil = reservation.retainedUntil,
+                        nowMillis = System.currentTimeMillis(),
+                    )
+                    if (!retention.accepted) {
+                        outbox.requestCancel(
+                            localId = record.localId,
+                            expectedWorkerGeneration = workerGeneration,
+                        )
+                    }
+                    activeRecord = outbox.saveReservation(
+                        localId = record.localId,
+                        serverReportId = reservation.reportId,
+                        serverReportToken = reservation.reportToken,
+                        retainedUntil = retention.retainedUntil,
+                        expectedWorkerGeneration = workerGeneration,
+                    )
+                    if (activeRecord.state.isCancellationState()) {
+                        return cancelReport(
+                            outbox,
+                            activeRecord,
+                            workerGeneration,
+                            client,
+                        )
+                    }
+                    reportId = reservation.reportId
+                    reportToken = reservation.reportToken
+                    if (reservation.status == "reserved") {
+                        FeedbackRemoteStatus(
+                            status = "reserved",
+                            receipt = null,
+                            retainedUntil = retention.retainedUntil,
+                        )
+                    } else {
+                        client.status(reportId, reportToken)
+                    }
+                }
+            }
+        }
+        applyRemoteStatus(
+            outbox,
+            activeRecord,
+            current,
+            client,
+            workerGeneration,
+        )?.let { return it }
 
+        val beforeComplete = outbox.load(activeRecord.localId)
+            ?: return Result.success()
+        if (beforeComplete.state.isCancellationState()) {
+            return cancelReport(outbox, beforeComplete, workerGeneration, client)
+        }
+        reportId = beforeComplete.serverReportId
+            ?: throw FeedbackProtocolException.InvalidResponse()
+        reportToken = beforeComplete.serverReportToken
+            ?: throw FeedbackProtocolException.InvalidResponse()
         val completed = try {
             client.complete(reportId, reportToken)
         } catch (error: FeedbackProtocolException.Http) {
             if (error.statusCode != 409) throw error
             val refreshed = client.status(reportId, reportToken)
-            return applyRemoteStatus(outbox, record, refreshed, client)
+            return applyRemoteStatus(
+                outbox,
+                record,
+                refreshed,
+                client,
+                workerGeneration,
+            )
         }
-        return applyRemoteStatus(outbox, record, completed, client)
+        return applyRemoteStatus(
+            outbox,
+            record,
+            completed,
+            client,
+            workerGeneration,
+        )
             ?: throw FeedbackProtocolException.InvalidResponse()
     }
 
@@ -725,25 +1258,48 @@ class FeedbackUploadWorker(
         record: FeedbackRecord,
         remote: FeedbackRemoteStatus,
         client: FeedbackAttemptClient,
+        workerGeneration: String,
     ): Result? = when (FeedbackRemoteStatusPolicy.recoverUpload(remote.status)) {
         FeedbackRemoteAction.MARK_SENT ->
-            commitRemoteSent(outbox, record.localId, remote, client)
+            commitRemoteSent(
+                outbox,
+                record.localId,
+                remote,
+                client,
+                workerGeneration,
+            )
         FeedbackRemoteAction.MARK_DELETED -> {
-            val canceling = outbox.requestCancel(record.localId)
-            val canceled = outbox.markCanceled(canceling.localId)
+            val canceling = outbox.requestCancel(
+                localId = record.localId,
+                expectedWorkerGeneration = workerGeneration,
+            )
+            val canceled = outbox.markCanceled(
+                localId = canceling.localId,
+                expectedWorkerGeneration = workerGeneration,
+            )
             publishProgress(canceled, "canceled", 0)
             Result.success()
         }
-        FeedbackRemoteAction.REJECT ->
-            failPermanently(
-                outbox,
-                record.localId,
-                FeedbackFailureCategory.SERVER_REJECTED,
-                cancel = false,
-            )
+        FeedbackRemoteAction.REJECT -> {
+            val latest = outbox.load(record.localId) ?: return Result.success()
+            if (latest.state.isCancellationState()) {
+                cancelReport(outbox, latest, workerGeneration, client)
+            } else {
+                failPermanently(
+                    outbox,
+                    record.localId,
+                    FeedbackFailureCategory.SERVER_REJECTED,
+                    cancel = false,
+                    workerGeneration = workerGeneration,
+                )
+            }
+        }
         FeedbackRemoteAction.REQUEST_DELETE -> {
-            val canceling = outbox.requestCancel(record.localId)
-            cancelReport(outbox, canceling, client)
+            val canceling = outbox.requestCancel(
+                localId = record.localId,
+                expectedWorkerGeneration = workerGeneration,
+            )
+            cancelReport(outbox, canceling, workerGeneration, client)
         }
         FeedbackRemoteAction.WAIT_FOR_DELETE ->
             throw FeedbackProtocolException.InvalidResponse()
@@ -755,16 +1311,36 @@ class FeedbackUploadWorker(
         localId: String,
         remote: FeedbackRemoteStatus,
         client: FeedbackAttemptClient,
+        workerGeneration: String,
     ): Result {
         val receipt = remote.receipt
             ?: throw FeedbackProtocolException.InvalidResponse()
         val retainedUntil = remote.retainedUntil
             ?: throw FeedbackProtocolException.InvalidResponse()
+        val current = outbox.load(localId)
+            ?: throw FeedbackProtocolException.InvalidResponse()
+        val retention = FeedbackServerRetentionResponsePolicy.evaluate(
+            record = current,
+            retainedUntil = retainedUntil,
+            nowMillis = System.currentTimeMillis(),
+        )
+        if (!retention.accepted) {
+            val canceling = if (current.state.isCancellationState()) {
+                current
+            } else {
+                outbox.requestCancel(
+                    localId = localId,
+                    expectedWorkerGeneration = workerGeneration,
+                )
+            }
+            return cancelReport(outbox, canceling, workerGeneration, client)
+        }
         return when (
             val commit = outbox.commitCompletion(
                 localId = localId,
                 receipt = receipt,
-                retainedUntil = retainedUntil,
+                retainedUntil = retention.retainedUntil,
+                expectedWorkerGeneration = workerGeneration,
             )
         ) {
             is FeedbackCompletionCommit.Sent -> {
@@ -772,13 +1348,14 @@ class FeedbackUploadWorker(
                 Result.success()
             }
             is FeedbackCompletionCommit.CancellationRequired ->
-                cancelReport(outbox, commit.record, client)
+                cancelReport(outbox, commit.record, workerGeneration, client)
         }
     }
 
     private suspend fun cancelReport(
         outbox: FeedbackOutbox,
         initial: FeedbackRecord,
+        workerGeneration: String,
         existingClient: FeedbackAttemptClient? = null,
     ): Result {
         val attempt = FeedbackRetryPolicy.nextCancellationAttempt(initial.cancellationAttempt)
@@ -788,15 +1365,24 @@ class FeedbackUploadWorker(
                 localId = initial.localId,
                 category = FeedbackFailureCategory.DELETION_PENDING,
                 cancel = true,
+                workerGeneration = workerGeneration,
             )
         }
         var canceling = try {
             outbox.noteCancelAttempt(
-                initial.localId,
-                attempt,
+                localId = initial.localId,
+                attempt = attempt,
+                expectedWorkerGeneration = workerGeneration,
             )
         } catch (error: Throwable) {
-            return handleFailure(outbox, initial.localId, attempt, error, cancel = true)
+            return handleFailure(
+                outbox,
+                initial.localId,
+                attempt,
+                error,
+                cancel = true,
+                workerGeneration = workerGeneration,
+            )
         }
         publishProgress(canceling, "canceling", 0)
         if (!FeedbackIdentityContinuityPolicy.canContactRemote(canceling)) {
@@ -805,76 +1391,84 @@ class FeedbackUploadWorker(
                 localId = canceling.localId,
                 category = FeedbackFailureCategory.IDENTITY,
                 cancel = true,
+                workerGeneration = workerGeneration,
             )
         }
         return try {
             var client = existingClient
             if (FeedbackCancellationPolicy.requiresReservationReconciliation(canceling)) {
                 client = client ?: feedbackClient(
+                    outbox = outbox,
                     record = canceling,
-                    reservationContinuityIdentitySubjectSha256s =
-                        outbox.reservationContinuityIdentitySubjectSha256s(),
                 )
                 canceling = FeedbackCancellationReconciler.reconcile(
                     outbox = outbox,
                     record = canceling,
                     client = client,
+                    expectedWorkerGeneration = workerGeneration,
                 )
             }
             val reportId = canceling.serverReportId
             val reportToken = canceling.serverReportToken
             if (reportId != null && reportToken != null) {
                 client = client ?: feedbackClient(
+                    outbox = outbox,
                     record = canceling,
-                    reservationContinuityIdentitySubjectSha256s =
-                        outbox.reservationContinuityIdentitySubjectSha256s(),
                 )
-                bindIdentity(outbox, canceling, client)
-                val current = client.status(
+                bindIdentity(outbox, canceling, client, workerGeneration)
+                val remote = FeedbackBoundCancellationReconciler.reconcile(
+                    client = client,
                     reportId = reportId,
                     reportToken = reportToken,
                 )
-                when (FeedbackRemoteStatusPolicy.recoverCancellation(current.status)) {
+                return when (FeedbackRemoteStatusPolicy.recoverCancellation(remote.status)) {
                     FeedbackRemoteAction.MARK_DELETED -> {
-                        val canceled = outbox.markCanceled(canceling.localId)
-                        publishProgress(canceled, "canceled", 0)
-                        return Result.success()
-                    }
-                    FeedbackRemoteAction.WAIT_FOR_DELETE ->
-                        return scheduleDeletionPoll(outbox, canceling.localId)
-                    FeedbackRemoteAction.REQUEST_DELETE -> Unit
-                    else -> throw FeedbackProtocolException.InvalidResponse()
-                }
-                val deletion = client.cancel(
-                    reportId = reportId,
-                    reportToken = reportToken,
-                )
-                return when (FeedbackRemoteStatusPolicy.recoverCancellation(deletion.status)) {
-                    FeedbackRemoteAction.MARK_DELETED -> {
-                        val canceled = outbox.markCanceled(canceling.localId)
+                        val canceled = outbox.markCanceled(
+                            localId = canceling.localId,
+                            expectedWorkerGeneration = workerGeneration,
+                        )
                         publishProgress(canceled, "canceled", 0)
                         Result.success()
                     }
                     FeedbackRemoteAction.WAIT_FOR_DELETE ->
-                        scheduleDeletionPoll(outbox, canceling.localId)
+                        scheduleDeletionPoll(
+                            outbox,
+                            canceling.localId,
+                            workerGeneration,
+                        )
                     FeedbackRemoteAction.REQUEST_DELETE ->
-                        scheduleDeletionPoll(outbox, canceling.localId)
+                        scheduleDeletionPoll(
+                            outbox,
+                            canceling.localId,
+                            workerGeneration,
+                        )
                     else -> throw FeedbackProtocolException.InvalidResponse()
                 }
             }
-            val canceled = outbox.markCanceled(canceling.localId)
+            val canceled = outbox.markCanceled(
+                localId = canceling.localId,
+                expectedWorkerGeneration = workerGeneration,
+            )
             publishProgress(canceled, "canceled", 0)
             Result.success()
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            handleFailure(outbox, canceling.localId, attempt, error, cancel = true)
+            handleFailure(
+                outbox,
+                canceling.localId,
+                attempt,
+                error,
+                cancel = true,
+                workerGeneration = workerGeneration,
+            )
         }
     }
 
     private suspend fun scheduleDeletionPoll(
         outbox: FeedbackOutbox,
         localId: String,
+        workerGeneration: String,
     ): Result {
         val current = outbox.load(localId) ?: return Result.success()
         if (current.cancellationAttempt >= FeedbackOutbox.MAX_ATTEMPTS) {
@@ -883,11 +1477,13 @@ class FeedbackUploadWorker(
                 localId = localId,
                 category = FeedbackFailureCategory.DELETION_PENDING,
                 cancel = true,
+                workerGeneration = workerGeneration,
             )
         }
         val retry = outbox.scheduleCancelRetry(
-            localId,
-            FeedbackFailureCategory.DELETION_PENDING,
+            localId = localId,
+            failure = FeedbackFailureCategory.DELETION_PENDING,
+            expectedWorkerGeneration = workerGeneration,
         )
         publishProgress(retry, "cancel_retry_scheduled", 0)
         return Result.retry()
@@ -899,8 +1495,104 @@ class FeedbackUploadWorker(
         attempt: Int,
         error: Throwable,
         cancel: Boolean,
+        workerGeneration: String,
     ): Result {
+        if (error.isWorkerSuperseded()) {
+            AppDiagnosticsRecorder.record(
+                "feedback.worker_generation",
+                fields = mapOf("outcome" to "superseded"),
+            )
+            return Result.success()
+        }
         val decision = FeedbackRetryPolicy.classify(error)
+        if (decision.preservesAttemptBudget) {
+            val current = outbox.load(localId)
+            if (current != null &&
+                FeedbackReservationContinuityPolicy.hasExpired(
+                    current,
+                    System.currentTimeMillis(),
+                )
+            ) {
+                return finishExpiredContinuityAsUnconfirmedDeletion(
+                    outbox,
+                    current,
+                    workerGeneration,
+                ) ?: Result.success()
+            }
+            return try {
+                val schedule = outbox.scheduleContinuityRetry(
+                    localId = localId,
+                    lane = if (cancel) {
+                        FeedbackReservationAttemptLane.CANCELLATION
+                    } else {
+                        FeedbackReservationAttemptLane.DELIVERY
+                    },
+                    failure = decision.category,
+                    allowBoundIdentity =
+                        decision.allowsBoundIdentityContinuity,
+                    expectedWorkerGeneration = workerGeneration,
+                )
+                val waitStage = if (decision.allowsBoundIdentityContinuity) {
+                    "reservation_continuity_wait"
+                } else {
+                    "identity_continuity_wait"
+                }
+                publishProgress(
+                    schedule.record,
+                    waitStage,
+                    0,
+                )
+                if (!cancel &&
+                    !decision.allowsBoundIdentityContinuity &&
+                    schedule.record.state.isCancellationState()
+                ) {
+                    val canceled = outbox.markCanceled(
+                        localId = schedule.record.localId,
+                        expectedWorkerGeneration =
+                            schedule.record.workerGeneration,
+                    )
+                    publishProgress(canceled, "canceled", 0)
+                    AppDiagnosticsRecorder.record(
+                        "feedback.$waitStage",
+                        fields = mapOf("outcome" to "cancelled"),
+                    )
+                    return Result.success()
+                }
+                FeedbackScheduler.enqueueContinuityRetry(
+                    context = applicationContext,
+                    record = schedule.record,
+                    delayMillis = schedule.delayMillis,
+                )
+                AppDiagnosticsRecorder.record(
+                    "feedback.$waitStage",
+                    fields = mapOf("outcome" to "deferred"),
+                )
+                Result.success()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (scheduleError: Throwable) {
+                if (scheduleError.isWorkerSuperseded()) {
+                    AppDiagnosticsRecorder.record(
+                        "feedback.worker_generation",
+                        fields = mapOf("outcome" to "superseded"),
+                    )
+                    return Result.success()
+                }
+                runCatching {
+                    FeedbackScheduler.reconcile(applicationContext)
+                }
+                val waitStage = if (decision.allowsBoundIdentityContinuity) {
+                    "reservation_continuity_wait"
+                } else {
+                    "identity_continuity_wait"
+                }
+                AppDiagnosticsRecorder.record(
+                    "feedback.$waitStage",
+                    fields = mapOf("outcome" to "scheduler_repair_requested"),
+                )
+                Result.success()
+            }
+        }
         val shouldRetry = if (cancel) {
             FeedbackRetryPolicy.shouldRetryCancellation(decision, attempt)
         } else {
@@ -908,9 +1600,17 @@ class FeedbackUploadWorker(
         }
         return if (shouldRetry) {
             val record = if (cancel) {
-                outbox.scheduleCancelRetry(localId, decision.category)
+                outbox.scheduleCancelRetry(
+                    localId = localId,
+                    failure = decision.category,
+                    expectedWorkerGeneration = workerGeneration,
+                )
             } else {
-                outbox.scheduleRetry(localId, decision.category)
+                outbox.scheduleRetry(
+                    localId = localId,
+                    failure = decision.category,
+                    expectedWorkerGeneration = workerGeneration,
+                )
             }
             publishProgress(
                 record,
@@ -919,7 +1619,13 @@ class FeedbackUploadWorker(
             )
             Result.retry()
         } else {
-            failPermanently(outbox, localId, decision.category, cancel)
+            failPermanently(
+                outbox,
+                localId,
+                decision.category,
+                cancel,
+                workerGeneration,
+            )
         }
     }
 
@@ -928,16 +1634,39 @@ class FeedbackUploadWorker(
         localId: String,
         category: FeedbackFailureCategory,
         cancel: Boolean,
+        workerGeneration: String,
     ): Result {
         val record = if (cancel) {
-            outbox.markCancelFailed(localId, category)
+            outbox.markCancelFailed(
+                localId = localId,
+                failure = category,
+                expectedWorkerGeneration = workerGeneration,
+            )
         } else {
-            outbox.markFailed(localId, category)
+            outbox.markFailed(
+                localId = localId,
+                failure = category,
+                expectedWorkerGeneration = workerGeneration,
+            )
         }
         publishProgress(record, if (cancel) "cancel_failed" else "failed", 0)
         return Result.failure(
             workDataOf("failure_category" to category.wireValue),
         )
+    }
+
+    private suspend fun finishExpiredContinuityAsUnconfirmedDeletion(
+        outbox: FeedbackOutbox,
+        record: FeedbackRecord,
+        workerGeneration: String,
+    ): Result? {
+        val unconfirmed = outbox.markUnconfirmedDeletionIfContinuityExpired(
+            localId = record.localId,
+            expectedWorkerGeneration = workerGeneration,
+        )
+            ?: return null
+        publishProgress(unconfirmed, "cancel_failed", 0)
+        return Result.success()
     }
 
     private suspend fun publishProgress(
@@ -961,17 +1690,23 @@ class FeedbackUploadWorker(
     private fun publishTransientProgress(
         outbox: FeedbackOutbox,
         localId: String,
+        workerGeneration: String,
         percent: Int,
     ) {
-        val current = runCatching { outbox.load(localId) }.getOrNull() ?: return
+        val current = runCatching {
+            outbox.loadForProgress(
+                localId = localId,
+                expectedWorkerGeneration = workerGeneration,
+            )
+        }.getOrNull() ?: return
         if (current.state != FeedbackState.UPLOADING) return
         FeedbackRuntimeStatusBus.publish(current, percent.coerceIn(0, 100))
     }
 
     private fun feedbackClient(
+        outbox: FeedbackOutbox,
         record: FeedbackRecord,
         configuration: FeedbackConfiguration? = null,
-        reservationContinuityIdentitySubjectSha256s: Set<String>,
     ): FeedbackAttemptClient {
         if (!FeedbackIdentityContinuityPolicy.canContactRemote(record)) {
             throw FeedbackProtocolException.Identity()
@@ -988,7 +1723,7 @@ class FeedbackUploadWorker(
                     FeedbackReservationContinuityPolicy
                         .requiresIdentityLifetimeCheck(record),
                 reservationContinuityIdentitySubjectSha256s =
-                    reservationContinuityIdentitySubjectSha256s,
+                    outbox::reservationContinuityIdentitySubjectSha256s,
             ),
             transport = FeedbackApiClient(resolvedConfiguration),
             expectedIdentitySubjectSha256 = record.identitySubjectSha256,
@@ -999,9 +1734,13 @@ class FeedbackUploadWorker(
         outbox: FeedbackOutbox,
         record: FeedbackRecord,
         client: FeedbackAttemptClient,
-    ): FeedbackRecord {
-        val identitySubjectSha256 = client.identitySubjectSha256()
-        return outbox.bindIdentity(record.localId, identitySubjectSha256)
+        workerGeneration: String,
+    ): FeedbackRecord = client.bindIdentity { identitySubjectSha256 ->
+        outbox.bindIdentity(
+            localId = record.localId,
+            identitySubjectSha256 = identitySubjectSha256,
+            expectedWorkerGeneration = workerGeneration,
+        )
     }
 
 }
@@ -1010,3 +1749,6 @@ private fun FeedbackState.isCancellationState(): Boolean =
     this == FeedbackState.CANCELING ||
         this == FeedbackState.CANCEL_RETRY_SCHEDULED ||
         this == FeedbackState.CANCEL_FAILED
+
+private fun Throwable.isWorkerSuperseded(): Boolean =
+    this is FeedbackWorkerSupersededException

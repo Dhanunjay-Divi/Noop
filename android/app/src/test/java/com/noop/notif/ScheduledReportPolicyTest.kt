@@ -1,6 +1,8 @@
 package com.noop.notif
 
 import java.io.File
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -92,6 +94,21 @@ class ScheduledReportPolicyTest {
         )
     }
 
+    @Test fun morningSuppressedDuringQuietHoursWithoutConsumingItsDay() {
+        assertFalse(
+            ScheduledReportPolicy.shouldNotifyMorning(
+                enabled = true, materializedAfterSync = true, chargeOrRestPresent = true,
+                lastNotifiedDay = null, reportDay = "2026-06-21", inQuietHours = true,
+            ),
+        )
+        assertTrue(
+            ScheduledReportPolicy.shouldNotifyMorning(
+                enabled = true, materializedAfterSync = true, chargeOrRestPresent = true,
+                lastNotifiedDay = null, reportDay = "2026-06-21", inQuietHours = false,
+            ),
+        )
+    }
+
     @Test fun disabledOsChannelBlocksReportDelivery() {
         assertFalse(
             ScheduledReportPolicy.deliveryAvailable(
@@ -133,6 +150,57 @@ class ScheduledReportPolicyTest {
         assertTrue(ScheduledReportPolicy.shouldNotifyWorkout(enabled = true, newestWorkoutTs = 1L, lastWorkoutTs = 0L))
     }
 
+    @Test fun workoutRemainsEligibleAfterQuietHours() {
+        assertFalse(
+            ScheduledReportPolicy.shouldNotifyWorkout(
+                enabled = true,
+                newestWorkoutTs = 2_000L,
+                lastWorkoutTs = 1_000L,
+                inQuietHours = true,
+            ),
+        )
+        assertTrue(
+            ScheduledReportPolicy.shouldNotifyWorkout(
+                enabled = true,
+                newestWorkoutTs = 2_000L,
+                lastWorkoutTs = 1_000L,
+                inQuietHours = false,
+            ),
+        )
+    }
+
+    @Test fun quietHoursEndHandlesOvernightDaytimeAndEmptyWindows() {
+        val zone = ZoneId.of("America/New_York")
+        val overnight = ZonedDateTime.of(2026, 9, 14, 23, 0, 0, 0, zone)
+        assertEquals(
+            ZonedDateTime.of(2026, 9, 15, 7, 0, 0, 0, zone),
+            ScheduledReportPolicy.nextQuietHoursEnd(
+                now = overnight,
+                quietHoursEnabled = true,
+                startMinutes = 22 * 60,
+                endMinutes = 7 * 60,
+            ),
+        )
+        val daytime = ZonedDateTime.of(2026, 9, 14, 11, 0, 0, 0, zone)
+        assertEquals(
+            ZonedDateTime.of(2026, 9, 14, 12, 0, 0, 0, zone),
+            ScheduledReportPolicy.nextQuietHoursEnd(
+                now = daytime,
+                quietHoursEnabled = true,
+                startMinutes = 10 * 60,
+                endMinutes = 12 * 60,
+            ),
+        )
+        assertNull(
+            ScheduledReportPolicy.nextQuietHoursEnd(
+                now = overnight,
+                quietHoursEnabled = true,
+                startMinutes = 22 * 60,
+                endMinutes = 22 * 60,
+            ),
+        )
+    }
+
     // MARK: - morningCopyKind (privacy-safe lock-screen reminder)
 
     @Test fun morningCopyKindMatchesAvailableMetrics() {
@@ -164,7 +232,24 @@ class ScheduledReportPolicyTest {
         assertTrue(source.contains("NotificationRouteBridge.launchIntent(context, route)"))
         assertTrue(source.contains("manager.getNotificationChannel(CHANNEL_ID)?.importance"))
         assertTrue(source.contains("if (!canNotify(context))"))
+        assertTrue(source.contains("if (NotifPrefs.inQuietHours(context))"))
+        assertTrue(source.contains("ScheduledReportDeferredScheduler.scheduleMorning("))
+        assertTrue(source.contains("class DeferredMorningRecapWorker("))
+        assertTrue(source.contains("ScheduledReportNotifier.onDeferredMorning("))
+        assertTrue(source.contains("NotificationLifecycleId.MORNING_REPORT"))
+        assertTrue(source.contains("NotificationLifecycleCategory.STATUS"))
         assertFalse(source.contains("appLaunchIntent(context)"))
+    }
+
+    @Test fun postWorkoutNotifierChecksQuietHoursBeforePosting() {
+        val source = locateNotifierSource().readText()
+        val block = source
+            .substringAfter("fun onWorkout(")
+            .substringBefore("\n    /**\n     * Seed the post-workout frontier")
+
+        assertTrue(block.contains("if (NotifPrefs.inQuietHours(context))"))
+        assertTrue(block.contains("NotificationLifecycleId.WORKOUT_REPORT"))
+        assertTrue(block.contains("return false"))
     }
 
     // MARK: - workoutCopy

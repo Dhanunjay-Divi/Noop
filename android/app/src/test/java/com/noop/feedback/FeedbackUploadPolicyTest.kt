@@ -1,9 +1,16 @@
 package com.noop.feedback
 
 import java.io.File
+import java.io.IOException
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
@@ -15,6 +22,20 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class FeedbackUploadPolicyTest {
+    @Test
+    fun missingIdentityCannotBeCreatedWhenReplacementIsForbidden() {
+        assertFalse(
+            FeedbackIdentityCreationPolicy.permitsCreation(
+                allowIdentityReplacement = false,
+            ),
+        )
+        assertTrue(
+            FeedbackIdentityCreationPolicy.permitsCreation(
+                allowIdentityReplacement = true,
+            ),
+        )
+    }
+
     @get:Rule
     val temporary = TemporaryFolder()
 
@@ -25,6 +46,14 @@ class FeedbackUploadPolicyTest {
 
         assertEquals(FeedbackScheduler.workName(first), FeedbackScheduler.workName(first))
         assertFalse(FeedbackScheduler.workName(first) == FeedbackScheduler.workName(second))
+        assertEquals(
+            FeedbackScheduler.generationTag(first),
+            FeedbackScheduler.generationTag(first),
+        )
+        assertFalse(
+            FeedbackScheduler.generationTag(first) ==
+                FeedbackScheduler.generationTag(second),
+        )
     }
 
     @Test
@@ -44,6 +73,20 @@ class FeedbackUploadPolicyTest {
             FeedbackFailureCategory.IDENTITY,
             retry = true,
         )
+        val continuityWait = FeedbackRetryPolicy.classify(
+            FeedbackProtocolException.ReservationContinuityPending(),
+        )
+        assertEquals(FeedbackFailureCategory.IDENTITY, continuityWait.category)
+        assertTrue(continuityWait.retryAutomatically)
+        assertTrue(continuityWait.preservesAttemptBudget)
+        assertFalse(continuityWait.allowsBoundIdentityContinuity)
+        val reservationWait = FeedbackRetryPolicy.classify(
+            FeedbackProtocolException.ReservationPending(),
+        )
+        assertEquals(FeedbackFailureCategory.DELETION_PENDING, reservationWait.category)
+        assertTrue(reservationWait.retryAutomatically)
+        assertTrue(reservationWait.preservesAttemptBudget)
+        assertTrue(reservationWait.allowsBoundIdentityContinuity)
         assertDecision(
             FeedbackProtocolException.Http(429),
             FeedbackFailureCategory.SERVER_RETRYABLE,
@@ -82,6 +125,35 @@ class FeedbackUploadPolicyTest {
         assertDecision(
             FeedbackProtocolException.Configuration(),
             FeedbackFailureCategory.CONFIGURATION,
+            retry = false,
+        )
+    }
+
+    @Test
+    fun workerRetriesTransientArchiveIoWithoutCallingTheArchiveInvalid() {
+        assertDecision(
+            FeedbackArchiveException(FeedbackArchiveException.Reason.WRITE_FAILED),
+            FeedbackFailureCategory.INTERRUPTED,
+            retry = true,
+        )
+        assertDecision(
+            IOException("synthetic transient archive read"),
+            FeedbackFailureCategory.INTERRUPTED,
+            retry = true,
+        )
+        assertDecision(
+            FeedbackOutboxException(FeedbackOutboxException.Reason.STATE_UNAVAILABLE),
+            FeedbackFailureCategory.INTERRUPTED,
+            retry = true,
+        )
+        assertDecision(
+            FeedbackOutboxException(FeedbackOutboxException.Reason.WRITE_FAILED),
+            FeedbackFailureCategory.INTERRUPTED,
+            retry = true,
+        )
+        assertDecision(
+            FeedbackArchiveException(FeedbackArchiveException.Reason.DIGEST_MISMATCH),
+            FeedbackFailureCategory.ARCHIVE_INVALID,
             retry = false,
         )
     }
@@ -131,7 +203,100 @@ class FeedbackUploadPolicyTest {
     }
 
     @Test
-    fun cancellationAttemptBudgetUsesOnlyDurableCancellationState() {
+    fun serverRetentionResponseIsBoundedAndCategorical() {
+        val created = 1_789_000_000_000L
+        val now = created + TimeUnit.HOURS.toMillis(1)
+        val record = FeedbackRecord(
+            localId = "11111111-1111-4111-8111-111111111111",
+            requestId = "22222222-2222-4222-8222-222222222222",
+            appVersion = "9.2.1",
+            serverReportId = null,
+            serverReportToken = null,
+            identitySubjectSha256 = feedbackIdentitySubjectSha256("retention-owner"),
+            archiveSha256 = "a".repeat(64),
+            archiveBytes = 1024,
+            includesUserNote = false,
+            includesScreenshot = false,
+            createdAtMillis = created,
+            updatedAtMillis = now,
+            state = FeedbackState.UPLOADING,
+            attempt = 1,
+            cancellationAttempt = 0,
+            failureCategory = FeedbackFailureCategory.NONE,
+            retainedUntil = null,
+            receipt = null,
+            localArchiveRemoved = false,
+            reservationContinuityStartedAtMillis = now,
+        )
+        val validUntil = now + TimeUnit.DAYS.toMillis(28)
+        val valid = FeedbackServerRetentionResponsePolicy.evaluate(
+            record = record,
+            retainedUntil = Instant.ofEpochMilli(validUntil).toString(),
+            nowMillis = now,
+        )
+        assertTrue(valid.accepted)
+        assertEquals(Instant.ofEpochMilli(validUntil).toString(), valid.retainedUntil)
+
+        val acceptedMaximum =
+            now +
+                FeedbackReservationContinuityPolicy.maximumRemoteRetentionMillis +
+                FeedbackReservationContinuityPolicy.maximumClockSkewMillis
+        val skewBoundary = FeedbackServerRetentionResponsePolicy.evaluate(
+            record = record,
+            retainedUntil = Instant.ofEpochMilli(acceptedMaximum).toString(),
+            nowMillis = now,
+        )
+        assertTrue(skewBoundary.accepted)
+        assertEquals(
+            Instant.ofEpochMilli(acceptedMaximum).toString(),
+            skewBoundary.retainedUntil,
+        )
+
+        val excessiveUntil = acceptedMaximum + 1L
+        val excessive = FeedbackServerRetentionResponsePolicy.evaluate(
+            record = record,
+            retainedUntil = Instant.ofEpochMilli(excessiveUntil).toString(),
+            nowMillis = now,
+        )
+        assertFalse(excessive.accepted)
+        assertEquals(
+            Instant.ofEpochMilli(acceptedMaximum).toString(),
+            excessive.retainedUntil,
+        )
+
+        val legacyRecord = record.copy(
+            reservationContinuityStartedAtMillis = null,
+        )
+        val legacyMaximum =
+            FeedbackReservationContinuityPolicy
+                .maximumServerRetainedUntilMillis(legacyRecord)
+        val legacyCreationBound = FeedbackServerRetentionResponsePolicy.evaluate(
+            record = legacyRecord,
+            retainedUntil = Instant.ofEpochMilli(validUntil).toString(),
+            nowMillis = now,
+        )
+        assertFalse(legacyCreationBound.accepted)
+        assertEquals(
+            Instant.ofEpochMilli(legacyMaximum).toString(),
+            legacyCreationBound.retainedUntil,
+        )
+    }
+
+    @Test
+    fun reportAttemptBudgetsUseOnlyDurableOutboxState() {
+        assertEquals(1, FeedbackRetryPolicy.nextDeliveryAttempt(persistedAttempt = 0))
+        assertEquals(
+            FeedbackOutbox.MAX_ATTEMPTS,
+            FeedbackRetryPolicy.nextDeliveryAttempt(
+                persistedAttempt = FeedbackOutbox.MAX_ATTEMPTS - 1,
+            ),
+        )
+        assertEquals(
+            FeedbackOutbox.MAX_ATTEMPTS + 1,
+            FeedbackRetryPolicy.nextDeliveryAttempt(
+                persistedAttempt = FeedbackOutbox.MAX_ATTEMPTS,
+            ),
+        )
         assertEquals(1, FeedbackRetryPolicy.nextCancellationAttempt(persistedAttempt = 0))
         assertEquals(
             FeedbackOutbox.MAX_ATTEMPTS,
@@ -186,7 +351,7 @@ class FeedbackUploadPolicyTest {
             ),
         )
         assertEquals(
-            TimeUnit.DAYS.toMillis(1),
+            TimeUnit.HOURS.toMillis(22) + TimeUnit.MINUTES.toMillis(55),
             maximumAge,
         )
     }
@@ -373,6 +538,76 @@ class FeedbackUploadPolicyTest {
     }
 
     @Test
+    fun boundCancellationDeletesWhenStatusIsTemporarilyAbsent() = runTest {
+        var statusReads = 0
+        var deletionRequests = 0
+        val client = FeedbackAttemptClient(
+            provider = stableAuthorizationProvider(),
+            transport = object : FeedbackTransport {
+                override suspend fun reserve(
+                    authorization: FeedbackAuthorization,
+                    idempotencyKey: UUID,
+                    request: FeedbackReservationRequest,
+                ): FeedbackReservation =
+                    throw AssertionError("Bound cancellation must not reserve")
+
+                override suspend fun recoverReservation(
+                    authorization: FeedbackAuthorization,
+                    idempotencyKey: UUID,
+                ): FeedbackReservation? =
+                    throw AssertionError("Bound cancellation must not recover by idempotency")
+
+                override suspend fun upload(
+                    archive: File,
+                    expectedBytes: Long,
+                    expectedSha256: String,
+                    capability: FeedbackUploadCapability,
+                    progress: (uploadedBytes: Long, totalBytes: Long) -> Unit,
+                ) = throw AssertionError("Bound cancellation must not upload")
+
+                override suspend fun complete(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ): FeedbackRemoteStatus =
+                    throw AssertionError("Bound cancellation must not complete")
+
+                override suspend fun status(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ): FeedbackRemoteStatus {
+                    statusReads += 1
+                    throw FeedbackProtocolException.ReservationPending()
+                }
+
+                override suspend fun cancel(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ): FeedbackRemoteStatus {
+                    deletionRequests += 1
+                    return FeedbackRemoteStatus(
+                        status = "deleted",
+                        receipt = null,
+                        retainedUntil = null,
+                    )
+                }
+            },
+        )
+
+        val remote = FeedbackBoundCancellationReconciler.reconcile(
+            client = client,
+            reportId = "11111111-1111-4111-8111-111111111111",
+            reportToken = "v2." + "a".repeat(43),
+        )
+
+        assertEquals("deleted", remote.status)
+        assertEquals(1, statusReads)
+        assertEquals(1, deletionRequests)
+    }
+
+    @Test
     fun apiAuthorizationRefreshesExactlyOncePerWorkerAttempt() = runTest {
         listOf(401, 403).forEach { statusCode ->
             val refreshes = mutableListOf<Boolean>()
@@ -525,6 +760,70 @@ class FeedbackUploadPolicyTest {
         } catch (_: FeedbackProtocolException.Identity) {
             // Expected.
         }
+    }
+
+    @Test
+    fun identityAuthorizationGateRemainsHeldThroughDurableOutboxBinding() = runTest {
+        val filesDir = temporary.newFolder("identity-binding-gate")
+        val outbox = FeedbackOutbox(filesDir)
+        val firstRecord = outbox.stage(
+            entries = feedbackEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val secondRecord = outbox.stage(
+            entries = feedbackEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val gate = Mutex()
+        val authorization = FeedbackAuthorization(
+            appCheckToken = "app-check",
+            identityToken = "identity",
+            identitySubject = "stable-feedback-owner",
+        )
+        val provider = object : FeedbackAuthorizationProvider {
+            override suspend fun authorization(
+                forceRefresh: Boolean,
+            ): FeedbackAuthorization = authorization
+
+            override suspend fun <T> authorizationAndBind(
+                forceRefresh: Boolean,
+                bind: suspend (FeedbackAuthorization) -> T,
+            ): T = gate.withLock {
+                bind(authorization)
+            }
+        }
+        val firstSession = FeedbackAuthorizedSession(provider)
+        val secondSession = FeedbackAuthorizedSession(provider)
+        val firstEntered = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val secondEntered = CompletableDeferred<Unit>()
+
+        val first = async {
+            firstSession.bindIdentity { identitySubjectSha256 ->
+                firstEntered.complete(Unit)
+                releaseFirst.await()
+                outbox.bindIdentity(firstRecord.localId, identitySubjectSha256)
+            }
+        }
+        firstEntered.await()
+        val second = async {
+            secondSession.bindIdentity { identitySubjectSha256 ->
+                secondEntered.complete(Unit)
+                outbox.bindIdentity(secondRecord.localId, identitySubjectSha256)
+            }
+        }
+        yield()
+        assertFalse(secondEntered.isCompleted)
+
+        releaseFirst.complete(Unit)
+        first.await()
+        second.await()
+
+        val expected = feedbackIdentitySubjectSha256("stable-feedback-owner")
+        assertEquals(expected, outbox.load(firstRecord.localId)?.identitySubjectSha256)
+        assertEquals(expected, outbox.load(secondRecord.localId)?.identitySubjectSha256)
     }
 
     @Test
@@ -748,6 +1047,179 @@ class FeedbackUploadPolicyTest {
     }
 
     @Test
+    fun cancellationFinishesWhenRecoveryProvesReservationWasRetired() = runTest {
+        val filesDir = temporary.newFolder("retired-reservation")
+        var next = 1L
+        val outbox = FeedbackOutbox(
+            filesDir = filesDir,
+            idFactory = { UUID(0L, next++) },
+            nowMillis = { 1_789_000_000_000L },
+        )
+        val staged = outbox.stage(
+            entries = listOf(
+                "report.txt" to "NOOP app runtime report\n".toByteArray(),
+                "meta.json" to
+                    """{"schema":1,"app_version":"1.0.0"}""".toByteArray(),
+            ),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        val canceling = outbox.requestCancel(staged.localId)
+        var reservationReplays = 0
+        var deletionRequests = 0
+        val client = FeedbackAttemptClient(
+            provider = stableAuthorizationProvider(),
+            transport = object : FeedbackTransport {
+                override suspend fun reserve(
+                    authorization: FeedbackAuthorization,
+                    idempotencyKey: UUID,
+                    request: FeedbackReservationRequest,
+                ): FeedbackReservation {
+                    reservationReplays += 1
+                    throw AssertionError("Cancellation must not replay a retired key")
+                }
+
+                override suspend fun recoverReservation(
+                    authorization: FeedbackAuthorization,
+                    idempotencyKey: UUID,
+                ): FeedbackReservation? =
+                    throw FeedbackProtocolException.ReservationGone()
+
+                override suspend fun upload(
+                    archive: File,
+                    expectedBytes: Long,
+                    expectedSha256: String,
+                    capability: FeedbackUploadCapability,
+                    progress: (uploadedBytes: Long, totalBytes: Long) -> Unit,
+                ) = Unit
+
+                override suspend fun complete(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ) = FeedbackRemoteStatus("sent", receipt = null, retainedUntil = null)
+
+                override suspend fun status(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ) = FeedbackRemoteStatus("reserved", receipt = null, retainedUntil = null)
+
+                override suspend fun cancel(
+                    authorization: FeedbackAuthorization,
+                    reportId: String,
+                    reportToken: String,
+                ): FeedbackRemoteStatus {
+                    deletionRequests += 1
+                    return FeedbackRemoteStatus(
+                        "deleted",
+                        receipt = null,
+                        retainedUntil = null,
+                    )
+                }
+            },
+        )
+
+        val reconciled = FeedbackCancellationReconciler.reconcile(
+            outbox = outbox,
+            record = canceling,
+            client = client,
+        )
+
+        assertEquals(FeedbackState.CANCELED, reconciled.state)
+        assertEquals(0, reservationReplays)
+        assertEquals(0, deletionRequests)
+        assertEquals(null, reconciled.serverReportId)
+        assertEquals(null, reconciled.serverReportToken)
+        assertTrue(reconciled.localArchiveRemoved)
+    }
+
+    @Test
+    fun deliveryRecoveryRetiresGoneReservationWithoutFalseFailure() = runTest {
+        val filesDir = temporary.newFolder("retired-delivery-reservation")
+        var next = 1L
+        val outbox = FeedbackOutbox(
+            filesDir = filesDir,
+            idFactory = { UUID(0L, next++) },
+            nowMillis = { 1_789_000_000_000L },
+        )
+        val staged = outbox.stage(
+            entries = listOf(
+                "report.txt" to "NOOP app runtime report\n".toByteArray(),
+                "meta.json" to
+                    """{"schema":1,"app_version":"1.0.0"}""".toByteArray(),
+            ),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        val bound = outbox.bindIdentity(
+            staged.localId,
+            feedbackIdentitySubjectSha256("stable-feedback-owner"),
+        )
+
+        val recovery = FeedbackDeliveryReservationReconciler.reconcile(
+            outbox = outbox,
+            record = bound,
+            client = reservationRecoveryClient {
+                throw FeedbackProtocolException.ReservationGone()
+            },
+            idempotencyKey = UUID.fromString(bound.requestId),
+        )
+
+        assertTrue(recovery is FeedbackDeliveryReservationRecovery.Retired)
+        val retired = (recovery as FeedbackDeliveryReservationRecovery.Retired).record
+        assertEquals(FeedbackState.CANCELED, retired.state)
+        assertEquals(FeedbackFailureCategory.NONE, retired.failureCategory)
+        assertTrue(retired.localArchiveRemoved)
+        assertEquals(FeedbackState.CANCELED, outbox.load(retired.localId)?.state)
+    }
+
+    @Test
+    fun deliveryRecoveryKeepsMissingReservationPending() = runTest {
+        val filesDir = temporary.newFolder("pending-delivery-reservation")
+        var next = 1L
+        val outbox = FeedbackOutbox(
+            filesDir = filesDir,
+            idFactory = { UUID(0L, next++) },
+            nowMillis = { 1_789_000_000_000L },
+        )
+        val staged = outbox.stage(
+            entries = listOf(
+                "report.txt" to "NOOP app runtime report\n".toByteArray(),
+                "meta.json" to
+                    """{"schema":1,"app_version":"1.0.0"}""".toByteArray(),
+            ),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        outbox.beginUpload(staged.localId, attempt = 1)
+        val bound = outbox.bindIdentity(
+            staged.localId,
+            feedbackIdentitySubjectSha256("stable-feedback-owner"),
+        )
+
+        try {
+            FeedbackDeliveryReservationReconciler.reconcile(
+                outbox = outbox,
+                record = bound,
+                client = reservationRecoveryClient { null },
+                idempotencyKey = UUID.fromString(bound.requestId),
+            )
+            fail("A missing reservation remains ambiguous until the continuity deadline")
+        } catch (_: FeedbackProtocolException.ReservationPending) {
+            // Expected.
+        }
+
+        val pending = outbox.load(bound.localId)!!
+        assertEquals(FeedbackState.UPLOADING, pending.state)
+        assertEquals(1, pending.attempt)
+        assertEquals(bound.identitySubjectSha256, pending.identitySubjectSha256)
+        assertFalse(pending.localArchiveRemoved)
+    }
+
+    @Test
     fun archiveFreeLegacyCancellationRecoversByIdempotencyWithoutAppVersion() = runTest {
         val filesDir = temporary.newFolder("legacy-archive-free-cancellation")
         var next = 1L
@@ -772,7 +1244,13 @@ class FeedbackUploadPolicyTest {
             "feedback/outbox/${staged.localId}/state.json",
         )
         val legacyState = org.json.JSONObject(stateFile.readText())
-            .apply { remove("app_version") }
+            .apply {
+                remove("app_version")
+                remove("clock_anomaly_observed_at_millis")
+                remove("reservation_continuity_started_at_millis")
+                remove("worker_generation")
+                remove("retry_not_before_millis")
+            }
         stateFile.writeText(legacyState.toString())
         val restarted = FeedbackOutbox(
             filesDir = filesDir,
@@ -915,6 +1393,8 @@ class FeedbackUploadPolicyTest {
         val decision = FeedbackRetryPolicy.classify(error)
         assertEquals(category, decision.category)
         assertEquals(retry, decision.retryAutomatically)
+        assertFalse(decision.preservesAttemptBudget)
+        assertFalse(decision.allowsBoundIdentityContinuity)
     }
 
     private fun assertInvalidRemoteStatus(block: () -> Unit) {
@@ -933,6 +1413,11 @@ class FeedbackUploadPolicyTest {
         expiresAt = "2026-09-12T23:59:59Z",
     )
 
+    private fun feedbackEntries(): List<Pair<String, ByteArray>> = listOf(
+        "report.txt" to "NOOP app runtime report\n".toByteArray(),
+        "meta.json" to """{"schema":1,"app_version":"9.2.1"}""".toByteArray(),
+    )
+
     private fun stableAuthorizationProvider() = object : FeedbackAuthorizationProvider {
         override suspend fun authorization(forceRefresh: Boolean): FeedbackAuthorization =
             FeedbackAuthorization(
@@ -941,6 +1426,54 @@ class FeedbackUploadPolicyTest {
                 identitySubject = "stable-feedback-owner",
             )
     }
+
+    private fun reservationRecoveryClient(
+        recover: suspend (UUID) -> FeedbackReservation?,
+    ) = FeedbackAttemptClient(
+        provider = stableAuthorizationProvider(),
+        transport = object : FeedbackTransport {
+            override suspend fun reserve(
+                authorization: FeedbackAuthorization,
+                idempotencyKey: UUID,
+                request: FeedbackReservationRequest,
+            ): FeedbackReservation =
+                throw AssertionError("Delivery recovery must not create a new reservation")
+
+            override suspend fun recoverReservation(
+                authorization: FeedbackAuthorization,
+                idempotencyKey: UUID,
+            ): FeedbackReservation? = recover(idempotencyKey)
+
+            override suspend fun upload(
+                archive: File,
+                expectedBytes: Long,
+                expectedSha256: String,
+                capability: FeedbackUploadCapability,
+                progress: (uploadedBytes: Long, totalBytes: Long) -> Unit,
+            ) = throw AssertionError("Delivery recovery must not upload")
+
+            override suspend fun complete(
+                authorization: FeedbackAuthorization,
+                reportId: String,
+                reportToken: String,
+            ): FeedbackRemoteStatus =
+                throw AssertionError("Delivery recovery must not complete")
+
+            override suspend fun status(
+                authorization: FeedbackAuthorization,
+                reportId: String,
+                reportToken: String,
+            ): FeedbackRemoteStatus =
+                throw AssertionError("Delivery recovery must not read status")
+
+            override suspend fun cancel(
+                authorization: FeedbackAuthorization,
+                reportId: String,
+                reportToken: String,
+            ): FeedbackRemoteStatus =
+                throw AssertionError("Delivery recovery must not cancel by report ID")
+        },
+    )
 
     private fun feedbackRecord(
         state: FeedbackState,
