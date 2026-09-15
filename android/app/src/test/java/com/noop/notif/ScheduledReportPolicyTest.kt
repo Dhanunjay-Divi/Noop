@@ -94,6 +94,19 @@ class ScheduledReportPolicyTest {
         )
     }
 
+    @Test fun morningSuppressedWhenClockBasedMorningReviewIsEnabled() {
+        assertFalse(
+            ScheduledReportPolicy.shouldNotifyMorning(
+                enabled = true,
+                materializedAfterSync = true,
+                chargeOrRestPresent = true,
+                lastNotifiedDay = null,
+                reportDay = "2026-06-21",
+                scheduledMorningReviewEnabled = true,
+            ),
+        )
+    }
+
     @Test fun morningSuppressedDuringQuietHoursWithoutConsumingItsDay() {
         assertFalse(
             ScheduledReportPolicy.shouldNotifyMorning(
@@ -236,6 +249,12 @@ class ScheduledReportPolicyTest {
         assertTrue(source.contains("ScheduledReportDeferredScheduler.scheduleMorning("))
         assertTrue(source.contains("class DeferredMorningRecapWorker("))
         assertTrue(source.contains("ScheduledReportNotifier.onDeferredMorning("))
+        assertTrue(
+            source.contains(
+                "DailyReviewReminders.isMorningEnabled(applicationContext)",
+            ),
+        )
+        assertTrue(source.contains("DailyReviewReminders.isMorningEnabled(context)"))
         assertTrue(source.contains("NotificationLifecycleId.MORNING_REPORT"))
         assertTrue(source.contains("NotificationLifecycleCategory.STATUS"))
         assertFalse(source.contains("appLaunchIntent(context)"))

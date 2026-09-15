@@ -94,6 +94,14 @@ internal data class AnalysisInputClaimProgress(
     }
 }
 
+internal data class AnalysisInputExclusionResult(
+    val excludedCount: Int,
+    val advancedCount: Int,
+) {
+    val madeProgress: Boolean
+        get() = excludedCount > 0 || advancedCount > 0
+}
+
 /** Durable non-biometric invalidations that require a complete scoring pass. */
 internal object AnalysisInvalidationSource {
     const val OWNERSHIP = "noop.internal.analysis.ownership"

@@ -84,6 +84,7 @@ struct RootTabView: View {
     @State private var keyboardVisible = false
     @State private var expandedContextualActionID: String?
     @State private var hydrationConfirmationML: Int?
+    @State private var showLighterWorkoutOptions = false
     /// One `NavigationPath` per tab, indexed by tab tag. Re-tapping the already-active tab pops
     /// that tab's stack to its root (#135) by clearing its path — an animated pop that leaves the
     /// root view alive, so an at-root re-tap keeps scroll position and never re-runs `.task`
@@ -431,6 +432,8 @@ struct RootTabView: View {
                 AppScrollHitchMonitor.shared.end(reason: "scene_inactive")
                 return
             }
+            DailyReviewNotifications.restoreScheduleIfAuthorized()
+            HydrationReminders.restoreScheduleIfAuthorized()
             WindDownNudge.restoreScheduleIfAuthorized()
             Task { await contextualActions.importDeliveredNotifications() }
         }
@@ -442,6 +445,30 @@ struct RootTabView: View {
         }
         .sheet(isPresented: $showUpdatesInbox) {
             UpdatesInboxView(onClose: { showUpdatesInbox = false })
+        }
+        .sheet(isPresented: $showLighterWorkoutOptions) {
+            LighterWorkoutOptionsSheet(
+                onOpenWorkouts: {
+                    showLighterWorkoutOptions = false
+                    AppDiagnosticsRecorder.shared.record(
+                        "adaptive_day.lighter_options_action",
+                        fields: ["destination": "workouts"]
+                    )
+                    openNotificationRoute(.workouts)
+                },
+                onOpenStrength: {
+                    showLighterWorkoutOptions = false
+                    AppDiagnosticsRecorder.shared.record(
+                        "adaptive_day.lighter_options_action",
+                        fields: ["destination": "strength"]
+                    )
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                        quickAction = .strength
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         // Honour a router request. Ordinary destinations enter through More's OWN NavigationStack so
         // the persistent five-tab glass bar behaves identically whether a page was opened from the More
@@ -540,6 +567,8 @@ struct RootTabView: View {
                     ) else { return }
                     expandedContextualActionID = nil
                     openNotificationRoute(action.resolvedRecoveryRoute)
+                    await Task.yield()
+                    presentLighterWorkoutOptions(source: "in_app")
                 }
                 return
             } else {
@@ -738,6 +767,21 @@ struct RootTabView: View {
                 NotificationRouteBridge.journalDayOffset(for: request)
         }
         openNotificationRoute(request.route)
+        if request.presentation == .lighterWorkoutOptions {
+            Task { @MainActor in
+                await Task.yield()
+                presentLighterWorkoutOptions(source: "notification")
+            }
+        }
+    }
+
+    private func presentLighterWorkoutOptions(source: String) {
+        guard !showLighterWorkoutOptions else { return }
+        AppDiagnosticsRecorder.shared.record(
+            "adaptive_day.lighter_options_presented",
+            fields: ["source": source]
+        )
+        showLighterWorkoutOptions = true
     }
 
     private func openNotificationRoute(_ route: NoopNotificationRoute) {
@@ -2146,6 +2190,118 @@ private struct FloatingQuickAddButton: View {
 }
 
 // MARK: - Contextual action rail
+
+private struct LighterWorkoutOptionsSheet: View {
+    let onOpenWorkouts: () -> Void
+    let onOpenStrength: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("appwide.adaptive_day_guidance.lighter_options.intro")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 18)
+
+                    option(
+                        icon: "gauge.with.dots.needle.33percent",
+                        title: "appwide.adaptive_day_guidance.lighter_options.intensity.title",
+                        detail: "appwide.adaptive_day_guidance.lighter_options.intensity.detail"
+                    )
+                    Divider().overlay(StrandPalette.hairline)
+                    option(
+                        icon: "timer",
+                        title: "appwide.adaptive_day_guidance.lighter_options.duration.title",
+                        detail: "appwide.adaptive_day_guidance.lighter_options.duration.detail"
+                    )
+                    Divider().overlay(StrandPalette.hairline)
+                    option(
+                        icon: "figure.walk",
+                        title: "appwide.adaptive_day_guidance.lighter_options.recovery.title",
+                        detail: "appwide.adaptive_day_guidance.lighter_options.recovery.detail"
+                    )
+
+                    Text("appwide.adaptive_day_guidance.lighter_options.disclaimer")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 18)
+
+                    VStack(spacing: 10) {
+                        Button(action: onOpenWorkouts) {
+                            Label(
+                                "appwide.adaptive_day_guidance.lighter_options.open_workouts",
+                                systemImage: "figure.run"
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(StrandPalette.accent)
+
+                        Button(action: onOpenStrength) {
+                            Label(
+                                "appwide.adaptive_day_guidance.lighter_options.open_strength",
+                                systemImage: "dumbbell.fill"
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(StrandPalette.accent)
+                    }
+                    .padding(.top, 20)
+                }
+                .padding(20)
+            }
+            .background(StrandPalette.surfaceBase)
+            .navigationTitle(
+                String(
+                    localized:
+                        "appwide.adaptive_day_guidance.lighter_options.title"
+                )
+            )
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Close")
+                }
+            }
+        }
+    }
+
+    private func option(
+        icon: String,
+        title: LocalizedStringKey,
+        detail: LocalizedStringKey
+    ) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(StrandPalette.chargeColor)
+                .frame(width: 28, height: 28)
+                .background(StrandPalette.chargeColor.opacity(0.12), in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(detail)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 14)
+    }
+}
 
 private struct ContextualActionRail: View {
     let actions: [ContextualAction]

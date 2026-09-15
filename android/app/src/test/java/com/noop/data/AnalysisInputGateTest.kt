@@ -784,6 +784,67 @@ class AnalysisInputGateTest {
     }
 
     @Test
+    fun terminalExclusionShrinksNewestUnknownTailThenAcknowledgesRemainder() = runBlocking {
+        val fixture = GateFixture(
+            initialGenerations = mapOf("band-a" to 7L),
+            initialBounds = mapOf("band-a" to (100L to 200L)),
+        )
+        val repository = fixture.repository()
+        val firstLease = repository.claimAnalysisInput(listOf("band-a"), force = false)!!
+
+        val first = repository.excludeClaimedAnalysisRange(
+            lease = firstLease,
+            exclusionStartTs = 151L,
+            exclusionEndTs = 250L,
+        )
+
+        assertEquals(
+            AnalysisInputExclusionResult(excludedCount = 0, advancedCount = 1),
+            first,
+        )
+        assertEquals(150L, fixture.latestAffected["band-a"])
+
+        val secondLease = repository.claimAnalysisInput(listOf("band-a"), force = false)!!
+        val second = repository.excludeClaimedAnalysisRange(
+            lease = secondLease,
+            exclusionStartTs = 0L,
+            exclusionEndTs = 150L,
+        )
+
+        assertEquals(
+            AnalysisInputExclusionResult(excludedCount = 1, advancedCount = 0),
+            second,
+        )
+        assertEquals(7L, fixture.acknowledged["band-a"])
+        assertNull(repository.claimAnalysisInput(listOf("band-a"), force = false))
+    }
+
+    @Test
+    fun concurrentWritePreventsTerminalExclusionAndPreservesExpandedBounds() = runBlocking {
+        val fixture = GateFixture(
+            initialGenerations = mapOf("band-a" to 4L),
+            initialBounds = mapOf("band-a" to (100L to 200L)),
+        )
+        val repository = fixture.repository()
+        val lease = repository.claimAnalysisInput(listOf("band-a"), force = false)!!
+        fixture.write("band-a", 300L)
+
+        val result = repository.excludeClaimedAnalysisRange(
+            lease = lease,
+            exclusionStartTs = 151L,
+            exclusionEndTs = 250L,
+        )
+
+        assertEquals(
+            AnalysisInputExclusionResult(excludedCount = 0, advancedCount = 0),
+            result,
+        )
+        assertEquals(5L, fixture.generations["band-a"])
+        assertEquals(100L, fixture.earliestAffected["band-a"])
+        assertEquals(300L, fixture.latestAffected["band-a"])
+    }
+
+    @Test
     fun concurrentWritePreventsPartialTailShrinkAndPreservesExpandedBounds() = runBlocking {
         val now = 1_780_012_345L
         val midnight = IntelligenceEngine.midnightLocal(now, 0L)

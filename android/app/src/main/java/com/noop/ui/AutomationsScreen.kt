@@ -67,6 +67,7 @@ import com.noop.analytics.NapCandidate
 import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.AdaptiveDayNotifier
+import com.noop.notif.HydrationReminderNotifier
 import com.noop.notif.HydrationReminderPrefs
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.notif.ScheduledReportNotifier
@@ -217,12 +218,22 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     var hydrationTapAmountMl by remember { mutableStateOf(hydrationConfig.tapAmountMl) }
     var hydrationTapWindow by remember { mutableStateOf(hydrationConfig.tapWindowMinutes) }
     var hydrationBandFirst by remember { mutableStateOf(hydrationConfig.bandFirst) }
+    var hydrationNotificationsUnavailable by remember {
+        mutableStateOf(
+            hydrationConfig.enabled && !HydrationReminderNotifier.canNotify(ctx),
+        )
+    }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        hydrationRemindersEnabled = granted
-        HydrationReminderPrefs.setEnabled(ctx, granted)
+    ) {
+        // Keep the user's explicit reminder intent even when Android permission is denied. The
+        // scheduler suppresses phone work until authorization becomes available; band-only choices
+        // remain intact, and a later permission grant can restore delivery without asking the user
+        // to rediscover and re-enable this preference.
+        hydrationRemindersEnabled = true
+        HydrationReminderPrefs.setEnabled(ctx, true)
         HydrationReminderScheduler.reconcile(ctx)
+        hydrationNotificationsUnavailable = !HydrationReminderNotifier.canNotify(ctx)
     }
     val stressNotificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -245,7 +256,14 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             null -> false
         }
         when (preference) {
-            DailyReviewPreference.MORNING -> morningReviewEnabled = enabled
+            DailyReviewPreference.MORNING -> {
+                morningReviewEnabled = enabled
+                if (enabled && morningRecapEnabled) {
+                    morningRecapEnabled = false
+                    NoopPrefs.setMorningReportEnabled(ctx, false)
+                    ScheduledReportNotifier.cancelMorning(ctx)
+                }
+            }
             DailyReviewPreference.JOURNAL -> journalReviewEnabled = enabled
             null -> Unit
         }
@@ -265,7 +283,13 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             AutomationReportKind.MORNING -> {
                 morningRecapEnabled = allowed
                 NoopPrefs.setMorningReportEnabled(ctx, allowed)
-                if (!allowed) ScheduledReportNotifier.cancelMorning(ctx)
+                if (allowed && morningReviewEnabled) {
+                    morningReviewEnabled = false
+                    DailyReviewReminders.setMorningEnabled(ctx, false)
+                }
+                if (!allowed) {
+                    ScheduledReportNotifier.cancelMorning(ctx)
+                }
             }
             AutomationReportKind.WORKOUT -> {
                 if (!allowed) {
@@ -320,12 +344,20 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 morningReviewEnabled = DailyReviewReminders.isMorningEnabled(ctx)
                 journalReviewEnabled = DailyReviewReminders.isJournalEnabled(ctx)
+                morningRecapEnabled = NoopPrefs.morningReportEnabled(ctx)
+                postWorkoutSummaryEnabled = NoopPrefs.postWorkoutReportEnabled(ctx)
                 dailyReviewNotificationsUnavailable =
                     (morningReviewEnabled || journalReviewEnabled) &&
                         !DailyReviewReminders.canNotify(ctx)
                 reportNotificationsUnavailable =
                     !automationReportsCanNotify(ctx) &&
                         (morningRecapEnabled || postWorkoutSummaryEnabled)
+                hydrationRemindersEnabled = HydrationReminderPrefs.config(ctx).enabled
+                hydrationNotificationsUnavailable =
+                    hydrationRemindersEnabled && !HydrationReminderNotifier.canNotify(ctx)
+                stressPhoneNudge = BiofeedbackPrefs.phoneNudge(ctx)
+                stressNotificationsUnavailable =
+                    stressPhoneNudge && !StressBreathingNotifier.prepareAndCanNotify(ctx)
                 if (plannedWorkoutCalendarEnabled) {
                     val calendarGranted = ContextCompat.checkSelfPermission(
                         ctx,
@@ -435,6 +467,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     fun setHydrationReminderEnabled(enabled: Boolean) {
         if (!enabled) {
             hydrationRemindersEnabled = false
+            hydrationNotificationsUnavailable = false
             HydrationReminderPrefs.setEnabled(ctx, false)
             HydrationReminderScheduler.reconcile(ctx)
             return
@@ -443,12 +476,17 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            hydrationRemindersEnabled = true
+            hydrationNotificationsUnavailable = true
+            HydrationReminderPrefs.setEnabled(ctx, true)
+            HydrationReminderScheduler.reconcile(ctx)
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
         hydrationRemindersEnabled = true
         HydrationReminderPrefs.setEnabled(ctx, true)
         HydrationReminderScheduler.reconcile(ctx)
+        hydrationNotificationsUnavailable = !HydrationReminderNotifier.canNotify(ctx)
     }
 
     fun setDailyReviewPreference(
@@ -487,7 +525,14 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 DailyReviewReminders.setJournalEnabled(ctx, true)
         }
         when (preference) {
-            DailyReviewPreference.MORNING -> morningReviewEnabled = committed
+            DailyReviewPreference.MORNING -> {
+                morningReviewEnabled = committed
+                if (committed && morningRecapEnabled) {
+                    morningRecapEnabled = false
+                    NoopPrefs.setMorningReportEnabled(ctx, false)
+                    ScheduledReportNotifier.cancelMorning(ctx)
+                }
+            }
             DailyReviewPreference.JOURNAL -> journalReviewEnabled = committed
         }
         dailyReviewNotificationsUnavailable =
@@ -867,7 +912,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 label = uiString(
                     R.string.l10n_notifications_settings_screen_morning_recap_45ec05c5,
                 ),
-                help = stringResource(R.string.automation_morning_recap_help),
+                help = stringResource(R.string.appwide_daily_review_morning_recap_help),
                 checked = morningRecapEnabled,
                 onChange = {
                     setReportPreference(AutomationReportKind.MORNING, it)
@@ -939,6 +984,38 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 onChange = ::setHydrationReminderEnabled,
             )
             if (hydrationRemindersEnabled) {
+                if (hydrationNotificationsUnavailable) {
+                    RowDivider()
+                    Text(
+                        stringResource(R.string.appwide_hydration_notifications_unavailable),
+                        style = NoopType.footnote,
+                        color = Palette.statusWarning,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            runCatching {
+                                ctx.startActivity(
+                                    android.content.Intent(
+                                        android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+                                    ).putExtra(
+                                        android.provider.Settings.EXTRA_APP_PACKAGE,
+                                        ctx.packageName,
+                                    ),
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Palette.accent,
+                        ),
+                    ) {
+                        Text(
+                            stringResource(
+                                R.string.daily_review_open_notification_settings,
+                            ),
+                            style = NoopType.body,
+                        )
+                    }
+                }
                 RowDivider()
                 ToggleRow(
                     label = stringResource(R.string.hydration_adaptive_timing_label),

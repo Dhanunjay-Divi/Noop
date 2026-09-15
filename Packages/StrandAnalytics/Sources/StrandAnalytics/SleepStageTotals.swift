@@ -440,16 +440,34 @@ public enum SleepStageTotals {
     /// cross-platform stable. (#561)
     public static func mainNightGroupIndices(_ blocks: [NightBlock], offsetSec: Int,
                                              habitualMidsleepSec: Int? = nil) -> [Int]? {
+        mainNightGroupIndices(
+            blocks,
+            offsetAtEpochSec: { _ in offsetSec },
+            habitualMidsleepSec: habitualMidsleepSec
+        )
+    }
+
+    public static func mainNightGroupIndices(
+        _ blocks: [NightBlock],
+        offsetAtEpochSec: (Int) -> Int,
+        habitualMidsleepSec: Int? = nil
+    ) -> [Int]? {
         guard !blocks.isEmpty else { return nil }
-        let all = bridgedNightGroups(blocks, offsetSec: offsetSec)
+        let all = bridgedNightGroups(
+            blocks,
+            offsetAtEpochSec: offsetAtEpochSec
+        )
         // Rebuild each group's bridged span for scoring: sorted-ascending fragments make the span
         // (first start, running-max end) — identical to the span the one-pass loop accumulated.
         let bridgedSpans = all.map { g -> NightBlock in
             NightBlock(start: g.indices.map { blocks[$0].start }.min() ?? 0,
                        end: g.indices.map { blocks[$0].end }.max() ?? 0)
         }
-        guard let winner = mainNightIndex(bridgedSpans, offsetSec: offsetSec,
-                                          habitualMidsleepSec: habitualMidsleepSec) else { return nil }
+        guard let winner = mainNightIndex(
+            bridgedSpans,
+            offsetAtEpochSec: offsetAtEpochSec,
+            habitualMidsleepSec: habitualMidsleepSec
+        ) else { return nil }
         return all[winner].indices
     }
 
@@ -465,11 +483,26 @@ public enum SleepStageTotals {
     /// enough history exists; leave nil for the cold-start band. (#525 / #547)
     public static func mainNightIndex(_ blocks: [NightBlock], offsetSec: Int,
                                       habitualMidsleepSec: Int? = nil) -> Int? {
+        mainNightIndex(
+            blocks,
+            offsetAtEpochSec: { _ in offsetSec },
+            habitualMidsleepSec: habitualMidsleepSec
+        )
+    }
+
+    public static func mainNightIndex(
+        _ blocks: [NightBlock],
+        offsetAtEpochSec: (Int) -> Int,
+        habitualMidsleepSec: Int? = nil
+    ) -> Int? {
         guard !blocks.isEmpty else { return nil }
         let target = targetMidsleepSec(habitualMidsleepSec)
         func score(_ b: NightBlock) -> Double {
             let asleepMin = Double(b.durationS) / 60.0
-            let midSec = localSecOfDay(b.midpointSec, offsetSec: offsetSec)
+            let midSec = localSecOfDay(
+                b.midpointSec,
+                offsetSec: offsetAtEpochSec(b.midpointSec)
+            )
             return asleepMin + alignmentBonusMinutes(blockMidSec: midSec, targetMidSec: target)
         }
         var bestIdx = 0

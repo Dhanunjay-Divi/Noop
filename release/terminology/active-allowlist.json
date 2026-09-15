@@ -1064,12 +1064,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 9,
+      "occurrenceCount": 11,
       "owner": "project team",
       "path": "Strand/Data/HydrationStore.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "6be6989272f1b3ffdfe89d94a57d597905daab126be171d8de8dbac30e231b0e"
+      "sha256": "0e2e95e8fc5150213454040ac96b82e5f76a000ee4d7e1e2448c074889742b2f"
     },
     {
       "category": "core",
@@ -1082,12 +1082,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 87,
+      "occurrenceCount": 91,
       "owner": "project team",
       "path": "Strand/Data/IntelligenceEngine.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "9f316eb531ea6c29683bd83c1d96e20f7482c7076fd5134b168bc597bbd66c4b"
+      "sha256": "d1297c201e05119a8cc3eee3662a7a29d16ac7d3e7d9fc29d354411d44de6eb9"
     },
     {
       "category": "core",

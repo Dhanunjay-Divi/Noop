@@ -59,6 +59,8 @@ struct StrandApp: App {
                     )
                     if acceptedTermsVersion == Terms.currentVersion,
                        scenePhase == .active {
+                        DailyReviewNotifications.restoreScheduleIfAuthorized()
+                        HydrationReminders.restoreScheduleIfAuthorized()
                         WindDownNudge.restoreScheduleIfAuthorized()
                     }
                 }
@@ -86,6 +88,8 @@ struct StrandApp: App {
                     }
                     model.setRealtimeForeground(phase == .active)
                     if phase == .active {
+                        DailyReviewNotifications.restoreScheduleIfAuthorized()
+                        HydrationReminders.restoreScheduleIfAuthorized()
                         WindDownNudge.restoreScheduleIfAuthorized()
                         model.refreshAgeMetricsIfProfileChanged()
                         model.reevaluateContextualInterventions()

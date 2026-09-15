@@ -17,7 +17,7 @@ final class MetricsCacheTests: XCTestCase {
     }
 
     func testSchemaVersionBumped() {
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 61)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 62)
     }
 
     // MARK: - sleep sessions
@@ -560,6 +560,50 @@ final class MetricsCacheTests: XCTestCase {
         ], deviceId: "devA")
         let rows = try await store.dailyMetrics(deviceId: "devA", from: "2026-05-10", to: "2026-05-31")
         XCTAssertEqual(rows.map { $0.day }, ["2026-05-20"])
+    }
+
+    func testClearDailyStrainPreservesOtherMetricsAndImportedOwner() async throws {
+        let store = try await WhoopStore.inMemory()
+        let computedId = "compatible-band-noop"
+        let importedId = "compatible-band"
+        try await store.upsertDailyMetrics([
+            DailyMetric(
+                day: "2026-05-20", totalSleepMin: 420, efficiency: 0.91,
+                deepMin: 80, remMin: 110, lightMin: 230, disturbances: 2,
+                restingHr: 54, avgHrv: 62, recovery: 78, strain: 13.5,
+                exerciseCount: 1
+            ),
+            DailyMetric(
+                day: "2026-05-21", totalSleepMin: nil, efficiency: nil,
+                deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
+                restingHr: nil, avgHrv: nil, recovery: 66, strain: nil,
+                exerciseCount: nil
+            ),
+        ], deviceId: computedId)
+        try await store.upsertDailyMetrics([
+            DailyMetric(
+                day: "2026-05-20", totalSleepMin: nil, efficiency: nil,
+                deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
+                restingHr: nil, avgHrv: nil, recovery: nil, strain: 17.2,
+                exerciseCount: nil
+            ),
+        ], deviceId: importedId)
+
+        let changed = try await store.clearDailyStrain(deviceId: computedId)
+
+        XCTAssertEqual(changed, 1)
+        let computed = try await store.dailyMetrics(
+            deviceId: computedId, from: "2026-05-20", to: "2026-05-21"
+        )
+        XCTAssertEqual(computed.count, 2)
+        XCTAssertNil(computed[0].strain)
+        XCTAssertEqual(computed[0].recovery, 78)
+        XCTAssertEqual(computed[0].totalSleepMin, 420)
+        XCTAssertEqual(computed[1].recovery, 66)
+        let imported = try await store.dailyMetrics(
+            deviceId: importedId, from: "2026-05-20", to: "2026-05-20"
+        )
+        XCTAssertEqual(try XCTUnwrap(imported.first).strain, 17.2)
     }
 
     func testDailyHrvMethodRoundTripsAndUnknownReplacementClearsStaleMethod() async throws {

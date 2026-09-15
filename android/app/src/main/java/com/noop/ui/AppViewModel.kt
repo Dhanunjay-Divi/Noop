@@ -26,6 +26,7 @@ import com.noop.automation.AlarmTapAutomationPrefs
 import com.noop.automation.TapAutomationRuntime
 import com.noop.automation.TapAutomationStore
 import com.noop.analytics.IllnessWatch
+import com.noop.analytics.AnalysisTimeZoneHistory
 import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.V5HealthSignals
 import com.noop.analytics.RegistryDayOwnerSource
@@ -1161,6 +1162,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // history once, so any deep-history rows an older build left on the 0–21 axis regenerate on
             // the 0–100 axis. Guarded by a persisted flag, so it's a no-op on every subsequent launch.
             runCatching {
+                val observationTs = System.currentTimeMillis() / 1_000L
+                val timeZoneHistory = AnalysisTimeZoneHistory.from(appContext).observe(
+                    observedAtEpochSeconds = observationTs,
+                    zoneId = ZoneId.systemDefault(),
+                ) ?: return@runCatching
                 IntelligenceEngine.runEffortRescoreIfNeeded(
                     repo = repository,
                     profileProvider = ::currentProfile,
@@ -1168,6 +1174,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     maxHROverride = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble(),
                     flagGet = { NoopPrefs.effortRescoreDone(appContext) },
                     flagSet = { NoopPrefs.setEffortRescoreDone(appContext) },
+                    timeZoneHistory = timeZoneHistory,
                 )
             }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
             while (isActive) {
@@ -1216,12 +1223,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 val forceAnalysis =
                     chargeUpgradePending || activeZoneUpgradePending || explicitRescorePending
-                val analysisLease = repository.claimAnalysisInput(
-                    sourceIds = analysisSourceIds,
-                    force = forceAnalysis,
-                )
-                if (analysisLease != null) {
-                    val analysisNowSeconds = System.currentTimeMillis() / 1_000L
+                val analysisNowSeconds = System.currentTimeMillis() / 1_000L
+                val analysisTimeZoneHistory =
+                    AnalysisTimeZoneHistory.from(appContext).observe(
+                        observedAtEpochSeconds = analysisNowSeconds,
+                        zoneId = ZoneId.systemDefault(),
+                    )
+                val analysisLease = if (analysisTimeZoneHistory == null) {
+                    null
+                } else {
+                    repository.claimAnalysisInput(
+                        sourceIds = analysisSourceIds,
+                        force = forceAnalysis,
+                    )
+                }
+                if (analysisTimeZoneHistory == null) {
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "analysis.recent",
+                        fields = mapOf(
+                            "outcome" to "deferred",
+                            "reason" to "timezone_persistence",
+                            "change_gate_ok" to "false",
+                            "pass_kind" to "deferred",
+                            "scan_days" to "0",
+                        ),
+                    )
+                } else if (analysisLease != null) {
                     val requestedAnalysisDays = if (chargeUpgradePending) {
                         ChargeFormulaUpgradeGate.HISTORY_DAYS
                     } else {
@@ -1232,16 +1259,54 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         claims = analysisLease.claims,
                         nowSeconds = analysisNowSeconds,
                         force = forceAnalysis,
+                        timeZoneHistory = analysisTimeZoneHistory,
                     )
                     if (!analysisPlan.shouldAnalyze) {
+                        val terminalExclusion = analysisPlan.terminalUnknownRange
+                        val exclusionResult = if (terminalExclusion != null) {
+                            runCatching {
+                                repository.excludeClaimedAnalysisRange(
+                                    lease = analysisLease,
+                                    exclusionStartTs = terminalExclusion.startTs,
+                                    exclusionEndTs = terminalExclusion.endTs,
+                                )
+                            }.getOrNull()
+                        } else {
+                            null
+                        }
                         com.noop.AppDiagnosticsRecorder.record(
                             "analysis.recent",
                             fields = mapOf(
-                                "outcome" to "deferred",
-                                "reason" to "late_evening",
+                                "outcome" to when {
+                                    exclusionResult?.madeProgress == true -> "excluded"
+                                    else -> "deferred"
+                                },
+                                "reason" to when (analysisPlan.deferralReason) {
+                                    IntelligenceEngine.AnalysisDeferralReason.LATE_EVENING ->
+                                        "late_evening"
+                                    IntelligenceEngine.AnalysisDeferralReason.TIMEZONE_PROVENANCE ->
+                                        "timezone_provenance"
+                                    IntelligenceEngine.AnalysisDeferralReason.TERMINAL_TIMEZONE_UNKNOWN ->
+                                        when (terminalExclusion?.reason) {
+                                            AnalysisTimeZoneHistory.Uncertainty.TRUNCATED_HISTORY ->
+                                                "truncated_history"
+                                            AnalysisTimeZoneHistory.Uncertainty.RECORDED_ZONE_BOUNDARY ->
+                                                "travel_boundary"
+                                            else -> "timezone_terminal_unknown"
+                                        }
+                                    null -> "unknown"
+                                },
                                 "change_gate_ok" to analysisLease.dirtyGateSucceeded.toString(),
                                 "pass_kind" to analysisPlan.passKind.name.lowercase(),
                                 "scan_days" to "0",
+                                "excluded" to minOf(
+                                    exclusionResult?.excludedCount ?: 0,
+                                    64,
+                                ).toString(),
+                                "advanced" to minOf(
+                                    exclusionResult?.advancedCount ?: 0,
+                                    64,
+                                ).toString(),
                             ),
                         )
                     } else {
@@ -1265,6 +1330,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 nowSeconds = analysisPlan.anchorNowSeconds,
                                 analysisTimezoneOffsetSeconds =
                                     analysisPlan.timezoneOffsetSeconds,
+                                analysisTimeZone = analysisPlan.timeZone,
+                                providedCivilDayWindows =
+                                    analysisPlan.civilDayWindows,
+                                providedCalibrationCivilDayWindows =
+                                    analysisPlan.calibrationCivilDayWindows,
                                 historicalCatchUp = analysisPlan.isHistoricalCatchUp,
                                 importedDeviceId = analysisSourceId,
                                 maxHROverride = profileStore.hrMaxOverride
@@ -2267,12 +2337,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun rescoreAfterEdit() {
         runCatching {
+            val analysisNowSeconds = System.currentTimeMillis() / 1_000L
+            val timeZoneHistory = AnalysisTimeZoneHistory.from(appContext).observe(
+                observedAtEpochSeconds = analysisNowSeconds,
+                zoneId = ZoneId.systemDefault(),
+            )
+            val analysisPlan = IntelligenceEngine.analysisScoringPlan(
+                requestedMaxDays = 21,
+                claims = emptyList(),
+                nowSeconds = analysisNowSeconds,
+                timeZoneHistory = timeZoneHistory,
+            )
+            if (!analysisPlan.shouldAnalyze) return@runCatching
             IntelligenceEngine.analyzeRecent(
                 repo = repository,
                 profileProvider = ::currentProfile,
+                maxDays = analysisPlan.maxDays,
                 importedDeviceId = deviceId,
                 maxHROverride = profileStore.hrMaxOverride
                     .takeIf { it > 0 }?.toDouble(),
+                nowSeconds = analysisPlan.anchorNowSeconds,
+                analysisTimezoneOffsetSeconds = analysisPlan.timezoneOffsetSeconds,
+                analysisTimeZone = analysisPlan.timeZone,
+                providedCivilDayWindows = analysisPlan.civilDayWindows,
+                providedCalibrationCivilDayWindows =
+                    analysisPlan.calibrationCivilDayWindows,
+                historicalCatchUp = analysisPlan.isHistoricalCatchUp,
                 ownerSource = RegistryDayOwnerSource(noopApp.deviceRegistry),
                 manualStepCoefficient = profileStore.stepsManualOverride,
                 persistStepsCalibration = { cal ->

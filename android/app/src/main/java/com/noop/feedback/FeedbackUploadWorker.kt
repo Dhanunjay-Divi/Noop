@@ -26,14 +26,129 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal data class FeedbackRuntimeStatus(
     val record: FeedbackRecord,
     val progressPercent: Int,
     val receipt: String? = record.receipt,
 )
+
+internal class FeedbackSchedulingException(
+    val record: FeedbackRecord,
+    cause: Throwable,
+) : Exception("Feedback work scheduling failed.", cause)
+
+internal class FeedbackSchedulingTimeoutException :
+    IOException("Feedback work scheduling timed out.")
+
+private data class FeedbackSchedulingCompleted<T>(
+    val value: T,
+)
+
+internal object FeedbackSchedulingAwaiter {
+    const val DEFAULT_TIMEOUT_MILLIS = 15_000L
+
+    suspend fun <T> await(
+        timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
+        operation: suspend () -> T,
+    ): T {
+        val completed = withTimeoutOrNull(timeoutMillis) {
+            FeedbackSchedulingCompleted(operation())
+        } ?: throw FeedbackSchedulingTimeoutException()
+        return completed.value
+    }
+}
+
+internal object FeedbackAcceptedPublication {
+    const val DEFAULT_TIMEOUT_MILLIS =
+        FeedbackSchedulingAwaiter.DEFAULT_TIMEOUT_MILLIS
+
+    suspend fun awaitAndPublish(
+        timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
+        awaitAcceptance: suspend () -> Unit,
+        publish: () -> Unit,
+    ) {
+        FeedbackSchedulingAwaiter.await(timeoutMillis, awaitAcceptance)
+        publish()
+    }
+}
+
+internal sealed interface FeedbackSchedulingFailureResolution {
+    val record: FeedbackRecord
+
+    data class PersistedFailure(
+        override val record: FeedbackRecord,
+    ) : FeedbackSchedulingFailureResolution
+
+    data class CurrentRecord(
+        override val record: FeedbackRecord,
+    ) : FeedbackSchedulingFailureResolution
+}
+
+internal object FeedbackSchedulingFailureResolver {
+    fun resolve(
+        persistFailure: () -> FeedbackRecord,
+        loadCurrent: () -> FeedbackRecord?,
+    ): FeedbackSchedulingFailureResolution = try {
+        FeedbackSchedulingFailureResolution.PersistedFailure(persistFailure())
+    } catch (superseded: FeedbackWorkerSupersededException) {
+        val current = loadCurrent() ?: throw superseded
+        FeedbackSchedulingFailureResolution.CurrentRecord(current)
+    }
+}
+
+internal enum class FeedbackSchedulerRepairOutcome {
+    REPAIRED,
+    PARTIAL,
+    FAILED,
+}
+
+internal data class FeedbackReconcileOutcome(
+    val schedulingFailureCount: Int = 0,
+    val recordFailureCount: Int = 0,
+    val outboxFailed: Boolean = false,
+    val reconciledWorkerGenerations: Set<String> = emptySet(),
+) {
+    val complete: Boolean
+        get() = !outboxFailed &&
+            schedulingFailureCount == 0 &&
+            recordFailureCount == 0
+}
+
+internal data class FeedbackSchedulerRepairResult(
+    val outcome: FeedbackSchedulerRepairOutcome,
+    private val reconciledWorkerGenerations: Set<String> = emptySet(),
+) {
+    fun reconciled(workerGeneration: String?): Boolean =
+        workerGeneration != null && workerGeneration in reconciledWorkerGenerations
+}
+
+internal object FeedbackSchedulerRepair {
+    suspend fun request(
+        operation: suspend () -> FeedbackReconcileOutcome,
+    ): FeedbackSchedulerRepairOutcome = requestDetailed(operation).outcome
+
+    suspend fun requestDetailed(
+        operation: suspend () -> FeedbackReconcileOutcome,
+    ): FeedbackSchedulerRepairResult = try {
+        val reconciliation = operation()
+        FeedbackSchedulerRepairResult(
+            outcome = if (reconciliation.complete) {
+                FeedbackSchedulerRepairOutcome.REPAIRED
+            } else {
+                FeedbackSchedulerRepairOutcome.PARTIAL
+            },
+            reconciledWorkerGenerations =
+                reconciliation.reconciledWorkerGenerations,
+        )
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        FeedbackSchedulerRepairResult(FeedbackSchedulerRepairOutcome.FAILED)
+    }
+}
 
 /** Process-local presentation only. Progress never enters the durable outbox or logs. */
 internal object FeedbackRuntimeStatusBus {
@@ -591,7 +706,7 @@ internal object FeedbackScheduler {
         .setRequiredNetworkType(NetworkType.CONNECTED)
         .build()
 
-    fun enqueue(
+    suspend fun enqueue(
         context: Context,
         record: FeedbackRecord,
         replace: Boolean = false,
@@ -600,16 +715,73 @@ internal object FeedbackScheduler {
             localId = record.localId,
             replace = replace,
         )
-        enqueuePrepared(
+        return enqueueOrPersistFailure(
             context = context,
             record = prepared,
             policy = if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
             delayMillis = remainingRetryDelayMillis(prepared),
         )
-        return prepared
     }
 
-    private fun enqueuePrepared(
+    private suspend fun enqueueOrPersistFailure(
+        context: Context,
+        record: FeedbackRecord,
+        policy: ExistingWorkPolicy,
+        delayMillis: Long,
+    ): FeedbackRecord {
+        try {
+            enqueuePrepared(
+                context = context,
+                record = record,
+                policy = policy,
+                delayMillis = delayMillis,
+            )
+            return record
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            return when (val resolution = resolveSchedulingFailure(context, record)) {
+                is FeedbackSchedulingFailureResolution.PersistedFailure ->
+                    throw FeedbackSchedulingException(resolution.record, error)
+                is FeedbackSchedulingFailureResolution.CurrentRecord ->
+                    resolution.record
+            }
+        }
+    }
+
+    internal fun resolveSchedulingFailure(
+        context: Context,
+        record: FeedbackRecord,
+    ): FeedbackSchedulingFailureResolution {
+        val outbox = FeedbackOutbox.from(context.applicationContext)
+        val resolution = FeedbackSchedulingFailureResolver.resolve(
+            persistFailure = {
+                if (record.state.isCancellationState()) {
+                    outbox.markCancelFailed(
+                        localId = record.localId,
+                        failure = FeedbackFailureCategory.UNKNOWN,
+                        expectedWorkerGeneration = record.workerGeneration,
+                    )
+                } else {
+                    outbox.markFailed(
+                        localId = record.localId,
+                        failure = FeedbackFailureCategory.UNKNOWN,
+                        expectedWorkerGeneration = record.workerGeneration,
+                    )
+                }
+            },
+            loadCurrent = {
+                outbox.loadForProgress(record.localId)
+            },
+        )
+        FeedbackRuntimeStatusBus.publish(
+            resolution.record,
+            progressFor(resolution.record.state),
+        )
+        return resolution
+    }
+
+    private suspend fun enqueuePrepared(
         context: Context,
         record: FeedbackRecord,
         policy: ExistingWorkPolicy,
@@ -617,7 +789,6 @@ internal object FeedbackScheduler {
     ) {
         val generation = record.workerGeneration
             ?: throw FeedbackOutboxException(FeedbackOutboxException.Reason.INVALID_RECORD)
-        FeedbackRuntimeStatusBus.publish(record, progressFor(record.state))
         val request = OneTimeWorkRequestBuilder<FeedbackUploadWorker>()
             .setInputData(
                 workDataOf(
@@ -630,10 +801,17 @@ internal object FeedbackScheduler {
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(generationTag(generation))
             .build()
-        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-            workName(record.localId),
-            policy,
-            request,
+        FeedbackAcceptedPublication.awaitAndPublish(
+            awaitAcceptance = {
+                WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                    workName(record.localId),
+                    policy,
+                    request,
+                ).await()
+            },
+            publish = {
+                FeedbackRuntimeStatusBus.publish(record, progressFor(record.state))
+            },
         )
     }
 
@@ -665,77 +843,145 @@ internal object FeedbackScheduler {
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(generationTag(generation))
             .build()
-        FeedbackRuntimeStatusBus.publish(record, progressFor(record.state))
-        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-            workName(record.localId),
-            ExistingWorkPolicy.APPEND_OR_REPLACE,
-            request,
-        ).await()
+        FeedbackAcceptedPublication.awaitAndPublish(
+            awaitAcceptance = {
+                WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                    workName(record.localId),
+                    ExistingWorkPolicy.APPEND_OR_REPLACE,
+                    request,
+                ).await()
+            },
+            publish = {
+                FeedbackRuntimeStatusBus.publish(record, progressFor(record.state))
+            },
+        )
     }
 
-    fun retry(context: Context, localId: String): FeedbackRecord {
+    suspend fun retry(context: Context, localId: String): FeedbackRecord {
         val generation = UUID.randomUUID().toString().lowercase(Locale.US)
         val record = FeedbackOutbox.from(context).retry(
             localId = localId,
             replacementWorkerGeneration = generation,
         )
-        enqueuePrepared(
+        return enqueueOrPersistFailure(
             context = context,
             record = record,
             policy = ExistingWorkPolicy.REPLACE,
             delayMillis = 0L,
         )
-        return record
     }
 
-    fun cancel(context: Context, localId: String): FeedbackRecord {
+    suspend fun cancel(context: Context, localId: String): FeedbackRecord {
         val generation = UUID.randomUUID().toString().lowercase(Locale.US)
         val record = FeedbackOutbox.from(context).requestCancel(
             localId = localId,
             replacementWorkerGeneration = generation,
         )
-        enqueuePrepared(
+        return enqueueOrPersistFailure(
             context = context,
             record = record,
             policy = ExistingWorkPolicy.REPLACE,
             delayMillis = 0L,
         )
-        return record
     }
 
     /** Repairs the narrow crash window between atomic staging and WorkManager enqueue. */
-    fun reconcile(context: Context) {
+    suspend fun reconcile(
+        context: Context,
+        excludedWorkId: UUID? = null,
+    ): FeedbackReconcileOutcome {
         val appContext = context.applicationContext
         val outbox = FeedbackOutbox.from(appContext)
         val workManager = WorkManager.getInstance(appContext)
-        outbox.recover().forEach { record ->
-            when (record.state) {
-                FeedbackState.QUEUED,
-                FeedbackState.UPLOADING,
-                FeedbackState.RETRY_SCHEDULED,
-                FeedbackState.CANCELING,
-                FeedbackState.CANCEL_RETRY_SCHEDULED,
-                -> {
-                    val prepared = outbox.prepareWorker(
-                        localId = record.localId,
-                        replace = false,
-                    )
-                    if (!hasUnfinishedGeneration(workManager, prepared)) {
-                        enqueuePrepared(
-                            context = appContext,
-                            record = prepared,
-                            policy = ExistingWorkPolicy.APPEND_OR_REPLACE,
-                            delayMillis = remainingRetryDelayMillis(prepared),
+        val recovered = try {
+            outbox.recover()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            AppDiagnosticsRecorder.record(
+                "feedback.reconcile",
+                fields = mapOf("outcome" to "outbox_failed"),
+            )
+            return FeedbackReconcileOutcome(outboxFailed = true)
+        }
+        var schedulingFailureCount = 0
+        var recordFailureCount = 0
+        val reconciledWorkerGenerations = linkedSetOf<String>()
+        recovered.forEach { record ->
+            try {
+                when (record.state) {
+                    FeedbackState.QUEUED,
+                    FeedbackState.UPLOADING,
+                    FeedbackState.RETRY_SCHEDULED,
+                    FeedbackState.CANCELING,
+                    FeedbackState.CANCEL_RETRY_SCHEDULED,
+                    -> {
+                        val prepared = outbox.prepareWorker(
+                            localId = record.localId,
+                            replace = false,
                         )
+                        val preparedGeneration = prepared.workerGeneration
+                        val hasUnfinished = try {
+                            hasUnfinishedGeneration(
+                                workManager = workManager,
+                                record = prepared,
+                                excludedWorkId = excludedWorkId,
+                            )
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Throwable) {
+                            val resolution =
+                                resolveSchedulingFailure(appContext, prepared)
+                            if (resolution is
+                                FeedbackSchedulingFailureResolution.PersistedFailure
+                            ) {
+                                schedulingFailureCount += 1
+                            } else {
+                                preparedGeneration?.let(reconciledWorkerGenerations::add)
+                            }
+                            return@forEach
+                        }
+                        if (!hasUnfinished) {
+                            enqueueOrPersistFailure(
+                                context = appContext,
+                                record = prepared,
+                                policy = ExistingWorkPolicy.APPEND_OR_REPLACE,
+                                delayMillis = remainingRetryDelayMillis(prepared),
+                            )
+                        }
+                        preparedGeneration?.let(reconciledWorkerGenerations::add)
                     }
+                    FeedbackState.FAILED,
+                    FeedbackState.CANCEL_FAILED,
+                    FeedbackState.SENT,
+                    FeedbackState.CANCELED,
+                    -> FeedbackRuntimeStatusBus.publish(record, progressFor(record.state))
                 }
-                FeedbackState.FAILED,
-                FeedbackState.CANCEL_FAILED,
-                FeedbackState.SENT,
-                FeedbackState.CANCELED,
-                -> FeedbackRuntimeStatusBus.publish(record, progressFor(record.state))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: FeedbackSchedulingException) {
+                schedulingFailureCount += 1
+            } catch (_: Throwable) {
+                recordFailureCount += 1
             }
         }
+        if (schedulingFailureCount > 0 || recordFailureCount > 0) {
+            AppDiagnosticsRecorder.record(
+                "feedback.reconcile",
+                fields = mapOf(
+                    "outcome" to "partial",
+                    "scheduling_failure_count" to
+                        schedulingFailureCount.coerceAtMost(8).toString(),
+                    "record_failure_count" to
+                        recordFailureCount.coerceAtMost(8).toString(),
+                ),
+            )
+        }
+        return FeedbackReconcileOutcome(
+            schedulingFailureCount = schedulingFailureCount,
+            recordFailureCount = recordFailureCount,
+            reconciledWorkerGenerations = reconciledWorkerGenerations.toSet(),
+        )
     }
 
     internal fun workName(localId: String): String =
@@ -753,24 +999,25 @@ internal object FeedbackScheduler {
         }
         ?: 0L
 
-    private fun hasUnfinishedGeneration(
+    private suspend fun hasUnfinishedGeneration(
         workManager: WorkManager,
         record: FeedbackRecord,
+        excludedWorkId: UUID? = null,
     ): Boolean {
         val generation = record.workerGeneration ?: return false
         val tag = generationTag(generation)
-        return runCatching {
-            runBlocking {
-                workManager.getWorkInfosForUniqueWorkFlow(workName(record.localId))
-                    .first()
-            }.any { info ->
-                    info.state !in setOf(
-                        WorkInfo.State.SUCCEEDED,
-                        WorkInfo.State.FAILED,
-                        WorkInfo.State.CANCELLED,
-                    ) && tag in info.tags
-                }
-        }.getOrDefault(false)
+        return FeedbackSchedulingAwaiter.await {
+            workManager.getWorkInfosForUniqueWorkFlow(workName(record.localId))
+                .first()
+        }.any { info ->
+            info.id != excludedWorkId &&
+                info.state !in setOf(
+                WorkInfo.State.SUCCEEDED,
+                WorkInfo.State.FAILED,
+                WorkInfo.State.CANCELLED,
+                ) &&
+                tag in info.tags
+        }
     }
 
     internal fun progressFor(state: FeedbackState): Int = when (state) {
@@ -1528,7 +1775,9 @@ class FeedbackUploadWorker(
                     workerGeneration,
                 ) ?: Result.success()
             }
+            var failedSchedulingRecord: FeedbackRecord? = null
             return try {
+                failedSchedulingRecord = outbox.loadForProgress(localId)
                 val schedule = outbox.scheduleContinuityRetry(
                     localId = localId,
                     lane = if (cancel) {
@@ -1542,16 +1791,12 @@ class FeedbackUploadWorker(
                     retryAfterMillis = decision.retryAfterMillis,
                     expectedWorkerGeneration = workerGeneration,
                 )
+                failedSchedulingRecord = schedule.record
                 val waitStage = if (decision.allowsBoundIdentityContinuity) {
                     "reservation_continuity_wait"
                 } else {
                     "identity_continuity_wait"
                 }
-                publishProgress(
-                    schedule.record,
-                    waitStage,
-                    0,
-                )
                 if (!cancel &&
                     !decision.allowsBoundIdentityContinuity &&
                     schedule.record.state.isCancellationState()
@@ -1588,17 +1833,37 @@ class FeedbackUploadWorker(
                     )
                     return Result.success()
                 }
-                runCatching {
-                    FeedbackScheduler.reconcile(applicationContext)
-                }
                 val waitStage = if (decision.allowsBoundIdentityContinuity) {
                     "reservation_continuity_wait"
                 } else {
                     "identity_continuity_wait"
                 }
+                val repairResult = FeedbackSchedulerRepair.requestDetailed {
+                    FeedbackScheduler.reconcile(
+                        context = applicationContext,
+                        excludedWorkId = id,
+                    )
+                }
+                if (!repairResult.reconciled(failedSchedulingRecord?.workerGeneration)) {
+                    failedSchedulingRecord?.let { failedRecord ->
+                        FeedbackScheduler.resolveSchedulingFailure(
+                            applicationContext,
+                            failedRecord,
+                        )
+                    }
+                }
                 AppDiagnosticsRecorder.record(
                     "feedback.$waitStage",
-                    fields = mapOf("outcome" to "scheduler_repair_requested"),
+                    fields = mapOf(
+                        "outcome" to when (repairResult.outcome) {
+                            FeedbackSchedulerRepairOutcome.REPAIRED ->
+                                "scheduler_repaired"
+                            FeedbackSchedulerRepairOutcome.PARTIAL ->
+                                "scheduler_repair_partial"
+                            FeedbackSchedulerRepairOutcome.FAILED ->
+                                "scheduler_repair_failed"
+                        },
+                    ),
                 )
                 Result.success()
             }

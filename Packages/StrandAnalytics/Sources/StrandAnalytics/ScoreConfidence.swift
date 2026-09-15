@@ -448,10 +448,19 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
                                        rr: [RRInterval],
                                        resp: [RespSample],
                                        offsetSec: Int,
+                                       timeZoneIdentifier: String? = nil,
                                        habitualMidsleepSec: Int?) -> RestRawEvidence {
+        let namedTimeZone = timeZoneIdentifier.flatMap {
+            TimeZone(identifier: $0)
+        }
+        let offsetAtEpochSec: (Int) -> Int = { epochSecond in
+            namedTimeZone?.secondsFromGMT(
+                for: Date(timeIntervalSince1970: TimeInterval(epochSecond))
+            ) ?? offsetSec
+        }
         let indices = SleepStageTotals.mainNightGroupIndices(
             sessions.map { SleepStageTotals.NightBlock(start: $0.start, end: $0.end) },
-            offsetSec: offsetSec,
+            offsetAtEpochSec: offsetAtEpochSec,
             habitualMidsleepSec: habitualMidsleepSec) ?? []
         let mainSessionStarts = Set(indices.map { sessions[$0].start })
         var countsBySessionStart: [Int: AnalyticsEngine.RestEvidenceCounts] = [:]

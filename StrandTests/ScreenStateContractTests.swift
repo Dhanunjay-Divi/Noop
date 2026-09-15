@@ -50,6 +50,30 @@ final class ScreenStateContractTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("guard pumpGate.begin(id) else"))
     }
 
+    func testMacNotificationRoutePresentsLighterWorkoutOptions() throws {
+        let root = try sourceText("Strand/App/RootView.swift")
+
+        XCTAssertTrue(
+            root.contains(
+                "request.presentation == .lighterWorkoutOptions"
+            )
+        )
+        XCTAssertTrue(
+            root.contains("MacLighterWorkoutOptionsSheet(")
+        )
+        XCTAssertTrue(
+            root.contains("showStrengthTrainer = true")
+        )
+        XCTAssertTrue(
+            root.contains("selection = .workouts")
+        )
+        XCTAssertTrue(
+            root.contains(
+                "\"adaptive_day.lighter_options_action\""
+            )
+        )
+    }
+
     func testStateCardHasMotionAndAccessibilityFallbacks() throws {
         let source = try sourceText("Strand/Screens/ScreenScaffold.swift")
 
@@ -1154,7 +1178,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 788)
+        XCTAssertEqual(source.count, 803)
         XCTAssertEqual(source["appwide.daily_signal.status.aligned"]?["en"], "Steady")
         XCTAssertEqual(source["appwide.daily_signal.status.recheck"]?["en"], "Watch")
         XCTAssertEqual(

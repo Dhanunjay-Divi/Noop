@@ -963,6 +963,22 @@ private final class LocalNotificationCenterCapacitySpy {
 
 @MainActor
 final class DailyReviewNotificationsTests: XCTestCase {
+    private actor AsyncGate {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var opened = false
+
+        func wait() async {
+            if opened { return }
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func open() {
+            opened = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
     private let keys = [
         DailyReviewNotifications.enabledKey,
         DailyReviewNotifications.morningEnabledKey,
@@ -974,6 +990,7 @@ final class DailyReviewNotificationsTests: XCTestCase {
         DailyReviewNotifications.scheduledEveningIDsKey,
         NotificationRouteBridge.pendingRouteKey,
         NotificationRouteBridge.pendingJournalDayKey,
+        NotificationRouteBridge.pendingPresentationKey,
         HydrationReminders.enabledKey,
         HydrationReminders.intervalMinutesKey,
         HydrationReminders.activeStartMinutesKey,
@@ -1162,7 +1179,8 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertTrue(specs[0].body.contains("Sleep"))
         XCTAssertTrue(specs[0].body.contains("Recovery"))
         XCTAssertTrue(specs[1].body.contains("Effort"))
-        XCTAssertTrue(specs[0].body.localizedCaseInsensitiveContains("log"))
+        XCTAssertFalse(specs[0].body.localizedCaseInsensitiveContains("log"))
+        XCTAssertFalse(specs[0].body.localizedCaseInsensitiveContains("rested"))
         XCTAssertTrue(specs[1].body.localizedCaseInsensitiveContains("log"))
         XCTAssertFalse(specs[0].body.localizedCaseInsensitiveContains("open NOOP"))
         XCTAssertFalse(specs[1].body.localizedCaseInsensitiveContains("open NOOP"))
@@ -1586,7 +1604,7 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertNotNil(center.requests[protected.identifier])
     }
 
-    func testHydrationScheduleResultDisablesOptInWhenAuthorizationWasRevoked() {
+    func testHydrationScheduleResultRetainsOptInWhenAuthorizationWasRevoked() {
         UserDefaults.standard.set(true, forKey: HydrationReminders.enabledKey)
         UserDefaults.standard.set(
             ["hydration-reminder-legacy"],
@@ -1598,8 +1616,8 @@ final class DailyReviewNotificationsTests: XCTestCase {
             authorizationStatus: .denied
         )
 
-        XCTAssertEqual(outcome, .denied)
-        XCTAssertFalse(HydrationReminders.isEnabled)
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertTrue(HydrationReminders.isEnabled)
         XCTAssertNil(
             UserDefaults.standard.object(
                 forKey: "hydrationReminders.scheduledRequestIDs"
@@ -1619,11 +1637,243 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertTrue(HydrationReminders.isEnabled)
     }
 
+    func testSceneActivationRearmsEveryRetainedWellnessReminder() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let iOSShell = try String(
+            contentsOf: root.appendingPathComponent(
+                "StrandiOS/App/RootTabView.swift"
+            ),
+            encoding: .utf8
+        )
+        let macShell = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/App/StrandApp.swift"
+            ),
+            encoding: .utf8
+        )
+        let sceneHandlerStart = try XCTUnwrap(
+            iOSShell.range(of: ".onChange(of: scenePhase)")
+        )
+        let sceneHandlerTail = iOSShell[sceneHandlerStart.lowerBound...]
+        let sceneHandlerEnd = try XCTUnwrap(
+            sceneHandlerTail.range(of: "\n        // Quick-action sheet")
+        )
+        let iOSSceneHandler = String(
+            sceneHandlerTail[..<sceneHandlerEnd.lowerBound]
+        )
+        let macSceneHandlerStart = try XCTUnwrap(
+            macShell.range(of: ".onChange(of: scenePhase)")
+        )
+        let macSceneHandler = String(
+            macShell[macSceneHandlerStart.lowerBound...]
+        )
+
+        for sceneHandler in [iOSSceneHandler, macSceneHandler] {
+            XCTAssertTrue(sceneHandler.contains(
+                "DailyReviewNotifications.restoreScheduleIfAuthorized()"
+            ))
+            XCTAssertTrue(sceneHandler.contains(
+                "HydrationReminders.restoreScheduleIfAuthorized()"
+            ))
+            XCTAssertTrue(sceneHandler.contains(
+                "WindDownNudge.restoreScheduleIfAuthorized()"
+            ))
+        }
+    }
+
+    func testHydrationRestoreAndRescheduleCannotUndoAnExplicitOptOut() throws {
+        func slice(
+            _ source: String,
+            from startMarker: String,
+            to endMarker: String
+        ) throws -> String {
+            let start = try XCTUnwrap(source.range(of: startMarker))
+            let tail = source[start.lowerBound...]
+            let end = try XCTUnwrap(tail.range(of: endMarker))
+            return String(tail[..<end.lowerBound])
+        }
+
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/System/HydrationReminders.swift"
+            ),
+            encoding: .utf8
+        )
+        let restore = try slice(
+            source,
+            from: "static func restoreScheduleIfAuthorized(",
+            to: "/// Daily reminder slots"
+        )
+        let reschedule = try slice(
+            source,
+            from: "private static func requestReschedule(",
+            to: "@discardableResult\n    static func applyScheduleResult("
+        )
+        let enable = try slice(
+            source,
+            from: "static func setEnabled(",
+            to: "static func setIntervalMinutes("
+        )
+
+        XCTAssertTrue(restore.contains("let generation = scheduleGeneration"))
+        XCTAssertTrue(
+            restore.contains(
+                "guard generation == scheduleGeneration, isEnabled else { return }"
+            )
+        )
+        XCTAssertTrue(reschedule.contains("guard isEnabled else"))
+        XCTAssertGreaterThanOrEqual(
+            reschedule.components(
+                separatedBy:
+                    "guard generation == scheduleGeneration, isEnabled else { return }"
+            ).count - 1,
+            3
+        )
+        XCTAssertEqual(
+            enable.components(
+                separatedBy: "UserDefaults.standard.set(true, forKey: enabledKey)"
+            ).count - 1,
+            2
+        )
+    }
+
+    func testHydrationRestoreCannotUndoOptOutWhileAuthorizationIsSuspended() async {
+        UserDefaults.standard.set(true, forKey: HydrationReminders.enabledKey)
+        let authorizationReadStarted = expectation(
+            description: "restore authorization read started"
+        )
+        let authorizationGate = AsyncGate()
+        let restore = HydrationReminders.restoreScheduleIfAuthorized {
+            authorizationReadStarted.fulfill()
+            await authorizationGate.wait()
+            return .authorized
+        }
+        await fulfillment(of: [authorizationReadStarted], timeout: 2)
+
+        HydrationReminders.setEnabled(false)
+        await authorizationGate.open()
+        await restore.value
+
+        XCTAssertFalse(HydrationReminders.isEnabled)
+        XCTAssertNil(
+            UserDefaults.standard.object(
+                forKey: "hydrationReminders.scheduledRequestIDs"
+            )
+        )
+    }
+
+    func testDeniedHydrationPermissionKeepsMountedTogglesAlignedWithIntent() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let hydrationView = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/Screens/HydrationView.swift"
+            ),
+            encoding: .utf8
+        )
+        let automationsView = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/Screens/AutomationsView.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            hydrationView.contains(
+                "reminderEnabled = HydrationReminders.isEnabled"
+            )
+        )
+        XCTAssertTrue(
+            hydrationView.contains(
+                "reminderEnabled && notificationPermissionDenied"
+            )
+        )
+        XCTAssertTrue(
+            hydrationView.contains(
+                "Notifications are disabled in Settings."
+            )
+        )
+        XCTAssertTrue(
+            hydrationView.contains(
+                "@Environment(\\.scenePhase) private var scenePhase"
+            )
+        )
+        let hydrationSceneStart = try XCTUnwrap(
+            hydrationView.range(of: ".onChange(of: scenePhase)")
+        )
+        let hydrationSceneHandler = String(
+            hydrationView[hydrationSceneStart.lowerBound...]
+        )
+        XCTAssertTrue(
+            hydrationSceneHandler.contains(
+                "reminderEnabled = HydrationReminders.isEnabled"
+            )
+        )
+        XCTAssertTrue(
+            hydrationSceneHandler.contains(
+                "refreshNotificationPermissionState()"
+            )
+        )
+        let warningStart = try XCTUnwrap(
+            hydrationView.range(
+                of: "if reminderEnabled && notificationPermissionDenied"
+            )
+        )
+        let warningTail = hydrationView[warningStart.lowerBound...]
+        let warningEnd = try XCTUnwrap(
+            warningTail.range(of: "\n                Divider().overlay")
+        )
+        let warning = String(
+            warningTail[..<warningEnd.lowerBound]
+        )
+        XCTAssertTrue(
+            warning.contains(
+                "Button(\"Open Settings\") { openNotificationSettings() }"
+            )
+        )
+        XCTAssertFalse(
+            warning.contains(
+                ".accessibilityElement(children: .combine)"
+            )
+        )
+        XCTAssertTrue(
+            automationsView.contains(
+                "hydrationReminderEnabled = HydrationReminders.isEnabled"
+            )
+        )
+    }
+
     func testPendingNotificationRouteIsConsumedOnce() {
         NotificationRouteBridge.recordPending(.breathe)
 
         XCTAssertEqual(NotificationRouteBridge.consumePending(), .breathe)
         XCTAssertNil(NotificationRouteBridge.consumePending())
+    }
+
+    func testPendingWorkoutPresentationIsConsumedOnce() throws {
+        NotificationRouteBridge.recordPending(
+            .workouts,
+            presentation: .lighterWorkoutOptions
+        )
+
+        let request = try XCTUnwrap(
+            NotificationRouteBridge.consumePendingRequest()
+        )
+
+        XCTAssertEqual(request.route, .workouts)
+        XCTAssertEqual(request.presentation, .lighterWorkoutOptions)
+        XCTAssertNil(NotificationRouteBridge.consumePendingRequest())
+        XCTAssertNil(
+            UserDefaults.standard.string(
+                forKey: NotificationRouteBridge.pendingPresentationKey
+            )
+        )
     }
 
     func testPendingJournalRoutePreservesLogicalDayAndComputesDaysBack() throws {
@@ -2051,6 +2301,14 @@ final class MorningRecapNotificationsTests: XCTestCase {
             recoveryOrSleepScorePresent: true,
             reportDay: "2026-08-28",
             lastReportDay: "2026-08-28"
+        ))
+        XCTAssertFalse(MorningRecapNotifications.shouldNotify(
+            enabled: true,
+            materializedAfterSync: true,
+            recoveryOrSleepScorePresent: true,
+            reportDay: "2026-08-28",
+            lastReportDay: nil,
+            scheduledMorningReviewEnabled: true
         ))
         XCTAssertFalse(MorningRecapNotifications.shouldNotify(
             enabled: true,
@@ -2804,6 +3062,7 @@ final class BluetoothAvailabilityNotificationsTests: XCTestCase {
             from: [NotificationRouteBridge.userInfoKey: "https://example.com"]
         ))
     }
+
 }
 
 @MainActor

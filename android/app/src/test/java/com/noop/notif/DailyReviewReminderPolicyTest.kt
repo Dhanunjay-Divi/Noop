@@ -5,6 +5,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import com.noop.ui.NoopNotificationRoute
+import com.noop.ui.NotificationRoutePresentation
 import com.noop.ui.NotificationRouteBridge
 import com.noop.ui.PendingNotificationRouteRequest
 import org.junit.Assert.assertEquals
@@ -280,6 +281,20 @@ class DailyReviewReminderPolicyTest {
                 "2026-02-31",
                 today = LocalDate.of(2026, 9, 14),
             ),
+        )
+    }
+
+    @Test
+    fun workoutRouteCanCarryTheTrustedLighterOptionsPresentation() {
+        val request = PendingNotificationRouteRequest(
+            route = NoopNotificationRoute.WORKOUTS,
+            presentation = NotificationRoutePresentation.LIGHTER_WORKOUT_OPTIONS,
+        )
+
+        assertEquals(NoopNotificationRoute.WORKOUTS, request.route)
+        assertEquals(
+            NotificationRoutePresentation.LIGHTER_WORKOUT_OPTIONS,
+            request.presentation,
         )
     }
 

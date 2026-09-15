@@ -28,6 +28,13 @@ extension WhoopStore {
     /// rejecting corrupt integers before they reach SQLite or a lossy `Double` projection.
     public static var hydrationLegacyMaximumML: Int { 1_000_000 }
 
+    /// Legacy UserDefaults hydration was one day-scoped JSON array. Bounding its decoded row count keeps
+    /// recovery work deterministic while preserving more than a full day of minimum-size UI logs.
+    public static var hydrationLegacyMaximumEntryCount: Int { 512 }
+
+    /// Matches the managed-document payload ceiling and rejects corrupted preference blobs before decode.
+    public static var hydrationLegacyMaximumPayloadBytes: Int { 1_000_000 }
+
     /// Last accepted persisted hydration timestamp: 2100-12-31 23:59:59 UTC. Hydration rows are
     /// user-authored event times, so values beyond this compatibility window are corruption rather than
     /// meaningful future plans. The fixed ceiling keeps restore behavior deterministic across clock and
@@ -258,6 +265,62 @@ extension WhoopStore {
         }
     }
 
+    /// Atomically classifies and adopts retired global hydration rows. A signed-in managed profile
+    /// cannot claim ownerless legacy data, and the profile cannot switch between the ownership check
+    /// and the SQLite write because both happen in this transaction.
+    public func adoptLegacyHydrationLogEntries(
+        _ entries: [HydrationLogEntry],
+        deviceId: String,
+        day: String,
+        metricKey: String
+    ) async throws -> ManagedHydrationLegacyDisposition {
+        let totalML = try validatedHydrationTotal(
+            entries,
+            day: day,
+            validation: .legacyCompatibility
+        )
+        guard !entries.isEmpty else {
+            throw HydrationEntryStoreError.invalidEntry
+        }
+
+        return try syncWrite { db in
+            let existing = try fetchHydrationLogEntries(
+                in: db,
+                deviceId: deviceId,
+                day: day
+            )
+            if !existing.isEmpty {
+                let normalizedExisting = existing.sorted {
+                    ($0.loggedAt, $0.id) < ($1.loggedAt, $1.id)
+                }
+                let normalizedIncoming = entries.sorted {
+                    ($0.loggedAt, $0.id) < ($1.loggedAt, $1.id)
+                }
+                guard normalizedExisting == normalizedIncoming else {
+                    throw HydrationEntryStoreError.invalidEntry
+                }
+                return .migrate
+            }
+
+            let disposition = try Self.managedHydrationLegacyDisposition(
+                db,
+                entryIDs: entries.map(\.id)
+            )
+            guard disposition == .migrate else {
+                return disposition
+            }
+            try writeHydrationLogEntries(
+                entries,
+                totalML: totalML,
+                deviceId: deviceId,
+                day: day,
+                metricKey: metricKey,
+                in: db
+            )
+            return .migrate
+        }
+    }
+
     /// Applies a correction to an oversized legacy day. A replacement still above the current cap is
     /// accepted only when the persisted day is already oversized and every surviving row keeps its
     /// identity/timestamp while decreasing in amount; additions and increases remain rejected. Once the
@@ -320,9 +383,28 @@ extension WhoopStore {
         deviceId: String,
         day: String,
         metricKey: String,
-        totalML: Double
+        totalML: Double,
+        suppressManagedDocumentDirtyForTesting: Bool = false
     ) async throws {
         try syncWrite { db in
+            if suppressManagedDocumentDirtyForTesting {
+                try db.execute(
+                    sql: """
+                        INSERT OR IGNORE INTO managedDocumentApplyGuard (guardId)
+                        VALUES (1)
+                        """
+                )
+            }
+            defer {
+                if suppressManagedDocumentDirtyForTesting {
+                    try? db.execute(
+                        sql: """
+                            DELETE FROM managedDocumentApplyGuard
+                            WHERE guardId = 1
+                            """
+                    )
+                }
+            }
             try db.execute(
                 sql: """
                     INSERT INTO metricSeries (deviceId, day, key, value)

@@ -15,6 +15,7 @@ import com.noop.protocol.Whoop4SkinTemp
 import com.noop.protocol.skinTempCelsius
 import org.json.JSONObject
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import kotlin.math.max
@@ -40,6 +41,27 @@ import kotlin.math.roundToLong
  * uses Int seconds.
  */
 object AnalyticsEngine {
+    sealed interface CivilDayBoundsValidation {
+        data object Absent : CivilDayBoundsValidation
+        data class Valid(
+            val startTs: Long,
+            val endTsExclusive: Long,
+        ) : CivilDayBoundsValidation
+        data object Invalid : CivilDayBoundsValidation
+    }
+
+    fun validateCivilDayBounds(
+        startTs: Long?,
+        endTsExclusive: Long?,
+    ): CivilDayBoundsValidation = when {
+        startTs == null && endTsExclusive == null ->
+            CivilDayBoundsValidation.Absent
+        startTs != null &&
+            endTsExclusive != null &&
+            endTsExclusive > startTs ->
+            CivilDayBoundsValidation.Valid(startTs, endTsExclusive)
+        else -> CivilDayBoundsValidation.Invalid
+    }
 
     /**
      * Pair the strap's WRIST_OFF/WRIST_ON events into off-wrist [start, end) intervals for the sleep
@@ -335,6 +357,14 @@ object AnalyticsEngine {
         // Default 0 keeps pure-function callers/tests on UTC; IntelligenceEngine passes the device's
         // real offset.
         tzOffsetSeconds: Long = 0L,
+        // Named historical zone for timestamp-specific offsets. Null preserves
+        // the existing fixed-offset behavior for pure and compatibility callers.
+        timeZone: ZoneId? = null,
+        // Exact UTC [start, end) bounds for a civil day whose duration is not 86,400 seconds.
+        // Both values must be supplied together. Normal callers leave them null and retain the
+        // fixed-offset path; IntelligenceEngine supplies them for calendar-derived day windows.
+        civilDayStartTs: Long? = null,
+        civilDayEndTsExclusive: Long? = null,
         // Off-wrist [start, end) intervals (unix seconds) for the off-wrist sleep backstop (#500),
         // paired from WRIST_OFF/WRIST_ON events by [offWristIntervals]. The HR-gap proxy in detectSleep
         // is the always-on guard; these explicit intervals sharpen it under the FRACTIONAL rule (#504) —
@@ -392,10 +422,39 @@ object AnalyticsEngine {
         // default (false) is byte-identical to the historical whole-night value.
         deepHrvWindow: Boolean = false,
     ): DayResult {
+        val civilBounds = validateCivilDayBounds(
+            startTs = civilDayStartTs,
+            endTsExclusive = civilDayEndTsExclusive,
+        )
+        if (civilBounds is CivilDayBoundsValidation.Invalid) {
+            return DayResult(
+                daily = DailyMetric(deviceId = "", day = day),
+                sleepSessions = emptyList(),
+                workouts = emptyList(),
+                recovery = null,
+                strain = null,
+                status = DayResult.Status.REJECTED_INVALID_CIVIL_DAY_BOUNDS,
+            )
+        }
+        fun tsInDay(ts: Long): Boolean =
+            when (civilBounds) {
+                is CivilDayBoundsValidation.Valid ->
+                    ts >= civilBounds.startTs &&
+                        ts < civilBounds.endTsExclusive
+                CivilDayBoundsValidation.Absent ->
+                    dayString(ts, tzOffsetSeconds) == day
+                CivilDayBoundsValidation.Invalid -> false
+            }
+        val offsetAtEpochSec: (Long) -> Long = { epochSecond ->
+            timeZone?.rules?.getOffset(Instant.ofEpochSecond(epochSecond))
+                ?.totalSeconds?.toLong()
+                ?: tzOffsetSeconds
+        }
 
         // ── Sleep detection + staging ─────────────────────────────────────────
         val detectedSessions = SleepStager.detectSleep(
             hr = hr, rr = rr, resp = resp, gravity = gravity, tzOffsetSeconds = tzOffsetSeconds,
+            timeZone = timeZone,
             wristOff = wristOff, bandSleepState = bandSleepState,
             useSleepStagerV2 = useSleepStagerV2,
             traceSink = traceSink,
@@ -412,7 +471,7 @@ object AnalyticsEngine {
         }
         // Sessions attributed to `day` = those whose end falls on `day` (LOCAL day, #277). `day` is
         // the caller's local-day key; attribute by the same offset so the bucket and the key agree.
-        val matched = allSessions.filter { dayString(it.end, tzOffsetSeconds) == day }
+        val matched = allSessions.filter { tsInDay(it.end) }
 
         // ── The day's MAIN night (#525) ───────────────────────────────────────
         // A day can hold an overnight AND a daytime nap (both end on `day`, so both are in `matched`).
@@ -438,7 +497,7 @@ object AnalyticsEngine {
         // Mirrors Swift. (#525 / #561)
         val mainGroupIdx = SleepStageTotals.mainNightGroupIndices(
             matched.map { SleepStageTotals.NightBlock(it.start, it.end) },
-            tzOffsetSeconds, habitualMidsleepSec,
+            offsetAtEpochSec, habitualMidsleepSec,
         ) ?: emptyList()
         val mainGroup: List<DetectedSleep> = mainGroupIdx.map { matched[it] }
 
@@ -703,7 +762,7 @@ object AnalyticsEngine {
             // day's read window may include adjacent-day samples, so filter to the LOCAL-day key first
             // (#277); the wrap-aware tick math itself lives in the shared StepsCounter kernel so the daily
             // and per-workout (#398) totals can never disagree.
-            val inDay = (daySteps ?: steps).filter { dayString(it.ts, tzOffsetSeconds) == day }
+            val inDay = (daySteps ?: steps).filter { tsInDay(it.ts) }
             val ticks = StepsCounter.stepsInWindow(inDay) ?: return@run null
             // @57 counts motion ticks, not validated steps — the 5/MG counter overcounts. Divide
             // by the user-calibrated ticks-per-step (default 1.0 = raw pass-through; floor 0.5 so
@@ -721,11 +780,11 @@ object AnalyticsEngine {
         // sparse-HR sample floor before gravity may stand in for steps; a real step counter needs no HR gate.
         val hasWornMotionEvidence = (dayHr ?: hr)
             .asSequence()
-            .filter { dayString(it.ts, tzOffsetSeconds) == day && it.bpm > 0 }
+            .filter { tsInDay(it.ts) && it.bpm > 0 }
             .take(StrainScorer.minSparseReadings)
             .count() == StrainScorer.minSparseReadings
         val movementGravity = if (hasWornMotionEvidence) {
-            (dayGravity ?: gravity).filter { dayString(it.ts, tzOffsetSeconds) == day }
+            (dayGravity ?: gravity).filter { tsInDay(it.ts) }
         } else {
             emptyList()
         }
@@ -747,7 +806,7 @@ object AnalyticsEngine {
         // (dayString(ts, tzOffset)) so it agrees with the bucket (#277). Fall back to the
         // night-window hr for pure-function callers that don't supply dayHr. Strain keeps the full
         // window (bounded log).
-        val dayHrFiltered = (dayHr ?: hr).filter { dayString(it.ts, tzOffsetSeconds) == day }
+        val dayHrFiltered = (dayHr ?: hr).filter { tsInDay(it.ts) }
         val activeKcalEst: Double? = if (dayHrFiltered.isEmpty()) {
             null
         } else {

@@ -82,6 +82,7 @@ import com.noop.feedback.FeedbackOutboxException
 import com.noop.feedback.FeedbackRuntimeStatus
 import com.noop.feedback.FeedbackRuntimeStatusBus
 import com.noop.feedback.FeedbackScheduler
+import com.noop.feedback.FeedbackSchedulingException
 import com.noop.feedback.FeedbackScreenshotCaptureGuard
 import com.noop.feedback.FeedbackScreenshotPreview
 import com.noop.feedback.FeedbackState
@@ -90,12 +91,13 @@ import com.noop.testcentre.ReportReviewGate
 import com.noop.testcentre.TestBundleAssembler
 import com.noop.testcentre.TestBundleMeta
 import com.noop.testcentre.TestDomain
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -106,11 +108,11 @@ import kotlin.coroutines.resume
 import kotlin.math.sqrt
 
 internal object AppDiagnosticReportRequestBridge {
-    private val mutableRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val requests = mutableRequests.asSharedFlow()
+    private val pendingRequests = Channel<Unit>(Channel.CONFLATED)
+    val requests = pendingRequests.receiveAsFlow()
 
     fun request() {
-        mutableRequests.tryEmit(Unit)
+        check(pendingRequests.trySend(Unit).isSuccess)
     }
 }
 
@@ -133,6 +135,41 @@ internal class PhysicalShakeDetector(
     }
 }
 
+internal object FeedbackDeliveryActionPolicy {
+    fun canRetry(
+        localFeedbackId: String?,
+        state: FeedbackState?,
+        actionInProgress: Boolean,
+        failureCategory: FeedbackFailureCategory,
+    ): Boolean {
+        if (localFeedbackId == null || actionInProgress) return false
+        return when (state) {
+            FeedbackState.QUEUED,
+            FeedbackState.RETRY_SCHEDULED,
+            FeedbackState.FAILED,
+            FeedbackState.CANCEL_RETRY_SCHEDULED,
+            FeedbackState.CANCEL_FAILED,
+            -> failureCategory !in setOf(
+                FeedbackFailureCategory.ARCHIVE_INVALID,
+                FeedbackFailureCategory.OUTBOX_FULL,
+            )
+            else -> false
+        }
+    }
+
+    fun canCancel(
+        localFeedbackId: String?,
+        state: FeedbackState?,
+        actionInProgress: Boolean,
+    ): Boolean =
+        localFeedbackId != null &&
+            !actionInProgress &&
+            state?.terminal == false &&
+            state != FeedbackState.CANCELING &&
+            state != FeedbackState.CANCEL_RETRY_SCHEDULED &&
+            state != FeedbackState.CANCEL_FAILED
+}
+
 internal class AppDiagnosticReportController(
     private val activity: ComponentActivity,
     private val awaitScreenshotSurface: suspend (View) -> Unit =
@@ -143,6 +180,7 @@ internal class AppDiagnosticReportController(
         EXPLANATION,
         BUILDING,
         REVIEW,
+        SCHEDULING,
         QUEUED,
         UPLOADING,
         RETRY_SCHEDULED,
@@ -207,7 +245,7 @@ internal class AppDiagnosticReportController(
     }
 
     val preventsDismissal: Boolean
-        get() = phase == Phase.BUILDING
+        get() = phase == Phase.BUILDING || phase == Phase.SCHEDULING
 
     val includesScreenAttachment: Boolean
         get() = entries.any { it.first == DisplayScreenshot.BUNDLE_NAME }
@@ -219,25 +257,19 @@ internal class AppDiagnosticReportController(
         get() = deliveryFailure
 
     val canRetryDelivery: Boolean
-        get() = !deliveryActionInProgress && when (deliveryState) {
-            FeedbackState.QUEUED,
-            FeedbackState.RETRY_SCHEDULED,
-            FeedbackState.FAILED,
-            FeedbackState.CANCEL_RETRY_SCHEDULED,
-            FeedbackState.CANCEL_FAILED,
-            -> deliveryFailureCategory !in setOf(
-                FeedbackFailureCategory.ARCHIVE_INVALID,
-                FeedbackFailureCategory.OUTBOX_FULL,
-            )
-            else -> false
-        }
+        get() = FeedbackDeliveryActionPolicy.canRetry(
+            localFeedbackId = localFeedbackId,
+            state = deliveryState,
+            actionInProgress = deliveryActionInProgress,
+            failureCategory = deliveryFailureCategory,
+        )
 
     val canCancelDelivery: Boolean
-        get() = !deliveryActionInProgress &&
-            deliveryState?.terminal == false &&
-            deliveryState != FeedbackState.CANCELING &&
-            deliveryState != FeedbackState.CANCEL_RETRY_SCHEDULED &&
-            deliveryState != FeedbackState.CANCEL_FAILED
+        get() = FeedbackDeliveryActionPolicy.canCancel(
+            localFeedbackId = localFeedbackId,
+            state = deliveryState,
+            actionInProgress = deliveryActionInProgress,
+        )
 
     val reviewPreview: String
         get() {
@@ -489,12 +521,13 @@ internal class AppDiagnosticReportController(
 
     fun sendFeedback() {
         if (phase != Phase.REVIEW || entries.isEmpty()) return
-        phase = Phase.QUEUED
-        deliveryState = FeedbackState.QUEUED
+        phase = Phase.SCHEDULING
+        deliveryState = null
+        deliveryActionInProgress = true
         uploadProgress = 0
         receipt = null
         deliveryFailure = false
-        statusMessage = null
+        statusMessage = activity.getString(R.string.app_report_status_securing)
         val reportEntries = entries.map { (name, bytes) -> name to bytes.copyOf() }
         val includesNote = reportEntries.any { it.first == "user-note.txt" }
         val includesScreenshot =
@@ -508,7 +541,7 @@ internal class AppDiagnosticReportController(
             ),
         )
         activity.lifecycleScope.launch {
-            val staged = runCatching {
+            val staged = try {
                 withContext(NonCancellable + Dispatchers.IO) {
                     val record = FeedbackOutbox.from(activity).stage(
                         entries = reportEntries,
@@ -516,18 +549,32 @@ internal class AppDiagnosticReportController(
                         includesScreenshot = includesScreenshot,
                     )
                     FeedbackScheduler.enqueue(activity, record)
-                    record
                 }
-            }.getOrElse {
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: FeedbackSchedulingException) {
+                deliveryActionInProgress = false
+                localFeedbackId = error.record.localId
+                clearSensitiveDraft()
+                applyRuntime(FeedbackRuntimeStatus(error.record, 0))
+                observeFeedback(error.record.localId)
+                AppDiagnosticsRecorder.record(
+                    "report.queue_failed",
+                    fields = mapOf("failure_kind" to reportFailureKind(error)),
+                )
+                return@launch
+            } catch (error: Throwable) {
+                deliveryActionInProgress = false
                 phase = Phase.REVIEW
                 deliveryState = null
                 statusMessage = activity.getString(R.string.app_report_error_queue)
                 AppDiagnosticsRecorder.record(
                     "report.queue_failed",
-                    fields = mapOf("failure_kind" to reportFailureKind(it)),
+                    fields = mapOf("failure_kind" to reportFailureKind(error)),
                 )
                 return@launch
             }
+            deliveryActionInProgress = false
             localFeedbackId = staged.localId
             clearSensitiveDraft()
             applyRuntime(FeedbackRuntimeStatus(staged, 0))
@@ -540,19 +587,28 @@ internal class AppDiagnosticReportController(
         val localId = localFeedbackId ?: return
         deliveryActionInProgress = true
         activity.lifecycleScope.launch {
-            val result = runCatching {
+            val result = try {
                 withContext(NonCancellable + Dispatchers.IO) {
                     when (deliveryState) {
                         FeedbackState.QUEUED -> {
                             val record = FeedbackOutbox.from(activity).load(localId)
                                 ?: return@withContext null
                             FeedbackScheduler.enqueue(activity, record, replace = true)
-                            record
                         }
                         else -> FeedbackScheduler.retry(activity, localId)
                     }
                 }
-            }.getOrNull()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: FeedbackSchedulingException) {
+                AppDiagnosticsRecorder.record(
+                    "report.retry_failed",
+                    fields = mapOf("failure_kind" to reportFailureKind(error)),
+                )
+                error.record
+            } catch (_: Throwable) {
+                null
+            }
             deliveryActionInProgress = false
             if (result == null) {
                 statusMessage = activity.getString(R.string.app_report_error_action)
@@ -577,11 +633,21 @@ internal class AppDiagnosticReportController(
         val localId = localFeedbackId ?: return
         deliveryActionInProgress = true
         activity.lifecycleScope.launch {
-            val record = runCatching {
+            val record = try {
                 withContext(NonCancellable + Dispatchers.IO) {
                     FeedbackScheduler.cancel(activity, localId)
                 }
-            }.getOrNull()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: FeedbackSchedulingException) {
+                AppDiagnosticsRecorder.record(
+                    "report.cancel_failed",
+                    fields = mapOf("failure_kind" to reportFailureKind(error)),
+                )
+                error.record
+            } catch (_: Throwable) {
+                null
+            }
             deliveryActionInProgress = false
             if (record == null) {
                 statusMessage = activity.getString(R.string.app_report_error_action)
@@ -781,6 +847,8 @@ internal fun AppDiagnosticReportSheet(controller: AppDiagnosticReportController)
                         ReportBuilding()
                     AppDiagnosticReportController.Phase.REVIEW ->
                         ReportReview(controller)
+                    AppDiagnosticReportController.Phase.SCHEDULING ->
+                        ReportScheduling()
                     AppDiagnosticReportController.Phase.QUEUED,
                     AppDiagnosticReportController.Phase.UPLOADING,
                     AppDiagnosticReportController.Phase.RETRY_SCHEDULED,
@@ -999,6 +1067,25 @@ private fun ReportBuilding() {
         Text(uiString(R.string.app_report_preparing_title), style = NoopType.title2)
         Text(
             uiString(R.string.app_report_preparing_detail),
+            style = NoopType.body,
+            color = Palette.textSecondary,
+        )
+    }
+}
+
+@Composable
+private fun ReportScheduling() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 52.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        CircularProgressIndicator(color = Palette.accent)
+        Text(uiString(R.string.app_report_send_feedback), style = NoopType.title2)
+        Text(
+            uiString(R.string.app_report_status_securing),
             style = NoopType.body,
             color = Palette.textSecondary,
         )
@@ -1344,6 +1431,7 @@ private fun EvidenceRow(
 
 private fun reportFailureKind(error: Throwable): String = when (error) {
     is FeedbackArchiveException -> "archive_rejected"
+    is FeedbackSchedulingException -> "scheduler"
     is FeedbackOutboxException -> when (error.reason) {
         FeedbackOutboxException.Reason.FULL -> "outbox_full"
         FeedbackOutboxException.Reason.RECORD_NOT_FOUND -> "record_missing"

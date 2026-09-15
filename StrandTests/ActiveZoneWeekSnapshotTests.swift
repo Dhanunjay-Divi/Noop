@@ -5,6 +5,22 @@ import WhoopStore
 @testable import Strand
 
 final class ActiveZoneWeekSnapshotTests: XCTestCase {
+    private func historicalTimeZoneTimeline() -> AnalysisTimeZoneTimeline {
+        let timeZone = TimeZone.current
+        let firstDate = Date().addingTimeInterval(-400 * 86_400)
+        let firstObservation = Int(firstDate.timeIntervalSince1970)
+        return AnalysisTimeZoneTimeline(
+            observations: [
+                AnalysisTimeZoneObservation(
+                    observedAtSec: firstObservation,
+                    timeZoneIdentifier: timeZone.identifier,
+                    offsetSeconds: timeZone.secondsFromGMT(for: firstDate)
+                ),
+            ],
+            unresolvableBeforeTs: firstObservation
+        )
+    }
+
     func testResolveUsesOnlyCompleteIncludedDays() {
         let days: Set<String> = ["2026-08-25", "2026-08-26"]
         let result = ActiveZoneWeekSnapshot.resolve(
@@ -60,6 +76,9 @@ final class ActiveZoneWeekSnapshotTests: XCTestCase {
             repo: repo,
             profile: ProfileStore(),
             deviceId: "my-whoop")
+        engine.setAnalysisTimeZoneTimelineForTesting(
+            historicalTimeZoneTimeline()
+        )
 
         let receipt = await engine.analyzeRecent(maxDays: 2, force: true)
         XCTAssertNotNil(receipt)

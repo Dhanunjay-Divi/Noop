@@ -267,7 +267,9 @@ struct AutomationsView: View {
                 rowDivider
                 ToggleRow(
                     label: String(localized: "Morning recap after sync"),
-                    help: String(localized: "Off by default. Notifies once when a newly synced night has a Recovery or Sleep Score; delayed wearable sync means delayed delivery."),
+                    help: String(
+                        localized: "appwide.daily_review.morning_recap.help"
+                    ),
                     isOn: morningRecapToggle
                 )
                 if morningRecapEnabled {
@@ -351,10 +353,18 @@ struct AutomationsView: View {
                     switch outcome {
                     case .scheduled:
                         morningReviewEnabled = true
+                        if morningRecapEnabled {
+                            morningRecapEnabled = false
+                            MorningRecapNotifications.setEnabled(false)
+                        }
                         notificationPermissionDenied = false
                         refreshNotificationPermissionState()
                     case .deferred:
                         morningReviewEnabled = true
+                        if morningRecapEnabled {
+                            morningRecapEnabled = false
+                            MorningRecapNotifications.setEnabled(false)
+                        }
                         notificationPermissionDenied = false
                     case .denied:
                         morningReviewEnabled = false
@@ -477,6 +487,10 @@ struct AutomationsView: View {
                     switch outcome {
                     case .enabled:
                         morningRecapEnabled = true
+                        if morningReviewEnabled {
+                            morningReviewEnabled = false
+                            DailyReviewNotifications.setMorningEnabled(false)
+                        }
                         notificationPermissionDenied = false
                         refreshNotificationPermissionState()
                     case .denied:
@@ -708,7 +722,7 @@ struct AutomationsView: View {
                         hydrationReminderEnabled = true
                         notificationPermissionDenied = false
                     case .denied:
-                        hydrationReminderEnabled = false
+                        hydrationReminderEnabled = HydrationReminders.isEnabled
                         notificationPermissionDenied = true
                         showNotificationPermissionAlert = true
                     case .off:

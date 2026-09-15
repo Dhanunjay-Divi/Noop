@@ -2853,6 +2853,9 @@ class AdaptivePlannedWorkoutDecisionReceiver : BroadcastReceiver() {
                         NotificationRouteBridge.launchIntent(
                             context,
                             NoopNotificationRoute.WORKOUTS,
+                            presentation =
+                                com.noop.ui.NotificationRoutePresentation
+                                    .LIGHTER_WORKOUT_OPTIONS,
                         ).addFlags(
                             Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP,
                         ),

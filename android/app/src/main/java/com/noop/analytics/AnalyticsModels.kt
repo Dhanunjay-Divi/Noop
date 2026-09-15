@@ -299,4 +299,11 @@ data class DayResult(
      * hypnogram. Empty on a WHOOP 4.0. Mirrors Swift `DayResult.sessionSleepStateByStart`. (#175)
      */
     val sessionSleepStateByStart: Map<Long, List<Int>> = emptyMap(),
-)
+    /** Typed completion state. Rejected results carry no derived values and must never be persisted. */
+    val status: Status = Status.COMPLETED,
+) {
+    enum class Status {
+        COMPLETED,
+        REJECTED_INVALID_CIVIL_DAY_BOUNDS,
+    }
+}

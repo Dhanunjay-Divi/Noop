@@ -221,6 +221,116 @@ class HydrationReminderPolicyTest {
         assertTrue(notifier.contains("return false"))
     }
 
+    @Test fun notificationAvailabilityRequiresPermissionAppAndChannelDelivery() {
+        assertTrue(
+            HydrationNotificationAvailability.canNotify(
+                runtimePermissionGranted = true,
+                appNotificationsEnabled = true,
+                channelDisabled = false,
+            ),
+        )
+        assertFalse(
+            HydrationNotificationAvailability.canNotify(
+                runtimePermissionGranted = false,
+                appNotificationsEnabled = true,
+                channelDisabled = false,
+            ),
+        )
+        assertFalse(
+            HydrationNotificationAvailability.canNotify(
+                runtimePermissionGranted = true,
+                appNotificationsEnabled = false,
+                channelDisabled = false,
+            ),
+        )
+        assertFalse(
+            HydrationNotificationAvailability.canNotify(
+                runtimePermissionGranted = true,
+                appNotificationsEnabled = true,
+                channelDisabled = true,
+            ),
+        )
+    }
+
+    @Test fun workerStopsChainingWhileNotificationDeliveryIsUnavailable() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/HydrationReminders.kt"),
+            File(root, "app/src/main/java/com/noop/notif/HydrationReminders.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/HydrationReminders.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("Could not locate HydrationReminders.kt from $root")
+        val worker = source
+            .substringAfter("class HydrationReminderWorker")
+            .substringBefore("/** Optional second lane")
+
+        val operationalGuard =
+            worker.indexOf("if (!ManagedRuntimeGate.isAuthorized(applicationContext))")
+        val notificationGuard =
+            worker.indexOf("if (!HydrationReminderNotifier.canNotify(applicationContext))")
+        val delivery = worker.indexOf("deliverPhoneOccurrence")
+        val reschedule = worker.indexOf("HydrationReminderScheduler.scheduleNext")
+        assertTrue(operationalGuard >= 0)
+        assertTrue(operationalGuard < notificationGuard)
+        assertTrue(notificationGuard < delivery)
+        assertTrue(notificationGuard < reschedule)
+        assertTrue(worker.contains("HydrationReminderEscalationScheduler.cancelAll"))
+        assertTrue(worker.contains("return Result.success()"))
+    }
+
+    @Test fun schedulerChecksOperationalConsentBeforeInitializingWorkManager() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/HydrationReminders.kt"),
+            File(root, "app/src/main/java/com/noop/notif/HydrationReminders.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/HydrationReminders.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("Could not locate HydrationReminders.kt from $root")
+        val scheduler = source
+            .substringAfter("object HydrationReminderScheduler")
+            .substringBefore("class HydrationReminderWorker")
+        val operationalGuard =
+            scheduler.indexOf("if (!ManagedRuntimeGate.isAuthorized(appContext)) return")
+        val workManagerAccess = scheduler.indexOf("WorkManager.getInstance(appContext)")
+
+        assertTrue(operationalGuard >= 0)
+        assertTrue(workManagerAccess >= 0)
+        assertTrue(operationalGuard < workManagerAccess)
+    }
+
+    @Test fun wallClockReceiverReconcilesHydrationWhileTheAppIsBackgrounded() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/HydrationReminders.kt"),
+            File(root, "app/src/main/java/com/noop/notif/HydrationReminders.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/HydrationReminders.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("Could not locate HydrationReminders.kt from $root")
+        val manifest = listOf(
+            File(root, "src/main/AndroidManifest.xml"),
+            File(root, "app/src/main/AndroidManifest.xml"),
+            File(root, "android/app/src/main/AndroidManifest.xml"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("Could not locate AndroidManifest.xml from $root")
+        val receiver = source
+            .substringAfter("class HydrationReminderTimeChangeReceiver")
+            .substringBefore("/** Optional second lane")
+
+        assertTrue(receiver.contains("Intent.ACTION_BOOT_COMPLETED"))
+        assertTrue(receiver.contains("Intent.ACTION_TIMEZONE_CHANGED"))
+        assertTrue(receiver.contains("Intent.ACTION_TIME_CHANGED"))
+        assertTrue(receiver.contains("Intent.ACTION_DATE_CHANGED"))
+        assertTrue(receiver.contains("HydrationReminderScheduler.reconcile"))
+        val operationalGuard =
+            receiver.indexOf("if (!ManagedRuntimeGate.isAuthorized(appContext)) return")
+        val reconcile = receiver.indexOf("HydrationReminderScheduler.reconcile(appContext)")
+        assertTrue(operationalGuard >= 0)
+        assertTrue(reconcile >= 0)
+        assertTrue(operationalGuard < reconcile)
+        assertTrue(manifest.contains("com.noop.notif.HydrationReminderTimeChangeReceiver"))
+        assertTrue(manifest.contains("android.intent.action.QUICKBOOT_POWERON"))
+    }
+
     @Test fun workerBeforeCuePostsOnceAndPreventsTheLaterBandOccurrence() {
         var lastPhone: String? = null
         var lastBuzz: String? = null

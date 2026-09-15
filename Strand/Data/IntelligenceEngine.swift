@@ -4,6 +4,686 @@ import WhoopProtocol
 import WhoopStore
 import StrandAnalytics
 
+enum AnalysisTimeZoneProvenance: Equatable, Sendable {
+    case observed
+    case suppliedTimeZone
+    case fixedOffsetCompatibility
+}
+
+struct AnalysisTimeZoneObservation: Codable, Equatable, Sendable {
+    let observedAtSec: Int
+    let timeZoneIdentifier: String
+    let offsetSeconds: Int
+}
+
+struct AnalysisTimeZoneSegment: Equatable, Sendable {
+    let timeZoneIdentifier: String
+    let timezoneOffsetSeconds: Int
+    let provenance: AnalysisTimeZoneProvenance
+    let lowerTravelBoundaryTs: Int?
+    let upperTravelBoundaryTs: Int?
+}
+
+enum AnalysisTimeZoneResolution: Equatable, Sendable {
+    enum UnresolvableReason: Equatable, Sendable {
+        case noObservation
+        case truncatedHistory
+        case travelBoundary
+        case invalidObservation
+    }
+
+    case resolved(AnalysisTimeZoneSegment)
+    case unresolvable(UnresolvableReason)
+}
+
+struct AnalysisTerminalUnknownRange: Equatable, Sendable {
+    enum Reason: String, Equatable, Sendable {
+        case truncatedHistory = "truncated_history"
+        case travelBoundary = "travel_boundary"
+    }
+
+    let startTs: Int64
+    let endTs: Int64
+    let reason: Reason
+
+    var range: ClosedRange<Int64>? {
+        guard startTs >= 0, endTs >= startTs else { return nil }
+        return startTs...endTs
+    }
+
+    func contains(_ epochSecond: Int64) -> Bool {
+        range?.contains(epochSecond) == true
+    }
+}
+
+struct AnalysisTimeZoneTimeline: Equatable, Sendable {
+    let observations: [AnalysisTimeZoneObservation]
+    let unresolvableBeforeTs: Int?
+
+    private struct Run {
+        let first: AnalysisTimeZoneObservation
+        let last: AnalysisTimeZoneObservation
+    }
+
+    private var runs: [Run] {
+        guard let first = observations.first else { return [] }
+        var result: [Run] = []
+        var runFirst = first
+        var runLast = first
+        for observation in observations.dropFirst() {
+            if observation.timeZoneIdentifier
+                == runLast.timeZoneIdentifier {
+                runLast = observation
+            } else {
+                result.append(Run(first: runFirst, last: runLast))
+                runFirst = observation
+                runLast = observation
+            }
+        }
+        result.append(Run(first: runFirst, last: runLast))
+        return result
+    }
+
+    private static func civilDayRange(
+        containing epochSecond: Int,
+        timeZoneIdentifier: String
+    ) -> ClosedRange<Int64>? {
+        guard let timeZone = TimeZone(identifier: timeZoneIdentifier) else {
+            return nil
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let date = Date(timeIntervalSince1970: TimeInterval(epochSecond))
+        let start = calendar.startOfDay(for: date)
+        guard let next = calendar.date(byAdding: .day, value: 1, to: start) else {
+            return nil
+        }
+        let startTs = Int64(start.timeIntervalSince1970)
+        let endTs = Int64(next.timeIntervalSince1970) - 1
+        guard startTs >= 0, endTs >= startTs else { return nil }
+        return startTs...endTs
+    }
+
+    /// Permanently unknown intervals that cannot form a fully provenance-backed civil day.
+    ///
+    /// The first observation does not prove the earlier part of its local day. Likewise, a recorded
+    /// timezone change does not prove either boundary day's transition instant. Those partial days must be
+    /// excluded rather than retried forever or silently assigned to one side of the transition.
+    func terminalUnknownRange(
+        containing epochSecond: Int64
+    ) -> AnalysisTerminalUnknownRange? {
+        guard epochSecond >= 0,
+              let epoch = Int(exactly: epochSecond),
+              !observations.isEmpty else {
+            return nil
+        }
+        if case .unresolvable(.invalidObservation) =
+                resolution(containing: observations.last!.observedAtSec) {
+            return nil
+        }
+
+        if unresolvableBeforeTs != nil,
+           let first = observations.first,
+           let firstDay = Self.civilDayRange(
+               containing: first.observedAtSec,
+               timeZoneIdentifier: first.timeZoneIdentifier
+           ) {
+            let endTs = firstDay.lowerBound == Int64(first.observedAtSec)
+                ? Int64(first.observedAtSec) - 1
+                : firstDay.upperBound
+            if endTs >= 0 {
+                let terminal = AnalysisTerminalUnknownRange(
+                    startTs: 0,
+                    endTs: endTs,
+                    reason: .truncatedHistory
+                )
+                if terminal.contains(epochSecond) {
+                    return terminal
+                }
+            }
+        }
+
+        let resolvedRuns = runs
+        guard resolvedRuns.count > 1 else { return nil }
+        for index in 0..<(resolvedRuns.count - 1) {
+            let older = resolvedRuns[index]
+            let newer = resolvedRuns[index + 1]
+            guard older.last.observedAtSec < newer.first.observedAtSec,
+                  let olderDay = Self.civilDayRange(
+                      containing: older.last.observedAtSec,
+                      timeZoneIdentifier: older.last.timeZoneIdentifier
+                  ),
+                  let newerDay = Self.civilDayRange(
+                      containing: newer.first.observedAtSec,
+                      timeZoneIdentifier: newer.first.timeZoneIdentifier
+                  ) else {
+                continue
+            }
+
+            var lowerBounds = [Int64(older.last.observedAtSec) + 1]
+            var upperBounds = [Int64(newer.first.observedAtSec) - 1]
+            if Int64(older.last.observedAtSec) < olderDay.upperBound {
+                lowerBounds.append(olderDay.lowerBound)
+                upperBounds.append(olderDay.upperBound)
+            }
+            if Int64(newer.first.observedAtSec) > newerDay.lowerBound {
+                lowerBounds.append(newerDay.lowerBound)
+                upperBounds.append(newerDay.upperBound)
+            }
+            guard let startTs = lowerBounds.min(),
+                  let endTs = upperBounds.max(),
+                  startTs >= 0,
+                  endTs >= startTs else {
+                continue
+            }
+            let terminal = AnalysisTerminalUnknownRange(
+                startTs: startTs,
+                endTs: endTs,
+                reason: .travelBoundary
+            )
+            if terminal.contains(Int64(epoch)) {
+                return terminal
+            }
+        }
+        return nil
+    }
+
+    func resolution(containing epochSecond: Int) -> AnalysisTimeZoneResolution {
+        guard !observations.isEmpty else {
+            return .unresolvable(.noObservation)
+        }
+        // The recorded offset is bounded evidence from observation time. Do not compare it with the
+        // device's current tzdata: an OS rules update must not invalidate otherwise readable history.
+        guard observations.allSatisfy({ observation in
+            observation.observedAtSec >= 0
+                && (-18 * 3_600...18 * 3_600)
+                    .contains(observation.offsetSeconds)
+                && TimeZone(
+                    identifier: observation.timeZoneIdentifier
+                ) != nil
+        }),
+        zip(
+            observations,
+            observations.dropFirst()
+        ).allSatisfy({ pair in
+            pair.0.observedAtSec < pair.1.observedAtSec
+        }) else {
+            return .unresolvable(.invalidObservation)
+        }
+
+        let resolvedRuns = runs
+        guard let firstRun = resolvedRuns.first,
+              let lastRun = resolvedRuns.last else {
+            return .unresolvable(.noObservation)
+        }
+        if epochSecond < firstRun.first.observedAtSec {
+            return .unresolvable(.truncatedHistory)
+        }
+
+        let selectedIndex: Int
+        let provenance: AnalysisTimeZoneProvenance
+        if epochSecond > lastRun.last.observedAtSec {
+            // Production records the current observation before planning.
+            // Keeping the latest run open-ended also avoids withholding metrics
+            // when a caller plans a few seconds after that durable observation.
+            selectedIndex = resolvedRuns.count - 1
+            provenance = .observed
+        } else if let containingIndex = resolvedRuns.firstIndex(
+            where: {
+                epochSecond >= $0.first.observedAtSec
+                    && epochSecond <= $0.last.observedAtSec
+            }
+        ) {
+            selectedIndex = containingIndex
+            provenance = .observed
+        } else {
+            return .unresolvable(.travelBoundary)
+        }
+
+        let selected = resolvedRuns[selectedIndex]
+        guard let timeZone = TimeZone(
+            identifier: selected.first.timeZoneIdentifier
+        ) else {
+            return .unresolvable(.invalidObservation)
+        }
+        let upperBoundary: Int?
+        if selectedIndex < resolvedRuns.count - 1 {
+            guard selected.last.observedAtSec < Int.max else {
+                return .unresolvable(.invalidObservation)
+            }
+            upperBoundary = selected.last.observedAtSec + 1
+        } else {
+            upperBoundary = nil
+        }
+        return .resolved(
+            AnalysisTimeZoneSegment(
+                timeZoneIdentifier:
+                    selected.first.timeZoneIdentifier,
+                timezoneOffsetSeconds: timeZone.secondsFromGMT(
+                    for: Date(
+                        timeIntervalSince1970:
+                            TimeInterval(epochSecond)
+                    )
+                ),
+                provenance: provenance,
+                lowerTravelBoundaryTs: selected.first.observedAtSec,
+                upperTravelBoundaryTs: upperBoundary
+            )
+        )
+    }
+}
+
+/// Local-only capture-zone observations for analysis. The atomic state file is
+/// explicitly excluded from backup and is never emitted through diagnostics.
+enum AnalysisTimeZoneHistory {
+    static let maximumObservationCount = 256
+    private static let maximumEncodedBytes = 128 * 1_024
+    private static let currentPayloadSchemaVersion = 1
+    private static let storageFileName =
+        "analysis-timezone-history-v1.json"
+    private static let lock = NSLock()
+    private static let productionPersistence: any Persistence =
+        NoBackupAtomicPersistence()
+
+    private struct Payload: Codable {
+        let schemaVersion: Int
+        var observations: [AnalysisTimeZoneObservation]
+        var unresolvableBeforeTs: Int?
+
+        init(
+            observations: [AnalysisTimeZoneObservation],
+            unresolvableBeforeTs: Int?
+        ) {
+            self.schemaVersion = currentPayloadSchemaVersion
+            self.observations = observations
+            self.unresolvableBeforeTs = unresolvableBeforeTs
+        }
+    }
+
+    enum ReadResult: Sendable {
+        case missing
+        case available(Data)
+        case failed
+    }
+
+    protocol Persistence: Sendable {
+        func read() -> ReadResult
+        func write(_ data: Data) -> Bool
+    }
+
+    final class NoBackupAtomicPersistence:
+        Persistence,
+        @unchecked Sendable
+    {
+        private let fileManager: FileManager
+        private let baseDirectoryURL: URL?
+        private let stagedFileProtector:
+            (@Sendable (URL) throws -> Void)?
+
+        init(
+            fileManager: FileManager = .default,
+            baseDirectoryURL: URL? = nil,
+            stagedFileProtector:
+                (@Sendable (URL) throws -> Void)? = nil
+        ) {
+            self.fileManager = fileManager
+            self.baseDirectoryURL = baseDirectoryURL
+            self.stagedFileProtector = stagedFileProtector
+        }
+
+        func read() -> ReadResult {
+            do {
+                let fileURL = try storageFileURL(
+                    createDirectory: false
+                )
+                guard fileManager.fileExists(
+                    atPath: fileURL.path
+                ) else {
+                    return .missing
+                }
+                let values = try fileURL.resourceValues(
+                    forKeys: [
+                        .fileSizeKey,
+                        .isRegularFileKey,
+                    ]
+                )
+                guard values.isRegularFile == true,
+                      let size = values.fileSize,
+                      size > 0,
+                      size <= maximumEncodedBytes else {
+                    return .failed
+                }
+                let data = try Data(
+                    contentsOf: fileURL,
+                    options: .mappedIfSafe
+                )
+                guard !data.isEmpty,
+                      data.count <= maximumEncodedBytes else {
+                    return .failed
+                }
+                return .available(data)
+            } catch {
+                return .failed
+            }
+        }
+
+        func write(_ data: Data) -> Bool {
+            guard !data.isEmpty,
+                  data.count <= maximumEncodedBytes else {
+                return false
+            }
+            do {
+                let fileURL = try storageFileURL(
+                    createDirectory: true
+                )
+                let stagedURL = fileURL
+                    .deletingLastPathComponent()
+                    .appendingPathComponent(
+                        ".\(storageFileName).\(UUID().uuidString).tmp",
+                        isDirectory: false
+                    )
+                var stagedFileExists = false
+                defer {
+                    if stagedFileExists {
+                        try? fileManager.removeItem(at: stagedURL)
+                    }
+                }
+                try data.write(to: stagedURL, options: .atomic)
+                stagedFileExists = true
+                if let stagedFileProtector {
+                    try stagedFileProtector(stagedURL)
+                } else {
+                    try protectFile(stagedURL)
+                }
+                if fileManager.fileExists(atPath: fileURL.path) {
+                    _ = try fileManager.replaceItemAt(
+                        fileURL,
+                        withItemAt: stagedURL,
+                        backupItemName: nil,
+                        options: .usingNewMetadataOnly
+                    )
+                } else {
+                    try fileManager.moveItem(
+                        at: stagedURL,
+                        to: fileURL
+                    )
+                }
+                stagedFileExists = false
+                return true
+            } catch {
+                return false
+            }
+        }
+
+        private func storageFileURL(
+            createDirectory: Bool
+        ) throws -> URL {
+            let root: URL
+            if let baseDirectoryURL {
+                root = baseDirectoryURL
+            } else {
+                root = try fileManager.url(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask,
+                    appropriateFor: nil,
+                    create: createDirectory
+                )
+            }
+            let directory = root
+                .appendingPathComponent(
+                    "OpenWhoop",
+                    isDirectory: true
+                )
+                .appendingPathComponent(
+                    "LocalState",
+                    isDirectory: true
+                )
+            if createDirectory {
+                try fileManager.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true
+                )
+                try protectDirectory(directory)
+            }
+            return directory.appendingPathComponent(
+                storageFileName,
+                isDirectory: false
+            )
+        }
+
+        private func protectDirectory(_ url: URL) throws {
+            try excludeFromBackup(url)
+            #if os(iOS)
+            try fileManager.setAttributes(
+                [
+                    .protectionKey:
+                        FileProtectionType
+                            .completeUntilFirstUserAuthentication,
+                    .posixPermissions: 0o700,
+                ],
+                ofItemAtPath: url.path
+            )
+            #else
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: url.path
+            )
+            #endif
+        }
+
+        private func protectFile(_ url: URL) throws {
+            try excludeFromBackup(url)
+            #if os(iOS)
+            try fileManager.setAttributes(
+                [
+                    .protectionKey:
+                        FileProtectionType
+                            .completeUntilFirstUserAuthentication,
+                    .posixPermissions: 0o600,
+                ],
+                ofItemAtPath: url.path
+            )
+            #else
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: url.path
+            )
+            #endif
+        }
+
+        private func excludeFromBackup(_ url: URL) throws {
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var mutableURL = url
+            try mutableURL.setResourceValues(values)
+        }
+    }
+
+    static func load(
+        persistence: any Persistence = productionPersistence
+    ) -> AnalysisTimeZoneTimeline? {
+        lock.lock()
+        defer { lock.unlock() }
+        switch persistence.read() {
+        case .missing:
+            return AnalysisTimeZoneTimeline(
+                observations: [],
+                unresolvableBeforeTs: nil
+            )
+        case .failed:
+            return nil
+        case .available(let data):
+            guard let payload = decodedPayload(data: data) else {
+                return nil
+            }
+            return AnalysisTimeZoneTimeline(
+                observations: payload.observations,
+                unresolvableBeforeTs:
+                    payload.unresolvableBeforeTs
+            )
+        }
+    }
+
+    @discardableResult
+    static func observe(
+        nowSec: Int,
+        timeZone: TimeZone,
+        persistence: any Persistence = productionPersistence
+    ) -> AnalysisTimeZoneTimeline? {
+        guard nowSec >= 0,
+              timeZone.identifier.utf8.count <= 128 else {
+            return nil
+        }
+        lock.lock()
+        defer { lock.unlock() }
+
+        var payload: Payload
+        switch persistence.read() {
+        case .missing:
+            payload = Payload(
+                observations: [],
+                unresolvableBeforeTs: nowSec
+            )
+        case .failed:
+            return nil
+        case .available(let data):
+            guard let decoded = decodedPayload(data: data) else {
+                return nil
+            }
+            payload = decoded
+        }
+        let offset = timeZone.secondsFromGMT(
+            for: Date(timeIntervalSince1970: TimeInterval(nowSec))
+        )
+        let observation = AnalysisTimeZoneObservation(
+            observedAtSec: nowSec,
+            timeZoneIdentifier: timeZone.identifier,
+            offsetSeconds: offset
+        )
+
+        if let last = payload.observations.last {
+            if observation.observedAtSec < last.observedAtSec {
+                return AnalysisTimeZoneTimeline(
+                    observations: payload.observations,
+                    unresolvableBeforeTs:
+                        payload.unresolvableBeforeTs
+                )
+            }
+            if observation.observedAtSec == last.observedAtSec {
+                if observation.timeZoneIdentifier
+                    != last.timeZoneIdentifier,
+                   last.observedAtSec < Int.max {
+                    let boundarySecond = last.observedAtSec + 1
+                    payload.observations.append(
+                        AnalysisTimeZoneObservation(
+                            observedAtSec: boundarySecond,
+                            timeZoneIdentifier:
+                                observation.timeZoneIdentifier,
+                            offsetSeconds:
+                                timeZone.secondsFromGMT(
+                                    for: Date(
+                                        timeIntervalSince1970:
+                                            TimeInterval(
+                                                boundarySecond
+                                            )
+                                    )
+                                )
+                        )
+                    )
+                }
+            } else if last.timeZoneIdentifier
+                        != observation.timeZoneIdentifier {
+                payload.observations.append(observation)
+            } else {
+                let sameZoneTailCount = payload.observations
+                    .reversed()
+                    .prefix {
+                        $0.timeZoneIdentifier
+                            == observation.timeZoneIdentifier
+                    }
+                    .count
+                if sameZoneTailCount < 2 {
+                    payload.observations.append(observation)
+                } else {
+                    payload.observations[
+                        payload.observations.count - 1
+                    ] = observation
+                }
+            }
+        } else {
+            payload.observations = [observation]
+            payload.unresolvableBeforeTs = observation.observedAtSec
+        }
+
+        if payload.observations.count > maximumObservationCount {
+            payload.observations.removeFirst(
+                payload.observations.count - maximumObservationCount
+            )
+            if let firstRetained = payload.observations.first {
+                payload.unresolvableBeforeTs = max(
+                    payload.unresolvableBeforeTs ?? 0,
+                    firstRetained.observedAtSec
+                )
+            }
+        }
+        guard let data = try? JSONEncoder().encode(payload),
+              persistence.write(data) else {
+            return nil
+        }
+        return AnalysisTimeZoneTimeline(
+            observations: payload.observations,
+            unresolvableBeforeTs: payload.unresolvableBeforeTs
+        )
+    }
+
+    private static func decodedPayload(
+        data: Data
+    ) -> Payload? {
+        guard !data.isEmpty,
+              data.count <= maximumEncodedBytes,
+              var payload = try? JSONDecoder().decode(
+                  Payload.self,
+                  from: data
+              ),
+              payload.schemaVersion == currentPayloadSchemaVersion else {
+            return nil
+        }
+        payload.observations.sort {
+            $0.observedAtSec < $1.observedAtSec
+        }
+        if payload.unresolvableBeforeTs == nil,
+           let firstObservation = payload.observations.first {
+            payload.unresolvableBeforeTs =
+                firstObservation.observedAtSec
+        }
+        // Zone identifiers and stored offsets remain structurally validated, but the offset is not
+        // re-derived from current tzdata because rules can legitimately change after observation.
+        guard payload.observations.count <= maximumObservationCount,
+              payload.observations.allSatisfy({ observation in
+                  observation.observedAtSec >= 0
+                      && (-18 * 3_600...18 * 3_600)
+                          .contains(observation.offsetSeconds)
+                      && TimeZone(
+                          identifier: observation.timeZoneIdentifier
+                      ) != nil
+              }),
+              zip(
+                  payload.observations,
+                  payload.observations.dropFirst()
+              ).allSatisfy({ pair in
+                  pair.0.observedAtSec < pair.1.observedAtSec
+              }),
+              payload.unresolvableBeforeTs == nil
+                  || (
+                      payload.unresolvableBeforeTs
+                          == payload.observations.first?.observedAtSec
+                  ) else {
+            return nil
+        }
+        return payload
+    }
+}
+
 /// On-device "intelligence": computes recovery / day-strain / sleep from the raw strap streams using
 /// the same model shape WHOOP uses (HRV vs personal baseline ~60%, resting HR ~20%, sleep ~15%,
 /// respiration ~5%; strain 0–21 from cardiovascular load). This is what makes NOOP independent of
@@ -54,6 +734,19 @@ final class IntelligenceEngine: ObservableObject {
     /// precedence and is not evidence that a local raw-stream computation happened.
     struct ScoreRunReceipt: Equatable, Sendable {
         let whoopStrapDays: Set<String>
+        /// False when valid partial results were published but a required read, persistence, repair, or
+        /// input-generation finalization boundary failed. Callers that merely consume published metrics
+        /// may still use the receipt; one-shot migrations must require this stronger completion signal.
+        let allRequiredBoundariesCompleted: Bool
+
+        init(
+            whoopStrapDays: Set<String>,
+            allRequiredBoundariesCompleted: Bool = true
+        ) {
+            self.whoopStrapDays = whoopStrapDays
+            self.allRequiredBoundariesCompleted =
+                allRequiredBoundariesCompleted
+        }
     }
 
     /// One pass-wide acknowledgement verdict. Storage failures remain retryable without changing the
@@ -98,22 +791,56 @@ final class IntelligenceEngine: ObservableObject {
         case deferred
     }
 
+    struct AnalysisCivilDayWindow: Equatable, Sendable {
+        let startTs: Int
+        let endTs: Int
+        let dayKey: String
+        let timezoneOffsetSeconds: Int
+        let localSixPMTs: Int
+
+        var durationSeconds: Int {
+            endTs - startTs + 1
+        }
+    }
+
     struct AnalysisScoringPlan: Equatable, Sendable {
         let referenceNow: Int
         let maxDays: Int
         let passKind: AnalysisPassKind
         let defersHistoricalBacklog: Bool
+        let timezoneOffsetSeconds: Int?
+        let civilDayWindow: AnalysisCivilDayWindow?
+        let timeZoneIdentifier: String?
+        let timeZoneProvenance: AnalysisTimeZoneProvenance
+        let lowerTravelBoundaryTs: Int?
+        let upperTravelBoundaryTs: Int?
+        let terminalUnknownRange: AnalysisTerminalUnknownRange?
 
         init(
             referenceNow: Int,
             maxDays: Int,
             passKind: AnalysisPassKind,
-            defersHistoricalBacklog: Bool = false
+            defersHistoricalBacklog: Bool = false,
+            timezoneOffsetSeconds: Int? = nil,
+            civilDayWindow: AnalysisCivilDayWindow? = nil,
+            timeZoneIdentifier: String? = nil,
+            timeZoneProvenance: AnalysisTimeZoneProvenance =
+                .fixedOffsetCompatibility,
+            lowerTravelBoundaryTs: Int? = nil,
+            upperTravelBoundaryTs: Int? = nil,
+            terminalUnknownRange: AnalysisTerminalUnknownRange? = nil
         ) {
             self.referenceNow = referenceNow
             self.maxDays = maxDays
             self.passKind = passKind
             self.defersHistoricalBacklog = defersHistoricalBacklog
+            self.timezoneOffsetSeconds = timezoneOffsetSeconds
+            self.civilDayWindow = civilDayWindow
+            self.timeZoneIdentifier = timeZoneIdentifier
+            self.timeZoneProvenance = timeZoneProvenance
+            self.lowerTravelBoundaryTs = lowerTravelBoundaryTs
+            self.upperTravelBoundaryTs = upperTravelBoundaryTs
+            self.terminalUnknownRange = terminalUnknownRange
         }
 
         var isHistoricalCatchUp: Bool {
@@ -123,6 +850,14 @@ final class IntelligenceEngine: ObservableObject {
         var shouldAnalyze: Bool {
             passKind != .deferred
         }
+    }
+
+    private struct AnalysisTimeZoneContext: Equatable, Sendable {
+        let timeZoneIdentifier: String?
+        let timezoneOffsetSeconds: Int
+        let provenance: AnalysisTimeZoneProvenance
+        let lowerTravelBoundaryTs: Int?
+        let upperTravelBoundaryTs: Int?
     }
 
     enum AnalysisReadFailurePoint: Hashable, Sendable {
@@ -135,9 +870,16 @@ final class IntelligenceEngine: ObservableObject {
 
     #if DEBUG
     private var analysisReadFailuresForTesting: Set<AnalysisReadFailurePoint> = []
+    private var analysisTimeZoneTimelineForTesting: AnalysisTimeZoneTimeline?
 
     func setAnalysisReadFailuresForTesting(_ failures: Set<AnalysisReadFailurePoint>) {
         analysisReadFailuresForTesting = failures
+    }
+
+    func setAnalysisTimeZoneTimelineForTesting(
+        _ timeline: AnalysisTimeZoneTimeline?
+    ) {
+        analysisTimeZoneTimelineForTesting = timeline
     }
     #endif
 
@@ -155,6 +897,7 @@ final class IntelligenceEngine: ObservableObject {
 
     private enum AnalysisPassStage: String {
         case registrySnapshot = "registry_snapshot"
+        case timeZonePersistence = "timezone_persistence"
         case generationSnapshot = "generation_snapshot"
         case baselineRead = "baseline_read"
         case habitualSleepRead = "habitual_sleep_read"
@@ -216,6 +959,10 @@ final class IntelligenceEngine: ObservableObject {
     /// `defer` re-invokes `analyzeRecent(force: true)` ONCE when it clears. A single re-arm (the flag is
     /// cleared BEFORE the re-invoke) bounds it to one extra pass , no recompute storm.
     private var pendingForcedRescore = false
+    /// A terminal timezone exclusion can expose an older exact segment without doing any scoring itself.
+    /// Re-run one ordinary claim-driven pass after the current call releases the actor gate so that older
+    /// exact history progresses instead of waiting for an unrelated foreground cadence.
+    private var pendingClaimRescore = false
     /// Durable fairness bit for non-forced analysis. A successful recent pass that leaves an older
     /// generation pending gives the next idle pass one bounded historical batch; that batch then yields
     /// back to current data. Failures and forced passes preserve the bit so neither can silently discard
@@ -292,6 +1039,8 @@ final class IntelligenceEngine: ObservableObject {
     private struct DayScan: Sendable {
         let result: AnalyticsEngine.DayResult
         let rhrLine: String?
+        let timezoneOffsetSeconds: Int
+        let civilDayWindow: AnalysisCivilDayWindow?
         /// CAPTURE-B (#814/#799): the resolved READ owner id this day was scored from, and how many HR rows
         /// that owner returned for the night window, carried out of the off-actor loop so the main-actor
         /// fold can emit the universal `dayOwner …` self-diagnostic line (it needs the registry active id +
@@ -453,9 +1202,7 @@ final class IntelligenceEngine: ObservableObject {
         deviceIds: [String],
         from windowStart: Int,
         to windowEnd: Int,
-        oldestDay: String,
-        newestDay: String,
-        timezoneOffsetSeconds: Int,
+        civilDayWindows: [AnalysisCivilDayWindow],
         freshStarts: Set<Int>,
         deleteSession: ((String, Int) async throws -> Int)? = nil
     ) async -> SleepHealResult {
@@ -463,6 +1210,9 @@ final class IntelligenceEngine: ObservableObject {
         var unchangedDeleteCount = 0
         var failedDeleteCount = 0
         var failedReadCount = 0
+        let healableWindows = civilDayWindows.map {
+            $0.startTs...$0.endTs
+        }
 
         func result(cancelled: Bool = false) -> SleepHealResult {
             SleepHealResult(
@@ -489,9 +1239,10 @@ final class IntelligenceEngine: ObservableObject {
                 failedReadCount += 1
                 continue
             }
-            let healable = storedSessions.filter {
-                (oldestDay...newestDay).contains(
-                    AnalyticsEngine.dayString($0.endTs, offsetSec: timezoneOffsetSeconds))
+            let healable = storedSessions.filter { session in
+                healableWindows.contains { window in
+                    window.contains(session.endTs)
+                }
             }
             let candidates = SleepSessionDedup.dedupe(healable, freshStarts: freshStarts).dropped
             for stale in candidates {
@@ -904,26 +1655,23 @@ final class IntelligenceEngine: ObservableObject {
     /// pass completes so it never re-runs.
     static let effortRescoreFlagKey = "intelligence.effortRescore.v313.done"
 
-    /// One-shot, on-upgrade FULL-history Effort rescore (#313 PART B). The Effort hero gauge + numbers
-    /// moved from the old 0–21 axis to NOOP's own 0–100 axis. On-device computed rows since v2.6.1
-    /// already store 0–100, but rows the engine computed on an OLDER build (capped at `maxDays` per run,
-    /// so deep history was never revisited) may still hold 0–21 strain.
+    /// One-shot, on-upgrade Effort migration (#313 PART B). The Effort hero gauge + numbers moved from
+    /// the old 0–21 axis to NOOP's own 0–100 axis. On-device computed rows since v2.6.1 already store
+    /// 0–100, but rows the engine computed on an OLDER build may still hold 0–21 strain.
     ///
-    /// The SAFE fix is to recompute strain FROM SOURCE for every day with raw HR , those regenerate at
-    /// 0–100 with NO double-rescale risk , rather than a blind `strain*21→100` multiply that would
-    /// double-rescale the large population already on 0–100 (→ ~0–476). We do that by running the normal
-    /// `analyzeRecent` once with the `maxDays` cap lifted to the full history, then persist a flag so it
-    /// runs exactly once. IMPORTED rows are never rewritten here (the engine only ever writes under the
-    /// "-noop" computed source) , those are handled by re-import. A day already on 0–100 is recomputed
-    /// from the same raw HR and lands on 0–100 again: UNCHANGED axis (verified by test).
+    /// The safe fix is source-scoped and fail-closed: recompute from raw HR with the history cap lifted,
+    /// replacing only days the scorer can prove and persist. Existing computed values are never cleared
+    /// first because a newly installed or unreadable timezone-history file may yield zero safe civil days;
+    /// destructive clearing in that state would erase all Effort history without a replacement. Imported
+    /// rows are never touched. The completion marker is written only after the scoring pass returns its
+    /// all-required-boundaries receipt; a storage failure, cancellation, or overlapping pass retries later.
     func runEffortRescoreIfNeeded(historyDays: Int = 4000) async {
         guard !UserDefaults.standard.bool(forKey: Self.effortRescoreFlagKey) else { return }
-        await analyzeRecent(maxDays: historyDays)
-        // Only mark done if the pass actually completed (wasn't skipped because another tick held the
-        // `computing` lock). `computing` is false here once analyzeRecent's `defer` has run; a skipped
-        // call returns with `note` unset by it. Use the lock state: if a concurrent run was in progress
-        // the flag stays unset so the next launch retries , cheap, and correctness over a one-time cost.
-        if !computing { UserDefaults.standard.set(true, forKey: Self.effortRescoreFlagKey) }
+        guard let receipt = await analyzeRecent(maxDays: historyDays),
+              receipt.allRequiredBoundariesCompleted else {
+            return
+        }
+        UserDefaults.standard.set(true, forKey: Self.effortRescoreFlagKey)
     }
 
     /// UserDefaults flag guarding the one-shot #547 implausible-timestamp DB heal (below). Set once the
@@ -1007,6 +1755,9 @@ final class IntelligenceEngine: ObservableObject {
                 // Carry THIS pass's window into the re-pass. The new Task starts after this defer releases
                 // the gate; another force arriving during that pass can arm one further bounded re-pass.
                 Task { await self.analyzeRecent(maxDays: maxDays, force: true) }
+            } else if pendingClaimRescore {
+                pendingClaimRescore = false
+                Task { await self.analyzeRecent(maxDays: maxDays, force: false) }
             }
         }
         guard let store = await repo.storeHandle() else {
@@ -1056,6 +1807,31 @@ final class IntelligenceEngine: ObservableObject {
         }
         let analysisSourceIds = Self.analysisDirtySourceIds(
             registered: regDevices, readIds: repo.importedReadIds, fallbackDeviceId: deviceId)
+        let actualNow = Int(Date().timeIntervalSince1970)
+        let currentTimeZone = TimeZone.current
+        let currentTimezoneOffset = currentTimeZone.secondsFromGMT(
+            for: Date(timeIntervalSince1970: TimeInterval(actualNow))
+        )
+        #if DEBUG
+        let injectedTimeZoneTimeline = analysisTimeZoneTimelineForTesting
+        #else
+        let injectedTimeZoneTimeline: AnalysisTimeZoneTimeline? = nil
+        #endif
+        let analysisTimeZoneTimeline: AnalysisTimeZoneTimeline
+        if let injectedTimeZoneTimeline {
+            analysisTimeZoneTimeline = injectedTimeZoneTimeline
+        } else if let observedTimeZoneTimeline =
+            AnalysisTimeZoneHistory.observe(
+                nowSec: actualNow,
+                timeZone: currentTimeZone
+            ) {
+            analysisTimeZoneTimeline = observedTimeZoneTimeline
+        } else {
+            passIntegrity.requiredReadsSucceeded = false
+            passIntegrity.requiredPersistenceSucceeded = false
+            recordAnalysisPassFailure(stage: .timeZonePersistence)
+            return nil
+        }
 
         // #836 (idle/resume gate): snapshot one durable generation per candidate source without changing
         // store state. A crash or force-quit before acknowledgement therefore leaves the same generation
@@ -1072,6 +1848,7 @@ final class IntelligenceEngine: ObservableObject {
         } catch {
             claimedAnalysisInputs = []
             generationSnapshotSucceeded = false
+            passIntegrity.requiredReadsSucceeded = false
             recordAnalysisPassFailure(stage: .generationSnapshot, error: error)
         }
         if !Self.analysisRunNeeded(
@@ -1082,12 +1859,10 @@ final class IntelligenceEngine: ObservableObject {
             return nil
         }
 
-        let actualNow = Int(Date().timeIntervalSince1970)
         // Device wall-clock offset (seconds east of UTC) for the sleep detector's daytime
         // false-sleep guard (#90): the stager places each window's center on the LOCAL clock
         // so only genuinely-daytime windows face the stricter nap bar. (Computed once; a DST
         // boundary inside the window is a negligible edge case for an hour-of-day band.)
-        let tzOffset = TimeZone.current.secondsFromGMT()
         let historicalCatchUpDue = UserDefaults.standard.bool(
             forKey: Self.analysisHistoricalCatchUpDueKey
         )
@@ -1096,9 +1871,15 @@ final class IntelligenceEngine: ObservableObject {
             force: force,
             claims: claimedAnalysisInputs,
             now: actualNow,
-            timezoneOffsetSeconds: tzOffset,
+            timezoneOffsetSeconds: currentTimezoneOffset,
+            timeZoneTimeline: analysisTimeZoneTimeline,
             preferHistoricalCatchUp: historicalCatchUpDue
         )
+        let tzOffset =
+            scoringPlan.timezoneOffsetSeconds ?? currentTimezoneOffset
+        let scoringTimeZone = scoringPlan.timeZoneIdentifier.flatMap {
+            TimeZone(identifier: $0)
+        }
         let historicalCatchUpPreferenceAfterSelection =
             Self.analysisHistoricalCatchUpPreferenceAfterSelection(
                 current: historicalCatchUpDue,
@@ -1112,6 +1893,37 @@ final class IntelligenceEngine: ObservableObject {
             )
         }
         guard scoringPlan.shouldAnalyze else {
+            if let terminalUnknownRange = scoringPlan.terminalUnknownRange,
+               generationSnapshotSucceeded {
+                do {
+                    let exclusion = try await store.excludeAnalysisInputGenerations(
+                        claimedAnalysisInputs,
+                        exclusionStartTs: terminalUnknownRange.startTs,
+                        exclusionEndTs: terminalUnknownRange.endTs
+                    )
+                    let madeProgress =
+                        exclusion.excludedCount > 0
+                        || exclusion.advancedCount > 0
+                    AppDiagnosticsRecorder.shared.record(
+                        "analysis.pass",
+                        fields: [
+                            "outcome": madeProgress ? "excluded" : "deferred",
+                            "mode": "historical_catch_up",
+                            "reason": terminalUnknownRange.reason.rawValue,
+                            "excluded": String(min(exclusion.excludedCount, 64)),
+                            "advanced": String(min(exclusion.advancedCount, 64)),
+                        ]
+                    )
+                    if madeProgress {
+                        pendingClaimRescore = true
+                    }
+                } catch is CancellationError {
+                    recordAnalysisPassCancellation(stage: .generationAcknowledgement)
+                } catch {
+                    recordAnalysisPassFailure(stage: .generationAcknowledgement, error: error)
+                }
+                return nil
+            }
             AppDiagnosticsRecorder.shared.record(
                 "analysis.pass",
                 fields: [
@@ -1122,14 +1934,30 @@ final class IntelligenceEngine: ObservableObject {
             )
             return nil
         }
-        let now = scoringPlan.referenceNow
-        let scoringMaxDays = scoringPlan.maxDays
         let historicalCatchUp = scoringPlan.isHistoricalCatchUp
         let analysisScanCoverage = Self.analysisScanCoverage(
             plan: scoringPlan,
             actualNow: actualNow,
-            timezoneOffsetSeconds: tzOffset
+            timezoneOffsetSeconds: tzOffset,
+            timeZone: scoringTimeZone
         )
+        let scoringDayWindows = Self.analysisCivilDayWindows(
+            plan: scoringPlan,
+            timezoneOffsetSeconds: tzOffset,
+            timeZone: scoringTimeZone
+        )
+        guard let newestScoringDay = scoringDayWindows.first else {
+            AppDiagnosticsRecorder.shared.record(
+                "analysis.pass",
+                fields: [
+                    "outcome": "failed",
+                    "mode": historicalCatchUp ? "historical_catch_up" : "current",
+                    "reason": "calendar_window",
+                ]
+            )
+            return nil
+        }
+        let scoringMaxDays = scoringDayWindows.count
         AppDiagnosticsRecorder.shared.record(
             "analysis.pass",
             fields: [
@@ -1208,6 +2036,8 @@ final class IntelligenceEngine: ObservableObject {
                             sessionMotion: [Int: [Double]],
                             sessionSleepState: [Int: [Int]],
                             restRawEvidence: ScoreConfidence.RestRawEvidence,
+                            timezoneOffsetSeconds: Int,
+                            civilDayWindow: AnalysisCivilDayWindow?,
                             hrvDiag: String?)] = []   // #195: carried from loop 1, emitted in the main-actor loop
         // Nightly values harvested in pass 1, keyed by day, to seed the pass-2 baseline.
         var nightlyHrvByDay: [String: Double?] = [:]
@@ -1227,10 +2057,11 @@ final class IntelligenceEngine: ObservableObject {
         // day keys are LOCAL calendar days, consistent with the dashboard's local "today" lookup. A
         // west-of-UTC user's evening crosses midnight UTC; bucketing by UTC put it in the next UTC day,
         // which the local read never found (Toronto/UTC-4 report).
-        let nowLocalMidnight = Self.midnightLocal(now, offsetSec: tzOffset)
+        let nowLocalMidnight = newestScoringDay.startTs
         let analysisWindowEnd = historicalCatchUp
-            ? nowLocalMidnight + 86_400 - 1
+            ? newestScoringDay.endTs
             : actualNow
+        let analysisWindowStart = Int(analysisScanCoverage.startTs)
 
         // ── Learned habitual midsleep (#547) ──────────────────────────────────
         // Compute the user's habitual midsleep ONCE per run from the trailing sleep history so the
@@ -1243,10 +2074,29 @@ final class IntelligenceEngine: ObservableObject {
         // and the Sleep tab resolve to the identical block. (#547)
         let habitualMidsleepSec: Int?
         do {
-            habitualMidsleepSec = try await Self.computeHabitualMidsleep(
-                store: store, importedId: deviceId, computedId: deviceId + "-noop",
-                windowStart: nowLocalMidnight - scoringMaxDays * 86_400 - 30 * 3_600,
-                windowEnd: analysisWindowEnd, offsetSec: tzOffset)
+            let habitualTimeZone =
+                scoringTimeZone
+                ?? TimeZone(secondsFromGMT: tzOffset)
+                ?? TimeZone(secondsFromGMT: 0)!
+            if let habitualWindow = Self.habitualMidsleepReadWindow(
+                analysisWindowStart: analysisWindowStart,
+                analysisWindowEnd: analysisWindowEnd,
+                lowerTravelBoundaryTs:
+                    scoringPlan.lowerTravelBoundaryTs,
+                upperTravelBoundaryTs:
+                    scoringPlan.upperTravelBoundaryTs
+            ) {
+                habitualMidsleepSec = try await Self.computeHabitualMidsleep(
+                    store: store,
+                    importedId: deviceId,
+                    computedId: deviceId + "-noop",
+                    windowStart: habitualWindow.lowerBound,
+                    windowEnd: habitualWindow.upperBound,
+                    timeZone: habitualTimeZone
+                )
+            } else {
+                habitualMidsleepSec = nil
+            }
         } catch {
             if error is CancellationError || Task.isCancelled {
                 passIntegrity.cancelled = true
@@ -1315,14 +2165,17 @@ final class IntelligenceEngine: ObservableObject {
             // #938: the WHOOP 4.0 ADC offset is per-device, not per-night. Learn one anchor per owner
             // from the whole scan window and reuse it for every night so cross-night deviations survive.
             let skinAnchorScanFrom =
-                nowLocalMidnight - (scoringMaxDays - 1) * 86_400 - 30 * 3_600
-            let skinAnchorScanTo = nowLocalMidnight + 18 * 3_600
+                analysisWindowStart - 30 * 3_600
+            let skinAnchorScanTo =
+                newestScoringDay.endTs + 1 - 6 * 3_600
             var skinAnchorByOwner: [String: Double] = [:]
             var skinAnchorResolvedOwners = Set<String>()
-            for offset in 0..<scoringMaxDays {
+            for exactDay in scoringDayWindows {
                 try Task.checkCancellation()
-                let dayStart = nowLocalMidnight - offset * 86_400
-                let day = AnalyticsEngine.dayString(dayStart, offsetSec: tzOffset)
+                let dayStart = exactDay.startTs
+                let dayTimezoneOffsetSeconds =
+                    exactDay.timezoneOffsetSeconds
+                let day = exactDay.dayKey
                 // Read a generous window around the night that ends on `day`; the stager finds the span.
                 let from = dayStart - 30 * 3_600
                 // Sleep read-window END. For a PAST day the night may end any time before the NEXT local
@@ -1331,10 +2184,10 @@ final class IntelligenceEngine: ObservableObject {
                 // past it was reported as a flat 18:00 wake (#500). Read a PAST day through to the next
                 // local midnight so the stager sees the whole night; TODAY keeps the 18:00 cap (the store
                 // clamps to `now` anyway, and an in-progress nap shouldn't be read as a finished night).
-                let nextMidnight = dayStart + 86_400
+                let nextMidnight = exactDay.endTs + 1
                 let to = (historicalCatchUp || dayStart < nowLocalMidnight)
                     ? nextMidnight
-                    : dayStart + 18 * 3_600
+                    : exactDay.localSixPMTs
 
                 // I2: pick the single device that owns this day, and read ITS streams below. With one device
                 // this resolves to `deviceId` (active strap, has data → priority 0), so nothing changes; with
@@ -1352,8 +2205,8 @@ final class IntelligenceEngine: ObservableObject {
                 // Active Minutes is a calendar-day activity measure, not a sleep output. Read and summarize
                 // the day's HR before the overnight eligibility gate so a daytime workout still counts when
                 // the band was not worn to bed.
-                let dayMid = Self.midnightLocal(dayStart, offsetSec: tzOffset)
-                let dayEnd = dayMid + 86_400 - 1
+                let dayMid = dayStart
+                let dayEnd = nextMidnight - 1
                 let dayHr: [HRSample]
                 if let slice = AnalyticsEngine.daySliceFromNight(
                     hr, nightLo: from, nightHi: to,
@@ -1617,7 +2470,11 @@ final class IntelligenceEngine: ObservableObject {
                                                      skinTempAnchorRaw: skinAnchorRaw,   // #938 second capture
                                                      spo2: spo2,                   // #93
                                                      profile: up, baselines: baselines1, maxHROverride: maxHR,
-                                                     tzOffsetSeconds: tzOffset, wristOff: wristOff,
+                                                     tzOffsetSeconds: dayTimezoneOffsetSeconds,
+                                                     timeZoneIdentifier: scoringPlan.timeZoneIdentifier,
+                                                     civilDayStartTs: exactDay.startTs,
+                                                     civilDayEndTsExclusive: exactDay.endTs + 1,
+                                                     wristOff: wristOff,
                                                      habitualMidsleepSec: habitualMidsleepSec,
                                                      bandSleepState: bandSleepState,
                                                      // #690: thread the V2 toggle into the NORMAL staging path so
@@ -1633,11 +2490,18 @@ final class IntelligenceEngine: ObservableObject {
                                                      // ring buffer isn't flooded; every night keeps the summary.
                                                      hrvWindowDetail: dayStart == nowLocalMidnight,
                                                      deepHrvWindow: deepHrvWindow)
+                guard res.status == .completed else {
+                    skippedDayLines.append(
+                        "analysis day=\(day) SKIPPED reason=invalid_civil_day_bounds"
+                    )
+                    continue
+                }
                 let restRawEvidence = ScoreConfidence.restRawEvidence(
                     sessions: res.sleepSessions,
                     rr: rr,
                     resp: resp,
-                    offsetSec: tzOffset,
+                    offsetSec: dayTimezoneOffsetSeconds,
+                    timeZoneIdentifier: scoringPlan.timeZoneIdentifier,
                     habitualMidsleepSec: habitualMidsleepSec)
                 // #195: whole-night HRV cleaning-pipeline summary for the always-on strap log, so a "reads ~2x
                 // too high" report is triageable without the HRV test mode: RMSSD vs SDNN (rmssd >> sdnn =
@@ -1690,8 +2554,11 @@ final class IntelligenceEngine: ObservableObject {
                 // Mirrors the Android IntelligenceEngine guard (stepsTraceSink != null && daySteps.isNotEmpty()).
                 if stepsTraceActive && !daySteps.isEmpty {
                     stepsTrace = StepsEstimateEngine.rawCounterTrace(
-                        daySteps: daySteps, dayKey: day, tzOffsetSeconds: tzOffset,
-                        ticksPerStep: up.stepTicksPerStep)
+                        daySteps: daySteps, dayKey: day,
+                        tzOffsetSeconds: dayTimezoneOffsetSeconds,
+                        ticksPerStep: up.stepTicksPerStep,
+                        civilDayStartTs: exactDay.startTs,
+                        civilDayEndTsExclusive: exactDay.endTs + 1)
                 }
                 // ── RHR floor-vs-mean diagnostic (#691) ────────────────────────────────────────────────
                 // Make the recurring "NOOP's resting HR reads LOWER than my sleeping-HR app" reports
@@ -1714,6 +2581,8 @@ final class IntelligenceEngine: ObservableObject {
                     rhrLine = Self.rhrFloorMeanLogLine(day: res.daily.day, floor: floor, inBedBpms: inBedBpms)
                 }
                 out.append(DayScan(result: res, rhrLine: rhrLine,
+                                   timezoneOffsetSeconds: dayTimezoneOffsetSeconds,
+                                   civilDayWindow: exactDay,
                                    readOwner: owner, hrRows: hr.count,
                                    sleepTrace: sleepTrace, stepsTrace: stepsTrace, hrvTrace: hrvTrace,
                                    hrvDiag: hrvDiag,
@@ -1799,6 +2668,8 @@ final class IntelligenceEngine: ObservableObject {
                                  sessionMotion: res.sessionMotionByStart,
                                  sessionSleepState: res.sessionSleepStateByStart,
                                  restRawEvidence: scan.restRawEvidence,
+                                 timezoneOffsetSeconds: scan.timezoneOffsetSeconds,
+                                 civilDayWindow: scan.civilDayWindow,
                                  hrvDiag: scan.hrvDiag))
         }
 
@@ -1830,8 +2701,7 @@ final class IntelligenceEngine: ObservableObject {
         let hrvEpoch = Baselines.hrvBaselineEpoch()
         let recoveryEpoch = Baselines.recoveryBaselineEpoch()
 
-        let windowStart =
-            nowLocalMidnight - (scoringMaxDays - 1) * 86_400 - 30 * 3_600
+        let windowStart = analysisWindowStart - 30 * 3_600
 
         // ── Pass 2: re-score ONLY recovery against the now-seeded baseline (cheap, baseline-dependent);
         // every other field was computed once in pass 1. Recovery stays nil until the HRV baseline is
@@ -1953,14 +2823,17 @@ final class IntelligenceEngine: ObservableObject {
             let dayEditedRows = Self.editedRowsForDay(
                 editedRows,
                 day: night.daily.day,
-                tzOffsetSeconds: tzOffset,
+                tzOffsetSeconds: night.timezoneOffsetSeconds,
+                civilDayStartTs: night.civilDayWindow?.startTs,
+                civilDayEndTsExclusive:
+                    night.civilDayWindow.map { $0.endTs + 1 },
                 sourceTimeline: editSourceTimeline)
             let editsByStart = Dictionary(dayEditedRows.map { ($0.startTs, $0) }, uniquingKeysWith: { a, _ in a })
             let editedSleep = Self.sleepEditedDaily(
                 night.daily,
                 detected: night.cachedSleep,
                 editsByStart: editsByStart,
-                tzOffsetSeconds: tzOffset,
+                tzOffsetSeconds: night.timezoneOffsetSeconds,
                 habitualMidsleepSec: habitualMidsleepSec,
                 fallbackMainSessionStarts: night.restRawEvidence.mainSessionStarts)
             let daily = editedSleep.daily
@@ -2181,10 +3054,9 @@ final class IntelligenceEngine: ObservableObject {
         // only , imported "my-whoop" rows are never touched (a BLE-only WHOOP 4.0 user has no import
         // fallback). Rows older than the window keep their old keys (cosmetic off-by-one, acceptable).
         // yyyy-MM-dd sorts chronologically, so the string range IS a date range.
-        let oldestDay = AnalyticsEngine.dayString(
-            nowLocalMidnight - (scoringMaxDays - 1) * 86_400,
-                                                  offsetSec: tzOffset)
-        let newestDay = AnalyticsEngine.dayString(nowLocalMidnight, offsetSec: tzOffset)
+        let oldestDay =
+            scoringDayWindows.last?.dayKey ?? newestScoringDay.dayKey
+        let newestDay = newestScoringDay.dayKey
 
         // ── Source-only Charge/Rest fold for wearable imports (Oura / Fitbit / Garmin / Health Connect) ──
         // Same honesty gap the watch fold above closes (#823), extended to the other import-only sources: a
@@ -2507,11 +3379,34 @@ final class IntelligenceEngine: ObservableObject {
         //
         // Calibration window: a generous 60 days (not just the 7 the weekly engines use) so enough
         // both-have days accumulate to fit. Reference steps = the apple-health daily `steps` value
-        // (the same source the dashboard's `steps` metric reads, Repository.swift). Motion = the
-        // [localMidnight, +24h) gravity volume, the same calendar-day window the daily totals use.
+        // (the same source the dashboard's `steps` metric reads, Repository.swift). Motion uses exact
+        // calendar-derived civil windows so a daylight-saving transition contributes its real 23 or
+        // 25 elapsed hours instead of borrowing or dropping an adjacent hour.
         let stepsCalDays = 60
-        let calOldest = AnalyticsEngine.dayString(
-            nowLocalMidnight - (stepsCalDays - 1) * 86_400, offsetSec: tzOffset)
+        let stepsCalibrationPlan = Self.analysisScoringPlan(
+            requestedMaxDays: stepsCalDays,
+            force: true,
+            claims: [],
+            now: actualNow,
+            timezoneOffsetSeconds: currentTimezoneOffset,
+            timeZoneTimeline: analysisTimeZoneTimeline
+        )
+        let stepsCalibrationTimeZone =
+            stepsCalibrationPlan.timeZoneIdentifier.flatMap {
+                TimeZone(identifier: $0)
+            }
+        let stepsCalibrationWindows = Self.analysisCivilDayWindows(
+            plan: stepsCalibrationPlan,
+            timezoneOffsetSeconds: currentTimezoneOffset,
+            timeZone: stepsCalibrationTimeZone
+        )
+        guard let oldestStepsCalibrationDay =
+            stepsCalibrationWindows.last else {
+            passIntegrity.requiredReadsSucceeded = false
+            recordAnalysisPassFailure(stage: .stepsCalibrationRead)
+            return nil
+        }
+        let calOldest = oldestStepsCalibrationDay.dayKey
         guard !Task.isCancelled else {
             passIntegrity.cancelled = true
             recordAnalysisPassCancellation(stage: .stepsCalibrationRead)
@@ -2550,11 +3445,11 @@ final class IntelligenceEngine: ObservableObject {
             // Per-day motion volume over the calibration window, read from the owner-resolved strap streams.
             // (Owner resolution mirrors the scoring loop; one device installs resolve to `deviceId`.)
             var motion: [String: Double] = [:]
-            for off in 0..<stepsCalDays {
+            for calibrationDay in stepsCalibrationWindows {
                 try Task.checkCancellation()
-                let dayMid = Self.midnightLocal(nowLocalMidnight - off * 86_400, offsetSec: tzOffset)
-                let dayEnd = dayMid + 86_400 - 1
-                let dayKey = AnalyticsEngine.dayString(dayMid, offsetSec: tzOffset)
+                let dayMid = calibrationDay.startTs
+                let dayEnd = calibrationDay.endTs
+                let dayKey = calibrationDay.dayKey
                 let owner = try await Self.resolveDayOwner(
                     day: dayKey, from: dayMid, to: dayEnd, store: store,
                     devices: regDevices, activeId: regActiveId,
@@ -2785,9 +3680,7 @@ final class IntelligenceEngine: ObservableObject {
             deviceIds: healIds,
             from: windowStart,
             to: analysisWindowEnd,
-            oldestDay: oldestDay,
-            newestDay: newestDay,
-            timezoneOffsetSeconds: tzOffset,
+            civilDayWindows: scoringDayWindows,
             freshStarts: keptStarts)
         if healResult.cancelled {
             passIntegrity.cancelled = true
@@ -2900,6 +3793,7 @@ final class IntelligenceEngine: ObservableObject {
             recordAnalysisPassCancellation(stage: .generationAcknowledgement)
             return nil
         }
+        var generationFinalizationSucceeded = false
         if generationSnapshotSucceeded {
             do {
                 let finalization = try await Self.finalizeAnalysisInputClaims(
@@ -2942,6 +3836,7 @@ final class IntelligenceEngine: ObservableObject {
                         ),
                     ]
                 )
+                generationFinalizationSucceeded = true
             } catch is CancellationError {
                 passIntegrity.cancelled = true
                 recordAnalysisPassCancellation(stage: .generationAcknowledgement)
@@ -2960,7 +3855,12 @@ final class IntelligenceEngine: ObservableObject {
         if !historicalCatchUp {
             repo.noteAgeMetricsChanged()
         }
-        return ScoreRunReceipt(whoopStrapDays: persistedWhoopStrapDays)
+        return ScoreRunReceipt(
+            whoopStrapDays: persistedWhoopStrapDays,
+            allRequiredBoundariesCompleted:
+                passIntegrity.canAcknowledgeInputs
+                    && generationFinalizationSucceeded
+        )
     }
 
     nonisolated static func analysisRunNeeded(
@@ -3068,80 +3968,537 @@ final class IntelligenceEngine: ObservableObject {
     /// fresh scores stale. After that pass makes durable progress, [preferHistoricalCatchUp] gives the next
     /// non-forced pass one bounded historical batch before yielding to current data again. A late-only claim
     /// defers until the next complete local-day window instead of repeating a scan that cannot advance it.
+    nonisolated private static func analysisTimeZoneContext(
+        containing epochSecond: Int,
+        timezoneOffsetSeconds: Int,
+        timeZone: TimeZone?,
+        timeZoneTimeline: AnalysisTimeZoneTimeline?
+    ) -> AnalysisTimeZoneContext? {
+        if let timeZoneTimeline {
+            guard case .resolved(let segment) =
+                    timeZoneTimeline.resolution(
+                        containing: epochSecond
+                    ) else {
+                return nil
+            }
+            return AnalysisTimeZoneContext(
+                timeZoneIdentifier: segment.timeZoneIdentifier,
+                timezoneOffsetSeconds:
+                    segment.timezoneOffsetSeconds,
+                provenance: segment.provenance,
+                lowerTravelBoundaryTs:
+                    segment.lowerTravelBoundaryTs,
+                upperTravelBoundaryTs:
+                    segment.upperTravelBoundaryTs
+            )
+        }
+        if let timeZone {
+            return AnalysisTimeZoneContext(
+                timeZoneIdentifier: timeZone.identifier,
+                timezoneOffsetSeconds: timeZone.secondsFromGMT(
+                    for: Date(
+                        timeIntervalSince1970:
+                            TimeInterval(epochSecond)
+                    )
+                ),
+                provenance: .suppliedTimeZone,
+                lowerTravelBoundaryTs: nil,
+                upperTravelBoundaryTs: nil
+            )
+        }
+        return AnalysisTimeZoneContext(
+            timeZoneIdentifier: nil,
+            timezoneOffsetSeconds: timezoneOffsetSeconds,
+            provenance: .fixedOffsetCompatibility,
+            lowerTravelBoundaryTs: nil,
+            upperTravelBoundaryTs: nil
+        )
+    }
+
+    nonisolated private static func makeAnalysisScoringPlan(
+        referenceNow: Int,
+        maxDays: Int,
+        passKind: AnalysisPassKind,
+        context: AnalysisTimeZoneContext,
+        defersHistoricalBacklog: Bool = false,
+        civilDayWindow: AnalysisCivilDayWindow? = nil
+    ) -> AnalysisScoringPlan {
+        AnalysisScoringPlan(
+            referenceNow: referenceNow,
+            maxDays: maxDays,
+            passKind: passKind,
+            defersHistoricalBacklog: defersHistoricalBacklog,
+            timezoneOffsetSeconds:
+                context.timezoneOffsetSeconds,
+            civilDayWindow: civilDayWindow,
+            timeZoneIdentifier: context.timeZoneIdentifier,
+            timeZoneProvenance: context.provenance,
+            lowerTravelBoundaryTs:
+                context.lowerTravelBoundaryTs,
+            upperTravelBoundaryTs:
+                context.upperTravelBoundaryTs
+        )
+    }
+
+    nonisolated private static func deferredAnalysisScoringPlan(
+        referenceNow: Int,
+        context: AnalysisTimeZoneContext? = nil,
+        terminalUnknownRange: AnalysisTerminalUnknownRange? = nil
+    ) -> AnalysisScoringPlan {
+        guard let context else {
+            return AnalysisScoringPlan(
+                referenceNow: referenceNow,
+                maxDays: 1,
+                passKind: .deferred,
+                terminalUnknownRange: terminalUnknownRange
+            )
+        }
+        let plan = makeAnalysisScoringPlan(
+            referenceNow: referenceNow,
+            maxDays: 1,
+            passKind: .deferred,
+            context: context
+        )
+        return AnalysisScoringPlan(
+            referenceNow: plan.referenceNow,
+            maxDays: plan.maxDays,
+            passKind: plan.passKind,
+            defersHistoricalBacklog: plan.defersHistoricalBacklog,
+            timezoneOffsetSeconds: plan.timezoneOffsetSeconds,
+            civilDayWindow: plan.civilDayWindow,
+            timeZoneIdentifier: plan.timeZoneIdentifier,
+            timeZoneProvenance: plan.timeZoneProvenance,
+            lowerTravelBoundaryTs: plan.lowerTravelBoundaryTs,
+            upperTravelBoundaryTs: plan.upperTravelBoundaryTs,
+            terminalUnknownRange: terminalUnknownRange
+        )
+    }
+
     nonisolated static func analysisScoringPlan(
         requestedMaxDays: Int,
         force: Bool,
         claims: [AnalysisInputGenerationClaim],
         now: Int,
         timezoneOffsetSeconds: Int,
+        timeZone: TimeZone? = nil,
+        timeZoneTimeline: AnalysisTimeZoneTimeline? = nil,
         preferHistoricalCatchUp: Bool = false
     ) -> AnalysisScoringPlan {
         let requested = max(1, requestedMaxDays)
-        let current = AnalysisScoringPlan(
+        let validRanges = claims.compactMap(\.affectedTimeRange)
+        if let timeZoneTimeline,
+           let newestAffected = validRanges.map(\.upperBound).max(),
+           let newestAffectedSecond = Int(exactly: newestAffected),
+           let terminalUnknownRange =
+                timeZoneTimeline.terminalUnknownRange(
+                    containing: newestAffected
+                ) {
+            return deferredAnalysisScoringPlan(
+                referenceNow: newestAffectedSecond,
+                terminalUnknownRange: terminalUnknownRange
+            )
+        }
+        guard let currentContext = analysisTimeZoneContext(
+            containing: now,
+            timezoneOffsetSeconds: timezoneOffsetSeconds,
+            timeZone: timeZone,
+            timeZoneTimeline: timeZoneTimeline
+        ) else {
+            return deferredAnalysisScoringPlan(
+                referenceNow: now
+            )
+        }
+        let current = makeAnalysisScoringPlan(
             referenceNow: now,
             maxDays: requested,
-            passKind: .recent
+            passKind: .recent,
+            context: currentContext
         )
-        guard !force else { return current }
+        let currentWindows = analysisCivilDayWindows(
+            plan: current,
+            timezoneOffsetSeconds: timezoneOffsetSeconds,
+            timeZone: timeZone
+        )
+        let hasCurrentWindows = !currentWindows.isEmpty
+        guard !force else {
+            return hasCurrentWindows
+                ? current
+                : deferredAnalysisScoringPlan(
+                    referenceNow: now,
+                    context: currentContext
+                )
+        }
         let currentCoverage = analysisScanCoverage(
             plan: current,
             actualNow: now,
-            timezoneOffsetSeconds: timezoneOffsetSeconds
+            timezoneOffsetSeconds: timezoneOffsetSeconds,
+            timeZone: timeZone
         )
-        let validRanges = claims.compactMap(\.affectedTimeRange)
         if !validRanges.isEmpty,
-           validRanges.allSatisfy({ $0.upperBound > currentCoverage.endTs }) {
-            return AnalysisScoringPlan(
+           validRanges.allSatisfy({
+               $0.upperBound
+                   > (hasCurrentWindows
+                       ? currentCoverage.endTs
+                       : Int64(now))
+           }) {
+            return deferredAnalysisScoringPlan(
                 referenceNow: now,
-                maxDays: 1,
-                passKind: .deferred
+                context: currentContext
             )
         }
-        let hasFinalizableCurrentRange = validRanges.contains { affected in
-            affected.upperBound >= currentCoverage.startTs
-                && affected.upperBound <= currentCoverage.endTs
-        }
+        let hasFinalizableCurrentRange =
+            hasCurrentWindows
+            && validRanges.contains { affected in
+                affected.upperBound
+                    >= currentCoverage.startTs
+                    && affected.upperBound
+                        <= currentCoverage.endTs
+            }
         let oldRanges = validRanges.filter { affected in
-            affected.upperBound < currentCoverage.startTs
-                && affected.upperBound <= Int64(now)
+            affected.upperBound <= Int64(now)
+                && (!hasCurrentWindows
+                    || affected.upperBound
+                        < currentCoverage.startTs)
         }
         let newestOldTimestamp = oldRanges.map(\.upperBound).max()
         if hasFinalizableCurrentRange
             && (!preferHistoricalCatchUp || newestOldTimestamp == nil) {
-            return AnalysisScoringPlan(
+            return makeAnalysisScoringPlan(
                 referenceNow: now,
                 maxDays: requested,
                 passKind: .recent,
+                context: currentContext,
                 defersHistoricalBacklog: newestOldTimestamp != nil
             )
         }
         guard let newestOldTimestamp,
               let newestOldSecond = Int(exactly: newestOldTimestamp) else {
-            return current
+            return hasCurrentWindows
+                ? current
+                : deferredAnalysisScoringPlan(
+                    referenceNow: now,
+                    context: currentContext
+                )
         }
-        let historicalMidnight = midnightLocal(
-            newestOldSecond,
-            offsetSec: timezoneOffsetSeconds
+        guard let historicalContext =
+                analysisTimeZoneContext(
+                    containing: newestOldSecond,
+                    timezoneOffsetSeconds:
+                        timezoneOffsetSeconds,
+                    timeZone: timeZone,
+                    timeZoneTimeline:
+                        timeZoneTimeline
+                ) else {
+            return deferredAnalysisScoringPlan(
+                referenceNow: newestOldSecond
+            )
+        }
+        let historicalTimeZone =
+            historicalContext.timeZoneIdentifier.flatMap {
+                TimeZone(identifier: $0)
+            }
+        if historicalContext.timeZoneIdentifier != nil,
+           historicalTimeZone == nil {
+            return deferredAnalysisScoringPlan(
+                referenceNow: newestOldSecond,
+                context: historicalContext
+            )
+        }
+        let oneDayPlan = makeAnalysisScoringPlan(
+            referenceNow: newestOldSecond,
+            maxDays: 1,
+            passKind: .historical,
+            context: historicalContext
         )
+        guard let newestHistoricalDay =
+                analysisCivilDayWindows(
+                    plan: oneDayPlan,
+                    timezoneOffsetSeconds:
+                        historicalContext
+                            .timezoneOffsetSeconds,
+                    timeZone: historicalTimeZone
+                ).first else {
+            // An observation proves two different zones on this civil day,
+            // but cannot prove the sample-side transition instant. Do not
+            // silently move the day into either zone.
+            return deferredAnalysisScoringPlan(
+                referenceNow: newestOldSecond,
+                context: historicalContext
+            )
+        }
+        if newestHistoricalDay.durationSeconds != 86_400 {
+            return makeAnalysisScoringPlan(
+                referenceNow:
+                    newestHistoricalDay.startTs
+                    + newestHistoricalDay.durationSeconds / 2,
+                maxDays: 1,
+                passKind: .historical,
+                context: historicalContext,
+                civilDayWindow: newestHistoricalDay
+            )
+        }
         let earliestSelectedTimestamp = oldRanges
             .filter { $0.upperBound == newestOldTimestamp }
             .map(\.lowerBound)
             .min() ?? newestOldTimestamp
         let earliestSelectedSecond =
             Int(exactly: earliestSelectedTimestamp) ?? newestOldSecond
-        let earliestSelectedMidnight = midnightLocal(
-            earliestSelectedSecond,
-            offsetSec: timezoneOffsetSeconds
+        let selectedSpanDays: Int
+        if let historicalTimeZone {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = historicalTimeZone
+            let earliestStart = calendar.startOfDay(
+                for: Date(
+                    timeIntervalSince1970:
+                        TimeInterval(earliestSelectedSecond)
+                )
+            )
+            let newestStart = Date(
+                timeIntervalSince1970:
+                    TimeInterval(newestHistoricalDay.startTs)
+            )
+            selectedSpanDays = max(
+                1,
+                (calendar.dateComponents(
+                    [.day],
+                    from: earliestStart,
+                    to: newestStart
+                ).day ?? 0) + 1
+            )
+        } else {
+            let earliestSelectedMidnight = midnightLocal(
+                earliestSelectedSecond,
+                offsetSec:
+                    historicalContext.timezoneOffsetSeconds
+            )
+            selectedSpanDays = max(
+                1,
+                (
+                    newestHistoricalDay.startTs
+                        - earliestSelectedMidnight
+                ) / 86_400 + 1
+            )
+        }
+        let boundedSpanDays = historicalTimeZone.map {
+            historicalSameOffsetDayCount(
+                endingAt: newestHistoricalDay.startTs,
+                requestedDays: selectedSpanDays,
+                timezoneOffsetSeconds:
+                    historicalContext.timezoneOffsetSeconds,
+                timeZone: $0
+            )
+        } ?? selectedSpanDays
+        return makeAnalysisScoringPlan(
+            referenceNow:
+                newestHistoricalDay.startTs
+                + newestHistoricalDay.durationSeconds / 2,
+            maxDays: min(requested, min(21, boundedSpanDays)),
+            passKind: .historical,
+            context: historicalContext
         )
-        let selectedSpanDays = max(
-            1,
-            (historicalMidnight - earliestSelectedMidnight) / 86_400 + 1
+    }
+
+    nonisolated static func historicalCivilDayWindow(
+        containing epochSecond: Int,
+        timeZone: TimeZone
+    ) -> AnalysisCivilDayWindow? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let date = Date(timeIntervalSince1970: TimeInterval(epochSecond))
+        let startDate = calendar.startOfDay(for: date)
+        guard let nextDate = calendar.date(
+            byAdding: .day,
+            value: 1,
+            to: startDate
+        ) else {
+            return nil
+        }
+        let startTs = Int(startDate.timeIntervalSince1970)
+        let nextStartTs = Int(nextDate.timeIntervalSince1970)
+        guard nextStartTs > startTs else { return nil }
+        let midpoint = startTs + (nextStartTs - startTs) / 2
+        let representativeOffset = timeZone.secondsFromGMT(
+            for: Date(timeIntervalSince1970: TimeInterval(midpoint))
         )
-        return AnalysisScoringPlan(
-            referenceNow: historicalMidnight + 12 * 3_600,
-            maxDays: min(requested, min(21, selectedSpanDays)),
-            passKind: .historical
+        let startOffset = timeZone.secondsFromGMT(for: startDate)
+        let components = calendar.dateComponents(
+            [.year, .month, .day],
+            from: startDate
         )
+        let localSixPMDate = calendar.date(
+            from: DateComponents(
+                calendar: calendar,
+                timeZone: timeZone,
+                year: components.year,
+                month: components.month,
+                day: components.day,
+                hour: 18,
+                minute: 0,
+                second: 0
+            )
+        )
+        let calendarSixPMTs = localSixPMDate.map {
+            Int($0.timeIntervalSince1970)
+        }
+        let fallbackSixPMTs = min(
+            max(startTs + 18 * 3_600, startTs),
+            nextStartTs
+        )
+        let localSixPMTs = calendarSixPMTs.flatMap { candidate in
+            (startTs...nextStartTs).contains(candidate) ? candidate : nil
+        } ?? fallbackSixPMTs
+        return AnalysisCivilDayWindow(
+            startTs: startTs,
+            endTs: nextStartTs - 1,
+            dayKey: AnalyticsEngine.dayString(
+                startTs,
+                offsetSec: startOffset
+            ),
+            timezoneOffsetSeconds: representativeOffset,
+            localSixPMTs: localSixPMTs
+        )
+    }
+
+    /// Calendar-derived scoring windows, newest first. A fixed 86,400-second step is not a civil-day
+    /// operation: recent and forced passes can cross a 23-hour or 25-hour daylight-saving day just as
+    /// historical catch-up can. Production always supplies the device timezone; the fixed-offset fallback
+    /// preserves deterministic compatibility for focused tests and callers that only have an offset.
+    nonisolated private static func analysisCivilDayWindowFitsPlan(
+        _ window: AnalysisCivilDayWindow,
+        plan: AnalysisScoringPlan
+    ) -> Bool {
+        if let lowerTravelBoundaryTs =
+                plan.lowerTravelBoundaryTs,
+           window.startTs < lowerTravelBoundaryTs {
+            return false
+        }
+        if let upperTravelBoundaryTs =
+                plan.upperTravelBoundaryTs,
+           window.endTs >= upperTravelBoundaryTs {
+            return false
+        }
+        return true
+    }
+
+    nonisolated static func analysisCivilDayWindows(
+        plan: AnalysisScoringPlan,
+        timezoneOffsetSeconds: Int,
+        timeZone: TimeZone? = nil
+    ) -> [AnalysisCivilDayWindow] {
+        guard plan.shouldAnalyze else { return [] }
+        let resolvedTimeZone: TimeZone?
+        if let timeZoneIdentifier = plan.timeZoneIdentifier {
+            guard let planTimeZone = TimeZone(
+                identifier: timeZoneIdentifier
+            ) else {
+                return []
+            }
+            resolvedTimeZone = planTimeZone
+        } else {
+            resolvedTimeZone = timeZone
+        }
+        if let exact = plan.civilDayWindow {
+            return analysisCivilDayWindowFitsPlan(
+                exact,
+                plan: plan
+            ) ? [exact] : []
+        }
+        let boundedDays = max(1, plan.maxDays)
+        if let resolvedTimeZone,
+           let newest = historicalCivilDayWindow(
+               containing: plan.referenceNow,
+               timeZone: resolvedTimeZone
+           ) {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = resolvedTimeZone
+            let newestStart = Date(
+                timeIntervalSince1970: TimeInterval(newest.startTs)
+            )
+            var windows: [AnalysisCivilDayWindow] = []
+            windows.reserveCapacity(boundedDays)
+            for offset in 0..<boundedDays {
+                guard let candidate = calendar.date(
+                    byAdding: .day,
+                    value: -offset,
+                    to: newestStart
+                ),
+                let window = historicalCivilDayWindow(
+                    containing: Int(candidate.timeIntervalSince1970),
+                    timeZone: resolvedTimeZone
+                ) else {
+                    break
+                }
+                guard analysisCivilDayWindowFitsPlan(
+                    window,
+                    plan: plan
+                ) else {
+                    break
+                }
+                windows.append(window)
+            }
+            return windows
+        }
+
+        let effectiveOffset =
+            plan.timezoneOffsetSeconds ?? timezoneOffsetSeconds
+        let newestStart = midnightLocal(
+            plan.referenceNow,
+            offsetSec: effectiveOffset
+        )
+        var windows: [AnalysisCivilDayWindow] = []
+        windows.reserveCapacity(boundedDays)
+        for offset in 0..<boundedDays {
+            let start = newestStart - offset * 86_400
+            let window = AnalysisCivilDayWindow(
+                startTs: start,
+                endTs: start + 86_400 - 1,
+                dayKey: AnalyticsEngine.dayString(
+                    start,
+                    offsetSec: effectiveOffset
+                ),
+                timezoneOffsetSeconds: effectiveOffset,
+                localSixPMTs: start + 18 * 3_600
+            )
+            guard analysisCivilDayWindowFitsPlan(
+                window,
+                plan: plan
+            ) else {
+                break
+            }
+            windows.append(window)
+        }
+        return windows
+    }
+
+    /// Keep each historical pass inside one fixed-offset run. A DST transition day is completed by
+    /// one explicit civil-day window after claim finalization advances to that day.
+    nonisolated static func historicalSameOffsetDayCount(
+        endingAt historicalMidnight: Int,
+        requestedDays: Int,
+        timezoneOffsetSeconds: Int,
+        timeZone: TimeZone
+    ) -> Int {
+        let boundedRequestedDays = max(1, requestedDays)
+        guard boundedRequestedDays > 1 else { return 1 }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        var count = 1
+        for index in 1..<boundedRequestedDays {
+            let candidate = historicalMidnight - index * 86_400
+            let date = Date(timeIntervalSince1970: TimeInterval(candidate))
+            let wallClock = calendar.dateComponents(
+                [.hour, .minute, .second],
+                from: date
+            )
+            guard timeZone.secondsFromGMT(for: date) == timezoneOffsetSeconds,
+                  wallClock.hour == 0,
+                  wallClock.minute == 0,
+                  wallClock.second == 0 else {
+                break
+            }
+            count += 1
+        }
+        return count
     }
 
     /// Compatibility seam retained for focused tests and the Android parity contract.
@@ -3163,7 +4520,8 @@ final class IntelligenceEngine: ObservableObject {
     nonisolated static func analysisScanCoverage(
         maxDays: Int,
         now: Int,
-        timezoneOffsetSeconds: Int
+        timezoneOffsetSeconds: Int,
+        timeZone: TimeZone? = nil
     ) -> AnalysisScanCoverage {
         analysisScanCoverage(
             plan: AnalysisScoringPlan(
@@ -3172,34 +4530,37 @@ final class IntelligenceEngine: ObservableObject {
                 passKind: .recent
             ),
             actualNow: now,
-            timezoneOffsetSeconds: timezoneOffsetSeconds
+            timezoneOffsetSeconds: timezoneOffsetSeconds,
+            timeZone: timeZone
         )
     }
 
     nonisolated static func analysisScanCoverage(
         plan: AnalysisScoringPlan,
         actualNow: Int,
-        timezoneOffsetSeconds: Int
+        timezoneOffsetSeconds: Int,
+        timeZone: TimeZone? = nil
     ) -> AnalysisScanCoverage {
-        let boundedDays = max(1, plan.maxDays)
-        let localMidnight = Int64(
-            midnightLocal(
-                plan.referenceNow,
-                offsetSec: timezoneOffsetSeconds
-            )
+        let windows = analysisCivilDayWindows(
+            plan: plan,
+            timezoneOffsetSeconds: timezoneOffsetSeconds,
+            timeZone: timeZone
         )
+        guard let newest = windows.first,
+              let oldest = windows.last else {
+            return AnalysisScanCoverage(startTs: 1, endTs: 0)
+        }
         let endTs: Int64
         if plan.isHistoricalCatchUp {
-            endTs = localMidnight + Int64(86_400) - 1
+            endTs = Int64(newest.endTs)
         } else {
             endTs = min(
                 Int64(actualNow),
-                localMidnight + Int64(18 * 3_600)
+                Int64(newest.localSixPMTs)
             )
         }
         return AnalysisScanCoverage(
-            startTs: localMidnight
-                - Int64(boundedDays - 1) * Int64(86_400),
+            startTs: Int64(oldest.startTs),
             endTs: endTs
         )
     }
@@ -3518,9 +4879,57 @@ final class IntelligenceEngine: ObservableObject {
         _ editedRows: [CachedSleepSession],
         day: String,
         tzOffsetSeconds: Int,
+        civilDayStartTs: Int? = nil,
+        civilDayEndTsExclusive: Int? = nil,
         sourceTimeline: [CachedSleepSession] = []
     ) -> [CachedSleepSession] {
-        guard !sourceTimeline.isEmpty else {
+        var wakeMembershipByStart: [
+            Int: (day: String, terminalWakeTs: Int)
+        ] = [:]
+        if !sourceTimeline.isEmpty {
+            // Cached rows are already read from one computed source. Every fragment in a bridged group
+            // inherits that complete group's final wake day and terminal wake timestamp.
+            let blocks = sourceTimeline.map {
+                SleepStageTotals.NightBlock(
+                    start: $0.effectiveStartTs,
+                    end: $0.endTs)
+            }
+            for bucket in SleepStageTotals.wakeDayBuckets(
+                blocks,
+                offsetAtEpochSec: { _ in tzOffsetSeconds }
+            ) {
+                for group in bucket.groups {
+                    guard let terminalWakeTs = group.indices
+                        .map({ sourceTimeline[$0].endTs })
+                        .max() else {
+                        continue
+                    }
+                    for index in group.indices {
+                        wakeMembershipByStart[sourceTimeline[index].startTs] = (
+                            day: bucket.day,
+                            terminalWakeTs: terminalWakeTs
+                        )
+                    }
+                }
+            }
+        }
+
+        let hasExplicitCivilBounds =
+            civilDayStartTs != nil || civilDayEndTsExclusive != nil
+        if hasExplicitCivilBounds {
+            guard let start = civilDayStartTs,
+                  let end = civilDayEndTsExclusive,
+                  end > start else {
+                return []
+            }
+            return editedRows.filter { row in
+                let terminalWakeTs =
+                    wakeMembershipByStart[row.startTs]?.terminalWakeTs
+                    ?? row.endTs
+                return terminalWakeTs >= start && terminalWakeTs < end
+            }
+        }
+        guard !wakeMembershipByStart.isEmpty else {
             return editedRows.filter {
                 AnalyticsEngine.dayString(
                     $0.endTs,
@@ -3528,30 +4937,11 @@ final class IntelligenceEngine: ObservableObject {
             }
         }
 
-        // Cached rows are already read from one computed source. Every fragment in a bridged group
-        // inherits that complete group's final wake day.
-        let blocks = sourceTimeline.map {
-            SleepStageTotals.NightBlock(
-                start: $0.effectiveStartTs,
-                end: $0.endTs)
-        }
-        var wakeDayByStart: [Int: String] = [:]
-        for bucket in SleepStageTotals.wakeDayBuckets(
-            blocks,
-            offsetAtEpochSec: { _ in tzOffsetSeconds }
-        ) {
-            for group in bucket.groups {
-                for index in group.indices {
-                    wakeDayByStart[sourceTimeline[index].startTs] = bucket.day
-                }
-            }
-        }
-
         return editedRows.filter { row in
-            let resolved = wakeDayByStart[row.startTs]
+            let resolved = wakeMembershipByStart[row.startTs]?.day
                 ?? AnalyticsEngine.dayString(
-                    row.endTs,
-                    offsetSec: tzOffsetSeconds)
+                row.endTs,
+                offsetSec: tzOffsetSeconds)
             return resolved == day
         }
     }
@@ -3697,9 +5087,9 @@ final class IntelligenceEngine: ObservableObject {
         return samples
     }
 
-    private static func computeHabitualMidsleep(
+    nonisolated static func computeHabitualMidsleep(
         store: WhoopStore, importedId: String, computedId: String,
-        windowStart: Int, windowEnd: Int, offsetSec: Int
+        windowStart: Int, windowEnd: Int, timeZone: TimeZone
     ) async throws -> Int? {
         let imported = try await store.sleepSessions(
             deviceId: importedId, from: windowStart, to: windowEnd, limit: 4000)
@@ -3712,7 +5102,39 @@ final class IntelligenceEngine: ObservableObject {
         // covers an imported night and its computed twin (the longest capture wins, exactly what the
         // per-day length rule chose anyway).
         let merged = SleepSessionDedup.dedupe(imported + computed).kept
-        return Repository.historicalHabitualMidsleepSec(merged)
+        return Repository.historicalHabitualMidsleepSec(
+            merged,
+            timeZone: timeZone
+        )
+    }
+
+    /// Bounds habitual-sleep learning to the same provenance-backed timezone segment as the scoring
+    /// plan. Without this clamp, trailing sessions from the zone before or after a travel boundary can
+    /// be interpreted with the selected segment's calendar and teach a false local bedtime.
+    nonisolated static func habitualMidsleepReadWindow(
+        analysisWindowStart: Int,
+        analysisWindowEnd: Int,
+        lowerTravelBoundaryTs: Int?,
+        upperTravelBoundaryTs: Int?
+    ) -> ClosedRange<Int>? {
+        let lookback = analysisWindowStart.subtractingReportingOverflow(
+            30 * 3_600
+        )
+        let candidateStart = lookback.overflow ? Int.min : lookback.partialValue
+        let boundedStart = max(
+            candidateStart,
+            lowerTravelBoundaryTs ?? Int.min
+        )
+        let segmentEnd: Int
+        if let upperTravelBoundaryTs {
+            guard upperTravelBoundaryTs > Int.min else { return nil }
+            segmentEnd = upperTravelBoundaryTs - 1
+        } else {
+            segmentEnd = Int.max
+        }
+        let boundedEnd = min(analysisWindowEnd, segmentEnd)
+        guard boundedStart <= boundedEnd else { return nil }
+        return boundedStart...boundedEnd
     }
 
     /// Floor a unix-seconds timestamp to 00:00:00 of its UTC calendar day. Mirrors the Android

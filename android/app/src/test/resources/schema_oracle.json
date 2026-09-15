@@ -62,11 +62,13 @@
     "v58-analysis-dirty-bounds-repair",
     "v59-managed-document-account-isolation",
     "v60-managed-change-feed-capability",
-    "v61-managed-document-generation-floor"
+    "v61-managed-document-generation-floor",
+    "v62-managed-document-deletion-state"
   ],
   "divergenceReasons": {
     "battery-alter-append-order": "REAL COLUMN-ORDER DRIFT (CLAUDE.md: 'column order in a Room CREATE TABLE must match the entity field order'). GRDB appended `synced` (v5) then `charging` (v6) with ALTER TABLE, which can only append; the Room entity declares `charging` before `synced`. Same columns, same types, different positions — so any positional copy (INSERT INTO battery SELECT * FROM …) swaps them. Fixing it means reordering the Room entity's fields, which changes Room's identity hash and therefore needs a version bump plus a no-op migration.",
     "grdb-boolean-affinity": "GRDB's .boolean column type is declared BOOLEAN, which SQLite gives NUMERIC affinity; Room maps Kotlin Boolean to INTEGER. For the 0/1 values both sides write, NUMERIC and INTEGER affinity store bit-identical INTEGERs, so a .noopbak round-trips. Closing it means a GRDB table rebuild.",
+    "managed-document-deletion-state-ios-legacy": "iOS v62 stores nullable deletion evidence only to resolve retired global UserDefaults hydration payloads without cross-account adoption, resurrection, or data loss. Android never had that global preference store, so adding unused Room state would impose a database migration without a corresponding compatibility case. Managed-document wire payloads and remote apply semantics remain unchanged.",
     "managed-upload-alter-append-order": "GRDB v52 appended snapshot validation and local-pruning state to the v51 managedWindowUpload table, so SQLite places those fields after updatedAtMs. Room v43 creates the final table directly and declares updatedAtMs last. All reads, writes, exports, and restores name columns explicitly; closing this harmless order drift requires coordinated schema-version bumps and table rebuilds.",
     "paired-device-alter-append-order": "REAL COLUMN-ORDER DRIFT, same shape as battery. GRDB's v16-paired-device-peripheral appended `peripheralId` at the end; the Room entity declares it fifth, between `nickname` and `sourceKind`.",
     "room-omits-sql-default": "GRDB declares these columns NOT NULL DEFAULT 0; Room emits NOT NULL with no SQL DEFAULT, because a Kotlin constructor default never reaches the schema (only @ColumnInfo(defaultValue=) does). Both sides are NOT NULL and both always name the column on insert, so no row differs; an INSERT that omitted the column would fail on Android and get 0 on iOS. Closing it means adding @ColumnInfo(defaultValue = \"0\") plus a Room version bump, since the generated CREATE TABLE — and therefore Room's identity hash — changes.",
@@ -1500,6 +1502,14 @@
           "affinity": "INTEGER",
           "notNull": true,
           "default": null
+        },
+        {
+          "name": "isDeleted",
+          "affinity": "NUMERIC",
+          "notNull": false,
+          "default": null,
+          "androidAbsent": true,
+          "divergence": "managed-document-deletion-state-ios-legacy"
         }
       ],
       "primaryKey": [

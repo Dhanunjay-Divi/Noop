@@ -120,6 +120,40 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
         XCTAssertTrue(lines[0].contains("noRawCounter"))
     }
 
+    func testDSTCivilBoundsKeepTraceEqualToProductionTotal() {
+        let start = 1_793_505_600 // 2026-11-01T04:00:00Z
+        let end = start + 90_000
+        let samples = [
+            StepSample(ts: start - 1, counter: 100),
+            StepSample(ts: start, counter: 110),
+            StepSample(ts: start + 3_600, counter: 120),
+            StepSample(ts: end - 1, counter: 130),
+            StepSample(ts: end, counter: 140),
+        ]
+        let production = AnalyticsEngine.analyzeDay(
+            day: "2026-11-01",
+            daySteps: samples,
+            profile: profile,
+            tzOffsetSeconds: -5 * 3_600,
+            civilDayStartTs: start,
+            civilDayEndTsExclusive: end
+        ).daily.steps
+        let lines = StepsEstimateEngine.rawCounterTrace(
+            daySteps: samples,
+            dayKey: "2026-11-01",
+            tzOffsetSeconds: -5 * 3_600,
+            ticksPerStep: profile.stepTicksPerStep,
+            civilDayStartTs: start,
+            civilDayEndTsExclusive: end
+        )
+
+        XCTAssertEqual(production, 20)
+        XCTAssertTrue(
+            lines.first { $0.hasPrefix("stepsRaw total ") }?
+                .contains("scaledSteps=20") == true
+        )
+    }
+
     // MARK: - WHOOP-4 calibration trace
 
     func testCalibrationTraceReusesCalibrateVerbatim() {

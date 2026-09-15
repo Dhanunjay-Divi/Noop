@@ -153,6 +153,19 @@ class UiAuditPresentationContractTest {
     }
 
     @Test
+    fun lighterWorkoutOptionsRemainScrollableAndUseDismissSemantics() {
+        val root = source("src/main/java/com/noop/ui/AppRoot.kt")
+        val sheet = root
+            .substringAfter("private fun LighterWorkoutOptionsSheet(")
+            .substringBefore("\n@Composable\nprivate fun LighterWorkoutOptionRow")
+
+        assertTrue(sheet.contains(".verticalScroll(rememberScrollState())"))
+        assertTrue(sheet.contains(".navigationBarsPadding()"))
+        assertTrue(sheet.contains("R.string.appwide_action_dismiss"))
+        assertFalse(sheet.contains("R.string.context_action_collapse"))
+    }
+
+    @Test
     fun auditedSocialAndBandCopyUsesCurrentVocabulary() {
         val strings = source("src/main/res/values/strings.xml")
         val appWide = source("src/main/res/values/appwide.xml")

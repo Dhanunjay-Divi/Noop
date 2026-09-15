@@ -8,7 +8,9 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.await
+import androidx.work.workDataOf
 import java.io.File
+import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -191,6 +193,156 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
                     requireNotNull(replacementRecord.workerGeneration),
                 ) in replacement.tags,
             )
+        }
+
+    @Test
+    fun lateAcceptedWorkerFromTimedOutGenerationCannotReviveFailedRecord() =
+        runBlocking {
+            val timedOutGeneration = UUID.randomUUID().toString()
+            val prepared = outbox.prepareWorker(
+                localId = localId,
+                replace = false,
+                generation = timedOutGeneration,
+            )
+            val failed = outbox.markFailed(
+                localId = localId,
+                failure = FeedbackFailureCategory.UNKNOWN,
+                expectedWorkerGeneration = timedOutGeneration,
+            )
+            assertEquals(FeedbackState.FAILED, failed.state)
+            assertEquals(null, failed.workerGeneration)
+
+            val lateAccepted =
+                OneTimeWorkRequestBuilder<FeedbackUploadWorker>()
+                    .setInputData(
+                        workDataOf(
+                            FeedbackScheduler.INPUT_LOCAL_ID to localId,
+                            FeedbackScheduler.INPUT_WORKER_GENERATION to
+                                requireNotNull(prepared.workerGeneration),
+                        ),
+                    )
+                    .addTag(
+                        FeedbackScheduler.generationTag(
+                            requireNotNull(prepared.workerGeneration),
+                        ),
+                    )
+                    .build()
+            workManager.enqueueUniqueWork(
+                uniqueWorkName,
+                ExistingWorkPolicy.REPLACE,
+                lateAccepted,
+            ).await()
+
+            val terminalState = withTimeout(15_000L) {
+                while (true) {
+                    val state = FeedbackContinuityWorkInspector.snapshots(
+                        workManager,
+                        uniqueWorkName,
+                    ).firstOrNull { it.id == lateAccepted.id }?.state
+                    if (state?.isFinished == true) return@withTimeout state
+                    delay(50L)
+                }
+                error("unreachable")
+            }
+            assertEquals(WorkInfo.State.SUCCEEDED, terminalState)
+            val persisted = requireNotNull(outbox.load(localId))
+            assertEquals(FeedbackState.FAILED, persisted.state)
+            assertEquals(null, persisted.workerGeneration)
+        }
+
+    @Test
+    fun completedWorkerBeforeTimeoutFailurePersistenceKeepsTerminalRecord() =
+        runBlocking {
+            val timedOutGeneration = UUID.randomUUID().toString()
+            val prepared = outbox.prepareWorker(
+                localId = localId,
+                replace = false,
+                generation = timedOutGeneration,
+            )
+            outbox.beginUpload(
+                localId = localId,
+                attempt = 1,
+                expectedWorkerGeneration = timedOutGeneration,
+            )
+            outbox.bindIdentity(
+                localId = localId,
+                identitySubjectSha256 = "a".repeat(64),
+                expectedWorkerGeneration = timedOutGeneration,
+            )
+            outbox.saveReservation(
+                localId = localId,
+                serverReportId = UUID.randomUUID().toString(),
+                serverReportToken = "a".repeat(43),
+                expectedWorkerGeneration = timedOutGeneration,
+            )
+            val completed = outbox.commitCompletion(
+                localId = localId,
+                receipt = "NF-ABCDEFGHIJKLMNOP",
+                retainedUntil = Instant.now().plusSeconds(86_400L).toString(),
+                expectedWorkerGeneration = timedOutGeneration,
+            )
+            assertTrue(completed is FeedbackCompletionCommit.Sent)
+
+            val resolution = FeedbackSchedulingFailureResolver.resolve(
+                persistFailure = {
+                    outbox.markFailed(
+                        localId = localId,
+                        failure = FeedbackFailureCategory.UNKNOWN,
+                        expectedWorkerGeneration =
+                            requireNotNull(prepared.workerGeneration),
+                    )
+                },
+                loadCurrent = {
+                    outbox.loadForProgress(localId)
+                },
+            )
+
+            assertTrue(
+                resolution is FeedbackSchedulingFailureResolution.CurrentRecord,
+            )
+            assertEquals(FeedbackState.SENT, resolution.record.state)
+            assertEquals("NF-ABCDEFGHIJKLMNOP", resolution.record.receipt)
+            assertEquals(null, resolution.record.workerGeneration)
+        }
+
+    @Test
+    fun staleSchedulingFailureCannotOverwriteNewerWorkerGeneration() =
+        runBlocking {
+            val failedGeneration = UUID.randomUUID().toString()
+            val failedRecord = outbox.prepareWorker(
+                localId = localId,
+                replace = false,
+                generation = failedGeneration,
+            )
+            val newerGeneration = UUID.randomUUID().toString()
+            outbox.prepareWorker(
+                localId = localId,
+                replace = true,
+                generation = newerGeneration,
+            )
+
+            val resolution = FeedbackSchedulingFailureResolver.resolve(
+                persistFailure = {
+                    outbox.markFailed(
+                        localId = localId,
+                        failure = FeedbackFailureCategory.UNKNOWN,
+                        expectedWorkerGeneration =
+                            requireNotNull(failedRecord.workerGeneration),
+                    )
+                },
+                loadCurrent = {
+                    outbox.loadForProgress(localId)
+                },
+            )
+
+            assertTrue(
+                resolution is FeedbackSchedulingFailureResolution.CurrentRecord,
+            )
+            assertEquals(FeedbackState.QUEUED, resolution.record.state)
+            assertEquals(newerGeneration, resolution.record.workerGeneration)
+            val persisted = requireNotNull(outbox.loadForProgress(localId))
+            assertEquals(FeedbackState.QUEUED, persisted.state)
+            assertEquals(newerGeneration, persisted.workerGeneration)
         }
 
     private fun feedbackEntries(): List<Pair<String, ByteArray>> = listOf(

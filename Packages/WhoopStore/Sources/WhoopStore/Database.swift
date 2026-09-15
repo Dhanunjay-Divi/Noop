@@ -1407,6 +1407,14 @@ extension WhoopStore {
         migrator.registerMigration("v61-managed-document-generation-floor") { db in
             try reinstallAccountScopedManagedDocumentTriggers(db)
         }
+        // v62: retain explicit remote document deletion state. Older rows remain unknown rather than
+        // inferring a tombstone from row absence or a content hash, so recovery can defer ambiguous
+        // legacy payloads without either resurrecting deleted data or discarding valid data.
+        migrator.registerMigration("v62-managed-document-deletion-state") { db in
+            try db.alter(table: "managedDocumentState") { t in
+                t.add(column: "isDeleted", .boolean)
+            }
+        }
         return migrator
     }
 

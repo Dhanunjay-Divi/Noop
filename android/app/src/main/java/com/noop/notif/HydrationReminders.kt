@@ -4,7 +4,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -21,6 +23,7 @@ import com.noop.automation.TapAutomationKind
 import com.noop.automation.TapAutomationStore
 import com.noop.R
 import com.noop.ble.LiveState
+import com.noop.managed.ManagedRuntimeGate
 import com.noop.ui.ContextualActionCenter
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotifPrefs
@@ -278,12 +281,23 @@ object HydrationReminderScheduler {
 
     fun reconcile(context: Context) {
         val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return
         val manager = WorkManager.getInstance(appContext)
         val config = HydrationReminderPrefs.config(appContext)
         if (!config.enabled) {
             manager.cancelUniqueWork(WORK_NAME)
             HydrationReminderEscalationScheduler.cancelAll(appContext)
             TapAutomationStore.clear(appContext, TapAutomationKind.HYDRATION_CONFIRM)
+            return
+        }
+        if (!HydrationReminderNotifier.canNotify(appContext)) {
+            NotificationLifecycleLedger.suppressed(
+                appContext,
+                NotificationLifecycleId.HYDRATION,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            manager.cancelUniqueWork(WORK_NAME)
+            HydrationReminderEscalationScheduler.cancelAll(appContext)
             return
         }
         scheduleNext(appContext, ZonedDateTime.now(), ExistingWorkPolicy.REPLACE)
@@ -294,6 +308,7 @@ object HydrationReminderScheduler {
         now: ZonedDateTime,
         existingWorkPolicy: ExistingWorkPolicy,
     ) {
+        if (!ManagedRuntimeGate.isAuthorized(context.applicationContext)) return
         val config = HydrationReminderPrefs.config(context, now.toLocalDate().toEpochDay())
         if (!config.enabled) {
             NotificationLifecycleLedger.observe(
@@ -341,12 +356,22 @@ class HydrationReminderWorker(appContext: Context, params: WorkerParameters) :
     CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
+        if (!ManagedRuntimeGate.isAuthorized(applicationContext)) return Result.success()
         val now = ZonedDateTime.now()
         val config = HydrationReminderPrefs.config(
             applicationContext,
             now.toLocalDate().toEpochDay(),
         )
         if (!config.enabled) return Result.success()
+        if (!HydrationReminderNotifier.canNotify(applicationContext)) {
+            NotificationLifecycleLedger.suppressed(
+                applicationContext,
+                NotificationLifecycleId.HYDRATION,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            HydrationReminderEscalationScheduler.cancelAll(applicationContext)
+            return Result.success()
+        }
 
         val due = HydrationReminderPolicy.latestDueSlot(
             epochDay = now.toLocalDate().toEpochDay(),
@@ -379,6 +404,25 @@ class HydrationReminderWorker(appContext: Context, params: WorkerParameters) :
             ExistingWorkPolicy.APPEND_OR_REPLACE,
         )
         return Result.success()
+    }
+}
+
+/** Recomputes the next local hydration slot after reboot, DST, travel, or a manual clock change. */
+class HydrationReminderTimeChangeReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent?) {
+        val supported = when (intent?.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_TIMEZONE_CHANGED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_DATE_CHANGED,
+            "android.intent.action.QUICKBOOT_POWERON",
+            -> true
+            else -> false
+        }
+        if (!supported) return
+        val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return
+        HydrationReminderScheduler.reconcile(appContext)
     }
 }
 
@@ -456,6 +500,30 @@ class HydrationReminderEscalationWorker(appContext: Context, params: WorkerParam
 object HydrationReminderNotifier {
     private const val CHANNEL_ID = "noop_hydration_reminders"
 
+    internal fun canNotify(context: Context): Boolean {
+        val runtimePermissionGranted =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) == PackageManager.PERMISSION_GRANTED
+        val appNotificationsEnabled =
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+        val channelDisabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.getNotificationChannel(CHANNEL_ID)?.importance ==
+                NotificationManager.IMPORTANCE_NONE
+        } else {
+            false
+        }
+        return HydrationNotificationAvailability.canNotify(
+            runtimePermissionGranted = runtimePermissionGranted,
+            appNotificationsEnabled = appNotificationsEnabled,
+            channelDisabled = channelDisabled,
+        )
+    }
+
     @SuppressLint("MissingPermission")
     internal fun post(context: Context, slot: String): Boolean = runCatching {
         if (NotifPrefs.inQuietHours(context)) {
@@ -466,10 +534,8 @@ object HydrationReminderNotifier {
             )
             return false
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
+        ensureChannel(context)
+        if (!canNotify(context)) {
             NotificationLifecycleLedger.suppressed(
                 context,
                 NotificationLifecycleId.HYDRATION,
@@ -478,15 +544,6 @@ object HydrationReminderNotifier {
             return false
         }
         val manager = NotificationManagerCompat.from(context)
-        if (!manager.areNotificationsEnabled()) {
-            NotificationLifecycleLedger.suppressed(
-                context,
-                NotificationLifecycleId.HYDRATION,
-                NotificationLifecycleCategory.REMINDER,
-            )
-            return false
-        }
-        ensureChannel(context)
         val title = context.getString(R.string.l10n_hydration_reminders_hydration_check_in_f93a58b5)
         val body = context.getString(R.string.l10n_hydration_reminders_take_a_moment_to_drink_some_6a03f36a)
         val openApp = NotificationPlatformIdentity.activityPendingIntent(
@@ -548,6 +605,15 @@ object HydrationReminderNotifier {
         )
         manager.createNotificationChannel(channel)
     }
+}
+
+internal object HydrationNotificationAvailability {
+    fun canNotify(
+        runtimePermissionGranted: Boolean,
+        appNotificationsEnabled: Boolean,
+        channelDisabled: Boolean,
+    ): Boolean =
+        runtimePermissionGranted && appNotificationsEnabled && !channelDisabled
 }
 
 internal enum class HydrationPhoneOccurrenceResult {

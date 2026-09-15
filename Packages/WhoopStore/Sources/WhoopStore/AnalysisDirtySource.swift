@@ -148,6 +148,16 @@ public struct AnalysisInputFinalizationResult: Equatable, Sendable {
     }
 }
 
+public struct AnalysisInputExclusionResult: Equatable, Sendable {
+    public let excludedCount: Int
+    public let advancedCount: Int
+
+    public init(excludedCount: Int, advancedCount: Int) {
+        self.excludedCount = excludedCount
+        self.advancedCount = advancedCount
+    }
+}
+
 extension WhoopStore {
     /// Snapshots pending analysis generations for the requested sources without clearing or leasing them.
     ///
@@ -337,6 +347,113 @@ extension WhoopStore {
             try Task.checkCancellation()
             return AnalysisInputFinalizationResult(
                 acknowledgedCount: acknowledgedCount,
+                advancedCount: advancedCount
+            )
+        }
+    }
+
+    /// Excludes one permanently unscorable newest range without claiming that it was analyzed.
+    ///
+    /// This is reserved for civil-day ranges whose timezone provenance can never be reconstructed, such as
+    /// the partial day before the first retained observation or either side of a recorded travel transition.
+    /// Both acknowledgement and newest-tail advancement compare the exact snapshotted generation and bounds,
+    /// so a concurrent score-bearing write preserves the complete expanded claim.
+    public func excludeAnalysisInputGenerations(
+        _ claims: [AnalysisInputGenerationClaim],
+        exclusionStartTs: Int64,
+        exclusionEndTs: Int64
+    ) async throws -> AnalysisInputExclusionResult {
+        guard exclusionStartTs >= 0, exclusionStartTs <= exclusionEndTs else {
+            return AnalysisInputExclusionResult(
+                excludedCount: 0,
+                advancedCount: 0
+            )
+        }
+        var byDevice: [String: AnalysisInputGenerationClaim] = [:]
+        for claim in claims {
+            let deviceId = claim.deviceId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard claim.generation > 0, !deviceId.isEmpty else { continue }
+            if let existing = byDevice[deviceId], existing.generation >= claim.generation {
+                continue
+            }
+            byDevice[deviceId] = AnalysisInputGenerationClaim(
+                deviceId: deviceId,
+                generation: claim.generation,
+                earliestAffectedTs: claim.earliestAffectedTs,
+                latestAffectedTs: claim.latestAffectedTs
+            )
+        }
+        let normalized = byDevice.values.sorted { $0.deviceId < $1.deviceId }
+        guard !normalized.isEmpty else {
+            return AnalysisInputExclusionResult(
+                excludedCount: 0,
+                advancedCount: 0
+            )
+        }
+
+        try Task.checkCancellation()
+        return try syncWrite { db in
+            var excludedCount = 0
+            var advancedCount = 0
+            let acknowledgeExact = try db.cachedStatement(sql: """
+                UPDATE analysisDirtySource
+                SET acknowledgedGeneration = ?,
+                    earliestAffectedTs = NULL,
+                    latestAffectedTs = NULL
+                WHERE deviceId = ?
+                  AND generation = ?
+                  AND acknowledgedGeneration < ?
+                  AND earliestAffectedTs IS ?
+                  AND latestAffectedTs IS ?
+                """)
+            let advanceExact = try db.cachedStatement(sql: """
+                UPDATE analysisDirtySource
+                SET latestAffectedTs = ?
+                WHERE deviceId = ?
+                  AND generation = ?
+                  AND acknowledgedGeneration < ?
+                  AND earliestAffectedTs = ?
+                  AND latestAffectedTs = ?
+                  AND ? >= earliestAffectedTs
+                  AND ? < latestAffectedTs
+                """)
+
+            for claim in normalized {
+                try Task.checkCancellation()
+                guard let affected = claim.affectedTimeRange,
+                      exclusionStartTs <= affected.upperBound,
+                      exclusionEndTs >= affected.upperBound else {
+                    continue
+                }
+                if exclusionStartTs <= affected.lowerBound {
+                    try acknowledgeExact.execute(arguments: [
+                        claim.generation,
+                        claim.deviceId,
+                        claim.generation,
+                        claim.generation,
+                        claim.earliestAffectedTs,
+                        claim.latestAffectedTs,
+                    ])
+                    excludedCount += db.changesCount
+                    continue
+                }
+
+                let remainingLatest = exclusionStartTs - 1
+                try advanceExact.execute(arguments: [
+                    remainingLatest,
+                    claim.deviceId,
+                    claim.generation,
+                    claim.generation,
+                    affected.lowerBound,
+                    affected.upperBound,
+                    remainingLatest,
+                    remainingLatest,
+                ])
+                advancedCount += db.changesCount
+            }
+            try Task.checkCancellation()
+            return AnalysisInputExclusionResult(
+                excludedCount: excludedCount,
                 advancedCount: advancedCount
             )
         }

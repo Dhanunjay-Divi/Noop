@@ -110,6 +110,7 @@ object ScheduledReportPolicy {
         chargeOrRestPresent: Boolean,
         lastNotifiedDay: String?,
         reportDay: String,
+        scheduledMorningReviewEnabled: Boolean = false,
         inQuietHours: Boolean = false,
     ): Boolean =
         enabled &&
@@ -117,6 +118,7 @@ object ScheduledReportPolicy {
             chargeOrRestPresent &&
             reportDay.isNotBlank() &&
             lastNotifiedDay != reportDay &&
+            !scheduledMorningReviewEnabled &&
             !inQuietHours
 
     /** A routine report cannot consume its frontier or shared budget unless the OS can accept it. */
@@ -278,6 +280,7 @@ class DeferredMorningRecapWorker(
             }.getOrNull()
         } ?: return Result.failure()
         if (!NoopPrefs.morningReportEnabled(applicationContext) ||
+            DailyReviewReminders.isMorningEnabled(applicationContext) ||
             NoopPrefs.reportMorningDay(applicationContext) == reportDay
         ) return Result.success()
         if (NotifPrefs.inQuietHours(applicationContext)) {
@@ -349,6 +352,8 @@ object ScheduledReportNotifier {
                 chargeOrRestPresent = chargePct != null || restPct != null,
                 lastNotifiedDay = lastNotifiedDay,
                 reportDay = reportDay,
+                scheduledMorningReviewEnabled =
+                    DailyReviewReminders.isMorningEnabled(context),
             )
         ) return false
         val copyKind =
@@ -421,6 +426,7 @@ object ScheduledReportNotifier {
         copyKind: ScheduledReportPolicy.MorningCopyKind,
     ): Boolean {
         if (!NoopPrefs.morningReportEnabled(context) ||
+            DailyReviewReminders.isMorningEnabled(context) ||
             NoopPrefs.reportMorningDay(context) == reportDay
         ) return false
         if (NotifPrefs.inQuietHours(context)) {

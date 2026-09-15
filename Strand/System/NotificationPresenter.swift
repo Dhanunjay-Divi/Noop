@@ -1105,7 +1105,10 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
                     if accepted,
                        actionIdentifier ==
                         DailyReviewNotifications.reviewLighterOptionsActionID {
-                        NotificationRouteBridge.recordPending(.workouts)
+                        NotificationRouteBridge.recordPending(
+                            .workouts,
+                            presentation: .lighterWorkoutOptions
+                        )
                     }
                 }
             }

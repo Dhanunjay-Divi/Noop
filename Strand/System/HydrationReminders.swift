@@ -245,13 +245,17 @@ enum HydrationReminders {
                     )
                 } else {
                     guard generation == scheduleGeneration else { return }
-                    UserDefaults.standard.set(false, forKey: enabledKey)
+                    UserDefaults.standard.set(true, forKey: enabledKey)
+                    removeScheduledRequests()
+                    cancelMissedResponse()
                     recordSuppressedRequests()
                     completion?(.denied)
                 }
             default:
                 guard generation == scheduleGeneration else { return }
-                UserDefaults.standard.set(false, forKey: enabledKey)
+                UserDefaults.standard.set(true, forKey: enabledKey)
+                removeScheduledRequests()
+                cancelMissedResponse()
                 recordSuppressedRequests()
                 completion?(.denied)
             }
@@ -413,17 +417,32 @@ enum HydrationReminders {
     }
 
     /// Rebuild pending requests after an upgrade without ever prompting for permission on launch.
-    static func restoreScheduleIfAuthorized() {
+    @discardableResult
+    static func restoreScheduleIfAuthorized(
+        authorizationStatus:
+            (@MainActor @Sendable () async -> UNAuthorizationStatus)? = nil
+    ) -> Task<Void, Never> {
         guard isEnabled else {
             removeScheduledRequests()
-            return
+            return Task {}
         }
-        Task { @MainActor in
-            let settings = await UNUserNotificationCenter.current().notificationSettings()
-            switch restoreAuthorizationDisposition(settings.authorizationStatus) {
+        let generation = scheduleGeneration
+        return Task { @MainActor in
+            let status: UNAuthorizationStatus
+            if let authorizationStatus {
+                status = await authorizationStatus()
+            } else {
+                status = await UNUserNotificationCenter.current()
+                    .notificationSettings()
+                    .authorizationStatus
+            }
+            guard generation == scheduleGeneration, isEnabled else { return }
+            switch restoreAuthorizationDisposition(status) {
             case .reschedule:
                 requestReschedule()
             case .retainOptIn:
+                removeScheduledRequests()
+                cancelMissedResponse()
                 recordSuppressedRequests()
             case .disable:
                 UserDefaults.standard.set(false, forKey: enabledKey)
@@ -617,15 +636,22 @@ enum HydrationReminders {
     }
 
     private static func requestReschedule(now: Date = Date()) {
+        guard isEnabled else {
+            removeScheduledRequests()
+            cancelMissedResponse()
+            return
+        }
         scheduleGeneration &+= 1
         let generation = scheduleGeneration
         Task { @MainActor in
             let center = UNUserNotificationCenter.current()
             let initialSettings = await center.notificationSettings()
-            guard generation == scheduleGeneration else { return }
+            guard generation == scheduleGeneration, isEnabled else { return }
             switch restoreAuthorizationDisposition(initialSettings.authorizationStatus) {
             case .retainOptIn:
                 UserDefaults.standard.set(true, forKey: enabledKey)
+                removeScheduledRequests()
+                cancelMissedResponse()
                 recordSuppressedRequests()
                 return
             case .disable:
@@ -643,9 +669,9 @@ enum HydrationReminders {
                 expectedGeneration: generation,
                 client: .system(center: center)
             )
-            guard generation == scheduleGeneration else { return }
+            guard generation == scheduleGeneration, isEnabled else { return }
             let finalSettings = await center.notificationSettings()
-            guard generation == scheduleGeneration else { return }
+            guard generation == scheduleGeneration, isEnabled else { return }
             _ = applyScheduleResult(
                 result,
                 authorizationStatus: finalSettings.authorizationStatus
@@ -663,6 +689,8 @@ enum HydrationReminders {
             return applyAuthorizedScheduleResult(result)
         case .retainOptIn:
             UserDefaults.standard.set(true, forKey: enabledKey)
+            removeScheduledRequests()
+            cancelMissedResponse()
             recordSuppressedRequests()
             return .deferred
         case .disable:
@@ -674,9 +702,9 @@ enum HydrationReminders {
         }
     }
 
-    /// Keep the explicit phone-reminder opt-in across transient Notification Center rejection or
-    /// capacity deferral. Authorization denial and an explicit OFF action remain the only paths that
-    /// clear this preference.
+    /// Keep the explicit phone-reminder opt-in across Notification Center rejection or capacity
+    /// deferral. Pending requests are suppressed while permission is unavailable and can be rebuilt
+    /// when the scene becomes active after the user changes Settings.
     @discardableResult
     static func applyAuthorizedScheduleResult(
         _ result: LocalNotificationReconciliationResult?
@@ -696,7 +724,7 @@ enum HydrationReminders {
         case .notDetermined:
             return .retainOptIn
         case .denied:
-            return .disable
+            return .retainOptIn
         @unknown default:
             return .disable
         }

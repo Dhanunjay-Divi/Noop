@@ -1152,6 +1152,16 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("DELETE FROM dailyMetric WHERE deviceId = :deviceId AND day >= :from AND day <= :to")
     suspend fun deleteDailyMetricsInRange(deviceId: String, from: String, to: String)
 
+    /**
+     * Hide stale locally computed Effort before the one-shot axis migration re-scores source data.
+     * Source scoping preserves imported/vendor Effort and every non-Effort field on computed rows.
+     */
+    @Query(
+        "UPDATE dailyMetric SET strain = NULL " +
+            "WHERE deviceId = :deviceId AND strain IS NOT NULL",
+    )
+    suspend fun clearDailyStrain(deviceId: String): Int
+
     /** All cached daily metrics for a device, oldest first. Convenience for analytics windows. */
     @Query("SELECT * FROM dailyMetric WHERE deviceId = :deviceId ORDER BY day ASC")
     suspend fun days(deviceId: String): List<DailyMetric>

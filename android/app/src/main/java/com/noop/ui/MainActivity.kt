@@ -40,6 +40,7 @@ import com.noop.managed.ManagedCloudScheduler
 import com.noop.managed.ManagedSafetyMessagingService
 import com.noop.managed.ManagedSafetyPushPayload
 import com.noop.notif.AdaptiveDayTimeZoneStore
+import com.noop.notif.HydrationReminderScheduler
 import com.noop.notif.StaleSyncReminderScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -158,6 +159,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             accelerometer?.let {
                 sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
             }
+            // A user can grant notifications or re-enable the hydration channel in system Settings
+            // while NOOP is paused. Reconcile on every operational foreground so the persisted opt-in
+            // becomes scheduled again without requiring the user to toggle it off and on.
+            HydrationReminderScheduler.reconcile(applicationContext)
         }
         com.noop.AppDiagnosticsRecorder.record("activity.resumed")
     }

@@ -28,9 +28,19 @@ internal enum class NoopNotificationRoute(val navRoute: String) {
     }
 }
 
+internal enum class NotificationRoutePresentation(val storedValue: String) {
+    LIGHTER_WORKOUT_OPTIONS("lighter_workout_options");
+
+    companion object {
+        fun fromRaw(raw: String?): NotificationRoutePresentation? =
+            entries.firstOrNull { it.storedValue == raw }
+    }
+}
+
 internal data class PendingNotificationRouteRequest(
     val route: NoopNotificationRoute,
     val journalDay: LocalDate? = null,
+    val presentation: NotificationRoutePresentation? = null,
 )
 
 /**
@@ -43,8 +53,10 @@ internal data class PendingNotificationRouteRequest(
 internal object NotificationRouteBridge {
     const val EXTRA_ROUTE = "com.noop.extra.NOTIFICATION_ROUTE"
     const val EXTRA_JOURNAL_DAY = "com.noop.extra.NOTIFICATION_JOURNAL_DAY"
+    const val EXTRA_PRESENTATION = "com.noop.extra.NOTIFICATION_PRESENTATION"
     private const val KEY_PENDING_ROUTE = "noop.notification.pendingRoute"
     private const val KEY_PENDING_JOURNAL_DAY = "noop.notification.pendingJournalDay"
+    private const val KEY_PENDING_PRESENTATION = "noop.notification.pendingPresentation"
 
     private val lock = Any()
     private val _routeRequests = MutableStateFlow(0L)
@@ -54,11 +66,15 @@ internal object NotificationRouteBridge {
         context: Context,
         route: NoopNotificationRoute,
         journalDay: LocalDate? = null,
+        presentation: NotificationRoutePresentation? = null,
     ): Intent = appLaunchIntent(context)
         .putExtra(EXTRA_ROUTE, route.navRoute)
         .apply {
             if (route == NoopNotificationRoute.JOURNAL && journalDay != null) {
                 putExtra(EXTRA_JOURNAL_DAY, journalDay.toString())
+            }
+            if (presentation != null) {
+                putExtra(EXTRA_PRESENTATION, presentation.storedValue)
             }
         }
 
@@ -66,14 +82,17 @@ internal object NotificationRouteBridge {
     fun recordFromIntent(context: Context, intent: Intent?): Boolean {
         val raw = intent?.getStringExtra(EXTRA_ROUTE)
         val journalDayRaw = intent?.getStringExtra(EXTRA_JOURNAL_DAY)
+        val presentationRaw = intent?.getStringExtra(EXTRA_PRESENTATION)
         if (raw != null) intent.removeExtra(EXTRA_ROUTE)
         if (journalDayRaw != null) intent?.removeExtra(EXTRA_JOURNAL_DAY)
+        if (presentationRaw != null) intent?.removeExtra(EXTRA_PRESENTATION)
         val route = NoopNotificationRoute.fromRaw(raw) ?: return false
         val journalDay = if (route == NoopNotificationRoute.JOURNAL) {
             parseJournalDay(journalDayRaw)
         } else {
             null
         }
+        val presentation = NotificationRoutePresentation.fromRaw(presentationRaw)
         synchronized(lock) {
             NoopPrefs.of(context).edit()
                 .putString(KEY_PENDING_ROUTE, route.navRoute)
@@ -82,6 +101,11 @@ internal object NotificationRouteBridge {
                         putString(KEY_PENDING_JOURNAL_DAY, journalDay.toString())
                     } else {
                         remove(KEY_PENDING_JOURNAL_DAY)
+                    }
+                    if (presentation != null) {
+                        putString(KEY_PENDING_PRESENTATION, presentation.storedValue)
+                    } else {
+                        remove(KEY_PENDING_PRESENTATION)
                     }
                 }
                 .apply()
@@ -95,9 +119,11 @@ internal object NotificationRouteBridge {
         val prefs = NoopPrefs.of(context)
         val raw = prefs.getString(KEY_PENDING_ROUTE, null)
         val journalDayRaw = prefs.getString(KEY_PENDING_JOURNAL_DAY, null)
+        val presentationRaw = prefs.getString(KEY_PENDING_PRESENTATION, null)
         prefs.edit()
             .remove(KEY_PENDING_ROUTE)
             .remove(KEY_PENDING_JOURNAL_DAY)
+            .remove(KEY_PENDING_PRESENTATION)
             .apply()
         val route = NoopNotificationRoute.fromRaw(raw) ?: return@synchronized null
         val journalDay = if (route == NoopNotificationRoute.JOURNAL) {
@@ -105,7 +131,11 @@ internal object NotificationRouteBridge {
         } else {
             null
         }
-        PendingNotificationRouteRequest(route, journalDay)
+        PendingNotificationRouteRequest(
+            route = route,
+            journalDay = journalDay,
+            presentation = NotificationRoutePresentation.fromRaw(presentationRaw),
+        )
     }
 
     fun consumePending(context: Context): NoopNotificationRoute? =

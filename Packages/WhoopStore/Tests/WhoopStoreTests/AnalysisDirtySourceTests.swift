@@ -713,6 +713,86 @@ final class AnalysisDirtySourceTests: XCTestCase {
         XCTAssertEqual(pending, [claim(id, 3, 100, 300)])
     }
 
+    func testTerminalExclusionAdvancesNewestUnknownTailThenAcknowledgesRemainder() async throws {
+        let store = try await WhoopStore.inMemory()
+        let id = "terminal-progress"
+        try await store.registryWriter.write { db in
+            try db.execute(
+                sql: "INSERT INTO hrSample (deviceId, ts, bpm) VALUES (?, 100, 60)",
+                arguments: [id]
+            )
+            try db.execute(
+                sql: "INSERT INTO hrSample (deviceId, ts, bpm) VALUES (?, 200, 61)",
+                arguments: [id]
+            )
+        }
+        let original = try await store.pendingAnalysisInputGenerations(deviceIds: [id])
+        XCTAssertEqual(original, [claim(id, 2, 100, 200)])
+
+        let first = try await store.excludeAnalysisInputGenerations(
+            original,
+            exclusionStartTs: 151,
+            exclusionEndTs: 250
+        )
+        XCTAssertEqual(
+            first,
+            AnalysisInputExclusionResult(excludedCount: 0, advancedCount: 1)
+        )
+        let remaining = try await store.pendingAnalysisInputGenerations(deviceIds: [id])
+        XCTAssertEqual(remaining, [claim(id, 2, 100, 150)])
+
+        let second = try await store.excludeAnalysisInputGenerations(
+            remaining,
+            exclusionStartTs: 0,
+            exclusionEndTs: 150
+        )
+        XCTAssertEqual(
+            second,
+            AnalysisInputExclusionResult(excludedCount: 1, advancedCount: 0)
+        )
+        let completed = try await store.pendingAnalysisInputGenerations(
+            deviceIds: [id]
+        )
+        XCTAssertEqual(completed, [])
+    }
+
+    func testTerminalExclusionNeverTrimsAConcurrentGeneration() async throws {
+        let store = try await WhoopStore.inMemory()
+        let id = "terminal-concurrent"
+        try await store.registryWriter.write { db in
+            try db.execute(
+                sql: "INSERT INTO hrSample (deviceId, ts, bpm) VALUES (?, 100, 60)",
+                arguments: [id]
+            )
+            try db.execute(
+                sql: "INSERT INTO hrSample (deviceId, ts, bpm) VALUES (?, 200, 61)",
+                arguments: [id]
+            )
+        }
+        let claimed = try await store.pendingAnalysisInputGenerations(deviceIds: [id])
+        try await store.registryWriter.write { db in
+            try db.execute(
+                sql: "INSERT INTO hrSample (deviceId, ts, bpm) VALUES (?, 300, 62)",
+                arguments: [id]
+            )
+        }
+
+        let result = try await store.excludeAnalysisInputGenerations(
+            claimed,
+            exclusionStartTs: 151,
+            exclusionEndTs: 250
+        )
+
+        XCTAssertEqual(
+            result,
+            AnalysisInputExclusionResult(excludedCount: 0, advancedCount: 0)
+        )
+        let pending = try await store.pendingAnalysisInputGenerations(
+            deviceIds: [id]
+        )
+        XCTAssertEqual(pending, [claim(id, 3, 100, 300)])
+    }
+
     func testScoreBearingHistoryProofStopsAtPresenceAndSupportsGlobalOwnership() async throws {
         let store = try await WhoopStore.inMemory()
         let emptyGlobal = try await store.hasScoreBearingAnalysisHistory()

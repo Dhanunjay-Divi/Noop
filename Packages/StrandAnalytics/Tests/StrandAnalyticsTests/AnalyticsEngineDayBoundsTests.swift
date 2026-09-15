@@ -15,6 +15,77 @@ final class AnalyticsEngineDayBoundsTests: XCTestCase {
 
     // MARK: - Membership equivalence sweep
 
+    func testCivilDayBoundsValidationRejectsPartialAndEmptyRanges() {
+        XCTAssertEqual(
+            AnalyticsEngine.validateCivilDayBounds(
+                startTs: nil,
+                endTsExclusive: nil
+            ),
+            .absent
+        )
+        XCTAssertEqual(
+            AnalyticsEngine.validateCivilDayBounds(
+                startTs: 100,
+                endTsExclusive: 200
+            ),
+            .valid(100..<200)
+        )
+        XCTAssertEqual(
+            AnalyticsEngine.validateCivilDayBounds(
+                startTs: 100,
+                endTsExclusive: nil
+            ),
+            .invalid
+        )
+        XCTAssertEqual(
+            AnalyticsEngine.validateCivilDayBounds(
+                startTs: nil,
+                endTsExclusive: 200
+            ),
+            .invalid
+        )
+        XCTAssertEqual(
+            AnalyticsEngine.validateCivilDayBounds(
+                startTs: 200,
+                endTsExclusive: 200
+            ),
+            .invalid
+        )
+        XCTAssertEqual(
+            AnalyticsEngine.validateCivilDayBounds(
+                startTs: 201,
+                endTsExclusive: 200
+            ),
+            .invalid
+        )
+    }
+
+    func testAnalyzeDayRejectsInvalidCivilBoundsWithoutScoring() {
+        let result = AnalyticsEngine.analyzeDay(
+            day: "2026-09-15",
+            hr: [HRSample(ts: 1_800_000_000, bpm: 180)],
+            dayHr: [HRSample(ts: 1_800_000_000, bpm: 180)],
+            daySteps: [
+                StepSample(ts: 1_800_000_000, counter: 100),
+                StepSample(ts: 1_800_000_060, counter: 200),
+            ],
+            profile: UserProfile(),
+            civilDayStartTs: 1_800_000_000,
+            civilDayEndTsExclusive: nil
+        )
+
+        XCTAssertEqual(
+            result.status,
+            .rejectedInvalidCivilDayBounds
+        )
+        XCTAssertNil(result.daily.strain)
+        XCTAssertNil(result.daily.steps)
+        XCTAssertNil(result.daily.activeKcalEst)
+        XCTAssertTrue(result.sleepSessions.isEmpty)
+        XCTAssertTrue(result.cachedSleep.isEmpty)
+        XCTAssertTrue(result.workouts.isEmpty)
+    }
+
     func testIntegerBoundsMatchDayStringAcrossMidnightAndOffsets() {
         let anchor = 1_700_000_000  // 2023-11-14T22:13:20Z
         // UTC, the whole-hour extremes NOOP actually threads (±12/13/14 h are the real-world edges),
@@ -119,6 +190,58 @@ final class AnalyticsEngineDayBoundsTests: XCTestCase {
             XCTAssertNotNil(full.daily.steps)          // the pin is vacuous if the day computed nothing
             XCTAssertNotNil(full.daily.activeKcalEst)
             XCTAssertNotNil(full.activeZoneMinutes)
+        }
+    }
+
+    func testExplicitCivilBoundsKeepAllAndOnlyDSTTransitionSamples() throws {
+        let formatter = ISO8601DateFormatter()
+        let cases = [
+            (
+                day: "2026-11-01",
+                start: "2026-11-01T04:00:00Z",
+                end: "2026-11-02T05:00:00Z",
+                representativeOffset: -5 * 3_600
+            ),
+            (
+                day: "2026-03-08",
+                start: "2026-03-08T05:00:00Z",
+                end: "2026-03-09T04:00:00Z",
+                representativeOffset: -4 * 3_600
+            ),
+        ]
+
+        for testCase in cases {
+            let start = Int(try XCTUnwrap(
+                formatter.date(from: testCase.start)
+            ).timeIntervalSince1970)
+            let end = Int(try XCTUnwrap(
+                formatter.date(from: testCase.end)
+            ).timeIntervalSince1970)
+            let samples = [
+                StepSample(ts: start - 1, counter: 100),
+                StepSample(ts: start, counter: 110),
+                StepSample(ts: start + 3_600, counter: 120),
+                StepSample(ts: end - 1, counter: 130),
+                StepSample(ts: end, counter: 140),
+            ]
+
+            let exact = AnalyticsEngine.analyzeDay(
+                day: testCase.day,
+                daySteps: samples,
+                profile: UserProfile(stepTicksPerStep: 1),
+                tzOffsetSeconds: testCase.representativeOffset,
+                civilDayStartTs: start,
+                civilDayEndTsExclusive: end
+            )
+            let fixedOffset = AnalyticsEngine.analyzeDay(
+                day: testCase.day,
+                daySteps: samples,
+                profile: UserProfile(stepTicksPerStep: 1),
+                tzOffsetSeconds: testCase.representativeOffset
+            )
+
+            XCTAssertEqual(exact.daily.steps, 20, testCase.day)
+            XCTAssertNotEqual(fixedOffset.daily.steps, exact.daily.steps)
         }
     }
 }

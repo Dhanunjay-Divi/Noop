@@ -87,6 +87,17 @@
     "zh-Hans": "暂不可用",
     "zh-Hant": "暫不可用"
   },
+  "appwide.hydration.notifications_unavailable": {
+    "de": "Wasser-Erinnerungen sind aktiviert, aber Android-Mitteilungen oder der Wasser-Kanal sind ausgeschaltet.",
+    "en": "Hydration reminders are on, but Android notifications or the Hydration channel are off.",
+    "es": "Los recordatorios de hidratación están activados, pero las notificaciones de Android o el canal Hidratación están desactivados.",
+    "fr": "Les rappels d’hydratation sont activés, mais les notifications Android ou le canal Hydratation sont désactivés.",
+    "it": "I promemoria di idratazione sono attivi, ma le notifiche Android o il canale Idratazione sono disattivati.",
+    "pt-PT": "Os lembretes de hidratação estão ativos, mas as notificações Android ou o canal Hidratação estão desativados.",
+    "ru": "Напоминания о воде включены, но уведомления Android или канал «Вода» отключены.",
+    "zh-Hans": "饮水提醒已开启，但 Android 通知或“饮水”通知渠道已关闭。",
+    "zh-Hant": "飲水提醒已開啟，但 Android 通知或「飲水」通知頻道已關閉。"
+  },
   "appwide.hydration.load_failed": {
     "de": "Hydration konnte nicht geladen werden. Versuche es erneut.",
     "en": "Hydration couldn’t be loaded. Try again.",
@@ -174,6 +185,17 @@
     "ru": "Записано: %1$s",
     "zh-Hans": "已记录%1$s",
     "zh-Hant": "已記錄%1$s"
+  },
+  "appwide.hydration.older_daily_total": {
+    "de": "Ältere Tagessumme",
+    "en": "Older daily total",
+    "es": "Total diario anterior",
+    "fr": "Ancien total quotidien",
+    "it": "Totale giornaliero precedente",
+    "pt-PT": "Total diário anterior",
+    "ru": "Более ранний итог за день",
+    "zh-Hans": "较早的每日总量",
+    "zh-Hant": "較早的每日總量"
   },
   "appwide.hydration.source": {
     "de": "Quelle",
@@ -5433,6 +5455,127 @@
     "zh-Hans": "查看较轻的选项",
     "zh-Hant": "查看較輕的選項"
   },
+  "appwide.adaptive_day_guidance.lighter_options.title": {
+    "de": "Leichtere Trainingsoptionen",
+    "en": "Lighter workout options",
+    "es": "Opciones de entrenamiento más ligero",
+    "fr": "Options d’entraînement plus léger",
+    "it": "Opzioni di allenamento più leggere",
+    "pt-PT": "Opções de treino mais leve",
+    "ru": "Варианты более лёгкой тренировки",
+    "zh-Hans": "较轻的锻炼选项",
+    "zh-Hant": "較輕的運動選項"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.intro": {
+    "de": "Wähle eine Anpassung, die zu deinem Befinden passt. NOOP ändert weder deinen Kalender noch deinen gespeicherten Plan.",
+    "en": "Choose an adjustment that fits how you feel. NOOP will not change your calendar or saved plan.",
+    "es": "Elige un ajuste que se adapte a cómo te sientes. NOOP no cambiará tu calendario ni tu plan guardado.",
+    "fr": "Choisissez un ajustement adapté à votre ressenti. NOOP ne modifiera ni votre calendrier ni votre programme enregistré.",
+    "it": "Scegli un adattamento adatto a come ti senti. NOOP non modificherà il calendario né il piano salvato.",
+    "pt-PT": "Escolhe um ajuste adequado ao que sentes. O NOOP não altera o calendário nem o plano guardado.",
+    "ru": "Выберите корректировку с учётом самочувствия. NOOP не изменит календарь или сохранённый план.",
+    "zh-Hans": "根据你的感受选择调整方式。NOOP 不会更改日历或已保存的计划。",
+    "zh-Hant": "依照你的感受選擇調整方式。NOOP 不會變更行事曆或已儲存的計畫。"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.intensity.title": {
+    "de": "Intensität reduzieren",
+    "en": "Reduce intensity",
+    "es": "Reducir la intensidad",
+    "fr": "Réduire l’intensité",
+    "it": "Riduci l’intensità",
+    "pt-PT": "Reduzir a intensidade",
+    "ru": "Снизить интенсивность",
+    "zh-Hans": "降低强度",
+    "zh-Hant": "降低強度"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.intensity.detail": {
+    "de": "Behalte die Bewegungen bei, nutze ein leichtes Tempo oder weniger Gewicht und lasse einige Wiederholungen in Reserve.",
+    "en": "Keep the movements, use an easy pace or lighter load, and leave a few reps in reserve.",
+    "es": "Mantén los movimientos, usa un ritmo suave o menos carga y deja algunas repeticiones en reserva.",
+    "fr": "Gardez les mouvements, adoptez une allure facile ou une charge plus légère et conservez quelques répétitions en réserve.",
+    "it": "Mantieni i movimenti, usa un ritmo facile o un carico più leggero e lascia qualche ripetizione di margine.",
+    "pt-PT": "Mantém os movimentos, usa um ritmo fácil ou menos carga e deixa algumas repetições de reserva.",
+    "ru": "Сохраните упражнения, выберите лёгкий темп или меньший вес и оставьте несколько повторений в запасе.",
+    "zh-Hans": "保留原有动作，采用轻松配速或更轻负重，并留出几次重复余量。",
+    "zh-Hant": "保留原有動作，採用輕鬆配速或較輕負重，並保留幾次重複餘量。"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.duration.title": {
+    "de": "Einheit verkürzen",
+    "en": "Shorten the session",
+    "es": "Acortar la sesión",
+    "fr": "Raccourcir la séance",
+    "it": "Accorcia la sessione",
+    "pt-PT": "Encurtar a sessão",
+    "ru": "Сократить тренировку",
+    "zh-Hans": "缩短训练时间",
+    "zh-Hant": "縮短訓練時間"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.duration.detail": {
+    "de": "Streiche eine Runde, einen Satz oder einen Zeitblock und behalte Aufwärmen und Abkühlen bei.",
+    "en": "Cut a round, set, or time block while keeping your warm-up and cool-down.",
+    "es": "Quita una ronda, serie o bloque de tiempo, manteniendo el calentamiento y la vuelta a la calma.",
+    "fr": "Retirez un tour, une série ou un bloc de temps tout en gardant l’échauffement et le retour au calme.",
+    "it": "Riduci un giro, una serie o un blocco di tempo mantenendo riscaldamento e defaticamento.",
+    "pt-PT": "Retira uma ronda, série ou bloco de tempo, mantendo o aquecimento e o retorno à calma.",
+    "ru": "Уберите один круг, подход или временной блок, сохранив разминку и заминку.",
+    "zh-Hans": "减少一轮、一组或一个计时区段，同时保留热身和放松。",
+    "zh-Hant": "減少一輪、一組或一個計時區段，同時保留熱身和收操。"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.recovery.title": {
+    "de": "Erholungsbewegung wählen",
+    "en": "Choose recovery movement",
+    "es": "Elegir movimiento de recuperación",
+    "fr": "Choisir un mouvement de récupération",
+    "it": "Scegli un movimento di recupero",
+    "pt-PT": "Escolher movimento de recuperação",
+    "ru": "Выбрать восстановительную активность",
+    "zh-Hans": "选择恢复性活动",
+    "zh-Hant": "選擇恢復性活動"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.recovery.detail": {
+    "de": "Wähle statt hoher Intensität einen lockeren Spaziergang oder eine Mobility-Einheit.",
+    "en": "Choose an easy walk or mobility session instead of high intensity.",
+    "es": "Elige un paseo suave o una sesión de movilidad en lugar de alta intensidad.",
+    "fr": "Choisissez une marche facile ou une séance de mobilité plutôt qu’une forte intensité.",
+    "it": "Scegli una passeggiata tranquilla o una sessione di mobilità invece dell’alta intensità.",
+    "pt-PT": "Escolhe uma caminhada leve ou uma sessão de mobilidade em vez de alta intensidade.",
+    "ru": "Выберите лёгкую прогулку или занятие на подвижность вместо высокой интенсивности.",
+    "zh-Hans": "选择轻松步行或灵活性训练，替代高强度活动。",
+    "zh-Hant": "選擇輕鬆步行或活動度訓練，取代高強度活動。"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.disclaimer": {
+    "de": "Das sind optionale Anpassungen, keine medizinische oder verbindliche Trainingsanweisung. Entscheide nach deinem Befinden.",
+    "en": "These are optional adjustments, not medical advice or a required training instruction. Decide based on how you feel.",
+    "es": "Son ajustes opcionales, no consejos médicos ni una instrucción de entrenamiento obligatoria. Decide según cómo te sientas.",
+    "fr": "Ces ajustements sont facultatifs et ne constituent ni un avis médical ni une consigne d’entraînement obligatoire. Décidez selon votre ressenti.",
+    "it": "Sono adattamenti facoltativi, non consigli medici né istruzioni di allenamento obbligatorie. Decidi in base a come ti senti.",
+    "pt-PT": "São ajustes opcionais, não aconselhamento médico nem uma instrução de treino obrigatória. Decide de acordo com o que sentes.",
+    "ru": "Это необязательные корректировки, а не медицинская рекомендация или обязательное указание по тренировке. Ориентируйтесь на самочувствие.",
+    "zh-Hans": "这些是可选调整，并非医疗建议或必须遵循的训练指示。请根据自身感受决定。",
+    "zh-Hant": "這些是可選調整，並非醫療建議或必須遵循的訓練指示。請依照自身感受決定。"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.open_workouts": {
+    "de": "Workouts öffnen",
+    "en": "Open Workouts",
+    "es": "Abrir Entrenamientos",
+    "fr": "Ouvrir Entraînements",
+    "it": "Apri Allenamenti",
+    "pt-PT": "Abrir Treinos",
+    "ru": "Открыть тренировки",
+    "zh-Hans": "打开锻炼",
+    "zh-Hant": "開啟運動"
+  },
+  "appwide.adaptive_day_guidance.lighter_options.open_strength": {
+    "de": "Kraftplan öffnen",
+    "en": "Open strength plan",
+    "es": "Abrir plan de fuerza",
+    "fr": "Ouvrir le programme de renforcement",
+    "it": "Apri il piano di forza",
+    "pt-PT": "Abrir plano de força",
+    "ru": "Открыть силовой план",
+    "zh-Hans": "打开力量计划",
+    "zh-Hant": "開啟肌力計畫"
+  },
   "appwide.adaptive_day_guidance.planned_workout.title": {
     "de": "Zieh heute ein leichteres Training in Betracht",
     "en": "Consider a lighter workout today",
@@ -5478,15 +5621,37 @@
     "zh-Hant": "日記提醒"
   },
   "appwide.daily_review.morning.help": {
-    "de": "Standardmäßig aus. Öffnet Schlaf für eine private Übersicht; die Benachrichtigung zeigt keine Scores oder Gesundheitswerte.",
-    "en": "Off by default. Opens Sleep for a private review; no scores or health values appear in the notification.",
-    "es": "Desactivado de forma predeterminada. Abre Sueño para una revisión privada; la notificación no muestra puntuaciones ni valores de salud.",
-    "fr": "Désactivé par défaut. Ouvre Sommeil pour un bilan privé ; la notification n’affiche aucun score ni aucune valeur de santé.",
-    "it": "Disattivato per impostazione predefinita. Apre Sonno per una revisione privata; la notifica non mostra punteggi o valori di salute.",
-    "pt-PT": "Desativado por predefinição. Abre o Sono para uma revisão privada; a notificação não mostra pontuações nem valores de saúde.",
-    "ru": "По умолчанию выключено. Открывает раздел сна для личного обзора; уведомление не показывает оценки или показатели здоровья.",
-    "zh-Hans": "默认关闭。打开睡眠进行私密回顾；通知中不显示评分或健康数值。",
-    "zh-Hant": "預設關閉。開啟睡眠進行私密回顧；通知中不顯示評分或健康數值。"
+    "de": "Standardmäßig aus. Öffnet Schlaf zu deiner gewählten Zeit. Wenn du dies aktivierst, wird die Zusammenfassung nach der Synchronisierung ausgeschaltet, damit du morgens nur einen Hinweis erhältst.",
+    "en": "Off by default. Opens Sleep at your chosen time. Enabling this turns off the after-sync recap so you receive one morning prompt.",
+    "es": "Desactivado de forma predeterminada. Abre Sueño a la hora elegida. Al activarlo se desactiva el resumen tras la sincronización para que recibas un solo aviso matutino.",
+    "fr": "Désactivé par défaut. Ouvre Sommeil à l’heure choisie. L’activation désactive le récapitulatif après synchronisation afin de ne recevoir qu’une seule invite le matin.",
+    "it": "Disattivato per impostazione predefinita. Apre Sonno all’ora scelta. Attivandolo, il riepilogo dopo la sincronizzazione viene disattivato per ricevere un solo avviso al mattino.",
+    "pt-PT": "Desativado por predefinição. Abre o Sono à hora escolhida. Ao ativar, desliga o resumo após sincronização para receberes apenas um aviso de manhã.",
+    "ru": "По умолчанию выключено. Открывает раздел сна в выбранное время. При включении сводка после синхронизации отключается, чтобы утром приходило одно напоминание.",
+    "zh-Hans": "默认关闭。在你选择的时间打开睡眠。启用后会关闭同步后回顾，确保早晨只收到一次提示。",
+    "zh-Hant": "預設關閉。在你選擇的時間開啟睡眠。啟用後會關閉同步後回顧，確保早晨只收到一次提示。"
+  },
+  "appwide.daily_review.morning.body": {
+    "de": "Sieh dir den Schlaf und die Erholung der letzten Nacht in NOOP an.",
+    "en": "Review last night’s Sleep and Recovery in NOOP.",
+    "es": "Revisa en NOOP el Sueño y la Recuperación de anoche.",
+    "fr": "Consultez dans NOOP le Sommeil et la Récupération de la nuit dernière.",
+    "it": "Rivedi in NOOP il Sonno e il Recupero della scorsa notte.",
+    "pt-PT": "Revê no NOOP o Sono e a Recuperação da noite passada.",
+    "ru": "Просмотрите в NOOP сон и восстановление за прошлую ночь.",
+    "zh-Hans": "在 NOOP 中查看昨晚的睡眠和恢复。",
+    "zh-Hant": "在 NOOP 中查看昨晚的睡眠和恢復。"
+  },
+  "appwide.daily_review.morning_recap.help": {
+    "de": "Benachrichtigt einmal nach einer neu synchronisierten Nacht. Wenn du dies aktivierst, wird der Check-in zu fester Zeit ausgeschaltet, damit du morgens nur einen Hinweis erhältst.",
+    "en": "Notifies once after a newly synced night. Enabling this turns off the scheduled check-in so you receive one morning prompt.",
+    "es": "Notifica una vez tras sincronizar una noche nueva. Al activarlo se desactiva la revisión programada para que recibas un solo aviso matutino.",
+    "fr": "Envoie une notification après la synchronisation d’une nouvelle nuit. L’activation désactive le bilan programmé afin de ne recevoir qu’une seule invite le matin.",
+    "it": "Invia una notifica dopo la sincronizzazione di una nuova notte. Attivandolo, il check-in programmato viene disattivato per ricevere un solo avviso al mattino.",
+    "pt-PT": "Notifica uma vez após a sincronização de uma nova noite. Ao ativar, desliga o check-in agendado para receberes apenas um aviso de manhã.",
+    "ru": "Уведомляет один раз после синхронизации новой ночи. При включении запланированный обзор отключается, чтобы утром приходило одно напоминание.",
+    "zh-Hans": "新夜间数据同步后提醒一次。启用后会关闭定时回顾，确保早晨只收到一次提示。",
+    "zh-Hant": "新夜間資料同步後提醒一次。啟用後會關閉排程回顧，確保早晨只收到一次提示。"
   },
   "appwide.daily_review.morning.label": {
     "de": "Morgendlicher Check-in",

@@ -871,6 +871,412 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         XCTAssertEqual(dirtyWindows, 0)
     }
 
+    func testManagedHydrationLegacyDispositionRequiresDeletionAndIsProfileScoped() async throws {
+        let accountB = String(repeating: "b", count: 64)
+        let store = try await managedStore()
+        let day = "2026-09-11"
+        let entryID = "11111111-2222-4333-8444-555555555555"
+        let documentID = "99999999-8888-5777-8666-555555555555"
+        try await store.replaceHydrationLogEntries(
+            [
+                HydrationLogEntry(
+                    id: entryID,
+                    day: day,
+                    amountML: 237,
+                    loggedAt: 1_789_142_400
+                ),
+            ],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+        let pendingCandidate = try await hydrationCandidate(in: store)
+        let candidate = try XCTUnwrap(pendingCandidate)
+        try await acknowledge(
+            candidate,
+            revision: 1,
+            documentID: documentID,
+            store: store
+        )
+        let acknowledgedDisposition =
+            try await store.managedHydrationLegacyDisposition(
+                entryIDs: [entryID]
+            )
+        XCTAssertEqual(
+            acknowledgedDisposition,
+            .deferForProfileConflict
+        )
+        try await store.registryWriter.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE managedDocumentState
+                    SET isDeleted = NULL
+                    WHERE accountScopeHash = ?
+                      AND tableName = 'hydrationEntry'
+                """,
+                arguments: [self.scope]
+            )
+            try db.execute(
+                sql: """
+                    INSERT OR IGNORE INTO managedDocumentApplyGuard (guardId)
+                    VALUES (1)
+                    """
+            )
+            defer {
+                try? db.execute(
+                    sql: "DELETE FROM managedDocumentApplyGuard WHERE guardId = 1"
+                )
+            }
+            try db.execute(
+                sql: "DELETE FROM hydrationEntry WHERE id = ?",
+                arguments: [entryID]
+            )
+        }
+        let upgradedUnknownDisposition =
+            try await store.managedHydrationLegacyDisposition(
+                entryIDs: [entryID]
+            )
+        XCTAssertEqual(
+            upgradedUnknownDisposition,
+            .deferForMixedDeletionState
+        )
+        try await store.registryWriter.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE managedDocumentState
+                    SET isDeleted = 0
+                    WHERE accountScopeHash = ?
+                      AND tableName = 'hydrationEntry'
+                    """,
+                arguments: [self.scope]
+            )
+        }
+        let knownNonDeleteDisposition =
+            try await store.managedHydrationLegacyDisposition(
+                entryIDs: [entryID]
+            )
+        XCTAssertEqual(
+            knownNonDeleteDisposition,
+            .deferForProfileConflict
+        )
+        do {
+            _ = try await store.managedHydrationLegacyDisposition(
+                entryIDs: ["not-a-uuid"]
+            )
+            XCTFail("malformed hydration identifiers must fail closed")
+        } catch {
+            // Expected.
+        }
+        var oversizedIDs: [String] = []
+        oversizedIDs.reserveCapacity(
+            WhoopStore.hydrationLegacyMaximumEntryCount + 1
+        )
+        for index in 0...WhoopStore.hydrationLegacyMaximumEntryCount {
+            oversizedIDs.append(
+                UUID(
+                    uuid: (
+                        0, 0, 0, 0, 0, 0, 0x40, 0,
+                        0x80, 0, 0, 0,
+                        UInt8((index >> 24) & 0xff),
+                        UInt8((index >> 16) & 0xff),
+                        UInt8((index >> 8) & 0xff),
+                        UInt8(index & 0xff)
+                    )
+                ).uuidString
+            )
+        }
+        do {
+            _ = try await store.managedHydrationLegacyDisposition(
+                entryIDs: oversizedIDs
+            )
+            XCTFail("oversized hydration evidence must fail closed")
+        } catch {
+            // Expected.
+        }
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 2,
+            contentSHA256: String(repeating: "2", count: 64),
+            payloadJSON: nil,
+            deleted: true,
+            appliedAtMs: 2_000
+        )
+
+        let deletedDisposition =
+            try await store.managedHydrationLegacyDisposition(
+                entryIDs: [entryID]
+            )
+        XCTAssertEqual(deletedDisposition, .retire)
+        let mixedDisposition =
+            try await store.managedHydrationLegacyDisposition(
+                entryIDs: [
+                    entryID,
+                    "22222222-3333-4444-8555-666666666666",
+                ]
+            )
+        XCTAssertEqual(mixedDisposition, .deferForMixedDeletionState)
+
+        try await store.activateManagedDocumentProfile(
+            accountScopeHash: accountB,
+            updatedAtMs: 3_000
+        )
+        let otherProfileDisposition =
+            try await store.managedHydrationLegacyDisposition(
+                entryIDs: [entryID]
+            )
+        XCTAssertEqual(
+            otherProfileDisposition,
+            .deferForProfileConflict
+        )
+    }
+
+    func testUnboundProfileCanAdoptOwnerlessLegacyHydration() async throws {
+        let store = try await WhoopStore.inMemory()
+        let disposition =
+            try await store.managedHydrationLegacyDisposition(
+                entryIDs: ["11111111-2222-4333-8444-555555555555"]
+            )
+
+        XCTAssertEqual(disposition, .migrate)
+    }
+
+    func testUppercaseHydrationTombstoneStillRetiresCanonicalLegacyID() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-11"
+        let uppercaseID = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+        let canonicalID = uppercaseID.lowercased()
+        let documentID = "99999999-8888-5777-8666-555555555555"
+        try await store.replaceHydrationLogEntries(
+            [
+                HydrationLogEntry(
+                    id: uppercaseID,
+                    day: day,
+                    amountML: 237,
+                    loggedAt: 1_789_142_400
+                ),
+            ],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+        let pending = try await store.pendingManagedDocuments(
+            accountScopeHash: scope,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        let candidate = try XCTUnwrap(
+            pending.first(where: { $0.documentKind == "hydration" })
+        )
+        try await acknowledge(
+            candidate,
+            revision: 1,
+            documentID: documentID,
+            store: store
+        )
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 2,
+            contentSHA256: String(repeating: "2", count: 64),
+            payloadJSON: nil,
+            deleted: true,
+            appliedAtMs: 2_000
+        )
+
+        let disposition =
+            try await store.managedHydrationLegacyDisposition(
+                entryIDs: [canonicalID]
+            )
+
+        XCTAssertEqual(disposition, .retire)
+    }
+
+    func testStaleAcknowledgementCannotOverwriteNewerDeleteProof() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-11"
+        let entryID = "11111111-2222-4333-8444-555555555555"
+        let documentID = "99999999-8888-5777-8666-555555555555"
+        try await store.replaceHydrationLogEntries(
+            [
+                HydrationLogEntry(
+                    id: entryID,
+                    day: day,
+                    amountML: 237,
+                    loggedAt: 1_789_142_400
+                ),
+            ],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+        let firstPending = try await store.pendingManagedDocuments(
+            accountScopeHash: scope,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        let staleUpsert = try XCTUnwrap(
+            firstPending.first(where: { $0.documentKind == "hydration" })
+        )
+        try await store.acknowledgeManagedDocument(
+            accountScopeHash: scope,
+            candidate: staleUpsert,
+            documentID: documentID,
+            remoteRevision: 1,
+            remoteContentSHA256: String(repeating: "1", count: 64),
+            acknowledgedAtMs: 1_000
+        )
+        _ = try await store.replaceHydrationLogEntries(
+            [],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+        let secondPending = try await store.pendingManagedDocuments(
+            accountScopeHash: scope,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        let currentDelete = try XCTUnwrap(
+            secondPending.first(where: { $0.documentKind == "hydration" })
+        )
+        XCTAssertGreaterThan(currentDelete.generation, staleUpsert.generation)
+        try await store.acknowledgeManagedDocument(
+            accountScopeHash: scope,
+            candidate: currentDelete,
+            documentID: documentID,
+            remoteRevision: 2,
+            remoteContentSHA256: String(repeating: "2", count: 64),
+            acknowledgedAtMs: 2_000
+        )
+        try await store.acknowledgeManagedDocument(
+            accountScopeHash: scope,
+            candidate: staleUpsert,
+            documentID: documentID,
+            remoteRevision: 1,
+            remoteContentSHA256: String(repeating: "1", count: 64),
+            acknowledgedAtMs: 3_000
+        )
+
+        let state = try await store.registryWriter.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT acknowledgedGeneration, remoteRevision,
+                           remoteContentSHA256, isDeleted
+                    FROM managedDocumentState
+                    WHERE accountScopeHash = ?
+                      AND tableName = 'hydrationEntry'
+                    """,
+                arguments: [self.scope]
+            )
+        }
+        XCTAssertEqual(
+            state?["acknowledgedGeneration"] as Int64?,
+            currentDelete.generation
+        )
+        XCTAssertEqual(state?["remoteRevision"] as Int64?, 2)
+        XCTAssertEqual(
+            state?["remoteContentSHA256"] as String?,
+            String(repeating: "2", count: 64)
+        )
+        XCTAssertEqual(state?["isDeleted"] as Bool?, true)
+    }
+
+    func testV61TombstoneReplayUpgradesUnknownDeletionState() async throws {
+        let path =
+            NSTemporaryDirectory()
+            + "managed-hydration-v61-\(UUID().uuidString).sqlite"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let entryID = "11111111-2222-4333-8444-555555555555"
+        let documentID = "99999999-8888-5777-8666-555555555555"
+        let revision: Int64 = 2
+        let digest = tombstoneDigest(
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: revision
+        )
+        do {
+            let queue = try DatabaseQueue(path: path)
+            let migrator = WhoopStore.makeMigrator()
+            try migrator.migrate(
+                queue,
+                upTo: "v61-managed-document-generation-floor"
+            )
+            try await queue.write { db in
+                let localKey = try XCTUnwrap(
+                    String.fetchOne(
+                        db,
+                        sql: "SELECT hex(CAST(? AS BLOB))",
+                        arguments: [entryID]
+                    )
+                )
+                try db.execute(
+                    sql: """
+                        UPDATE managedLocalProfile
+                        SET localProfileId = ?,
+                            accountScopeHash = ?,
+                            updatedAtMs = 1
+                        WHERE bindingId = 1
+                        """,
+                    arguments: [self.scope, self.scope]
+                )
+                try db.execute(
+                    sql: """
+                        INSERT INTO managedDocumentState (
+                            accountScopeHash, tableName, localKey, documentKind,
+                            documentId, keyJSON, acknowledgedGeneration,
+                            remoteRevision, remoteContentSHA256, updatedAtMs
+                        ) VALUES (
+                            ?, 'hydrationEntry', ?, 'hydration', ?,
+                            ?, 1, ?, ?, 1
+                        )
+                        """,
+                    arguments: [
+                        self.scope,
+                        localKey,
+                        documentID,
+                        #"{"id":"11111111-2222-4333-8444-555555555555"}"#,
+                        revision,
+                        digest,
+                    ]
+                )
+            }
+        }
+
+        let store = try await WhoopStore(path: path)
+        let replay = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: revision,
+            contentSHA256: digest,
+            payloadJSON: nil,
+            deleted: true,
+            appliedAtMs: 2_000
+        )
+        let isDeleted = try await store.registryWriter.read { db in
+            try Bool.fetchOne(
+                db,
+                sql: """
+                    SELECT isDeleted
+                    FROM managedDocumentState
+                    WHERE accountScopeHash = ?
+                      AND tableName = 'hydrationEntry'
+                    """,
+                arguments: [self.scope]
+            )
+        }
+
+        XCTAssertEqual(
+            replay,
+            ManagedDocumentApplyResult(changedRows: 0, applied: true)
+        )
+        XCTAssertEqual(isDeleted, true)
+    }
+
     func testRemoteHydrationMergedDayLimitIsAtomic() async throws {
         let store = try await managedStore()
         let day = "2026-09-11"
@@ -1068,6 +1474,269 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         XCTAssertEqual(retainedMetric, 500)
         XCTAssertEqual(localAfter, localBefore)
         XCTAssertEqual(stateAfter, stateBefore)
+    }
+
+    func testRemoteManagedDocumentIgnoresStaleUpsertWithoutRegressingState() async throws {
+        let store = try await managedStore()
+        let documentID = "99999999-8888-5777-8666-555555555555"
+        let newerDigest = String(repeating: "2", count: 64)
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 2,
+            contentSHA256: newerDigest,
+            payloadJSON: hydrationPayload(amountML: "500"),
+            deleted: false,
+            appliedAtMs: 2_000
+        )
+        let stateBefore = try await hydrationState(
+            in: store,
+            documentID: documentID
+        )
+
+        let stale = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 1,
+            contentSHA256: String(repeating: "1", count: 64),
+            payloadJSON: hydrationPayload(amountML: "237"),
+            deleted: false,
+            appliedAtMs: 3_000
+        )
+
+        let entries = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: "2026-09-11"
+        )
+        let stateAfter = try await hydrationState(
+            in: store,
+            documentID: documentID
+        )
+        XCTAssertEqual(
+            stale,
+            ManagedDocumentApplyResult(changedRows: 0, applied: true)
+        )
+        XCTAssertEqual(entries.map(\.amountML), [500])
+        XCTAssertEqual(stateAfter, stateBefore)
+    }
+
+    func testRemoteManagedDocumentIgnoresStaleTombstoneWithoutDeletingNewerRow() async throws {
+        let store = try await managedStore()
+        let documentID = "99999999-8888-5777-8666-555555555555"
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 2,
+            contentSHA256: String(repeating: "2", count: 64),
+            payloadJSON: hydrationPayload(amountML: "500"),
+            deleted: false,
+            appliedAtMs: 2_000
+        )
+        let stateBefore = try await hydrationState(
+            in: store,
+            documentID: documentID
+        )
+
+        let stale = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 1,
+            contentSHA256: tombstoneDigest(
+                documentKind: "hydration",
+                documentID: documentID,
+                revision: 1
+            ),
+            payloadJSON: nil,
+            deleted: true,
+            appliedAtMs: 3_000
+        )
+
+        let entries = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: "2026-09-11"
+        )
+        let stateAfter = try await hydrationState(
+            in: store,
+            documentID: documentID
+        )
+        XCTAssertEqual(
+            stale,
+            ManagedDocumentApplyResult(changedRows: 0, applied: true)
+        )
+        XCTAssertEqual(entries.map(\.amountML), [500])
+        XCTAssertEqual(stateAfter, stateBefore)
+    }
+
+    func testRemoteManagedDocumentIgnoresStaleUpsertAfterNewerTombstone() async throws {
+        let store = try await managedStore()
+        let documentID = "99999999-8888-5777-8666-555555555555"
+        let upsertDigest = String(repeating: "1", count: 64)
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 1,
+            contentSHA256: upsertDigest,
+            payloadJSON: hydrationPayload(amountML: "237"),
+            deleted: false,
+            appliedAtMs: 1_000
+        )
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 2,
+            contentSHA256: tombstoneDigest(
+                documentKind: "hydration",
+                documentID: documentID,
+                revision: 2
+            ),
+            payloadJSON: nil,
+            deleted: true,
+            appliedAtMs: 2_000
+        )
+        let stateBefore = try await hydrationState(
+            in: store,
+            documentID: documentID
+        )
+
+        let stale = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 1,
+            contentSHA256: upsertDigest,
+            payloadJSON: hydrationPayload(amountML: "237"),
+            deleted: false,
+            appliedAtMs: 3_000
+        )
+
+        let entries = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: "2026-09-11"
+        )
+        let stateAfter = try await hydrationState(
+            in: store,
+            documentID: documentID
+        )
+        XCTAssertEqual(
+            stale,
+            ManagedDocumentApplyResult(changedRows: 0, applied: true)
+        )
+        XCTAssertTrue(entries.isEmpty)
+        XCTAssertEqual(stateAfter, stateBefore)
+    }
+
+    func testRemoteManagedDocumentRejectsDivergentEqualRevisionAtomically() async throws {
+        let store = try await managedStore()
+        let documentID = "99999999-8888-5777-8666-555555555555"
+        let acceptedDigest = String(repeating: "2", count: 64)
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "hydration",
+            documentID: documentID,
+            revision: 2,
+            contentSHA256: acceptedDigest,
+            payloadJSON: hydrationPayload(amountML: "500"),
+            deleted: false,
+            appliedAtMs: 2_000
+        )
+        let stateBefore = try await hydrationState(
+            in: store,
+            documentID: documentID
+        )
+
+        for conflict in [
+            (
+                digest: String(repeating: "3", count: 64),
+                payload: hydrationPayload(amountML: "600") as Data?
+            ),
+            (digest: acceptedDigest, payload: nil),
+        ] {
+            do {
+                _ = try await store.applyManagedDocument(
+                    accountScopeHash: scope,
+                    documentKind: "hydration",
+                    documentID: documentID,
+                    revision: 2,
+                    contentSHA256: conflict.digest,
+                    payloadJSON: conflict.payload,
+                    deleted: conflict.payload == nil,
+                    appliedAtMs: 3_000
+                )
+                XCTFail("Expected an equal-revision conflict")
+            } catch {
+                XCTAssertEqual(
+                    error as? ManagedDocumentStoreError,
+                    .invalidState
+                )
+            }
+        }
+
+        let entries = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: "2026-09-11"
+        )
+        let stateAfter = try await hydrationState(
+            in: store,
+            documentID: documentID
+        )
+        XCTAssertEqual(entries.map(\.amountML), [500])
+        XCTAssertEqual(stateAfter, stateBefore)
+    }
+
+    func testRemoteManagedPreferencesIgnoreStaleRevision() async throws {
+        let store = try await managedStore()
+        let documentID = "22222222-2222-5222-8222-222222222222"
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "preferences",
+            documentID: documentID,
+            revision: 2,
+            contentSHA256: String(repeating: "2", count: 64),
+            payloadJSON: Data(#"{"units.system":"metric"}"#.utf8),
+            deleted: false,
+            appliedAtMs: 2_000
+        )
+
+        let stale = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "preferences",
+            documentID: documentID,
+            revision: 1,
+            contentSHA256: String(repeating: "1", count: 64),
+            payloadJSON: Data(#"{"units.system":"imperial"}"#.utf8),
+            deleted: false,
+            appliedAtMs: 3_000
+        )
+        let state = try await store.registryWriter.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT remoteRevision, remoteContentSHA256, updatedAtMs
+                    FROM managedDocumentState
+                    WHERE accountScopeHash = ?
+                      AND tableName = 'preferences'
+                      AND localKey = 'global'
+                    """,
+                arguments: [self.scope]
+            )
+        }
+
+        XCTAssertEqual(
+            stale,
+            ManagedDocumentApplyResult(changedRows: 0, applied: true)
+        )
+        XCTAssertEqual(state?["remoteRevision"] as Int64?, 2)
+        XCTAssertEqual(
+            state?["remoteContentSHA256"] as String?,
+            String(repeating: "2", count: 64)
+        )
+        XCTAssertEqual(state?["updatedAtMs"] as Int64?, 2_000)
     }
 
     func testRemoteHydrationTombstonePreservesUnacknowledgedLocalGeneration() async throws {

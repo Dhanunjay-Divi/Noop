@@ -62,6 +62,13 @@ public struct ManagedDocumentApplyResult: Equatable, Sendable {
     }
 }
 
+public enum ManagedHydrationLegacyDisposition: Equatable, Sendable {
+    case migrate
+    case retire
+    case deferForProfileConflict
+    case deferForMixedDeletionState
+}
+
 struct ManagedDocumentTableSpec {
     let tableName: String
     let documentKind: String
@@ -91,6 +98,21 @@ struct ManagedDocumentTableSpec {
 }
 
 extension WhoopStore {
+    private struct ManagedRemoteDocumentState {
+        let documentKind: String
+        let documentID: String
+        let keyJSON: String
+        let revision: Int64
+        let contentSHA256: String
+        let isDeleted: Bool?
+    }
+
+    private enum ManagedRemoteApplyDisposition {
+        case apply
+        case alreadyCurrent
+        case stale
+    }
+
     private struct ManagedHydrationProjection: Hashable {
         let deviceId: String
         let day: String
@@ -690,6 +712,207 @@ extension WhoopStore {
         }
     }
 
+    /// Classifies a bounded legacy hydration payload against durable managed state. Only an explicit
+    /// remote tombstone or a newer local delete can retire rows. State owned by another local profile is
+    /// deferred so a global legacy preference can never be adopted by a different signed-in account.
+    public func managedHydrationLegacyDisposition(
+        entryIDs: [String]
+    ) async throws -> ManagedHydrationLegacyDisposition {
+        try syncRead { db in
+            try Self.managedHydrationLegacyDisposition(
+                db,
+                entryIDs: entryIDs
+            )
+        }
+    }
+
+    static func managedHydrationLegacyDisposition(
+        _ db: Database,
+        entryIDs: [String]
+    ) throws -> ManagedHydrationLegacyDisposition {
+        guard !entryIDs.isEmpty,
+              entryIDs.count <= Self.hydrationLegacyMaximumEntryCount else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+        var canonicalIDs = Set<String>()
+        for rawID in entryIDs {
+            guard let id = UUID(uuidString: rawID) else {
+                throw ManagedDocumentStoreError.invalidState
+            }
+            canonicalIDs.insert(id.uuidString.lowercased())
+        }
+        guard !canonicalIDs.isEmpty else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+
+        let binding = try Row.fetchOne(
+            db,
+            sql: """
+                SELECT localProfileId, accountScopeHash
+                FROM managedLocalProfile
+                WHERE bindingId = ?
+            """,
+            arguments: [Self.managedLocalProfileBindingID]
+        )
+        guard let binding,
+              let localProfileID: String = binding["localProfileId"] else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+        let boundAccountScopeHash: String? = binding["accountScopeHash"]
+        let activeAccountScopeHash: String?
+        if let boundAccountScopeHash {
+            guard boundAccountScopeHash == localProfileID,
+                  Self.validAccountScopeHash(boundAccountScopeHash) else {
+                throw ManagedDocumentStoreError.invalidState
+            }
+            activeAccountScopeHash = boundAccountScopeHash
+        } else {
+            activeAccountScopeHash = nil
+        }
+
+        // Retired builds accepted mixed-case UUID strings. Decode the stored key instead of matching
+        // only the current lowercase spelling so an old uppercase tombstone cannot be bypassed.
+        let stateRows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT accountScopeHash, localKey, documentId, isDeleted,
+                       acknowledgedGeneration, remoteRevision,
+                       remoteContentSHA256
+                FROM managedDocumentState
+                WHERE tableName = ?
+                  AND documentKind = 'hydration'
+                """,
+            arguments: [Self.managedHydrationTable]
+        )
+        let dirtyRows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT localProfileId, localKey, generation, operation
+                FROM managedDocumentDirty
+                WHERE tableName = ?
+                  AND documentKind = 'hydration'
+                """,
+            arguments: [Self.managedHydrationTable]
+        )
+        let sortedCanonicalIDs = canonicalIDs.sorted()
+        let idPlaceholders = Array(
+            repeating: "?",
+            count: sortedCanonicalIDs.count
+        ).joined(separator: ", ")
+        let liveIDs = Set(
+            try String.fetchAll(
+                db,
+                sql: """
+                    SELECT id
+                    FROM hydrationEntry
+                    WHERE LOWER(id) IN (\(idPlaceholders))
+                    """,
+                arguments: StatementArguments(sortedCanonicalIDs)
+            ).compactMap {
+                UUID(uuidString: $0)?.uuidString.lowercased()
+            }
+        )
+
+        var activeStates: [String: [String: Row]] = [:]
+        var activeDirtyRows: [String: [String: Row]] = [:]
+        var hasForeignProfileEvidence = false
+        for row in stateRows {
+            let localKey: String = row["localKey"]
+            guard let canonicalID = Self.canonicalHydrationID(
+                fromLocalKey: localKey
+            ), canonicalIDs.contains(canonicalID) else {
+                continue
+            }
+            let owner: String = row["accountScopeHash"]
+            if owner == activeAccountScopeHash {
+                activeStates[canonicalID, default: [:]][localKey] = row
+            } else {
+                hasForeignProfileEvidence = true
+            }
+        }
+        for row in dirtyRows {
+            let localKey: String = row["localKey"]
+            guard let canonicalID = Self.canonicalHydrationID(
+                fromLocalKey: localKey
+            ), canonicalIDs.contains(canonicalID) else {
+                continue
+            }
+            let owner: String = row["localProfileId"]
+            if owner == localProfileID {
+                activeDirtyRows[canonicalID, default: [:]][localKey] = row
+            } else {
+                hasForeignProfileEvidence = true
+            }
+        }
+        if hasForeignProfileEvidence {
+            return .deferForProfileConflict
+        }
+
+        var deletedCount = 0
+        var hasUnknownManagedState = false
+        for canonicalID in canonicalIDs {
+            if liveIDs.contains(canonicalID) {
+                continue
+            }
+
+            let states = activeStates[canonicalID] ?? [:]
+            let dirty = activeDirtyRows[canonicalID] ?? [:]
+            let localKeys = Set(states.keys).union(dirty.keys)
+            var hasDeletedEvidence = false
+            var hasNonDeletedEvidence = false
+            var hasUnknownEvidence = false
+            for localKey in localKeys {
+                let state = states[localKey]
+                let acknowledgedGeneration: Int64 =
+                    state?["acknowledgedGeneration"] ?? 0
+                if let pending = dirty[localKey] {
+                    let generation: Int64 = pending["generation"]
+                    let operation: String = pending["operation"]
+                    guard generation > 0,
+                          operation == "upsert" || operation == "delete" else {
+                        throw ManagedDocumentStoreError.invalidState
+                    }
+                    if generation > acknowledgedGeneration {
+                        if operation == "delete" {
+                            hasDeletedEvidence = true
+                        } else {
+                            hasNonDeletedEvidence = true
+                        }
+                        continue
+                    }
+                }
+                if let state {
+                    let isDeleted: Bool? = state["isDeleted"]
+                    if isDeleted == true {
+                        hasDeletedEvidence = true
+                    } else if isDeleted == false {
+                        hasNonDeletedEvidence = true
+                    } else {
+                        hasUnknownEvidence = true
+                    }
+                }
+            }
+            if hasUnknownEvidence
+                || (hasDeletedEvidence && hasNonDeletedEvidence) {
+                hasUnknownManagedState = true
+            } else if hasDeletedEvidence {
+                deletedCount += 1
+            }
+        }
+        if deletedCount == canonicalIDs.count {
+            return .retire
+        }
+        if deletedCount > 0 || hasUnknownManagedState {
+            return .deferForMixedDeletionState
+        }
+        // A retired global preference has no account provenance. It may be adopted only while the
+        // local profile is unbound; a signed-in account must not silently claim it.
+        if activeAccountScopeHash != nil {
+            return .deferForProfileConflict
+        }
+        return .migrate
+    }
+
     private static func ensureManagedLocalProfile(
         _ db: Database,
         updatedAtMs: Int64
@@ -1031,23 +1254,67 @@ extension WhoopStore {
             guard candidate.localProfileID == localProfileID else {
                 throw ManagedDocumentStoreError.invalidState
             }
+            if let current = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT documentKind, documentId, keyJSON,
+                           acknowledgedGeneration, remoteRevision,
+                           remoteContentSHA256, isDeleted
+                    FROM managedDocumentState
+                    WHERE accountScopeHash = ?
+                      AND tableName = ?
+                      AND localKey = ?
+                    """,
+                arguments: [
+                    accountScopeHash,
+                    candidate.tableName,
+                    candidate.localKey,
+                ]
+            ) {
+                let currentGeneration: Int64 =
+                    current["acknowledgedGeneration"]
+                let currentRevision: Int64 = current["remoteRevision"]
+                if candidate.generation < currentGeneration
+                    || (
+                        candidate.generation == currentGeneration
+                            && remoteRevision < currentRevision
+                    ) {
+                    return
+                }
+                if candidate.generation == currentGeneration,
+                   remoteRevision == currentRevision {
+                    let currentDeleted: Bool? = current["isDeleted"]
+                    guard (current["documentKind"] as String?)
+                            == candidate.documentKind,
+                          (current["documentId"] as String?)
+                            == documentID.lowercased(),
+                          (current["keyJSON"] as String?) == keyJSON,
+                          (current["remoteContentSHA256"] as String?)
+                            == remoteContentSHA256,
+                          currentDeleted == candidate.deleted else {
+                        throw ManagedDocumentStoreError.invalidState
+                    }
+                    return
+                }
+                guard remoteRevision > currentRevision else {
+                    throw ManagedDocumentStoreError.invalidState
+                }
+            }
             try db.execute(sql: """
                 INSERT INTO managedDocumentState (
                     accountScopeHash, tableName, localKey, documentKind,
                     documentId, keyJSON, acknowledgedGeneration, remoteRevision,
-                    remoteContentSHA256, updatedAtMs
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    remoteContentSHA256, updatedAtMs, isDeleted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(accountScopeHash, tableName, localKey) DO UPDATE SET
                     documentKind = excluded.documentKind,
                     documentId = excluded.documentId,
                     keyJSON = excluded.keyJSON,
-                    acknowledgedGeneration = MAX(
-                        managedDocumentState.acknowledgedGeneration,
-                        excluded.acknowledgedGeneration
-                    ),
+                    acknowledgedGeneration = excluded.acknowledgedGeneration,
                     remoteRevision = excluded.remoteRevision,
                     remoteContentSHA256 = excluded.remoteContentSHA256,
-                    updatedAtMs = excluded.updatedAtMs
+                    updatedAtMs = excluded.updatedAtMs,
+                    isDeleted = excluded.isDeleted
                 """, arguments: [
                     accountScopeHash,
                     candidate.tableName,
@@ -1059,6 +1326,7 @@ extension WhoopStore {
                     remoteRevision,
                     remoteContentSHA256,
                     acknowledgedAtMs,
+                    candidate.deleted,
                 ])
         }
     }
@@ -1116,6 +1384,30 @@ extension WhoopStore {
                 ) else {
                     throw ManagedDocumentStoreError.invalidPayload
                 }
+                if let current = try Self.managedRemoteDocumentState(
+                    db,
+                    accountScopeHash: accountScopeHash,
+                    tableName: Self.managedPreferencesTable,
+                    localKey: Self.managedPreferencesKey
+                ) {
+                    switch try Self.managedRemoteApplyDisposition(
+                        current: current,
+                        documentKind: documentKind,
+                        documentID: documentID,
+                        keyJSON: keyText,
+                        revision: revision,
+                        contentSHA256: contentSHA256,
+                        deleted: false
+                    ) {
+                    case .apply:
+                        break
+                    case .alreadyCurrent, .stale:
+                        return ManagedDocumentApplyResult(
+                            changedRows: 0,
+                            applied: true
+                        )
+                    }
+                }
                 try Self.discardConflictingDirtyProfiles(
                     db,
                     tableName: Self.managedPreferencesTable,
@@ -1139,6 +1431,7 @@ extension WhoopStore {
                     keyJSON: keyText,
                     revision: revision,
                     contentSHA256: contentSHA256,
+                    isDeleted: false,
                     localProfileID: localProfileID,
                     updatedAtMs: appliedAtMs
                 )
@@ -1150,9 +1443,9 @@ extension WhoopStore {
 
             if deleted {
                 let state = try Row.fetchOne(db, sql: """
-                    SELECT tableName, localKey, keyJSON,
+                    SELECT tableName, localKey, documentKind, documentId, keyJSON,
                            acknowledgedGeneration, remoteRevision,
-                           remoteContentSHA256
+                           remoteContentSHA256, isDeleted
                     FROM managedDocumentState
                     WHERE accountScopeHash = ?
                       AND documentKind = ?
@@ -1183,29 +1476,38 @@ extension WhoopStore {
                 }
                 let tableName: String = state["tableName"]
                 let localKey: String = state["localKey"]
+                let current = try Self.managedRemoteDocumentState(state)
                 let acknowledgedGeneration: Int64 =
                     state["acknowledgedGeneration"]
-                let remoteRevision: Int64 = state["remoteRevision"]
-                let remoteContentSHA256: String = state["remoteContentSHA256"]
+                switch try Self.managedRemoteApplyDisposition(
+                    current: current,
+                    documentKind: documentKind,
+                    documentID: documentID,
+                    keyJSON: nil,
+                    revision: revision,
+                    contentSHA256: contentSHA256,
+                    deleted: true
+                ) {
+                case .apply:
+                    break
+                case .alreadyCurrent, .stale:
+                    return ManagedDocumentApplyResult(
+                        changedRows: 0,
+                        applied: true
+                    )
+                }
                 try Self.discardConflictingDirtyProfiles(
                     db,
                     tableName: tableName,
                     localKey: localKey,
                     localProfileID: localProfileID
                 )
-                if remoteRevision == revision,
-                   remoteContentSHA256 == contentSHA256 {
-                    return ManagedDocumentApplyResult(
-                        changedRows: 0,
-                        applied: true
-                    )
-                }
                 if acknowledgedGeneration == 0,
-                   revision > remoteRevision,
-                   remoteContentSHA256 == Self.managedTombstoneSHA256(
+                   revision > current.revision,
+                   current.contentSHA256 == Self.managedTombstoneSHA256(
                        documentKind: documentKind,
                        documentID: documentID,
-                       revision: remoteRevision
+                       revision: current.revision
                    ),
                    try Self.hasUnacknowledgedLocalGeneration(
                        db,
@@ -1289,6 +1591,7 @@ extension WhoopStore {
                     keyJSON: state["keyJSON"],
                     revision: revision,
                     contentSHA256: contentSHA256,
+                    isDeleted: true,
                     localProfileID: localProfileID,
                     updatedAtMs: appliedAtMs
                 )
@@ -1321,6 +1624,17 @@ extension WhoopStore {
                   }) else {
                 throw ManagedDocumentStoreError.invalidPayload
             }
+            if tableName == Self.managedHydrationTable {
+                guard let keyID = key["id"] as? String,
+                      let recordID = record["id"] as? String,
+                      let canonicalID = UUID(
+                          uuidString: keyID
+                      )?.uuidString.lowercased(),
+                      keyID == canonicalID,
+                      recordID == canonicalID else {
+                    throw ManagedDocumentStoreError.invalidPayload
+                }
+            }
             if tableName == Self.managedDayOwnershipTable {
                 try Self.validateManagedDayOwnership(
                     key: key,
@@ -1339,6 +1653,30 @@ extension WhoopStore {
             let keyJSON = try Self.canonicalJSONObject(key)
             guard let keyText = String(data: keyJSON, encoding: .utf8) else {
                 throw ManagedDocumentStoreError.invalidPayload
+            }
+            if let current = try Self.managedRemoteDocumentState(
+                db,
+                accountScopeHash: accountScopeHash,
+                tableName: tableName,
+                localKey: localKey
+            ) {
+                switch try Self.managedRemoteApplyDisposition(
+                    current: current,
+                    documentKind: documentKind,
+                    documentID: documentID,
+                    keyJSON: keyText,
+                    revision: revision,
+                    contentSHA256: contentSHA256,
+                    deleted: false
+                ) {
+                case .apply:
+                    break
+                case .alreadyCurrent, .stale:
+                    return ManagedDocumentApplyResult(
+                        changedRows: 0,
+                        applied: true
+                    )
+                }
             }
             let priorDayOwnership: ManagedDayOwnershipValue?
             let incomingDayOwnership: ManagedDayOwnershipValue?
@@ -1428,6 +1766,7 @@ extension WhoopStore {
                 keyJSON: keyText,
                 revision: revision,
                 contentSHA256: contentSHA256,
+                isDeleted: false,
                 localProfileID: localProfileID,
                 updatedAtMs: appliedAtMs
             )
@@ -1656,8 +1995,8 @@ extension WhoopStore {
                 INSERT INTO managedDocumentState (
                     accountScopeHash, tableName, localKey, documentKind,
                     documentId, keyJSON, acknowledgedGeneration, remoteRevision,
-                    remoteContentSHA256, updatedAtMs
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    remoteContentSHA256, updatedAtMs, isDeleted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
             arguments: [
                 accountScopeHash,
@@ -1702,6 +2041,29 @@ extension WhoopStore {
             return nil
         }
         return day
+    }
+
+    private static func canonicalHydrationID(
+        fromLocalKey localKey: String
+    ) -> String? {
+        let encoded = Array(localKey.utf8)
+        guard encoded.count == 72 else { return nil }
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(encoded.count / 2)
+        for offset in stride(from: 0, to: encoded.count, by: 2) {
+            guard let high = hexNibble(encoded[offset]),
+                  let low = hexNibble(encoded[offset + 1]) else {
+                return nil
+            }
+            bytes.append((high << 4) | low)
+        }
+        let data = Data(bytes)
+        guard let rawID = String(data: data, encoding: .utf8),
+              Data(rawID.utf8) == data,
+              let id = UUID(uuidString: rawID) else {
+            return nil
+        }
+        return id.uuidString.lowercased()
     }
 
     private static func hexNibble(_ byte: UInt8) -> UInt8? {
@@ -1783,6 +2145,84 @@ extension WhoopStore {
         }
     }
 
+    private static func managedRemoteDocumentState(
+        _ db: Database,
+        accountScopeHash: String,
+        tableName: String,
+        localKey: String
+    ) throws -> ManagedRemoteDocumentState? {
+        guard let row = try Row.fetchOne(
+            db,
+            sql: """
+                SELECT documentKind, documentId, keyJSON, remoteRevision,
+                       remoteContentSHA256, isDeleted
+                FROM managedDocumentState
+                WHERE accountScopeHash = ?
+                  AND tableName = ?
+                  AND localKey = ?
+                """,
+            arguments: [accountScopeHash, tableName, localKey]
+        ) else {
+            return nil
+        }
+        return try managedRemoteDocumentState(row)
+    }
+
+    private static func managedRemoteDocumentState(
+        _ row: Row
+    ) throws -> ManagedRemoteDocumentState {
+        guard let documentKind: String = row["documentKind"],
+              let documentID: String = row["documentId"],
+              let keyJSON: String = row["keyJSON"],
+              let revision: Int64 = row["remoteRevision"],
+              let contentSHA256: String = row["remoteContentSHA256"] else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+        let isDeleted: Bool? = row["isDeleted"]
+        return ManagedRemoteDocumentState(
+            documentKind: documentKind,
+            documentID: documentID,
+            keyJSON: keyJSON,
+            revision: revision,
+            contentSHA256: contentSHA256,
+            isDeleted: isDeleted
+        )
+    }
+
+    private static func managedRemoteApplyDisposition(
+        current: ManagedRemoteDocumentState,
+        documentKind: String,
+        documentID: String,
+        keyJSON: String?,
+        revision: Int64,
+        contentSHA256: String,
+        deleted: Bool
+    ) throws -> ManagedRemoteApplyDisposition {
+        guard current.documentKind == documentKind,
+              current.documentID == documentID.lowercased(),
+              keyJSON.map({ current.keyJSON == $0 }) ?? true else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+        if revision < current.revision {
+            return .stale
+        }
+        if revision > current.revision {
+            return .apply
+        }
+        guard current.contentSHA256 == contentSHA256 else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+        guard let currentDeleted = current.isDeleted else {
+            // Older schemas did not persist deletion state. Reapply the verified payload once so
+            // the state row is upgraded without weakening equal-revision conflict detection.
+            return .apply
+        }
+        guard currentDeleted == deleted else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+        return .alreadyCurrent
+    }
+
     private static func upsertManagedDocumentState(
         _ db: Database,
         accountScopeHash: String,
@@ -1793,6 +2233,7 @@ extension WhoopStore {
         keyJSON: String,
         revision: Int64,
         contentSHA256: String,
+        isDeleted: Bool,
         localProfileID: String,
         updatedAtMs: Int64
     ) throws {
@@ -1810,8 +2251,8 @@ extension WhoopStore {
             INSERT INTO managedDocumentState (
                 accountScopeHash, tableName, localKey, documentKind,
                 documentId, keyJSON, acknowledgedGeneration, remoteRevision,
-                remoteContentSHA256, updatedAtMs
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                remoteContentSHA256, updatedAtMs, isDeleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(accountScopeHash, tableName, localKey) DO UPDATE SET
                 documentKind = excluded.documentKind,
                 documentId = excluded.documentId,
@@ -1819,7 +2260,8 @@ extension WhoopStore {
                 acknowledgedGeneration = excluded.acknowledgedGeneration,
                 remoteRevision = excluded.remoteRevision,
                 remoteContentSHA256 = excluded.remoteContentSHA256,
-                updatedAtMs = excluded.updatedAtMs
+                updatedAtMs = excluded.updatedAtMs,
+                isDeleted = excluded.isDeleted
             """, arguments: [
                 accountScopeHash,
                 tableName,
@@ -1831,6 +2273,7 @@ extension WhoopStore {
                 revision,
                 contentSHA256,
                 updatedAtMs,
+                isDeleted,
             ])
     }
 

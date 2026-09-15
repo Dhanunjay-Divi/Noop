@@ -225,6 +225,8 @@ struct RootView: View {
     /// going empty to non-empty), so clearing the search puts every group back exactly as they left
     /// it. `nil` means no search is in flight; whitespace-only input never arms one.
     @State private var preSearchExpansion: Set<String>? = nil
+    @State private var showLighterWorkoutOptions = false
+    @State private var showStrengthTrainer = false
 
     /// The groups expanded at rest: every single-item group (so its lone row is visible) plus the group
     /// owning the current selection. Keeps the sidebar to "headers + the active group" as the spec asks.
@@ -414,6 +416,34 @@ struct RootView: View {
         .onChangeCompat(of: repo.refreshSeq) { _ in
             WindDownNudge.refreshPersonalization(from: repo.vitalRows)
         }
+        .sheet(isPresented: $showLighterWorkoutOptions) {
+            MacLighterWorkoutOptionsSheet(
+                onOpenWorkouts: {
+                    showLighterWorkoutOptions = false
+                    AppDiagnosticsRecorder.shared.record(
+                        "adaptive_day.lighter_options_action",
+                        fields: ["destination": "workouts"]
+                    )
+                    selection = .workouts
+                },
+                onOpenStrength: {
+                    showLighterWorkoutOptions = false
+                    AppDiagnosticsRecorder.shared.record(
+                        "adaptive_day.lighter_options_action",
+                        fields: ["destination": "strength"]
+                    )
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        showStrengthTrainer = true
+                    }
+                }
+            )
+            .frame(minWidth: 480, idealWidth: 560, minHeight: 500, idealHeight: 620)
+        }
+        .sheet(isPresented: $showStrengthTrainer) {
+            StrengthTrainerView()
+                .environmentObject(repo)
+                .frame(minWidth: 760, minHeight: 720)
+        }
     }
 
     /// Cold and warm notification taps converge here. `consumePending` removes the route before the
@@ -438,6 +468,9 @@ struct RootView: View {
         case .friends: selection = .friends
         case .safety: selection = .safety
         case .coach: selection = .coach
+        }
+        if request.presentation == .lighterWorkoutOptions {
+            showLighterWorkoutOptions = true
         }
     }
 
@@ -565,6 +598,116 @@ struct RootView: View {
         #else
         LiveView()
         #endif
+    }
+}
+
+private struct MacLighterWorkoutOptionsSheet: View {
+    let onOpenWorkouts: () -> Void
+    let onOpenStrength: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("appwide.adaptive_day_guidance.lighter_options.intro")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 18)
+
+                    option(
+                        icon: "gauge.with.dots.needle.33percent",
+                        title: "appwide.adaptive_day_guidance.lighter_options.intensity.title",
+                        detail: "appwide.adaptive_day_guidance.lighter_options.intensity.detail"
+                    )
+                    Divider().overlay(StrandPalette.hairline)
+                    option(
+                        icon: "timer",
+                        title: "appwide.adaptive_day_guidance.lighter_options.duration.title",
+                        detail: "appwide.adaptive_day_guidance.lighter_options.duration.detail"
+                    )
+                    Divider().overlay(StrandPalette.hairline)
+                    option(
+                        icon: "figure.walk",
+                        title: "appwide.adaptive_day_guidance.lighter_options.recovery.title",
+                        detail: "appwide.adaptive_day_guidance.lighter_options.recovery.detail"
+                    )
+
+                    Text("appwide.adaptive_day_guidance.lighter_options.disclaimer")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 18)
+
+                    VStack(spacing: 10) {
+                        Button(action: onOpenWorkouts) {
+                            Label(
+                                "appwide.adaptive_day_guidance.lighter_options.open_workouts",
+                                systemImage: "figure.run"
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(StrandPalette.accent)
+
+                        Button(action: onOpenStrength) {
+                            Label(
+                                "appwide.adaptive_day_guidance.lighter_options.open_strength",
+                                systemImage: "dumbbell.fill"
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(StrandPalette.accent)
+                    }
+                    .padding(.top, 20)
+                }
+                .padding(20)
+            }
+            .background(StrandPalette.surfaceBase)
+            .navigationTitle(
+                Text("appwide.adaptive_day_guidance.lighter_options.title")
+            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("appwide.action.dismiss") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private func option(
+        icon: String,
+        title: LocalizedStringKey,
+        detail: LocalizedStringKey
+    ) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(StrandPalette.chargeColor)
+                .frame(width: 30, height: 30)
+                .background(
+                    StrandPalette.chargeColor.opacity(0.12),
+                    in: Circle()
+                )
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(detail)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 14)
     }
 }
 

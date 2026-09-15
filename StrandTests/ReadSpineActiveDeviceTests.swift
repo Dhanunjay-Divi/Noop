@@ -16,10 +16,74 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
     private let canonicalId = "my-whoop"
     private let newId = "whoop-ABC123"   // the id a re-added strap gets (AddDeviceWizard: "whoop-<uuid>")
 
+    private final class TimeZoneMemoryPersistence:
+        AnalysisTimeZoneHistory.Persistence,
+        @unchecked Sendable
+    {
+        var data: Data?
+        var failRead = false
+        var failWrite = false
+        var writeCount = 0
+
+        init(data: Data? = nil) {
+            self.data = data
+        }
+
+        func read() -> AnalysisTimeZoneHistory.ReadResult {
+            if failRead {
+                return .failed
+            }
+            guard let data else {
+                return .missing
+            }
+            return .available(data)
+        }
+
+        func write(_ data: Data) -> Bool {
+            writeCount += 1
+            guard !failWrite else {
+                return false
+            }
+            self.data = data
+            return true
+        }
+    }
+
     private func dailyMetric(day: String, recovery: Double) -> DailyMetric {
         DailyMetric(day: day, totalSleepMin: 420, efficiency: 0.9, deepMin: 90, remMin: 100, lightMin: 230,
                     disturbances: 2, restingHr: 52, avgHrv: 70, recovery: recovery, strain: 8, exerciseCount: 0,
                     spo2Pct: nil, skinTempDevC: nil, respRateBpm: 14, steps: nil, activeKcalEst: nil)
+    }
+
+    @MainActor
+    private func analysisEngine(repo: Repository) -> IntelligenceEngine {
+        let engine = IntelligenceEngine(
+            repo: repo,
+            profile: ProfileStore(),
+            deviceId: canonicalId
+        )
+        let timeZone = TimeZone.current
+        let firstObservation = Int(
+            Date().addingTimeInterval(-400 * 86_400).timeIntervalSince1970
+        )
+        engine.setAnalysisTimeZoneTimelineForTesting(
+            AnalysisTimeZoneTimeline(
+                observations: [
+                    AnalysisTimeZoneObservation(
+                        observedAtSec: firstObservation,
+                        timeZoneIdentifier: timeZone.identifier,
+                        offsetSeconds: timeZone.secondsFromGMT(
+                            for: Date(
+                                timeIntervalSince1970:
+                                    TimeInterval(firstObservation)
+                            )
+                        )
+                    ),
+                ],
+                unresolvableBeforeTs: firstObservation
+            )
+        )
+        return engine
     }
 
     @MainActor
@@ -227,15 +291,19 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         let repo = Repository(deviceId: canonicalId)
         repo.setStoreForTesting(store)
         XCTAssertTrue(repo.adoptActiveDeviceId(newId))
-        let engine = IntelligenceEngine(
-            repo: repo, profile: ProfileStore(), deviceId: canonicalId)
+        let engine = analysisEngine(repo: repo)
 
         // A forced pass remains independent of dirty state and must still run for formula/repair callers.
         _ = await engine.analyzeRecent(maxDays: 1, force: true)
 
         let calendar = Calendar.current
         let midnight = calendar.startOfDay(for: Date())
-        let endDate = try XCTUnwrap(calendar.date(byAdding: .hour, value: 7, to: midnight))
+        let previousMidnight = try XCTUnwrap(
+            calendar.date(byAdding: .day, value: -1, to: midnight)
+        )
+        let endDate = try XCTUnwrap(
+            calendar.date(byAdding: .hour, value: 7, to: previousMidnight)
+        )
         let end = Int(endDate.timeIntervalSince1970)
         let start = end - 7 * 3_600
         let ppg = (start..<end).map {
@@ -252,7 +320,7 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         XCTAssertEqual(inserted.ppgHr, ppg.count)
         XCTAssertEqual(inserted.gravity, gravity.count)
 
-        let receipt = await engine.analyzeRecent(maxDays: 1, force: false)
+        let receipt = await engine.analyzeRecent(maxDays: 2, force: false)
         XCTAssertNotNil(receipt, "PPG history on the active re-added source must mark analysis dirty")
 
         let day = Repository.localDayKey(endDate)
@@ -276,17 +344,20 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         let store = try await WhoopStore.inMemory()
         let repo = Repository(deviceId: canonicalId)
         repo.setStoreForTesting(store)
-        let engine = IntelligenceEngine(
-            repo: repo, profile: ProfileStore(), deviceId: canonicalId)
+        let engine = analysisEngine(repo: repo)
         let fixture = try await seedScorableNight(store: store, deviceId: canonicalId)
         XCTAssertFalse(fixture.claims.isEmpty)
 
         engine.setAnalysisReadFailuresForTesting([.respiration])
         let receipt = await engine.analyzeRecent(maxDays: 2, force: false)
 
-        XCTAssertNotNil(
+        let completedReceipt = try XCTUnwrap(
             receipt,
             "an optional respiration read failure must not discard valid HR/sleep scoring"
+        )
+        XCTAssertFalse(
+            completedReceipt.allRequiredBoundariesCompleted,
+            "a degraded optional read must not complete one-shot migrations"
         )
         let rows = try await store.dailyMetrics(
             deviceId: canonicalId + "-noop",
@@ -311,17 +382,20 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         let store = try await WhoopStore.inMemory()
         let repo = Repository(deviceId: canonicalId)
         repo.setStoreForTesting(store)
-        let engine = IntelligenceEngine(
-            repo: repo, profile: ProfileStore(), deviceId: canonicalId)
+        let engine = analysisEngine(repo: repo)
         let fixture = try await seedScorableNight(store: store, deviceId: canonicalId)
         XCTAssertFalse(fixture.claims.isEmpty)
 
         engine.setAnalysisReadFailuresForTesting([.registryAll, .registryActiveDeviceId])
         let receipt = await engine.analyzeRecent(maxDays: 2, force: false)
 
-        XCTAssertNotNil(
+        let completedReceipt = try XCTUnwrap(
             receipt,
             "registry snapshot failures must retain the canonical safe fallback scoring path"
+        )
+        XCTAssertFalse(
+            completedReceipt.allRequiredBoundariesCompleted,
+            "an incomplete ownership snapshot must not complete one-shot migrations"
         )
         let rows = try await store.dailyMetrics(
             deviceId: canonicalId + "-noop",
@@ -438,6 +512,1022 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
             IntelligenceEngine.midnightLocal(Int(oldTs), offsetSec: 0)
         )
         XCTAssertTrue(coverage.covers(historical))
+    }
+
+    func testHistoricalClaimUsesTheOffsetAtTheClaimAcrossDST() throws {
+        let timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let cases = [
+            ("2026-07-15T16:00:00Z", "2026-01-15T17:00:00Z"),
+            ("2027-01-15T17:00:00Z", "2026-07-15T16:00:00Z"),
+        ]
+
+        for (nowText, historicalText) in cases {
+            let nowDate = try XCTUnwrap(formatter.date(from: nowText))
+            let historicalDate = try XCTUnwrap(
+                formatter.date(from: historicalText)
+            )
+            let now = Int(nowDate.timeIntervalSince1970)
+            let historicalSecond = Int(historicalDate.timeIntervalSince1970)
+            let historical = AnalysisInputGenerationClaim(
+                deviceId: canonicalId,
+                generation: 1,
+                earliestAffectedTs: Int64(historicalSecond),
+                latestAffectedTs: Int64(historicalSecond)
+            )
+            let currentOffset = timeZone.secondsFromGMT(for: nowDate)
+            let historicalOffset = timeZone.secondsFromGMT(for: historicalDate)
+            XCTAssertNotEqual(currentOffset, historicalOffset)
+
+            let plan = IntelligenceEngine.analysisScoringPlan(
+                requestedMaxDays: 21,
+                force: false,
+                claims: [historical],
+                now: now,
+                timezoneOffsetSeconds: currentOffset,
+                timeZone: timeZone
+            )
+            let coverage = IntelligenceEngine.analysisScanCoverage(
+                plan: plan,
+                actualNow: now,
+                timezoneOffsetSeconds: currentOffset,
+                timeZone: timeZone
+            )
+            let expectedMidnight = IntelligenceEngine.midnightLocal(
+                historicalSecond,
+                offsetSec: historicalOffset
+            )
+
+            XCTAssertEqual(plan.passKind, .historical)
+            XCTAssertEqual(plan.timezoneOffsetSeconds, historicalOffset)
+            XCTAssertEqual(coverage.startTs, Int64(expectedMidnight))
+            XCTAssertEqual(
+                coverage.endTs,
+                Int64(expectedMidnight + 86_400 - 1)
+            )
+            XCTAssertTrue(coverage.covers(historical))
+        }
+    }
+
+    func testFirstTimeZoneObservationDoesNotRebucketLegacyHistory() throws {
+        let timeZone = try XCTUnwrap(
+            TimeZone(identifier: "America/New_York")
+        )
+        let formatter = ISO8601DateFormatter()
+        let nowDate = try XCTUnwrap(
+            formatter.date(from: "2026-09-15T18:00:00Z")
+        )
+        let priorDate = try XCTUnwrap(
+            formatter.date(from: "2026-09-14T16:00:00Z")
+        )
+        let now = Int(nowDate.timeIntervalSince1970)
+        let prior = Int(priorDate.timeIntervalSince1970)
+        let timeline = AnalysisTimeZoneTimeline(
+            observations: [
+                AnalysisTimeZoneObservation(
+                    observedAtSec: now,
+                    timeZoneIdentifier: timeZone.identifier,
+                    offsetSeconds:
+                        timeZone.secondsFromGMT(for: nowDate)
+                ),
+            ],
+            unresolvableBeforeTs: now
+        )
+
+        XCTAssertEqual(
+            timeline.resolution(containing: prior),
+            .unresolvable(.truncatedHistory)
+        )
+
+        guard case .resolved(let currentResolution) =
+                timeline.resolution(containing: now + 5) else {
+            return XCTFail("The latest observed run should remain open.")
+        }
+        XCTAssertEqual(currentResolution.provenance, .observed)
+
+        let claim = AnalysisInputGenerationClaim(
+            deviceId: canonicalId,
+            generation: 1,
+            earliestAffectedTs: Int64(prior),
+            latestAffectedTs: Int64(prior)
+        )
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 3,
+            force: false,
+            claims: [claim],
+            now: now,
+            timezoneOffsetSeconds:
+                timeZone.secondsFromGMT(for: nowDate),
+            timeZoneTimeline: timeline
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: now,
+            timezoneOffsetSeconds:
+                timeZone.secondsFromGMT(for: nowDate)
+        )
+
+        XCTAssertFalse(plan.shouldAnalyze)
+        XCTAssertFalse(coverage.covers(claim))
+        XCTAssertEqual(
+            plan.terminalUnknownRange?.reason,
+            .truncatedHistory
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(plan.terminalUnknownRange).contains(Int64(prior))
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(plan.terminalUnknownRange).contains(Int64(now))
+        )
+    }
+
+    func testRecordedTravelGapDefersInsteadOfExtendingEitherZone() throws {
+        let newYork = try XCTUnwrap(
+            TimeZone(identifier: "America/New_York")
+        )
+        let losAngeles = try XCTUnwrap(
+            TimeZone(identifier: "America/Los_Angeles")
+        )
+        let formatter = ISO8601DateFormatter()
+        func observation(
+            _ text: String,
+            timeZone: TimeZone
+        ) throws -> AnalysisTimeZoneObservation {
+            let date = try XCTUnwrap(formatter.date(from: text))
+            return AnalysisTimeZoneObservation(
+                observedAtSec: Int(date.timeIntervalSince1970),
+                timeZoneIdentifier: timeZone.identifier,
+                offsetSeconds: timeZone.secondsFromGMT(for: date)
+            )
+        }
+
+        let nyFirst = try observation(
+            "2026-06-01T16:00:00Z",
+            timeZone: newYork
+        )
+        let nyLast = try observation(
+            "2026-06-05T12:00:00Z",
+            timeZone: newYork
+        )
+        let laFirst = try observation(
+            "2026-06-05T19:00:00Z",
+            timeZone: losAngeles
+        )
+        let laLast = try observation(
+            "2026-09-01T19:00:00Z",
+            timeZone: losAngeles
+        )
+        let timeline = AnalysisTimeZoneTimeline(
+            observations: [nyFirst, nyLast, laFirst, laLast],
+            unresolvableBeforeTs: nil
+        )
+        let gap = nyLast.observedAtSec
+            + (laFirst.observedAtSec - nyLast.observedAtSec) / 2
+
+        XCTAssertEqual(
+            timeline.resolution(containing: gap),
+            .unresolvable(.travelBoundary)
+        )
+        guard case .resolved(let oldRun) =
+                timeline.resolution(
+                    containing: nyLast.observedAtSec
+                ) else {
+            return XCTFail("The old observed run should resolve.")
+        }
+        XCTAssertEqual(
+            oldRun.upperTravelBoundaryTs,
+            nyLast.observedAtSec + 1
+        )
+        guard case .resolved(let newRun) =
+                timeline.resolution(
+                    containing: laFirst.observedAtSec
+                ) else {
+            return XCTFail("The new observed run should resolve.")
+        }
+        XCTAssertEqual(
+            newRun.lowerTravelBoundaryTs,
+            laFirst.observedAtSec
+        )
+
+        let claim = AnalysisInputGenerationClaim(
+            deviceId: canonicalId,
+            generation: 1,
+            earliestAffectedTs: Int64(gap),
+            latestAffectedTs: Int64(gap)
+        )
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: [claim],
+            now: laLast.observedAtSec,
+            timezoneOffsetSeconds: laLast.offsetSeconds,
+            timeZoneTimeline: timeline
+        )
+        XCTAssertEqual(plan.passKind, .deferred)
+        XCTAssertFalse(plan.shouldAnalyze)
+        XCTAssertEqual(
+            plan.terminalUnknownRange?.reason,
+            .travelBoundary
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(plan.terminalUnknownRange).contains(Int64(gap))
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(plan.terminalUnknownRange).contains(
+                Int64(nyLast.observedAtSec)
+            )
+        )
+    }
+
+    func testTimeZoneTimelineUsesExactSpringAndFallCivilDayLengths() throws {
+        let timeZone = try XCTUnwrap(
+            TimeZone(identifier: "America/New_York")
+        )
+        let formatter = ISO8601DateFormatter()
+        let firstDate = try XCTUnwrap(
+            formatter.date(from: "2026-03-01T17:00:00Z")
+        )
+        let lastDate = try XCTUnwrap(
+            formatter.date(from: "2026-11-04T17:00:00Z")
+        )
+        let timeline = AnalysisTimeZoneTimeline(
+            observations: [
+                AnalysisTimeZoneObservation(
+                    observedAtSec:
+                        Int(firstDate.timeIntervalSince1970),
+                    timeZoneIdentifier: timeZone.identifier,
+                    offsetSeconds:
+                        timeZone.secondsFromGMT(for: firstDate)
+                ),
+                AnalysisTimeZoneObservation(
+                    observedAtSec:
+                        Int(lastDate.timeIntervalSince1970),
+                    timeZoneIdentifier: timeZone.identifier,
+                    offsetSeconds:
+                        timeZone.secondsFromGMT(for: lastDate)
+                ),
+            ],
+            unresolvableBeforeTs: nil
+        )
+        let cases = [
+            ("2026-03-09T18:00:00Z", "2026-03-08", 82_800),
+            ("2026-11-02T18:00:00Z", "2026-11-01", 90_000),
+        ]
+
+        for (nowText, dayKey, duration) in cases {
+            let nowDate = try XCTUnwrap(formatter.date(from: nowText))
+            let now = Int(nowDate.timeIntervalSince1970)
+            let plan = IntelligenceEngine.analysisScoringPlan(
+                requestedMaxDays: 3,
+                force: true,
+                claims: [],
+                now: now,
+                timezoneOffsetSeconds:
+                    timeZone.secondsFromGMT(for: nowDate),
+                timeZoneTimeline: timeline
+            )
+            let windows = IntelligenceEngine.analysisCivilDayWindows(
+                plan: plan,
+                timezoneOffsetSeconds:
+                    timeZone.secondsFromGMT(for: nowDate)
+            )
+
+            XCTAssertEqual(
+                try XCTUnwrap(
+                    windows.first { $0.dayKey == dayKey }
+                ).durationSeconds,
+                duration
+            )
+        }
+    }
+
+    func testTimeZoneHistoryPersistsFirstAndLatestObservationPerZoneRun() throws {
+        let persistence = TimeZoneMemoryPersistence()
+        let newYork = try XCTUnwrap(
+            TimeZone(identifier: "America/New_York")
+        )
+        let losAngeles = try XCTUnwrap(
+            TimeZone(identifier: "America/Los_Angeles")
+        )
+        let formatter = ISO8601DateFormatter()
+        func epoch(_ text: String) throws -> Int {
+            Int(try XCTUnwrap(formatter.date(from: text)).timeIntervalSince1970)
+        }
+        let nyFirst = try epoch("2026-06-01T16:00:00Z")
+        let nyMiddle = try epoch("2026-06-03T16:00:00Z")
+        let nyLast = try epoch("2026-06-05T12:00:00Z")
+        let laFirst = try epoch("2026-06-05T19:00:00Z")
+        let laMiddle = try epoch("2026-06-07T19:00:00Z")
+        let laLast = try epoch("2026-06-09T19:00:00Z")
+
+        _ = AnalysisTimeZoneHistory.observe(
+            nowSec: nyFirst,
+            timeZone: newYork,
+            persistence: persistence
+        )
+        _ = AnalysisTimeZoneHistory.observe(
+            nowSec: nyMiddle,
+            timeZone: newYork,
+            persistence: persistence
+        )
+        _ = AnalysisTimeZoneHistory.observe(
+            nowSec: nyLast,
+            timeZone: newYork,
+            persistence: persistence
+        )
+        _ = AnalysisTimeZoneHistory.observe(
+            nowSec: laFirst,
+            timeZone: losAngeles,
+            persistence: persistence
+        )
+        _ = AnalysisTimeZoneHistory.observe(
+            nowSec: laMiddle,
+            timeZone: losAngeles,
+            persistence: persistence
+        )
+        let observed = try XCTUnwrap(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: laLast,
+                timeZone: losAngeles,
+                persistence: persistence
+            )
+        )
+        let reloaded = try XCTUnwrap(
+            AnalysisTimeZoneHistory.load(
+                persistence: persistence
+            )
+        )
+
+        XCTAssertEqual(
+            observed.observations.map(\.observedAtSec),
+            [nyFirst, nyLast, laFirst, laLast]
+        )
+        XCTAssertEqual(reloaded, observed)
+        XCTAssertEqual(reloaded.unresolvableBeforeTs, nyFirst)
+        let gap = nyLast + (laFirst - nyLast) / 2
+        XCTAssertEqual(
+            reloaded.resolution(containing: gap),
+            .unresolvable(.travelBoundary)
+        )
+    }
+
+    func testTimeZoneHistoryRetentionMakesDiscardedHistoryUnresolvable() throws {
+        let persistence = TimeZoneMemoryPersistence()
+        let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let paris = try XCTUnwrap(TimeZone(identifier: "Europe/Paris"))
+        let base = 1_800_000_000
+        var timeline = AnalysisTimeZoneTimeline(
+            observations: [],
+            unresolvableBeforeTs: nil
+        )
+
+        for index in 0...AnalysisTimeZoneHistory.maximumObservationCount {
+            timeline = try XCTUnwrap(
+                AnalysisTimeZoneHistory.observe(
+                    nowSec: base + index * 3_600,
+                    timeZone: index.isMultiple(of: 2) ? utc : paris,
+                    persistence: persistence
+                )
+            )
+        }
+
+        XCTAssertEqual(
+            timeline.observations.count,
+            AnalysisTimeZoneHistory.maximumObservationCount
+        )
+        let firstRetained = try XCTUnwrap(
+            timeline.observations.first?.observedAtSec
+        )
+        XCTAssertEqual(timeline.unresolvableBeforeTs, firstRetained)
+        XCTAssertEqual(
+            timeline.resolution(containing: firstRetained - 1),
+            .unresolvable(.truncatedHistory)
+        )
+        XCTAssertEqual(
+            AnalysisTimeZoneHistory.load(
+                persistence: persistence
+            ),
+            timeline
+        )
+    }
+
+    func testTimeZoneHistoryFailsClosedOnPersistenceFailure() throws {
+        let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))
+
+        let readFailure = TimeZoneMemoryPersistence()
+        readFailure.failRead = true
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.load(
+                persistence: readFailure
+            )
+        )
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: 1_800_000_000,
+                timeZone: utc,
+                persistence: readFailure
+            )
+        )
+
+        let writeFailure = TimeZoneMemoryPersistence()
+        writeFailure.failWrite = true
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: 1_800_000_000,
+                timeZone: utc,
+                persistence: writeFailure
+            )
+        )
+        XCTAssertNil(writeFailure.data)
+    }
+
+    func testTimeZoneHistoryCorruptionIsPreservedAndFailsClosed() throws {
+        let original = Data([0x00, 0x01, 0x02])
+        let persistence = TimeZoneMemoryPersistence(
+            data: original
+        )
+        let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let observedAt = 1_800_000_000
+
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.load(
+                persistence: persistence
+            )
+        )
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: observedAt,
+                timeZone: utc,
+                persistence: persistence
+            )
+        )
+        XCTAssertEqual(persistence.data, original)
+        XCTAssertEqual(persistence.writeCount, 0)
+    }
+
+    func testTimeZoneHistoryRejectsUnsupportedSchemaWithoutReplacingIt() throws {
+        let unsupported = try JSONSerialization.data(
+            withJSONObject: [
+                "schemaVersion": 999,
+                "observations": [],
+                "unresolvableBeforeTs": NSNull(),
+            ],
+            options: [.sortedKeys]
+        )
+        let persistence = TimeZoneMemoryPersistence(data: unsupported)
+        let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))
+
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.load(
+                persistence: persistence
+            )
+        )
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: 1_800_000_000,
+                timeZone: utc,
+                persistence: persistence
+            )
+        )
+        XCTAssertEqual(persistence.data, unsupported)
+        XCTAssertEqual(persistence.writeCount, 0)
+    }
+
+    func testTimeZoneHistoryKeepsStoredObservationAcrossTzdataRevision() throws {
+        let observedAt = 1_800_000_000
+        let payload = try JSONSerialization.data(
+            withJSONObject: [
+                "schemaVersion": 1,
+                "observations": [
+                    [
+                        "observedAtSec": observedAt,
+                        "timeZoneIdentifier": "UTC",
+                        "offsetSeconds": 3_600,
+                    ],
+                ],
+                "unresolvableBeforeTs": observedAt,
+            ],
+            options: [.sortedKeys]
+        )
+        let timeline = try XCTUnwrap(
+            AnalysisTimeZoneHistory.load(
+                persistence: TimeZoneMemoryPersistence(data: payload)
+            )
+        )
+
+        XCTAssertEqual(timeline.observations.count, 1)
+        XCTAssertEqual(
+            timeline.observations.first?.offsetSeconds,
+            3_600
+        )
+    }
+
+    func testTimeZoneHistoryFileIsExcludedFromBackup() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "noop-timezone-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+        let persistence =
+            AnalysisTimeZoneHistory.NoBackupAtomicPersistence(
+                baseDirectoryURL: root
+            )
+        let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))
+
+        XCTAssertNotNil(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: 1_800_000_000,
+                timeZone: utc,
+                persistence: persistence
+            )
+        )
+
+        let directory = root
+            .appendingPathComponent(
+                "OpenWhoop",
+                isDirectory: true
+            )
+            .appendingPathComponent(
+                "LocalState",
+                isDirectory: true
+            )
+        let file = directory.appendingPathComponent(
+            "analysis-timezone-history-v1.json"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: file.path)
+        )
+        XCTAssertEqual(
+            try directory.resourceValues(
+                forKeys: [.isExcludedFromBackupKey]
+            ).isExcludedFromBackup,
+            true
+        )
+        XCTAssertEqual(
+            try file.resourceValues(
+                forKeys: [.isExcludedFromBackupKey]
+            ).isExcludedFromBackup,
+            true
+        )
+    }
+
+    func testTimeZoneHistoryProtectionFailurePreservesPreviousFile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "noop-timezone-preserve-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+        let normal =
+            AnalysisTimeZoneHistory.NoBackupAtomicPersistence(
+                baseDirectoryURL: root
+            )
+        let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let first = try XCTUnwrap(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: 1_800_000_000,
+                timeZone: utc,
+                persistence: normal
+            )
+        )
+        let file = root
+            .appendingPathComponent("OpenWhoop", isDirectory: true)
+            .appendingPathComponent("LocalState", isDirectory: true)
+            .appendingPathComponent("analysis-timezone-history-v1.json")
+        let original = try Data(contentsOf: file)
+        let failing =
+            AnalysisTimeZoneHistory.NoBackupAtomicPersistence(
+                baseDirectoryURL: root,
+                stagedFileProtector: { _ in
+                    throw NSError(
+                        domain: "TimeZoneHistoryProtectionFailure",
+                        code: 1
+                    )
+                }
+            )
+
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: 1_800_000_100,
+                timeZone: utc,
+                persistence: failing
+            )
+        )
+        XCTAssertEqual(try Data(contentsOf: file), original)
+        XCTAssertEqual(
+            AnalysisTimeZoneHistory.load(persistence: normal),
+            first
+        )
+    }
+
+    func testHistoricalClaimCrossingDSTAdvancesInOneOffsetSegments() throws {
+        let timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let earliest = try XCTUnwrap(
+            formatter.date(from: "2026-10-31T16:00:00Z")
+        )
+        let newest = try XCTUnwrap(
+            formatter.date(from: "2026-11-03T17:00:00Z")
+        )
+        let nowDate = try XCTUnwrap(
+            formatter.date(from: "2027-01-15T17:00:00Z")
+        )
+        let claim = AnalysisInputGenerationClaim(
+            deviceId: canonicalId,
+            generation: 1,
+            earliestAffectedTs: Int64(earliest.timeIntervalSince1970),
+            latestAffectedTs: Int64(newest.timeIntervalSince1970)
+        )
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 21,
+            force: false,
+            claims: [claim],
+            now: Int(nowDate.timeIntervalSince1970),
+            timezoneOffsetSeconds: timeZone.secondsFromGMT(for: nowDate),
+            timeZone: timeZone
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: Int(nowDate.timeIntervalSince1970),
+            timezoneOffsetSeconds: timeZone.secondsFromGMT(for: nowDate),
+            timeZone: timeZone
+        )
+        let expectedStart = try XCTUnwrap(
+            formatter.date(from: "2026-11-02T05:00:00Z")
+        )
+        let expectedEnd = try XCTUnwrap(
+            formatter.date(from: "2026-11-04T04:59:59Z")
+        )
+
+        XCTAssertEqual(plan.passKind, .historical)
+        XCTAssertEqual(plan.timezoneOffsetSeconds, -5 * 3_600)
+        XCTAssertEqual(plan.maxDays, 2)
+        XCTAssertEqual(
+            coverage.startTs,
+            Int64(expectedStart.timeIntervalSince1970)
+        )
+        XCTAssertEqual(
+            coverage.endTs,
+            Int64(expectedEnd.timeIntervalSince1970)
+        )
+        XCTAssertLessThanOrEqual(
+            coverage.startTs,
+            claim.latestAffectedTs ?? .min
+        )
+        XCTAssertGreaterThanOrEqual(
+            coverage.endTs,
+            claim.latestAffectedTs ?? .max
+        )
+        XCTAssertFalse(coverage.covers(claim))
+    }
+
+    func testHistoricalTransitionDayUsesOneCompleteCivilWindowAfterTailAdvance() throws {
+        let timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let cases = [
+            (
+                newest: "2026-11-03T17:00:00Z",
+                earliest: "2026-10-31T16:00:00Z",
+                transitionStart: "2026-11-01T04:00:00Z",
+                transitionEnd: "2026-11-02T04:59:59Z",
+                dayKey: "2026-11-01",
+                duration: 90_000
+            ),
+            (
+                newest: "2026-03-10T16:00:00Z",
+                earliest: "2026-03-07T17:00:00Z",
+                transitionStart: "2026-03-08T05:00:00Z",
+                transitionEnd: "2026-03-09T03:59:59Z",
+                dayKey: "2026-03-08",
+                duration: 82_800
+            ),
+        ]
+        let nowDate = try XCTUnwrap(
+            formatter.date(from: "2027-01-15T17:00:00Z")
+        )
+        let now = Int(nowDate.timeIntervalSince1970)
+        let currentOffset = timeZone.secondsFromGMT(for: nowDate)
+
+        for testCase in cases {
+            let newest = try XCTUnwrap(formatter.date(from: testCase.newest))
+            let earliest = try XCTUnwrap(
+                formatter.date(from: testCase.earliest)
+            )
+            let original = AnalysisInputGenerationClaim(
+                deviceId: canonicalId,
+                generation: 1,
+                earliestAffectedTs: Int64(earliest.timeIntervalSince1970),
+                latestAffectedTs: Int64(newest.timeIntervalSince1970)
+            )
+            let firstPlan = IntelligenceEngine.analysisScoringPlan(
+                requestedMaxDays: 21,
+                force: false,
+                claims: [original],
+                now: now,
+                timezoneOffsetSeconds: currentOffset,
+                timeZone: timeZone
+            )
+            let firstCoverage = IntelligenceEngine.analysisScanCoverage(
+                plan: firstPlan,
+                actualNow: now,
+                timezoneOffsetSeconds: currentOffset,
+                timeZone: timeZone
+            )
+            let remaining = AnalysisInputGenerationClaim(
+                deviceId: original.deviceId,
+                generation: original.generation,
+                earliestAffectedTs: original.earliestAffectedTs,
+                latestAffectedTs: firstCoverage.startTs - 1
+            )
+
+            let transitionPlan = IntelligenceEngine.analysisScoringPlan(
+                requestedMaxDays: 21,
+                force: false,
+                claims: [remaining],
+                now: now,
+                timezoneOffsetSeconds: currentOffset,
+                timeZone: timeZone
+            )
+            let transitionCoverage =
+                IntelligenceEngine.analysisScanCoverage(
+                    plan: transitionPlan,
+                    actualNow: now,
+                    timezoneOffsetSeconds: currentOffset,
+                    timeZone: timeZone
+                )
+            let expectedStart = try XCTUnwrap(
+                formatter.date(from: testCase.transitionStart)
+            )
+            let expectedEnd = try XCTUnwrap(
+                formatter.date(from: testCase.transitionEnd)
+            )
+            let civilDay = try XCTUnwrap(
+                transitionPlan.civilDayWindow
+            )
+
+            XCTAssertEqual(transitionPlan.passKind, .historical)
+            XCTAssertEqual(transitionPlan.maxDays, 1)
+            XCTAssertEqual(civilDay.dayKey, testCase.dayKey)
+            XCTAssertEqual(civilDay.durationSeconds, testCase.duration)
+            XCTAssertEqual(
+                transitionCoverage.startTs,
+                Int64(expectedStart.timeIntervalSince1970)
+            )
+            XCTAssertEqual(
+                transitionCoverage.endTs,
+                Int64(expectedEnd.timeIntervalSince1970)
+            )
+            XCTAssertEqual(
+                transitionCoverage.endTs + 1,
+                firstCoverage.startTs,
+                "Tail advancement must cover the transition day without a gap or overlap."
+            )
+            XCTAssertLessThanOrEqual(
+                transitionCoverage.startTs,
+                remaining.latestAffectedTs ?? .min
+            )
+            XCTAssertGreaterThanOrEqual(
+                transitionCoverage.endTs,
+                remaining.latestAffectedTs ?? .max
+            )
+        }
+    }
+
+    func testRecentPassUsesCompleteFallDSTWindowsAndFinalizesItsClaim() async throws {
+        let timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let nowDate = try XCTUnwrap(
+            formatter.date(from: "2026-11-02T22:00:00Z")
+        )
+        let earliest = try XCTUnwrap(
+            formatter.date(from: "2026-10-31T12:00:00Z")
+        )
+        let latest = try XCTUnwrap(
+            formatter.date(from: "2026-11-02T04:59:59Z")
+        )
+        let source = "recent-fall-dst"
+        let store = try await WhoopStore.inMemory()
+        _ = try await store.insert(
+            Streams(
+                hr: [
+                    HRSample(ts: Int(earliest.timeIntervalSince1970), bpm: 60),
+                    HRSample(ts: Int(latest.timeIntervalSince1970), bpm: 61),
+                ]
+            ),
+            deviceId: source
+        )
+        let claims = try await store.pendingAnalysisInputGenerations(
+            deviceIds: [source]
+        )
+        let now = Int(nowDate.timeIntervalSince1970)
+        let currentOffset = timeZone.secondsFromGMT(for: nowDate)
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 3,
+            force: false,
+            claims: claims,
+            now: now,
+            timezoneOffsetSeconds: currentOffset,
+            timeZone: timeZone
+        )
+        let windows = IntelligenceEngine.analysisCivilDayWindows(
+            plan: plan,
+            timezoneOffsetSeconds: currentOffset,
+            timeZone: timeZone
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: now,
+            timezoneOffsetSeconds: currentOffset,
+            timeZone: timeZone
+        )
+
+        XCTAssertEqual(plan.passKind, .recent)
+        XCTAssertEqual(
+            windows.map(\.dayKey),
+            ["2026-11-02", "2026-11-01", "2026-10-31"]
+        )
+        XCTAssertEqual(
+            windows.map(\.durationSeconds),
+            [86_400, 90_000, 86_400]
+        )
+        XCTAssertEqual(windows[2].endTs + 1, windows[1].startTs)
+        XCTAssertEqual(windows[1].endTs + 1, windows[0].startTs)
+        XCTAssertTrue(coverage.covers(try XCTUnwrap(claims.first)))
+
+        try await IntelligenceEngine.finalizeAnalysisInputClaims(
+            store: store,
+            claims: claims,
+            integrity: IntelligenceEngine.AnalysisPassIntegrity(),
+            coverage: coverage,
+            consumedSourceIDs: [source],
+            ownershipEvaluatedSourceIDs: []
+        )
+
+        let pendingAfterFinalization =
+            try await store.pendingAnalysisInputGenerations(
+                deviceIds: [source]
+            )
+        XCTAssertEqual(pendingAfterFinalization, [])
+    }
+
+    func testForcedPassUsesCompleteSpringDSTWindows() throws {
+        let timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let nowDate = try XCTUnwrap(
+            formatter.date(from: "2026-03-09T22:00:00Z")
+        )
+        let now = Int(nowDate.timeIntervalSince1970)
+        let currentOffset = timeZone.secondsFromGMT(for: nowDate)
+
+        let plan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 3,
+            force: true,
+            claims: [],
+            now: now,
+            timezoneOffsetSeconds: currentOffset,
+            timeZone: timeZone
+        )
+        let windows = IntelligenceEngine.analysisCivilDayWindows(
+            plan: plan,
+            timezoneOffsetSeconds: currentOffset,
+            timeZone: timeZone
+        )
+        let coverage = IntelligenceEngine.analysisScanCoverage(
+            plan: plan,
+            actualNow: now,
+            timezoneOffsetSeconds: currentOffset,
+            timeZone: timeZone
+        )
+
+        XCTAssertEqual(plan.passKind, .recent)
+        XCTAssertEqual(
+            windows.map(\.dayKey),
+            ["2026-03-09", "2026-03-08", "2026-03-07"]
+        )
+        XCTAssertEqual(
+            windows.map(\.durationSeconds),
+            [86_400, 82_800, 86_400]
+        )
+        XCTAssertEqual(windows[2].endTs + 1, windows[1].startTs)
+        XCTAssertEqual(windows[1].endTs + 1, windows[0].startTs)
+        XCTAssertEqual(coverage.startTs, Int64(windows[2].startTs))
+        XCTAssertEqual(coverage.endTs, Int64(now))
+    }
+
+    func testCivilDaySixPMUsesCalendarAcrossMidnightOffsetTransitions() throws {
+        let formatter = ISO8601DateFormatter()
+        let cases = [
+            ("America/Santiago", "2026-04-04T16:00:00Z"),
+            ("America/Nuuk", "2026-03-28T16:00:00Z"),
+            ("Africa/Cairo", "2026-10-29T12:00:00Z"),
+        ]
+
+        for (identifier, referenceText) in cases {
+            let timeZone = try XCTUnwrap(
+                TimeZone(identifier: identifier),
+                identifier
+            )
+            let reference = try XCTUnwrap(
+                formatter.date(from: referenceText),
+                identifier
+            )
+            let window = try XCTUnwrap(
+                IntelligenceEngine.historicalCivilDayWindow(
+                    containing: Int(reference.timeIntervalSince1970),
+                    timeZone: timeZone
+                ),
+                identifier
+            )
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = timeZone
+            let sixPMComponents = calendar.dateComponents(
+                [.hour, .minute, .second],
+                from: Date(
+                    timeIntervalSince1970:
+                        TimeInterval(window.localSixPMTs)
+                )
+            )
+            XCTAssertEqual(sixPMComponents.hour, 18, identifier)
+            XCTAssertEqual(sixPMComponents.minute, 0, identifier)
+            XCTAssertEqual(sixPMComponents.second, 0, identifier)
+            XCTAssertNotEqual(
+                window.localSixPMTs,
+                window.endTs + 1 - 6 * 3_600,
+                identifier
+            )
+
+            let offset = timeZone.secondsFromGMT(for: reference)
+            let plan = IntelligenceEngine.AnalysisScoringPlan(
+                referenceNow: window.localSixPMTs,
+                maxDays: 1,
+                passKind: .recent
+            )
+            let before = IntelligenceEngine.analysisScanCoverage(
+                plan: plan,
+                actualNow: window.localSixPMTs - 1,
+                timezoneOffsetSeconds: offset,
+                timeZone: timeZone
+            )
+            let after = IntelligenceEngine.analysisScanCoverage(
+                plan: plan,
+                actualNow: window.localSixPMTs + 1,
+                timezoneOffsetSeconds: offset,
+                timeZone: timeZone
+            )
+            XCTAssertEqual(
+                before.endTs,
+                Int64(window.localSixPMTs - 1),
+                identifier
+            )
+            XCTAssertEqual(
+                after.endTs,
+                Int64(window.localSixPMTs),
+                identifier
+            )
+        }
+    }
+
+    func testTransitionDayEditsUseExactCivilBounds() throws {
+        let formatter = ISO8601DateFormatter()
+        let start = Int(try XCTUnwrap(
+            formatter.date(from: "2026-11-01T04:00:00Z")
+        ).timeIntervalSince1970)
+        let end = Int(try XCTUnwrap(
+            formatter.date(from: "2026-11-02T05:00:00Z")
+        ).timeIntervalSince1970)
+        func row(endingAt endTs: Int) -> CachedSleepSession {
+            CachedSleepSession(
+                startTs: endTs - 3_600,
+                endTs: endTs,
+                efficiency: nil,
+                restingHr: nil,
+                avgHrv: nil,
+                stagesJSON: nil
+            )
+        }
+        let rows = [
+            row(endingAt: start - 1),
+            row(endingAt: start),
+            row(endingAt: end - 1),
+            row(endingAt: end),
+        ]
+
+        let filtered = IntelligenceEngine.editedRowsForDay(
+            rows,
+            day: "2026-11-01",
+            tzOffsetSeconds: -5 * 3_600,
+            civilDayStartTs: start,
+            civilDayEndTsExclusive: end
+        )
+
+        XCTAssertEqual(filtered.map(\.endTs), [start, end - 1])
     }
 
     func testMultiYearHistoricalClaimNeverCreatesAnUnboundedPass() {
@@ -904,8 +1994,7 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         let store = try await WhoopStore.inMemory()
         let repo = Repository(deviceId: canonicalId)
         repo.setStoreForTesting(store)
-        let engine = IntelligenceEngine(
-            repo: repo, profile: ProfileStore(), deviceId: canonicalId)
+        let engine = analysisEngine(repo: repo)
         let fixture = try await seedScorableNight(
             store: store,
             deviceId: canonicalId,

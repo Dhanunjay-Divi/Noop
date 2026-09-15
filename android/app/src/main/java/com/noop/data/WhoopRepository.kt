@@ -645,6 +645,51 @@ class WhoopRepository private constructor(
         return result
     }
 
+    /**
+     * Exclude a permanently unscorable newest timezone-provenance range without treating it as analyzed.
+     *
+     * The exact generation and original bounds participate in every mutation. A concurrent input write
+     * therefore defeats the compare-and-set and preserves the expanded claim for a later pass.
+     */
+    internal suspend fun excludeClaimedAnalysisRange(
+        lease: AnalysisInputLease,
+        exclusionStartTs: Long,
+        exclusionEndTs: Long,
+    ): AnalysisInputExclusionResult {
+        if (exclusionStartTs < 0L || exclusionEndTs < exclusionStartTs) {
+            return AnalysisInputExclusionResult(excludedCount = 0, advancedCount = 0)
+        }
+        var excludedCount = 0
+        var advancedCount = 0
+        transactor.run {
+            for (claim in lease.claims) {
+                val affected = claim.affectedTimeRange() ?: continue
+                if (exclusionStartTs > affected.last || exclusionEndTs < affected.last) continue
+                if (exclusionStartTs <= affected.first) {
+                    excludedCount += dao.acknowledgeExactAnalysisInputGeneration(
+                        deviceId = claim.deviceId,
+                        generation = claim.generation,
+                        expectedEarliestAffectedTs = claim.earliestAffectedTs,
+                        expectedLatestAffectedTs = claim.latestAffectedTs,
+                    )
+                } else {
+                    val remainingLatest = exclusionStartTs - 1L
+                    advancedCount += dao.shrinkExactAnalysisInputNewestTail(
+                        deviceId = claim.deviceId,
+                        generation = claim.generation,
+                        expectedEarliestAffectedTs = affected.first,
+                        expectedLatestAffectedTs = affected.last,
+                        newLatestAffectedTs = remainingLatest,
+                    )
+                }
+            }
+        }
+        return AnalysisInputExclusionResult(
+            excludedCount = excludedCount,
+            advancedCount = advancedCount,
+        )
+    }
+
     // MARK: - Server-derived caches (latest value wins on conflict)
 
     suspend fun upsertDailyMetrics(days: List<DailyMetric>) {
@@ -2294,6 +2339,18 @@ class WhoopRepository private constructor(
     /** Bounded source-specific daily metrics, oldest first. */
     suspend fun daysInRange(deviceId: String, from: String, to: String): List<DailyMetric> =
         dao.daysInRange(deviceId, from, to)
+
+    /**
+     * Clear only one computed source's Effort values before the legacy-axis migration.
+     *
+     * The rows and their Recovery, Rest, sleep, and activity fields remain available. Imported/vendor
+     * sources are untouched, and Room propagates a storage failure so the migration marker stays unset.
+     */
+    suspend fun clearDailyStrain(deviceId: String): Int {
+        val changed = dao.clearDailyStrain(deviceId)
+        if (changed > 0) noteMetricsChanged(dailyMetricsChanged = true, keys = emptyList())
+        return changed
+    }
 
     /** Scalar COUNT twin of [days] for count badges. */
     suspend fun daysCount(deviceId: String): Int = dao.daysCount(deviceId)

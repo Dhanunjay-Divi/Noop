@@ -1,6 +1,7 @@
 import SwiftUI
 import StrandDesign
 import StrandAnalytics
+import UserNotifications
 #if os(iOS)
 import UIKit
 #endif
@@ -41,13 +42,14 @@ struct HydrationDetailModel {
 
     func load(from repo: Repository) async throws -> HydrationDetailSnapshot {
         guard hasValidDay else { throw HydrationDetailModelError.invalidDayKey }
+        // Entry loading owns the one-time legacy migration. Finish it before reading the scalar/history
+        // projections so one published snapshot cannot mix pre-migration totals with post-migration rows.
+        let loadedEntries = try await repo.hydrationEntries(day: selectedDayKey)
         async let reading = repo.hydrationReading(day: selectedDayKey)
         async let history = repo.hydrationHistory(days: 7, throughDay: selectedDayKey)
-        async let entries = repo.hydrationEntries(day: selectedDayKey)
-        let (loadedReading, loadedHistory, loadedEntries) = try await (
+        let (loadedReading, loadedHistory) = try await (
             reading,
-            history,
-            entries
+            history
         )
         return HydrationDetailSnapshot(
             reading: loadedReading,
@@ -358,8 +360,10 @@ struct HydrationView: View {
     @AppStorage(HydrationReminders.bandFirstEnabledKey) private var bandFirstReminders = false
     @AppStorage("notif.masterEnabled") private var wristAlertsEnabled = false
     @State private var showNotificationPermissionAlert = false
+    @State private var notificationPermissionDenied = false
     @Environment(\.openURL) private var openURL
     @Environment(\.locale) private var locale
+    @Environment(\.scenePhase) private var scenePhase
 
     init(selectedDay: String? = nil) {
         detailModel = HydrationDetailModel(selectedDayKey: selectedDay)
@@ -471,7 +475,15 @@ struct HydrationView: View {
             }
         }
         .task(id: reloadTick) { await reload() }
-        .onAppear { reminderEnabled = HydrationReminders.isEnabled }
+        .onAppear {
+            reminderEnabled = HydrationReminders.isEnabled
+            refreshNotificationPermissionState()
+        }
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            reminderEnabled = HydrationReminders.isEnabled
+            refreshNotificationPermissionState()
+        }
         .alert("Notifications are off", isPresented: $showNotificationPermissionAlert) {
             Button("Open Settings") {
                 #if os(iOS)
@@ -767,6 +779,20 @@ struct HydrationView: View {
                     reminderTimeRow("Active until", minutes: reminderEndBinding)
                 }
 
+                if reminderEnabled && notificationPermissionDenied {
+                    Divider().overlay(StrandPalette.hairline)
+                    HStack(alignment: .center, spacing: NoopMetrics.space3) {
+                        Text("Notifications are disabled in Settings.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: NoopMetrics.space2)
+                        Button("Open Settings") { openNotificationSettings() }
+                            .buttonStyle(.bordered)
+                            .tint(StrandPalette.accent)
+                    }
+                }
+
                 Divider().overlay(StrandPalette.hairline)
                 Toggle(isOn: strapReminderToggle) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -864,10 +890,13 @@ struct HydrationView: View {
                     switch outcome {
                     case .scheduled:
                         reminderEnabled = true
+                        notificationPermissionDenied = false
                     case .deferred:
                         reminderEnabled = true
+                        refreshNotificationPermissionState()
                     case .denied:
-                        reminderEnabled = false
+                        reminderEnabled = HydrationReminders.isEnabled
+                        notificationPermissionDenied = true
                         showNotificationPermissionAlert = true
                     case .off:
                         reminderEnabled = false
@@ -875,6 +904,31 @@ struct HydrationView: View {
                 }
             }
         )
+    }
+
+    private func refreshNotificationPermissionState() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            Task { @MainActor in
+                notificationPermissionDenied =
+                    settings.authorizationStatus == .denied
+            }
+        }
+    }
+
+    private func openNotificationSettings() {
+        #if os(iOS)
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+            return
+        }
+        #else
+        guard let url = URL(
+            string:
+                "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+        ) else {
+            return
+        }
+        #endif
+        openURL(url)
     }
 
     private var reminderIntervalBinding: Binding<Int> {
@@ -1035,10 +1089,17 @@ struct HydrationView: View {
 
     /// One logged-drink row: the time it was logged + its amount (tap to edit) with a trailing trash.
     private func entryRow(_ entry: HydrationEntry) -> some View {
-        let entryTime = HydrationDisplayFormatting.entryTime(
-            entry.loggedAt,
-            locale: locale
+        let isLegacyAggregate = HydrationStore.isLegacyScalarPresentationEntry(
+            entry,
+            entries: entries,
+            day: selectedDayKey
         )
+        let entryTime = isLegacyAggregate
+            ? String(localized: "appwide.hydration.older_daily_total")
+            : HydrationDisplayFormatting.entryTime(
+                entry.loggedAt,
+                locale: locale
+            )
         return HStack(spacing: 10) {
             Button { editingEntry = entry } label: {
                 HStack(spacing: 10) {
@@ -1065,13 +1126,17 @@ struct HydrationView: View {
             // Liquid tap response: the same physical settle-inward every tappable liquid row gets.
             .buttonStyle(LiquidPressStyle())
             .accessibilityLabel(
-                HydrationDisplayFormatting.entryAccessibilityLabel(
-                    amountML: entry.amountMl,
-                    loggedAt: entry.loggedAt,
-                    locale: locale
-                )
+                isLegacyAggregate
+                    ? "\(entryTime), \(HydrationDisplayFormatting.spokenMillilitres(entry.amountMl, locale: locale))"
+                    : HydrationDisplayFormatting.entryAccessibilityLabel(
+                        amountML: entry.amountMl,
+                        loggedAt: entry.loggedAt,
+                        locale: locale
+                    )
             )
-            .accessibilityHint("Tap to edit the amount")
+            .accessibilityHint(
+                "Tap to edit the amount"
+            )
             Button(role: .destructive) {
                 Task { await deleteEntry(entry) }
             } label: {
@@ -1083,11 +1148,24 @@ struct HydrationView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(
-                HydrationDisplayFormatting.deleteEntryAccessibilityLabel(
-                    amountML: entry.amountMl,
-                    loggedAt: entry.loggedAt,
-                    locale: locale
-                )
+                isLegacyAggregate
+                    ? String(
+                        format: String(
+                            localized:
+                                "appwide.hydration.delete_entry_accessibility_format",
+                            locale: locale
+                        ),
+                        locale: locale,
+                        HydrationDisplayFormatting.spokenMillilitres(
+                            entry.amountMl,
+                            locale: locale
+                        )
+                    )
+                    : HydrationDisplayFormatting.deleteEntryAccessibilityLabel(
+                        amountML: entry.amountMl,
+                        loggedAt: entry.loggedAt,
+                        locale: locale
+                    )
             )
         }
     }

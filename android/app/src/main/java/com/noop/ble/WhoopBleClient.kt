@@ -52,6 +52,7 @@ import com.noop.protocol.extractStreams
 import com.noop.protocol.WhoopGattServiceFamily
 import com.noop.protocol.whoopGattScanDecision
 import com.noop.analytics.Baselines
+import com.noop.analytics.AnalysisTimeZoneHistory
 import com.noop.analytics.BatterySocLine
 import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.NapDetector
@@ -98,6 +99,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import java.time.ZoneId
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -2434,23 +2436,85 @@ class WhoopBleClient(
             return BackfillAnalysisProcessResult.Completed
         }
         val analysisNowSeconds = System.currentTimeMillis() / 1_000L
-        val analysisPlan = IntelligenceEngine.analysisScoringPlan(
-            requestedMaxDays = 21,
-            claims = analysisLease.claims,
-            nowSeconds = analysisNowSeconds,
+        val analysisTimeZoneHistory = AnalysisTimeZoneHistory.from(context).observe(
+            observedAtEpochSeconds = analysisNowSeconds,
+            zoneId = ZoneId.systemDefault(),
         )
-        if (!analysisPlan.shouldAnalyze) {
+        if (analysisTimeZoneHistory == null) {
             AppDiagnosticsRecorder.record(
                 "analysis.post_backfill",
                 fields = mapOf(
                     "outcome" to "deferred",
-                    "reason" to "late_evening",
-                    "pass_kind" to analysisPlan.passKind.name.lowercase(),
+                    "reason" to "timezone_persistence",
+                    "pass_kind" to "deferred",
                     "scan_days" to "0",
                 ),
             )
-            log("Backfill: post-sync scoring deferred until the next local-day window")
-            val retryAtSeconds = analysisPlan.deferUntilSeconds ?: (analysisNowSeconds + 900L)
+            return BackfillAnalysisProcessResult.RetryRequired
+        }
+        val analysisPlan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 21,
+            claims = analysisLease.claims,
+            nowSeconds = analysisNowSeconds,
+            timeZoneHistory = analysisTimeZoneHistory,
+        )
+        if (!analysisPlan.shouldAnalyze) {
+            val terminalExclusion = analysisPlan.terminalUnknownRange
+            val exclusionResult = if (terminalExclusion != null) {
+                repository.excludeClaimedAnalysisRange(
+                    lease = analysisLease,
+                    exclusionStartTs = terminalExclusion.startTs,
+                    exclusionEndTs = terminalExclusion.endTs,
+                )
+            } else {
+                null
+            }
+            AppDiagnosticsRecorder.record(
+                "analysis.post_backfill",
+                fields = mapOf(
+                    "outcome" to when {
+                        exclusionResult?.madeProgress == true -> "excluded"
+                        else -> "deferred"
+                    },
+                    "reason" to when (analysisPlan.deferralReason) {
+                        IntelligenceEngine.AnalysisDeferralReason.LATE_EVENING ->
+                            "late_evening"
+                        IntelligenceEngine.AnalysisDeferralReason.TIMEZONE_PROVENANCE ->
+                            "timezone_provenance"
+                        IntelligenceEngine.AnalysisDeferralReason.TERMINAL_TIMEZONE_UNKNOWN ->
+                            when (terminalExclusion?.reason) {
+                                AnalysisTimeZoneHistory.Uncertainty.TRUNCATED_HISTORY ->
+                                    "truncated_history"
+                                AnalysisTimeZoneHistory.Uncertainty.RECORDED_ZONE_BOUNDARY ->
+                                    "travel_boundary"
+                                else -> "timezone_terminal_unknown"
+                            }
+                        null -> "unknown"
+                    },
+                    "pass_kind" to analysisPlan.passKind.name.lowercase(),
+                    "scan_days" to "0",
+                    "excluded" to minOf(
+                        exclusionResult?.excludedCount ?: 0,
+                        64,
+                    ).toString(),
+                    "advanced" to minOf(
+                        exclusionResult?.advancedCount ?: 0,
+                        64,
+                    ).toString(),
+                ),
+            )
+            log(
+                if (exclusionResult?.madeProgress == true) {
+                    "Backfill: skipped a permanently unknown timezone boundary; continuing older history"
+                } else {
+                    "Backfill: post-sync scoring deferred until the next local-day window"
+                },
+            )
+            val retryAtSeconds = if (exclusionResult?.madeProgress == true) {
+                analysisNowSeconds + 5L
+            } else {
+                analysisPlan.deferUntilSeconds ?: (analysisNowSeconds + 900L)
+            }
             // The database claim remains unacknowledged. The explicit deferred outcome preserves the
             // durable source marker, releases this single worker, and arms the process-independent retry.
             return BackfillAnalysisProcessResult.Deferred(
@@ -2485,6 +2549,10 @@ class WhoopBleClient(
                     maxDays = analysisPlan.maxDays,
                     nowSeconds = analysisPlan.anchorNowSeconds,
                     analysisTimezoneOffsetSeconds = analysisPlan.timezoneOffsetSeconds,
+                    analysisTimeZone = analysisPlan.timeZone,
+                    providedCivilDayWindows = analysisPlan.civilDayWindows,
+                    providedCalibrationCivilDayWindows =
+                        analysisPlan.calibrationCivilDayWindows,
                     historicalCatchUp = analysisPlan.isHistoricalCatchUp,
                     importedDeviceId = sourceId,
                     maxHROverride = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble(),

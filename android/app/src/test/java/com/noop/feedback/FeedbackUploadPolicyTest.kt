@@ -5,11 +5,16 @@ import java.io.IOException
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -22,6 +27,209 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class FeedbackUploadPolicyTest {
+    @Test
+    fun userVisibleSchedulingAwaitsWorkManagerAcceptance() {
+        val source = locateFeedbackUploadWorkerSource().readText()
+        val scheduler = source.substring(
+            source.indexOf("internal object FeedbackScheduler"),
+            source.indexOf("class FeedbackUploadWorker("),
+        )
+
+        assertTrue(scheduler.contains("suspend fun enqueue("))
+        assertTrue(scheduler.contains("private suspend fun enqueuePrepared("))
+        assertTrue(scheduler.contains("suspend fun retry("))
+        assertTrue(scheduler.contains("suspend fun cancel("))
+        assertTrue(scheduler.contains("suspend fun reconcile("))
+        val enqueuePrepared = scheduler.substring(
+            scheduler.indexOf("private suspend fun enqueuePrepared("),
+            scheduler.indexOf("suspend fun enqueueContinuityRetry("),
+        )
+        assertTrue(enqueuePrepared.contains("enqueueUniqueWork("))
+        assertTrue(enqueuePrepared.contains(").await()"))
+        assertTrue(
+            enqueuePrepared.contains(
+                "FeedbackAcceptedPublication.awaitAndPublish(",
+            ),
+        )
+        assertFalse(enqueuePrepared.contains("runBlocking"))
+        assertTrue(scheduler.contains("private suspend fun enqueueOrPersistFailure("))
+        assertTrue(scheduler.contains("outbox.markFailed("))
+        assertTrue(scheduler.contains("outbox.markCancelFailed("))
+        assertTrue(
+            scheduler.contains(
+                "throw FeedbackSchedulingException(resolution.record, error)",
+            ),
+        )
+        assertTrue(scheduler.contains("FeedbackSchedulingFailureResolver.resolve("))
+        val reconcile = scheduler.substring(
+            scheduler.indexOf("suspend fun reconcile("),
+            scheduler.indexOf("internal fun workName("),
+        )
+        assertTrue(reconcile.contains("enqueueOrPersistFailure("))
+        assertTrue(reconcile.contains("catch (_: FeedbackSchedulingException)"))
+        val unfinishedLookup = scheduler.substring(
+            scheduler.indexOf("private suspend fun hasUnfinishedGeneration("),
+            scheduler.indexOf("internal fun progressFor("),
+        )
+        assertTrue(unfinishedLookup.contains("FeedbackSchedulingAwaiter.await"))
+        assertFalse(unfinishedLookup.contains("runCatching"))
+        val workerRepair = source.substring(
+            source.indexOf("var failedSchedulingRecord: FeedbackRecord? = null"),
+            source.indexOf("val shouldRetry = if (cancel)"),
+        )
+        assertTrue(workerRepair.contains("failedSchedulingRecord = schedule.record"))
+        assertTrue(workerRepair.contains("failedSchedulingRecord?.let { failedRecord ->"))
+        assertTrue(workerRepair.contains("excludedWorkId = id"))
+        assertFalse(
+            workerRepair.contains("outbox.loadForProgress(localId)?.let { current ->"),
+        )
+        assertTrue(unfinishedLookup.contains("info.id != excludedWorkId"))
+
+        val controller = locateAppDiagnosticReportSource().readText()
+        assertTrue(controller.contains("catch (error: FeedbackSchedulingException)"))
+        assertTrue(controller.contains("localFeedbackId = error.record.localId"))
+        assertTrue(controller.contains("clearSensitiveDraft()"))
+        assertTrue(controller.contains("applyRuntime(FeedbackRuntimeStatus(error.record, 0))"))
+        val sendFeedback = controller.substring(
+            controller.indexOf("fun sendFeedback()"),
+            controller.indexOf("fun retryFeedback()"),
+        )
+        assertTrue(sendFeedback.contains("phase = Phase.SCHEDULING"))
+        assertTrue(sendFeedback.contains("deliveryState = null"))
+        assertTrue(sendFeedback.contains("deliveryActionInProgress = true"))
+        assertFalse(
+            sendFeedback.substringBefore("activity.lifecycleScope.launch")
+                .contains("deliveryState = FeedbackState.QUEUED"),
+        )
+        assertTrue(
+            controller.contains(
+                "phase == Phase.BUILDING || phase == Phase.SCHEDULING",
+            ),
+        )
+        assertTrue(
+            controller.split("catch (cancelled: CancellationException)").size - 1 >= 3,
+        )
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun runtimeStatusPublishesOnlyAfterWorkManagerAcceptance() = runTest {
+        val acceptance = CompletableDeferred<Unit>()
+        var published = false
+        val scheduling = async {
+            FeedbackAcceptedPublication.awaitAndPublish(
+                timeoutMillis = 10_000,
+                awaitAcceptance = { acceptance.await() },
+                publish = { published = true },
+            )
+        }
+
+        runCurrent()
+        assertFalse(published)
+        acceptance.complete(Unit)
+        scheduling.await()
+        assertTrue(published)
+    }
+
+    @Test
+    fun failedOrTimedOutSchedulingNeverPublishesRuntimeStatus() = runTest {
+        var failedPublish = false
+        try {
+            FeedbackAcceptedPublication.awaitAndPublish(
+                timeoutMillis = 10_000,
+                awaitAcceptance = { throw IOException("expected") },
+                publish = { failedPublish = true },
+            )
+            fail("a failed WorkManager operation must remain failed")
+        } catch (_: IOException) {
+            // Expected.
+        }
+        assertFalse(failedPublish)
+
+        var timedOutPublish = false
+        try {
+            FeedbackAcceptedPublication.awaitAndPublish(
+                timeoutMillis = 1,
+                awaitAcceptance = { CompletableDeferred<Unit>().await() },
+                publish = { timedOutPublish = true },
+            )
+            fail("a stalled WorkManager operation must time out")
+        } catch (_: FeedbackSchedulingTimeoutException) {
+            // Expected.
+        }
+        assertFalse(timedOutPublish)
+    }
+
+    @Test
+    fun boundedSchedulingAwaiterPropagatesCallerCancellation() = runTest {
+        try {
+            FeedbackSchedulingAwaiter.await {
+                throw CancellationException("expected")
+            }
+            fail("caller cancellation must not become a scheduling failure")
+        } catch (_: CancellationException) {
+            // Expected.
+        }
+    }
+
+    @Test
+    fun boundedSchedulingAwaiterDoesNotRewriteAnEnclosingTimeout() = runTest {
+        try {
+            withTimeout(1) {
+                FeedbackSchedulingAwaiter.await(timeoutMillis = 10_000) {
+                    CompletableDeferred<Unit>().await()
+                }
+            }
+            fail("the enclosing timeout must cancel its child")
+        } catch (_: TimeoutCancellationException) {
+            // Expected. The enclosing timeout remains distinguishable from scheduler timeout.
+        }
+    }
+
+    @Test
+    fun schedulerRepairPropagatesCancellationAndClassifiesOperationalFailure() =
+        runTest {
+            try {
+                FeedbackSchedulerRepair.request {
+                    throw CancellationException("expected")
+                }
+                fail("repair cancellation must stop the worker")
+            } catch (_: CancellationException) {
+                // Expected.
+            }
+
+            assertEquals(
+                FeedbackSchedulerRepairOutcome.FAILED,
+                FeedbackSchedulerRepair.request {
+                    throw IOException("expected")
+                },
+            )
+            assertEquals(
+                FeedbackSchedulerRepairOutcome.REPAIRED,
+                FeedbackSchedulerRepair.request {
+                    FeedbackReconcileOutcome()
+                },
+            )
+            assertEquals(
+                FeedbackSchedulerRepairOutcome.PARTIAL,
+                FeedbackSchedulerRepair.request {
+                    FeedbackReconcileOutcome(schedulingFailureCount = 1)
+                },
+            )
+
+            val targetGeneration = "11111111-1111-4111-8111-111111111111"
+            val unrelatedGeneration = "22222222-2222-4222-8222-222222222222"
+            val mixedRepair = FeedbackSchedulerRepair.requestDetailed {
+                FeedbackReconcileOutcome(
+                    schedulingFailureCount = 1,
+                    reconciledWorkerGenerations = setOf(targetGeneration),
+                )
+            }
+            assertEquals(FeedbackSchedulerRepairOutcome.PARTIAL, mixedRepair.outcome)
+            assertTrue(mixedRepair.reconciled(targetGeneration))
+            assertFalse(mixedRepair.reconciled(unrelatedGeneration))
+        }
+
     @Test
     fun missingIdentityCannotBeCreatedWhenReplacementIsForbidden() {
         assertFalse(
@@ -1512,6 +1720,29 @@ class FeedbackUploadPolicyTest {
         receipt = null,
         localArchiveRemoved = state.isCancellationStateForTest(),
     )
+
+    private fun locateFeedbackUploadWorkerSource(): File {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        return listOf(
+            File(root, "src/main/java/com/noop/feedback/FeedbackUploadWorker.kt"),
+            File(root, "app/src/main/java/com/noop/feedback/FeedbackUploadWorker.kt"),
+            File(
+                root,
+                "android/app/src/main/java/com/noop/feedback/FeedbackUploadWorker.kt",
+            ),
+        ).firstOrNull(File::isFile)
+            ?: error("Could not locate FeedbackUploadWorker.kt from $root")
+    }
+
+    private fun locateAppDiagnosticReportSource(): File {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        return listOf(
+            File(root, "src/main/java/com/noop/ui/AppDiagnosticReport.kt"),
+            File(root, "app/src/main/java/com/noop/ui/AppDiagnosticReport.kt"),
+            File(root, "android/app/src/main/java/com/noop/ui/AppDiagnosticReport.kt"),
+        ).firstOrNull(File::isFile)
+            ?: error("Could not locate AppDiagnosticReport.kt from $root")
+    }
 
     private fun FeedbackState.isCancellationStateForTest(): Boolean =
         this == FeedbackState.CANCELING ||

@@ -9,6 +9,9 @@ import com.noop.data.WorkoutRow
 import com.noop.data.affectedTimeRange
 import com.noop.protocol.DeviceFamily
 import com.noop.protocol.Whoop4SkinTemp
+import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -109,6 +112,12 @@ object IntelligenceEngine {
         DEFERRED,
     }
 
+    internal enum class AnalysisDeferralReason {
+        LATE_EVENING,
+        TIMEZONE_PROVENANCE,
+        TERMINAL_TIMEZONE_UNKNOWN,
+    }
+
     internal data class AnalysisScanCoverage(
         val startTs: Long,
         val endTs: Long,
@@ -121,6 +130,20 @@ object IntelligenceEngine {
         }
     }
 
+    data class AnalysisCivilDayWindow(
+        val startTs: Long,
+        val endTs: Long,
+        val dayKey: String,
+        val timezoneOffsetSeconds: Long,
+        val localSixPMTs: Long,
+        /** Exact observed-zone segment bounds. Null only for explicit fixed-zone compatibility callers. */
+        val provenanceStartTs: Long? = null,
+        val provenanceEndTs: Long? = null,
+    ) {
+        val durationSeconds: Long
+            get() = endTs - startTs + 1L
+    }
+
     internal data class AnalysisScoringPlan(
         val maxDays: Int,
         val anchorNowSeconds: Long,
@@ -131,6 +154,15 @@ object IntelligenceEngine {
         val requestedWindowSatisfied: Boolean,
         /** Next local-day boundary when a late-evening range becomes fully evaluable. */
         val deferUntilSeconds: Long? = null,
+        val deferralReason: AnalysisDeferralReason? = null,
+        /** Real timezone retained so execution and the 60-day calibration use the same civil calendar. */
+        val timeZone: ZoneId? = null,
+        /** Exact newest-first day windows; transition days can be 23 or 25 elapsed hours. */
+        val civilDayWindows: List<AnalysisCivilDayWindow> = emptyList(),
+        /** Same-segment calibration windows; never crosses a recorded travel-zone boundary. */
+        val calibrationCivilDayWindows: List<AnalysisCivilDayWindow> = emptyList(),
+        /** Permanently unscorable newest claim range; excluded by exact CAS without claiming a score. */
+        val terminalUnknownRange: AnalysisTimeZoneHistory.TerminalUnknownRange? = null,
     ) {
         val isHistoricalCatchUp: Boolean
             get() = passKind == AnalysisPassKind.HISTORICAL
@@ -154,37 +186,164 @@ object IntelligenceEngine {
         nowSeconds: Long,
         timezoneOffsetSeconds: Long? = null,
         force: Boolean = false,
+        timeZone: ZoneId? = null,
+        timeZoneHistory: AnalysisTimeZoneHistory.Snapshot? = null,
     ): AnalysisScoringPlan {
         val requested = requestedMaxDays.coerceAtLeast(1)
-        val zone = java.util.TimeZone.getDefault()
-        val recentOffset = timezoneOffsetSeconds
-            ?: (zone.getOffset(nowSeconds * 1_000L) / 1_000L)
+        val validRanges = claims.mapNotNull { it.affectedTimeRange() }
+        if (timeZoneHistory != null) {
+            val newestAffected = validRanges.maxOfOrNull(LongRange::last)
+            val terminalUnknown = newestAffected?.let {
+                timeZoneHistory.terminalUnknownRangeContaining(it)
+            }
+            if (terminalUnknown != null) {
+                return AnalysisScoringPlan(
+                    maxDays = 0,
+                    anchorNowSeconds = newestAffected,
+                    timezoneOffsetSeconds = 0L,
+                    passKind = AnalysisPassKind.DEFERRED,
+                    scanCoverage = AnalysisScanCoverage(startTs = 1L, endTs = 0L),
+                    requestedWindowSatisfied = false,
+                    deferralReason = AnalysisDeferralReason.TERMINAL_TIMEZONE_UNKNOWN,
+                    terminalUnknownRange = terminalUnknown,
+                )
+            }
+        }
+        data class WindowSelection(
+            val zone: ZoneId?,
+            val offsetSeconds: Long,
+            val windows: List<AnalysisCivilDayWindow>,
+            val unresolved:
+                AnalysisTimeZoneHistory.Uncertainty? = null,
+        )
+
+        fun selectWindows(
+            days: Int,
+            referenceSeconds: Long,
+            historicalCatchUp: Boolean,
+        ): WindowSelection {
+            if (timeZoneHistory != null) {
+                return when (val resolution = timeZoneHistory.resolve(referenceSeconds)) {
+                    is AnalysisTimeZoneHistory.Resolution.Exact -> {
+                        val zone = resolution.segment.zoneId
+                        WindowSelection(
+                            zone = zone,
+                            offsetSeconds = zone.rules
+                                .getOffset(Instant.ofEpochSecond(referenceSeconds))
+                                .totalSeconds
+                                .toLong(),
+                            windows = observedCivilDayWindows(
+                                maxDays = days,
+                                referenceNowSeconds = referenceSeconds,
+                                snapshot = timeZoneHistory,
+                                historicalCatchUp = historicalCatchUp,
+                            ),
+                        )
+                    }
+                    is AnalysisTimeZoneHistory.Resolution.Uncertain -> WindowSelection(
+                        zone = null,
+                        offsetSeconds = 0L,
+                        windows = emptyList(),
+                        unresolved = resolution.reason,
+                    )
+                }
+            }
+            val explicitZone = timeZone
+            val explicitOffset = timezoneOffsetSeconds
+                ?: explicitZone?.rules
+                    ?.getOffset(Instant.ofEpochSecond(referenceSeconds))
+                    ?.totalSeconds
+                    ?.toLong()
+            if (explicitOffset == null) {
+                return WindowSelection(
+                    zone = null,
+                    offsetSeconds = 0L,
+                    windows = emptyList(),
+                    unresolved = AnalysisTimeZoneHistory.Uncertainty.NO_OBSERVATION,
+                )
+            }
+            return WindowSelection(
+                zone = explicitZone,
+                offsetSeconds = explicitOffset,
+                windows = analysisCivilDayWindows(
+                    maxDays = days,
+                    referenceNowSeconds = referenceSeconds,
+                    timezoneOffsetSeconds = explicitOffset,
+                    timeZone = explicitZone,
+                ),
+            )
+        }
+
+        fun calibrationWindows(
+            selection: WindowSelection,
+            referenceSeconds: Long,
+            historicalCatchUp: Boolean,
+        ) =
+            if (timeZoneHistory != null) {
+                observedCivilDayWindows(
+                    maxDays = 60,
+                    referenceNowSeconds = referenceSeconds,
+                    snapshot = timeZoneHistory,
+                    historicalCatchUp = historicalCatchUp,
+                )
+            } else {
+                analysisCivilDayWindows(
+                    maxDays = 60,
+                    referenceNowSeconds = referenceSeconds,
+                    timezoneOffsetSeconds = selection.offsetSeconds,
+                    timeZone = selection.zone,
+                )
+            }
+
+        fun timezoneDeferredPlan(selection: WindowSelection): AnalysisScoringPlan {
+            val nextBoundary = selection.zone?.let { zone ->
+                historicalCivilDayWindow(nowSeconds, zone)?.endTs?.plus(1L)
+            }
+            return AnalysisScoringPlan(
+                maxDays = 0,
+                anchorNowSeconds = nowSeconds,
+                timezoneOffsetSeconds = selection.offsetSeconds,
+                passKind = AnalysisPassKind.DEFERRED,
+                scanCoverage = AnalysisScanCoverage(startTs = 1L, endTs = 0L),
+                requestedWindowSatisfied = false,
+                deferUntilSeconds = nextBoundary ?: (nowSeconds + SECONDS_PER_DAY),
+                deferralReason = AnalysisDeferralReason.TIMEZONE_PROVENANCE,
+                timeZone = selection.zone,
+            )
+        }
 
         if (claims.isEmpty()) {
+            val selection = selectWindows(requested, nowSeconds, historicalCatchUp = false)
+            val windows = selection.windows
+            if (windows.isEmpty()) return timezoneDeferredPlan(selection)
             val coverage = analysisScanCoverage(
-                maxDays = requested,
-                nowSeconds = nowSeconds,
-                timezoneOffsetSeconds = recentOffset,
+                civilDayWindows = windows,
+                actualNowSeconds = nowSeconds,
                 historicalCatchUp = false,
             )
             return AnalysisScoringPlan(
-                maxDays = requested,
+                maxDays = windows.size,
                 anchorNowSeconds = nowSeconds,
-                timezoneOffsetSeconds = recentOffset,
+                timezoneOffsetSeconds = selection.offsetSeconds,
                 passKind = AnalysisPassKind.RECENT,
                 scanCoverage = coverage,
-                requestedWindowSatisfied = true,
+                requestedWindowSatisfied = windows.size == requested,
+                timeZone = selection.zone,
+                civilDayWindows = windows,
+                calibrationCivilDayWindows =
+                    calibrationWindows(selection, nowSeconds, historicalCatchUp = false),
             )
         }
 
         val batchDays = minOf(requested, ANALYSIS_INVALIDATION_BATCH_DAYS)
+        val recentSelection = selectWindows(batchDays, nowSeconds, historicalCatchUp = false)
+        val recentWindows = recentSelection.windows
+        if (recentWindows.isEmpty()) return timezoneDeferredPlan(recentSelection)
         val recentCoverage = analysisScanCoverage(
-            maxDays = batchDays,
-            nowSeconds = nowSeconds,
-            timezoneOffsetSeconds = recentOffset,
+            civilDayWindows = recentWindows,
+            actualNowSeconds = nowSeconds,
             historicalCatchUp = false,
         )
-        val validRanges = claims.mapNotNull { it.affectedTimeRange() }
         // Today's sleep-bearing reads stop at 18:00. A generation whose newest edge is later than that
         // cannot advance yet: pretending the whole current day was evaluated would lose R-R/respiration/
         // skin/event work that only becomes part of a complete past-day window after local midnight.
@@ -197,29 +356,42 @@ object IntelligenceEngine {
             validRanges.none { it.last <= recentCoverage.endTs }
         ) {
             if (force) {
+                val forcedSelection = selectWindows(requested, nowSeconds, historicalCatchUp = false)
+                val forcedWindows = forcedSelection.windows
+                if (forcedWindows.isEmpty()) return timezoneDeferredPlan(forcedSelection)
                 return AnalysisScoringPlan(
-                    maxDays = requested,
+                    maxDays = forcedWindows.size,
                     anchorNowSeconds = nowSeconds,
-                    timezoneOffsetSeconds = recentOffset,
+                    timezoneOffsetSeconds = forcedSelection.offsetSeconds,
                     passKind = AnalysisPassKind.RECENT,
                     scanCoverage = analysisScanCoverage(
-                        maxDays = requested,
-                        nowSeconds = nowSeconds,
-                        timezoneOffsetSeconds = recentOffset,
+                        civilDayWindows = forcedWindows,
+                        actualNowSeconds = nowSeconds,
                         historicalCatchUp = false,
                     ),
-                    requestedWindowSatisfied = true,
+                    requestedWindowSatisfied = forcedWindows.size == requested,
+                    timeZone = forcedSelection.zone,
+                    civilDayWindows = forcedWindows,
+                    calibrationCivilDayWindows =
+                        calibrationWindows(
+                            forcedSelection,
+                            nowSeconds,
+                            historicalCatchUp = false,
+                        ),
                 )
             }
             return AnalysisScoringPlan(
                 maxDays = 1,
                 anchorNowSeconds = nowSeconds,
-                timezoneOffsetSeconds = recentOffset,
+                timezoneOffsetSeconds = recentSelection.offsetSeconds,
                 passKind = AnalysisPassKind.DEFERRED,
                 scanCoverage = recentCoverage,
                 requestedWindowSatisfied = false,
-                deferUntilSeconds =
-                    midnightLocal(nowSeconds, recentOffset) + SECONDS_PER_DAY,
+                deferUntilSeconds = recentWindows.firstOrNull()?.endTs?.plus(1L)
+                    ?: (midnightLocal(nowSeconds, recentSelection.offsetSeconds) + SECONDS_PER_DAY),
+                deferralReason = AnalysisDeferralReason.LATE_EVENING,
+                timeZone = recentSelection.zone,
+                civilDayWindows = recentWindows.take(1),
             )
         }
         val intersectsRecent = validRanges.any { affected ->
@@ -235,29 +407,51 @@ object IntelligenceEngine {
             return AnalysisScoringPlan(
                 maxDays = batchDays,
                 anchorNowSeconds = nowSeconds,
-                timezoneOffsetSeconds = recentOffset,
+                timezoneOffsetSeconds = recentSelection.offsetSeconds,
                 passKind = AnalysisPassKind.RECENT,
                 scanCoverage = recentCoverage,
-                requestedWindowSatisfied = requested <= batchDays,
+                requestedWindowSatisfied =
+                    requested <= batchDays && recentWindows.size >= requested,
+                timeZone = recentSelection.zone,
+                civilDayWindows = recentWindows,
+                calibrationCivilDayWindows =
+                    calibrationWindows(
+                        recentSelection,
+                        nowSeconds,
+                        historicalCatchUp = false,
+                    ),
             )
         }
 
-        val historicalOffset = timezoneOffsetSeconds
-            ?: (zone.getOffset(newestHistoricalTs * 1_000L) / 1_000L)
-        val historicalAnchor = midnightLocal(newestHistoricalTs, historicalOffset)
+        val historicalSelection =
+            selectWindows(batchDays, newestHistoricalTs, historicalCatchUp = true)
+        val historicalWindows = historicalSelection.windows
+        if (historicalWindows.isEmpty()) return timezoneDeferredPlan(historicalSelection)
         val historicalCoverage = analysisScanCoverage(
-            maxDays = batchDays,
-            nowSeconds = historicalAnchor,
-            timezoneOffsetSeconds = historicalOffset,
+            civilDayWindows = historicalWindows,
+            actualNowSeconds = historicalWindows.first().endTs,
             historicalCatchUp = true,
         )
+        val historicalAnchor = if (timeZoneHistory != null) {
+            historicalWindows.first().startTs + historicalWindows.first().durationSeconds / 2L
+        } else {
+            historicalWindows.first().startTs
+        }
         return AnalysisScoringPlan(
-            maxDays = batchDays,
+            maxDays = historicalWindows.size,
             anchorNowSeconds = historicalAnchor,
-            timezoneOffsetSeconds = historicalOffset,
+            timezoneOffsetSeconds = historicalSelection.offsetSeconds,
             passKind = AnalysisPassKind.HISTORICAL,
             scanCoverage = historicalCoverage,
             requestedWindowSatisfied = false,
+            timeZone = historicalSelection.zone,
+            civilDayWindows = historicalWindows,
+            calibrationCivilDayWindows =
+                calibrationWindows(
+                    historicalSelection,
+                    historicalAnchor,
+                    historicalCatchUp = true,
+                ),
         )
     }
 
@@ -280,20 +474,163 @@ object IntelligenceEngine {
         nowSeconds: Long,
         timezoneOffsetSeconds: Long,
         historicalCatchUp: Boolean = false,
+        timeZone: ZoneId? = null,
     ): AnalysisScanCoverage {
-        val boundedDays = maxDays.coerceAtLeast(1)
-        val localMidnight = midnightLocal(nowSeconds, timezoneOffsetSeconds)
+        val windows = analysisCivilDayWindows(
+            maxDays = maxDays,
+            referenceNowSeconds = nowSeconds,
+            timezoneOffsetSeconds = timezoneOffsetSeconds,
+            timeZone = timeZone,
+        )
+        return analysisScanCoverage(
+            civilDayWindows = windows,
+            actualNowSeconds = nowSeconds,
+            historicalCatchUp = historicalCatchUp,
+        )
+    }
+
+    internal fun analysisScanCoverage(
+        civilDayWindows: List<AnalysisCivilDayWindow>,
+        actualNowSeconds: Long,
+        historicalCatchUp: Boolean,
+    ): AnalysisScanCoverage {
+        val newest = civilDayWindows.firstOrNull()
+            ?: return AnalysisScanCoverage(startTs = 1L, endTs = 0L)
+        val oldest = civilDayWindows.last()
         return AnalysisScanCoverage(
-            // The 30-hour read look-back is context for the oldest enumerated day; it does not mean the
-            // preceding calendar day was itself recomputed, so it is deliberately outside claim coverage.
-            startTs = localMidnight - (boundedDays - 1).toLong() * SECONDS_PER_DAY,
+            startTs = oldest.startTs,
             endTs =
                 if (historicalCatchUp) {
-                    localMidnight + SECONDS_PER_DAY - 1L
+                    newest.endTs
                 } else {
-                    minOf(nowSeconds, localMidnight + 18L * 3_600L)
+                    minOf(actualNowSeconds, newest.localSixPMTs)
                 },
         )
+    }
+
+    internal fun historicalCivilDayWindow(
+        containingEpochSecond: Long,
+        timeZone: ZoneId,
+    ): AnalysisCivilDayWindow? = runCatching {
+        val localDate = Instant.ofEpochSecond(containingEpochSecond)
+            .atZone(timeZone)
+            .toLocalDate()
+        val start = localDate.atStartOfDay(timeZone)
+        val next = localDate.plusDays(1L).atStartOfDay(timeZone)
+        val startTs = start.toEpochSecond()
+        val nextStartTs = next.toEpochSecond()
+        require(nextStartTs > startTs)
+        val midpoint = Instant.ofEpochSecond(startTs + (nextStartTs - startTs) / 2L)
+        val representativeOffset =
+            timeZone.rules.getOffset(midpoint).totalSeconds.toLong()
+        val sixPM = localDate.atTime(LocalTime.of(18, 0)).atZone(timeZone).toEpochSecond()
+            .coerceIn(startTs, nextStartTs)
+        AnalysisCivilDayWindow(
+            startTs = startTs,
+            endTs = nextStartTs - 1L,
+            dayKey = localDate.toString(),
+            timezoneOffsetSeconds = representativeOffset,
+            localSixPMTs = sixPM,
+        )
+    }.getOrNull()
+
+    internal fun analysisCivilDayWindows(
+        maxDays: Int,
+        referenceNowSeconds: Long,
+        timezoneOffsetSeconds: Long,
+        timeZone: ZoneId? = null,
+    ): List<AnalysisCivilDayWindow> {
+        val boundedDays = maxDays.coerceAtLeast(1)
+        if (timeZone != null) {
+            val newestDate = Instant.ofEpochSecond(referenceNowSeconds)
+                .atZone(timeZone)
+                .toLocalDate()
+            val exact = (0 until boundedDays).mapNotNull { offset ->
+                historicalCivilDayWindow(
+                    newestDate.minusDays(offset.toLong())
+                        .atStartOfDay(timeZone)
+                        .toEpochSecond(),
+                    timeZone,
+                )
+            }
+            if (exact.size == boundedDays) return exact
+        }
+        val newestStart = midnightLocal(referenceNowSeconds, timezoneOffsetSeconds)
+        return (0 until boundedDays).map { offset ->
+            val start = newestStart - offset.toLong() * SECONDS_PER_DAY
+            AnalysisCivilDayWindow(
+                startTs = start,
+                endTs = start + SECONDS_PER_DAY - 1L,
+                dayKey = AnalyticsEngine.dayString(start, timezoneOffsetSeconds),
+                timezoneOffsetSeconds = timezoneOffsetSeconds,
+                localSixPMTs = start + 18L * 3_600L,
+            )
+        }
+    }
+
+    /**
+     * Exact newest-first civil days contained by one durable observed-zone segment.
+     *
+     * A recorded ZoneId change creates two exact segments with an unresolved interval between them. This
+     * helper never crosses that interval and never extends the current zone backward over legacy history.
+     * Same-zone DST changes remain in one segment and use the ZoneId's actual 23/24/25-hour day rules.
+     */
+    internal fun observedCivilDayWindows(
+        maxDays: Int,
+        referenceNowSeconds: Long,
+        snapshot: AnalysisTimeZoneHistory.Snapshot,
+        historicalCatchUp: Boolean,
+    ): List<AnalysisCivilDayWindow> {
+        val resolution = snapshot.resolve(referenceNowSeconds)
+        val segment = when (resolution) {
+            is AnalysisTimeZoneHistory.Resolution.Exact -> resolution.segment
+            is AnalysisTimeZoneHistory.Resolution.Uncertain -> return emptyList()
+        }
+        val offset = segment.zoneId.rules
+            .getOffset(Instant.ofEpochSecond(referenceNowSeconds))
+            .totalSeconds
+            .toLong()
+        val candidates = analysisCivilDayWindows(
+            maxDays = maxDays,
+            referenceNowSeconds = referenceNowSeconds,
+            timezoneOffsetSeconds = offset,
+            timeZone = segment.zoneId,
+        )
+        val contained = ArrayList<AnalysisCivilDayWindow>(candidates.size)
+        for ((index, window) in candidates.withIndex()) {
+            val requiredEnd = if (!historicalCatchUp && index == 0) {
+                minOf(referenceNowSeconds, window.localSixPMTs)
+            } else {
+                window.endTs
+            }
+            if (!segment.permitsHistoryBeforeStart && window.startTs < segment.startTs) break
+            if (!segment.openEnded && requiredEnd > segment.endTs) break
+            contained += window.copy(
+                provenanceStartTs = segment.startTs
+                    .takeUnless { segment.permitsHistoryBeforeStart },
+                provenanceEndTs = segment.endTs
+                    .takeUnless { segment.openEnded },
+            )
+        }
+        return contained
+    }
+
+    internal fun historicalSameOffsetDayCount(
+        endingAt: Long,
+        requestedDays: Int,
+        timezoneOffsetSeconds: Long,
+        timeZone: ZoneId,
+    ): Int {
+        val windows = analysisCivilDayWindows(
+            maxDays = requestedDays,
+            referenceNowSeconds = endingAt,
+            timezoneOffsetSeconds = timezoneOffsetSeconds,
+            timeZone = timeZone,
+        )
+        return windows.takeWhile {
+            it.durationSeconds == SECONDS_PER_DAY &&
+                it.timezoneOffsetSeconds == timezoneOffsetSeconds
+        }.size.coerceAtLeast(1)
     }
 
     /** Read cap per stream read , matches the Swift 200_000 bound. */
@@ -504,6 +841,8 @@ object IntelligenceEngine {
         val result: DayResult,
         val rawEvidence: ScoreConfidence.RestRawEvidence,
         val gravitySparse: Boolean,
+        val timezoneOffsetSeconds: Long,
+        val civilDayWindow: AnalysisCivilDayWindow,
     )
 
     internal data class EditedSleepDailyResult(
@@ -558,6 +897,9 @@ object IntelligenceEngine {
         maxHROverride: Double? = null,
         nowSeconds: Long = System.currentTimeMillis() / 1000L,
         analysisTimezoneOffsetSeconds: Long? = null,
+        analysisTimeZone: ZoneId? = null,
+        providedCivilDayWindows: List<AnalysisCivilDayWindow>? = null,
+        providedCalibrationCivilDayWindows: List<AnalysisCivilDayWindow>? = null,
         historicalCatchUp: Boolean = false,
         ownerSource: DayOwnerSource? = null,
         // Steps-estimate calibration I/O (kept pure-JVM, mirroring the Effort-rescore flagGet/flagSet):
@@ -651,7 +993,8 @@ object IntelligenceEngine {
             // A profile edit after this read queues reconciliation behind this same gate, preserving order.
             val resolvedProfile = profileProvider?.invoke() ?: profile
             val (out, healed) = analyzeRecentOnCpu(repo, resolvedProfile, maxDays, importedDeviceId, maxHROverride,
-                nowSeconds, analysisTimezoneOffsetSeconds, historicalCatchUp, ownerSource,
+                nowSeconds, analysisTimezoneOffsetSeconds, analysisTimeZone, providedCivilDayWindows,
+                providedCalibrationCivilDayWindows, historicalCatchUp, ownerSource,
                 manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
                 stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, sourceConsumed,
@@ -663,7 +1006,8 @@ object IntelligenceEngine {
             // re-scores the window against the cleaned store; its own heal then finds nothing (the duplicates
             // are gone), so this can never loop. Mirrors the Swift pendingForcedRescore re-arm.
             else analyzeRecentOnCpu(repo, resolvedProfile, maxDays, importedDeviceId, maxHROverride,
-                nowSeconds, analysisTimezoneOffsetSeconds, historicalCatchUp, ownerSource,
+                nowSeconds, analysisTimezoneOffsetSeconds, analysisTimeZone, providedCivilDayWindows,
+                providedCalibrationCivilDayWindows, historicalCatchUp, ownerSource,
                 manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
                 stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, sourceConsumed,
@@ -676,24 +1020,20 @@ object IntelligenceEngine {
     const val EFFORT_RESCORE_HISTORY_DAYS: Int = 4000
 
     /**
-     * One-shot, on-upgrade FULL-history Effort rescore (#313 PART B). The Effort hero gauge + numbers
-     * moved from the old 0–21 axis to NOOP's own 0–100 axis. On-device computed rows since v2.6.0 already
-     * store 0–100, but rows the engine computed on an OLDER build (capped at [maxDays] per run, so deep
-     * history was never revisited) may still hold 0–21 strain.
+     * One-shot, on-upgrade Effort migration (#313 PART B). The Effort hero gauge + numbers moved from
+     * the old 0–21 axis to NOOP's own 0–100 axis.
      *
-     * The SAFE fix is to recompute strain FROM SOURCE for every day with raw HR , those regenerate at
-     * 0–100 with NO double-rescale risk , rather than a blind `strain*100/21` multiply that would
-     * double-rescale the large population already on 0–100 (→ ~0–476). We do that by running the normal
-     * [analyzeRecent] once with the [maxDays] cap lifted to the full history, then persist a flag (via the
-     * injected [flagGet]/[flagSet]) so it runs exactly once. IMPORTED rows are never rewritten here (the
-     * engine only ever writes under the "-noop" computed source) , those are handled by re-import. A day
-     * already on 0–100 is recomputed from the same raw HR and lands on 0–100 again: UNCHANGED axis.
+     * The safe fix is source-scoped and fail-closed: recompute exact timezone-backed days from raw HR,
+     * replacing only days the scorer can prove and persist. Existing computed values are never cleared
+     * first because a new or unreadable timezone-history file can yield zero safe civil days; clearing in
+     * that state would erase all Effort history without replacement. Imported/vendor rows are untouched.
+     * Any Room, scoring, or cancellation failure escapes before [flagSet], so the migration retries later.
      *
      * The flag get/set are passed in so this stays a pure-JVM analytics object (no Android Context). The
      * caller (AppViewModel) wires them to [com.noop.ui.NoopPrefs]. Mirrors Swift
      * IntelligenceEngine.runEffortRescoreIfNeeded.
      */
-    suspend fun runEffortRescoreIfNeeded(
+    internal suspend fun runEffortRescoreIfNeeded(
         repo: WhoopRepository,
         profile: UserProfile = UserProfile(),
         profileProvider: (() -> UserProfile)? = null,
@@ -701,18 +1041,46 @@ object IntelligenceEngine {
         maxHROverride: Double? = null,
         flagGet: () -> Boolean,
         flagSet: () -> Unit,
+        timeZoneHistory: AnalysisTimeZoneHistory.Snapshot,
         historyDays: Int = EFFORT_RESCORE_HISTORY_DAYS,
     ) {
         if (flagGet()) return
-        analyzeRecent(
-            repo = repo,
-            profile = profile,
-            profileProvider = profileProvider,
-            maxDays = historyDays,
-            importedDeviceId = importedDeviceId,
-            maxHROverride = maxHROverride,
-        )
-        flagSet()
+        var remainingDays = historyDays.coerceAtLeast(1)
+        var processedDays = 0
+        val segments = timeZoneHistory.exactSegments()
+        for ((index, segment) in segments.withIndex().reversed()) {
+            if (remainingDays <= 0) break
+            val isLatestSegment = index == segments.lastIndex
+            val windows = observedCivilDayWindows(
+                maxDays = remainingDays,
+                referenceNowSeconds = segment.endTs,
+                snapshot = timeZoneHistory,
+                historicalCatchUp = !isLatestSegment,
+            )
+            if (windows.isEmpty()) continue
+            val calibrationWindows = observedCivilDayWindows(
+                maxDays = minOf(60, remainingDays),
+                referenceNowSeconds = segment.endTs,
+                snapshot = timeZoneHistory,
+                historicalCatchUp = !isLatestSegment,
+            )
+            analyzeRecent(
+                repo = repo,
+                profile = profile,
+                profileProvider = profileProvider,
+                maxDays = windows.size,
+                importedDeviceId = importedDeviceId,
+                maxHROverride = maxHROverride,
+                nowSeconds = segment.endTs,
+                analysisTimeZone = segment.zoneId,
+                providedCivilDayWindows = windows,
+                providedCalibrationCivilDayWindows = calibrationWindows,
+                historicalCatchUp = !isLatestSegment,
+            )
+            remainingDays -= windows.size
+            processedDays += windows.size
+        }
+        if (processedDays > 0) flagSet()
     }
 
     private suspend fun analyzeRecentOnCpu(
@@ -723,6 +1091,9 @@ object IntelligenceEngine {
         maxHROverride: Double? = null,
         nowSeconds: Long = System.currentTimeMillis() / 1000L,
         analysisTimezoneOffsetSeconds: Long? = null,
+        analysisTimeZone: ZoneId? = null,
+        providedCivilDayWindows: List<AnalysisCivilDayWindow>? = null,
+        providedCalibrationCivilDayWindows: List<AnalysisCivilDayWindow>? = null,
         historicalCatchUp: Boolean = false,
         ownerSource: DayOwnerSource? = null,
         manualStepCoefficient: Double? = null,
@@ -777,13 +1148,30 @@ object IntelligenceEngine {
 
         val computedId = importedDeviceId + "-noop"
 
-        // Device wall-clock offset (seconds east of UTC) for the sleep detector's daytime
-        // false-sleep guard (#90): the stager places each window's center on the LOCAL clock so
-        // only genuinely-daytime windows face the stricter nap bar. getOffset(nowMillis) folds in
-        // the current DST state (a DST boundary inside a single window is a negligible edge case
-        // for an hour-of-day band). Computed once per run.
+        // Production callers provide persisted exact windows. A caller-supplied ZoneId or fixed offset
+        // remains available for focused deterministic tests, but the process's current default zone is
+        // never extrapolated backward over historical samples.
+        val resolvedTimeZone = analysisTimeZone
+        val fallbackOffsetSeconds = analysisTimezoneOffsetSeconds
+            ?: resolvedTimeZone?.rules?.getOffset(Instant.ofEpochSecond(nowSeconds))
+                ?.totalSeconds?.toLong()
+        val scoringDayWindows = providedCivilDayWindows
+            ?.takeIf { it.isNotEmpty() }
+            ?.take(maxDays.coerceAtLeast(1))
+            ?: fallbackOffsetSeconds?.let { offset ->
+                analysisCivilDayWindows(
+                    maxDays = maxDays,
+                    referenceNowSeconds = nowSeconds,
+                    timezoneOffsetSeconds = offset,
+                    timeZone = resolvedTimeZone,
+                )
+            }
+            ?: emptyList()
+        if (scoringDayWindows.isEmpty()) return emptyList<Computed>() to 0
         val tzOffsetSeconds = analysisTimezoneOffsetSeconds
-            ?: (java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L)
+            ?: scoringDayWindows.first().timezoneOffsetSeconds
+        val newestScoringDay = scoringDayWindows.first()
+        val oldestScoringDay = scoringDayWindows.last()
 
         // Device-registry snapshot for per-day owner resolution (invariant I2 , a day's scores come from
         // exactly ONE source). Read ONCE before the loop: the paired-device list is stable for the run.
@@ -858,9 +1246,14 @@ object IntelligenceEngine {
         // day keys are LOCAL calendar days, consistent with the dashboard's local "today" lookup. A
         // west-of-UTC user's evening crosses midnight UTC; bucketing by UTC put it in the next UTC day,
         // which the local read never found (Toronto/UTC-4 report).
-        val nowLocalMidnight = midnightLocal(nowSeconds, tzOffsetSeconds)
+        val nowLocalMidnight = newestScoringDay.startTs
         val analysisWindowEnd =
-            if (historicalCatchUp) nowLocalMidnight + SECONDS_PER_DAY - 1L else nowSeconds
+            minOf(
+                if (historicalCatchUp) newestScoringDay.endTs else nowSeconds,
+                newestScoringDay.provenanceEndTs ?: Long.MAX_VALUE,
+            )
+        val analysisWindowStart = oldestScoringDay.startTs
+        val analysisProvenanceStart = oldestScoringDay.provenanceStartTs ?: Long.MIN_VALUE
 
         // ── Learned habitual midsleep (#547) ──────────────────────────────────
         // Compute the user's habitual midsleep ONCE per run from the trailing sleep history so the
@@ -873,7 +1266,7 @@ object IntelligenceEngine {
         // the Sleep tab resolve to the identical block. Mirrors Swift. (#547)
         val habitualMidsleepSec = computeHabitualMidsleep(
             repo, importedDeviceId, computedId,
-            nowLocalMidnight - maxDays * SECONDS_PER_DAY - 30 * 3_600L,
+            maxOf(analysisWindowStart - 30 * 3_600L, analysisProvenanceStart),
             analysisWindowEnd,
             tzOffsetSeconds,
         )
@@ -889,16 +1282,26 @@ object IntelligenceEngine {
         val skinFamilyByOwner = HashMap<String, DeviceFamily>()
         // #938: the WHOOP 4.0 ADC offset is per-device, not per-night. Learn one anchor per owner from the
         // whole scan window and reuse it for every night so cross-night deviations survive.
-        val skinAnchorScanFrom = nowLocalMidnight - (maxDays - 1).toLong() * SECONDS_PER_DAY - 30 * 3_600L
-        val skinAnchorScanTo = nowLocalMidnight + 18 * 3_600L
+        val skinAnchorScanFrom =
+            maxOf(analysisWindowStart - 30 * 3_600L, analysisProvenanceStart)
+        val skinAnchorScanTo = minOf(
+            newestScoringDay.endTs + 1L - 6L * 3_600L,
+            (newestScoringDay.provenanceEndTs ?: Long.MAX_VALUE).let {
+                if (it == Long.MAX_VALUE) it else it + 1L
+            },
+        )
         val skinAnchorByOwner = HashMap<String, Double>()
         val skinAnchorResolvedOwners = HashSet<String>()
 
-        for (offset in 0 until maxDays) {
-            val dayStart = nowLocalMidnight - offset * SECONDS_PER_DAY
-            val day = AnalyticsEngine.dayString(dayStart, tzOffsetSeconds)
+        for (exactDay in scoringDayWindows) {
+            val dayStart = exactDay.startTs
+            val dayTimezoneOffsetSeconds = exactDay.timezoneOffsetSeconds
+            val day = exactDay.dayKey
             // Read a generous window around the night that ends on `day`; the stager finds the span.
-            val from = dayStart - 30 * 3_600L
+            val from = maxOf(
+                dayStart - 30 * 3_600L,
+                exactDay.provenanceStartTs ?: Long.MIN_VALUE,
+            )
             // Sleep read-window END. For a PAST day the night may end any time before the NEXT local
             // midnight (late sleepers / weekend lie-ins / shift workers wake well after noon), so a
             // hard `dayStart + 18h` (6 PM) bound TRUNCATED the read at exactly 18:00 , and a real wake
@@ -906,13 +1309,18 @@ object IntelligenceEngine {
             // local midnight so the stager sees the whole night; TODAY keeps the 18:00 cap (the DAO
             // clamps to now anyway, and an in-progress nap shouldn't be read as a finished night).
             // Matches the Swift window.
-            val nextMidnight = dayStart + SECONDS_PER_DAY
-            val to =
+            val nextMidnight = exactDay.endTs + 1L
+            val unclampedTo =
                 if (historicalCatchUp || dayStart < nowLocalMidnight) {
                     nextMidnight
                 } else {
-                    dayStart + 18 * 3_600L
+                    exactDay.localSixPMTs
                 }
+            val provenanceEndExclusive = exactDay.provenanceEndTs?.let {
+                if (it == Long.MAX_VALUE) it else it + 1L
+            } ?: Long.MAX_VALUE
+            val to = minOf(unclampedTo, provenanceEndExclusive)
+            if (from >= to) continue
 
             // I2: pick the single device that OWNS this day, and read ITS streams below. With one device
             // this resolves to [importedDeviceId] (active strap, has data → priority 0), so nothing
@@ -926,8 +1334,11 @@ object IntelligenceEngine {
             // Active Minutes belongs to the calendar day, not the sleep score. Load and summarize the
             // day's HR before the overnight minimum-sample gate so daytime exercise survives a night
             // when the band was not worn.
-            val dayMidnight = midnightLocal(dayStart, tzOffsetSeconds)
-            val dayEnd = dayMidnight + SECONDS_PER_DAY - 1
+            val dayMidnight = dayStart
+            val dayEnd = minOf(
+                exactDay.endTs,
+                exactDay.provenanceEndTs ?: Long.MAX_VALUE,
+            )
             val dayHr = repo.hrSamples(owner, dayMidnight, dayEnd, STREAM_LIMIT)
             val activeMinutes = activeZoneSet?.let {
                 ActiveZoneMinutesCalculator.minutes(hr = dayHr, zoneSet = it)
@@ -1045,7 +1456,10 @@ object IntelligenceEngine {
                 profile = profile,
                 baselines = baselines1,
                 maxHROverride = maxHROverride,
-                tzOffsetSeconds = tzOffsetSeconds,
+                tzOffsetSeconds = dayTimezoneOffsetSeconds,
+                timeZone = analysisTimeZone,
+                civilDayStartTs = exactDay.startTs,
+                civilDayEndTsExclusive = exactDay.endTs + 1L,
                 wristOff = wristOff,
                 habitualMidsleepSec = habitualMidsleepSec,
                 bandSleepState = bandSleepState,
@@ -1070,11 +1484,16 @@ object IntelligenceEngine {
                 hrvWindowDetail = dayStart == nowLocalMidnight,
                 deepHrvWindow = deepHrvWindow,
             )
+            if (res.status != DayResult.Status.COMPLETED) {
+                diag("analysis day=$day SKIPPED reason=invalid_civil_day_bounds")
+                continue
+            }
             val restRawEvidence = ScoreConfidence.restRawEvidence(
                 sessions = res.sleepSessions,
                 rr = rr,
                 resp = resp,
-                offsetSec = tzOffsetSeconds,
+                offsetSec = dayTimezoneOffsetSeconds,
+                timeZone = analysisTimeZone,
                 habitualMidsleepSec = habitualMidsleepSec,
             )
             val restGravitySparse = SleepStager.isGravitySparse(grav, hr)
@@ -1127,8 +1546,12 @@ object IntelligenceEngine {
             // 5/MG always banks counter rows so this never suppresses its real trace.
             if (stepsTraceSink != null && daySteps.isNotEmpty()) {
                 for (line in StepsEstimateEngineTrace.rawCounterTrace(
-                    daySteps = daySteps, dayKey = day, tzOffsetSeconds = tzOffsetSeconds,
+                    daySteps = daySteps,
+                    dayKey = day,
+                    tzOffsetSeconds = dayTimezoneOffsetSeconds,
                     ticksPerStep = profile.stepTicksPerStep,
+                    civilDayStartTs = exactDay.startTs,
+                    civilDayEndTsExclusive = exactDay.endTs + 1L,
                 )) {
                     stepsTraceSink(line)
                 }
@@ -1164,6 +1587,8 @@ object IntelligenceEngine {
                     result = res,
                     rawEvidence = restRawEvidence,
                     gravitySparse = restGravitySparse,
+                    timezoneOffsetSeconds = dayTimezoneOffsetSeconds,
+                    civilDayWindow = exactDay,
                 ),
             )
         }
@@ -1203,7 +1628,7 @@ object IntelligenceEngine {
         // values in the maps is safe because the causal fold excludes both the current and later days.
 
         val windowStart =
-            nowLocalMidnight - (maxDays - 1).toLong() * SECONDS_PER_DAY - 30L * 3_600L
+            maxOf(analysisWindowStart - 30L * 3_600L, analysisProvenanceStart)
 
         // ── Pass 2: re-score every offloaded night against the now-seeded baseline. Only the
         // recovery composite is recomputed (cheap, baseline-dependent); every other field was
@@ -1290,8 +1715,10 @@ object IntelligenceEngine {
             val dayEditedRows = editedRowsForDay(
                 editedRows,
                 res.daily.day,
-                tzOffsetSeconds,
+                night.timezoneOffsetSeconds,
                 editSourceTimeline,
+                civilDayStartTs = night.civilDayWindow.startTs,
+                civilDayEndTsExclusive = night.civilDayWindow.endTs + 1L,
             )
             val editsByStart: Map<Long, String?> = dayEditedRows.associate { it.startTs to it.stagesJSON }
             val editOnsetByStart: Map<Long, Long> = dayEditedRows.associate { it.startTs to it.effectiveStartTs }
@@ -1299,7 +1726,9 @@ object IntelligenceEngine {
             // sleep aggregate feeds Rest + recovery. No edit touching this night → `daily` is unchanged.
             val editedSleep = sleepEditedDaily(
                 res.daily, res.sleepSessions, editsByStart, editOnsetByStart,
-                tzOffsetSeconds, habitualMidsleepSec, night.rawEvidence.mainSessionStarts,
+                night.timezoneOffsetSeconds,
+                habitualMidsleepSec,
+                night.rawEvidence.mainSessionStarts,
             )
             val daily = editedSleep.daily
             val selectedRawEvidence = night.rawEvidence.selecting(editedSleep.mainSessionStarts)
@@ -1486,10 +1915,8 @@ object IntelligenceEngine {
         // are never touched (a BLE-only WHOOP 4.0 user has no import fallback). Rows older than the
         // window keep their old keys (cosmetic off-by-one, acceptable). yyyy-MM-dd sorts
         // chronologically, so the string range IS a date range.
-        val oldestDay = AnalyticsEngine.dayString(
-            nowLocalMidnight - (maxDays - 1) * SECONDS_PER_DAY, tzOffsetSeconds,
-        )
-        val newestDay = AnalyticsEngine.dayString(nowLocalMidnight, tzOffsetSeconds)
+        val oldestDay = oldestScoringDay.dayKey
+        val newestDay = newestScoringDay.dayKey
 
         // ── Source-only Charge/Rest fold for imported-only days (#823) ──────────────────────────────────
         // A user who ONLY imports (Health Connect, or an Oura/Fitbit/Garmin export, or Apple Health) has
@@ -1711,8 +2138,19 @@ object IntelligenceEngine {
         // Mirrors the Swift IntelligenceEngine steps-estimate block byte-for-byte (60-day window, the
         // apple-health daily `steps` reference, the [localMidnight,+24h) motion volume).
         val stepsCalDays = 60
-        val calOldest = AnalyticsEngine.dayString(
-            nowLocalMidnight - (stepsCalDays - 1) * SECONDS_PER_DAY, tzOffsetSeconds)
+        val stepCalibrationWindows = providedCalibrationCivilDayWindows
+            ?.takeIf { it.isNotEmpty() }
+            ?.take(stepsCalDays)
+            ?: fallbackOffsetSeconds?.let { offset ->
+                analysisCivilDayWindows(
+                    maxDays = stepsCalDays,
+                    referenceNowSeconds = nowSeconds,
+                    timezoneOffsetSeconds = offset,
+                    timeZone = resolvedTimeZone,
+                )
+            }
+            ?: scoringDayWindows
+        val calOldest = stepCalibrationWindows.last().dayKey
         // Phone reference steps per day, from the apple-health daily rows (steps > 0 only). On Android the
         // Apple-Health importer banks `steps` in AppleDaily (DailyMetric holds only sleep/HR/HRV , see
         // AppleHealthImporter), so read appleDaily here, not dailyMetrics, or the reference is always empty
@@ -1731,10 +2169,14 @@ object IntelligenceEngine {
         // Per-day motion volume over the calibration window, read from the owner-resolved strap streams.
         // (Owner resolution mirrors the scoring loop; a single-device install resolves to importedDeviceId.)
         val motionByDay = HashMap<String, Double>()
-        for (off in 0 until stepsCalDays) {
-            val dayMid = midnightLocal(nowLocalMidnight - off * SECONDS_PER_DAY, tzOffsetSeconds)
-            val dayEnd = dayMid + SECONDS_PER_DAY - 1
-            val dayKey = AnalyticsEngine.dayString(dayMid, tzOffsetSeconds)
+        for (calibrationDay in stepCalibrationWindows) {
+            val dayMid = calibrationDay.startTs
+            val dayEnd = minOf(
+                calibrationDay.endTs,
+                calibrationDay.provenanceEndTs ?: Long.MAX_VALUE,
+            )
+            if (dayEnd < dayMid) continue
+            val dayKey = calibrationDay.dayKey
             val owner = resolveDayOwner(repo, ownerSource, candidatePriorities, dayKey, dayMid, dayEnd, importedDeviceId)
             sourceConsumed(owner)
             val grav = repo.gravitySamples(owner, dayMid, dayEnd, STREAM_LIMIT)
@@ -1847,9 +2289,7 @@ object IntelligenceEngine {
             deviceIds = healIds,
             windowStart = windowStart,
             windowEnd = analysisWindowEnd,
-            oldestDay = oldestDay,
-            newestDay = newestDay,
-            timezoneOffsetSeconds = tzOffsetSeconds,
+            civilDayWindows = scoringDayWindows,
             freshStarts = keptStarts,
         )
         val healDropped = healResult.deleted
@@ -1887,9 +2327,8 @@ object IntelligenceEngine {
         // This is deliberately terminal: every ownership/read/persistence boundary above must succeed
         // before a non-selected candidate can satisfy its exact-generation claim.
         val scanCoverage = analysisScanCoverage(
-            maxDays = maxDays,
-            nowSeconds = nowSeconds,
-            timezoneOffsetSeconds = tzOffsetSeconds,
+            civilDayWindows = scoringDayWindows,
+            actualNowSeconds = nowSeconds,
             historicalCatchUp = historicalCatchUp,
         )
         sourcesEvaluatedForOwnership(
@@ -2187,7 +2626,41 @@ object IntelligenceEngine {
         day: String,
         tzOffsetSeconds: Long,
         sourceTimeline: List<SleepSession> = emptyList(),
+        civilDayStartTs: Long? = null,
+        civilDayEndTsExclusive: Long? = null,
     ): List<SleepSession> {
+        val terminalWakeBySession = linkedMapOf<Pair<String, Long>, Long>()
+        for ((source, sourceSessions) in sourceTimeline.groupBy(SleepSession::deviceId)) {
+            val blocks = sourceSessions.map {
+                SleepStageTotals.NightBlock(it.effectiveStartTs, it.endTs)
+            }
+            for (bucket in SleepStageTotals.wakeDayBuckets(blocks) { tzOffsetSeconds }) {
+                for (group in bucket.groups) {
+                    val terminalWake = group.indices
+                        .maxOfOrNull { sourceSessions[it].endTs }
+                        ?: continue
+                    for (index in group.indices) {
+                        terminalWakeBySession[source to sourceSessions[index].startTs] =
+                            terminalWake
+                    }
+                }
+            }
+        }
+        val hasExplicitCivilBounds =
+            civilDayStartTs != null || civilDayEndTsExclusive != null
+        if (hasExplicitCivilBounds) {
+            if (civilDayStartTs == null ||
+                civilDayEndTsExclusive == null ||
+                civilDayEndTsExclusive <= civilDayStartTs
+            ) {
+                return emptyList()
+            }
+            return editedRows.filter { row ->
+                val terminalWake = terminalWakeBySession[row.deviceId to row.startTs]
+                    ?: row.endTs
+                terminalWake >= civilDayStartTs && terminalWake < civilDayEndTsExclusive
+            }
+        }
         if (sourceTimeline.isEmpty()) {
             return editedRows.filter {
                 AnalyticsEngine.dayString(it.endTs, tzOffsetSeconds) == day
@@ -2710,16 +3183,15 @@ object IntelligenceEngine {
         deviceIds: List<String>,
         windowStart: Long,
         windowEnd: Long,
-        oldestDay: String,
-        newestDay: String,
-        timezoneOffsetSeconds: Long,
+        civilDayWindows: List<AnalysisCivilDayWindow>,
         freshStarts: Set<Long>,
     ): SleepHealResult {
         val deleted = ArrayList<SleepSession>()
         var unchangedDeleteCount = 0
+        val healableWindows = civilDayWindows.map { it.startTs..it.endTs }
         for (deviceId in deviceIds.toSortedSet()) {
             val healable = repo.sleepSessions(deviceId, windowStart, windowEnd, 4000).filter {
-                AnalyticsEngine.dayString(it.endTs, timezoneOffsetSeconds) in oldestDay..newestDay
+                healableWindows.any { window -> it.endTs in window }
             }
             val candidates = SleepSessionDedup.dedupe(healable, freshStarts = freshStarts).dropped
             // Row-only delete: the user-facing deleteSleepSession writes a dismissal tombstone that

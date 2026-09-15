@@ -64,6 +64,7 @@ import com.noop.data.NutritionLogContract
 import com.noop.data.MoodStore
 import com.noop.data.WhoopRepository
 import com.noop.analytics.CalibratedMetricEstimate
+import com.noop.analytics.AnalysisTimeZoneHistory
 import com.noop.analytics.BodyProfilePolicy
 import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.NoopScoreAlgorithmRevision
@@ -76,6 +77,7 @@ import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.WhoopCsvImporter
 import com.noop.ingest.WhoopReferenceImportManifest
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -539,13 +541,37 @@ fun CompareScreen(vm: AppViewModel) {
         )
         referenceState = ReferenceUiState(loading = true)
         referenceState = try {
-            val verifiedDays = verifiedCurrentNoopDays ?: IntelligenceEngine.analyzeRecent(
-                repo = vm.repo,
-                profile = vm.analysisProfileSnapshot(),
-                maxDays = 120,
-                importedDeviceId = vm.activeStrapId,
-            ).filter { it.rawStrapEvidence }.mapTo(linkedSetOf()) { it.day }.also {
-                verifiedCurrentNoopDays = it
+            val verifiedDays = verifiedCurrentNoopDays ?: run {
+                val analysisNowSeconds = System.currentTimeMillis() / 1_000L
+                val timeZoneHistory = AnalysisTimeZoneHistory.from(context).observe(
+                    observedAtEpochSeconds = analysisNowSeconds,
+                    zoneId = ZoneId.systemDefault(),
+                )
+                val plan = IntelligenceEngine.analysisScoringPlan(
+                    requestedMaxDays = 120,
+                    claims = emptyList(),
+                    nowSeconds = analysisNowSeconds,
+                    timeZoneHistory = timeZoneHistory,
+                )
+                if (!plan.shouldAnalyze) {
+                    emptySet()
+                } else {
+                    IntelligenceEngine.analyzeRecent(
+                        repo = vm.repo,
+                        profile = vm.analysisProfileSnapshot(),
+                        maxDays = plan.maxDays,
+                        importedDeviceId = vm.activeStrapId,
+                        nowSeconds = plan.anchorNowSeconds,
+                        analysisTimezoneOffsetSeconds = plan.timezoneOffsetSeconds,
+                        analysisTimeZone = plan.timeZone,
+                        providedCivilDayWindows = plan.civilDayWindows,
+                        providedCalibrationCivilDayWindows =
+                            plan.calibrationCivilDayWindows,
+                        historicalCatchUp = plan.isHistoricalCatchUp,
+                    ).filter { it.rawStrapEvidence }.mapTo(linkedSetOf()) { it.day }
+                }.also {
+                    verifiedCurrentNoopDays = it
+                }
             }
             val today = LocalDate.now()
             val report = WhoopReferenceCalibration.report(

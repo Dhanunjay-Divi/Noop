@@ -597,30 +597,87 @@ final class Repository: ObservableObject {
     /// so the card sat stale until an unrelated sync landed. Race-free: Repository is @MainActor.
     @Published private(set) var hydrationSeq = 0
     func noteHydrationChanged() { hydrationSeq += 1 }
-    /// A hydration mutation spans an async read-modify-write. Main-actor isolation alone does not make
-    /// that span atomic because another tap can enter while the first store call is suspended. Chain each
-    /// operation behind the prior task so rapid adds, edits, and deletes cannot overwrite one another.
-    private var hydrationMutationTail: Task<HydrationMutationResult, Never>?
+    /// Hydration migration reads and user mutations can both change the canonical entry set. Main-actor
+    /// isolation alone does not make either async span atomic because another operation can enter while a
+    /// store call is suspended. Chain every entry read/migration/add/edit/delete behind one completion tail.
+    private var hydrationOperationTail: Task<Void, Never>?
+
+    private enum HydrationOperationCancellationPolicy {
+        case cancelWithCaller
+        case commitOnceScheduled
+    }
+
+    private func performSerializedHydrationOperation<Value: Sendable>(
+        cancellationPolicy: HydrationOperationCancellationPolicy,
+        _ operation: @escaping @MainActor @Sendable () async throws -> Value
+    ) async throws -> Value {
+        let predecessor = hydrationOperationTail
+        let task = Task { @MainActor in
+            _ = await predecessor?.value
+            try Task.checkCancellation()
+            return try await operation()
+        }
+        hydrationOperationTail = Task { @MainActor in
+            _ = try? await task.value
+        }
+        switch cancellationPolicy {
+        case .cancelWithCaller:
+            return try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        case .commitOnceScheduled:
+            return try await task.value
+        }
+    }
+
     func performSerializedHydrationMutation(
         _ operation: @escaping @MainActor @Sendable () async -> HydrationMutationResult
     ) async -> HydrationMutationResult {
-        let predecessor = hydrationMutationTail
-        let task = Task { @MainActor in
-            _ = await predecessor?.value
-            return await operation()
+        do {
+            return try await performSerializedHydrationOperation(
+                cancellationPolicy: .commitOnceScheduled
+            ) {
+                await operation()
+            }
+        } catch {
+            return .failed
         }
-        hydrationMutationTail = task
-        return await task.value
+    }
+
+    func performSerializedHydrationRead(
+        _ operation: @escaping @MainActor @Sendable () async throws -> [HydrationEntry]
+    ) async throws -> [HydrationEntry] {
+        try await performSerializedHydrationOperation(
+            cancellationPolicy: .cancelWithCaller,
+            operation
+        )
     }
     #if DEBUG
     private(set) var hydrationReadFailureForTesting = false
     private(set) var hydrationWriteFailureForTesting = false
+    private var hydrationMigrationBarrierForTesting:
+        (@MainActor @Sendable () async -> Void)?
+
     func setHydrationFailureForTesting(
         reads: Bool = false,
         writes: Bool = false
     ) {
         hydrationReadFailureForTesting = reads
         hydrationWriteFailureForTesting = writes
+    }
+
+    func setHydrationMigrationBarrierForTesting(
+        _ barrier: (@MainActor @Sendable () async -> Void)?
+    ) {
+        hydrationMigrationBarrierForTesting = barrier
+    }
+
+    func runHydrationMigrationBarrierForTesting() async {
+        guard let barrier = hydrationMigrationBarrierForTesting else { return }
+        hydrationMigrationBarrierForTesting = nil
+        await barrier()
     }
     #endif
 

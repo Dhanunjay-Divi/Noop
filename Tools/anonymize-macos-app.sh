@@ -75,4 +75,9 @@ codesign --verify --deep --verbose=1 "$APP"
 # not just Contents/MacOS, so an embedded widget/extension can never ship the builder path.
 residual=$(find "$APP" -type f -exec strings -a {} + 2>/dev/null | grep -c "$HOME" || true)
 echo "residual home-path hits (whole bundle): ${residual:-0}"
-[ "${residual:-0}" -eq 0 ] && echo "✓ clean" || { echo "✗ residual paths remain" >&2; exit 1; }
+if [ "${residual:-0}" -eq 0 ]; then
+  echo "✓ clean"
+else
+  echo "✗ residual paths remain" >&2
+  exit 1
+fi

@@ -788,7 +788,7 @@ internal object DailyReviewReminderNotifier {
         )
         val body = context.getString(
             if (kind == DailyReviewKind.MORNING) {
-                R.string.daily_review_morning_body
+                R.string.appwide_daily_review_morning_body
             } else {
                 R.string.daily_review_evening_body
             },

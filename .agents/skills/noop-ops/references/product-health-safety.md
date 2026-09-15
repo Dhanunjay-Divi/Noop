@@ -138,8 +138,8 @@ notifications, exercise media, or Safety/SOS.
 
 ## Private Reference Inputs
 
-The owner may provide `/Users/divii/Downloads/noop.json`,
-`/Users/divii/Downloads/noop_ref`, screenshots, archives, or exercise media.
+The owner may provide `$HOME/Downloads/noop.json`,
+`$HOME/Downloads/noop_ref`, screenshots, archives, or exercise media.
 Use them only as review context:
 
 - never commit or upload them;

@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Edit
@@ -72,6 +75,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.filled.WaterDrop
@@ -380,6 +384,7 @@ fun AppRoot(
     val contextualProcessingIds by ContextualActionCenter.processingIds.collectAsStateWithLifecycle()
     var expandedContextualActionId by rememberSaveable { mutableStateOf<String?>(null) }
     var hydrationConfirmationMl by remember { mutableIntStateOf(0) }
+    var showLighterWorkoutOptions by rememberSaveable { mutableStateOf(false) }
     val contextualActionScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val keyboardVisible = WindowInsets.ime.getBottom(density) > 0
@@ -437,6 +442,11 @@ fun AppRoot(
                         }
                         expandedContextualActionId = null
                         openTopLevel(action.resolvedRecoveryRoute().navRoute)
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "adaptive_day.lighter_options_presented",
+                            fields = mapOf("source" to "in_app"),
+                        )
+                        showLighterWorkoutOptions = true
                     }
                     return
                 } else {
@@ -489,6 +499,16 @@ fun AppRoot(
                     viewModel.requestJournalDay(it)
                 }
                 openTopLevel(request.route.navRoute)
+                if (
+                    request.presentation ==
+                    NotificationRoutePresentation.LIGHTER_WORKOUT_OPTIONS
+                ) {
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "adaptive_day.lighter_options_presented",
+                        fields = mapOf("source" to "notification"),
+                    )
+                    showLighterWorkoutOptions = true
+                }
             }
         }
     }
@@ -817,6 +837,168 @@ fun AppRoot(
                     },
                 )
             }
+        }
+
+        if (showLighterWorkoutOptions) {
+            ModalBottomSheet(
+                onDismissRequest = { showLighterWorkoutOptions = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = Palette.surfaceOverlay,
+                contentColor = Palette.textPrimary,
+            ) {
+                LighterWorkoutOptionsSheet(
+                    onOpenWorkouts = {
+                        showLighterWorkoutOptions = false
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "adaptive_day.lighter_options_action",
+                            fields = mapOf("destination" to "workouts"),
+                        )
+                        openTopLevel(Destination.Workouts.route)
+                    },
+                    onOpenStrength = {
+                        showLighterWorkoutOptions = false
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "adaptive_day.lighter_options_action",
+                            fields = mapOf("destination" to "strength"),
+                        )
+                        quickOverlay = QuickActionKind.STRENGTH
+                    },
+                    onDismiss = { showLighterWorkoutOptions = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LighterWorkoutOptionsSheet(
+    onOpenWorkouts: () -> Unit,
+    onOpenStrength: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.appwide_adaptive_day_guidance_lighter_options_title,
+                ),
+                style = NoopType.title2,
+                color = Palette.textPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.appwide_action_dismiss),
+                    tint = Palette.textSecondary,
+                )
+            }
+        }
+        Text(
+            text = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_intro,
+            ),
+            style = NoopType.body,
+            color = Palette.textSecondary,
+        )
+        LighterWorkoutOptionRow(
+            icon = Icons.Filled.Bolt,
+            title = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_intensity_title,
+            ),
+            detail = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_intensity_detail,
+            ),
+        )
+        HorizontalDivider(color = Palette.hairline)
+        LighterWorkoutOptionRow(
+            icon = Icons.Filled.Timer,
+            title = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_duration_title,
+            ),
+            detail = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_duration_detail,
+            ),
+        )
+        HorizontalDivider(color = Palette.hairline)
+        LighterWorkoutOptionRow(
+            icon = Icons.Filled.Spa,
+            title = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_recovery_title,
+            ),
+            detail = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_recovery_detail,
+            ),
+        )
+        Text(
+            text = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_disclaimer,
+            ),
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+        )
+        NoopButton(
+            text = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_open_workouts,
+            ),
+            leadingIcon = Icons.AutoMirrored.Filled.DirectionsRun,
+            kind = NoopButtonKind.Primary,
+            fullWidth = true,
+            onClick = onOpenWorkouts,
+        )
+        NoopButton(
+            text = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_open_strength,
+            ),
+            leadingIcon = Icons.Filled.FitnessCenter,
+            kind = NoopButtonKind.Secondary,
+            fullWidth = true,
+            onClick = onOpenStrength,
+        )
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun LighterWorkoutOptionRow(
+    icon: ImageVector,
+    title: String,
+    detail: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .background(Palette.chargeColor.copy(alpha = 0.12f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Palette.chargeColor,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(title, style = NoopType.headline, color = Palette.textPrimary)
+            Text(detail, style = NoopType.footnote, color = Palette.textSecondary)
         }
     }
 }

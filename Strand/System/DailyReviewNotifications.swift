@@ -17,9 +17,24 @@ enum NoopNotificationRoute: String, Codable, Equatable, Sendable {
     case coach
 }
 
+enum NotificationRoutePresentation: String, Codable, Equatable, Sendable {
+    case lighterWorkoutOptions
+}
+
 struct PendingNotificationRouteRequest: Equatable, Sendable {
     let route: NoopNotificationRoute
     let journalDay: String?
+    let presentation: NotificationRoutePresentation?
+
+    init(
+        route: NoopNotificationRoute,
+        journalDay: String? = nil,
+        presentation: NotificationRoutePresentation? = nil
+    ) {
+        self.route = route
+        self.journalDay = journalDay
+        self.presentation = presentation
+    }
 }
 
 /// Durable hand-off between `UNUserNotificationCenterDelegate` and the SwiftUI app shells.
@@ -36,6 +51,7 @@ enum NotificationRouteBridge {
     static let journalDayUserInfoKey = "noop.notification.journalDay"
     static let pendingRouteKey = "noop.notification.pendingRoute"
     static let pendingJournalDayKey = "noop.notification.pendingJournalDay"
+    static let pendingPresentationKey = "noop.notification.pendingPresentation"
     static let routeRequested = Notification.Name("noop.notification.routeRequested")
 
     static func route(from userInfo: [AnyHashable: Any]) -> NoopNotificationRoute? {
@@ -49,13 +65,22 @@ enum NotificationRouteBridge {
 
     static func recordPending(
         _ route: NoopNotificationRoute,
-        journalDay: String? = nil
+        journalDay: String? = nil,
+        presentation: NotificationRoutePresentation? = nil
     ) {
         UserDefaults.standard.set(route.rawValue, forKey: pendingRouteKey)
         if route == .journal, let journalDay = canonicalJournalDay(journalDay) {
             UserDefaults.standard.set(journalDay, forKey: pendingJournalDayKey)
         } else {
             UserDefaults.standard.removeObject(forKey: pendingJournalDayKey)
+        }
+        if let presentation {
+            UserDefaults.standard.set(
+                presentation.rawValue,
+                forKey: pendingPresentationKey
+            )
+        } else {
+            UserDefaults.standard.removeObject(forKey: pendingPresentationKey)
         }
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: routeRequested, object: nil)
@@ -65,15 +90,23 @@ enum NotificationRouteBridge {
     static func consumePendingRequest() -> PendingNotificationRouteRequest? {
         guard let raw = UserDefaults.standard.string(forKey: pendingRouteKey) else {
             UserDefaults.standard.removeObject(forKey: pendingJournalDayKey)
+            UserDefaults.standard.removeObject(forKey: pendingPresentationKey)
             return nil
         }
         let journalDay = UserDefaults.standard.string(forKey: pendingJournalDayKey)
+        let presentationRaw = UserDefaults.standard.string(
+            forKey: pendingPresentationKey
+        )
         UserDefaults.standard.removeObject(forKey: pendingRouteKey)
         UserDefaults.standard.removeObject(forKey: pendingJournalDayKey)
+        UserDefaults.standard.removeObject(forKey: pendingPresentationKey)
         guard let route = NoopNotificationRoute(rawValue: raw) else { return nil }
         return PendingNotificationRouteRequest(
             route: route,
-            journalDay: route == .journal ? canonicalJournalDay(journalDay) : nil
+            journalDay: route == .journal ? canonicalJournalDay(journalDay) : nil,
+            presentation: presentationRaw.flatMap(
+                NotificationRoutePresentation.init(rawValue:)
+            )
         )
     }
 
@@ -470,7 +503,7 @@ enum DailyReviewNotifications {
                 identifier: morningRequestID,
                 minuteOfDay: clampMinute(morning),
                 title: String(localized: "Morning check-in"),
-                body: String(localized: "Review Sleep and Recovery, then log how rested you feel."),
+                body: String(localized: "appwide.daily_review.morning.body"),
                 route: .sleep
             ),
             ReminderSpec(
@@ -1098,6 +1131,7 @@ enum MorningRecapNotifications {
         recoveryOrSleepScorePresent: Bool,
         reportDay: String,
         lastReportDay: String?,
+        scheduledMorningReviewEnabled: Bool = false,
         inQuietHours: Bool = false
     ) -> Bool {
         enabled
@@ -1105,6 +1139,7 @@ enum MorningRecapNotifications {
             && recoveryOrSleepScorePresent
             && !reportDay.isEmpty
             && reportDay != lastReportDay
+            && !scheduledMorningReviewEnabled
             && !inQuietHours
     }
 
@@ -1230,7 +1265,9 @@ enum MorningRecapNotifications {
             materializedAfterSync: materializedAfterSync,
             recoveryOrSleepScorePresent: recoveryPresent || sleepScorePresent,
             reportDay: reportDay,
-            lastReportDay: lastReportDay
+            lastReportDay: lastReportDay,
+            scheduledMorningReviewEnabled:
+                DailyReviewNotifications.isMorningEnabled
         ), activeReportDay != reportDay else { return }
         let deferredUntil = RoutineNotificationQuietHours.nextEnd(
             after: now,

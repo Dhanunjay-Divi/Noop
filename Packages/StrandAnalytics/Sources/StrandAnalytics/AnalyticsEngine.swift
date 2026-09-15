@@ -13,6 +13,25 @@ import WhoopProtocol
 // (persistence is wired elsewhere). All derived values are APPROXIMATE.
 
 public enum AnalyticsEngine {
+    public enum CivilDayBoundsValidation: Equatable, Sendable {
+        case absent
+        case valid(Range<Int>)
+        case invalid
+    }
+
+    public static func validateCivilDayBounds(
+        startTs: Int?,
+        endTsExclusive: Int?
+    ) -> CivilDayBoundsValidation {
+        switch (startTs, endTsExclusive) {
+        case (nil, nil):
+            return .absent
+        case let (.some(start), .some(end)) where end > start:
+            return .valid(start..<end)
+        default:
+            return .invalid
+        }
+    }
 
     /// Pair the strap's WRIST_OFF/WRIST_ON events into off-wrist `[start, end)` intervals for the sleep
     /// detector's fractional wear filter (#500; design credited to j0b-dev's #504). Each WRIST_OFF opens
@@ -57,6 +76,13 @@ public enum AnalyticsEngine {
     /// All embedded store and analyzer values are immutable and `Sendable`, so the complete result can
     /// safely cross from the detached per-day scan back to the main-actor intelligence fold.
     public struct DayResult: Sendable {
+        public enum Status: String, Equatable, Sendable {
+            case completed
+            case rejectedInvalidCivilDayBounds
+        }
+
+        /// Typed completion state. A rejected result carries no derived values and must never be persisted.
+        public let status: Status
         /// DailyMetric in the WhoopStore cache shape (recovery/strain/sleep rolled up).
         public let daily: DailyMetric
         /// Detected sleep sessions (rich, with stage segments).
@@ -119,7 +145,9 @@ public enum AnalyticsEngine {
                     sessionMotionByStart: [Int: [Double]] = [:],
                     sessionSleepStateByStart: [Int: [Int]] = [:],
                     chargeDrivers: [ChargeDriver] = [],
-                    skinTempRelative: SkinTempRelative? = nil) {
+                    skinTempRelative: SkinTempRelative? = nil,
+                    status: Status = .completed) {
+            self.status = status
             self.daily = daily; self.sleepSessions = sleepSessions
             self.cachedSleep = cachedSleep; self.workouts = workouts
             self.recovery = recovery; self.strain = strain
@@ -133,6 +161,33 @@ public enum AnalyticsEngine {
             self.restConfidence = restConfidence
             self.sessionMotionByStart = sessionMotionByStart
             self.sessionSleepStateByStart = sessionSleepStateByStart
+        }
+
+        fileprivate static func rejectedInvalidCivilDayBounds(
+            day: String
+        ) -> DayResult {
+            DayResult(
+                daily: DailyMetric(
+                    day: day,
+                    totalSleepMin: nil,
+                    efficiency: nil,
+                    deepMin: nil,
+                    remMin: nil,
+                    lightMin: nil,
+                    disturbances: nil,
+                    restingHr: nil,
+                    avgHrv: nil,
+                    recovery: nil,
+                    strain: nil,
+                    exerciseCount: nil
+                ),
+                sleepSessions: [],
+                cachedSleep: [],
+                workouts: [],
+                recovery: nil,
+                strain: nil,
+                status: .rejectedInvalidCivilDayBounds
+            )
         }
     }
 
@@ -430,6 +485,15 @@ public enum AnalyticsEngine {
                                   // false-sleep guard (#90). Default 0 keeps pure-function callers/tests
                                   // on UTC; IntelligenceEngine passes the device's real offset.
                                   tzOffsetSeconds: Int = 0,
+                                  // Named historical zone for timestamp-specific offset lookup. When nil,
+                                  // fixed-offset callers retain their existing deterministic behavior.
+                                  timeZoneIdentifier: String? = nil,
+                                  // Exact UTC bounds for a civil day whose duration is not 86,400 seconds.
+                                  // Both values must be supplied together. Normal callers leave them nil and
+                                  // retain the fixed-offset fast path; a DST transition-day caller supplies
+                                  // [start, end) so daily membership never drops or borrows an adjacent hour.
+                                  civilDayStartTs: Int? = nil,
+                                  civilDayEndTsExclusive: Int? = nil,
                                   // Off-wrist `[start, end)` intervals (unix seconds) for the off-wrist
                                   // sleep backstop (#500), paired from WRIST_OFF/WRIST_ON events by
                                   // `offWristIntervals`. The HR-gap proxy in detectSleep is the always-on
@@ -504,6 +568,13 @@ public enum AnalyticsEngine {
                                   // (UnitPrefs.hrvWindowKey). Default false = byte-identical whole-night value.
                                   deepHrvWindow: Bool = false) -> DayResult {
 
+        let civilBounds = validateCivilDayBounds(
+            startTs: civilDayStartTs,
+            endTsExclusive: civilDayEndTsExclusive
+        )
+        guard civilBounds != .invalid else {
+            return DayResult.rejectedInvalidCivilDayBounds(day: day)
+        }
         // Precompute the day's UTC bounds ONCE (#996). `dayString(ts, offsetSec:)` formats the UTC
         // calendar day of (ts + offset) with a FIXED offset, so "== day" is exactly membership in
         // [dayStartUtc, +86400). That turns the day-bucketing filters below — otherwise a per-sample
@@ -512,11 +583,33 @@ public enum AnalyticsEngine {
         // formatter compare (locked by AnalyticsEngineDayBoundsTests, incl. fractional offsets).
         let dayStartUtc = dayStartUtcSeconds(day)
         let dayEndUtc = dayStartUtc + 86_400
-        func tsInDay(_ ts: Int) -> Bool { (ts + tzOffsetSeconds) >= dayStartUtc && (ts + tzOffsetSeconds) < dayEndUtc }
+        let explicitCivilBounds: Range<Int>?
+        if case .valid(let bounds) = civilBounds {
+            explicitCivilBounds = bounds
+        } else {
+            explicitCivilBounds = nil
+        }
+        func tsInDay(_ ts: Int) -> Bool {
+            if let explicitCivilBounds {
+                return explicitCivilBounds.contains(ts)
+            }
+            return (ts + tzOffsetSeconds) >= dayStartUtc
+                && (ts + tzOffsetSeconds) < dayEndUtc
+        }
+        let namedTimeZone = timeZoneIdentifier.flatMap {
+            TimeZone(identifier: $0)
+        }
+        let offsetAtEpochSec: (Int) -> Int = { epochSecond in
+            namedTimeZone?.secondsFromGMT(
+                for: Date(timeIntervalSince1970: TimeInterval(epochSecond))
+            ) ?? tzOffsetSeconds
+        }
 
         // ── Sleep detection + staging ─────────────────────────────────────────
         let detectedSessions = SleepStager.detectSleep(hr: hr, rr: rr, resp: resp, gravity: gravity,
-                                                  tzOffsetSeconds: tzOffsetSeconds, wristOff: wristOff,
+                                                  tzOffsetSeconds: tzOffsetSeconds,
+                                                  timeZoneIdentifier: timeZoneIdentifier,
+                                                  wristOff: wristOff,
                                                   bandSleepState: bandSleepState,
                                                   useSleepStagerV2: useSleepStagerV2,
                                                   traceSink: traceSink)
@@ -556,7 +649,8 @@ public enum AnalyticsEngine {
         // group; the debt ledger starts with it and separately credits naps, so #525 does not regress.
         let mainGroupIdx = SleepStageTotals.mainNightGroupIndices(
             matched.map { SleepStageTotals.NightBlock(start: $0.start, end: $0.end) },
-            offsetSec: tzOffsetSeconds, habitualMidsleepSec: habitualMidsleepSec) ?? []
+            offsetAtEpochSec: offsetAtEpochSec,
+            habitualMidsleepSec: habitualMidsleepSec) ?? []
         let mainGroup: [SleepSession] = mainGroupIdx.map { matched[$0] }
 
         // ── Daily sleep aggregates (AASM) SUMMED over the main-night GROUP (#525 / #561) ──

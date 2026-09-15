@@ -20,6 +20,7 @@ iterations=${NOOP_LAUNCH_GATE_ITERATIONS:-}
 
 [ -n "$version" ] || fail
 [ "${#version}" -le 128 ] || fail
+# shellcheck disable=SC2016 # The literal pattern rejects command-substitution text.
 case "$version" in [!A-Za-z0-9]*|*'$('*|*[!A-Za-z0-9._-]*) fail ;; esac
 [ "${#salt}" -eq 32 ] || fail
 [ "${#verifier}" -eq 64 ] || fail

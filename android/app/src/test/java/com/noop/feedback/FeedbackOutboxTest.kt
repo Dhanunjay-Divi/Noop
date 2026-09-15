@@ -1063,6 +1063,49 @@ class FeedbackOutboxTest {
     }
 
     @Test
+    fun schedulerFailureClearsPreparedGenerationsAndRemainsRetryable() {
+        val filesDir = temporary.newFolder("scheduler-failure")
+        val outbox = deterministicOutbox(filesDir)
+        val staged = outbox.stage(
+            baseEntries(),
+            includesUserNote = false,
+            includesScreenshot = false,
+        )
+        val deliveryGeneration = "11111111-2222-4333-8444-555555555555"
+        val prepared = outbox.prepareWorker(
+            localId = staged.localId,
+            replace = false,
+            generation = deliveryGeneration,
+        )
+
+        val failed = outbox.markFailed(
+            localId = prepared.localId,
+            failure = FeedbackFailureCategory.UNKNOWN,
+            expectedWorkerGeneration = deliveryGeneration,
+        )
+        assertEquals(FeedbackState.FAILED, failed.state)
+        assertEquals(null, failed.workerGeneration)
+        assertEquals(FeedbackFailureCategory.UNKNOWN, failed.failureCategory)
+
+        val cancelGeneration = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        val canceling = outbox.requestCancel(
+            localId = failed.localId,
+            replacementWorkerGeneration = cancelGeneration,
+        )
+        val cancelFailed = outbox.markCancelFailed(
+            localId = canceling.localId,
+            failure = FeedbackFailureCategory.UNKNOWN,
+            expectedWorkerGeneration = cancelGeneration,
+        )
+        assertEquals(FeedbackState.CANCEL_FAILED, cancelFailed.state)
+        assertEquals(null, cancelFailed.workerGeneration)
+        assertEquals(
+            FeedbackState.CANCEL_FAILED,
+            outbox.recover().single().state,
+        )
+    }
+
+    @Test
     fun reservationContinuityDeadlineIsBoundedAndUsesServerRetention() {
         val created = 1_789_000_000_000L
         val retainedUntilMillis = created + TimeUnit.DAYS.toMillis(2)
