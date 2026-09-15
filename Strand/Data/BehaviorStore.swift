@@ -188,6 +188,7 @@ final class BehaviorStore: ObservableObject {
     func setDailyActionCheckIn(_ value: DailyActionPlanner.CheckIn, for day: String) {
         d.set(day, forKey: Self.dailyActionCheckInDayKey)
         d.set(value.rawValue, forKey: Self.dailyActionCheckInValueKey)
+        ContextualInterventionInputs.notifyChanged()
     }
 
     // MARK: Charge baseline recalibration

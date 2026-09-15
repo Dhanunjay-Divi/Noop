@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.analytics.FusionSource
+import com.noop.analytics.Baselines
 import com.noop.data.DailyMetric
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -70,6 +71,25 @@ class TodayExplainabilityTest {
     }
 
     @Test
+    fun recoveryHeroTone_isNeutralUntilBaselineIsReady() {
+        assertEquals(
+            Palette.onDarkSecondary.copy(alpha = 0.64f),
+            todayRecoveryHeroColors(recovery = null, calibrationNights = 0).first,
+        )
+        assertEquals(
+            Palette.chargeColor,
+            todayRecoveryHeroColors(
+                recovery = null,
+                calibrationNights = Baselines.minNightsSeed,
+            ).first,
+        )
+        assertEquals(
+            Palette.recoveryGaugeColors(72.0),
+            todayRecoveryHeroColors(recovery = 72.0, calibrationNights = null),
+        )
+    }
+
+    @Test
     fun scoreState_carriedLastNight_whenNotCalibratingAndPriorExists() {
         // A genuine post-rollover carry (yesterday's score) stays "Last night". An explicit `today` anchors
         // the recency check so the test is stable regardless of the real wall-clock date (#779).
@@ -110,6 +130,16 @@ class TodayExplainabilityTest {
         assertEquals(ScoreState.NeedsStrap, state)
         assertEquals("Needs wearable data", state.title)
         assertEquals("No data for today. Was Noop Band worn and connected overnight?", state.detail)
+    }
+
+    @Test
+    fun historicalMissingRecovery_isNotFabricatedAsZeroOrLive() {
+        assertEquals(ScoreState.Scored(64.0), scoreStateForHistorical(64.0))
+
+        val missing = scoreStateForHistorical(null)
+        assertEquals(ScoreState.MissingForDay, missing)
+        assertEquals("No Recovery score", missing.title)
+        assertEquals("No Recovery score was recorded for this date.", missing.detail)
     }
 
     @Test

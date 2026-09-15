@@ -4,6 +4,7 @@ final class NOOPiOSUITests: XCTestCase {
     private enum PreferredContentSize {
         static let standard = "UICTContentSizeCategoryL"
         static let accessibilityLarge = "UICTContentSizeCategoryAccessibilityL"
+        static let accessibilityXXXL = "UICTContentSizeCategoryAccessibilityXXXL"
     }
 
     private func launchApp(
@@ -90,27 +91,27 @@ final class NOOPiOSUITests: XCTestCase {
 
     func testPrimaryTabsNavigateAndExposeSelection() {
         let app = launchApp()
-        let today = app.buttons["noop.tab.0"]
-        let trends = app.buttons["noop.tab.1"]
-        let workouts = app.buttons["noop.tab.2"]
-        let sleep = app.buttons["noop.tab.3"]
-        let more = app.buttons["noop.tab.4"]
+        let identifiers = (0...4).map { "noop.tab.\($0)" }
 
-        XCTAssertTrue(today.waitForExistence(timeout: 20))
-        XCTAssertTrue(trends.exists)
-        XCTAssertTrue(workouts.exists)
-        XCTAssertTrue(sleep.exists)
-        XCTAssertTrue(more.exists)
-        XCTAssertTrue(today.isSelected)
+        XCTAssertTrue(app.buttons[identifiers[0]].waitForExistence(timeout: 20))
+        for identifier in identifiers {
+            XCTAssertTrue(app.buttons[identifier].exists)
+        }
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            app.buttons[identifiers[0]].isSelected
+        })
 
-        trends.tap()
-        XCTAssertTrue(trends.isSelected)
-        workouts.tap()
-        XCTAssertTrue(workouts.isSelected)
-        sleep.tap()
-        XCTAssertTrue(sleep.isSelected)
-        more.tap()
-        XCTAssertTrue(more.isSelected)
+        for identifier in identifiers.dropFirst() {
+            let tab = app.buttons[identifier]
+            XCTAssertTrue(tab.waitForExistence(timeout: 5))
+            tab.tap()
+            XCTAssertTrue(
+                waitUntil(timeout: 5) {
+                    app.buttons[identifier].isSelected
+                },
+                "\(identifier) did not expose its selected accessibility state."
+            )
+        }
     }
 
     func testPrivateNativePilotEnrollmentAndIdempotentSync() throws {
@@ -205,7 +206,12 @@ final class NOOPiOSUITests: XCTestCase {
     }
 
     func testAppReportRequiresConsentAndBuildsPrivateAttachmentReview() {
-        let app = launchApp(extraArguments: ["--demo-app-report"])
+        let app = launchApp(
+            extraArguments: [
+                "--demo-app-report",
+                "--demo-feedback-hold-queued",
+            ]
+        )
 
         XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["Capture what happened"].exists)
@@ -213,7 +219,7 @@ final class NOOPiOSUITests: XCTestCase {
             app.staticTexts.matching(
                 NSPredicate(
                     format: "label CONTAINS[c] %@",
-                    "Nothing is uploaded automatically"
+                    "Nothing uploads until you review"
                 )
             ).firstMatch.exists
         )
@@ -230,14 +236,113 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["meta.json"].exists)
         XCTAssertFalse(app.staticTexts["raw-capture.jsonl"].exists)
         XCTAssertFalse(app.staticTexts["screenshot.png"].exists)
-        XCTAssertTrue(app.buttons["Share ZIP"].exists)
-        keepScreenshot(app, name: "app-report-review")
-
-        app.buttons["Share ZIP"].tap()
+        XCTAssertTrue(app.buttons["Send feedback"].exists)
+        XCTAssertFalse(app.buttons["Share ZIP"].exists)
         XCTAssertTrue(
             app.staticTexts.matching(
-                NSPredicate(format: "label BEGINSWITH %@", "Share sheet opened for noop-app-report")
-            ).firstMatch.waitForExistence(timeout: 10)
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "uploads exactly this reviewed ZIP"
+                )
+            ).firstMatch.exists
+        )
+        keepScreenshot(app, name: "app-report-review")
+
+        app.buttons["Send feedback"].tap()
+        XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Cancel feedback"].exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "Queued securely on this phone"
+                )
+            ).firstMatch.exists
+        )
+        XCTAssertTrue(app.buttons["Close app report"].isEnabled)
+        app.buttons["Close app report"].tap()
+        XCTAssertFalse(app.navigationBars["App report"].exists)
+    }
+
+    func testAppReportScreenSnapshotIsReviewableAndRemovable() {
+        let app = launchApp(
+            extraArguments: [
+                "--demo-app-report",
+                "--demo-feedback-hold-queued",
+            ]
+        )
+
+        XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
+        let screenToggle = app.switches[
+            "noop.app-report.include-screenshot"
+        ]
+        XCTAssertTrue(screenToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(screenToggle.isEnabled)
+        XCTAssertEqual(screenToggle.value as? String, "0")
+        XCTAssertTrue(
+            setSwitch(screenToggle, on: true, in: app),
+            "The screen snapshot switch must become enabled through a visible user tap."
+        )
+        let buildReport = app.buttons["Build report"]
+        XCTAssertTrue(
+            waitUntil(timeout: 10) {
+                buildReport.isEnabled
+                    && screenToggle.value as? String == "1"
+            }
+        )
+        XCTAssertTrue(scrollToHittable(buildReport, in: app))
+
+        buildReport.tap()
+        XCTAssertTrue(app.staticTexts["Report ready"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["screenshot.png"].exists)
+        XCTAssertTrue(
+            app.images["noop.app-report.screenshot-preview"]
+                .waitForExistence(timeout: 5)
+        )
+
+        let removeSnapshot = app.buttons["Remove screen snapshot"]
+        XCTAssertTrue(removeSnapshot.waitForExistence(timeout: 5))
+        XCTAssertTrue(scrollToHittable(removeSnapshot, in: app))
+        removeSnapshot.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 5) {
+                !app.staticTexts["screenshot.png"].exists
+                    && !app.images["noop.app-report.screenshot-preview"].exists
+            }
+        )
+    }
+
+    func testAppReportCancellationUsesAccurateRemovalCopy() {
+        let app = launchApp(
+            extraArguments: [
+                "--demo-app-report",
+                "--demo-feedback-hold-queued",
+            ]
+        )
+
+        XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
+        app.buttons["Build report"].tap()
+        XCTAssertTrue(app.staticTexts["Report ready"].waitForExistence(timeout: 20))
+        app.buttons["Send feedback"].tap()
+        XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 10))
+
+        app.buttons["Cancel feedback"].tap()
+        XCTAssertTrue(app.staticTexts["Canceled"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "sealed local ZIP was removed"
+                )
+            ).firstMatch.exists
+        )
+        XCTAssertFalse(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "Nothing was uploaded"
+                )
+            ).firstMatch.exists
         )
     }
 
@@ -391,8 +496,10 @@ final class NOOPiOSUITests: XCTestCase {
         let app = launchApp(tab: "trends")
         let expanded = app.buttons["noop.tab.1"]
         XCTAssertTrue(expanded.waitForExistence(timeout: 20))
+        let scroll = app.scrollViews["noop.trends.scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
 
-        app.swipeUp()
+        scroll.swipeUp()
 
         let compact = app.buttons["noop.tab.compact"]
         XCTAssertTrue(compact.waitForExistence(timeout: 5))
@@ -424,6 +531,41 @@ final class NOOPiOSUITests: XCTestCase {
         app.swipeUp()
         assertExpandedNavigationLabels(selectedTab: 2, in: app)
         keepScreenshot(app, name: "se-accessibility-workouts-clear-navigation")
+    }
+
+    func testPrimaryNavigationRemainsVisibleAndOperableAtAccessibilityXXXL() {
+        let app = launchApp(
+            preferredContentSize: PreferredContentSize.accessibilityXXXL
+        )
+        let tabs = (0...4).map { app.buttons["noop.tab.\($0)"] }
+        XCTAssertTrue(tabs[0].waitForExistence(timeout: 20))
+        for (index, tab) in tabs.enumerated() {
+            XCTAssertTrue(tab.exists)
+            XCTAssertGreaterThan(tab.frame.width, 0)
+            XCTAssertGreaterThan(tab.frame.height, 0)
+            XCTAssertTrue(tab.frame.intersects(app.frame))
+            tab.tap()
+            XCTAssertTrue(tab.isSelected, "Tab \(index) must remain operable at AX-XXXL.")
+        }
+    }
+
+    func testTrendsTimeoutShowsRetryAndRetryLeavesTheTerminalFailure() {
+        let app = launchApp(
+            tab: "trends",
+            extraArguments: ["--demo-trends-timeout"]
+        )
+        let failure = app.descendants(matching: .any)["noop.trends.failure"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 20))
+
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 5))
+        retry.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["noop.trends.range-label"]
+                .waitForExistence(timeout: 20)
+        )
+        XCTAssertFalse(failure.exists)
     }
 
     func testActiveMinutesCardExplainsCreditAndCoverageAtLargeText() {
@@ -840,11 +982,35 @@ final class NOOPiOSUITests: XCTestCase {
             "charge", "effort", "rest", "hrv", "restingHr",
             "bloodOxygen", "respiratory", "steps", "weight", "calories",
         ]
-        for id in metricIDs {
-            let tile = app.descendants(matching: .any)["noop.today.key-metric.\(id)"]
-            for _ in 0..<4 where !tile.exists { app.swipeUp() }
-            XCTAssertTrue(tile.waitForExistence(timeout: 3), "\(id) must remain in the Today catalog.")
+        let scroll = app.scrollViews["noop.today.scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 20))
+        let readinessTile = app.descendants(matching: .any)["noop.today.key-metric.charge"]
+        for _ in 0..<12 where !readinessTile.exists {
+            scroll.swipeUp()
         }
+        XCTAssertTrue(
+            readinessTile.waitForExistence(timeout: 15),
+            "The demo Key Metrics section must finish loading before catalog traversal."
+        )
+        let calendar = app.buttons["noop.today.calendar"]
+        for _ in 0..<12 where !calendar.isHittable {
+            scroll.swipeDown()
+        }
+        XCTAssertTrue(calendar.isHittable, "Today must return to the top before catalog traversal.")
+
+        var missing = Set(metricIDs)
+        for _ in 0..<16 {
+            let visible = missing.filter { id in
+                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists
+            }
+            missing.subtract(visible)
+            if missing.isEmpty { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(
+            missing.isEmpty,
+            "Every Today metric must remain reachable; missing: \(missing.sorted().joined(separator: ", "))."
+        )
         keepScreenshot(app, name: "today-complete-key-metric-catalog")
     }
 
@@ -920,18 +1086,28 @@ final class NOOPiOSUITests: XCTestCase {
 
         let finalControl = app.switches["noop.sleep-planner.per-day"]
         let compactNavigation = app.buttons["noop.tab.compact"]
+        let expandedNavigation = app.buttons["noop.tab.4"]
         let quickActions = app.buttons["noop.quick-actions"]
         XCTAssertTrue(finalControl.waitForExistence(timeout: 20))
-        XCTAssertTrue(compactNavigation.waitForExistence(timeout: 5))
-        XCTAssertTrue(quickActions.exists)
+        XCTAssertTrue(
+            compactNavigation.exists || expandedNavigation.waitForExistence(timeout: 5),
+            "Navigation must remain available in its compact or accessibility-expanded presentation."
+        )
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
+        var navigationY = compactNavigation.exists
+            ? compactNavigation.frame.minY
+            : expandedNavigation.frame.minY
         var firstFloatingControlY = min(
-            compactNavigation.frame.minY,
+            navigationY,
             quickActions.frame.minY
         )
         for _ in 0..<10 where finalControl.frame.maxY + 8 > firstFloatingControlY {
             app.swipeUp()
+            navigationY = compactNavigation.exists
+                ? compactNavigation.frame.minY
+                : expandedNavigation.frame.minY
             firstFloatingControlY = min(
-                compactNavigation.frame.minY,
+                navigationY,
                 quickActions.frame.minY
             )
         }
@@ -951,25 +1127,36 @@ final class NOOPiOSUITests: XCTestCase {
             "--demo-more-route", "alarms",
             "--demo-compact-tab-bar",
             "--demo-sleep-per-day",
+            "--demo-scroll-bottom",
         ]
         app.launch()
 
-        let monday = app.staticTexts["Monday"]
-        let sundayWakeTime = app.descendants(matching: .any)["Sunday wake time"]
+        let sundayWakeRow = app.otherElements["noop.sleep-planner.wake-row.1"]
         let compactNavigation = app.buttons["noop.tab.compact"]
+        let expandedNavigation = app.buttons["noop.tab.4"]
         let quickActions = app.buttons["noop.quick-actions"]
         let perDay = app.switches["noop.sleep-planner.per-day"]
         XCTAssertTrue(perDay.waitForExistence(timeout: 20))
         XCTAssertEqual(perDay.value as? String, "1")
-        XCTAssertTrue(monday.waitForExistence(timeout: 5))
-        XCTAssertTrue(sundayWakeTime.waitForExistence(timeout: 5))
-        var firstFloatingControlY = min(compactNavigation.frame.minY, quickActions.frame.minY)
-        for _ in 0..<8 where sundayWakeTime.frame.maxY + 8 > firstFloatingControlY {
+        XCTAssertTrue(sundayWakeRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            compactNavigation.exists || expandedNavigation.waitForExistence(timeout: 5),
+            "Navigation must remain available in its compact or accessibility-expanded presentation."
+        )
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
+        var navigationY = compactNavigation.exists
+            ? compactNavigation.frame.minY
+            : expandedNavigation.frame.minY
+        var firstFloatingControlY = min(navigationY, quickActions.frame.minY)
+        for _ in 0..<8 where sundayWakeRow.frame.maxY + 8 > firstFloatingControlY {
             app.swipeUp()
-            firstFloatingControlY = min(compactNavigation.frame.minY, quickActions.frame.minY)
+            navigationY = compactNavigation.exists
+                ? compactNavigation.frame.minY
+                : expandedNavigation.frame.minY
+            firstFloatingControlY = min(navigationY, quickActions.frame.minY)
         }
-        XCTAssertTrue(sundayWakeTime.isHittable)
-        XCTAssertLessThanOrEqual(sundayWakeTime.frame.maxY + 8, firstFloatingControlY)
+        XCTAssertTrue(sundayWakeRow.isHittable)
+        XCTAssertLessThanOrEqual(sundayWakeRow.frame.maxY + 8, firstFloatingControlY)
     }
 
     func testDeviceActionsAndFooterClearPersistentNavigation() {
@@ -1082,28 +1269,43 @@ final class NOOPiOSUITests: XCTestCase {
         let app = launchApp()
         let calendar = app.buttons["noop.today.calendar"]
         XCTAssertTrue(calendar.waitForExistence(timeout: 20))
-        let scroll = app.scrollViews.firstMatch
-        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        let scrollIdentifier = "noop.today.scroll"
+        XCTAssertTrue(app.scrollViews[scrollIdentifier].waitForExistence(timeout: 5))
 
         let options = XCTMeasureOptions()
-        options.iterationCount = 5
         #if targetEnvironment(simulator)
         // The iOS 26 simulator currently throws NSInternalInconsistencyException while decoding the
-        // scrolling signpost payload. Keep CI useful with process metrics; real devices retain Apple's
-        // hitch/deceleration metric below.
+        // scrolling signpost payload and can starve XCTest's event-loop observer across repeated measured
+        // gestures. One unmeasured round trip plus one complete process-metric round trip keeps hosted CI
+        // as a bounded liveness check without crossing the simulator's repeat-interaction failure edge.
+        // Re-query before every event because interruption handling can invalidate a cached XCUIElement.
+        // The dedicated compaction test owns navigation semantics; production's bounded CADisplayLink
+        // monitor records 50 ms and 150 ms hitches, and real devices retain five iterations of Apple's
+        // scrolling/deceleration metric below.
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        app.scrollViews[scrollIdentifier].swipeUp()
+        app.scrollViews[scrollIdentifier].swipeDown()
+        let smokeRoundTrip = ProcessInfo.processInfo.systemUptime - startedAt
+        XCTAssertLessThan(
+            smokeRoundTrip,
+            15,
+            "A simulator Today scroll round trip must not stall."
+        )
+        options.iterationCount = 1
         measure(
             metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()],
             options: options
         ) {
-            scroll.swipeUp()
-            scroll.swipeDown()
+            app.scrollViews[scrollIdentifier].swipeUp()
+            app.scrollViews[scrollIdentifier].swipeDown()
         }
         #else
+        options.iterationCount = 5
         measure(
             metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric],
             options: options
         ) {
-            scroll.swipeUp()
+            app.scrollViews[scrollIdentifier].swipeUp()
         }
         #endif
     }
@@ -1113,21 +1315,34 @@ final class NOOPiOSUITests: XCTestCase {
         // removes SwiftUI's transient replacement of compact/expanded accessibility nodes from this
         // performance regression; dedicated tests above cover that morph at standard text sizes.
         let app = launchApp(preferredContentSize: PreferredContentSize.accessibilityLarge)
-        let tabs = (0...4).map { app.buttons["noop.tab.\($0)"] }
-        XCTAssertTrue(tabs[0].waitForExistence(timeout: 20))
+        let identifiers = (0...4).map { "noop.tab.\($0)" }
+        XCTAssertTrue(app.buttons[identifiers[0]].waitForExistence(timeout: 20))
 
         for _ in 0..<3 {
-            for tab in tabs.dropFirst() {
+            for identifier in identifiers.dropFirst() {
+                let tab = app.buttons[identifier]
                 guard tab.waitForExistence(timeout: 5) else {
                     XCTFail("A primary tab did not remain responsive.")
                     return
                 }
                 tab.tap()
-                XCTAssertTrue(tab.isSelected)
+                XCTAssertTrue(
+                    waitUntil(timeout: 3) {
+                        app.buttons[identifier].isSelected
+                    },
+                    "\(identifier) did not expose its selected accessibility state promptly."
+                )
                 app.swipeUp()
             }
-            tabs[0].tap()
-            XCTAssertTrue(tabs[0].isSelected)
+            let today = app.buttons[identifiers[0]]
+            XCTAssertTrue(today.waitForExistence(timeout: 5))
+            today.tap()
+            XCTAssertTrue(
+                waitUntil(timeout: 3) {
+                    app.buttons[identifiers[0]].isSelected
+                },
+                "\(identifiers[0]) did not expose its selected accessibility state promptly."
+            )
         }
     }
 
@@ -1225,6 +1440,36 @@ final class NOOPiOSUITests: XCTestCase {
         waitUntil(timeout: timeout) {
             self.switchIsOn(element) == on
         }
+    }
+
+    private func setSwitch(
+        _ element: XCUIElement,
+        on: Bool,
+        in app: XCUIApplication,
+        attempts: Int = 3
+    ) -> Bool {
+        if switchIsOn(element) == on { return true }
+        for _ in 0..<attempts {
+            guard scrollToHittable(element, in: app) else { return false }
+            element.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)
+            ).tap()
+            if waitForSwitch(element, on: on, timeout: 5) { return true }
+        }
+        return switchIsOn(element) == on
+    }
+
+    private func scrollToHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        attempts: Int = 6
+    ) -> Bool {
+        if element.exists && element.isHittable { return true }
+        for _ in 0..<attempts {
+            app.swipeUp()
+            if element.exists && element.isHittable { return true }
+        }
+        return element.exists && element.isHittable
     }
 
     private func waitForElementDisabled(

@@ -13,6 +13,7 @@ public enum AdaptiveDayGuidance {
     public static let shortSleepThresholdMinutes = 60
     public static let lateRoutineThresholdMinutes = 90
     public static let routineDurationDropMinutes = 45
+    public static let maximumFragmentGapSeconds = 90 * 60
     public static let travelThresholdSeconds = 2 * 60 * 60
     public static let travelMaximumAgeSeconds = 36 * 60 * 60
 
@@ -66,26 +67,32 @@ public enum AdaptiveDayGuidance {
         public let nowSec: Int
         public let currentTimeZoneOffsetSec: Int
         public let sleepTargetMinutes: Int
+        public let sleepTargetIsExplicit: Bool
         public let sleepDays: [SleepDay]
         public let sleepWindows: [SleepWindow]
         public let timeZoneChange: TimeZoneChange?
+        public let routineHistoryStartSec: Int?
 
         public init(
             today: String,
             nowSec: Int,
             currentTimeZoneOffsetSec: Int,
             sleepTargetMinutes: Int,
+            sleepTargetIsExplicit: Bool,
             sleepDays: [SleepDay],
             sleepWindows: [SleepWindow],
-            timeZoneChange: TimeZoneChange?
+            timeZoneChange: TimeZoneChange?,
+            routineHistoryStartSec: Int? = nil
         ) {
             self.today = today
             self.nowSec = nowSec
             self.currentTimeZoneOffsetSec = currentTimeZoneOffsetSec
             self.sleepTargetMinutes = sleepTargetMinutes
+            self.sleepTargetIsExplicit = sleepTargetIsExplicit
             self.sleepDays = sleepDays
             self.sleepWindows = sleepWindows
             self.timeZoneChange = timeZoneChange
+            self.routineHistoryStartSec = routineHistoryStartSec
         }
     }
 
@@ -160,44 +167,71 @@ public enum AdaptiveDayGuidance {
         return ((raw + halfDay) % day + day) % day - halfDay
     }
 
-    private static func eligibleWindows(_ input: Input) -> [SleepWindow] {
+    private struct SleepObservation {
+        let primaryStartSec: Int
+        let endSec: Int
+        let totalDurationSeconds: Int
+    }
+
+    private static func eligibleWindows(_ input: Input) -> [SleepObservation] {
         let oldest = input.nowSec - routineLookbackDays * 24 * 60 * 60
         var seen = Set<String>()
-        let eligible = input.sleepWindows
+        let candidates = input.sleepWindows
             .filter { window in
                 let duration = window.endSec - window.startSec
                 guard window.startSec >= oldest,
+                      (input.routineHistoryStartSec.map {
+                          window.startSec >= $0
+                      } ?? true),
                       window.endSec <= input.nowSec,
-                      duration >= 3 * 60 * 60,
+                      duration > 0,
                       duration <= 14 * 60 * 60,
-                      isOvernightOnset(window.startSec, offsetSec: input.currentTimeZoneOffsetSec)
+                      seen.insert("\(window.startSec):\(window.endSec)").inserted
                 else { return false }
-                return seen.insert("\(window.startSec):\(window.endSec)").inserted
+                return true
             }
-            .sorted { $0.endSec < $1.endSec }
+            .sorted {
+                $0.startSec == $1.startSec
+                    ? $0.endSec < $1.endSec
+                    : $0.startSec < $1.startSec
+            }
 
-        // A fragmented or duplicated night must not count as several routine observations. Keep the
-        // longest eligible block on each noon-to-noon local sleep day, with latest end as the tie-break.
-        var primaryByNight: [Int: SleepWindow] = [:]
-        for window in eligible {
+        // Merge short, nearby fragments before applying the three-hour night threshold. Distant sleep
+        // remains a separate cluster, and only one cluster can represent a noon-to-noon sleep night.
+        var windowsByNight: [Int: [SleepWindow]] = [:]
+        for window in candidates {
             let key = sleepNightKey(window.startSec, offsetSec: input.currentTimeZoneOffsetSec)
-            guard let current = primaryByNight[key] else {
-                primaryByNight[key] = window
-                continue
+            windowsByNight[key, default: []].append(window)
+        }
+        return windowsByNight.values.compactMap { windows in
+            fragmentClusters(windows).compactMap { cluster -> SleepObservation? in
+                guard let startSec = cluster.map(\.startSec).min(),
+                      let endSec = cluster.map(\.endSec).max(),
+                      isOvernightOnset(
+                          startSec,
+                          offsetSec: input.currentTimeZoneOffsetSec
+                      ) else { return nil }
+                let totalDuration = mergedDurationSeconds(cluster)
+                guard totalDuration >= 3 * 60 * 60,
+                      totalDuration <= 14 * 60 * 60 else { return nil }
+                return SleepObservation(
+                    primaryStartSec: startSec,
+                    endSec: endSec,
+                    totalDurationSeconds: totalDuration
+                )
             }
-            let duration = window.endSec - window.startSec
-            let currentDuration = current.endSec - current.startSec
-            if duration > currentDuration
-                || (duration == currentDuration && window.endSec > current.endSec) {
-                primaryByNight[key] = window
+            .max {
+                $0.totalDurationSeconds == $1.totalDurationSeconds
+                    ? $0.endSec < $1.endSec
+                    : $0.totalDurationSeconds < $1.totalDurationSeconds
             }
         }
-        return primaryByNight.values.sorted { $0.endSec < $1.endSec }
+        .sorted { $0.endSec < $1.endSec }
     }
 
     private static func routineRecommendation(
         _ input: Input,
-        windows: [SleepWindow]
+        windows: [SleepObservation]
     ) -> Recommendation? {
         guard let latest = windows.last,
               input.nowSec - latest.endSec <= latestSleepMaximumAgeSeconds else { return nil }
@@ -205,18 +239,18 @@ public enum AdaptiveDayGuidance {
         guard history.count >= minimumRoutineNights else { return nil }
 
         let baselineOnset = median(history.map {
-            bedtimeCoordinate($0.startSec, offsetSec: input.currentTimeZoneOffsetSec)
+            bedtimeCoordinate($0.primaryStartSec, offsetSec: input.currentTimeZoneOffsetSec)
         })
         let latestOnset = bedtimeCoordinate(
-            latest.startSec,
+            latest.primaryStartSec,
             offsetSec: input.currentTimeZoneOffsetSec
         )
         let delay = latestOnset - baselineOnset
-        let baselineDuration = median(history.map { Double($0.endSec - $0.startSec) / 60.0 })
-        let latestDuration = Double(latest.endSec - latest.startSec) / 60.0
-        let target = Double(min(max(input.sleepTargetMinutes, 5 * 60), 11 * 60))
+        let baselineDuration = median(history.map {
+            Double($0.totalDurationSeconds) / 60.0
+        })
+        let latestDuration = Double(latest.totalDurationSeconds) / 60.0
         let shortened = latestDuration <= baselineDuration - Double(routineDurationDropMinutes)
-            || latestDuration <= target - Double(shortSleepThresholdMinutes)
         guard delay >= Double(lateRoutineThresholdMinutes), shortened else { return nil }
 
         return Recommendation(
@@ -224,30 +258,44 @@ public enum AdaptiveDayGuidance {
             observedAtSec: latest.endSec,
             maximumAgeSeconds: 18 * 60 * 60,
             confidence: history.count >= strongRoutineNights ? .strong : .building,
-            fingerprint: "routine:\(latest.startSec / 900):\(latest.endSec / 900)",
+            fingerprint:
+                "routine:\(latest.primaryStartSec / 900):\(latest.endSec / 900):" +
+                "\(latest.totalDurationSeconds / 900)",
             evidence: ["personal-sleep-timing", "later-onset", "shorter-sleep"]
         )
     }
 
     private static func sleepRecommendation(
         _ input: Input,
-        windows: [SleepWindow]
+        windows: [SleepObservation]
     ) -> Recommendation? {
+        guard input.sleepTargetIsExplicit else { return nil }
         let target = Double(min(max(input.sleepTargetMinutes, 5 * 60), 11 * 60))
+        let freshWindows = windows.reversed().filter { window in
+            let age = input.nowSec - window.endSec
+            return (-5 * 60...latestSleepMaximumAgeSeconds).contains(age)
+                && localDayKey(
+                    window.endSec,
+                    offsetSec: input.currentTimeZoneOffsetSec
+                ) == input.today
+        }
         if let current = input.sleepDays.last(where: { $0.day == input.today }),
            let minutes = current.totalSleepMinutes,
            minutes.isFinite,
            (120...900).contains(minutes),
-           target - minutes >= Double(shortSleepThresholdMinutes) {
-            let observedAt = windows.last.map(\.endSec).flatMap { endSec -> Int? in
-                let age = input.nowSec - endSec
-                return (-5 * 60...latestSleepMaximumAgeSeconds).contains(age)
-                    ? endSec
-                    : nil
-            } ?? input.nowSec
+           target - minutes >= Double(shortSleepThresholdMinutes),
+           let matchedWindow = freshWindows.first(where: { window in
+               DailyActionPlanner.matchedSleepObservationEndSec(
+                   aggregateMinutes: minutes,
+                   sessionDurationMinutes: Double(window.totalDurationSeconds) / 60.0,
+                   sessionEndSec: window.endSec,
+                   nowSec: input.nowSec,
+                   maximumAgeSeconds: latestSleepMaximumAgeSeconds
+               ) != nil
+           }) {
             return Recommendation(
                 kind: .sleepRecovery,
-                observedAtSec: observedAt,
+                observedAtSec: matchedWindow.endSec,
                 maximumAgeSeconds: 18 * 60 * 60,
                 confidence: .strong,
                 fingerprint: "sleep:\(input.today):\(Int(minutes.rounded()))",
@@ -256,18 +304,70 @@ public enum AdaptiveDayGuidance {
         }
 
         // A sleep block is a weaker fallback because time in bed is not the same as asleep time.
-        guard let latest = windows.last,
-              input.nowSec - latest.endSec <= latestSleepMaximumAgeSeconds else { return nil }
-        let duration = Double(latest.endSec - latest.startSec) / 60.0
+        guard let latest = freshWindows.first else { return nil }
+        let duration = Double(latest.totalDurationSeconds) / 60.0
         guard target - duration >= Double(shortSleepThresholdMinutes) else { return nil }
         return Recommendation(
             kind: .sleepRecovery,
             observedAtSec: latest.endSec,
             maximumAgeSeconds: 18 * 60 * 60,
             confidence: .building,
-            fingerprint: "sleep-window:\(latest.startSec / 900):\(latest.endSec / 900)",
+            fingerprint:
+                "sleep-window:\(latest.primaryStartSec / 900):\(latest.endSec / 900):" +
+                "\(latest.totalDurationSeconds / 900)",
             evidence: ["recent-sleep-window", "below-explicit-target"]
         )
+    }
+
+    private static func fragmentClusters(_ windows: [SleepWindow]) -> [[SleepWindow]] {
+        let sorted = windows.sorted {
+            $0.startSec == $1.startSec
+                ? $0.endSec < $1.endSec
+                : $0.startSec < $1.startSec
+        }
+        var clusters: [[SleepWindow]] = []
+        for window in sorted {
+            guard let lastCluster = clusters.last,
+                  let clusterEnd = lastCluster.map(\.endSec).max(),
+                  window.startSec - clusterEnd <= maximumFragmentGapSeconds else {
+                clusters.append([window])
+                continue
+            }
+            clusters[clusters.count - 1].append(window)
+        }
+        return clusters
+    }
+
+    private static func mergedDurationSeconds(_ windows: [SleepWindow]) -> Int {
+        let sorted = windows.sorted {
+            $0.startSec == $1.startSec
+                ? $0.endSec < $1.endSec
+                : $0.startSec < $1.startSec
+        }
+        guard var current = sorted.first else { return 0 }
+        var total = 0
+        for window in sorted.dropFirst() {
+            if window.startSec <= current.endSec {
+                current = SleepWindow(
+                    startSec: current.startSec,
+                    endSec: max(current.endSec, window.endSec)
+                )
+            } else {
+                total += current.endSec - current.startSec
+                current = window
+            }
+        }
+        return total + current.endSec - current.startSec
+    }
+
+    private static func localDayKey(_ epochSec: Int, offsetSec: Int) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(epochSec + offsetSec))
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private static func isOvernightOnset(_ epochSec: Int, offsetSec: Int) -> Bool {

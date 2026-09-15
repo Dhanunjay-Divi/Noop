@@ -364,10 +364,10 @@ public final class FrameRouter {
     /// 0 Failure, 1 Success, 2 Pending, 3 Unsupported).
     static func renameAck(for result: Int?) -> String {
         switch result {
-        case 1:  return "Renamed, your strap reboots to apply the new name."
-        case 0:  return "The strap rejected the rename (failure)."
+        case 1:  return "Renamed, the band reboots to apply the new name."
+        case 0:  return "The band rejected the rename (failure)."
         case 2:  return "Rename pending…"
-        case 3:  return "This strap firmware doesn't support renaming."
+        case 3:  return "This band firmware doesn't support renaming."
         default: return "Rename sent - re-scan to confirm the new name."
         }
     }

@@ -170,7 +170,7 @@ resource "google_identity_platform_config" "managed" {
 
   sign_in {
     anonymous {
-      enabled = false
+      enabled = var.enable_feedback_ingestion
     }
     email {
       enabled           = var.enable_ownership_identity

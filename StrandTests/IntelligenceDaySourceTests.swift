@@ -139,6 +139,21 @@ final class IntelligenceDaySourceTests: XCTestCase {
             userEdited: edited)
     }
 
+    private func civilWindow(
+        _ start: Int,
+        _ end: Int,
+        dayKey: String = "1970-01-01",
+        timezoneOffsetSeconds: Int = 0
+    ) -> IntelligenceEngine.AnalysisCivilDayWindow {
+        IntelligenceEngine.AnalysisCivilDayWindow(
+            startTs: start,
+            endTs: end,
+            dayKey: dayKey,
+            timezoneOffsetSeconds: timezoneOffsetSeconds,
+            localSixPMTs: min(start + 18 * 3_600, end + 1)
+        )
+    }
+
     @MainActor
     func testSleepRepairDeletesPerSourceAndPreservesEditedAndNonOverlappingRowsIdempotently() async throws {
         let store = try await WhoopStore.inMemory()
@@ -169,15 +184,14 @@ final class IntelligenceDaySourceTests: XCTestCase {
             deviceIds: ["oura", "computed", "edited-source", "oura"],
             from: 0,
             to: 100_000,
-            oldestDay: "1970-01-01",
-            newestDay: "2100-01-01",
-            timezoneOffsetSeconds: 0,
+            civilDayWindows: [civilWindow(0, 100_000)],
             freshStarts: [10_600])
 
         XCTAssertEqual(first.deleted.count, 3)
         XCTAssertEqual(first.unchangedDeleteCount, 0)
         XCTAssertEqual(first.failedDeleteCount, 0)
         XCTAssertEqual(first.failedReadCount, 0)
+        XCTAssertFalse(first.cancelled)
         let computedRows = try await store.sleepSessions(
             deviceId: "computed", from: 0, to: 100_000, limit: 20)
         let ouraRows = try await store.sleepSessions(
@@ -194,13 +208,64 @@ final class IntelligenceDaySourceTests: XCTestCase {
             deviceIds: ["computed", "oura", "edited-source"],
             from: 0,
             to: 100_000,
-            oldestDay: "1970-01-01",
-            newestDay: "2100-01-01",
-            timezoneOffsetSeconds: 0,
+            civilDayWindows: [civilWindow(0, 100_000)],
             freshStarts: [10_600])
         XCTAssertTrue(second.deleted.isEmpty, "a completed repair must be idempotent")
         XCTAssertEqual(second.unchangedDeleteCount, 0)
+        XCTAssertFalse(second.cancelled)
         XCTAssertFalse(second.hasFailures)
+    }
+
+    @MainActor
+    func testSleepRepairFiltersWakeTimesAgainstTheExactFallDSTWindow() async throws {
+        let timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let reference = try XCTUnwrap(
+            formatter.date(from: "2026-11-01T16:00:00Z")
+        )
+        let window = try XCTUnwrap(
+            IntelligenceEngine.historicalCivilDayWindow(
+                containing: Int(reference.timeIntervalSince1970),
+                timeZone: timeZone
+            )
+        )
+        XCTAssertEqual(window.durationSeconds, 90_000)
+        let store = try await WhoopStore.inMemory()
+        let priorStart = window.startTs - 10_000
+        let priorShiftedStart = priorStart + 600
+        let inRangeStart = window.startTs + 600
+        let inRangeShiftedStart = inRangeStart + 600
+        let nextStart = window.endTs + 1_000
+        let nextShiftedStart = nextStart + 600
+        try await store.upsertSleepSessions([
+            sleep(priorStart, window.startTs - 1),
+            sleep(priorShiftedStart, window.startTs - 300),
+            sleep(inRangeStart, window.startTs + 2_400),
+            sleep(inRangeShiftedStart, window.startTs + 2_100),
+            sleep(nextStart, window.endTs + 10_000),
+            sleep(nextShiftedStart, window.endTs + 9_700),
+        ], deviceId: "dst-source")
+
+        let result = await IntelligenceEngine.healBankedSleepSessions(
+            store: store,
+            deviceIds: ["dst-source"],
+            from: priorStart - 1,
+            to: window.endTs + 10_000,
+            civilDayWindows: [window],
+            freshStarts: [inRangeShiftedStart])
+
+        XCTAssertEqual(result.deleted.map(\.startTs), [inRangeStart])
+        let survivingStarts = try await store.sleepSessions(
+            deviceId: "dst-source",
+            from: priorStart - 1,
+            to: window.endTs + 10_000,
+            limit: 20
+        ).map(\.startTs)
+        XCTAssertTrue(survivingStarts.contains(priorStart))
+        XCTAssertTrue(survivingStarts.contains(priorShiftedStart))
+        XCTAssertTrue(survivingStarts.contains(inRangeShiftedStart))
+        XCTAssertTrue(survivingStarts.contains(nextStart))
+        XCTAssertTrue(survivingStarts.contains(nextShiftedStart))
     }
 
     @MainActor
@@ -218,9 +283,7 @@ final class IntelligenceDaySourceTests: XCTestCase {
             deviceIds: ["oura"],
             from: 0,
             to: 30_000,
-            oldestDay: "1970-01-01",
-            newestDay: "2100-01-01",
-            timezoneOffsetSeconds: 0,
+            civilDayWindows: [civilWindow(0, 30_000)],
             freshStarts: [],
             deleteSession: { _, _ in throw ExpectedFailure.delete })
 
@@ -230,6 +293,29 @@ final class IntelligenceDaySourceTests: XCTestCase {
         let rowsAfterFailure = try await store.sleepSessions(
             deviceId: "oura", from: 0, to: 30_000, limit: 20)
         XCTAssertEqual(rowsAfterFailure.count, 2, "a failed delete must leave both source rows intact")
+    }
+
+    @MainActor
+    func testSleepRepairCancellationIsNotDowngradedToADeleteFailure() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertSleepSessions([
+            sleep(10_000, 20_000),
+            sleep(10_600, 19_000),
+        ], deviceId: "oura")
+
+        let result = await IntelligenceEngine.healBankedSleepSessions(
+            store: store,
+            deviceIds: ["oura"],
+            from: 0,
+            to: 30_000,
+            civilDayWindows: [civilWindow(0, 30_000)],
+            freshStarts: [],
+            deleteSession: { _, _ in throw CancellationError() })
+
+        XCTAssertTrue(result.cancelled)
+        XCTAssertTrue(result.deleted.isEmpty)
+        XCTAssertEqual(result.failedDeleteCount, 0)
+        XCTAssertTrue(result.hasFailures)
     }
 
     // MARK: - diagnostic line shape (the strap-log proof the next report ships)

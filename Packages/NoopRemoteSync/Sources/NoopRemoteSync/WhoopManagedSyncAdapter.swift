@@ -242,6 +242,12 @@ public actor WhoopManagedSyncStateStore: ManagedSyncStateStoring {
         try await store.managedChangeSequence(accountScopeHash: accountScopeHash)
     }
 
+    public func changeFeedCapabilityVersion() async throws -> Int {
+        try await store.managedChangeFeedCapabilityVersion(
+            accountScopeHash: accountScopeHash
+        )
+    }
+
     public func saveChangeSequence(_ sequence: Int64) async throws {
         try await store.saveManagedChangeSequence(
             sequence,
@@ -289,7 +295,7 @@ public actor WhoopManagedSyncStateStore: ManagedSyncStateStoring {
         }
         guard let requestID = UUID(uuidString: stored.requestID),
               stored.dataClasses == stored.dataClasses.sorted(),
-              !stored.dataClasses.isEmpty else {
+              stored.changeFeedCapabilityVersion >= 0 else {
             throw ManagedStorageError.invalidResponse
         }
         if stored.restoreJobID == nil {
@@ -310,7 +316,8 @@ public actor WhoopManagedSyncStateStore: ManagedSyncStateStoring {
             }
             return ManagedSnapshotRestoreCheckpoint(
                 requestID: requestID,
-                dataClasses: stored.dataClasses
+                dataClasses: stored.dataClasses,
+                changeFeedCapabilityVersion: stored.changeFeedCapabilityVersion
             )
         }
         guard let restoreJobID = stored.restoreJobID.flatMap(UUID.init(uuidString:)),
@@ -333,6 +340,7 @@ public actor WhoopManagedSyncStateStore: ManagedSyncStateStoring {
         return ManagedSnapshotRestoreCheckpoint(
             requestID: requestID,
             dataClasses: stored.dataClasses,
+            changeFeedCapabilityVersion: stored.changeFeedCapabilityVersion,
             restoreJobID: restoreJobID,
             snapshotAt: snapshotAt,
             changeSequence: changeSequence,
@@ -351,7 +359,7 @@ public actor WhoopManagedSyncStateStore: ManagedSyncStateStoring {
         _ checkpoint: ManagedSnapshotRestoreCheckpoint
     ) async throws {
         guard checkpoint.dataClasses == checkpoint.dataClasses.sorted(),
-              !checkpoint.dataClasses.isEmpty,
+              checkpoint.changeFeedCapabilityVersion >= 0,
               (checkpoint.cursor == nil || checkpoint.restoreJobID != nil),
               (checkpoint.documentCursor == nil || checkpoint.restoreJobID != nil) else {
             throw ManagedStorageError.invalidResponse
@@ -361,6 +369,7 @@ public actor WhoopManagedSyncStateStore: ManagedSyncStateStoring {
                 accountScopeHash: accountScopeHash,
                 requestID: checkpoint.requestID.uuidString.lowercased(),
                 dataClasses: checkpoint.dataClasses,
+                changeFeedCapabilityVersion: checkpoint.changeFeedCapabilityVersion,
                 restoreJobID: checkpoint.restoreJobID?.uuidString.lowercased(),
                 snapshotAt: checkpoint.snapshotAt,
                 changeSequence: checkpoint.changeSequence,
@@ -386,10 +395,14 @@ public actor WhoopManagedSyncStateStore: ManagedSyncStateStoring {
         try await store.clearManagedSnapshotRestore(accountScopeHash: accountScopeHash)
     }
 
-    public func finishSnapshotRestore(changeSequence: Int64) async throws {
+    public func finishSnapshotRestore(
+        changeSequence: Int64,
+        changeFeedCapabilityVersion: Int
+    ) async throws {
         try await store.finishManagedSnapshotRestore(
             accountScopeHash: accountScopeHash,
             changeSequence: changeSequence,
+            changeFeedCapabilityVersion: changeFeedCapabilityVersion,
             updatedAtMs: Self.nowMilliseconds()
         )
     }
@@ -510,6 +523,10 @@ public actor WhoopManagedDocumentAdapter:
     ManagedDocumentOutbox,
     WhoopManagedDocumentRestoring
 {
+    private static let serverReadableKinds: Set<ManagedDocumentKind> = [
+        .dayOwnership,
+    ]
+
     private let store: WhoopStore
     private let accountScopeHash: String
     private let preferencesDefaults: UserDefaults?
@@ -540,13 +557,16 @@ public actor WhoopManagedDocumentAdapter:
         }
         let local = try await store.pendingManagedDocuments(
             accountScopeHash: accountScopeHash,
+            contentMode: .serverReadable,
             limit: limit
         )
         var pending: [ManagedPendingDocument] = []
         for candidate in local {
-            guard let kind = ManagedDocumentKind(
-                rawValue: candidate.documentKind
-            ) else {
+            guard candidate.contentMode == .serverReadable,
+                  let kind = ManagedDocumentKind(
+                      rawValue: candidate.documentKind
+                  ),
+                  Self.serverReadableKinds.contains(kind) else {
                 throw ManagedStorageError.invalidResponse
             }
             let documentID = Self.documentID(
@@ -583,7 +603,7 @@ public actor WhoopManagedDocumentAdapter:
                 documentKind: kind,
                 documentID: documentID,
                 baseRevision: candidate.baseRevision,
-                contentMode: "server_readable",
+                contentMode: candidate.contentMode.rawValue,
                 payloadJSON: payload,
                 contentSHA256: contentSHA256,
                 updatedAt: ManagedTimestamp.iso8601(
@@ -656,10 +676,22 @@ public actor WhoopManagedDocumentAdapter:
         document: ManagedDocument,
         change: ManagedChangeFeed.Change
     ) async throws {
-        guard document.contentMode == "server_readable",
+        try Self.validateDocumentMetadata(document, change: change)
+        if document.contentMode == ManagedDocumentContentMode
+            .clientEncrypted.rawValue {
+            try Self.validateIgnoredEncryptedDocument(document)
+            // The current client has no key recovery or durable ciphertext inbox.
+            // Failing here keeps the feed cursor anchored so a future capable
+            // client can replay the document instead of losing it permanently.
+            throw ManagedStorageError.invalidConfiguration
+        }
+
+        guard Self.serverReadableKinds.contains(document.documentKind),
+              document.contentMode == ManagedDocumentContentMode
+                  .serverReadable.rawValue,
               document.clientKeyID == nil,
               document.payloadCiphertextBase64 == nil,
-              document.revision > 0 else {
+              document.payloadJSON != nil || document.deletedAt != nil else {
             throw ManagedStorageError.invalidResponse
         }
 
@@ -734,7 +766,81 @@ public actor WhoopManagedDocumentAdapter:
                 deleted: deleted,
                 appliedAtMs: Self.nowMilliseconds()
             )
+        } catch ManagedDocumentStoreError.unacknowledgedLocalGeneration {
+            throw ManagedStorageError.conflict
         } catch {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validateDocumentMetadata(
+        _ document: ManagedDocument,
+        change: ManagedChangeFeed.Change
+    ) throws {
+        guard document.revision > 0,
+              document.contentSHA256.range(
+                  of: #"^[0-9a-f]{64}$"#,
+                  options: .regularExpression
+              ) != nil,
+              ManagedTimestamp.milliseconds(
+                  iso8601: document.updatedAt
+              ) != nil,
+              document.deletedAt.map({
+                  ManagedTimestamp.milliseconds(iso8601: $0) != nil
+              }) ?? true,
+              change.resourceKind == "document",
+              change.resourceID == document.documentID,
+              change.contentSHA256 == document.contentSHA256,
+              let metadata = change.document,
+              metadata.documentKind == document.documentKind,
+              metadata.documentID == document.documentID,
+              metadata.revision == document.revision,
+              metadata.contentMode == document.contentMode,
+              metadata.clientKeyID == document.clientKeyID,
+              metadata.updatedAt == document.updatedAt,
+              metadata.deletedAt == document.deletedAt,
+              (document.deletedAt == nil && change.operation == "upsert")
+                || (
+                    document.deletedAt != nil
+                        && change.operation == "tombstone"
+                ) else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validateIgnoredEncryptedDocument(
+        _ document: ManagedDocument
+    ) throws {
+        guard !serverReadableKinds.contains(document.documentKind),
+              document.payloadJSON == nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+
+        if document.deletedAt != nil {
+            let expectedDigest = ManagedDigest.sha256(
+                Data(
+                    (
+                        "deleted:\(document.documentKind.rawValue):"
+                            + "\(document.documentID.uuidString.lowercased()):"
+                            + "\(document.revision)"
+                    ).utf8
+                )
+            )
+            guard document.clientKeyID == nil,
+                  document.payloadCiphertextBase64 == nil,
+                  document.contentSHA256 == expectedDigest else {
+                throw ManagedStorageError.invalidResponse
+            }
+            return
+        }
+
+        guard document.clientKeyID != nil,
+              let encoded = document.payloadCiphertextBase64,
+              let ciphertext = Data(base64Encoded: encoded),
+              ciphertext.base64EncodedString() == encoded,
+              (17...1_048_576).contains(ciphertext.count),
+              ManagedDigest.sha256(ciphertext)
+                == document.contentSHA256 else {
             throw ManagedStorageError.invalidResponse
         }
     }
@@ -744,13 +850,10 @@ public actor WhoopManagedDocumentAdapter:
         tableName: String,
         keyJSON: Data
     ) -> UUID {
-        ManagedStableIdentifier.uuid(
-            seed: Data(
-                (
-                    "noop-managed-document-v1\0\(kind.rawValue)\0"
-                        + "\(tableName)\0"
-                ).utf8
-            ) + keyJSON
+        ManagedDocumentStableIdentifier.uuid(
+            documentKind: kind.rawValue,
+            tableName: tableName,
+            keyJSON: keyJSON
         )
     }
 

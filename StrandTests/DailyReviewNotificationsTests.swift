@@ -111,6 +111,12 @@ final class LocalNotificationLifecycleLedgerTests: XCTestCase {
             Set(ledger.records().dropFirst().map(\.categoryIdentifier)),
             ["private"]
         )
+        XCTAssertEqual(
+            LocalNotificationLifecycleLedger.stableCategory(
+                DailyReviewNotifications.plannedWorkoutCategoryID
+            ),
+            "private"
+        )
     }
 
     func testConcurrentDelegateWritesRemainBoundedAndDecodable() {
@@ -215,14 +221,788 @@ final class LocalNotificationLifecycleLedgerTests: XCTestCase {
 }
 
 @MainActor
+final class LocalNotificationCapacityTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_788_739_200)
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    func testCoordinatorNeverExceedsSystemPendingCap() async {
+        let protected = (0..<4).map {
+            request(
+                identifier: "noop.safety.capacity-\($0)",
+                interval: TimeInterval(10_000 + $0)
+            )
+        }
+        let routine = (0..<80).map {
+            request(
+                identifier: String(format: "daily-review-%03d", $0),
+                interval: TimeInterval(60 + $0)
+            )
+        }
+        let center = LocalNotificationCenterCapacitySpy()
+
+        let result = await LocalNotificationCapacityCoordinator().reconcile(
+            candidateRequests: protected + routine,
+            replacingIdentifiers: [],
+            now: now,
+            calendar: calendar,
+            client: center.client
+        )
+
+        XCTAssertEqual(result.acceptedCount, 64)
+        XCTAssertEqual(result.capacityLimitedIdentifiers.count, 20)
+        XCTAssertLessThanOrEqual(
+            center.requests.count,
+            LocalNotificationCapacityPolicy.systemCapacity
+        )
+        XCTAssertEqual(center.requests.count, result.acceptedCount)
+        XCTAssertTrue(
+            protected.allSatisfy {
+                center.requests[$0.identifier] != nil
+            }
+        )
+    }
+
+    func testReservedSlotsRemainAvailableForEveryProtectedPriorityClass() {
+        let safety = request(
+            identifier: "noop.safety.user-armed",
+            interval: 3_600
+        )
+        let userExplicit = request(
+            identifier: "smart-alarm-user-selected",
+            interval: 3_600
+        )
+        let transient = request(
+            identifier: "transient-coach-check-in",
+            interval: nil
+        )
+        let routine = (0..<8).map {
+            request(
+                identifier: String(format: "hydration-reminder-%03d", $0),
+                interval: TimeInterval(60 + $0)
+            )
+        }
+
+        let plan = LocalNotificationCapacityPolicy.plan(
+            existingRequests: [],
+            candidateRequests: routine + [transient, userExplicit, safety],
+            replacingIdentifiers: [],
+            capacity: 8,
+            reservedPrioritySlots: 3,
+            now: now,
+            calendar: calendar
+        )
+        let selected = Set(
+            plan.selectedCandidateRequests.map(\.identifier)
+        )
+
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: safety),
+            .safetyCritical
+        )
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: userExplicit),
+            .userExplicit
+        )
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: transient),
+            .transient
+        )
+        XCTAssertTrue(selected.isSuperset(of:
+            [safety.identifier, userExplicit.identifier, transient.identifier]
+        ))
+        XCTAssertEqual(selected.count, 8)
+        XCTAssertEqual(plan.capacityLimitedCandidateRequests.count, 3)
+    }
+
+    func testRoutineHorizonIsTrimmedBeforeProtectedRequests() {
+        let routine = (0..<8).map {
+            request(
+                identifier: String(format: "daily-review-%02d", $0),
+                interval: TimeInterval(60 * ($0 + 1))
+            )
+        }
+        let protected = [
+            request(
+                identifier: "noop.safety.future-check-in",
+                interval: 86_400
+            ),
+            request(
+                identifier: "smart-alarm-future",
+                interval: 86_400
+            ),
+            request(
+                identifier: "foreground-transient",
+                interval: nil
+            ),
+        ]
+
+        let plan = LocalNotificationCapacityPolicy.plan(
+            existingRequests: routine,
+            candidateRequests: protected,
+            replacingIdentifiers: [],
+            capacity: 8,
+            reservedPrioritySlots: 3,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(
+            Set(plan.selectedCandidateRequests.map(\.identifier)),
+            Set(protected.map(\.identifier))
+        )
+        XCTAssertEqual(
+            plan.selectedExistingRequests.map(\.identifier),
+            Array(routine.prefix(5)).map(\.identifier)
+        )
+        XCTAssertEqual(
+            plan.existingIdentifiersToRemove,
+            Array(routine.suffix(3)).map(\.identifier)
+        )
+    }
+
+    func testRoutineHydrationPhoneFallbackDoesNotDisplaceExplicitRequests() {
+        let fallback = request(
+            identifier: "hydration-reminder-phone-fallback-20260914T0900",
+            interval: 3_600
+        )
+        let explicit = request(
+            identifier: "smart-alarm-user-selected",
+            interval: 7_200
+        )
+
+        let plan = LocalNotificationCapacityPolicy.plan(
+            existingRequests: [],
+            candidateRequests: [fallback, explicit],
+            replacingIdentifiers: [],
+            capacity: 1,
+            reservedPrioritySlots: 1,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: fallback),
+            .routine
+        )
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: explicit),
+            .userExplicit
+        )
+        XCTAssertEqual(
+            plan.selectedCandidateRequests.map(\.identifier),
+            [explicit.identifier]
+        )
+    }
+
+    func testMissedHydrationResponseRemainsUserExplicit() {
+        let content = UNMutableNotificationContent()
+        content.userInfo = [
+            LocalNotificationPriorityMarker.hydrationMissedResponse: true
+        ]
+        let escalation = UNNotificationRequest(
+            identifier: "hydration-reminder-phone-fallback-20260914T0900",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(
+                timeInterval: 3_600,
+                repeats: false
+            )
+        )
+
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: escalation),
+            .userExplicit
+        )
+    }
+
+    func testStaleSyncIsMaintenanceAndLosesCapacityBeforeRoutine() {
+        let staleSync = request(
+            identifier: "noop.band-sync.stale",
+            interval: 30
+        )
+        let routine = request(
+            identifier: "daily-review-evening",
+            interval: 3_600
+        )
+
+        let plan = LocalNotificationCapacityPolicy.plan(
+            existingRequests: [],
+            candidateRequests: [staleSync, routine],
+            replacingIdentifiers: [],
+            capacity: 1,
+            reservedPrioritySlots: 0,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(
+            LocalNotificationCapacityPolicy.priority(for: staleSync),
+            .maintenance
+        )
+        XCTAssertEqual(
+            plan.selectedCandidateRequests.map(\.identifier),
+            [routine.identifier]
+        )
+        XCTAssertEqual(
+            plan.capacityLimitedCandidateRequests.map(\.identifier),
+            [staleSync.identifier]
+        )
+    }
+
+    func testEqualPriorityAndFireDateUseIdentifierTieOrdering() {
+        let candidates = ["c", "a", "b"].map {
+            request(
+                identifier: "daily-review-\($0)",
+                interval: 600
+            )
+        }
+
+        let plan = LocalNotificationCapacityPolicy.plan(
+            existingRequests: [],
+            candidateRequests: candidates,
+            replacingIdentifiers: [],
+            capacity: 2,
+            reservedPrioritySlots: 0,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(
+            plan.selectedCandidateRequests.map(\.identifier),
+            ["daily-review-a", "daily-review-b"]
+        )
+        XCTAssertEqual(
+            plan.capacityLimitedCandidateRequests.map(\.identifier),
+            ["daily-review-c"]
+        )
+    }
+
+    func testReconciliationReplacesSelectedRequestAndRemovesDeselectedExisting() async {
+        let replacementID = "daily-review-replacement"
+        let original = request(
+            identifier: replacementID,
+            interval: 120,
+            body: "old"
+        )
+        let obsolete = request(
+            identifier: "daily-review-obsolete",
+            interval: 180
+        )
+        let replacement = request(
+            identifier: replacementID,
+            interval: 60,
+            body: "new"
+        )
+        let safety = request(
+            identifier: "noop.safety.user-check",
+            interval: 3_600
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: [original, obsolete]
+        )
+
+        let result = await LocalNotificationCapacityCoordinator(
+            capacity: 2,
+            reservedPrioritySlots: 0
+        ).reconcile(
+            candidateRequests: [replacement, safety],
+            replacingIdentifiers: [replacementID],
+            now: now,
+            calendar: calendar,
+            client: center.client
+        )
+
+        XCTAssertEqual(
+            Set(result.acceptedIdentifiers),
+            [replacementID, safety.identifier]
+        )
+        XCTAssertEqual(
+            result.removedIdentifiers,
+            [obsolete.identifier]
+        )
+        XCTAssertEqual(center.requests.count, 2)
+        XCTAssertEqual(center.requests[replacementID]?.content.body, "new")
+        XCTAssertNil(center.requests[obsolete.identifier])
+        XCTAssertFalse(
+            center.removalBatches.joined().contains(replacementID)
+        )
+    }
+
+    func testFailedReplacementKeepsEligibleExistingRequest() async {
+        let identifier = "daily-review-replacement"
+        let original = request(
+            identifier: identifier,
+            interval: 120,
+            body: "old"
+        )
+        let replacement = request(
+            identifier: identifier,
+            interval: 60,
+            body: "new"
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: [original],
+            failingIdentifiers: [identifier]
+        )
+
+        let result = await LocalNotificationCapacityCoordinator(
+            capacity: 1,
+            reservedPrioritySlots: 0
+        ).reconcile(
+            candidateRequests: [replacement],
+            replacingIdentifiers: [identifier],
+            now: now,
+            calendar: calendar,
+            client: center.client
+        )
+
+        XCTAssertEqual(result.failedIdentifiers, [identifier])
+        XCTAssertTrue(result.acceptedIdentifiers.isEmpty)
+        XCTAssertEqual(result.retainedIdentifiers, [identifier])
+        XCTAssertEqual(result.activeIdentifiers, [identifier])
+        XCTAssertTrue(result.capacityLimitedIdentifiers.isEmpty)
+        XCTAssertTrue(result.removedIdentifiers.isEmpty)
+        XCTAssertEqual(center.requests[identifier]?.content.body, "old")
+        XCTAssertFalse(
+            center.removalBatches.joined().contains(identifier)
+        )
+    }
+
+    func testPreservedExistingRequestsRemainPinnedUnderCapacityPressure() async {
+        let firstPrior = request(
+            identifier: "wind-down-nudge-prior-1",
+            interval: 60
+        )
+        let secondPrior = request(
+            identifier: "wind-down-nudge-prior-2",
+            interval: 120
+        )
+        let firstCandidate = request(
+            identifier: "wind-down-nudge-next-1",
+            interval: 30
+        )
+        let secondCandidate = request(
+            identifier: "wind-down-nudge-next-2",
+            interval: 45
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: [firstPrior, secondPrior]
+        )
+
+        let result = await LocalNotificationCapacityCoordinator(
+            capacity: 2,
+            reservedPrioritySlots: 0
+        ).reconcile(
+            candidateRequests: [firstCandidate, secondCandidate],
+            replacingIdentifiers: [
+                firstCandidate.identifier,
+                secondCandidate.identifier,
+            ],
+            preservingExistingIdentifiers: [
+                firstPrior.identifier,
+                secondPrior.identifier,
+            ],
+            now: now,
+            calendar: calendar,
+            client: center.client
+        )
+
+        XCTAssertTrue(result.acceptedIdentifiers.isEmpty)
+        XCTAssertEqual(
+            Set(result.retainedIdentifiers),
+            [firstPrior.identifier, secondPrior.identifier]
+        )
+        XCTAssertEqual(
+            Set(result.capacityLimitedIdentifiers),
+            [firstCandidate.identifier, secondCandidate.identifier]
+        )
+        XCTAssertTrue(result.removedIdentifiers.isEmpty)
+        XCTAssertTrue(center.removalBatches.isEmpty)
+        XCTAssertEqual(
+            Set(center.requests.keys),
+            [firstPrior.identifier, secondPrior.identifier]
+        )
+    }
+
+    func testObsoleteGenerationCannotMutateAfterPendingSnapshotReturns() async {
+        let existing = request(
+            identifier: "daily-review-obsolete",
+            interval: 120,
+            body: "old"
+        )
+        let candidate = request(
+            identifier: "daily-review-current",
+            interval: 60,
+            body: "new"
+        )
+        let pendingPaused = expectation(
+            description: "pending request snapshot paused"
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: [existing],
+            pauseFirstPending: true,
+            onFirstPendingPaused: { pendingPaused.fulfill() }
+        )
+        let coordinator = LocalNotificationCapacityCoordinator(
+            capacity: 1,
+            reservedPrioritySlots: 0
+        )
+        var isCurrent = true
+
+        let task = Task { @MainActor in
+            await coordinator.reconcile(
+                candidateRequests: [candidate],
+                replacingIdentifiers: [existing.identifier],
+                now: now,
+                calendar: calendar,
+                isStillCurrent: { isCurrent },
+                client: center.client
+            )
+        }
+        await fulfillment(of: [pendingPaused], timeout: 1)
+        isCurrent = false
+        center.resumeFirstPending()
+
+        let result = await task.value
+        XCTAssertTrue(result.activeIdentifiers.isEmpty)
+        XCTAssertTrue(result.removedIdentifiers.isEmpty)
+        XCTAssertTrue(center.removalBatches.isEmpty)
+        XCTAssertTrue(center.mutationLog.isEmpty)
+        XCTAssertEqual(
+            center.requests[existing.identifier]?.content.body,
+            "old"
+        )
+    }
+
+    func testObsoleteGenerationCannotDeleteNewerStableIdentifierSchedule() async {
+        let stableID = "daily-review-shared"
+        let oldRequest = request(
+            identifier: stableID,
+            interval: 120,
+            body: "old"
+        )
+        let newRequest = request(
+            identifier: stableID,
+            interval: 60,
+            body: "new"
+        )
+        let firstAddPaused = expectation(description: "first add paused")
+        let center = LocalNotificationCenterCapacitySpy(
+            pauseFirstAdd: true,
+            onFirstAddPaused: { firstAddPaused.fulfill() }
+        )
+        let coordinator = LocalNotificationCapacityCoordinator(
+            capacity: 1,
+            reservedPrioritySlots: 0
+        )
+        var firstGenerationIsCurrent = true
+
+        let first = Task { @MainActor in
+            await coordinator.reconcile(
+                candidateRequests: [oldRequest],
+                replacingIdentifiers: [stableID],
+                now: now,
+                calendar: calendar,
+                isStillCurrent: { firstGenerationIsCurrent },
+                client: center.client
+            )
+        }
+        await fulfillment(of: [firstAddPaused], timeout: 1)
+
+        firstGenerationIsCurrent = false
+        let second = Task { @MainActor in
+            await coordinator.reconcile(
+                candidateRequests: [newRequest],
+                replacingIdentifiers: [stableID],
+                now: now,
+                calendar: calendar,
+                client: center.client
+            )
+        }
+        await Task.yield()
+        center.resumeFirstAdd()
+
+        let firstResult = await first.value
+        let secondResult = await second.value
+
+        XCTAssertTrue(firstResult.acceptedIdentifiers.isEmpty)
+        XCTAssertEqual(secondResult.acceptedIdentifiers, [stableID])
+        XCTAssertEqual(center.requests[stableID]?.content.body, "new")
+        XCTAssertEqual(
+            center.mutationLog,
+            ["add:old", "remove:\(stableID)", "add:new"]
+        )
+    }
+
+    func testCapacityLimitedLifecycleEvidenceIsPrivacySafe() async throws {
+        let candidate = request(
+            identifier: "metric-review-sensitive-token",
+            interval: 60,
+            categoryIdentifier: "sensitive-category",
+            body: "private measurement"
+        )
+        let center = LocalNotificationCenterCapacitySpy()
+
+        let result = await LocalNotificationLifecycle.reconcile(
+            candidateRequests: [candidate],
+            replacingIdentifiers: [candidate.identifier],
+            now: now,
+            calendar: calendar,
+            coordinator: LocalNotificationCapacityCoordinator(
+                capacity: 1,
+                reservedPrioritySlots: 1
+            ),
+            client: center.client
+        )
+
+        XCTAssertEqual(
+            result.capacityLimitedIdentifiers,
+            [candidate.identifier]
+        )
+        XCTAssertTrue(center.requests.isEmpty)
+        let record = try XCTUnwrap(
+            LocalNotificationLifecycleLedger.shared.records().last
+        )
+        XCTAssertEqual(record.state, .capacityLimited)
+        XCTAssertEqual(record.identifier, "metric_review")
+        XCTAssertEqual(record.categoryIdentifier, "unknown")
+        let encoded = String(
+            decoding: try JSONEncoder().encode(record),
+            as: UTF8.self
+        )
+        XCTAssertFalse(encoded.contains("sensitive"))
+        XCTAssertFalse(encoded.contains("private measurement"))
+    }
+
+    func testDirectReplacementKeepsIdentifierAndDoesNotRemoveFirst() async {
+        let stableID = "hydration-reminder-phone-fallback-slot"
+        let existing = request(
+            identifier: stableID,
+            interval: 60,
+            body: "fallback"
+        )
+        let replacement = request(
+            identifier: stableID,
+            interval: 600,
+            body: "missed response"
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: [existing]
+        )
+        var accepted = false
+
+        let result = await LocalNotificationLifecycle.replacePending(
+            replacement,
+            coordinator: LocalNotificationCapacityCoordinator(),
+            didAccept: {
+                accepted = center.requests[stableID]?.content.body
+                    == "missed response"
+            },
+            client: center.client
+        )
+
+        XCTAssertEqual(result, .accepted)
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(
+            center.requests[stableID]?.content.body,
+            "missed response"
+        )
+        XCTAssertTrue(center.removalBatches.isEmpty)
+        XCTAssertEqual(center.mutationLog, ["add:missed response"])
+    }
+
+    func testDirectReplacementFailureLeavesExistingRequestIntact() async {
+        let stableID = "hydration-reminder-phone-fallback-slot"
+        let existing = request(
+            identifier: stableID,
+            interval: 60,
+            body: "fallback"
+        )
+        let replacement = request(
+            identifier: stableID,
+            interval: 600,
+            body: "missed response"
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: [existing],
+            failingIdentifiers: [stableID]
+        )
+        var accepted = false
+
+        let result = await LocalNotificationLifecycle.replacePending(
+            replacement,
+            coordinator: LocalNotificationCapacityCoordinator(),
+            didAccept: {
+                accepted = true
+            },
+            client: center.client
+        )
+
+        XCTAssertEqual(result, .failed)
+        XCTAssertFalse(accepted)
+        XCTAssertEqual(center.requests[stableID]?.content.body, "fallback")
+        XCTAssertTrue(center.removalBatches.isEmpty)
+        XCTAssertTrue(center.mutationLog.isEmpty)
+    }
+
+    private func request(
+        identifier: String,
+        interval: TimeInterval?,
+        categoryIdentifier: String = "noop.daily-review.private",
+        body: String = "Private reminder"
+    ) -> UNNotificationRequest {
+        let content = UNMutableNotificationContent()
+        content.title = "NOOP"
+        content.body = body
+        content.categoryIdentifier = categoryIdentifier
+        let trigger = interval.map {
+            UNTimeIntervalNotificationTrigger(
+                timeInterval: $0,
+                repeats: false
+            )
+        }
+        return UNNotificationRequest(
+            identifier: identifier,
+            content: content,
+            trigger: trigger
+        )
+    }
+}
+
+@MainActor
+private final class LocalNotificationCenterCapacitySpy {
+    private enum TestError: Error {
+        case rejected
+    }
+
+    private(set) var requests: [String: UNNotificationRequest]
+    private(set) var removalBatches: [[String]] = []
+    private(set) var mutationLog: [String] = []
+    private let failingIdentifiers: Set<String>
+    private var pauseFirstPending: Bool
+    private let onFirstPendingPaused: (() -> Void)?
+    private var firstPendingContinuation: CheckedContinuation<Void, Never>?
+    private var pauseFirstAdd: Bool
+    private let onFirstAddPaused: (() -> Void)?
+    private var firstAddContinuation: CheckedContinuation<Void, Never>?
+
+    init(
+        existing: [UNNotificationRequest] = [],
+        failingIdentifiers: Set<String> = [],
+        pauseFirstPending: Bool = false,
+        onFirstPendingPaused: (() -> Void)? = nil,
+        pauseFirstAdd: Bool = false,
+        onFirstAddPaused: (() -> Void)? = nil
+    ) {
+        requests = Dictionary(
+            uniqueKeysWithValues: existing.map {
+                ($0.identifier, $0)
+            }
+        )
+        self.failingIdentifiers = failingIdentifiers
+        self.pauseFirstPending = pauseFirstPending
+        self.onFirstPendingPaused = onFirstPendingPaused
+        self.pauseFirstAdd = pauseFirstAdd
+        self.onFirstAddPaused = onFirstAddPaused
+    }
+
+    func resumeFirstAdd() {
+        firstAddContinuation?.resume()
+        firstAddContinuation = nil
+    }
+
+    func resumeFirstPending() {
+        firstPendingContinuation?.resume()
+        firstPendingContinuation = nil
+    }
+
+    var client: LocalNotificationCenterClient {
+        LocalNotificationCenterClient(
+            pendingRequests: { [weak self] in
+                guard let self else { return [] }
+                if self.pauseFirstPending {
+                    self.pauseFirstPending = false
+                    self.onFirstPendingPaused?()
+                    await withCheckedContinuation { continuation in
+                        self.firstPendingContinuation = continuation
+                    }
+                }
+                return self.requests.values.sorted {
+                    $0.identifier < $1.identifier
+                }
+            },
+            add: { [weak self] request in
+                guard let self else { return }
+                if self.pauseFirstAdd {
+                    self.pauseFirstAdd = false
+                    self.onFirstAddPaused?()
+                    await withCheckedContinuation { continuation in
+                        self.firstAddContinuation = continuation
+                    }
+                }
+                if self.failingIdentifiers.contains(request.identifier) {
+                    throw TestError.rejected
+                }
+                self.requests[request.identifier] = request
+                self.mutationLog.append("add:\(request.content.body)")
+            },
+            removePending: { [weak self] identifiers in
+                guard let self else { return }
+                self.removalBatches.append(identifiers)
+                identifiers.forEach {
+                    self.requests.removeValue(forKey: $0)
+                    self.mutationLog.append("remove:\($0)")
+                }
+            }
+        )
+    }
+}
+
+@MainActor
 final class DailyReviewNotificationsTests: XCTestCase {
+    private actor AsyncGate {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var opened = false
+
+        func wait() async {
+            if opened { return }
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func open() {
+            opened = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
     private let keys = [
         DailyReviewNotifications.enabledKey,
+        DailyReviewNotifications.morningEnabledKey,
+        DailyReviewNotifications.journalEnabledKey,
+        DailyReviewNotifications.splitPreferenceMigrationKey,
         DailyReviewNotifications.morningMinutesKey,
         DailyReviewNotifications.eveningMinutesKey,
         DailyReviewNotifications.completedJournalDaysKey,
         DailyReviewNotifications.scheduledEveningIDsKey,
         NotificationRouteBridge.pendingRouteKey,
+        NotificationRouteBridge.pendingJournalDayKey,
+        NotificationRouteBridge.pendingPresentationKey,
+        HydrationReminders.enabledKey,
+        HydrationReminders.intervalMinutesKey,
+        HydrationReminders.activeStartMinutesKey,
+        HydrationReminders.activeEndMinutesKey,
+        HydrationReminders.strapBuzzEnabledKey,
+        HydrationReminders.adaptiveEnabledKey,
+        HydrationReminders.doubleTapConfirmEnabledKey,
+        HydrationReminders.bandFirstEnabledKey,
+        "hydrationReminders.scheduledRequestIDs",
+        "hydrationReminders.adaptiveIntervalMinutes",
+        "hydrationReminders.adaptiveReason",
+        "hydrationReminders.adaptiveDay",
         AutoWorkoutNotifications.enabledKey,
         MorningRecapNotifications.enabledKey,
         MorningRecapNotifications.lastReportDayKey,
@@ -251,6 +1031,138 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertEqual(DailyReviewNotifications.eveningMinutes, 19 * 60)
     }
 
+    func testRestoreAuthorizationPolicyRetainsExplicitIntentWhenDeliveryIsUnavailable() {
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.authorized),
+            .reschedule
+        )
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.provisional),
+            .reschedule
+        )
+        #if os(iOS)
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.ephemeral),
+            .reschedule
+        )
+        #endif
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.notDetermined),
+            .retainOptIn
+        )
+        XCTAssertEqual(
+            DailyReviewNotifications.restoreAuthorizationDisposition(.denied),
+            .retainOptIn
+        )
+    }
+
+    func testReenablingAnEnabledReminderKeepsThePreferenceOn() {
+        XCTAssertEqual(
+            DailyReviewNotifications.persistedPreferenceOutcome(
+                morningEnabled: true,
+                journalEnabled: false
+            ),
+            .deferred
+        )
+        XCTAssertEqual(
+            DailyReviewNotifications.persistedPreferenceOutcome(
+                morningEnabled: false,
+                journalEnabled: false
+            ),
+            .off
+        )
+    }
+
+    func testUnavailableAuthorizationCancellationClearsTrackedScheduleButKeepsOptIn() {
+        let suiteName = "DailyReviewNotificationsTests.cancellation.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: DailyReviewNotifications.enabledKey)
+        defaults.set(true, forKey: DailyReviewNotifications.morningEnabledKey)
+        defaults.set(true, forKey: DailyReviewNotifications.journalEnabledKey)
+        defaults.set(true, forKey: DailyReviewNotifications.splitPreferenceMigrationKey)
+        defaults.set(
+            [
+                "daily-review-evening-2026-09-14",
+                "daily-review-evening-2026-09-15",
+            ],
+            forKey: DailyReviewNotifications.scheduledEveningIDsKey
+        )
+        var cancelled: [String] = []
+
+        DailyReviewNotifications.cancelTrackedRequestsPreservingOptIn(
+            defaults: defaults,
+            cancel: { cancelled = $0 }
+        )
+
+        XCTAssertEqual(
+            Set(cancelled),
+            [
+                "daily-review-morning",
+                "daily-review-evening",
+                "daily-review-evening-2026-09-14",
+                "daily-review-evening-2026-09-15",
+            ]
+        )
+        XCTAssertNil(
+            defaults.object(
+                forKey: DailyReviewNotifications.scheduledEveningIDsKey
+            )
+        )
+        XCTAssertTrue(
+            defaults.bool(forKey: DailyReviewNotifications.morningEnabledKey)
+        )
+        XCTAssertTrue(
+            defaults.bool(forKey: DailyReviewNotifications.journalEnabledKey)
+        )
+    }
+
+    func testAutomationsExposePlatformNeutralQuietHoursControls() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/Screens/AutomationsView.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("@AppStorage(\"notif.quietHoursEnabled\")"))
+        XCTAssertTrue(source.contains("isOn: quietHoursEnabledBinding"))
+        XCTAssertTrue(source.contains("selection: quietStartBinding"))
+        XCTAssertTrue(source.contains("selection: quietEndBinding"))
+
+        let localizationData = try Data(
+            contentsOf: root.appendingPathComponent(
+                "Tools/AppWideLocalization/appwide_strings.json"
+            )
+        )
+        let localizations = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: localizationData)
+                as? [String: [String: String]]
+        )
+        let help = try XCTUnwrap(
+            localizations["appwide.notifications.quiet_hours.help"]?["en"]
+        )
+        XCTAssertFalse(help.localizedCaseInsensitiveContains("phone"))
+        XCTAssertTrue(
+            help.localizedCaseInsensitiveContains("daily-review reminders")
+        )
+    }
+
+    func testLegacyCombinedPreferenceMigratesToIndependentPreferences() {
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
+
+        XCTAssertTrue(DailyReviewNotifications.isMorningEnabled)
+        XCTAssertTrue(DailyReviewNotifications.isJournalEnabled)
+        XCTAssertTrue(
+            UserDefaults.standard.bool(
+                forKey: DailyReviewNotifications.splitPreferenceMigrationKey
+            )
+        )
+    }
+
     func testMinuteInputsAreClampedBeforePersistence() {
         DailyReviewNotifications.setMorningMinutes(-20)
         DailyReviewNotifications.setEveningMinutes(9_000)
@@ -267,7 +1179,8 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertTrue(specs[0].body.contains("Sleep"))
         XCTAssertTrue(specs[0].body.contains("Recovery"))
         XCTAssertTrue(specs[1].body.contains("Effort"))
-        XCTAssertTrue(specs[0].body.localizedCaseInsensitiveContains("log"))
+        XCTAssertFalse(specs[0].body.localizedCaseInsensitiveContains("log"))
+        XCTAssertFalse(specs[0].body.localizedCaseInsensitiveContains("rested"))
         XCTAssertTrue(specs[1].body.localizedCaseInsensitiveContains("log"))
         XCTAssertFalse(specs[0].body.localizedCaseInsensitiveContains("open NOOP"))
         XCTAssertFalse(specs[1].body.localizedCaseInsensitiveContains("open NOOP"))
@@ -283,6 +1196,657 @@ final class DailyReviewNotificationsTests: XCTestCase {
         let category = DailyReviewNotifications.privacyCategory()
         XCTAssertEqual(category.identifier, "noop.daily-review.private")
         XCTAssertEqual(category.hiddenPreviewsBodyPlaceholder, "Private NOOP check-in")
+
+        let planned = DailyReviewNotifications.plannedWorkoutDecisionCategory()
+        XCTAssertEqual(
+            planned.identifier,
+            DailyReviewNotifications.plannedWorkoutCategoryID
+        )
+        XCTAssertEqual(
+            planned.actions.map(\.identifier),
+            [
+                DailyReviewNotifications.keepCurrentPlanActionID,
+                DailyReviewNotifications.reviewLighterOptionsActionID,
+            ]
+        )
+        XCTAssertTrue(
+            planned.actions[0].options.contains(.authenticationRequired)
+        )
+        XCTAssertTrue(
+            planned.actions[1].options.contains(.authenticationRequired)
+        )
+        XCTAssertTrue(planned.actions[1].options.contains(.foreground))
+    }
+
+    func testIndependentPreferencesBuildOnlySelectedRequests() {
+        setDailyReviewPreferences(morning: true, journal: false)
+        let morningOnly = DailyReviewNotifications.notificationRequests()
+        XCTAssertEqual(morningOnly.map(\.identifier), ["daily-review-morning"])
+
+        setDailyReviewPreferences(morning: false, journal: true)
+        let journalOnly = DailyReviewNotifications.notificationRequests()
+        XCTAssertFalse(journalOnly.isEmpty)
+        XCTAssertTrue(
+            journalOnly.allSatisfy {
+                $0.identifier.hasPrefix("daily-review-evening-")
+            }
+        )
+    }
+
+    func testDisablingOnePreferenceCancelsOnlyItsPendingRequests() {
+        let storedEveningIDs = [
+            "daily-review-evening-2026-09-14",
+            "daily-review-evening-2026-09-15",
+        ]
+
+        XCTAssertEqual(
+            DailyReviewNotifications.disabledRequestIDs(
+                morningEnabled: false,
+                journalEnabled: true,
+                storedEveningIDs: storedEveningIDs
+            ),
+            ["daily-review-morning"]
+        )
+        XCTAssertEqual(
+            DailyReviewNotifications.disabledRequestIDs(
+                morningEnabled: true,
+                journalEnabled: false,
+                storedEveningIDs: storedEveningIDs
+            ),
+            [
+                "daily-review-evening",
+                "daily-review-evening-2026-09-14",
+                "daily-review-evening-2026-09-15",
+            ]
+        )
+    }
+
+    func testJournalCandidatesAreTrackedBeforeNotificationCenterIsRead() async {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 12
+        ))!
+        setDailyReviewPreferences(morning: false, journal: true)
+        let candidateIDs = DailyReviewNotifications.datedEveningRequestIDs(
+            DailyReviewNotifications.notificationRequests(
+                now: now,
+                calendar: calendar
+            ).map(\.identifier)
+        )
+        let priorID = "daily-review-evening-2026-09-01"
+        UserDefaults.standard.set(
+            [priorID],
+            forKey: DailyReviewNotifications.scheduledEveningIDsKey
+        )
+        let pendingPaused = expectation(
+            description: "pending Notification Center read paused"
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            pauseFirstPending: true,
+            onFirstPendingPaused: { pendingPaused.fulfill() }
+        )
+
+        let reconciliation = Task { @MainActor in
+            await DailyReviewNotifications.reconcileSchedule(
+                now: now,
+                calendar: calendar,
+                coordinator: LocalNotificationCapacityCoordinator(
+                    capacity: 32,
+                    reservedPrioritySlots: 0
+                ),
+                client: center.client
+            )
+        }
+        await fulfillment(of: [pendingPaused], timeout: 1)
+
+        XCTAssertEqual(
+            Set(
+                UserDefaults.standard.stringArray(
+                    forKey: DailyReviewNotifications.scheduledEveningIDsKey
+                ) ?? []
+            ),
+            Set(candidateIDs + [priorID])
+        )
+
+        center.resumeFirstPending()
+        _ = await reconciliation.value
+    }
+
+    func testDailyReviewRequestsMoveOutsideQuietHours() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 12
+        ))!
+        let suiteName = "DailyReviewNotificationsTests.quiet.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "notif.quietHoursEnabled")
+        defaults.set(22 * 60, forKey: "notif.quietStartMinutes")
+        defaults.set(7 * 60, forKey: "notif.quietEndMinutes")
+
+        setDailyReviewPreferences(morning: true, journal: false)
+        UserDefaults.standard.set(
+            6 * 60 + 30,
+            forKey: DailyReviewNotifications.morningMinutesKey
+        )
+        let morning = DailyReviewNotifications.notificationRequests(
+            now: now,
+            calendar: calendar,
+            defaults: defaults
+        )
+        let morningTrigger = morning.first?.trigger as? UNCalendarNotificationTrigger
+        XCTAssertEqual(morningTrigger?.dateComponents.hour, 7)
+        XCTAssertEqual(morningTrigger?.dateComponents.minute, 0)
+        XCTAssertEqual(morningTrigger?.repeats, true)
+
+        setDailyReviewPreferences(morning: false, journal: true)
+        UserDefaults.standard.set(
+            23 * 60,
+            forKey: DailyReviewNotifications.eveningMinutesKey
+        )
+        let journal = DailyReviewNotifications.notificationRequests(
+            now: now,
+            calendar: calendar,
+            defaults: defaults
+        )
+        let journalTrigger = journal.first?.trigger as? UNCalendarNotificationTrigger
+        XCTAssertEqual(journalTrigger?.dateComponents.hour, 7)
+        XCTAssertEqual(journalTrigger?.dateComponents.minute, 0)
+        XCTAssertEqual(journalTrigger?.repeats, false)
+    }
+
+    func testFailedStableReplacementKeepsDailyReviewEnabledAndTracked() async {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 12,
+            hour: 12
+        ))!
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
+        let existing = DailyReviewNotifications.notificationRequests(
+            now: now,
+            calendar: calendar
+        )
+        let eveningIDs = existing.map(\.identifier).filter {
+            $0.hasPrefix("daily-review-evening-")
+        }
+        UserDefaults.standard.set(
+            eveningIDs,
+            forKey: DailyReviewNotifications.scheduledEveningIDsKey
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: existing,
+            failingIdentifiers: Set(existing.map(\.identifier))
+        )
+
+        let result = await DailyReviewNotifications.reconcileSchedule(
+            now: now,
+            calendar: calendar,
+            coordinator: LocalNotificationCapacityCoordinator(
+                capacity: 32,
+                reservedPrioritySlots: 0
+            ),
+            client: center.client
+        )
+        let outcome = DailyReviewNotifications.applyAuthorizedScheduleResult(result)
+
+        XCTAssertEqual(outcome, .scheduled)
+        XCTAssertTrue(result?.acceptedIdentifiers.isEmpty ?? false)
+        XCTAssertEqual(
+            Set(result?.retainedIdentifiers ?? []),
+            Set(existing.map(\.identifier))
+        )
+        XCTAssertTrue(DailyReviewNotifications.isEnabled)
+        XCTAssertEqual(
+            Set(
+                UserDefaults.standard.stringArray(
+                    forKey: DailyReviewNotifications.scheduledEveningIDsKey
+                ) ?? []
+            ),
+            Set(eveningIDs)
+        )
+    }
+
+    func testTransientDailyReviewScheduleFailureRetainsOptInForRetry() async {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 13,
+            hour: 12
+        ))!
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
+        let requests = DailyReviewNotifications.notificationRequests(
+            now: now,
+            calendar: calendar
+        )
+        let center = LocalNotificationCenterCapacitySpy(
+            failingIdentifiers: Set(requests.map(\.identifier))
+        )
+
+        let result = await DailyReviewNotifications.reconcileSchedule(
+            now: now,
+            calendar: calendar,
+            coordinator: LocalNotificationCapacityCoordinator(
+                capacity: 32,
+                reservedPrioritySlots: 0
+            ),
+            client: center.client
+        )
+        let outcome = DailyReviewNotifications.applyAuthorizedScheduleResult(result)
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertEqual(result?.activeCount, 0)
+        XCTAssertEqual(
+            Set(result?.failedIdentifiers ?? []),
+            Set(requests.map(\.identifier))
+        )
+        XCTAssertTrue(DailyReviewNotifications.isEnabled)
+    }
+
+    func testDailyReviewScheduleResultRetainsOptInWhenAuthorizationWasRevoked() {
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
+        UserDefaults.standard.set(
+            ["daily-review-evening-legacy"],
+            forKey: DailyReviewNotifications.scheduledEveningIDsKey
+        )
+
+        let outcome = DailyReviewNotifications.applyScheduleResult(
+            nil,
+            authorizationStatus: .denied
+        )
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertTrue(DailyReviewNotifications.isEnabled)
+        XCTAssertNil(
+            UserDefaults.standard.object(
+                forKey: DailyReviewNotifications.scheduledEveningIDsKey
+            )
+        )
+    }
+
+    func testDailyReviewUndeterminedAuthorizationRetainsIntentWithoutPrompting() {
+        UserDefaults.standard.set(true, forKey: DailyReviewNotifications.enabledKey)
+
+        let outcome = DailyReviewNotifications.applyScheduleResult(
+            nil,
+            authorizationStatus: .notDetermined
+        )
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertTrue(DailyReviewNotifications.isEnabled)
+    }
+
+    private func setDailyReviewPreferences(
+        morning: Bool,
+        journal: Bool
+    ) {
+        UserDefaults.standard.set(
+            morning,
+            forKey: DailyReviewNotifications.morningEnabledKey
+        )
+        UserDefaults.standard.set(
+            journal,
+            forKey: DailyReviewNotifications.journalEnabledKey
+        )
+        UserDefaults.standard.set(
+            morning || journal,
+            forKey: DailyReviewNotifications.enabledKey
+        )
+        UserDefaults.standard.set(
+            true,
+            forKey: DailyReviewNotifications.splitPreferenceMigrationKey
+        )
+    }
+
+    func testFailedStableReplacementKeepsHydrationEnabledAndTracked() async {
+        let scheduledIDsKey = "hydrationReminders.scheduledRequestIDs"
+        let specs = HydrationReminders.reminderSpecs(
+            start: 8 * 60,
+            end: 20 * 60,
+            interval: 120
+        )
+        let existing = HydrationReminders.notificationRequests(specs: specs)
+        let identifiers = existing.map(\.identifier)
+        UserDefaults.standard.set(true, forKey: HydrationReminders.enabledKey)
+        UserDefaults.standard.set(
+            8 * 60,
+            forKey: HydrationReminders.activeStartMinutesKey
+        )
+        UserDefaults.standard.set(
+            20 * 60,
+            forKey: HydrationReminders.activeEndMinutesKey
+        )
+        UserDefaults.standard.set(
+            120,
+            forKey: HydrationReminders.intervalMinutesKey
+        )
+        UserDefaults.standard.set(identifiers, forKey: scheduledIDsKey)
+        let center = LocalNotificationCenterCapacitySpy(
+            existing: existing,
+            failingIdentifiers: Set(identifiers)
+        )
+
+        let result = await HydrationReminders.reconcileSchedule(
+            coordinator: LocalNotificationCapacityCoordinator(
+                capacity: 32,
+                reservedPrioritySlots: 0
+            ),
+            client: center.client
+        )
+        let outcome = HydrationReminders.applyAuthorizedScheduleResult(result)
+
+        XCTAssertEqual(outcome, .scheduled)
+        XCTAssertTrue(result?.acceptedIdentifiers.isEmpty ?? false)
+        XCTAssertEqual(
+            Set(result?.retainedIdentifiers ?? []),
+            Set(identifiers)
+        )
+        XCTAssertTrue(HydrationReminders.isEnabled)
+        XCTAssertEqual(
+            Set(
+                UserDefaults.standard.stringArray(
+                    forKey: scheduledIDsKey
+                ) ?? []
+            ),
+            Set(identifiers)
+        )
+        UserDefaults.standard.removeObject(forKey: HydrationReminders.enabledKey)
+        UserDefaults.standard.removeObject(
+            forKey: HydrationReminders.activeStartMinutesKey
+        )
+        UserDefaults.standard.removeObject(
+            forKey: HydrationReminders.activeEndMinutesKey
+        )
+        UserDefaults.standard.removeObject(
+            forKey: HydrationReminders.intervalMinutesKey
+        )
+        UserDefaults.standard.removeObject(forKey: scheduledIDsKey)
+    }
+
+    func testCapacityDeferredHydrationScheduleRetainsOptInForRetry() async {
+        let content = UNMutableNotificationContent()
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        let protected = UNNotificationRequest(
+            identifier: "noop.safety.capacity-guard",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(
+                timeInterval: 3_600,
+                repeats: false
+            )
+        )
+        let center = LocalNotificationCenterCapacitySpy(existing: [protected])
+
+        let result = await HydrationReminders.reconcileSchedule(
+            coordinator: LocalNotificationCapacityCoordinator(
+                capacity: 1,
+                reservedPrioritySlots: 0
+            ),
+            client: center.client
+        )
+        let outcome = HydrationReminders.applyAuthorizedScheduleResult(result)
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertEqual(result?.activeCount, 0)
+        XCTAssertFalse(result?.capacityLimitedIdentifiers.isEmpty ?? true)
+        XCTAssertTrue(HydrationReminders.isEnabled)
+        XCTAssertNotNil(center.requests[protected.identifier])
+    }
+
+    func testHydrationScheduleResultRetainsOptInWhenAuthorizationWasRevoked() {
+        UserDefaults.standard.set(true, forKey: HydrationReminders.enabledKey)
+        UserDefaults.standard.set(
+            ["hydration-reminder-legacy"],
+            forKey: "hydrationReminders.scheduledRequestIDs"
+        )
+
+        let outcome = HydrationReminders.applyScheduleResult(
+            nil,
+            authorizationStatus: .denied
+        )
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertTrue(HydrationReminders.isEnabled)
+        XCTAssertNil(
+            UserDefaults.standard.object(
+                forKey: "hydrationReminders.scheduledRequestIDs"
+            )
+        )
+    }
+
+    func testHydrationUndeterminedAuthorizationRetainsIntentWithoutPrompting() {
+        UserDefaults.standard.set(true, forKey: HydrationReminders.enabledKey)
+
+        let outcome = HydrationReminders.applyScheduleResult(
+            nil,
+            authorizationStatus: .notDetermined
+        )
+
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertTrue(HydrationReminders.isEnabled)
+    }
+
+    func testSceneActivationRearmsEveryRetainedWellnessReminder() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let iOSShell = try String(
+            contentsOf: root.appendingPathComponent(
+                "StrandiOS/App/RootTabView.swift"
+            ),
+            encoding: .utf8
+        )
+        let macShell = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/App/StrandApp.swift"
+            ),
+            encoding: .utf8
+        )
+        let sceneHandlerStart = try XCTUnwrap(
+            iOSShell.range(of: ".onChange(of: scenePhase)")
+        )
+        let sceneHandlerTail = iOSShell[sceneHandlerStart.lowerBound...]
+        let sceneHandlerEnd = try XCTUnwrap(
+            sceneHandlerTail.range(of: "\n        // Quick-action sheet")
+        )
+        let iOSSceneHandler = String(
+            sceneHandlerTail[..<sceneHandlerEnd.lowerBound]
+        )
+        let macSceneHandlerStart = try XCTUnwrap(
+            macShell.range(of: ".onChange(of: scenePhase)")
+        )
+        let macSceneHandler = String(
+            macShell[macSceneHandlerStart.lowerBound...]
+        )
+
+        for sceneHandler in [iOSSceneHandler, macSceneHandler] {
+            XCTAssertTrue(sceneHandler.contains(
+                "DailyReviewNotifications.restoreScheduleIfAuthorized()"
+            ))
+            XCTAssertTrue(sceneHandler.contains(
+                "HydrationReminders.restoreScheduleIfAuthorized()"
+            ))
+            XCTAssertTrue(sceneHandler.contains(
+                "WindDownNudge.restoreScheduleIfAuthorized()"
+            ))
+        }
+    }
+
+    func testHydrationRestoreAndRescheduleCannotUndoAnExplicitOptOut() throws {
+        func slice(
+            _ source: String,
+            from startMarker: String,
+            to endMarker: String
+        ) throws -> String {
+            let start = try XCTUnwrap(source.range(of: startMarker))
+            let tail = source[start.lowerBound...]
+            let end = try XCTUnwrap(tail.range(of: endMarker))
+            return String(tail[..<end.lowerBound])
+        }
+
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/System/HydrationReminders.swift"
+            ),
+            encoding: .utf8
+        )
+        let restore = try slice(
+            source,
+            from: "static func restoreScheduleIfAuthorized(",
+            to: "/// Daily reminder slots"
+        )
+        let reschedule = try slice(
+            source,
+            from: "private static func requestReschedule(",
+            to: "@discardableResult\n    static func applyScheduleResult("
+        )
+        let enable = try slice(
+            source,
+            from: "static func setEnabled(",
+            to: "static func setIntervalMinutes("
+        )
+
+        XCTAssertTrue(restore.contains("let generation = scheduleGeneration"))
+        XCTAssertTrue(
+            restore.contains(
+                "guard generation == scheduleGeneration, isEnabled else { return }"
+            )
+        )
+        XCTAssertTrue(reschedule.contains("guard isEnabled else"))
+        XCTAssertGreaterThanOrEqual(
+            reschedule.components(
+                separatedBy:
+                    "guard generation == scheduleGeneration, isEnabled else { return }"
+            ).count - 1,
+            3
+        )
+        XCTAssertEqual(
+            enable.components(
+                separatedBy: "UserDefaults.standard.set(true, forKey: enabledKey)"
+            ).count - 1,
+            2
+        )
+    }
+
+    func testHydrationRestoreCannotUndoOptOutWhileAuthorizationIsSuspended() async {
+        UserDefaults.standard.set(true, forKey: HydrationReminders.enabledKey)
+        let authorizationReadStarted = expectation(
+            description: "restore authorization read started"
+        )
+        let authorizationGate = AsyncGate()
+        let restore = HydrationReminders.restoreScheduleIfAuthorized {
+            authorizationReadStarted.fulfill()
+            await authorizationGate.wait()
+            return .authorized
+        }
+        await fulfillment(of: [authorizationReadStarted], timeout: 2)
+
+        HydrationReminders.setEnabled(false)
+        await authorizationGate.open()
+        await restore.value
+
+        XCTAssertFalse(HydrationReminders.isEnabled)
+        XCTAssertNil(
+            UserDefaults.standard.object(
+                forKey: "hydrationReminders.scheduledRequestIDs"
+            )
+        )
+    }
+
+    func testDeniedHydrationPermissionKeepsMountedTogglesAlignedWithIntent() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let hydrationView = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/Screens/HydrationView.swift"
+            ),
+            encoding: .utf8
+        )
+        let automationsView = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/Screens/AutomationsView.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            hydrationView.contains(
+                "reminderEnabled = HydrationReminders.isEnabled"
+            )
+        )
+        XCTAssertTrue(
+            hydrationView.contains(
+                "reminderEnabled && notificationPermissionDenied"
+            )
+        )
+        XCTAssertTrue(
+            hydrationView.contains(
+                "Notifications are disabled in Settings."
+            )
+        )
+        XCTAssertTrue(
+            hydrationView.contains(
+                "@Environment(\\.scenePhase) private var scenePhase"
+            )
+        )
+        let hydrationSceneStart = try XCTUnwrap(
+            hydrationView.range(of: ".onChange(of: scenePhase)")
+        )
+        let hydrationSceneHandler = String(
+            hydrationView[hydrationSceneStart.lowerBound...]
+        )
+        XCTAssertTrue(
+            hydrationSceneHandler.contains(
+                "reminderEnabled = HydrationReminders.isEnabled"
+            )
+        )
+        XCTAssertTrue(
+            hydrationSceneHandler.contains(
+                "refreshNotificationPermissionState()"
+            )
+        )
+        let warningStart = try XCTUnwrap(
+            hydrationView.range(
+                of: "if reminderEnabled && notificationPermissionDenied"
+            )
+        )
+        let warningTail = hydrationView[warningStart.lowerBound...]
+        let warningEnd = try XCTUnwrap(
+            warningTail.range(of: "\n                Divider().overlay")
+        )
+        let warning = String(
+            warningTail[..<warningEnd.lowerBound]
+        )
+        XCTAssertTrue(
+            warning.contains(
+                "Button(\"Open Settings\") { openNotificationSettings() }"
+            )
+        )
+        XCTAssertFalse(
+            warning.contains(
+                ".accessibilityElement(children: .combine)"
+            )
+        )
+        XCTAssertTrue(
+            automationsView.contains(
+                "hydrationReminderEnabled = HydrationReminders.isEnabled"
+            )
+        )
     }
 
     func testPendingNotificationRouteIsConsumedOnce() {
@@ -290,6 +1854,71 @@ final class DailyReviewNotificationsTests: XCTestCase {
 
         XCTAssertEqual(NotificationRouteBridge.consumePending(), .breathe)
         XCTAssertNil(NotificationRouteBridge.consumePending())
+    }
+
+    func testPendingWorkoutPresentationIsConsumedOnce() throws {
+        NotificationRouteBridge.recordPending(
+            .workouts,
+            presentation: .lighterWorkoutOptions
+        )
+
+        let request = try XCTUnwrap(
+            NotificationRouteBridge.consumePendingRequest()
+        )
+
+        XCTAssertEqual(request.route, .workouts)
+        XCTAssertEqual(request.presentation, .lighterWorkoutOptions)
+        XCTAssertNil(NotificationRouteBridge.consumePendingRequest())
+        XCTAssertNil(
+            UserDefaults.standard.string(
+                forKey: NotificationRouteBridge.pendingPresentationKey
+            )
+        )
+    }
+
+    func testPendingJournalRoutePreservesLogicalDayAndComputesDaysBack() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 8
+        )))
+        NotificationRouteBridge.recordPending(
+            .journal,
+            journalDay: "2026-09-13"
+        )
+
+        let request = try XCTUnwrap(
+            NotificationRouteBridge.consumePendingRequest()
+        )
+
+        XCTAssertEqual(request.route, .journal)
+        XCTAssertEqual(request.journalDay, "2026-09-13")
+        XCTAssertEqual(
+            NotificationRouteBridge.journalDayOffset(
+                for: request,
+                now: now,
+                calendar: calendar
+            ),
+            1
+        )
+        XCTAssertNil(NotificationRouteBridge.consumePendingRequest())
+    }
+
+    func testInvalidPendingJournalDayIsDiscarded() throws {
+        NotificationRouteBridge.recordPending(
+            .journal,
+            journalDay: "2026-02-31"
+        )
+
+        let request = try XCTUnwrap(
+            NotificationRouteBridge.consumePendingRequest()
+        )
+
+        XCTAssertEqual(request.route, .journal)
+        XCTAssertNil(request.journalDay)
     }
 
     func testEveningJournalScheduleSkipsCompletedDaysAndPastToday() {
@@ -313,6 +1942,87 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertFalse(specs.map(\.day).contains("2026-09-01"))
         XCTAssertEqual(specs.first?.reminder.route, .journal)
         XCTAssertEqual(specs.first?.day, "2026-09-02")
+    }
+
+    func testQuietHoursCarryPreviousJournalDayAcrossMidnight() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 1,
+            hour: 1
+        )))
+        let suiteName = "DailyReviewNotificationsTests.carryover.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "notif.quietHoursEnabled")
+        defaults.set(22 * 60, forKey: "notif.quietStartMinutes")
+        defaults.set(7 * 60, forKey: "notif.quietEndMinutes")
+
+        let specs = DailyReviewNotifications.eveningReminderSpecs(
+            now: now,
+            minuteOfDay: 23 * 60,
+            completedDays: [],
+            calendar: calendar,
+            defaults: defaults
+        )
+        let carryover = try XCTUnwrap(
+            specs.first(where: { $0.day == "2026-08-31" })
+        )
+
+        let fireComponents = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: carryover.fireDate
+        )
+        XCTAssertEqual(fireComponents.year, 2026)
+        XCTAssertEqual(fireComponents.month, 9)
+        XCTAssertEqual(fireComponents.day, 1)
+        XCTAssertEqual(fireComponents.hour, 7)
+        XCTAssertEqual(fireComponents.minute, 0)
+        XCTAssertTrue(
+            DailyReviewNotifications.journalHorizonDayKeys(
+                now: now,
+                calendar: calendar
+            ).contains("2026-08-31")
+        )
+    }
+
+    func testJournalRequestCarriesOriginalLogicalDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 1,
+            hour: 1
+        )))
+        let suiteName = "DailyReviewNotificationsTests.request-day.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "notif.quietHoursEnabled")
+        defaults.set(22 * 60, forKey: "notif.quietStartMinutes")
+        defaults.set(7 * 60, forKey: "notif.quietEndMinutes")
+        setDailyReviewPreferences(morning: false, journal: true)
+        UserDefaults.standard.set(
+            23 * 60,
+            forKey: DailyReviewNotifications.eveningMinutesKey
+        )
+
+        let request = try XCTUnwrap(
+            DailyReviewNotifications.notificationRequests(
+                now: now,
+                calendar: calendar,
+                defaults: defaults
+            ).first(where: {
+                $0.identifier == "daily-review-evening-2026-08-31"
+            })
+        )
+
+        XCTAssertEqual(
+            NotificationRouteBridge.journalDay(from: request.content.userInfo),
+            "2026-08-31"
+        )
     }
 
     func testUnknownNotificationRouteIsIgnored() {
@@ -434,6 +2144,41 @@ final class DailyReviewNotificationsTests: XCTestCase {
                        expectedToken)
     }
 
+    func testClearReleasesQueuedDeliveryBudgetBeforeSuspendedAddCompletes() async {
+        let notifications = AutoWorkoutNotificationClientSpy(status: .authorized)
+        notifications.suspendAdds = true
+        PuffinExperiment.setAutoWorkoutMode(.ask)
+        UserDefaults.standard.set(true, forKey: AutoWorkoutNotifications.enabledKey)
+        let activeBudget = PostSyncRoutineNotificationBudget()
+        let queuedBudget = PostSyncRoutineNotificationBudget()
+
+        let activePosting = Task {
+            await AutoWorkoutNotifications.postIfAuthorized(
+                startSec: 1_700_150_000,
+                endSec: 1_700_151_200,
+                client: notifications.client,
+                budget: activeBudget
+            )
+        }
+        await notifications.waitUntilAddStarts()
+
+        await AutoWorkoutNotifications.postIfAuthorized(
+            startSec: 1_700_160_000,
+            endSec: 1_700_161_200,
+            client: notifications.client,
+            budget: queuedBudget
+        )
+        AutoWorkoutNotifications.clear(client: notifications.client)
+
+        XCTAssertTrue(queuedBudget.reserve(.morningRecap))
+        XCTAssertTrue(queuedBudget.commit(.morningRecap))
+        XCTAssertEqual(queuedBudget.claimedLane, .morningRecap)
+
+        notifications.resumeAdd()
+        await activePosting.value
+        XCTAssertFalse(activeBudget.isClaimed)
+    }
+
     func testActivitySuggestionDedupHonorsBoundedHistoryAndLegacyToken() {
         let suite = "DailyReviewNotificationsTests.autoWorkout.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -455,6 +2200,57 @@ final class DailyReviewNotificationsTests: XCTestCase {
             deliveryToken: delivery, kind: .candidate, startSec: start, defaults: defaults
         ))
     }
+
+    func testPostSyncBudgetAllowsOnlyOneRoutineNotificationLane() async {
+        let budget = PostSyncRoutineNotificationBudget()
+        let notifications = AutoWorkoutNotificationClientSpy(status: .authorized)
+        PuffinExperiment.setAutoWorkoutMode(.ask)
+        UserDefaults.standard.set(true, forKey: AutoWorkoutNotifications.enabledKey)
+
+        await AutoWorkoutNotifications.postIfAuthorized(
+            startSec: 1_700_200_000,
+            endSec: 1_700_201_200,
+            client: notifications.client,
+            budget: budget
+        )
+
+        XCTAssertEqual(budget.claimedLane, .autoWorkout)
+        XCTAssertEqual(notifications.requests.count, 1)
+        XCTAssertFalse(budget.claim(.postWorkoutSummary))
+        XCTAssertEqual(budget.claimedLane, .autoWorkout)
+    }
+
+    func testFailedPostReleasesBudgetForLowerPriorityLane() async {
+        let budget = PostSyncRoutineNotificationBudget()
+        let notifications = AutoWorkoutNotificationClientSpy(status: .authorized)
+        notifications.failAdds = true
+        PuffinExperiment.setAutoWorkoutMode(.ask)
+        UserDefaults.standard.set(true, forKey: AutoWorkoutNotifications.enabledKey)
+
+        await AutoWorkoutNotifications.postIfAuthorized(
+            startSec: 1_700_300_000,
+            endSec: 1_700_301_200,
+            client: notifications.client,
+            budget: budget
+        )
+
+        XCTAssertNil(budget.claimedLane)
+        XCTAssertFalse(budget.isClaimed)
+        XCTAssertTrue(budget.reserve(.morningRecap))
+        XCTAssertTrue(budget.commit(.morningRecap))
+        XCTAssertEqual(budget.claimedLane, .morningRecap)
+        XCTAssertTrue(notifications.requests.isEmpty)
+    }
+
+    func testWrongLaneCannotCommitOrReleaseReservation() {
+        let budget = PostSyncRoutineNotificationBudget()
+
+        XCTAssertTrue(budget.reserve(.postWorkoutSummary))
+        XCTAssertFalse(budget.commit(.morningRecap))
+        budget.release(.morningRecap)
+        XCTAssertFalse(budget.reserve(.adaptiveDay))
+        XCTAssertTrue(budget.commit(.postWorkoutSummary))
+    }
 }
 
 @MainActor
@@ -462,6 +2258,9 @@ final class MorningRecapNotificationsTests: XCTestCase {
     private let keys = [
         MorningRecapNotifications.enabledKey,
         MorningRecapNotifications.lastReportDayKey,
+        "notif.quietHoursEnabled",
+        "notif.quietStartMinutes",
+        "notif.quietEndMinutes",
     ]
 
     override func setUp() {
@@ -478,30 +2277,74 @@ final class MorningRecapNotificationsTests: XCTestCase {
         XCTAssertTrue(MorningRecapNotifications.shouldNotify(
             enabled: true,
             materializedAfterSync: true,
-            chargeOrRestPresent: true,
+            recoveryOrSleepScorePresent: true,
             reportDay: "2026-08-28",
             lastReportDay: "2026-08-27"
         ))
         XCTAssertFalse(MorningRecapNotifications.shouldNotify(
             enabled: true,
             materializedAfterSync: false,
-            chargeOrRestPresent: true,
+            recoveryOrSleepScorePresent: true,
             reportDay: "2026-08-28",
             lastReportDay: nil
         ))
         XCTAssertFalse(MorningRecapNotifications.shouldNotify(
             enabled: true,
             materializedAfterSync: true,
-            chargeOrRestPresent: false,
+            recoveryOrSleepScorePresent: false,
             reportDay: "2026-08-28",
             lastReportDay: nil
         ))
         XCTAssertFalse(MorningRecapNotifications.shouldNotify(
             enabled: true,
             materializedAfterSync: true,
-            chargeOrRestPresent: true,
+            recoveryOrSleepScorePresent: true,
             reportDay: "2026-08-28",
             lastReportDay: "2026-08-28"
+        ))
+        XCTAssertFalse(MorningRecapNotifications.shouldNotify(
+            enabled: true,
+            materializedAfterSync: true,
+            recoveryOrSleepScorePresent: true,
+            reportDay: "2026-08-28",
+            lastReportDay: nil,
+            scheduledMorningReviewEnabled: true
+        ))
+        XCTAssertFalse(MorningRecapNotifications.shouldNotify(
+            enabled: true,
+            materializedAfterSync: true,
+            recoveryOrSleepScorePresent: true,
+            reportDay: "2026-08-28",
+            lastReportDay: nil,
+            inQuietHours: true
+        ))
+    }
+
+    func testCopyNamesOnlyAvailableMetrics() throws {
+        let both = try XCTUnwrap(MorningRecapNotifications.copy(
+            recoveryPresent: true,
+            sleepScorePresent: true
+        ))
+        XCTAssertTrue(both.body.contains("Recovery"))
+        XCTAssertTrue(both.body.contains("Sleep Score"))
+
+        let recovery = try XCTUnwrap(MorningRecapNotifications.copy(
+            recoveryPresent: true,
+            sleepScorePresent: false
+        ))
+        XCTAssertTrue(recovery.body.contains("Recovery"))
+        XCTAssertFalse(recovery.body.contains("Sleep Score"))
+
+        let sleep = try XCTUnwrap(MorningRecapNotifications.copy(
+            recoveryPresent: false,
+            sleepScorePresent: true
+        ))
+        XCTAssertFalse(sleep.body.contains("Recovery"))
+        XCTAssertTrue(sleep.body.contains("Sleep Score"))
+
+        XCTAssertNil(MorningRecapNotifications.copy(
+            recoveryPresent: false,
+            sleepScorePresent: false
         ))
     }
 
@@ -522,13 +2365,15 @@ final class MorningRecapNotificationsTests: XCTestCase {
 
         await MorningRecapNotifications.postIfAuthorized(
             reportDay: "2026-08-28",
-            chargeOrRestPresent: true,
+            recoveryPresent: true,
+            sleepScorePresent: true,
             materializedAfterSync: true,
             client: notifications.client
         )
         await MorningRecapNotifications.postIfAuthorized(
             reportDay: "2026-08-28",
-            chargeOrRestPresent: true,
+            recoveryPresent: true,
+            sleepScorePresent: true,
             materializedAfterSync: true,
             client: notifications.client
         )
@@ -568,6 +2413,97 @@ final class MorningRecapNotificationsTests: XCTestCase {
         XCTAssertEqual(notifications.authorizationRequestCount, 1)
         XCTAssertFalse(MorningRecapNotifications.isEnabled)
     }
+
+    func testExhaustedPostSyncBudgetKeepsRecapEligibleForLaterSync() async {
+        let notifications = MorningRecapNotificationClientSpy(status: .authorized)
+        UserDefaults.standard.set(true, forKey: MorningRecapNotifications.enabledKey)
+        let exhausted = PostSyncRoutineNotificationBudget()
+        XCTAssertTrue(exhausted.claim(.autoWorkout))
+
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-09-11",
+            recoveryPresent: true,
+            sleepScorePresent: false,
+            client: notifications.client,
+            budget: exhausted
+        )
+
+        XCTAssertTrue(notifications.requests.isEmpty)
+        XCTAssertNil(
+            UserDefaults.standard.string(forKey: MorningRecapNotifications.lastReportDayKey)
+        )
+
+        let laterSync = PostSyncRoutineNotificationBudget()
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-09-11",
+            recoveryPresent: true,
+            sleepScorePresent: false,
+            client: notifications.client,
+            budget: laterSync
+        )
+
+        XCTAssertEqual(laterSync.claimedLane, .morningRecap)
+        XCTAssertEqual(notifications.requests.count, 1)
+        XCTAssertEqual(
+            UserDefaults.standard.string(forKey: MorningRecapNotifications.lastReportDayKey),
+            "2026-09-11"
+        )
+    }
+
+    func testQuietHoursScheduleRecapForTheConfiguredEnd() async throws {
+        let notifications = MorningRecapNotificationClientSpy(status: .authorized)
+        UserDefaults.standard.set(true, forKey: MorningRecapNotifications.enabledKey)
+        UserDefaults.standard.set(true, forKey: "notif.quietHoursEnabled")
+        UserDefaults.standard.set(22 * 60, forKey: "notif.quietStartMinutes")
+        UserDefaults.standard.set(7 * 60, forKey: "notif.quietEndMinutes")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let quietNow = calendar.date(
+            from: DateComponents(
+                year: 2026,
+                month: 9,
+                day: 14,
+                hour: 23
+            )
+        )!
+
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-09-14",
+            recoveryPresent: true,
+            sleepScorePresent: false,
+            client: notifications.client,
+            now: quietNow,
+            calendar: calendar
+        )
+
+        let request = try XCTUnwrap(notifications.requests["morning-recap"])
+        let trigger = try XCTUnwrap(
+            request.trigger as? UNCalendarNotificationTrigger
+        )
+        XCTAssertFalse(trigger.repeats)
+        XCTAssertEqual(trigger.dateComponents.year, 2026)
+        XCTAssertEqual(trigger.dateComponents.month, 9)
+        XCTAssertEqual(trigger.dateComponents.day, 15)
+        XCTAssertEqual(trigger.dateComponents.hour, 7)
+        XCTAssertEqual(trigger.dateComponents.minute, 0)
+        XCTAssertEqual(
+            UserDefaults.standard.string(
+                forKey: MorningRecapNotifications.lastReportDayKey
+            ),
+            "2026-09-14"
+        )
+
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-09-14",
+            recoveryPresent: true,
+            sleepScorePresent: false,
+            client: notifications.client,
+            now: quietNow,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(notifications.requests.count, 1)
+    }
 }
 
 @MainActor
@@ -576,6 +2512,9 @@ final class PostWorkoutSummaryNotificationsTests: XCTestCase {
         PostWorkoutSummaryNotifications.enabledKey,
         PostWorkoutSummaryNotifications.lastWorkoutStartKey,
         PostWorkoutSummaryNotifications.frontierInitializedKey,
+        "notif.quietHoursEnabled",
+        "notif.quietStartMinutes",
+        "notif.quietEndMinutes",
     ]
 
     override func setUp() {
@@ -789,6 +2728,64 @@ final class PostWorkoutSummaryNotificationsTests: XCTestCase {
             )
         )
     }
+
+    func testQuietHoursKeepWorkoutEligibleForTheNextSync() async throws {
+        let notifications = PostWorkoutNotificationClientSpy(status: .authorized)
+        UserDefaults.standard.set(
+            true,
+            forKey: PostWorkoutSummaryNotifications.enabledKey
+        )
+        UserDefaults.standard.set(
+            true,
+            forKey: PostWorkoutSummaryNotifications.frontierInitializedKey
+        )
+        UserDefaults.standard.set(
+            100,
+            forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+        )
+        UserDefaults.standard.set(true, forKey: "notif.quietHoursEnabled")
+        UserDefaults.standard.set(22 * 60, forKey: "notif.quietStartMinutes")
+        UserDefaults.standard.set(7 * 60, forKey: "notif.quietEndMinutes")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let quietNow = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 14,
+            hour: 23
+        )))
+
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 101,
+            client: notifications.client,
+            now: quietNow,
+            calendar: calendar
+        )
+
+        XCTAssertTrue(notifications.requests.isEmpty)
+        XCTAssertEqual(
+            UserDefaults.standard.integer(
+                forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+            ),
+            100
+        )
+
+        UserDefaults.standard.set(false, forKey: "notif.quietHoursEnabled")
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 101,
+            client: notifications.client,
+            now: quietNow,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(notifications.requests.count, 1)
+        XCTAssertEqual(
+            UserDefaults.standard.integer(
+                forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+            ),
+            101
+        )
+    }
 }
 
 @MainActor
@@ -859,6 +2856,7 @@ private final class AutoWorkoutNotificationClientSpy {
     var authorizationResult = false
     var authorizationRequestCount = 0
     var suspendAdds = false
+    var failAdds = false
     private(set) var requests: [String: UNNotificationRequest] = [:]
     private(set) var removalCount = 0
     private(set) var addCount = 0
@@ -881,7 +2879,7 @@ private final class AutoWorkoutNotificationClientSpy {
             },
             add: { [weak self] request in
                 guard let self else { return }
-                await self.add(request)
+                try await self.add(request)
             },
             remove: { [weak self] identifiers in
                 self?.remove(identifiers)
@@ -889,8 +2887,11 @@ private final class AutoWorkoutNotificationClientSpy {
         )
     }
 
-    private func add(_ request: UNNotificationRequest) async {
+    private func add(_ request: UNNotificationRequest) async throws {
         addCount += 1
+        if failAdds {
+            throw TestError.rejected
+        }
         if suspendAdds {
             addStarted = true
             addStartedContinuation?.resume()
@@ -898,6 +2899,10 @@ private final class AutoWorkoutNotificationClientSpy {
             await withCheckedContinuation { addResumeContinuation = $0 }
         }
         requests[request.identifier] = request
+    }
+
+    private enum TestError: Error {
+        case rejected
     }
 
     func waitUntilAddStarts() async {
@@ -1057,6 +3062,7 @@ final class BluetoothAvailabilityNotificationsTests: XCTestCase {
             from: [NotificationRouteBridge.userInfoKey: "https://example.com"]
         ))
     }
+
 }
 
 @MainActor

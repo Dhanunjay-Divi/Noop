@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="wind_down_notification_title">Zeit zum Runterkommen</string>
-    <string name="wind_down_notification_body">Deine geplante Schlafenszeit rückt näher. Komm zur Ruhe, wenn es für dich passt.</string>
+    <string name="wind_down_notification_body">Plan: um %1$s zur Ruhe kommen; um %2$s schlafen gehen, wenn das für dich passt.</string>
     <string name="wind_down_channel_name">Abendlicher Ruhehinweis</string>
     <string name="wind_down_channel_description">Optionale abendliche Erinnerung vor deiner geplanten Schlafenszeit.</string>
     <string name="sleep_planner_title">Schlafplaner</string>
@@ -251,9 +251,9 @@
 
     <!-- Power saving (#477) -->
     <string name="fast_link_phy">Schnellere Bluetooth-Verbindung (experimentell)</string>
-    <string name="fast_link_phy_desc">Fordert einen schnelleren Bluetooth-Funkmodus an, während Ihr Riemen seinen gespeicherten Verlauf überträgt. Dieselben Daten in kürzerer Sendezeit - möglicherweise schnellere Synchronisierung und etwas weniger Akkuverbrauch am Riemen. Ihr Riemen muss dies unterstützen, und es geht etwas Reichweite verloren. Neu und unerprobt: Schalten Sie es aus, wenn die Synchronisierung auf Distanz unzuverlässig wird.</string>
+    <string name="fast_link_phy_desc">Fordert einen schnelleren Bluetooth-Funkmodus an, während dein Band seinen gespeicherten Verlauf überträgt. Dieselben Daten in kürzerer Sendezeit können schneller synchronisieren und etwas weniger Bandakku verbrauchen. Dein Band muss dies unterstützen, und es geht etwas Reichweite verloren. Neu und unerprobt: Schalte es aus, wenn die Synchronisierung auf Distanz unzuverlässig wird.</string>
     <string name="fast_history_sync">Schnellere Verlaufssynchronisierung (experimentell)</string>
-    <string name="fast_history_sync_desc">Fordert eine schnellere Bluetooth-Verbindung an, während Ihr Riemen seinen gespeicherten Verlauf überträgt, damit ein großer Rückstand schneller aufholt. Nur während der Synchronisierung - Ihre Live-Herzfrequenz und der nächtliche Datenstrom bleiben unberührt. Neu und unerprobt: Wenn es nicht hilft oder zu viel Akku kostet, schalten Sie es wieder aus.</string>
+    <string name="fast_history_sync_desc">Fordert eine schnellere Bluetooth-Verbindung an, während dein Band seinen gespeicherten Verlauf überträgt, damit ein großer Rückstand schneller aufholt. Nur während der Synchronisierung; deine Live-Herzfrequenz und der nächtliche Datenstrom bleiben unberührt. Neu und unerprobt: Wenn es nicht hilft oder zu viel Akku kostet, schalte es wieder aus.</string>
     <string name="keep_alive_allowed">Erlaubt - Ihr Telefon stoppt die nächtliche Synchronisierung von NOOP nicht mehr, um Akku zu sparen. Die Berechtigung selbst verbraucht keinen Akku; verbraucht wird er von der nächtlichen Synchronisierung, die Sie oben aktiviert haben.</string>
     <string name="keep_alive_needed_vendor">Ihr Telefon (%1$s) kann Hintergrund-Apps stoppen, um Akku zu sparen - dadurch können NOOP nächtliche Schlaf- und Erholungsdaten entgehen. Aktivieren Sie dies, um NOOP auf die Whitelist zu setzen.\n\nAndroid fragt „Akkuoptimierung beenden?“ und warnt, dass NOOP Ihren Akku entladen könnte - das ist Androids Standardformulierung für jede App, die im Hintergrund laufen darf. Tippen Sie auf Zulassen. Der Akku wird von der nächtlichen Synchronisierung verbraucht, die Sie oben bereits aktiviert haben; dies verhindert nur, dass Android sie vorzeitig beendet.</string>
     <string name="keep_alive_needed_generic">Manche Telefone können Hintergrund-Apps stoppen, um Akku zu sparen - dadurch können NOOP nächtliche Schlaf- und Erholungsdaten entgehen. Aktivieren Sie dies, um NOOP auf die Whitelist zu setzen.\n\nAndroid fragt „Akkuoptimierung beenden?“ und warnt, dass NOOP Ihren Akku entladen könnte - das ist Androids Standardformulierung für jede App, die im Hintergrund laufen darf. Tippen Sie auf Zulassen. Der Akku wird von der nächtlichen Synchronisierung verbraucht, die Sie oben bereits aktiviert haben; dies verhindert nur, dass Android sie vorzeitig beendet.</string>
@@ -394,7 +394,7 @@
     <string name="l10n_breathe_screen_hrv_rmssd_51014f87">HRV (RMSSD)</string>
     <string name="l10n_breathe_screen_locked_formatday_datems_paces_drift_re_8ebec15b">Gesperrtes %1$s · Tempos driften, jederzeit neu messen.</string>
     <string name="l10n_breathe_screen_locked_formatday_datems_switch_to_breathe_3efc52c6">Gesperrt %1$s. Wechseln Sie zu Atmen, um es zu verwenden, oder messen Sie oben erneut.</string>
-    <string name="l10n_breathe_screen_not_enough_clean_beat_data_to_865a1260">Nicht genug saubere Schlagdaten, um heute ein Tempo zu fixieren. Versuch es ausgeruht erneut, still sitzend mit eng anliegendem Strap. Vorerst takten wir dich mit 5,5 AZ/min (Kohärenz).</string>
+    <string name="l10n_breathe_screen_not_enough_clean_beat_data_to_865a1260">Nicht genug saubere Schlagdaten, um heute ein Tempo zu fixieren. Versuch es ausgeruht erneut, still sitzend mit eng anliegendem Noop Band. Vorerst takten wir dich mit 5,5 AZ/min (Kohärenz).</string>
     <string name="l10n_breathe_screen_not_now_e4571490">Nicht jetzt</string>
     <string name="l10n_breathe_screen_pace_7a9a6226">Tempo</string>
     <string name="l10n_breathe_screen_quick_sweep_7_min_5d58f88d">Schneller Durchlauf · ~7 Min.</string>
@@ -502,7 +502,7 @@
     <string name="l10n_data_sources_screen_whoop_history_db101974">Noop Band Geschichte</string>
     <string name="l10n_data_sources_screen_whoop_strap_live_ble_217f7df6">Noop Band-Strap (Live-BLE)</string>
     <string name="l10n_data_sources_screen_workout_file_gpx_tcx_fit_5469c068">Workout-Datei (GPX / TCX / FIT)</string>
-    <string name="l10n_data_sources_screen_write_the_metrics_noop_computes_from_439940c2">Schreiben Sie die Metriken NOOP berechnet von Ihrem Gurt (resting HR, HRV, SpO2,)</string>
+    <string name="l10n_data_sources_screen_write_the_metrics_noop_computes_from_439940c2">Schreibe die Messwerte, die NOOP aus Noop Band berechnet (Ruhepuls, HRV, SpO₂, </string>
     <string name="l10n_data_sources_screen_xiaomi_mi_band_edeab3bc">Xiaomi Mi Band</string>
     <string name="l10n_devices_screen_add_a_device_f90866b8">Gerät hinzufügen</string>
     <string name="l10n_devices_screen_battery_4a9be042">Akku</string>
@@ -527,8 +527,8 @@
     <string name="l10n_devices_screen_rename_device_ee233604">Gerät umbenennen</string>
     <string name="l10n_devices_screen_send_probe_read_only_36b318bc">Test senden (nur lesen)</string>
     <string name="l10n_devices_screen_save_efc007a3">Sichern</string>
-    <string name="l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2">Der Noop Band 4.0-Reboot-Frame wird nicht bestätigt - ein normaler Neustart wird ignoriert (# 235).</string>
-    <string name="l10n_devices_screen_waiting_for_the_straps_reply_5a06e7ac">Warte auf die Antwort des Bands…</string>
+    <string name="l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2">Der Neustartbefehl für das ältere Noop Band ist nicht bestätigt; ein normaler Neustart wird ignoriert (#235). Sende jeden Kandidaten einzeln und beobachte sowohl das Bandprotokoll als auch das Band. „Keine Trennung innerhalb von 12 Sekunden“ bedeutet, dass das Band den Befehl ignoriert hat. Die Meldung „Verbindung getrennt“ bedeutet, dass der Befehl das Band erreicht hat. Eine getrennte Verbindung allein ist jedoch noch kein Neustart: Bei einem echten Neustart erlischt das Sensorlicht des Bands für einige Sekunden. Bleibt das Licht an, wurde nur die Verbindung getrennt. Der Test löscht keine Daten. Teile bitte das Protokoll, damit wir den richtigen Befehl bestimmen können.</string>
+    <string name="l10n_devices_screen_waiting_for_the_straps_reply_5a06e7ac">Warte auf die Antwort von Noop Band…</string>
     <string name="l10n_devices_screen_whoop_4_0_reboot_probe_b51fb50f">Noop Band 4.0-Reboot-Sonde</string>
     <string name="l10n_devices_screen_whoop_is_noop_s_primary_fully_1c9e67fd">Noop Band ist das primäre, vollständig unterstützte Band von NOOP. Andere Herzfrequenzbänder sind eine frühe,</string>
     <string name="l10n_devices_screen_you_removed_your_active_strap_choose_2ac91d48">Du hast dein aktives Wearable entfernt. Wähle aus, welches gekoppelte Gerät deine Live-Daten liefert, oder </string>
@@ -580,7 +580,7 @@
     <string name="l10n_how_noop_works_screen_noop_never_shows_you_a_number_d1db9958">NOOP zeigt Ihnen nie eine Zahl, die es erfinden musste. Wenn ein Score nicht fertig ist,</string>
     <string name="l10n_how_noop_works_screen_section_title_section_body_efb1a999">%1$s. %2$s</string>
     <string name="l10n_how_noop_works_screen_sleep_scores_recording_where_your_numbers_1b3e981f">Schlaf · Werte · Aufzeichnung · woher deine Zahlen kommen</string>
-    <string name="l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff">Eine HRV-Lesung benötigt den Live-R-R-Stream. Öffnen Sie den Live-Bildschirm und verbinden Sie Ihren Gurt,</string>
+    <string name="l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff">Eine HRV-Messung benötigt den Live-R-R-Datenstrom. Öffne den Live-Bildschirm und verbinde Noop Band, </string>
     <string name="l10n_hrv_snapshot_screen_beats_12aafda0">Schläge</string>
     <string name="l10n_hrv_snapshot_screen_hrvdial_4c244c45">hrvDial</string>
     <string name="l10n_hrv_snapshot_screen_mean_hr_6c9272dd">Mittlere HF</string>
@@ -850,7 +850,7 @@
     <string name="l10n_scoring_guide_screen_how_your_scores_work_21a0e2be">So funktionieren deine Werte</string>
     <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">NOOP bietet Ihnen drei tägliche Werte (Erholung, Anstrengung und Schlafwert), jeweils auf einer Skala von 0–100.</string>
     <string name="l10n_scoring_guide_screen_scorecardhighlight_4af6985c">scoreCardHighlight</string>
-    <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">Dies sind unabhängige Annäherungen an ein Verbraucherband, die auf Open Science aufbauen: nicht</string>
+    <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">Dies sind unabhängige Näherungen aus einem Verbraucher-Wearable, die auf Open Science aufbauen: nicht</string>
     <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">NOOP-METHODE</string>
     <string name="l10n_settings_screen_advancedchevron_f22dfa01">AdvancedChevron</string>
     <string name="l10n_settings_screen_note_a2481d6c">· %1$s</string>
@@ -975,7 +975,7 @@
     <string name="l10n_test_centre_screen_experimental_algorithms_e09581e2">Experimentelle Algorithmen</string>
     <string name="l10n_test_centre_screen_export_f3e4fadb">Exportieren</string>
     <string name="l10n_test_centre_screen_export_time_2ca90c2e">Ausfuhrzeit</string>
-    <string name="l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69">Heads up: Dieser Testmodus ist ausgeschaltet, so dass der Bericht keine Erfassung dafür hat. Für a</string>
+    <string name="l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69">Hinweis: Dieser Testmodus ist ausgeschaltet, daher enthält der Bericht keine Aufzeichnung dafür. Schalte den Modus ein, stelle das Problem beim Tragen von Noop Band erneut nach und erstelle dann einen neuen Bericht.</string>
     <string name="l10n_test_centre_screen_hr_from_ppg_sub_lag_interpolation_a3ed1536">HR-from-PPG Sublag Interpolation (v26 gap-fill)</string>
     <string name="l10n_test_centre_screen_hrv_readiness_experimental_924f61bc">HRV-Bereitschaft (experimentell)</string>
     <string name="l10n_test_centre_screen_hrv_readiness_experimental_word_a471930e">HRV-Reife (experimentell): %1$s</string>
@@ -987,7 +987,7 @@
     <string name="l10n_test_centre_screen_report_ee45c303">Bericht</string>
     <string name="l10n_test_centre_screen_review_before_sharing_d7050383">Vor dem Teilen prüfen</string>
     <string name="l10n_test_centre_screen_share_09ca55ca">Teilen</string>
-    <string name="l10n_test_centre_screen_share_strap_log_for_bug_reports_b9802500">Share strap log (für bug-reports)</string>
+    <string name="l10n_test_centre_screen_share_strap_log_for_bug_reports_b9802500">Bandprotokoll teilen (für Fehlerberichte)</string>
     <string name="l10n_test_centre_screen_test_centre_37b36828">Testzentrum</string>
     <string name="l10n_test_centre_screen_test_modes_e21f1d3c">Prüfphasen</string>
     <string name="l10n_test_centre_screen_this_is_exactly_what_your_report_77278bdd">Genau das wird Ihr Bericht enthalten. Nichts verlässt dieses Telefon, bis Sie auf Teilen tippen.</string>
@@ -1453,7 +1453,7 @@
     <string name="l10n_how_noop_works_screen_how_your_sleep_is_sorted_6a8e82e0">So wird dein Schlaf einsortiert</string>
     <string name="l10n_how_noop_works_screen_what_recording_means_b896c422">Was „Aufnahme“ bedeutet</string>
     <string name="l10n_how_noop_works_screen_where_your_numbers_come_from_e169963a">Woher deine Zahlen kommen</string>
-    <string name="l10n_hrv_snapshot_screen_a_60_second_snapshot_of_your_35f03f7c">Ein 60-Sekunden-Schnappschuss Ihrer Beat-to-Beat-Intervalle (R-R) vom Band, gereinigt</string>
+    <string name="l10n_hrv_snapshot_screen_a_60_second_snapshot_of_your_35f03f7c">Ein 60-Sekunden-Schnappschuss Ihrer Beat-to-Beat-Intervalle (R-R) vom Noop Band, gereinigt</string>
     <string name="l10n_hrv_snapshot_screen_close_hrv_reading_a29a99a1">HRV-Messung schließen</string>
     <string name="l10n_hrv_snapshot_screen_hrv_reading_a2cf71f3">HRV-Messung</string>
     <string name="l10n_insights_screen_charge_d4e1aee4">Erholung</string>
@@ -1543,7 +1543,7 @@
     <string name="l10n_settings_screen_export_raw_log_matched_pair_d65390bf">Roh- und Logarithmusexport (übereinstimmendes Paar)</string>
     <string name="l10n_settings_screen_export_raw_sensor_data_csv_a171b81e">Rohe Sensordaten exportieren (CSV)</string>
     <string name="l10n_settings_screen_extends_the_sky_behind_the_whole_39bb82cc">Erweitert den Himmel hinter dem gesamten Heute-Bildschirm, sodass er bei geringerer Kartentransparenz durch jede Karte hindurchscheint. Erfordert aktivierten Tageszyklus-Hintergrund.</string>
-    <string name="l10n_settings_screen_feel_the_current_time_as_a_8ca41db1">Fühlen Sie die aktuelle Zeit als eine Folge von Summen (#460). Tut nichts, es sei denn, Ihr Gurt ist angeschlossen.</string>
+    <string name="l10n_settings_screen_feel_the_current_time_as_a_8ca41db1">Spüre die aktuelle Uhrzeit als Folge von Vibrationen (#460). Funktioniert nur, wenn Noop Band verbunden ist.</string>
     <string name="l10n_settings_screen_flags_accepted_but_the_enable_sequence_542b2595">Flags akzeptiert, aber die Aktivierungssequenz startet keinen separaten Live-Stream. Die Deep-Datensätze kommen als Teil der normalen Verlaufssynchronisierung an (#494).</string>
     <string name="l10n_settings_screen_for_a_whoop_4_0_which_df865854">Für ein Noop Band 4.0, das keine Schrittzahl sendet: NOOP schätzt Schritte aus Bewegung, kalibriert an deinem Telefon. Tippe, um zu sehen, wie nah es dran ist, und passe es an.</string>
     <string name="l10n_settings_screen_github_code_releases_issues_and_the_50b41e25">GitHub: Code, Releases, Issues und das Wiki.</string>
@@ -1562,7 +1562,7 @@
     <string name="l10n_settings_screen_keep_noop_alive_overnight_e43b2fba">Halten Sie NOOP über Nacht lebendig</string>
     <string name="l10n_settings_screen_keep_screen_on_during_a_workout_42d27284">Bildschirm während eines Workouts anlassen</string>
     <string name="l10n_settings_screen_keeps_streaming_from_your_strap_with_d31b4af9">Streamt mit einer dauerhaften Benachrichtigung weiter von Noop Band, auch nachdem du NOOP geschlossen hast. Ausschalten, um beim Schließen der App zu trennen.</string>
-    <string name="l10n_settings_screen_keeps_the_detailed_beat_to_beat_87b78edd">Läuft den detaillierten Beat-to-Beat-Stream Tag und Nacht, nicht nur während ein Live-Bildschirm geöffnet ist, so dass NOOP viel mehr für HRV über Nacht, Erholung und Schlaf einfängt. Verwendet mehr Batterie (Ihr Band streamt die Herzfrequenz kontinuierlich). Benötigt "Im Hintergrund verbunden bleiben" auf.</string>
+    <string name="l10n_settings_screen_keeps_the_detailed_beat_to_beat_87b78edd">Hält den detaillierten Schlag-zu-Schlag-Datenstrom Tag und Nacht aktiv, nicht nur bei geöffnetem Live-Bildschirm. So erfasst NOOP mehr Daten für nächtliche HRV, Erholung und Schlaf. Verbraucht mehr Akku, da Noop Band die Herzfrequenz fortlaufend überträgt. Erfordert „Im Hintergrund verbunden bleiben“.</string>
     <string name="l10n_settings_screen_live_deeppacketsthissession_type_0x2f_historical_offload_8fef3d84">%1$s Typ-0x2F historischer-Offload-Frame (s) außerhalb unserer Synchronisierung gesehen. Dies sind Geschichte (z. B. eine andere App, die den Bandbestand zieht), kein Live-R22-Stream (#494).</string>
     <string name="l10n_settings_screen_live_sessions_beta_2ca3a97f">Live Sessions (Beta)</string>
     <string name="l10n_settings_screen_makes_your_whoop_5_0_mg_b26b94c7">Bringt Ihr Noop Band 5.0/MG dazu, seine Herzfrequenz als Standard-Bluetooth-HR-Sensor zu bewerben, so dass ein Garmin (Edge / Watch), Zwift oder Fitnessgeräte es während eines Trainings verwenden können. Auf die nächste Verbindung angewendet (und sofort, wenn verbunden); schreibt das Flag Noop Band live hr in adv ind pkt des Bandes. Reversibel. 5/MG.</string>
@@ -1601,7 +1601,7 @@
     <string name="l10n_settings_screen_sex_e301dd60">Geschlecht</string>
     <string name="l10n_settings_screen_share_5_mg_capture_for_the_e41ac6bd">Share 5/MG Capture (für den Dekodierungsaufwand)</string>
     <string name="l10n_settings_screen_share_on_device_signals_with_the_b3fd747e">Teile On-Device-Signale mit dem Coach</string>
-    <string name="l10n_settings_screen_share_strap_log_for_bug_reports_b9802500">Share strap log (für bug-reports)</string>
+    <string name="l10n_settings_screen_share_strap_log_for_bug_reports_b9802500">Bandprotokoll teilen (für Fehlerberichte)</string>
     <string name="l10n_settings_screen_shows_a_soft_sunrise_day_dusk_2d20b417">Zeigt eine sanfte Szene aus Sonnenaufgang, Tag, Dämmerung und Nacht hinter dem Heute-Bildschirm. Schalte es aus für eine schlichte dunkle Fläche. Deine Karten bleiben genauso lesbar.</string>
     <string name="l10n_settings_screen_sky_behind_cards_efbe5cb8">Himmel hinter Karten</string>
     <string name="l10n_settings_screen_sleep_sorting_scores_recording_and_where_832378b5">Schlaf-Einsortierung, Werte, Aufzeichnung und woher deine Zahlen kommen.</string>
@@ -1803,7 +1803,7 @@
     <string name="l10n_workouts_screen_hrr_bpm_516">bpm</string>
     <string name="l10n_workouts_screen_hrr_not_available_516">nicht verfügbar</string>
     <string name="l10n_workouts_screen_hrr_accessibility_516">Herzfrequenzerholung nach %1$s: %2$s Schläge pro Minute</string>
-    <string name="l10n_workouts_screen_hrr_explanation_516">Die Veränderung gegenüber deiner Herzfrequenz am Ende der Belastung. Positive Werte bedeuten, dass deine Herzfrequenz gesunken ist; ein Strich bedeutet, dass das Band um diese Minute herum nicht genügend Daten aufgezeichnet hat.</string>
+    <string name="l10n_workouts_screen_hrr_explanation_516">Die Veränderung gegenüber deiner Herzfrequenz am Ende der Belastung. Positive Werte bedeuten, dass deine Herzfrequenz gesunken ist; ein Strich bedeutet, dass das Wearable um diese Minute herum nicht genügend Daten aufgezeichnet hat.</string>
     <string name="l10n_workouts_screen_recovery_trend_516">Erholungstrend</string>
     <string name="l10n_workouts_screen_hrr_range_516">Herzfrequenzerholung · %1$s</string>
     <string name="l10n_workouts_screen_hrr_trend_explanation_516">Jede Linie zeigt, um wie viele Schläge pro Minute sich deine Herzfrequenz nach der Belastung verändert hat. Berücksichtigt werden nur hochintensive Workouts mit aufgezeichneter Herzfrequenz nach der Belastung.</string>
@@ -2166,8 +2166,8 @@
     <string name="hydration_tap_amount_help">Die genaue Menge, die ein gültiges Tippen protokolliert.</string>
     <string name="hydration_tap_window_label">Tipp-Zeitfenster</string>
     <string name="hydration_tap_window_help">Nach dieser Zeit kehrt die Geste zu ihrer normalen Aktion zurück.</string>
-    <string name="hydration_tap_band_first_label">Erst nach einem verpassten Tippen benachrichtigen</string>
-    <string name="hydration_tap_band_first_help">Nachdem NOOP ein Bandsignal ausgegeben hat, wartet es auf das Tipp-Zeitfenster. Wenn du nicht bestätigst, wird eine Benachrichtigung an das Smartphone gesendet. Alarme und Sicherheitswarnungen warten nie.</string>
+    <string name="hydration_tap_band_first_label">Band zuerst verwenden, wenn verfügbar</string>
+    <string name="hydration_tap_band_first_help">Die Smartphone-Erinnerung bleibt geplant. Nur ein erfolgreiches Live-Bandsignal startet das Tipp-Zeitfenster; andernfalls bleibt die Smartphone-Erinnerung bestehen. Alarme und Sicherheitswarnungen warten nie.</string>
     <string name="smart_alarm_tap_response_label">Zum Reagieren doppelt auf das Band tippen</string>
     <string name="smart_alarm_tap_response_help">Verbraucht ein Live-Doppeltippen, während der Alarm aktiv ist. Sicherheits- oder Medikamentenwarnungen werden dadurch nie geändert.</string>
     <string name="smart_alarm_tap_window_label">Aktives Tipp-Zeitfenster</string>
@@ -2554,7 +2554,7 @@
     <string name="app_report_subtitle">Private Nachweise von diesem Smartphone</string>
     <string name="app_report_close_content_description">App-Bericht schließen</string>
     <string name="app_report_capture_title">Geschehenes erfassen</string>
-    <string name="app_report_capture_detail">NOOP bündelt bereits auf diesem Smartphone vorhandene Nachweise. Nichts wird automatisch hochgeladen.</string>
+    <string name="app_report_capture_detail">NOOP bündelt bereits auf diesem Smartphone vorhandene Nachweise. Nichts wird hochgeladen, bevor du alles geprüft und auf Feedback senden getippt hast.</string>
     <string name="app_report_evidence_performance_title">Leistung</string>
     <string name="app_report_evidence_performance_detail">Ruckler bei der Anzeige, Blockaden des Hauptthreads, Speicherdruck, Speicherplatz und Temperaturzustand</string>
     <string name="app_report_evidence_recent_path_title">Letzter Ablauf</string>
@@ -2564,7 +2564,7 @@
     <string name="app_report_evidence_band_status_title">Bandstatus</string>
     <string name="app_report_evidence_band_status_detail">Das vorhandene, bereinigte Verbindungs- und Verlaufssynchronisierungsprotokoll</string>
     <string name="app_report_evidence_android_title">Android-Diagnose</string>
-    <string name="app_report_evidence_android_detail">Letzter Betriebssystem-Beendigungsgrund und ANR-Ablaufverfolgung, sofern Android sie bereitstellt</string>
+    <string name="app_report_evidence_android_detail">Begrenzte Android-Beendigungsgründe ohne rohe Systemablaufverfolgungen oder Ausnahmemeldungen</string>
     <string name="app_report_user_note_title">Was hat fehlerhaft gewirkt? (optional)</string>
     <string name="app_report_user_note_detail">Beschreibe, worauf du getippt hast, was du erwartet hast und was passiert ist. Vermeide Namen oder Kontaktdaten.</string>
     <string name="app_report_user_note_placeholder">Beispiel: Health wurde angehalten, nachdem ich eine Metrik geöffnet hatte</string>
@@ -2572,16 +2572,17 @@
     <string name="app_report_include_snapshot">Bildschirmaufnahme beifügen</string>
     <string name="app_report_snapshot_available_detail">Zeigt den Bildschirm vor dem Öffnen dieses Berichts. Sie kann Gesundheitswerte enthalten.</string>
     <string name="app_report_snapshot_unavailable_detail">Eine Bildschirmaufnahme ist noch nicht verfügbar.</string>
-    <string name="app_report_privacy_detail">Nie enthalten: deine Gesundheitsdatenbank, der Rohverlauf der Sensoren, Kontozugangsdaten oder API-Schlüssel. Die temporäre Bildschirmaufnahme wird verworfen, wenn dieser Bericht geschlossen wird.</string>
+    <string name="app_report_privacy_detail">Nie enthalten: deine Gesundheitsdatenbank, der Rohverlauf der Sensoren, Kontozugangsdaten, API-Schlüssel oder rohe Android-Ablaufverfolgungen. Eine Notiz oder Bildschirmaufnahme wird nur beigefügt, wenn sie in deiner Prüfung angezeigt wird.</string>
     <string name="app_report_build">Bericht erstellen</string>
     <string name="app_report_cancel">Abbrechen</string>
     <string name="app_report_preparing_title">Private ZIP-Datei wird vorbereitet</string>
     <string name="app_report_preparing_detail">Begrenzte Protokolle, Dateigröße und Zeitstempel der zuletzt gespeicherten Herzfrequenz werden gelesen. Deine Gesundheitsdatenbank bleibt auf diesem Smartphone.</string>
     <string name="app_report_ready_title">Bericht ist bereit</string>
-    <string name="app_report_ready_detail">Prüfe die Liste der Anhänge und wähle dann, wohin die ZIP-Datei gesendet oder gespeichert werden soll.</string>
+    <string name="app_report_ready_detail">Prüfe die genaue Anhangsliste und Vorschau. Sende Feedback nur, wenn du diese Dateien an den NOOP-Support hochladen möchtest.</string>
+    <string name="app_report_snapshot_preview_title">BILDSCHIRMAUFNAHME</string>
+    <string name="app_report_snapshot_preview_content_description">Vorschau der Bildschirmaufnahme, die diesem Feedback-Bericht beigefügt ist</string>
     <string name="app_report_redacted_preview">BEREINIGTE VORSCHAU</string>
     <string name="app_report_preparing_zip">ZIP-Datei wird vorbereitet</string>
-    <string name="app_report_share_zip">ZIP-Datei teilen</string>
     <string name="app_report_remove_snapshot">Bildschirmaufnahme entfernen</string>
     <string name="app_report_not_ready_title">Bericht nicht bereit</string>
     <string name="app_report_prepare_zip_fallback">NOOP konnte die ZIP-Datei nicht vorbereiten.</string>
@@ -2589,8 +2590,6 @@
     <string name="app_report_close">Schließen</string>
     <string name="app_report_error_prepare">NOOP konnte den Bericht nicht vorbereiten. Öffne die App erneut und versuche es noch einmal.</string>
     <string name="app_report_status_snapshot_removed">Bildschirmaufnahme wurde aus diesem Bericht entfernt.</string>
-    <string name="app_report_error_share">Die ZIP-Datei konnte nicht erstellt werden. Es wurde kein Bericht geteilt.</string>
-    <string name="app_report_status_share_opened">Teilen-Menü für %1$s geöffnet</string>
     <string name="app_report_preview_shortened">Vorschau gekürzt. Die vollständigen begrenzten Dateien sind oben aufgeführt.</string>
     <string name="app_report_open_button">App-Problem melden</string>
     <string name="changelog_clearer_updates_and_reports_9_2_1">Klarere Updates und Berichte, die bei der Fehlerbehebung helfen</string>
@@ -2638,9 +2637,9 @@
     <string name="managed_friends_sharing_settings">Freigabeeinstellungen</string>
     <string name="managed_friends_no_shared_details">Geteilte Details erscheinen nur, wenn dieser Freund sie erlaubt.</string>
     <string name="managed_friends_poke_action">Anstupsen</string>
-    <string name="managed_friends_charge">Charge</string>
+    <string name="managed_friends_charge">Erholung</string>
     <string name="managed_friends_effort">Effort</string>
-    <string name="managed_friends_rest">Rest</string>
+    <string name="managed_friends_rest">Schlafwert</string>
     <string name="managed_friends_sleep_duration">Schlafdauer</string>
     <string name="managed_friends_hrv">HRV</string>
     <string name="managed_friends_rhr">Ruheherzfrequenz</string>
@@ -2653,7 +2652,7 @@
     <string name="managed_friends_quiet_start">Ruhezeit beginnt</string>
     <string name="managed_friends_quiet_end">Ruhezeit endet</string>
     <string name="managed_friends_save_settings">Freunde-Einstellungen speichern</string>
-    <string name="managed_friends_data_boundary">Nur Charge, Effort, Rest, Schlafdauer, HRV und Ruheherzfrequenz können geteilt werden. Rohdaten, Standorte, Journale, Routen, Workouts und Schlafphasen sind ausgeschlossen.</string>
+    <string name="managed_friends_data_boundary">Nur Erholung, Effort, Schlafwert, Schlafdauer, HRV und Ruheherzfrequenz können geteilt werden. Rohdaten, Standorte, Journale, Routen, Workouts und Schlafphasen sind ausgeschlossen.</string>
     <string name="managed_friends_directional_sharing">Wähle genau aus, was dieser Freund sehen darf. Seine Auswahl für dich ist davon getrennt.</string>
     <string name="managed_friends_allow_friend_poke">Diesem Freund erlauben, mich anzustupsen</string>
     <string name="managed_friends_save_sharing">Freigabeauswahl speichern</string>
@@ -2873,4 +2872,48 @@
     <string name="compare_reference_export_ready">Die Vergleichs-ZIP ist in der Systemfreigabe verfügbar.</string>
     <string name="compare_reference_export_failed">Die Vergleichs-ZIP konnte nicht erstellt werden.</string>
     <string name="compare_reference_units">Wert von 0 bis 100</string>
+    <string name="app_report_send_feedback">Feedback senden</string>
+    <string name="app_report_error_queue">NOOP konnte diesen Bericht nicht im privaten Postausgang versiegeln. Es wurde nichts hochgeladen.</string>
+    <string name="app_report_status_queued">Sicher auf diesem Smartphone vorgemerkt. Der Upload beginnt, sobald ein Netzwerk verfügbar ist.</string>
+    <string name="app_report_status_queued_reopen">Sicher vorgemerkt. Schließe und öffne NOOP erneut, um den Hintergrundprozess neu zu starten.</string>
+    <string name="app_report_status_uploading">Das geprüfte ZIP wird hochgeladen. Du kannst dieses Fenster schließen, während der Upload weiterläuft.</string>
+    <string name="app_report_status_retry_scheduled">Der letzte Versuch wurde nicht abgeschlossen. NOOP hat einen erneuten Versuch im Hintergrund geplant.</string>
+    <string name="app_report_status_canceling">Der Abbruch und die Entfernung einer möglichen Serverkopie werden angefordert. Ein bereits gestarteter Upload kann abgeschlossen werden, bevor die Löschung bestätigt ist.</string>
+    <string name="app_report_status_cancel_retry_scheduled">NOOP hat die Löschung noch nicht bestätigt. Das geprüfte ZIP könnte den Server bereits erreicht haben; eine weitere Löschprüfung ist geplant.</string>
+    <string name="app_report_status_sent">Feedback gesendet. Das versiegelte lokale ZIP wurde entfernt.</string>
+    <string name="app_report_status_canceled">Feedback abgebrochen und Löschung bestätigt. Das versiegelte lokale ZIP wurde entfernt.</string>
+    <string name="app_report_error_cancel_failed">NOOP konnte den Abbruch nicht bestätigen. Versuche es erneut, damit die Serverkopie entfernt werden kann.</string>
+    <string name="app_report_error_archive_invalid">Der versiegelte Bericht wurde verändert oder konnte nicht geprüft werden. Er wird nicht hochgeladen.</string>
+    <string name="app_report_error_configuration">Feedback ist in diesem Build nicht konfiguriert. Der Bericht bleibt privat auf diesem Smartphone.</string>
+    <string name="app_report_error_rejected">Der NOOP-Support hat diesen Bericht abgelehnt. Brich ihn ab, um eine eventuell gespeicherte Serverkopie zu entfernen.</string>
+    <string name="app_report_error_delivery">Das Feedback hat nach den begrenzten Versuchen keinen Endzustand erreicht. Das geprüfte ZIP könnte den Server bereits erreicht haben; wiederhole den Vorgang oder brich ihn ab.</string>
+    <string name="app_report_queued_title">Vorgemerkt</string>
+    <string name="app_report_uploading_title">Wird hochgeladen</string>
+    <string name="app_report_retry_scheduled_title">Erneuter Versuch geplant</string>
+    <string name="app_report_canceling_title">Wird abgebrochen</string>
+    <string name="app_report_cancel_retry_title">Erneuter Abbruchversuch geplant</string>
+    <string name="app_report_sent_title">Gesendet</string>
+    <string name="app_report_canceled_title">Abgebrochen</string>
+    <string name="app_report_send_failed_title">Feedback erfordert Aufmerksamkeit</string>
+    <string name="app_report_progress_percent">%1$d%%</string>
+    <string name="app_report_receipt">Beleg: %1$s</string>
+    <string name="app_report_receipt_confirmed">Beleg vom NOOP-Support bestätigt</string>
+    <string name="app_report_retry_now">Jetzt erneut versuchen</string>
+    <string name="app_report_cancel_send">Feedback abbrechen</string>
+    <string name="app_report_continue_background">Im Hintergrund fortfahren</string>
+    <string name="app_report_error_action">NOOP konnte diesen Feedback-Bericht nicht aktualisieren. Öffne den Bericht erneut und versuche es noch einmal.</string>
+    <string name="app_report_evidence_apple_title">Apple-Diagnose</string>
+    <string name="app_report_evidence_apple_detail">Verzögerte Systemberichte über Hänger oder Abstürze, sobald iOS sie bereitstellt</string>
+    <string name="app_report_privacy_detail_apple">Nie enthalten: deine Gesundheitsdatenbank, der Rohverlauf der Sensoren, Kontozugangsdaten oder API-Schlüssel. Eine Notiz oder Bildschirmaufnahme wird nur beigefügt, wenn sie in deiner Prüfung angezeigt wird.</string>
+    <string name="app_report_status_securing">Der geprüfte Bericht wird im privaten Feedback-Postausgang gesichert.</string>
+    <string name="app_report_status_cancel_before_queue">Feedback wurde abgebrochen, bevor es vorgemerkt wurde.</string>
+    <string name="app_report_status_cancel_queueing">Abbruch, bevor der Feedback-Bericht vollständig vorgemerkt ist.</string>
+    <string name="app_report_status_confirming">Zustellung wird vom NOOP-Support bestätigt.</string>
+    <string name="app_report_status_sent_cleanup_pending">Feedback gesendet. Die Bereinigung der lokalen ZIP-Datei wird erneut versucht.</string>
+    <string name="app_report_status_canceled_cleanup_pending">Feedback abgebrochen. Die Bereinigung der lokalen ZIP-Datei wird beim nächsten Öffnen von NOOP erneut versucht.</string>
+    <string name="app_report_send_disclosure">Feedback senden lädt genau diese geprüfte ZIP-Datei zum NOOP-Support hoch. Eine Notiz oder Bildschirmaufnahme wird nur beigefügt, wenn sie oben erscheint. Das Schließen dieses Fensters bricht einen vorgemerkten Upload nicht ab.</string>
+    <string name="app_report_upload_progress_label">Fortschritt des Feedback-Uploads</string>
+    <string name="app_report_cancel_progress_label">Feedback-Abbruch läuft</string>
+    <string name="app_report_queued_progress_label">Feedback ist vorgemerkt</string>
+    <string name="app_report_delivery_in_progress">Feedback-Zustellung läuft.</string>
 </resources>

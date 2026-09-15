@@ -218,14 +218,13 @@ final class AppDiagnosticsRecorderTests: XCTestCase {
 
     @MainActor
     func testAppHangBundleIncludesOnlyExplicitReviewedContext() throws {
-        let screenshot = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01])
         let entries = TestBundleAssembler.assemble(
             profile: .master,
             live: LiveState(),
             purpose: .appHang,
             runtimeDiagnostics: [],
             userNote: "Health froze near WHOOP 4C1594026",
-            appReportScreenshotPNG: screenshot
+            appReportScreenshotPNG: FeedbackScreenshotFixture.rawMetadataBearing
         )
 
         let note = try XCTUnwrap(entries.first { $0.name == "user-note.txt" })
@@ -234,7 +233,7 @@ final class AppDiagnosticsRecorderTests: XCTestCase {
         XCTAssertFalse(noteText.contains("4C1594026"))
         XCTAssertEqual(
             entries.first { $0.name == DisplayScreenshot.bundleName }?.data,
-            screenshot
+            FeedbackScreenshotFixture.sanitized
         )
 
         let preview = ReportReviewGate(entries: entries).previewText

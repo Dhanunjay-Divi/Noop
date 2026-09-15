@@ -137,6 +137,7 @@ class LiveSessionRunnerFreshnessTest {
             realtimeHr = {},
             workoutGuidanceEnabled = { true },
             workoutGuidanceSignalTrusted = { true },
+            workoutGuidanceHapticsEnabled = { true },
             pauseAndAssess = { phonePrompts += 1 },
             nowEpochSec = { baseEpochSec + testScheduler.currentTime / 1_000L },
         )
@@ -243,6 +244,7 @@ class LiveSessionRunnerFreshnessTest {
             realtimeHr = {},
             workoutGuidanceEnabled = { true },
             workoutGuidanceSignalTrusted = { trusted },
+            workoutGuidanceHapticsEnabled = { true },
             pauseAndAssess = { phonePrompts += 1 },
             nowEpochSec = { baseEpochSec + testScheduler.currentTime / 1_000L },
         )
@@ -293,6 +295,7 @@ class LiveSessionRunnerFreshnessTest {
             realtimeHr = {},
             workoutGuidanceEnabled = { enabled },
             workoutGuidanceSignalTrusted = { true },
+            workoutGuidanceHapticsEnabled = { true },
             pauseAndAssess = { phonePrompts += 1 },
             nowEpochSec = { baseEpochSec + testScheduler.currentTime / 1_000L },
         )

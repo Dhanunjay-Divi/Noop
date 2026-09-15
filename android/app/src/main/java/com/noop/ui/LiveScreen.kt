@@ -421,17 +421,17 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_hr_f187928f), value = bpm?.toString() ?: "-",
+                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_hr_f187928f), value = bpm?.toString() ?: NoopDisplayFormat.MISSING,
                             accent = if (bpm == null) Palette.textPrimary else Palette.metricRose)
-                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_avg_cdc93143), value = if (w.avgHr > 0) "${w.avgHr}" else "-")
-                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_peak_c83dbbd3), value = if (w.peakHr > 0) "${w.peakHr}" else "-")
+                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_avg_cdc93143), value = if (w.avgHr > 0) "${w.avgHr}" else NoopDisplayFormat.MISSING)
+                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_peak_c83dbbd3), value = if (w.peakHr > 0) "${w.peakHr}" else NoopDisplayFormat.MISSING)
                         StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_effort_8c974bc6), value = UnitFormatter.effortDisplay(w.liveStrain, effortScale),
                             accent = Palette.strainColor(w.liveStrain))
                     }
                     if (w.gpsEnabled) {
                         Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
                             StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_distance_42320809), value = liveDistance(w.distanceM, unitSystem))
-                            StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_pace_7a9a6226), value = w.paceSecPerKm?.let { livePace(it, unitSystem) } ?: "-")
+                            StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_pace_7a9a6226), value = w.paceSecPerKm?.let { livePace(it, unitSystem) } ?: NoopDisplayFormat.MISSING)
                         }
                     }
                     Button(
@@ -885,7 +885,7 @@ private fun ConsoleHeader(live: LiveState, activeConnection: Boolean, ouraWear: 
                 // Charging bolt next to the battery % when the strap reports it's charging (PR #568 reimpl).
                 HeaderStat(
                     "Battery",
-                    live.batteryPct?.let { "${it.toInt()}%" } ?: "-",
+                    live.batteryPct?.let { "${it.toInt()}%" } ?: NoopDisplayFormat.MISSING,
                     charging = live.charging == true,
                 )
                 HeaderStat("Worn", wornLabel(live, activeConnection, ouraWear))
@@ -989,13 +989,14 @@ internal fun hasLiveHrConnection(live: LiveState): Boolean =
 /** The "Worn" stat text. An Oura ring reports a precise live wear/charge state (live-HR presence + charger
  *  STATE + a removal watchdog), so prefer it — it flips to not-worn the moment the ring is off the finger
  *  or on the charger, unlike the WHOOP wrist boolean which lingers. WHOOP has no such signal ([ouraWear]
- *  stays null) so it keeps the wrist-event read. "-" off a live link; because an Oura ring streams WITHOUT
+ *  stays null) so it keeps the wrist-event read. The shared missing-value mark appears off a live link;
+ *  because an Oura ring streams WITHOUT
  *  bonding, a live stream counts as a link too (not just [activeConnection]). Mirrors iOS LiveView.wornNow
  *  (#628 / #218). */
 private fun wornLabel(live: LiveState, activeConnection: Boolean, ouraWear: OuraWearState?): String {
     val liveLink = activeConnection || ringStreaming(live)
     return when {
-        !liveLink -> "-"
+        !liveLink -> NoopDisplayFormat.MISSING
         ouraWear != null -> if (ouraWear == OuraWearState.WORN) "Yes" else "No"
         else -> if (live.worn) "Yes" else "No"
     }
@@ -1022,7 +1023,7 @@ private fun connectionModeColor(live: LiveState, activeConnection: Boolean): Col
 }
 
 private fun lastSyncLabel(live: LiveState): String =
-    live.lastSyncAt?.let { relativeAgo(it) } ?: "Never"
+    live.lastSyncAt?.let { relativeAgo(it) } ?: NoopDisplayFormat.MISSING
 
 // MARK: - Body console (focal HR ring + live physiology)
 
@@ -1102,7 +1103,7 @@ private fun HeartReadout(live: LiveState, bpm: Int?, activeConnection: Boolean, 
                     )
                 } else {
                     Text(
-                        text = "-",
+                        text = NoopDisplayFormat.MISSING,
                         style = NoopType.number(64f, weight = FontWeight.Bold),
                         color = Palette.textSecondary,
                     )
@@ -1145,12 +1146,16 @@ private fun PhysiologyStack(live: LiveState, activeConnection: Boolean) {
             // stream. Mirrors the macOS liveProofMetric(offline:).
             LiveProofMetric(
                 Modifier.weight(1f), "R-R",
-                if (activeConnection) (live.rr.lastOrNull()?.let { "$it ms" } ?: "-") else "Offline",
+                if (activeConnection) {
+                    live.rr.lastOrNull()?.let { "$it ms" } ?: NoopDisplayFormat.MISSING
+                } else {
+                    "Offline"
+                },
                 Palette.metricCyan, offline = !activeConnection,
             )
             LiveProofMetric(
                 Modifier.weight(1f), "Event",
-                if (activeConnection) (live.lastEvent ?: "-") else "Offline",
+                if (activeConnection) (live.lastEvent ?: NoopDisplayFormat.MISSING) else "Offline",
                 Palette.statusWarning, offline = !activeConnection,
             )
         }

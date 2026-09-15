@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
 from app import managed_lifecycle
+from app.config import Settings
 from app.managed_lifecycle import ManagedLifecycleResult, ManagedLifecycleRunner
 from app.managed_identity_deletion import ManagedIdentityDeletionError
 from app.managed_object_store import ManagedObjectStoreError
 from app.managed_repository import ManagedProcessingBusyError
 from app.managed_safety_repository import ManagedPushBatchResult
+from app.repository import MigrationManifestMismatchError
 
 
 class FakeLifecycleRepository:
@@ -182,6 +185,66 @@ class FakeSafetyPushService:
             self.events.append("push")
         self.limits.append(limit)
         return self.result
+
+
+class StaleMigrationPrimary:
+    def __init__(self) -> None:
+        self.started = False
+        self.shutdown_called = False
+
+    async def startup(self) -> None:
+        self.started = True
+
+    @asynccontextmanager
+    async def maintenance_guard(self):
+        raise MigrationManifestMismatchError(
+            "database migration manifest does not match this build"
+        )
+        yield
+
+    async def shutdown(self) -> None:
+        self.shutdown_called = True
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_rejects_forward_schema_before_mutating_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        api_token=None,
+        database_url="postgresql://synthetic.invalid/noop",
+        managed_project_id="synthetic-project",
+        managed_raw_bucket="synthetic-raw-bucket",
+        managed_signer_email="lifecycle@synthetic.invalid",
+        managed_replay_secret="r" * 32,
+    )
+    primary = StaleMigrationPrimary()
+
+    monkeypatch.setattr(
+        managed_lifecycle.Settings,
+        "from_env",
+        classmethod(lambda cls: settings),
+    )
+    monkeypatch.setattr(
+        managed_lifecycle,
+        "PostgresRepository",
+        lambda *args, **kwargs: primary,
+    )
+
+    def reject_mutating_dependency(*args, **kwargs):
+        raise AssertionError("mutating lifecycle dependency was constructed")
+
+    monkeypatch.setattr(
+        managed_lifecycle,
+        "PostgresManagedRepository",
+        reject_mutating_dependency,
+    )
+
+    with pytest.raises(MigrationManifestMismatchError):
+        await managed_lifecycle._run()
+
+    assert primary.started is True
+    assert primary.shutdown_called is True
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -21,6 +23,7 @@ import com.noop.automation.TapAutomationKind
 import com.noop.automation.TapAutomationStore
 import com.noop.R
 import com.noop.ble.LiveState
+import com.noop.managed.ManagedRuntimeGate
 import com.noop.ui.ContextualActionCenter
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotifPrefs
@@ -48,6 +51,7 @@ object HydrationReminderPrefs {
     private const val BAND_FIRST = "hydration.reminders.bandFirst"
     private const val LAST_NOTIFICATION_SLOT = "hydration.reminders.lastNotificationSlot"
     private const val LAST_STRAP_SLOT = "hydration.reminders.lastStrapSlot"
+    private const val LAST_BAND_FIRST_CUE_SLOT = "hydration.reminders.lastBandFirstCueSlot"
     private const val LAST_CONFIRMED_SLOT = "hydration.reminders.lastConfirmedSlot"
 
     data class Config(
@@ -255,6 +259,12 @@ object HydrationReminderPrefs {
     internal fun markStrapSlot(context: Context, slot: String) =
         prefs(context).edit().putString(LAST_STRAP_SLOT, slot).apply()
 
+    internal fun lastBandFirstCueSlot(context: Context): String? =
+        prefs(context).getString(LAST_BAND_FIRST_CUE_SLOT, null)
+
+    internal fun markBandFirstCueSlot(context: Context, slot: String) =
+        prefs(context).edit().putString(LAST_BAND_FIRST_CUE_SLOT, slot).apply()
+
     internal fun lastConfirmedSlot(context: Context): String? =
         prefs(context).getString(LAST_CONFIRMED_SLOT, null)
 
@@ -271,12 +281,23 @@ object HydrationReminderScheduler {
 
     fun reconcile(context: Context) {
         val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return
         val manager = WorkManager.getInstance(appContext)
         val config = HydrationReminderPrefs.config(appContext)
         if (!config.enabled) {
             manager.cancelUniqueWork(WORK_NAME)
             HydrationReminderEscalationScheduler.cancelAll(appContext)
             TapAutomationStore.clear(appContext, TapAutomationKind.HYDRATION_CONFIRM)
+            return
+        }
+        if (!HydrationReminderNotifier.canNotify(appContext)) {
+            NotificationLifecycleLedger.suppressed(
+                appContext,
+                NotificationLifecycleId.HYDRATION,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            manager.cancelUniqueWork(WORK_NAME)
+            HydrationReminderEscalationScheduler.cancelAll(appContext)
             return
         }
         scheduleNext(appContext, ZonedDateTime.now(), ExistingWorkPolicy.REPLACE)
@@ -287,6 +308,7 @@ object HydrationReminderScheduler {
         now: ZonedDateTime,
         existingWorkPolicy: ExistingWorkPolicy,
     ) {
+        if (!ManagedRuntimeGate.isAuthorized(context.applicationContext)) return
         val config = HydrationReminderPrefs.config(context, now.toLocalDate().toEpochDay())
         if (!config.enabled) {
             NotificationLifecycleLedger.observe(
@@ -334,12 +356,22 @@ class HydrationReminderWorker(appContext: Context, params: WorkerParameters) :
     CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
+        if (!ManagedRuntimeGate.isAuthorized(applicationContext)) return Result.success()
         val now = ZonedDateTime.now()
         val config = HydrationReminderPrefs.config(
             applicationContext,
             now.toLocalDate().toEpochDay(),
         )
         if (!config.enabled) return Result.success()
+        if (!HydrationReminderNotifier.canNotify(applicationContext)) {
+            NotificationLifecycleLedger.suppressed(
+                applicationContext,
+                NotificationLifecycleId.HYDRATION,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            HydrationReminderEscalationScheduler.cancelAll(applicationContext)
+            return Result.success()
+        }
 
         val due = HydrationReminderPolicy.latestDueSlot(
             epochDay = now.toLocalDate().toEpochDay(),
@@ -348,19 +380,20 @@ class HydrationReminderWorker(appContext: Context, params: WorkerParameters) :
             endMinutes = config.endMinutes,
             intervalMinutes = config.effectiveIntervalMinutes,
         )
-        if (HydrationReminderPolicy.shouldNotify(
-                enabled = config.enabled,
-                currentSlotKey = due?.key,
-                lastNotifiedSlotKey = HydrationReminderPrefs.lastNotificationSlot(applicationContext),
-            )
-        ) {
-            val slot = checkNotNull(due).key
-            // Band-first escalation is occurrence-driven. The live delivery path schedules it only
-            // after issuing the band cue, so a delayed worker cannot shorten the user's tap window.
-            if (!config.bandFirst && HydrationReminderNotifier.post(applicationContext, slot)) {
+        HydrationReminderOccurrenceCoordinator.deliverPhoneOccurrence(
+            enabled = config.enabled,
+            currentSlotKey = due?.key,
+            lastNotifiedSlotKey = {
+                HydrationReminderPrefs.lastNotificationSlot(applicationContext)
+            },
+            lastBandFirstCueSlotKey = {
+                HydrationReminderPrefs.lastBandFirstCueSlot(applicationContext)
+            },
+            post = { slot -> HydrationReminderNotifier.post(applicationContext, slot) },
+            markPosted = { slot ->
                 HydrationReminderPrefs.markNotificationSlot(applicationContext, slot)
-            }
-        }
+            },
+        )
 
         // Chain one persisted one-shot instead of polling every 15 minutes. A late worker skips stale
         // slots via the policy grace window, then still restores the next reminder.
@@ -374,23 +407,41 @@ class HydrationReminderWorker(appContext: Context, params: WorkerParameters) :
     }
 }
 
+/** Recomputes the next local hydration slot after reboot, DST, travel, or a manual clock change. */
+class HydrationReminderTimeChangeReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent?) {
+        val supported = when (intent?.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_TIMEZONE_CHANGED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_DATE_CHANGED,
+            "android.intent.action.QUICKBOOT_POWERON",
+            -> true
+            else -> false
+        }
+        if (!supported) return
+        val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return
+        HydrationReminderScheduler.reconcile(appContext)
+    }
+}
+
 /** Optional second lane: wait for the explicit band-tap window, then notify only if it was missed. */
 object HydrationReminderEscalationScheduler {
     private const val WORK_PREFIX = "noop_hydration_escalation_"
     private const val WORK_TAG = "noop_hydration_escalation"
     internal const val SLOT_KEY = "slot"
 
-    fun schedule(context: Context, slot: String, delayMinutes: Int) {
+    fun schedule(context: Context, slot: String, delayMinutes: Int): Boolean {
         val request = OneTimeWorkRequestBuilder<HydrationReminderEscalationWorker>()
             .setInputData(workDataOf(SLOT_KEY to slot))
             .setInitialDelay(delayMinutes.coerceIn(5, 30).toLong(), TimeUnit.MINUTES)
             .addTag(WORK_TAG)
             .build()
-        NotificationLifecycleLedger.observe(
+        return NotificationLifecycleLedger.scheduled(
             context,
             NotificationLifecycleId.HYDRATION,
             NotificationLifecycleCategory.REMINDER,
-            NotificationLifecycleState.SCHEDULED,
         ) {
             WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
                 WORK_PREFIX + slot,
@@ -449,21 +500,33 @@ class HydrationReminderEscalationWorker(appContext: Context, params: WorkerParam
 object HydrationReminderNotifier {
     private const val CHANNEL_ID = "noop_hydration_reminders"
 
+    internal fun canNotify(context: Context): Boolean {
+        val runtimePermissionGranted =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) == PackageManager.PERMISSION_GRANTED
+        val appNotificationsEnabled =
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+        val channelDisabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.getNotificationChannel(CHANNEL_ID)?.importance ==
+                NotificationManager.IMPORTANCE_NONE
+        } else {
+            false
+        }
+        return HydrationNotificationAvailability.canNotify(
+            runtimePermissionGranted = runtimePermissionGranted,
+            appNotificationsEnabled = appNotificationsEnabled,
+            channelDisabled = channelDisabled,
+        )
+    }
+
     @SuppressLint("MissingPermission")
     internal fun post(context: Context, slot: String): Boolean = runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            NotificationLifecycleLedger.suppressed(
-                context,
-                NotificationLifecycleId.HYDRATION,
-                NotificationLifecycleCategory.REMINDER,
-            )
-            return false
-        }
-        val manager = NotificationManagerCompat.from(context)
-        if (!manager.areNotificationsEnabled()) {
+        if (NotifPrefs.inQuietHours(context)) {
             NotificationLifecycleLedger.suppressed(
                 context,
                 NotificationLifecycleId.HYDRATION,
@@ -472,6 +535,15 @@ object HydrationReminderNotifier {
             return false
         }
         ensureChannel(context)
+        if (!canNotify(context)) {
+            NotificationLifecycleLedger.suppressed(
+                context,
+                NotificationLifecycleId.HYDRATION,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            return false
+        }
+        val manager = NotificationManagerCompat.from(context)
         val title = context.getString(R.string.l10n_hydration_reminders_hydration_check_in_f93a58b5)
         val body = context.getString(R.string.l10n_hydration_reminders_take_a_moment_to_drink_some_6a03f36a)
         val openApp = NotificationPlatformIdentity.activityPendingIntent(
@@ -487,6 +559,7 @@ object HydrationReminderNotifier {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .protectPrivateContent(context, CHANNEL_ID)
             .build()
         val posted = NotificationLifecycleLedger.posted(
             context,
@@ -534,6 +607,112 @@ object HydrationReminderNotifier {
     }
 }
 
+internal object HydrationNotificationAvailability {
+    fun canNotify(
+        runtimePermissionGranted: Boolean,
+        appNotificationsEnabled: Boolean,
+        channelDisabled: Boolean,
+    ): Boolean =
+        runtimePermissionGranted && appNotificationsEnabled && !channelDisabled
+}
+
+internal enum class HydrationPhoneOccurrenceResult {
+    POSTED,
+    WAITING_FOR_TAP,
+    SKIPPED,
+    FAILED,
+}
+
+/**
+ * Serializes the one occurrence shared by the WorkManager phone lane and the live-band lane.
+ *
+ * Both callers run in the app process, but may arrive in either order. Keeping the decision and its
+ * synchronous side effect under one lock means worker-first posts once and prevents a later cue, while
+ * cue-first records the cue only after the buzz and delayed fallback are accepted. A failed buzz or
+ * failed delayed schedule leaves the durable phone occurrence eligible.
+ */
+internal object HydrationReminderOccurrenceCoordinator {
+    @Synchronized
+    fun deliverPhoneOccurrence(
+        enabled: Boolean,
+        currentSlotKey: String?,
+        lastNotifiedSlotKey: () -> String?,
+        lastBandFirstCueSlotKey: () -> String?,
+        post: (String) -> Boolean,
+        markPosted: (String) -> Unit,
+    ): HydrationPhoneOccurrenceResult {
+        val lastNotified = lastNotifiedSlotKey()
+        val lastBandFirstCue = lastBandFirstCueSlotKey()
+        if (currentSlotKey == lastBandFirstCue && currentSlotKey != null) {
+            return HydrationPhoneOccurrenceResult.WAITING_FOR_TAP
+        }
+        if (!HydrationReminderPolicy.shouldDeliverPhoneOccurrence(
+                enabled = enabled,
+                currentSlotKey = currentSlotKey,
+                lastNotifiedSlotKey = lastNotified,
+                lastBandFirstCueSlotKey = lastBandFirstCue,
+            )
+        ) return HydrationPhoneOccurrenceResult.SKIPPED
+
+        val slot = checkNotNull(currentSlotKey)
+        if (!post(slot)) return HydrationPhoneOccurrenceResult.FAILED
+        markPosted(slot)
+        return HydrationPhoneOccurrenceResult.POSTED
+    }
+
+    @Synchronized
+    fun issueBandCue(
+        enabled: Boolean,
+        strapBuzzEnabled: Boolean,
+        wristAlertsMasterOn: Boolean,
+        connected: Boolean,
+        bonded: Boolean,
+        encryptedBond: Boolean,
+        worn: Boolean,
+        freshLiveSample: Boolean,
+        inQuietHours: Boolean,
+        currentSlotKey: String?,
+        lastBuzzedSlotKey: () -> String?,
+        lastNotifiedSlotKey: () -> String?,
+        bandFirst: Boolean,
+        buzz: () -> Unit,
+        prepareTapWindow: (String) -> Boolean,
+        markBuzzed: (String) -> Unit,
+        markBandFirstCue: (String) -> Unit,
+    ): Boolean {
+        if (!HydrationReminderPolicy.shouldBuzzStrap(
+                enabled = enabled,
+                strapBuzzEnabled = strapBuzzEnabled,
+                wristAlertsMasterOn = wristAlertsMasterOn,
+                connected = connected,
+                bonded = bonded,
+                encryptedBond = encryptedBond,
+                worn = worn,
+                freshLiveSample = freshLiveSample,
+                inQuietHours = inQuietHours,
+                currentSlotKey = currentSlotKey,
+                lastBuzzedSlotKey = lastBuzzedSlotKey(),
+                lastNotifiedSlotKey = lastNotifiedSlotKey(),
+            )
+        ) return false
+
+        val slot = checkNotNull(currentSlotKey)
+        val cueIssued = runCatching {
+            buzz()
+            true
+        }.getOrDefault(false)
+        if (!cueIssued) return false
+
+        // The physical cue happened, so deduplicate it even if preparing the optional tap path fails.
+        markBuzzed(slot)
+        val tapWindowReady = prepareTapWindow(slot)
+        if (bandFirst && tapWindowReady) {
+            markBandFirstCue(slot)
+        }
+        return true
+    }
+}
+
 /** WHOOP lane: invoked only for a newly observed HR packet by the connection service. */
 object HydrationReminderDelivery {
     fun maybeBuzzOnFreshWhoopSample(
@@ -550,46 +729,56 @@ object HydrationReminderDelivery {
             endMinutes = config.endMinutes,
             intervalMinutes = config.effectiveIntervalMinutes,
         )
-        if (!HydrationReminderPolicy.shouldBuzzStrap(
-                enabled = config.enabled,
-                strapBuzzEnabled = config.strapBuzzEnabled,
-                wristAlertsMasterOn = NotifPrefs.getBool(context, NotifPrefs.MASTER, false),
-                connected = state.connected,
-                bonded = state.bonded,
-                encryptedBond = state.encryptedBond,
-                worn = state.worn,
-                freshLiveSample = state.heartRate != null && state.heartRateSampleSequence > 0L,
-                inQuietHours = NotifPrefs.inQuietHours(context),
-                currentSlotKey = due?.key,
-                lastBuzzedSlotKey = HydrationReminderPrefs.lastStrapSlot(context),
-            )
-        ) return false
-
-        // Claim before sending so two back-to-back live packets cannot double-fire the slot.
-        HydrationReminderPrefs.markStrapSlot(context, checkNotNull(due).key)
-        val cueIssued = runCatching { buzz(1); true }.getOrDefault(false)
-        if (cueIssued && config.tapConfirmEnabled) {
-            val nowMs = now.toInstant().toEpochMilli()
-            val slot = checkNotNull(due).key
-            TapAutomationStore.arm(
-                context,
-                PendingTapAutomation.create(
-                    kind = TapAutomationKind.HYDRATION_CONFIRM,
-                    value = config.tapAmountMl,
-                    contextKey = slot,
-                    nowMs = nowMs,
-                    windowMinutes = config.tapWindowMinutes,
-                ),
-                nowMs,
-            )
-            if (config.bandFirst && config.enabled) {
-                HydrationReminderEscalationScheduler.schedule(
+        return HydrationReminderOccurrenceCoordinator.issueBandCue(
+            enabled = config.enabled,
+            strapBuzzEnabled = config.strapBuzzEnabled,
+            wristAlertsMasterOn = NotifPrefs.getBool(context, NotifPrefs.MASTER, false),
+            connected = state.connected,
+            bonded = state.bonded,
+            encryptedBond = state.encryptedBond,
+            worn = state.worn,
+            freshLiveSample = state.heartRate != null && state.heartRateSampleSequence > 0L,
+            inQuietHours = NotifPrefs.inQuietHours(context),
+            currentSlotKey = due?.key,
+            lastBuzzedSlotKey = { HydrationReminderPrefs.lastStrapSlot(context) },
+            lastNotifiedSlotKey = {
+                HydrationReminderPrefs.lastNotificationSlot(context)
+            },
+            bandFirst = config.bandFirst,
+            buzz = { buzz(1) },
+            prepareTapWindow = { slot ->
+                if (!config.tapConfirmEnabled) return@issueBandCue true
+                val nowMs = now.toInstant().toEpochMilli()
+                val armed = runCatching {
+                    TapAutomationStore.arm(
+                        context,
+                        PendingTapAutomation.create(
+                            kind = TapAutomationKind.HYDRATION_CONFIRM,
+                            value = config.tapAmountMl,
+                            contextKey = slot,
+                            nowMs = nowMs,
+                            windowMinutes = config.tapWindowMinutes,
+                        ),
+                        nowMs,
+                    )
+                    true
+                }.getOrDefault(false)
+                if (!armed) return@issueBandCue false
+                if (!config.bandFirst || !config.enabled) return@issueBandCue true
+                val scheduled = HydrationReminderEscalationScheduler.schedule(
                     context,
                     slot,
                     config.tapWindowMinutes,
                 )
-            }
-        }
-        return cueIssued
+                if (!scheduled) {
+                    TapAutomationStore.clear(context, TapAutomationKind.HYDRATION_CONFIRM)
+                }
+                scheduled
+            },
+            markBuzzed = { slot -> HydrationReminderPrefs.markStrapSlot(context, slot) },
+            markBandFirstCue = { slot ->
+                HydrationReminderPrefs.markBandFirstCueSlot(context, slot)
+            },
+        )
     }
 }

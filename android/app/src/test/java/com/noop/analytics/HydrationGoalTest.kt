@@ -88,10 +88,76 @@ class HydrationGoalTest {
         assertEquals(500, HydrationGoal.BOTTLE_ML)
     }
 
-    @Test fun heat_bump_rejects_absolute_and_implausible_skin_temperature() {
-        assertEquals(150, HydrationGoal.heatBumpMl(0.5))
+    @Test fun skin_temperature_never_changes_the_fluid_goal() {
+        assertEquals(0, HydrationGoal.heatBumpMl(0.5))
         assertEquals(0, HydrationGoal.heatBumpMl(34.2))
         assertEquals(0, HydrationGoal.heatBumpMl(9.0))
         assertEquals(0, HydrationGoal.heatBumpMl(Double.POSITIVE_INFINITY))
+    }
+
+    @Test fun personalized_goal_requires_confirmed_adult_age() {
+        assertEquals(
+            null,
+            HydrationGoal.personalizedDailyGoalMl(
+                age = 30,
+                ageConfirmed = false,
+                sex = "female",
+                sexConfirmed = true,
+                weightKg = 70.0,
+                weightConfirmed = true,
+                effort = 50.0,
+            ),
+        )
+        assertEquals(
+            null,
+            HydrationGoal.personalizedDailyGoalMl(
+                age = 19,
+                ageConfirmed = true,
+                sex = "female",
+                sexConfirmed = true,
+                weightKg = 70.0,
+                weightConfirmed = true,
+                effort = 50.0,
+            ),
+        )
+    }
+
+    @Test fun personalized_goal_prefers_confirmed_weight_then_confirmed_sex() {
+        assertEquals(
+            2800,
+            HydrationGoal.personalizedDailyGoalMl(
+                age = 30,
+                ageConfirmed = true,
+                sex = "female",
+                sexConfirmed = false,
+                weightKg = 70.0,
+                weightConfirmed = true,
+                effort = 50.0,
+            ),
+        )
+        assertEquals(
+            2500,
+            HydrationGoal.personalizedDailyGoalMl(
+                age = 30,
+                ageConfirmed = true,
+                sex = "female",
+                sexConfirmed = true,
+                weightKg = null,
+                weightConfirmed = false,
+                effort = 50.0,
+            ),
+        )
+        assertEquals(
+            null,
+            HydrationGoal.personalizedDailyGoalMl(
+                age = 30,
+                ageConfirmed = true,
+                sex = "male",
+                sexConfirmed = false,
+                weightKg = 75.0,
+                weightConfirmed = false,
+                effort = 50.0,
+            ),
+        )
     }
 }

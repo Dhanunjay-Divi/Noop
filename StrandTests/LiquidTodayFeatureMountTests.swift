@@ -52,7 +52,11 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
 
     func testAutoDetectedWorkoutSuggestionIsMountedOnDefaultToday() throws {
         let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
-        let body = try slice(source, from: "var body: some View", to: ".coordinateSpace(name: Self.pullSpace)")
+        let body = try slice(
+            source,
+            from: "private var liquidBody: some View",
+            to: ".modifier(LiquidTodayScrollPositionReporter"
+        )
 
         let suggestion = try XCTUnwrap(body.range(of: "AutoWorkoutCard()"))
         let sources = try XCTUnwrap(body.range(of: "dataSourcesSection"))
@@ -66,7 +70,11 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
 
     func testHealthAlertIsPinnedAndPersistsWhileTheModelAlertExists() throws {
         let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
-        let body = try slice(source, from: "var body: some View", to: ".coordinateSpace(name: Self.pullSpace)")
+        let body = try slice(
+            source,
+            from: "private var liquidBody: some View",
+            to: ".modifier(LiquidTodayScrollPositionReporter"
+        )
 
         let alert = try XCTUnwrap(body.range(of: "HealthAlertBanner()"))
         let reordered = try XCTUnwrap(body.range(of: "ForEach(sectionOrder)"))

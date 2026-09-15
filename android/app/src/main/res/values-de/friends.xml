@@ -54,7 +54,7 @@
     <string name="friends_waiting_shared_day">Warten auf einen geteilten Tag</string>
     <string name="friends_scores_waiting">Werte erscheinen, nachdem %1$s eine Tageszusammenfassung hochgeladen hat.</string>
     <string name="friends_open_sharing_named">Freigaben für %1$s öffnen</string>
-    <string name="friends_score_charge">Energie</string>
+    <string name="friends_score_charge">Erholung</string>
     <string name="friends_score_effort">Belastung</string>
     <string name="friends_score_rest">Erholung</string>
     <string name="friends_detail_sleep">Schlaf %1$s</string>
@@ -84,7 +84,7 @@
     <string name="friends_server_address">Serveradresse</string>
     <string name="friends_invite_code">Einladungscode</string>
     <string name="friends_join_default_title">Standardmäßig geteilt</string>
-    <string name="friends_join_default_body">Energie, Belastung und Erholung</string>
+    <string name="friends_join_default_body">Erholung, Anstrengung und Schlafwert</string>
     <string name="friends_join_never_title">Nie an Friends gesendet</string>
     <string name="friends_join_never_body">Roher Puls und R-R, Schlafphasen, Tagebuch, Trainings, Routen, Exporte und Gerätekennungen</string>
     <string name="friends_join_trust_title">Vertrauen in den Betreiber</string>

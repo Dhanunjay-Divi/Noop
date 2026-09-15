@@ -9,11 +9,18 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.noop.AppDiagnosticsRecorder
+import com.noop.analytics.RestScorer
 import com.noop.data.WhoopRepository
 import com.noop.NoopApplication
 import com.noop.notif.AdaptiveDayEvaluator
+import com.noop.notif.PostSyncRoutineNotificationBudget
+import com.noop.notif.ScheduledReportNotifier
+import com.noop.notif.scorePctOrNull
 import com.noop.ui.NoopPrefs
 import com.noop.ui.ProfileStore
+import com.noop.ui.logicalDayKeyNow
+import com.noop.ui.resolveTodayRow
 import com.noop.widget.WidgetSnapshotPublisher
 import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
@@ -127,22 +134,42 @@ class HealthConnectSyncWorker(appContext: Context, params: WorkerParameters) :
         val granted = try {
             HealthConnectImporter.client(applicationContext)
                 .permissionController.getGrantedPermissions()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Throwable) {
             return Result.retry()
         }
+        val repository = WhoopRepository.from(applicationContext)
         if (!HealthConnectBackgroundPolicy.runtimeCanRunInBackground(granted)) {
-            // Permission was never granted or was revoked. Foreground/on-open sync remains available;
-            // a background worker must not keep retrying a user decision.
-            return Result.success()
+            // Provider reads are not allowed, but a confirmed profile-height correction still has to
+            // rebuild or remove locally derived BMI from already stored Health Connect weight.
+            return try {
+                when (
+                    HealthConnectReconciler.reconcileLocalBmiProjection(
+                        repository = repository,
+                        currentHeightCm = {
+                            ProfileStore.from(applicationContext).bodyCompositionImportHeightCm
+                        },
+                    )
+                ) {
+                    is HealthConnectReconcileResult.Success -> Result.success()
+                    is HealthConnectReconcileResult.RetryableFailure -> Result.retry()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                Result.retry()
+            }
         }
 
         return try {
-            val repository = WhoopRepository.from(applicationContext)
             val outcome = HealthConnectReconciler.reconcile(
                 context = applicationContext,
                 repository = repository,
                 grantedPermissions = granted,
-                heightCm = ProfileStore.from(applicationContext).heightCm,
+                currentHeightCm = {
+                    ProfileStore.from(applicationContext).bodyCompositionImportHeightCm
+                },
             )
             if (outcome is HealthConnectReconcileResult.Success) {
                 NoopPrefs.setHcLastSync(applicationContext, System.currentTimeMillis())
@@ -151,19 +178,19 @@ class HealthConnectSyncWorker(appContext: Context, params: WorkerParameters) :
                 // The worker may run with no Activity and no BLE foreground service, so neither normal
                 // widget producer is necessarily alive. Republish the newly-imported scores directly;
                 // this is best-effort and can never turn a successful health import into a retry loop.
-                runCatching {
-                    WidgetSnapshotPublisher.refreshScores(applicationContext, repository, activeId)
-                }
                 try {
-                    AdaptiveDayEvaluator.evaluateAndNotify(
-                        context = applicationContext,
-                        repository = repository,
-                        deviceId = activeId,
-                    )
+                    WidgetSnapshotPublisher.refreshScores(applicationContext, repository, activeId)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Throwable) {
-                    // Guidance is best-effort and cannot turn a successful health import into a retry.
+                    // Widget publication is best-effort and cannot turn a successful import into a retry.
+                }
+                if (outcome.rebuilt) {
+                    reconcileRoutineNotifications(
+                        context = applicationContext,
+                        repository = repository,
+                        activeDeviceId = activeId,
+                    )
                 }
                 Result.success()
             } else {
@@ -174,6 +201,75 @@ class HealthConnectSyncWorker(appContext: Context, params: WorkerParameters) :
             throw cancelled
         } catch (_: Throwable) {
             Result.retry()
+        }
+    }
+
+    private suspend fun reconcileRoutineNotifications(
+        context: Context,
+        repository: WhoopRepository,
+        activeDeviceId: String,
+    ) {
+        val budget = PostSyncRoutineNotificationBudget()
+
+        try {
+            ScheduledReportNotifier.onWorkout(
+                context = context,
+                newestWorkoutTs = repository.latestWorkoutStartAllSources(),
+                title = "",
+                body = "",
+                budget = budget,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            // Routine guidance is best-effort and cannot turn a successful health import into a retry.
+        }
+
+        try {
+            AdaptiveDayEvaluator.evaluateAndNotify(
+                context = context,
+                repository = repository,
+                deviceId = activeDeviceId,
+                notificationBudget = budget,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            // Guidance is best-effort and cannot turn a successful health import into a retry.
+        }
+
+        if (!budget.isClaimed) {
+            try {
+                val merged = repository.daysMerged(activeDeviceId)
+                val logicalDay = logicalDayKeyNow()
+                val localDay = java.time.LocalDate.now().toString()
+                val today = resolveTodayRow(merged, logicalDay, localDay)
+                if (today?.totalSleepMin != null) {
+                    ScheduledReportNotifier.onMorning(
+                        context = context,
+                        reportDay = today.day,
+                        chargePct = today.recovery.scorePctOrNull(),
+                        restPct = RestScorer.restFromDaily(today).scorePctOrNull(),
+                        materializedAfterSync = true,
+                        budget = budget,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Routine guidance is best-effort and cannot turn a successful health import into a retry.
+            }
+        }
+
+        budget.claimedLane?.let { lane ->
+            AppDiagnosticsRecorder.record(
+                "post_sync.notification_budget",
+                fields = mapOf(
+                    "lane" to lane.storageKey,
+                    "outcome" to "claimed",
+                    "source" to "external_health",
+                ),
+            )
         }
     }
 }

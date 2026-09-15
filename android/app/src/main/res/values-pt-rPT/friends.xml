@@ -54,7 +54,7 @@
     <string name="friends_waiting_shared_day">A aguardar um dia partilhado</string>
     <string name="friends_scores_waiting">As pontuações aparecem depois de %1$s enviar um resumo diário.</string>
     <string name="friends_open_sharing_named">Abrir controlos de partilha para %1$s</string>
-    <string name="friends_score_charge">Carga</string>
+    <string name="friends_score_charge">Recuperação</string>
     <string name="friends_score_effort">Esforço</string>
     <string name="friends_score_rest">Descanso</string>
     <string name="friends_detail_sleep">Sono %1$s</string>
@@ -84,7 +84,7 @@
     <string name="friends_server_address">Endereço do servidor</string>
     <string name="friends_invite_code">Código de convite</string>
     <string name="friends_join_default_title">Partilhado por predefinição</string>
-    <string name="friends_join_default_body">Carga, Esforço e Descanso</string>
+    <string name="friends_join_default_body">Recuperação, Esforço e Pontuação do sono</string>
     <string name="friends_join_never_title">Nunca enviado para Amigos</string>
     <string name="friends_join_never_body">FC e R-R em bruto, fases do sono, diário, treinos, percursos, exportações e identificadores de dispositivo</string>
     <string name="friends_join_trust_title">Confiança no operador</string>

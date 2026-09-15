@@ -259,7 +259,7 @@ struct HRVSnapshotView: View {
             .disabled(!bonded && phase != .capturing)
             .help(bonded
                   ? "Take a 60-second seated HRV reading from the live R-R stream."
-                  : "Connect your strap first. The reading needs the live R-R stream.")
+                  : "Connect Noop Band first. The reading needs the live R-R stream.")
 
             if phase == .done, let r = result, r.rmssd != nil {
                 Button {

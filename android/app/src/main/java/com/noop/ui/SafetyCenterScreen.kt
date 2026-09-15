@@ -63,9 +63,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.R
 import com.noop.ble.WhoopConnectionService
-import com.noop.safety.FallResponsePolicy
+import com.noop.managed.ManagedCloudPhase
+import com.noop.managed.ManagedCloudService
+import com.noop.managed.ManagedSafetyContacts
 import com.noop.safety.SafetyCheckInPolicy
 import com.noop.safety.SafetyCheckInReminderPrefs
 import com.noop.safety.SafetyCheckInReminderScheduler
@@ -97,6 +100,16 @@ import kotlinx.coroutines.launch
 private enum class SafetyLocationState { Idle, Requesting, Ready, Denied, Failed }
 private enum class SafetyIncidentAction { Resolve, Cancel }
 
+internal fun shouldDisableBandSosPreference(
+    enabled: Boolean,
+    phase: ManagedCloudPhase,
+    contacts: ManagedSafetyContacts?,
+): Boolean =
+    enabled &&
+        phase == ManagedCloudPhase.ENROLLED &&
+        contacts != null &&
+        contacts.deliveryCapableCount < contacts.minimumRequired
+
 private enum class CheckInPreset(val seconds: Long, val labelRes: Int) {
     Minutes15(15 * 60L, R.string.safety_duration_15_minutes),
     Minutes30(30 * 60L, R.string.safety_duration_30_minutes),
@@ -113,11 +126,14 @@ fun SafetyCenterScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pagingController = remember(context) { SafetyPagingController(context) }
+    val managedService = remember(context) { ManagedCloudService.get(context) }
+    val managedState by managedService.state.collectAsStateWithLifecycle()
     var shareIntent by remember { mutableStateOf(SafetyShareIntent.FEEL_UNSAFE) }
     var displayName by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var detailsExpanded by remember { mutableStateOf(false) }
-    var includeLocation by remember { mutableStateOf(true) }
+    // Precise location is additive, never a prerequisite for asking a trusted contact for help.
+    var includeLocation by remember { mutableStateOf(false) }
     var locationState by remember { mutableStateOf(SafetyLocationState.Idle) }
     var location by remember { mutableStateOf<SafetyLocation?>(null) }
     var nowUnix by remember { mutableLongStateOf(System.currentTimeMillis() / 1_000L) }
@@ -137,12 +153,25 @@ fun SafetyCenterScreen() {
     var sosGestureEvents by remember {
         mutableStateOf(SafetySosGesturePrefs.requiredEvents(context))
     }
+    var sosGestureSharesLocation by remember {
+        mutableStateOf(SafetySosGesturePrefs.sharesLocation(context))
+    }
     var shareDurationHours by remember {
         mutableStateOf(SafetyPagingPrefs.shareDurationHours(context))
     }
     var sosNotificationsAvailable by remember {
         mutableStateOf(SafetyStatusNotifications.deliveryAvailable(context))
     }
+    val managedBandSosReady =
+        managedState.phase == ManagedCloudPhase.ENROLLED &&
+            managedState.safetyContacts?.let { contacts ->
+                contacts.deliveryCapableCount >= contacts.minimumRequired
+            } == true
+    val shouldDisableBandSos = shouldDisableBandSosPreference(
+        enabled = sosGestureEnabled,
+        phase = managedState.phase,
+        contacts = managedState.safetyContacts,
+    )
     var locationPermissionRevision by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -168,6 +197,7 @@ fun SafetyCenterScreen() {
             ) == PackageManager.PERMISSION_GRANTED
     }
     val sosLocationReady = hasForegroundLocation && hasBackgroundLocation
+    val bandSosReady = managedBandSosReady
     val reminderAvailability = SafetyCheckInReminderScheduler.deliveryAvailability(context)
     val scheduleFailure = stringResource(R.string.safety_error_schedule)
     val notificationsOffStart = stringResource(R.string.safety_error_notifications_start)
@@ -295,6 +325,10 @@ fun SafetyCenterScreen() {
         ActivityResultContracts.RequestPermission(),
     ) {
         sosNotificationsAvailable = SafetyStatusNotifications.deliveryAvailable(context)
+        val enabled = managedService.bandSosSetupReady()
+        sosGestureEnabled = enabled
+        SafetySosGesturePrefs.setEnabled(context, enabled)
+        if (enabled) WhoopConnectionService.start(context)
     }
 
     fun startCheckIn() {
@@ -313,6 +347,18 @@ fun SafetyCenterScreen() {
         while (true) {
             nowUnix = System.currentTimeMillis() / 1_000L
             delay(1_000L)
+        }
+    }
+    LaunchedEffect(managedService) {
+        managedService.bootstrap()
+        if (managedService.state.value.phase == ManagedCloudPhase.ENROLLED) {
+            managedService.refreshSafety()
+        }
+    }
+    LaunchedEffect(shouldDisableBandSos) {
+        if (shouldDisableBandSos) {
+            sosGestureEnabled = false
+            SafetySosGesturePrefs.setEnabled(context, false)
         }
     }
     LaunchedEffect(pagingController) {
@@ -459,63 +505,10 @@ fun SafetyCenterScreen() {
             }
         }
 
-        SectionHeader(
-            stringResource(R.string.safety_fall_section),
-            overline = stringResource(R.string.safety_fall_overline),
-        )
-        NoopCard(tint = Palette.statusWarning) {
-            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
-                Row(
-                    modifier = Modifier.semantics(mergeDescendants = true) {},
-                    horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Icon(
-                        Icons.Filled.Shield,
-                        contentDescription = null,
-                        tint = Palette.statusWarning,
-                    )
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(Metrics.space8),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            Text(
-                                stringResource(R.string.safety_fall_title),
-                                style = NoopType.headline,
-                                color = Palette.textPrimary,
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatePill(
-                                stringResource(R.string.safety_fall_status),
-                                tone = StrandTone.Warning,
-                            )
-                        }
-                        Text(
-                            stringResource(
-                                R.string.safety_fall_body_format,
-                                FallResponsePolicy.RESPONSE_WINDOW_SECONDS,
-                            ),
-                            style = NoopType.body,
-                            color = Palette.textSecondary,
-                        )
-                    }
-                }
-                Text(
-                    stringResource(R.string.safety_fall_requirements),
-                    style = NoopType.caption,
-                    color = Palette.textTertiary,
-                )
-            }
-        }
-
         ManagedSafetySection(
             currentLocation = location,
             locationReady = locationIsReady,
+            foregroundLocationReady = hasForegroundLocation,
             backgroundLocationReady = hasBackgroundLocation,
             onRequestLocation = ::requestLocation,
             onRequestBackgroundLocation = ::openAppSettings,
@@ -1043,26 +1036,29 @@ fun SafetyCenterScreen() {
                         .fillMaxWidth()
                         .toggleable(
                             value = sosGestureEnabled,
+                            enabled = bandSosReady || sosGestureEnabled,
                             role = Role.Switch,
                             onValueChange = { enabled ->
-                                sosGestureEnabled = enabled
-                                SafetySosGesturePrefs.setEnabled(context, enabled)
-                                if (enabled) {
-                                    WhoopConnectionService.start(context)
-                                    if (
-                                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                        ContextCompat.checkSelfPermission(
-                                            context,
-                                            Manifest.permission.POST_NOTIFICATIONS,
-                                        ) != PackageManager.PERMISSION_GRANTED
-                                    ) {
-                                        sosNotificationPermissionLauncher.launch(
-                                            Manifest.permission.POST_NOTIFICATIONS,
-                                        )
-                                    } else {
-                                        sosNotificationsAvailable =
-                                            SafetyStatusNotifications.deliveryAvailable(context)
-                                    }
+                                if (!enabled) {
+                                    sosGestureEnabled = false
+                                    SafetySosGesturePrefs.setEnabled(context, false)
+                                } else if (
+                                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                    ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.POST_NOTIFICATIONS,
+                                    ) != PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    sosNotificationPermissionLauncher.launch(
+                                        Manifest.permission.POST_NOTIFICATIONS,
+                                    )
+                                } else if (managedService.bandSosSetupReady()) {
+                                    sosNotificationsAvailable =
+                                        SafetyStatusNotifications.deliveryAvailable(context)
+                                    val allowed = true
+                                    sosGestureEnabled = allowed
+                                    SafetySosGesturePrefs.setEnabled(context, allowed)
+                                    if (allowed) WhoopConnectionService.start(context)
                                 }
                             },
                         )
@@ -1089,6 +1085,13 @@ fun SafetyCenterScreen() {
                     NoopToggleSwitch(
                         checked = sosGestureEnabled,
                         onCheckedChange = null,
+                    )
+                }
+                if (!bandSosReady) {
+                    Text(
+                        managedService.bandSosSetupMessage(),
+                        style = NoopType.caption,
+                        color = Palette.statusWarning,
                     )
                 }
 
@@ -1124,6 +1127,91 @@ fun SafetyCenterScreen() {
                         style = NoopType.caption,
                         color = Palette.textTertiary,
                     )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .toggleable(
+                                value = sosGestureSharesLocation,
+                                role = Role.Switch,
+                                onValueChange = { enabled ->
+                                    sosGestureSharesLocation = enabled
+                                    SafetySosGesturePrefs.setSharesLocation(context, enabled)
+                                    if (enabled && !hasForegroundLocation) {
+                                        sosLocationPermissionLauncher.launch(
+                                            arrayOf(
+                                                Manifest.permission.ACCESS_COARSE_LOCATION,
+                                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
+                            .padding(vertical = Metrics.space4)
+                            .semantics(mergeDescendants = true) {},
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                        ) {
+                            Text(
+                                stringResource(R.string.safety_sos_location_title),
+                                style = NoopType.body,
+                                color = Palette.textPrimary,
+                            )
+                            if (sosGestureSharesLocation) {
+                                Text(
+                                    stringResource(
+                                        if (sosLocationReady) {
+                                            R.string.safety_sos_location_ready
+                                        } else {
+                                            R.string.safety_sos_location_permission
+                                        },
+                                    ),
+                                    style = NoopType.caption,
+                                    color = Palette.textTertiary,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(Metrics.space12))
+                        NoopToggleSwitch(
+                            checked = sosGestureSharesLocation,
+                            onCheckedChange = null,
+                        )
+                    }
+                    if (sosGestureSharesLocation && !sosLocationReady) {
+                        NoopButton(
+                            text = stringResource(
+                                if (hasForegroundLocation) {
+                                    R.string.safety_sos_location_settings
+                                } else {
+                                    R.string.safety_sos_location_enable
+                                },
+                            ),
+                            leadingIcon = Icons.Filled.MyLocation,
+                            kind = NoopButtonKind.Secondary,
+                            fullWidth = true,
+                        ) {
+                            if (hasForegroundLocation) {
+                                openAppSettings()
+                            } else {
+                                sosLocationPermissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                    if (sosGestureSharesLocation) {
+                        Text(
+                            stringResource(R.string.safety_sos_location_retention),
+                            style = NoopType.caption,
+                            color = Palette.textTertiary,
+                        )
+                    }
 
                     HorizontalDivider(color = Palette.hairline)
                     Row(

@@ -1,5 +1,8 @@
 package com.noop.notif
 
+import java.io.File
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -53,6 +56,20 @@ class ScheduledReportPolicyTest {
         )
     }
 
+    @Test fun morningSuppressedWhenEvidenceDayIsBlank() {
+        for (reportDay in listOf("", "   ")) {
+            assertFalse(
+                ScheduledReportPolicy.shouldNotifyMorning(
+                    enabled = true,
+                    materializedAfterSync = true,
+                    chargeOrRestPresent = true,
+                    lastNotifiedDay = null,
+                    reportDay = reportDay,
+                ),
+            )
+        }
+    }
+
     /** #567: after midnight a late-nighter's row still resolves to LAST night (reportDay stays that
      *  night's day) even though the calendar day has rolled. Keyed on reportDay (not the calendar day),
      *  the recap must NOT re-fire — it was already posted for that night. Guards the fix against a
@@ -73,6 +90,51 @@ class ScheduledReportPolicyTest {
             ScheduledReportPolicy.shouldNotifyMorning(
                 enabled = true, materializedAfterSync = false, chargeOrRestPresent = true,
                 lastNotifiedDay = null, reportDay = "2026-06-21",
+            ),
+        )
+    }
+
+    @Test fun morningSuppressedWhenClockBasedMorningReviewIsEnabled() {
+        assertFalse(
+            ScheduledReportPolicy.shouldNotifyMorning(
+                enabled = true,
+                materializedAfterSync = true,
+                chargeOrRestPresent = true,
+                lastNotifiedDay = null,
+                reportDay = "2026-06-21",
+                scheduledMorningReviewEnabled = true,
+            ),
+        )
+    }
+
+    @Test fun morningSuppressedDuringQuietHoursWithoutConsumingItsDay() {
+        assertFalse(
+            ScheduledReportPolicy.shouldNotifyMorning(
+                enabled = true, materializedAfterSync = true, chargeOrRestPresent = true,
+                lastNotifiedDay = null, reportDay = "2026-06-21", inQuietHours = true,
+            ),
+        )
+        assertTrue(
+            ScheduledReportPolicy.shouldNotifyMorning(
+                enabled = true, materializedAfterSync = true, chargeOrRestPresent = true,
+                lastNotifiedDay = null, reportDay = "2026-06-21", inQuietHours = false,
+            ),
+        )
+    }
+
+    @Test fun disabledOsChannelBlocksReportDelivery() {
+        assertFalse(
+            ScheduledReportPolicy.deliveryAvailable(
+                runtimePermissionGranted = true,
+                appNotificationsEnabled = true,
+                channelDisabled = true,
+            ),
+        )
+        assertTrue(
+            ScheduledReportPolicy.deliveryAvailable(
+                runtimePermissionGranted = true,
+                appNotificationsEnabled = true,
+                channelDisabled = false,
             ),
         )
     }
@@ -101,31 +163,112 @@ class ScheduledReportPolicyTest {
         assertTrue(ScheduledReportPolicy.shouldNotifyWorkout(enabled = true, newestWorkoutTs = 1L, lastWorkoutTs = 0L))
     }
 
-    // MARK: - morningCopy (privacy-safe lock-screen reminder)
-
-    @Test fun morningCopyNeverShowsScores() {
-        val (title, body) = ScheduledReportPolicy.morningCopy(chargePct = 72, restPct = 88)!!
-        val copy = "$title $body"
-        assertEquals("Your morning recap is ready", title)
-        assertTrue(body.contains("Recovery"))
-        assertTrue(body.contains("Sleep Score"))
-        assertFalse(copy.contains("72"))
-        assertFalse(copy.contains("88"))
-        assertFalse(copy.contains("Charge"))
-    }
-
-    @Test fun morningCopyStaysGenericWhenOnlyOneScoreExists() {
-        val copy = ScheduledReportPolicy.morningCopy(chargePct = 60, restPct = null)!!
-        assertEquals(
-            ScheduledReportPolicy.morningCopy(chargePct = null, restPct = 91),
-            copy,
+    @Test fun workoutRemainsEligibleAfterQuietHours() {
+        assertFalse(
+            ScheduledReportPolicy.shouldNotifyWorkout(
+                enabled = true,
+                newestWorkoutTs = 2_000L,
+                lastWorkoutTs = 1_000L,
+                inQuietHours = true,
+            ),
         )
-        assertFalse("${copy.first} ${copy.second}".contains("60"))
-        assertFalse("${copy.first} ${copy.second}".contains("91"))
+        assertTrue(
+            ScheduledReportPolicy.shouldNotifyWorkout(
+                enabled = true,
+                newestWorkoutTs = 2_000L,
+                lastWorkoutTs = 1_000L,
+                inQuietHours = false,
+            ),
+        )
     }
 
-    @Test fun morningCopyNullWhenNeitherPresent() {
-        assertNull(ScheduledReportPolicy.morningCopy(chargePct = null, restPct = null))
+    @Test fun quietHoursEndHandlesOvernightDaytimeAndEmptyWindows() {
+        val zone = ZoneId.of("America/New_York")
+        val overnight = ZonedDateTime.of(2026, 9, 14, 23, 0, 0, 0, zone)
+        assertEquals(
+            ZonedDateTime.of(2026, 9, 15, 7, 0, 0, 0, zone),
+            ScheduledReportPolicy.nextQuietHoursEnd(
+                now = overnight,
+                quietHoursEnabled = true,
+                startMinutes = 22 * 60,
+                endMinutes = 7 * 60,
+            ),
+        )
+        val daytime = ZonedDateTime.of(2026, 9, 14, 11, 0, 0, 0, zone)
+        assertEquals(
+            ZonedDateTime.of(2026, 9, 14, 12, 0, 0, 0, zone),
+            ScheduledReportPolicy.nextQuietHoursEnd(
+                now = daytime,
+                quietHoursEnabled = true,
+                startMinutes = 10 * 60,
+                endMinutes = 12 * 60,
+            ),
+        )
+        assertNull(
+            ScheduledReportPolicy.nextQuietHoursEnd(
+                now = overnight,
+                quietHoursEnabled = true,
+                startMinutes = 22 * 60,
+                endMinutes = 22 * 60,
+            ),
+        )
+    }
+
+    // MARK: - morningCopyKind (privacy-safe lock-screen reminder)
+
+    @Test fun morningCopyKindMatchesAvailableMetrics() {
+        assertEquals(
+            ScheduledReportPolicy.MorningCopyKind.BOTH,
+            ScheduledReportPolicy.morningCopyKind(chargePct = 72, restPct = 88),
+        )
+        assertEquals(
+            ScheduledReportPolicy.MorningCopyKind.RECOVERY,
+            ScheduledReportPolicy.morningCopyKind(chargePct = 60, restPct = null),
+        )
+        assertEquals(
+            ScheduledReportPolicy.MorningCopyKind.SLEEP,
+            ScheduledReportPolicy.morningCopyKind(chargePct = null, restPct = 91),
+        )
+    }
+
+    @Test fun morningCopyKindNullWhenNeitherPresent() {
+        assertNull(ScheduledReportPolicy.morningCopyKind(chargePct = null, restPct = null))
+    }
+
+    @Test fun morningRecapUsesLocalizedAvailabilityCopyAndSleepRoute() {
+        val source = locateNotifierSource().readText()
+
+        assertTrue(source.contains("R.string.appwide_morning_recap_body_both"))
+        assertTrue(source.contains("R.string.appwide_morning_recap_body_recovery"))
+        assertTrue(source.contains("R.string.appwide_morning_recap_body_sleep"))
+        assertTrue(source.contains("NoopNotificationRoute.SLEEP"))
+        assertTrue(source.contains("NotificationRouteBridge.launchIntent(context, route)"))
+        assertTrue(source.contains("manager.getNotificationChannel(CHANNEL_ID)?.importance"))
+        assertTrue(source.contains("if (!canNotify(context))"))
+        assertTrue(source.contains("if (NotifPrefs.inQuietHours(context))"))
+        assertTrue(source.contains("ScheduledReportDeferredScheduler.scheduleMorning("))
+        assertTrue(source.contains("class DeferredMorningRecapWorker("))
+        assertTrue(source.contains("ScheduledReportNotifier.onDeferredMorning("))
+        assertTrue(
+            source.contains(
+                "DailyReviewReminders.isMorningEnabled(applicationContext)",
+            ),
+        )
+        assertTrue(source.contains("DailyReviewReminders.isMorningEnabled(context)"))
+        assertTrue(source.contains("NotificationLifecycleId.MORNING_REPORT"))
+        assertTrue(source.contains("NotificationLifecycleCategory.STATUS"))
+        assertFalse(source.contains("appLaunchIntent(context)"))
+    }
+
+    @Test fun postWorkoutNotifierChecksQuietHoursBeforePosting() {
+        val source = locateNotifierSource().readText()
+        val block = source
+            .substringAfter("fun onWorkout(")
+            .substringBefore("\n    /**\n     * Seed the post-workout frontier")
+
+        assertTrue(block.contains("if (NotifPrefs.inQuietHours(context))"))
+        assertTrue(block.contains("NotificationLifecycleId.WORKOUT_REPORT"))
+        assertTrue(block.contains("return false"))
     }
 
     // MARK: - workoutCopy
@@ -164,5 +307,15 @@ class ScheduledReportPolicyTest {
         assertEquals("1 h", ScheduledReportPolicy.durationLabel(60))
         assertEquals("1 h 8 min", ScheduledReportPolicy.durationLabel(68))
         assertEquals("2 h", ScheduledReportPolicy.durationLabel(120))
+    }
+
+    private fun locateNotifierSource(): File {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        return listOf(
+            File(root, "src/main/java/com/noop/notif/ScheduledReportNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/ScheduledReportNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/ScheduledReportNotifier.kt"),
+        ).firstOrNull(File::isFile)
+            ?: error("Could not locate ScheduledReportNotifier.kt from $root")
     }
 }

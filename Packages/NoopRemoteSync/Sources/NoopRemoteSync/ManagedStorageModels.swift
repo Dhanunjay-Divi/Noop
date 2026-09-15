@@ -429,6 +429,7 @@ public struct ManagedRestoreRequest: Codable, Equatable, Sendable {
     public let dataClasses: [String]
     public let documentKinds: [ManagedDocumentKind]
     public let includeDocuments: Bool
+    public let includeDeletedDocuments: Bool
     public let start: String?
     public let end: String?
 
@@ -437,6 +438,7 @@ public struct ManagedRestoreRequest: Codable, Equatable, Sendable {
         dataClasses: [String],
         documentKinds: [ManagedDocumentKind] = [],
         includeDocuments: Bool = false,
+        includeDeletedDocuments: Bool = false,
         start: String? = nil,
         end: String? = nil
     ) {
@@ -444,6 +446,7 @@ public struct ManagedRestoreRequest: Codable, Equatable, Sendable {
         self.dataClasses = dataClasses
         self.documentKinds = documentKinds
         self.includeDocuments = includeDocuments
+        self.includeDeletedDocuments = includeDeletedDocuments
         self.start = start
         self.end = end
     }

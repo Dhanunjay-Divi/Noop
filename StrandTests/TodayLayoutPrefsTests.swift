@@ -11,8 +11,9 @@ final class TodayLayoutPrefsTests: XCTestCase {
         XCTAssertEqual(TodayLayoutPrefs.decodeOrder("   "), TodaySection.defaultOrder)
     }
 
-    func testEncodeDecodeRoundTripsAReorderedList() {
-        // A COMPLETE reordered list (every case present) must round-trip exactly. It has to be complete,
+    func testEncodeDecodePinsHeroAndRoundTripsSecondaryOrder() {
+        // A COMPLETE reordered list (every case present) preserves the secondary order while normalizing
+        // the primary score hero to the first position. It has to be complete,
         // because decodeOrder deliberately re-inserts any section missing from a saved order — that is the
         // "never hide a section" contract, and it is what makes adding a new section in a later version
         // safe for users who already customised their layout.
@@ -22,8 +23,19 @@ final class TodayLayoutPrefsTests: XCTestCase {
         ]
         XCTAssertEqual(Set(reordered), Set(TodaySection.allCases), "the round-trip list must be complete")
         let encoded = TodayLayoutPrefs.encode(reordered)
-        XCTAssertEqual(encoded, "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,why,target,watch,journal")
-        XCTAssertEqual(TodayLayoutPrefs.decodeOrder(encoded), reordered)
+        let expected: [TodaySection] = [
+            .hero, .heartRate, .yourCards, .liveSession, .synthesis, .keyMetrics, .workouts,
+            .recoveryVitals, .why, .target, .watch, .journal,
+        ]
+        XCTAssertEqual(encoded, "hero,heartRate,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,why,target,watch,journal")
+        XCTAssertEqual(TodayLayoutPrefs.decodeOrder(encoded), expected)
+    }
+
+    func testDecodeNormalizesOlderSavedHeroPosition() {
+        XCTAssertEqual(
+            TodayLayoutPrefs.decodeOrder("heartRate,hero,yourCards"),
+            [.hero, .liveSession, .why, .target, .watch, .synthesis, .keyMetrics, .workouts, .heartRate, .recoveryVitals, .yourCards, .journal]
+        )
     }
 
     /// The v1 upgrade path: an order saved by the FIRST cut (6 sections — no hero/liveSession, which were

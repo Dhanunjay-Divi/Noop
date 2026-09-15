@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hydration_screen_sip">Глоток</string>
+    <string name="hydration_screen_cup">Стакан</string>
+    <string name="hydration_screen_bottle">Бутылка</string>
+    <string name="hydration_screen_quick_amounts_format">%1$s %2$s · %3$s %4$s · %5$s %6$s</string>
+    <string name="hydration_screen_custom_amount">Другая порция</string>
+    <string name="hydration_screen_log">Записать</string>
+    <string name="hydration_screen_cancel">Отмена</string>
+    <string name="hydration_screen_edit_entry">Изменить запись о воде</string>
+    <string name="hydration_screen_save">Сохранить</string>
+    <string name="hydration_screen_amount_label">Миллилитры (мл)</string>
+    <string name="hydration_screen_amount_range_format">Введите объём от 1 до %1$d мл.</string>
+    <string name="hydration_screen_guidance">Простая цель, которая учитывает вашу нагрузку. Общая рекомендация для самочувствия, а не медицинский совет.</string>
+    <string name="hydration_screen_last_seven_days">Последние 7 дней</string>
+    <string name="hydration_screen_litres_short_format">%1$s л</string>
+    <string name="hydration_screen_litres_accessibility_format">%1$s литра</string>
+    <string name="hydration_screen_goal_visible_format">из %1$s</string>
+    <string name="hydration_screen_log_accessibility_format">Записать: %1$s</string>
+    <string name="hydration_screen_hero_status_accessibility_format">%1$s. %2$s. %3$s</string>
+    <string name="hydration_screen_hero_missing_with_goal_accessibility_format">%1$s. %2$s. Цель: %3$s.</string>
+    <string name="hydration_screen_hero_progress_accessibility_format">%1$s. Записано: %2$s. Цель: %3$s. Выполнено %4$d%% цели.</string>
+    <string name="hydration_screen_history_accessibility_format">%1$s. %2$s.</string>
+    <string name="hydration_screen_history_day_accessibility_format">%1$s: %2$s</string>
+</resources>

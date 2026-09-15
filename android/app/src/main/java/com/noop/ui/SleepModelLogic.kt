@@ -22,7 +22,8 @@ internal fun heroDisplay(model: SleepModel?, night: HeroNight?): HeroDisplay? {
     val segments = night?.realSegments ?: return null
     val stages = stagesFromSegments(segments) ?: return null
     val eff = night.session.efficiency
-        ?.let { e -> "${(if (e <= 1.0) e * 100.0 else e).roundToInt()}%" } ?: "-"
+        ?.let { e -> "${(if (e <= 1.0) e * 100.0 else e).roundToInt()}%" }
+        ?: NoopDisplayFormat.MISSING
     return HeroDisplay(stages, segments, eff)
 }
 
@@ -258,7 +259,8 @@ internal fun buildSleepModel(
     return SleepModel(
         stages = stages,
         clockLabel = clockLabel(latest, session),
-        efficiencyText = efficiency.latest?.let { "${it.roundToInt()}%" } ?: "-",
+        efficiencyText = efficiency.latest?.let { "${it.roundToInt()}%" }
+            ?: NoopDisplayFormat.MISSING,
         performance = performance,
         efficiency = efficiency,
         consistency = consistency,

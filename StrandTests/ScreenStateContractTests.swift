@@ -19,6 +19,61 @@ final class ScreenStateContractTests: XCTestCase {
         )
     }
 
+    func testFeedbackUploadCallbacksDropTerminalRacesBeforeDiagnostics() throws {
+        let coordinator = try sourceText(
+            "StrandiOS/System/FeedbackUploadCoordinator.swift"
+        )
+
+        XCTAssertTrue(coordinator.contains("current.state == .uploading"))
+        XCTAssertTrue(
+            coordinator.contains(
+                "current.uploadAttemptID == context.attemptID else"
+            )
+        )
+        XCTAssertTrue(coordinator.contains("record.state == .uploading"))
+        XCTAssertTrue(
+            coordinator.contains(
+                "record.uploadAttemptID == context.attemptID else"
+            )
+        )
+        XCTAssertTrue(coordinator.contains(
+            "if activeUploadAttempts[context.reportID] == context.attemptID"
+        ))
+        XCTAssertTrue(coordinator.contains(
+            "activeUploadAttempts.removeValue(forKey: context.reportID)"
+        ))
+        XCTAssertTrue(coordinator.contains("case .suspended:"))
+        XCTAssertTrue(coordinator.contains("task.resume()"))
+        XCTAssertTrue(coordinator.contains(
+            "await cancelBackgroundUploadTasks(for: id)"
+        ))
+        XCTAssertTrue(coordinator.contains("guard pumpGate.begin(id) else"))
+    }
+
+    func testMacNotificationRoutePresentsLighterWorkoutOptions() throws {
+        let root = try sourceText("Strand/App/RootView.swift")
+
+        XCTAssertTrue(
+            root.contains(
+                "request.presentation == .lighterWorkoutOptions"
+            )
+        )
+        XCTAssertTrue(
+            root.contains("MacLighterWorkoutOptionsSheet(")
+        )
+        XCTAssertTrue(
+            root.contains("showStrengthTrainer = true")
+        )
+        XCTAssertTrue(
+            root.contains("selection = .workouts")
+        )
+        XCTAssertTrue(
+            root.contains(
+                "\"adaptive_day.lighter_options_action\""
+            )
+        )
+    }
+
     func testStateCardHasMotionAndAccessibilityFallbacks() throws {
         let source = try sourceText("Strand/Screens/ScreenScaffold.swift")
 
@@ -50,6 +105,448 @@ final class ScreenStateContractTests: XCTestCase {
         XCTAssertTrue(workouts.contains("kind: .empty"))
         XCTAssertTrue(rhythm.contains("kind: .empty"))
         XCTAssertFalse(nutrition.contains("Loading your private nutrition log"))
+    }
+
+    func testTrendsHasBoundedTimeoutFailureAndRetry() throws {
+        let trends = try sourceText("Strand/Screens/TrendsView.swift")
+        XCTAssertTrue(trends.contains("productionTimeoutNanoseconds"))
+        XCTAssertTrue(trends.contains("--demo-trends-timeout"))
+        XCTAssertEqual(
+            TrendsView.LoadPolicy.timeoutNanoseconds(
+                arguments: ["NOOP", "--demo-trends-timeout"],
+                retryGeneration: 0
+            ),
+            TrendsView.LoadPolicy.demoTimeoutNanoseconds
+        )
+        XCTAssertEqual(
+            TrendsView.LoadPolicy.timeoutNanoseconds(
+                arguments: ["NOOP", "--demo-trends-timeout"],
+                retryGeneration: 1
+            ),
+            TrendsView.LoadPolicy.productionTimeoutNanoseconds
+        )
+        XCTAssertTrue(trends.contains("noop.trends.failure"))
+        XCTAssertTrue(trends.contains("action: retryTrends"))
+        XCTAssertTrue(trends.contains("trendsLoadingSkeleton"))
+        XCTAssertTrue(trends.contains("noop.trends.loading"))
+        XCTAssertTrue(trends.contains("weeklyDigestLoadingSkeleton"))
+        XCTAssertTrue(trends.contains("outcome = \"timed_out\""))
+        XCTAssertTrue(trends.contains("Task.detached(priority: .userInitiated)"))
+        XCTAssertTrue(trends.contains("@State private var trendsSnapshotCache = SnapshotCache(capacity: 6)"))
+        XCTAssertTrue(trends.contains("outcome = \"cache_hit\""))
+        XCTAssertTrue(trends.contains("\"day_count_bucket\""))
+        XCTAssertTrue(
+            trends.contains(
+                """
+                guard let cacheKey = currentSnapshotCacheKey else {
+                            trendsSnapshot = nil
+                            trendsSnapshotKey = nil
+                """
+            )
+        )
+        XCTAssertFalse(trends.contains("\"health_value\""))
+        XCTAssertFalse(trends.contains("\"device_id\""))
+    }
+
+    func testExternalHealthProjectionReconcilesOptInRoutineNotifications() throws {
+        let iosApp = try sourceText("StrandiOS/App/StrandiOSApp.swift")
+        let appleModel = try sourceText("Strand/App/AppModel.swift")
+        let androidWorker = try sourceText(
+            "android/app/src/main/java/com/noop/ingest/HealthConnectAutoSync.kt"
+        )
+
+        XCTAssertTrue(iosApp.contains(
+            "await model.processAppleHealthProjectionChange("
+        ))
+        XCTAssertTrue(appleModel.contains(
+            "func processAppleHealthProjectionChange("
+        ))
+        XCTAssertTrue(appleModel.contains(
+            "postSyncRoutineCoordinationActive = true"
+        ))
+        XCTAssertTrue(appleModel.contains(
+            "await evaluateContextualInterventions(\n            notificationBudget: notificationBudget"
+        ))
+        XCTAssertTrue(androidWorker.contains("if (outcome.rebuilt)"))
+        XCTAssertTrue(androidWorker.contains("ScheduledReportNotifier.onWorkout("))
+        XCTAssertTrue(androidWorker.contains("AdaptiveDayEvaluator.evaluateAndNotify("))
+        XCTAssertTrue(androidWorker.contains("ScheduledReportNotifier.onMorning("))
+        XCTAssertTrue(androidWorker.contains("\"source\" to \"external_health\""))
+    }
+
+    func testAuditedCoreSurfacesUseTheSharedMissingValueToken() throws {
+        let auditedPaths = [
+            "Strand/Liquid/LiquidTodayView.swift",
+            "Strand/Screens/CoupledView.swift",
+            "Strand/Screens/FriendsView.swift",
+            "Strand/Screens/HealthView.swift",
+            "Strand/Screens/LiveView.swift",
+            "Strand/Screens/SleepView.swift",
+            "Strand/Screens/StressView.swift",
+            "Strand/Screens/TodayView.swift",
+            "Strand/Screens/TrendsView.swift",
+            "Strand/Screens/WeeklyDigestView.swift",
+            "StrandiOS/System/ManagedFriendsView.swift",
+        ]
+        let forbidden = [
+            #"?? "-""#,
+            #"?? "–""#,
+            #"return "-""#,
+            #"return "–""#,
+            #"== "-""#,
+            #"== "–""#,
+            #"Text("-")"#,
+            #"String(localized: "No Data")"#,
+        ]
+
+        for path in auditedPaths {
+            let source = try sourceText(path)
+            for fragment in forbidden {
+                XCTAssertFalse(
+                    source.contains(fragment),
+                    "\(path) reintroduced a raw missing-value token: \(fragment)"
+                )
+            }
+        }
+
+        let today = try sourceText("Strand/Screens/TodayView.swift")
+        XCTAssertTrue(today.contains("StrandFormat.missing"))
+        XCTAssertTrue(today.contains("?? StrandFormat.missing"))
+        XCTAssertFalse(today.contains(#"?? " - ms""#))
+        XCTAssertTrue(
+            try sourceText("StrandiOS/System/ManagedFriendsView.swift")
+                .contains("StrandFormat.missing")
+        )
+
+        let health = try sourceText("Strand/Screens/HealthView.swift")
+        XCTAssertTrue(health.contains(
+            #"trailing: hasLiveHR ? "\(displayHR!) bpm" : StrandFormat.missing"#
+        ))
+        XCTAssertTrue(health.contains(
+            #"("Zone", hasLiveHR ? "Z\(zone)" : StrandFormat.missing)"#
+        ))
+        XCTAssertTrue(health.contains(
+            #"("% Max", hasLiveHR ? "\(Int((fraction * 100).rounded()))%" : StrandFormat.missing)"#
+        ))
+        XCTAssertFalse(health.contains(
+            #"trailing: hasLiveHR ? "\(displayHR!) bpm" : "-""#
+        ))
+
+        let journal = try sourceText("Strand/Screens/JournalLogCard.swift")
+        XCTAssertTrue(journal.contains("placeholder: StrandFormat.missing"))
+        XCTAssertFalse(journal.contains(#"placeholder: "-""#))
+    }
+
+    func testAuditedSocialAndBandCopyUsesCurrentVocabulary() throws {
+        let managedFriends = try sourceText(
+            "StrandiOS/System/ManagedFriendsView.swift"
+        )
+        let androidStrings = try sourceText(
+            "android/app/src/main/res/values/strings.xml"
+        )
+        let canonicalCopy = try sourceText(
+            "Tools/AppWideLocalization/appwide_strings.json"
+        )
+        let today = try sourceText("Strand/Screens/TodayView.swift")
+        let breathing = try sourceText("Strand/Screens/BreathingView.swift")
+        let androidModel = try sourceText(
+            "android/app/src/main/java/com/noop/ui/AppViewModel.kt"
+        )
+
+        XCTAssertTrue(managedFriends.contains(#"label: "Sleep Score""#))
+        XCTAssertFalse(managedFriends.contains(#"label: "Rest""#))
+        XCTAssertFalse(androidStrings.contains("Sync your strap"))
+        XCTAssertTrue(
+            androidStrings.contains(
+                #"<string name="managed_friends_rest">Sleep Score</string>"#
+            )
+        )
+        XCTAssertFalse(canonicalCopy.contains("Only Recovery, Effort, Rest"))
+        XCTAssertTrue(
+            canonicalCopy.contains(
+                "Only Recovery, Effort, Sleep Score, sleep duration"
+            )
+        )
+        XCTAssertFalse(today.contains(#""Strap sync""#))
+        XCTAssertTrue(today.contains(#""Band sync""#))
+        XCTAssertFalse(breathing.contains("pulse on the strap"))
+        XCTAssertTrue(breathing.contains("appwide.breathe.test_buzz_help"))
+        XCTAssertTrue(
+            canonicalCopy.contains(
+                "Send one test vibration to the band. A bonded connection is required."
+            )
+        )
+        XCTAssertFalse(androidModel.contains("after your strap synced"))
+        XCTAssertTrue(androidModel.contains("after your band synced"))
+    }
+
+    func testAuditedPrimaryBandInstructionsUseCurrentVocabulary() throws {
+        let appWideText = try sourceText(
+            "Tools/AppWideLocalization/appwide_strings.json"
+        )
+        let appWideData = Data(appWideText.utf8)
+        let appWide = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: appWideData) as? [String: [String: String]]
+        )
+
+        let live = try sourceText("Strand/Screens/LiveView.swift")
+        XCTAssertFalse(live.contains("Connect the strap first"))
+        XCTAssertFalse(live.contains("Refresh strap battery"))
+        XCTAssertFalse(live.contains("Connect your strap first"))
+        XCTAssertTrue(live.contains("Connect Noop Band first"))
+        XCTAssertTrue(live.contains("Refresh Noop Band battery"))
+        XCTAssertFalse(live.contains("Wear Noop Band for scoring"))
+        XCTAssertTrue(live.contains("Wear your wearable for scoring"))
+        XCTAssertFalse(live.contains(#"Text("STRAP LOG")"#))
+        XCTAssertTrue(live.contains(#"Text("BAND LOG")"#))
+
+        let notifications = try sourceText(
+            "Strand/Screens/NotificationSettingsView.swift"
+        )
+        XCTAssertFalse(notifications.contains("Connect your strap to test"))
+        XCTAssertFalse(notifications.contains("buzz on your strap"))
+        XCTAssertTrue(
+            notifications.contains("appwide.ui_audit.notifications.connect_to_test")
+        )
+        XCTAssertTrue(
+            notifications.contains("appwide.ui_audit.notifications.test_buzz_hint")
+        )
+        XCTAssertEqual(
+            appWide["appwide.ui_audit.notifications.connect_to_test"]?["en"],
+            "Connect Noop Band to test."
+        )
+        XCTAssertEqual(
+            appWide["appwide.ui_audit.notifications.test_buzz_hint"]?["en"],
+            "Sends a test vibration to Noop Band."
+        )
+
+        let testCentre = try sourceText("Strand/Screens/TestCentreView.swift")
+        XCTAssertFalse(testCentre.contains("wear the strap, then tap Report"))
+        XCTAssertFalse(testCentre.contains("Daily auto-export of the strap log"))
+        XCTAssertFalse(testCentre.contains("Strap log exported"))
+        XCTAssertFalse(testCentre.contains(#"Text("STRAP LOG")"#))
+        XCTAssertTrue(testCentre.contains("Daily auto-export of the band log"))
+        XCTAssertTrue(testCentre.contains(#"Text("BAND LOG")"#))
+        XCTAssertTrue(
+            testCentre.contains("appwide.ui_audit.test_centre.subtitle_device_format")
+        )
+        XCTAssertTrue(
+            testCentre.contains("appwide.ui_audit.test_centre.band_log_exported")
+        )
+        let testCentreSubtitle = try XCTUnwrap(
+            appWide["appwide.ui_audit.test_centre.subtitle_device_format"]?["en"]
+        )
+        XCTAssertTrue(testCentreSubtitle.contains("wear Noop Band, then tap Report"))
+        XCTAssertEqual(
+            appWide["appwide.ui_audit.test_centre.band_log_exported"]?["en"],
+            "Band log exported"
+        )
+
+        let today = try sourceText("Strand/Screens/TodayView.swift")
+        XCTAssertFalse(today.contains("Syncing strap history"))
+        XCTAssertFalse(today.contains("Wear the strap overnight"))
+        XCTAssertFalse(today.contains("Your strap is connected and saving data"))
+        XCTAssertTrue(today.contains("Syncing Noop Band history"))
+        XCTAssertTrue(today.contains("appwide.ui_audit.today.metric_last_scored"))
+        XCTAssertTrue(today.contains("appwide.ui_audit.today.recording_live"))
+        let lastScoredCopy = try XCTUnwrap(
+            appWide["appwide.ui_audit.today.metric_last_scored"]?["en"]
+        )
+        XCTAssertTrue(lastScoredCopy.contains("Wear Noop Band overnight"))
+        XCTAssertEqual(
+            appWide["appwide.ui_audit.today.recording_live"]?["en"],
+            "Noop Band is connected and saving data."
+        )
+
+        let health = try sourceText("Strand/Screens/HealthView.swift")
+        XCTAssertFalse(health.contains("Wear the strap overnight"))
+
+        let settings = try sourceText("Strand/Screens/SettingsView.swift")
+        XCTAssertFalse(settings.contains("wear the strap, then tap Report"))
+        XCTAssertFalse(settings.contains("the strap log together"))
+        XCTAssertFalse(settings.contains(#"Text("STRAP LOG")"#))
+        XCTAssertTrue(settings.contains(#"Text("BAND LOG")"#))
+        XCTAssertTrue(settings.contains("appwide.ui_audit.settings.test_centre"))
+        let settingsTestCentreCopy = try XCTUnwrap(
+            appWide["appwide.ui_audit.settings.test_centre"]?["en"]
+        )
+        XCTAssertTrue(settingsTestCentreCopy.contains("wear Noop Band, then tap Report"))
+        XCTAssertTrue(settings.contains("the band log together"))
+
+        let devices = try sourceText("Strand/Screens/DevicesView.swift")
+        XCTAssertFalse(devices.contains("Waiting for the strap's reply"))
+        XCTAssertFalse(devices.contains("Listening for the strap for 30 seconds"))
+        XCTAssertTrue(devices.contains("Waiting for the band's reply"))
+        XCTAssertTrue(devices.contains("Listening for the band for 30 seconds"))
+
+        let scoring = try sourceText("Strand/Screens/ScoringGuideView.swift")
+        XCTAssertFalse(scoring.contains("consumer strap"))
+        XCTAssertTrue(scoring.contains("consumer wearable"))
+    }
+
+    func testAuditedP2PresentationFixesRemainMounted() throws {
+        XCTAssertTrue(
+            try sourceText("Strand/Screens/DevicesView.swift")
+                .contains("if !profile.footnote.isEmpty")
+        )
+        XCTAssertTrue(
+            try sourceText("Strand/Screens/SettingsView.swift")
+                .contains(#"Text("Age")"#)
+        )
+        let stress = try sourceText("Strand/Screens/StressView.swift")
+        XCTAssertTrue(stress.contains("appwide.stress.band.light_load"))
+        XCTAssertTrue(stress.contains("appwide.common.vs_baseline"))
+        XCTAssertTrue(
+            try sourceText("Strand/Screens/JournalLogCard.swift")
+                .contains(".padding(.horizontal, NoopMetrics.space4)")
+        )
+        let health = try sourceText("Strand/Screens/HealthView.swift")
+        XCTAssertTrue(health.contains("appwide.health.live_hr.disconnected"))
+        let settings = try sourceText("Strand/Screens/SettingsView.swift")
+        XCTAssertTrue(settings.contains("appwide.health.live_activity.lock_screen"))
+        XCTAssertTrue(settings.contains("appwide.health.live_activity.recovery_indicator"))
+        let sleep = try sourceText("Strand/Screens/SleepView.swift")
+        XCTAssertTrue(sleep.contains(#"SectionHeader("Sleep Score""#))
+        XCTAssertTrue(sleep.contains("appwide.sleep.imported_confidence_note"))
+        let coupled = try sourceText("Strand/Screens/CoupledView.swift")
+        XCTAssertTrue(coupled.contains(#"SectionHeader("Sleep Score", overline: "Last night")"#))
+        XCTAssertFalse(coupled.contains(#"SectionHeader("Sleep performance""#))
+        XCTAssertTrue(coupled.contains(#"String(localized: "Sleep Score not available")"#))
+        let managed = try sourceText("StrandiOS/System/ManagedCloudViews.swift")
+        XCTAssertTrue(managed.contains("managedBenefit("))
+        XCTAssertTrue(managed.contains(#"title: "Stays local-first""#))
+    }
+
+    func testAuditedRecoveryAndDailySignalCallSitesUseSharedPresentation() throws {
+        let today = try sourceText("Strand/Screens/TodayView.swift")
+        let calendar = try sourceText("Strand/Screens/CalendarMonthView.swift")
+        let digest = try sourceText("Strand/Screens/WeeklyDigestView.swift")
+        let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+
+        XCTAssertTrue(today.contains("RecoveryBandPresentation.label(for: score)"))
+        XCTAssertTrue(calendar.contains(
+            "RecoveryBandPresentation.color(for: v).opacity(0.9)"
+        ))
+        XCTAssertTrue(digest.contains(
+            "RecoveryBandPresentation.gaugeStops(for: summary.thisWeek.mean)"
+        ))
+        XCTAssertTrue(digest.contains(
+            "RecoveryBandPresentation.color(for: s.thisWeek.mean)"
+        ))
+
+        XCTAssertTrue(liquidToday.contains(
+            #"case .steady: return String(localized: "appwide.daily_signal.status.aligned")"#
+        ))
+        XCTAssertTrue(liquidToday.contains(
+            #"case .watch: return String(localized: "appwide.daily_signal.status.recheck")"#
+        ))
+        XCTAssertTrue(liquidToday.contains(
+            #"case .alert: return String(localized: "appwide.daily_signal.status.check_in")"#
+        ))
+    }
+
+    func testWorkoutCoachEntryBranchesOnBandAndCurrentRecovery() throws {
+        let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+
+        XCTAssertTrue(liquidToday.contains("private var state: LiveSessionEntryState"))
+        XCTAssertTrue(liquidToday.contains(
+            "bandReady: liveSessionBandReady(live)"
+        ))
+        XCTAssertTrue(liquidToday.contains("switch state"))
+        XCTAssertTrue(liquidToday.contains(
+            #"Text("appwide.live_session.start_detail_unavailable")"#
+        ))
+        XCTAssertTrue(liquidToday.contains(
+            #"Text("appwide.live_session.band_required")"#
+        ))
+    }
+}
+
+/// Dynamic Type must reach the user's selected accessibility size across app
+/// content. Fixed navigation chrome may retain a local cap when it preserves
+/// stable destinations and spoken labels.
+final class RootDynamicTypeContractTests: XCTestCase {
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func text(_ relativePath: String) throws -> String {
+        try String(
+            contentsOf: repoRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    func testAppleAppRootsDoNotClampAccessibilityText() throws {
+        let macApp = try text("Strand/App/StrandApp.swift")
+        let iosApp = try text("StrandiOS/App/StrandiOSApp.swift")
+        let globalClamp = ".dynamicTypeSize(...DynamicTypeSize.accessibility1)"
+
+        XCTAssertFalse(macApp.contains(globalClamp))
+        XCTAssertFalse(iosApp.contains(globalClamp))
+    }
+
+    func testFixedIOSNavigationChromeKeepsLocalLargeTextBehavior() throws {
+        let shell = try text("StrandiOS/App/RootTabView.swift")
+
+        XCTAssertTrue(shell.contains(
+            "compact && !dynamicTypeSize.isAccessibilitySize"
+        ))
+        XCTAssertTrue(shell.contains("@ScaledMetric(relativeTo: .caption2)"))
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ? 2 : 1"))
+        XCTAssertTrue(shell.contains("FloatingTabBar.expandedBodyHeight("))
+        XCTAssertFalse(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxxLarge)"))
+        XCTAssertTrue(shell.contains("accessibilityShowsLargeContentViewer"))
+    }
+
+    func testTodayContentHonorsAccessibilityTextAndQAExpandsTheRealPlan() throws {
+        let today = try text("Strand/Liquid/LiquidTodayView.swift")
+        let localClamp = ".dynamicTypeSize(...DynamicTypeSize.accessibility1)"
+
+        XCTAssertFalse(today.contains(localClamp))
+        XCTAssertTrue(today.contains("if dynamicTypeSize.isAccessibilitySize"))
+        XCTAssertTrue(today.contains(
+            "@State private var todayDetailsExpanded = Self.initialTodayDetailsExpanded"
+        ))
+        XCTAssertTrue(today.contains(
+            #"CommandLine.arguments.contains("--demo-daily-plan")"#
+        ))
+        XCTAssertTrue(today.contains(
+            "return [.target] + saved.filter { $0 != .target }"
+        ))
+        XCTAssertTrue(today.contains(
+            "Color.clear.frame(height: 0).id(Self.dailyPlanAnchorID)"
+        ))
+        XCTAssertTrue(today.contains(
+            "dynamicTypeSize.isAccessibilitySize ? 0.12 : 0.08"
+        ))
+        XCTAssertTrue(today.contains(
+            #"CommandLine.arguments.contains("--demo-daily-plan-collapsed")"#
+        ))
+        XCTAssertTrue(today.contains(
+            "? Self.dailyPlanDisclosureAnchorID"
+        ))
+        XCTAssertTrue(today.contains(
+            ": Self.dailyPlanAnchorID"
+        ))
+        XCTAssertTrue(today.contains(
+            "proxy.scrollTo(framingID, anchor: framingAnchor)"
+        ))
+    }
+
+    func testDailyPlanVisualMatrixIncludesMaximumAccessibilityText() throws {
+        let script = try text("Tools/ios-daily-plan-visual-qa.sh")
+
+        XCTAssertTrue(script.contains("accessibility5-stop"))
+        XCTAssertTrue(script.contains(
+            "accessibility-extra-extra-extra-large"
+        ))
+        XCTAssertTrue(script.contains("collapsed-planned-workout"))
+        XCTAssertTrue(script.contains(
+            "accessibility-collapsed-planned-workout"
+        ))
     }
 }
 
@@ -199,11 +696,13 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
         XCTAssertFalse(android.contains("NutritionMixedSourceCard"))
 
         XCTAssertTrue(shell.contains("expandedReservedHeight: CGFloat = 76"))
+        XCTAssertTrue(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
+        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight)"))
         XCTAssertTrue(shell.contains(
-            ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
+            "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize"
         ))
+        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight + 28)"))
         XCTAssertFalse(shell.contains(".padding(.bottom, visibleTabBarHeight)"))
-        XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         XCTAssertFalse(shell.contains("floatingTabBarClearance"))
     }
 }
@@ -231,6 +730,8 @@ final class TabShellVisualQAContractTests: XCTestCase {
         XCTAssertTrue(script.contains("iPhone-17-Pro-Max"))
         XCTAssertTrue(script.contains("iPhone-17e"))
         XCTAssertTrue(script.contains("--demo-tab today"))
+        XCTAssertTrue(script.contains("today-accessibility"))
+        XCTAssertTrue(script.contains("--demo-daily-plan"))
         XCTAssertTrue(script.contains("--demo-tab trends"))
         XCTAssertTrue(script.contains("--demo-tab sleep"))
         XCTAssertTrue(script.contains("--demo-tab more"))
@@ -305,7 +806,7 @@ final class SafetyCenterLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 313)
+        XCTAssertEqual(source.count, 314)
         for (key, translations) in source {
             XCTAssertTrue(
                 key.hasPrefix("safety.") || key.hasPrefix("managed.safety."),
@@ -419,6 +920,32 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertFalse(health.contains(#"title: "Biological Age""#))
     }
 
+    func testImportedBodyCompositionBmiUsesTheConfirmedAdultPolicyGate() throws {
+        let health = try text("Strand/Screens/HealthView.swift")
+        let sectionStart = try XCTUnwrap(
+            health.range(of: "private struct BodyCompositionSection: View")
+        )
+        let sectionTail = health[sectionStart.lowerBound...]
+        let sectionEnd = try XCTUnwrap(
+            sectionTail.range(of: "\n/// Source-aware measured markers")
+        )
+        let section = String(sectionTail[..<sectionEnd.lowerBound])
+        let bmiStart = try XCTUnwrap(section.range(of: "private var bmi: Reading? {"))
+        let bmiTail = section[bmiStart.lowerBound...]
+        let bmiEnd = try XCTUnwrap(
+            bmiTail.range(of: "\n    private var latestMeasuredDay")
+        )
+        let bmiBody = String(bmiTail[..<bmiEnd.lowerBound])
+
+        XCTAssertTrue(section.contains("BodyProfilePolicy.canPresentAdultBMI("))
+        XCTAssertTrue(bmiBody.contains("guard canPresentBMI else { return nil }"))
+        XCTAssertTrue(bmiBody.contains("if let measured = snapshot.bmi { return measured }"))
+        XCTAssertLessThan(
+            try XCTUnwrap(bmiBody.range(of: "guard canPresentBMI")?.lowerBound),
+            try XCTUnwrap(bmiBody.range(of: "snapshot.bmi")?.lowerBound)
+        )
+    }
+
     func testFitnessCalendarAndReferenceDestinationsStayDiscoverable() throws {
         let fitness = try text("Strand/Screens/WorkoutsView.swift")
         let calendar = try text("Strand/Screens/CalendarMonthView.swift")
@@ -479,7 +1006,10 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(classic.contains("StrandPalette.recoveryGaugeColors(s).base"))
         XCTAssertTrue(liquid.contains("StrandPalette.recoveryGaugeColors(score)"))
         XCTAssertTrue(recoveryRing.contains("StrandPalette.recoveryGaugeStops(score)"))
-        XCTAssertTrue(androidToday.contains("Palette.recoveryGaugeColors(it).first"))
+        XCTAssertTrue(androidToday.contains(
+            "TodayRecoveryHeroTone.RECOVERY -> Palette.recoveryGaugeColors"
+        ))
+        XCTAssertTrue(androidToday.contains("tint = todayRecoveryHeroColors("))
         XCTAssertTrue(androidRing.contains("Palette.recoveryGaugeStops(score)"))
     }
 }
@@ -513,10 +1043,105 @@ final class LiveSessionPreflightContractTests: XCTestCase {
         XCTAssertTrue(androidScreen.contains(
             "if (runner == null) {\n        LiveSessionPreflight("))
         XCTAssertTrue(androidScreen.contains(
-            "onStart = { startOrResumeLiveSession(vm, context) }"))
+            "if (liveSessionBandReady(vm.live.value)) {\n" +
+            "                    startOrResumeLiveSession(vm, context)"))
+        XCTAssertTrue(androidScreen.contains("enabled = bandReady"))
+        XCTAssertTrue(androidScreen.contains(
+            "live.connected && live.bonded && live.encryptedBond && live.worn"))
+        XCTAssertTrue(apple.contains(".disabled(!canStart)"))
+        XCTAssertTrue(apple.contains(
+            "internal func liveSessionBandReady(_ live: LiveState) -> Bool"))
+        XCTAssertTrue(apple.contains(
+            "guard !hasStarted,\n" +
+            "              liveSessionBandReady(model.live)"))
+        XCTAssertTrue(androidToday.contains("appwide_live_session_connect_band"))
+        XCTAssertTrue(androidToday.contains("appwide_live_session_band_required"))
         XCTAssertFalse(androidToday.contains(
             "if (LiveSessionRunner.active.value == null) {\n" +
             "                                    startOrResumeLiveSession"))
+    }
+}
+
+final class TerminologyLocalizationContractTests: XCTestCase {
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    func testCloseoutCopyIsFullyLocalizedWithoutStaleVendorFallbacks() throws {
+        let catalogData = try Data(
+            contentsOf: repoRoot.appendingPathComponent(
+                "Strand/Resources/Localizable.xcstrings"
+            )
+        )
+        let catalog = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: catalogData) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: Any])
+        let marker = "UI audit terminology closeout"
+        let tagged = strings.compactMapValues { rawEntry -> [String: Any]? in
+            guard let entry = rawEntry as? [String: Any],
+                  entry["comment"] as? String == marker else {
+                return nil
+            }
+            return entry
+        }
+        let locales = Set([
+            "en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant",
+        ])
+
+        XCTAssertEqual(tagged.count, 28)
+        for (key, entry) in tagged {
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any],
+                key
+            )
+            XCTAssertEqual(Set(localizations.keys), locales, key)
+
+            var values: [String: String] = [:]
+            for locale in locales {
+                let localization = try XCTUnwrap(
+                    localizations[locale] as? [String: Any],
+                    "\(key) [\(locale)]"
+                )
+                let unit = try XCTUnwrap(
+                    localization["stringUnit"] as? [String: Any],
+                    "\(key) [\(locale)]"
+                )
+                XCTAssertEqual(unit["state"] as? String, "translated", "\(key) [\(locale)]")
+                let value = try XCTUnwrap(
+                    unit["value"] as? String,
+                    "\(key) [\(locale)]"
+                )
+                XCTAssertFalse(
+                    value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    "\(key) [\(locale)]"
+                )
+                values[locale] = value
+            }
+
+            let english = try XCTUnwrap(values["en"], key)
+            XCTAssertEqual(english, key)
+            for locale in locales where locale != "en" {
+                XCTAssertNotEqual(values[locale], english, "\(key) [\(locale)]")
+            }
+
+            for (locale, value) in values {
+                let normalized = value.lowercased()
+                XCTAssertFalse(normalized.contains("whoop"), "\(key) [\(locale)]")
+                XCTAssertFalse(normalized.contains("5/mg"), "\(key) [\(locale)]")
+                XCTAssertFalse(normalized.contains("4.0"), "\(key) [\(locale)]")
+                XCTAssertFalse(normalized.contains("safe to leave on"), "\(key) [\(locale)]")
+                XCTAssertFalse(normalized.contains("newer band only"), "\(key) [\(locale)]")
+                if normalized.contains("strap") {
+                    XCTAssertTrue(
+                        locale == "en" && key.contains("heart-rate strap"),
+                        "\(key) [\(locale)]"
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -553,7 +1178,23 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 631)
+        XCTAssertEqual(source.count, 803)
+        XCTAssertEqual(source["appwide.daily_signal.status.aligned"]?["en"], "Steady")
+        XCTAssertEqual(source["appwide.daily_signal.status.recheck"]?["en"], "Watch")
+        XCTAssertEqual(
+            source["appwide.weekly_digest.imported_sleep_not_included"]?["en"],
+            "Imported sleep not included"
+        )
+        XCTAssertEqual(
+            source["appwide.live_session.start_detail_unavailable"]?["en"],
+            "Live heart-rate coaching uses heart rate while today's Recovery is unavailable."
+        )
+        XCTAssertNil(source["appwide.live_session.start_accessibility"])
+        XCTAssertNil(source["appwide.live_session.start_detail_calibrating"])
+        XCTAssertEqual(
+            source["appwide.friends.data_boundary"]?["en"],
+            "Only Recovery, Effort, Sleep Score, sleep duration, HRV, and resting heart rate can be shared. Raw streams, locations, journals, routes, workouts, and sleep stages are excluded."
+        )
         XCTAssertEqual(
             source["appwide.terms.title"]?["en"],
             "NOOP Band is coming"
@@ -562,6 +1203,56 @@ final class AppWideLocalizationContractTests: XCTestCase {
             source["appwide.terms.subtitle"]?["en"],
             "Until NOOP Band is ready, this version works with a compatible band you own."
         )
+        let uiAuditKeys = source.keys.filter { $0.hasPrefix("appwide.ui_audit.") }
+        XCTAssertEqual(uiAuditKeys.count, 50)
+        let placeholderRegex = try NSRegularExpression(
+            pattern: #"%(?:\d+\$)?[a-zA-Z@]"#
+        )
+        func placeholders(_ value: String) -> [String] {
+            let range = NSRange(value.startIndex..., in: value)
+            return placeholderRegex.matches(in: value, range: range).compactMap { match in
+                guard let range = Range(match.range, in: value) else { return nil }
+                return String(value[range])
+            }.sorted()
+        }
+        for key in uiAuditKeys {
+            let translations = try XCTUnwrap(source[key], key)
+            XCTAssertEqual(Set(translations.keys), locales, key)
+            let english = try XCTUnwrap(translations["en"], key)
+            XCTAssertFalse(
+                english.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                key
+            )
+            for locale in locales {
+                let value = try XCTUnwrap(translations[locale], "\(key) [\(locale)]")
+                XCTAssertFalse(
+                    value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    "\(key) [\(locale)]"
+                )
+                XCTAssertEqual(
+                    placeholders(value),
+                    placeholders(english),
+                    "\(key) [\(locale)]"
+                )
+                if locale != "en" {
+                    XCTAssertNotEqual(value, english, "\(key) [\(locale)]")
+                }
+                let normalized = value.lowercased()
+                XCTAssertFalse(normalized.contains("whoop"), "\(key) [\(locale)]")
+                XCTAssertFalse(normalized.contains("5/mg"), "\(key) [\(locale)]")
+                XCTAssertFalse(normalized.contains("safe to leave on"), "\(key) [\(locale)]")
+                XCTAssertFalse(normalized.contains("newer band only"), "\(key) [\(locale)]")
+                XCTAssertFalse(value.contains("—"), "\(key) [\(locale)]")
+            }
+        }
+        let rawCaptureHelp = try XCTUnwrap(
+            source["appwide.ui_audit.settings.raw_capture_help"]?["en"]
+        )
+        XCTAssertTrue(rawCaptureHelp.contains("raw biometric data"))
+        let ppgDescription = try XCTUnwrap(
+            source["appwide.ui_audit.test_centre.ppg_description"]?["en"]
+        )
+        XCTAssertTrue(ppgDescription.contains("compatible v26 firmware"))
         for (key, translations) in source {
             XCTAssertTrue(key.hasPrefix("appwide."), key)
             XCTAssertEqual(Set(translations.keys), locales, key)
@@ -600,6 +1291,60 @@ final class AppWideLocalizationContractTests: XCTestCase {
                 resource.contains("Generated by Tools/AppWideLocalization/generate.rb")
             )
         }
+    }
+
+    func testUiAuditCopyIsMountedThroughLocalizedResources() throws {
+        let appleHealth = try text("Strand/Screens/AppleHealthView.swift")
+        XCTAssertTrue(
+            appleHealth.contains(
+                #"if health.auth == .entitlementMissing {"#
+            )
+        )
+        XCTAssertTrue(
+            appleHealth.contains(
+                #"ComingSoon(what: "appwide.ui_audit.apple_health.empty_sideload")"#
+            )
+        )
+        XCTAssertTrue(
+            appleHealth.contains(
+                #"ComingSoon(what: "appwide.ui_audit.apple_health.empty_live")"#
+            )
+        )
+
+        let settings = try text("Strand/Screens/SettingsView.swift")
+        XCTAssertTrue(
+            settings.contains(#"Text("appwide.ui_audit.settings.raw_capture_help")"#)
+        )
+        XCTAssertFalse(settings.lowercased().contains("safe to leave on"))
+
+        let testCentre = try text("Strand/Screens/TestCentreView.swift")
+        XCTAssertTrue(
+            testCentre.contains(
+                #"Text("appwide.ui_audit.test_centre.ppg_description")"#
+            )
+        )
+        XCTAssertFalse(testCentre.contains("Newer band only"))
+
+        let today = try text("Strand/Screens/TodayView.swift")
+        XCTAssertTrue(
+            today.contains(
+                #"String(localized: "appwide.ui_audit.today.sync_experimental")"#
+            )
+        )
+        XCTAssertTrue(
+            today.contains(
+                #"String(localized: "appwide.ui_audit.today.metric_no_data")"#
+            )
+        )
+        XCTAssertFalse(today.contains("Strap history synced"))
+
+        let notifications = try text("Strand/Screens/NotificationSettingsView.swift")
+        XCTAssertTrue(
+            notifications.contains(
+                #"String(localized: "appwide.ui_audit.notifications.test_buzz_hint")"#
+            )
+        )
+        XCTAssertFalse(notifications.contains("Fires a test buzz on your strap"))
     }
 
     func testTermsVersionsStayInSyncAcrossPlatformsAndBundledDocument() throws {

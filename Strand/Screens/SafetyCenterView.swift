@@ -61,6 +61,9 @@ struct SafetyIncidentContactPresentation {
 /// one-shot location, and arm a local check-in reminder. Wellness signals never silently page anyone.
 struct SafetyCenterView: View {
     @Environment(\.openURL) private var openURL
+    #if os(iOS)
+    @ObservedObject private var managedSafety = ManagedCloudService.shared
+    #endif
 
     private enum IncidentAction: Equatable {
         case resolve
@@ -89,13 +92,16 @@ struct SafetyCenterView: View {
     @AppStorage("safety.checkInDueAtUnix") private var checkInDueAtUnix = 0.0
     @AppStorage(SafetySOSGesturePreferences.enabledKey) private var sosGestureEnabled = false
     @AppStorage(SafetySOSGesturePreferences.requiredEventsKey) private var sosGestureEvents = 4
+    @AppStorage(SafetySOSGesturePreferences.shareLocationKey)
+    private var sosGestureSharesLocation = false
     @AppStorage("safetyPaging.shareDurationHours") private var shareDurationHours = 8
 
     @State private var shareIntent: SafetyShareIntent = .feelUnsafe
     @State private var displayName = ""
     @State private var note = ""
     @State private var detailsExpanded = false
-    @State private var includeLocation = true
+    // Precise location is additive, never a prerequisite for asking a trusted contact for help.
+    @State private var includeLocation = false
     @State private var preset: CheckInPreset = .thirtyMinutes
     @State private var scheduling = false
     @State private var notice: String?
@@ -111,7 +117,6 @@ struct SafetyCenterView: View {
             subtitle: "safety.subtitle"
         ) {
             emergencyBoundary
-            fallResponseReadiness
             #if os(iOS)
             ManagedSafetyView(
                 locationProvider: locationProvider,
@@ -131,8 +136,11 @@ struct SafetyCenterView: View {
         }
         .task {
             #if os(iOS)
+            managedSafety.bootstrap()
+            await managedSafety.refreshSafety()
             sosNotificationsAvailable =
                 await SafetySOSRuntime.notificationDeliveryAvailable()
+            reconcileBandSOSAvailability()
             #endif
             while !Task.isCancelled {
                 nowUnix = Int(Date().timeIntervalSince1970)
@@ -148,8 +156,10 @@ struct SafetyCenterView: View {
             Task {
                 await refreshReminderDeliveryState()
                 #if os(iOS)
+                await managedSafety.refreshSafety()
                 sosNotificationsAvailable =
                     await SafetySOSRuntime.notificationDeliveryAvailable()
+                reconcileBandSOSAvailability()
                 #endif
                 await pagingService.refresh()
             }
@@ -242,45 +252,6 @@ struct SafetyCenterView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 #endif
                 SafetyContactsSetupView(service: pagingService)
-            }
-        }
-    }
-
-    private var fallResponseReadiness: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
-            SectionHeader("safety.fall.section", overline: "safety.fall.overline")
-            NoopCard(tint: StrandPalette.statusWarning) {
-                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
-                    HStack(alignment: .top, spacing: NoopMetrics.space3) {
-                        Image(systemName: "figure.fall")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(StrandPalette.statusWarning)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-                            HStack(alignment: .firstTextBaseline, spacing: NoopMetrics.space2) {
-                                Text("safety.fall.title")
-                                    .font(StrandFont.headline)
-                                    .foregroundStyle(StrandPalette.textPrimary)
-                                Spacer(minLength: 8)
-                                StatePill("safety.fall.status", tone: .warning)
-                            }
-                            Text(
-                                String(
-                                    format: String(localized: "safety.fall.body_format"),
-                                    Int64(FallResponsePolicy.responseWindowSeconds)
-                                )
-                            )
-                            .font(StrandFont.body)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-
-                    Text("safety.fall.requirements")
-                        .font(StrandFont.caption)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
         }
     }
@@ -381,6 +352,16 @@ struct SafetyCenterView: View {
                 }
             }
             .toggleStyle(.noopSwitch)
+            .disabled(bandSOSSetupUnavailable)
+
+            #if os(iOS)
+            if !bandSOSSetupReady {
+                Text(bandSOSSetupMessage)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            #endif
 
             if sosGestureEnabled {
                 Picker("safety.sos.gesture.repeats", selection: sosGestureEventsBinding) {
@@ -408,6 +389,54 @@ struct SafetyCenterView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
                 #if os(iOS)
+                Toggle(isOn: $sosGestureSharesLocation) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("safety.sos.location.title")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        if sosGestureSharesLocation {
+                            Text(
+                                locationProvider.hasBackgroundAuthorization
+                                    ? String(localized: "safety.sos.location.ready")
+                                    : String(localized: "safety.sos.location.permission")
+                            )
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .toggleStyle(.noopSwitch)
+
+                if sosGestureSharesLocation
+                    && !locationProvider.hasBackgroundAuthorization {
+                    if [.denied, .restricted].contains(
+                        locationProvider.authorizationStatus
+                    ) {
+                        NoopButton(
+                            "safety.sos.location.settings",
+                            systemImage: "gearshape",
+                            kind: .secondary,
+                            fullWidth: true,
+                            action: openAppSettings
+                        )
+                    } else {
+                        NoopButton(
+                            "safety.sos.location.enable",
+                            systemImage: "location.fill",
+                            kind: .secondary,
+                            fullWidth: true,
+                            action: locationProvider.requestBackgroundAuthorization
+                        )
+                    }
+                }
+                if sosGestureSharesLocation {
+                    Text("safety.sos.location.retention")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 HStack(alignment: .top, spacing: NoopMetrics.space2) {
                     Image(
                         systemName: sosNotificationsAvailable
@@ -442,16 +471,58 @@ struct SafetyCenterView: View {
             }
         }
         .onChangeCompat(of: sosGestureEnabled) { enabled in
-            SafetySOSGesturePreferences.setEnabled(enabled)
             #if os(iOS)
-            guard enabled else { return }
+            guard enabled else {
+                SafetySOSGesturePreferences.setEnabled(false)
+                return
+            }
             Task { @MainActor in
                 sosNotificationsAvailable =
                     await SafetySOSRuntime.requestNotificationAuthorizationIfNeeded()
+                await managedSafety.refreshSafety()
+                let allowed = bandSOSSetupReady
+                SafetySOSGesturePreferences.setEnabled(allowed)
+                if !allowed {
+                    sosGestureEnabled = false
+                }
+            }
+            #else
+            SafetySOSGesturePreferences.setEnabled(enabled)
+            #endif
+        }
+        .onChangeCompat(of: sosGestureSharesLocation) { enabled in
+            #if os(iOS)
+            SafetySOSGesturePreferences.setSharesLocation(enabled)
+            if enabled && !locationProvider.hasBackgroundAuthorization {
+                locationProvider.requestBackgroundAuthorization()
             }
             #endif
         }
     }
+
+    private var bandSOSSetupUnavailable: Bool {
+        #if os(iOS)
+        !bandSOSSetupReady
+        #else
+        false
+        #endif
+    }
+
+    #if os(iOS)
+    private var bandSOSSetupReady: Bool {
+        managedSafety.bandSOSSetupReady
+    }
+
+    private var bandSOSSetupMessage: String {
+        return managedSafety.bandSOSSetupMessage
+    }
+
+    private func reconcileBandSOSAvailability() {
+        guard sosGestureEnabled, !bandSOSSetupReady else { return }
+        sosGestureEnabled = false
+        SafetySOSGesturePreferences.setEnabled(false)
+    }
+    #endif
 
     private var sosGestureEventsBinding: Binding<Int> {
         Binding(

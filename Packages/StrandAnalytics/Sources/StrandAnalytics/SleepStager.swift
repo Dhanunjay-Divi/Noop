@@ -615,9 +615,16 @@ public enum SleepStager {
     /// `((x % d) + d) % d` is a floored modulo so a negative local-shifted time still maps
     /// into [0, secondsPerDay).
     static func isDaytimeCenter(_ p: Period, tzOffsetSeconds: Int) -> Bool {
+        isDaytimeCenter(p, offsetAtEpochSec: { _ in tzOffsetSeconds })
+    }
+
+    static func isDaytimeCenter(
+        _ p: Period,
+        offsetAtEpochSec: (Int) -> Int
+    ) -> Bool {
         // Int overflow-safe: starts/ends are unix seconds; midpoint via average of the two.
         let center = p.start + (p.end - p.start) / 2
-        let local = center + tzOffsetSeconds
+        let local = center + offsetAtEpochSec(center)
         let secOfDay = ((local % secondsPerDay) + secondsPerDay) % secondsPerDay
         let hour = secOfDay / 3_600
         return hour >= daytimeBandStartHour && hour < daytimeBandEndHour
@@ -627,7 +634,14 @@ public enum SleepStager {
     /// the sleep began at night, not during the day. Anchors a continuous-sleep chain: only a
     /// chain that began overnight may carry its tail past the daytime-band start (a late wake).
     static func isOvernightOnset(_ start: Int, tzOffsetSeconds: Int) -> Bool {
-        let local = start + tzOffsetSeconds
+        isOvernightOnset(start, offsetAtEpochSec: { _ in tzOffsetSeconds })
+    }
+
+    static func isOvernightOnset(
+        _ start: Int,
+        offsetAtEpochSec: (Int) -> Int
+    ) -> Bool {
+        let local = start + offsetAtEpochSec(start)
         let secOfDay = ((local % secondsPerDay) + secondsPerDay) % secondsPerDay
         let hour = secOfDay / 3_600
         return !(hour >= daytimeBandStartHour && hour < daytimeBandEndHour)
@@ -791,6 +805,7 @@ public enum SleepStager {
                                    resp: [RespSample] = [],
                                    gravity: [GravitySample],
                                    tzOffsetSeconds: Int = 0,
+                                   timeZoneIdentifier: String? = nil,
                                    wristOff: [(start: Int, end: Int)] = [],
                                    bandSleepState: [(ts: Int, state: Int)] = [],
                                    useSleepStagerV2: Bool = false,
@@ -803,7 +818,9 @@ public enum SleepStager {
         // to before: same memo key, same compute.
         if let traceSink {
             return detectSleepUncached(hr: hr, rr: rr, resp: resp, gravity: gravity,
-                                       tzOffsetSeconds: tzOffsetSeconds, wristOff: wristOff,
+                                       tzOffsetSeconds: tzOffsetSeconds,
+                                       timeZoneIdentifier: timeZoneIdentifier,
+                                       wristOff: wristOff,
                                        bandSleepState: bandSleepState, useSleepStagerV2: useSleepStagerV2,
                                        sleepHRBaseline: sleepHRBaseline, traceSink: traceSink)
         }
@@ -821,13 +838,16 @@ public enum SleepStager {
             rr: StreamFingerprint.of(rr, ts: { $0.ts }, quant: { Int($0.rrMs) }),
             resp: StreamFingerprint.of(resp, ts: { $0.ts }, quant: { $0.raw }),
             tz: tzOffsetSeconds,
+            timeZoneIdentifier: timeZoneIdentifier,
             wristOff: StreamFingerprint.of(wristOff, ts: { $0.start }, quant: { $0.end }),
             band: StreamFingerprint.of(bandSleepState, ts: { $0.ts }, quant: { $0.state }),
             v2: useSleepStagerV2,
             sleepHRBaseline: sleepHRBaseline)
         return detectSleepCache.value(key) {
             detectSleepUncached(hr: hr, rr: rr, resp: resp, gravity: gravity,
-                                tzOffsetSeconds: tzOffsetSeconds, wristOff: wristOff,
+                                tzOffsetSeconds: tzOffsetSeconds,
+                                timeZoneIdentifier: timeZoneIdentifier,
+                                wristOff: wristOff,
                                 bandSleepState: bandSleepState, useSleepStagerV2: useSleepStagerV2,
                                 sleepHRBaseline: sleepHRBaseline, traceSink: nil)
         }
@@ -837,6 +857,7 @@ public enum SleepStager {
         let grav: StreamFingerprint; let hr: StreamFingerprint
         let rr: StreamFingerprint; let resp: StreamFingerprint
         let tz: Int
+        let timeZoneIdentifier: String?
         let wristOff: StreamFingerprint; let band: StreamFingerprint
         let v2: Bool
         let sleepHRBaseline: Double?
@@ -850,6 +871,7 @@ public enum SleepStager {
                                             resp: [RespSample],
                                             gravity: [GravitySample],
                                             tzOffsetSeconds: Int,
+                                            timeZoneIdentifier: String?,
                                             wristOff: [(start: Int, end: Int)],
                                             bandSleepState: [(ts: Int, state: Int)],
                                             useSleepStagerV2: Bool,
@@ -861,6 +883,14 @@ public enum SleepStager {
         let hrS = hr.sorted { $0.ts < $1.ts }
         let rrS = rr.sortedByTsStable()
         let respS = resp.sorted { $0.ts < $1.ts }
+        let namedTimeZone = timeZoneIdentifier.flatMap {
+            TimeZone(identifier: $0)
+        }
+        let offsetAtEpochSec: (Int) -> Int = { epochSecond in
+            namedTimeZone?.secondsFromGMT(
+                for: Date(timeIntervalSince1970: TimeInterval(epochSecond))
+            ) ?? tzOffsetSeconds
+        }
 
         let baseline = hrBaseline(hrS)
         // Sparse-gravity gate (#308): an un-unlocked WHOOP 5.0 backfills mostly v18/v26 records
@@ -959,7 +989,10 @@ public enum SleepStager {
             // clear the STRONGER re-onset bar — killing the 9 am phantom nap of residual post-wake stillness
             // while keeping a genuine second sleep. Outside the window the guard is the ordinary daytime bar.
             let morningWakeEnd = chainFromOvernight ? chainPrevEnd : nil
-            let isDaytime = isDaytimeCenter(p, tzOffsetSeconds: tzOffsetSeconds)
+            let isDaytime = isDaytimeCenter(
+                p,
+                offsetAtEpochSec: offsetAtEpochSec
+            )
             // Evaluate the morning-stillness guard ONLY when the run is daytime-centered, preserving the
             // original short-circuit (overnight runs never call it). The boolean used to `continue` below
             // is identical to the original combined condition.
@@ -988,7 +1021,12 @@ public enum SleepStager {
                 verdict: .kept, gate: "accepted",
                 detail: "spanMin=\(spanMin) eff=\(round2(eff)) restingHR=\(resting ?? -1) daytime=\(isDaytime)"))
             // A run that does NOT continue the chain re-anchors it on this run's onset.
-            if !continuesChain { chainFromOvernight = isOvernightOnset(p.start, tzOffsetSeconds: tzOffsetSeconds) }
+            if !continuesChain {
+                chainFromOvernight = isOvernightOnset(
+                    p.start,
+                    offsetAtEpochSec: offsetAtEpochSec
+                )
+            }
             chainPrevEnd = p.end
         }
         sessions.sort { $0.start < $1.start }

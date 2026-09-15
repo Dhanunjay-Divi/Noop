@@ -274,16 +274,35 @@ public extension StatTile where Accessory == EmptyView {
 
 // MARK: - Trend chip — a small tinted delta pill with a direction arrow.
 
+public enum TrendChipDirection: Sendable {
+    case up
+    case down
+    case flat
+    case none
+}
+
 /// A compact trend pill: an up/down/flat arrow + the delta text, tinted to `color`.
 /// Inferred direction comes from a leading +/− in the text (else flat). Sits in the
 /// corner of a StatTile or beside a metric value.
 public struct TrendChip: View {
     let text: String
     var color: Color = StrandPalette.textTertiary
-    public init(text: String, color: Color = StrandPalette.textTertiary) {
-        self.text = text; self.color = color
+    var direction: TrendChipDirection?
+    public init(text: String, color: Color = StrandPalette.textTertiary,
+                direction: TrendChipDirection? = nil) {
+        self.text = text
+        self.color = color
+        self.direction = direction
     }
     private var symbol: String? {
+        if let direction {
+            switch direction {
+            case .up: return "arrow.up.right"
+            case .down: return "arrow.down.right"
+            case .flat: return "minus"
+            case .none: return nil
+            }
+        }
         let t = text.trimmingCharacters(in: .whitespaces)
         if t.hasPrefix("+") || t.hasPrefix("▲") || t.lowercased().hasPrefix("up") { return "arrow.up.right" }
         if t.hasPrefix("-") || t.hasPrefix("−") || t.hasPrefix("▼") || t.lowercased().hasPrefix("down") { return "arrow.down.right" }

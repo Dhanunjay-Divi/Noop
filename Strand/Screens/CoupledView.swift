@@ -243,7 +243,7 @@ struct CoupledView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             } else {
-                Text("-")
+                Text(StrandFormat.missing)
                     .font(StrandFont.number(48))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
@@ -339,7 +339,9 @@ struct CoupledView: View {
                                             font: StrandFont.number(34),
                                             color: .white)
                             } else {
-                                Text("-").font(StrandFont.number(34)).foregroundStyle(.white)
+                                Text(StrandFormat.missing)
+                                    .font(StrandFont.number(34))
+                                    .foregroundStyle(.white)
                             }
                         }
                         .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
@@ -419,7 +421,7 @@ struct CoupledView: View {
     /// Active calories for the day from the stored whole-day estimate. Never fabricated, a day with no
     /// estimate reads a dash.
     private var caloriesText: String {
-        guard let k = day?.activeKcalEst else { return "-" }
+        guard let k = day?.activeKcalEst else { return StrandFormat.missing }
         return "\(Int(k.rounded())) kcal"
     }
 
@@ -431,7 +433,7 @@ struct CoupledView: View {
         } label: {
             card {
                 VStack(alignment: .leading, spacing: 14) {
-                    SectionHeader("Sleep performance", overline: "Last night", trailing: String(localized: "Sleep Score"))
+                    SectionHeader("Sleep Score", overline: "Last night")
                     HStack(alignment: .center, spacing: 16) {
                         // Left: the SLEEP PERFORMANCE % as the liquid vessel (Rest world), with the score
                         // counting up over the fluid. Empty vessel when there's no scored performance.
@@ -487,11 +489,11 @@ struct CoupledView: View {
     }
 
     private var sleepAccessibilityLabel: String {
-        guard let p = sleepPerformance else { return String(localized: "Sleep performance not available") }
+        guard let p = sleepPerformance else { return String(localized: "Sleep Score not available") }
         if let asleep = day?.totalSleepMin, asleep > 0 {
-            return String(localized: "Sleep performance \(Int(p.rounded())) percent. \(Self.hoursMinutes(asleep)) slept, \(Self.hoursMinutes(sleepNeedForDay)) needed")
+            return String(localized: "Sleep Score \(Int(p.rounded())) percent. \(Self.hoursMinutes(asleep)) slept, \(Self.hoursMinutes(sleepNeedForDay)) needed")
         }
-        return String(localized: "Sleep performance \(Int(p.rounded())) percent")
+        return String(localized: "Sleep Score \(Int(p.rounded())) percent")
     }
 
     /// The night's need (minutes) for the slept-vs-needed read: the imported per-day figure when the
@@ -792,7 +794,9 @@ struct CoupledView: View {
 
     /// The optimal band as display text ("14 to 18" / "-"). Byte-identical formatting to Android.
     static func optimalStrainRangeText(recovery: Double?) -> String {
-        guard let band = optimalStrainRange(recovery: recovery) else { return "-" }
+        guard let band = optimalStrainRange(recovery: recovery) else {
+            return StrandFormat.missing
+        }
         return String(localized: "\(band.lowerBound) to \(band.upperBound)")
     }
 }

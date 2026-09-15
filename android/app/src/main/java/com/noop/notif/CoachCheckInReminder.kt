@@ -170,7 +170,7 @@ internal object CoachCheckInNotifier {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .protectPrivateContent(context, CHANNEL_ID)
             .build()
         NotificationLifecycleLedger.posted(
             context,

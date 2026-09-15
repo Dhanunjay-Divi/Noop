@@ -8,6 +8,9 @@ require "fileutils"
 tool_dir = File.expand_path(__dir__)
 repo_root = File.expand_path("../..", tool_dir)
 source = JSON.parse(File.read(File.join(tool_dir, "appwide_strings.json")))
+android_only = JSON.parse(File.read(File.join(tool_dir, "android_only_strings.json")))
+android_only_strings = android_only.fetch("strings")
+android_only_plurals = android_only.fetch("plurals")
 
 locales = {
   "en" => "values",
@@ -26,6 +29,22 @@ source.each do |key, translations|
   actual = translations.keys.sort
   abort("#{key}: expected #{expected_locales.inspect}, got #{actual.inspect}") unless actual == expected_locales
 end
+android_only_strings.each do |key, translations|
+  actual = translations.keys.sort
+  abort("#{key}: expected #{expected_locales.inspect}, got #{actual.inspect}") unless actual == expected_locales
+end
+android_only_plurals.each do |key, translations|
+  actual = translations.keys.sort
+  abort("#{key}: expected #{expected_locales.inspect}, got #{actual.inspect}") unless actual == expected_locales
+  translations.each do |locale, quantities|
+    abort("#{key}/#{locale}: missing other quantity") unless quantities.key?("other")
+  end
+end
+
+generated_android_keys = source.keys.map { |key| key.tr(".", "_") }
+android_only_keys = android_only_strings.keys + android_only_plurals.keys
+duplicates = generated_android_keys & android_only_keys
+abort("Duplicate Android-only keys: #{duplicates.sort.join(", ")}") unless duplicates.empty?
 
 def android_key(key)
   key.tr(".", "_")
@@ -46,6 +65,18 @@ locales.each do |locale, directory|
   FileUtils.mkdir_p(File.dirname(path))
   lines = source.sort.map do |key, translations|
     %(    <string name="#{android_key(key)}">#{android_xml(translations.fetch(locale))}</string>)
+  end
+  lines.concat(
+    android_only_strings.sort.map do |key, translations|
+      %(    <string name="#{key}">#{android_xml(translations.fetch(locale))}</string>)
+    end
+  )
+  android_only_plurals.sort.each do |key, translations|
+    lines << %(    <plurals name="#{key}">)
+    translations.fetch(locale).each do |quantity, value|
+      lines << %(        <item quantity="#{quantity}">#{android_xml(value)}</item>)
+    end
+    lines << "    </plurals>"
   end
   File.write(
     path,
@@ -88,4 +119,8 @@ File.write(
   "#{head},\n#{entries.join(",\n")}#{marker}#{tail}"
 )
 
-puts "Generated #{source.length} app-wide strings for #{locales.length} locales."
+puts(
+  "Generated #{source.length} app-wide strings and " \
+  "#{android_only_strings.length + android_only_plurals.length} Android-only resources " \
+  "for #{locales.length} locales."
+)

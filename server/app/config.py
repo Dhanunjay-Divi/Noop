@@ -116,6 +116,29 @@ class Settings:
     managed_push_token_write_version: str = "v1"
     managed_push_timeout_seconds: int = 5
     managed_push_max_concurrency: int = 6
+    feedback_enabled: bool = False
+    feedback_accepting_reservations: bool = False
+    feedback_lifecycle_enabled: bool = False
+    feedback_bucket: str | None = None
+    feedback_capability_secret: str | None = None
+    feedback_capability_previous_secret: str | None = None
+    feedback_capability_primary_key_version: str = "v1"
+    feedback_capability_previous_key_version: str | None = None
+    feedback_capability_write_version: str = "legacy"
+    feedback_retention_days: int = 28
+    feedback_lifecycle_interval_seconds: int = 5 * 60
+    feedback_lifecycle_batch_size: int = 20
+    feedback_upload_ttl_seconds: int = 15 * 60
+    feedback_upload_finalization_grace_seconds: int = 5 * 60
+    feedback_cleanup_confirmation_delay_seconds: int = 60
+    feedback_max_archive_bytes: int = 20 * 1024 * 1024
+    feedback_daily_report_limit: int = 6
+    feedback_pending_byte_limit: int = 64 * 1024 * 1024
+    feedback_app_daily_report_limit: int = 500
+    feedback_app_pending_byte_limit: int = 1024 * 1024 * 1024
+    feedback_validation_max_concurrency: int = 2
+    feedback_validation_timeout_seconds: int = 10
+    feedback_external_abuse_gate_approved: bool = False
     ownership_service_enabled: bool = False
     ownership_project_id: str | None = None
     ownership_project_number: str | None = None
@@ -167,6 +190,7 @@ class Settings:
             raise ValueError("NOOP_RETENTION_DAYS must be an integer") from exc
         if retention_value < 0:
             raise ValueError("NOOP_RETENTION_DAYS cannot be negative")
+        feedback_enabled = _boolean("NOOP_FEEDBACK_ENABLED", False)
         return cls(
             api_token=os.getenv("NOOP_API_TOKEN"),
             database_url=os.getenv("NOOP_DATABASE_URL"),
@@ -300,6 +324,87 @@ class Settings:
             managed_push_max_concurrency=_positive_int(
                 "NOOP_MANAGED_PUSH_MAX_CONCURRENCY",
                 6,
+            ),
+            feedback_enabled=feedback_enabled,
+            feedback_accepting_reservations=_boolean(
+                "NOOP_FEEDBACK_ACCEPTING_RESERVATIONS",
+                False,
+            ),
+            feedback_lifecycle_enabled=_boolean(
+                "NOOP_FEEDBACK_LIFECYCLE_ENABLED",
+                False,
+            ),
+            feedback_bucket=os.getenv("NOOP_FEEDBACK_BUCKET"),
+            feedback_capability_secret=os.getenv("NOOP_FEEDBACK_CAPABILITY_SECRET"),
+            feedback_capability_previous_secret=os.getenv(
+                "NOOP_FEEDBACK_CAPABILITY_PREVIOUS_SECRET"
+            ),
+            feedback_capability_primary_key_version=os.getenv(
+                "NOOP_FEEDBACK_CAPABILITY_PRIMARY_KEY_VERSION",
+                "v1",
+            ).strip(),
+            feedback_capability_previous_key_version=(
+                os.getenv("NOOP_FEEDBACK_CAPABILITY_PREVIOUS_KEY_VERSION") or None
+            ),
+            feedback_capability_write_version=os.getenv(
+                "NOOP_FEEDBACK_CAPABILITY_WRITE_VERSION",
+                "legacy",
+            ).strip(),
+            feedback_retention_days=_positive_int(
+                "NOOP_FEEDBACK_RETENTION_DAYS",
+                28,
+            ),
+            feedback_lifecycle_interval_seconds=_positive_int(
+                "NOOP_FEEDBACK_LIFECYCLE_INTERVAL_SECONDS",
+                5 * 60,
+            ),
+            feedback_lifecycle_batch_size=_positive_int(
+                "NOOP_FEEDBACK_LIFECYCLE_BATCH_SIZE",
+                20,
+            ),
+            feedback_upload_ttl_seconds=_positive_int(
+                "NOOP_FEEDBACK_UPLOAD_TTL_SECONDS",
+                15 * 60,
+            ),
+            feedback_upload_finalization_grace_seconds=_positive_int(
+                "NOOP_FEEDBACK_UPLOAD_FINALIZATION_GRACE_SECONDS",
+                5 * 60,
+            ),
+            feedback_cleanup_confirmation_delay_seconds=_positive_int(
+                "NOOP_FEEDBACK_CLEANUP_CONFIRMATION_DELAY_SECONDS",
+                60,
+            ),
+            feedback_max_archive_bytes=_positive_int(
+                "NOOP_FEEDBACK_MAX_ARCHIVE_BYTES",
+                20 * 1024 * 1024,
+            ),
+            feedback_daily_report_limit=_positive_int(
+                "NOOP_FEEDBACK_DAILY_REPORT_LIMIT",
+                6,
+            ),
+            feedback_pending_byte_limit=_positive_int(
+                "NOOP_FEEDBACK_PENDING_BYTE_LIMIT",
+                64 * 1024 * 1024,
+            ),
+            feedback_app_daily_report_limit=_positive_int(
+                "NOOP_FEEDBACK_APP_DAILY_REPORT_LIMIT",
+                500,
+            ),
+            feedback_app_pending_byte_limit=_positive_int(
+                "NOOP_FEEDBACK_APP_PENDING_BYTE_LIMIT",
+                1024 * 1024 * 1024,
+            ),
+            feedback_validation_max_concurrency=_positive_int(
+                "NOOP_FEEDBACK_VALIDATION_MAX_CONCURRENCY",
+                2,
+            ),
+            feedback_validation_timeout_seconds=_positive_int(
+                "NOOP_FEEDBACK_VALIDATION_TIMEOUT_SECONDS",
+                10,
+            ),
+            feedback_external_abuse_gate_approved=_boolean(
+                "NOOP_FEEDBACK_EXTERNAL_ABUSE_GATE_APPROVED",
+                False,
             ),
             ownership_service_enabled=_boolean(
                 "NOOP_OWNERSHIP_SERVICE_ENABLED",
@@ -609,6 +714,192 @@ class Settings:
                 )
         elif self.managed_push_enabled:
             raise RuntimeError("NOOP_MANAGED_PUSH_ENABLED requires managed storage")
+        if self.feedback_accepting_reservations and not self.feedback_enabled:
+            raise RuntimeError(
+                "NOOP_FEEDBACK_ACCEPTING_RESERVATIONS requires NOOP_FEEDBACK_ENABLED"
+            )
+        if (
+            self.feedback_accepting_reservations
+            and not self.feedback_external_abuse_gate_approved
+        ):
+            raise RuntimeError(
+                "NOOP_FEEDBACK_ACCEPTING_RESERVATIONS requires the explicit "
+                "NOOP_FEEDBACK_EXTERNAL_ABUSE_GATE_APPROVED release gate"
+            )
+        if self.feedback_enabled or self.feedback_lifecycle_enabled:
+            if self.feedback_enabled and not self.managed_storage_enabled:
+                raise RuntimeError("NOOP_FEEDBACK_ENABLED requires managed storage")
+            required_feedback = {"NOOP_FEEDBACK_BUCKET": self.feedback_bucket}
+            if self.feedback_enabled:
+                required_feedback["NOOP_FEEDBACK_CAPABILITY_SECRET"] = (
+                    self.feedback_capability_secret
+                )
+            missing_feedback = [
+                name for name, value in required_feedback.items() if not value
+            ]
+            if missing_feedback:
+                raise RuntimeError(
+                    "feedback ingestion requires: " + ", ".join(missing_feedback)
+                )
+            if not re.fullmatch(
+                r"[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]",
+                self.feedback_bucket or "",
+            ):
+                raise RuntimeError("NOOP_FEEDBACK_BUCKET must be a valid bucket name")
+            if len((self.feedback_capability_secret or "").encode("utf-8")) < 32:
+                if self.feedback_enabled:
+                    raise RuntimeError(
+                        "NOOP_FEEDBACK_CAPABILITY_SECRET must be at least 32 bytes"
+                    )
+            if (
+                self.feedback_capability_previous_secret
+                and len(self.feedback_capability_previous_secret.encode("utf-8")) < 32
+            ):
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_CAPABILITY_PREVIOUS_SECRET must be at least 32 bytes"
+                )
+            if (
+                self.feedback_capability_previous_secret
+                and self.feedback_capability_previous_secret
+                == self.feedback_capability_secret
+            ):
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_CAPABILITY_PREVIOUS_SECRET must differ from "
+                    "NOOP_FEEDBACK_CAPABILITY_SECRET"
+                )
+            if (
+                re.fullmatch(
+                    r"v[0-9]{1,4}",
+                    self.feedback_capability_primary_key_version,
+                )
+                is None
+            ):
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_CAPABILITY_PRIMARY_KEY_VERSION is invalid"
+                )
+            previous_secret_configured = bool(self.feedback_capability_previous_secret)
+            previous_version_configured = bool(
+                self.feedback_capability_previous_key_version
+            )
+            if previous_secret_configured != previous_version_configured:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_CAPABILITY_PREVIOUS_SECRET and "
+                    "NOOP_FEEDBACK_CAPABILITY_PREVIOUS_KEY_VERSION must be "
+                    "configured together"
+                )
+            if previous_version_configured:
+                if (
+                    re.fullmatch(
+                        r"v[0-9]{1,4}",
+                        self.feedback_capability_previous_key_version or "",
+                    )
+                    is None
+                ):
+                    raise RuntimeError(
+                        "NOOP_FEEDBACK_CAPABILITY_PREVIOUS_KEY_VERSION is invalid"
+                    )
+                if (
+                    self.feedback_capability_previous_key_version
+                    == self.feedback_capability_primary_key_version
+                ):
+                    raise RuntimeError("feedback capability key versions must differ")
+            allowed_feedback_write_versions = {
+                "legacy",
+                self.feedback_capability_primary_key_version,
+            }
+            if self.feedback_capability_previous_key_version:
+                allowed_feedback_write_versions.add(
+                    self.feedback_capability_previous_key_version
+                )
+            if (
+                self.feedback_capability_write_version
+                not in allowed_feedback_write_versions
+            ):
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_CAPABILITY_WRITE_VERSION must be legacy "
+                    "or a configured key version"
+                )
+            if (
+                self.feedback_lifecycle_enabled
+                and re.fullmatch(
+                    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+",
+                    self.managed_signer_email or "",
+                )
+                is None
+            ):
+                raise RuntimeError(
+                    "NOOP_MANAGED_SIGNER_EMAIL is required for feedback lifecycle"
+                )
+            if not 1 <= self.feedback_retention_days <= 28:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_RETENTION_DAYS must be between 1 and 28"
+                )
+            if not 60 <= self.feedback_lifecycle_interval_seconds <= 3_600:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_LIFECYCLE_INTERVAL_SECONDS must be between "
+                    "60 and 3600"
+                )
+            if not 1 <= self.feedback_lifecycle_batch_size <= 30:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_LIFECYCLE_BATCH_SIZE must be between 1 and 30"
+                )
+            if not 60 <= self.feedback_upload_ttl_seconds <= 3_600:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_UPLOAD_TTL_SECONDS must be between 60 and 3600"
+                )
+            if not 60 <= self.feedback_upload_finalization_grace_seconds <= 1_800:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_UPLOAD_FINALIZATION_GRACE_SECONDS must be "
+                    "between 60 and 1800"
+                )
+            if not 30 <= self.feedback_cleanup_confirmation_delay_seconds <= 600:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_CLEANUP_CONFIRMATION_DELAY_SECONDS must be "
+                    "between 30 and 600"
+                )
+            if not 1 <= self.feedback_max_archive_bytes <= 20 * 1024 * 1024:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_MAX_ARCHIVE_BYTES must be between 1 and 20971520"
+                )
+            if not 1 <= self.feedback_daily_report_limit <= 100:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_DAILY_REPORT_LIMIT must be between 1 and 100"
+                )
+            if not (
+                self.feedback_max_archive_bytes
+                <= self.feedback_pending_byte_limit
+                <= 256 * 1024 * 1024
+            ):
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_PENDING_BYTE_LIMIT must be at least the "
+                    "archive limit and no more than 268435456"
+                )
+            if not (
+                self.feedback_daily_report_limit
+                <= self.feedback_app_daily_report_limit
+                <= 100_000
+            ):
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_APP_DAILY_REPORT_LIMIT must be at least the "
+                    "principal daily limit and no more than 100000"
+                )
+            if not (
+                self.feedback_pending_byte_limit
+                <= self.feedback_app_pending_byte_limit
+                <= 16 * 1024 * 1024 * 1024
+            ):
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_APP_PENDING_BYTE_LIMIT must be at least the "
+                    "principal pending byte limit and no more than 17179869184"
+                )
+            if not 1 <= self.feedback_validation_max_concurrency <= 4:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_VALIDATION_MAX_CONCURRENCY must be between 1 and 4"
+                )
+            if not 1 <= self.feedback_validation_timeout_seconds <= 30:
+                raise RuntimeError(
+                    "NOOP_FEEDBACK_VALIDATION_TIMEOUT_SECONDS must be between 1 and 30"
+                )
         if self.managed_push_retry_enabled:
             if not re.fullmatch(
                 r"[a-z][a-z0-9-]{4,28}[a-z0-9]",

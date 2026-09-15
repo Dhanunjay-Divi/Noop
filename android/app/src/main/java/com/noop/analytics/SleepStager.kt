@@ -4,6 +4,8 @@ import com.noop.data.GravitySample
 import com.noop.data.HrSample
 import com.noop.data.RespSample
 import com.noop.data.RrInterval
+import java.time.Instant
+import java.time.ZoneId
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.exp
@@ -702,8 +704,15 @@ object SleepStager {
      * Math.floorMod keeps the local-shifted time in [0, secondsPerDay) for any sign.
      */
     internal fun isDaytimeCenter(p: Period, tzOffsetSeconds: Long): Boolean {
+        return isDaytimeCenter(p) { tzOffsetSeconds }
+    }
+
+    internal fun isDaytimeCenter(
+        p: Period,
+        offsetAtEpochSec: (Long) -> Long,
+    ): Boolean {
         val center = p.start + (p.end - p.start) / 2
-        val secOfDay = Math.floorMod(center + tzOffsetSeconds, secondsPerDay)
+        val secOfDay = Math.floorMod(center + offsetAtEpochSec(center), secondsPerDay)
         val hour = (secOfDay / 3_600L).toInt()
         return hour >= daytimeBandStartHour && hour < daytimeBandEndHour
     }
@@ -715,7 +724,14 @@ object SleepStager {
      * Reimplemented from @vulnix0x4's PR #353.
      */
     internal fun isOvernightOnset(start: Long, tzOffsetSeconds: Long): Boolean {
-        val secOfDay = Math.floorMod(start + tzOffsetSeconds, secondsPerDay)
+        return isOvernightOnset(start) { tzOffsetSeconds }
+    }
+
+    internal fun isOvernightOnset(
+        start: Long,
+        offsetAtEpochSec: (Long) -> Long,
+    ): Boolean {
+        val secOfDay = Math.floorMod(start + offsetAtEpochSec(start), secondsPerDay)
         val hour = (secOfDay / 3_600L).toInt()
         return !(hour >= daytimeBandStartHour && hour < daytimeBandEndHour)
     }
@@ -875,7 +891,7 @@ object SleepStager {
     /** Full memo key for [detectSleep] — every input that steers detection or staging, nothing else. */
     private data class DetectKey(
         val grav: Long, val hr: Long, val rr: Long, val resp: Long,
-        val tz: Long, val wristOff: Long, val band: Long, val v2: Boolean,
+        val tz: Long, val zoneId: String?, val wristOff: Long, val band: Long, val v2: Boolean,
         val sleepHRBaseline: Double?,
     )
 
@@ -931,6 +947,7 @@ object SleepStager {
         resp: List<RespSample> = emptyList(),
         gravity: List<GravitySample>,
         tzOffsetSeconds: Long = 0L,
+        timeZone: ZoneId? = null,
         wristOff: List<Pair<Long, Long>> = emptyList(),
         // The strap's OWN persisted v18 BAND sleep_state per timestamp (Interpreter's `(sb shr 4) and 3`:
         // 0 wake / 1 still / 2 asleep / 3 up), consumed ONLY to confirm a borderline H7 morning re-onset
@@ -960,7 +977,7 @@ object SleepStager {
         // byte-identical to the untraced call), so every real call still memoizes below. Mirrors the
         // Swift detectSleep traceSink bypass (#707).
         if (traceSink != null) {
-            return detectSleepUncached(hr, rr, resp, gravity, tzOffsetSeconds, wristOff,
+            return detectSleepUncached(hr, rr, resp, gravity, tzOffsetSeconds, timeZone, wristOff,
                 bandSleepState, useSleepStagerV2, sleepHRBaseline, traceSink)
         }
         val key = DetectKey(
@@ -979,6 +996,7 @@ object SleepStager {
             rr = streamFingerprint(rr, { it.ts }) { it.rrMs.toLong() },
             resp = streamFingerprint(resp, { it.ts }) { it.raw.toLong() },
             tz = tzOffsetSeconds,
+            zoneId = timeZone?.id,
             wristOff = streamFingerprint(wristOff, { it.first }) { it.second },
             band = streamFingerprint(bandSleepState, { it.first }) { it.second.toLong() },
             v2 = useSleepStagerV2,
@@ -988,7 +1006,7 @@ object SleepStager {
         // Compute OUTSIDE the lock (the Swift AnalyticsMemoCache does the same): a slow night never
         // serialises another thread's lookup, and a racing duplicate compute just overwrites the entry
         // with an identical value — benign, the function is deterministic.
-        val sessions = detectSleepUncached(hr, rr, resp, gravity, tzOffsetSeconds, wristOff,
+        val sessions = detectSleepUncached(hr, rr, resp, gravity, tzOffsetSeconds, timeZone, wristOff,
             bandSleepState, useSleepStagerV2, sleepHRBaseline, null)
         synchronized(detectCacheLock) { detectCache[key] = copyDetected(sessions) }
         return sessions
@@ -1002,6 +1020,7 @@ object SleepStager {
         resp: List<RespSample>,
         gravity: List<GravitySample>,
         tzOffsetSeconds: Long,
+        timeZone: ZoneId?,
         wristOff: List<Pair<Long, Long>>,
         bandSleepState: List<Pair<Long, Int>>,
         useSleepStagerV2: Boolean,
@@ -1014,6 +1033,11 @@ object SleepStager {
         val hrS = hr.sortedBy { it.ts }
         val rrS = rr.sortedBy { it.ts }
         val respS = resp.sortedBy { it.ts }
+        val offsetAtEpochSec: (Long) -> Long = { epochSecond ->
+            timeZone?.rules?.getOffset(Instant.ofEpochSecond(epochSecond))
+                ?.totalSeconds?.toLong()
+                ?: tzOffsetSeconds
+        }
 
         val baseline = hrBaseline(hrS)
         // Sparse-gravity gate (#308): an un-unlocked WHOOP 5.0 backfills mostly v18/v26 records
@@ -1107,7 +1131,7 @@ object SleepStager {
             // clear the STRONGER re-onset bar — killing the 9 am phantom nap of residual post-wake stillness
             // while keeping a genuine second sleep. Outside the window the guard is the ordinary daytime bar.
             val morningWakeEnd = if (chainFromOvernight) chainPrevEnd else null
-            val isDaytime = isDaytimeCenter(p, tzOffsetSeconds)
+            val isDaytime = isDaytimeCenter(p, offsetAtEpochSec)
             // Evaluate the morning-stillness guard ONLY when the run is daytime-centered, preserving the
             // original short-circuit (overnight runs never call it). The boolean used to drop below is
             // identical to the original combined condition.
@@ -1140,7 +1164,9 @@ object SleepStager {
                 SleepStagerTrace.Verdict.KEPT, "accepted",
                 "spanMin=$spanMin eff=${SleepStagerTrace.round2(eff)} restingHR=${resting ?: -1} daytime=$isDaytime"))
             // A run that does NOT continue the chain re-anchors it on this run's onset.
-            if (!continuesChain) chainFromOvernight = isOvernightOnset(p.start, tzOffsetSeconds)
+            if (!continuesChain) {
+                chainFromOvernight = isOvernightOnset(p.start, offsetAtEpochSec)
+            }
             chainPrevEnd = p.end
         }
         sessions.sortBy { it.start }

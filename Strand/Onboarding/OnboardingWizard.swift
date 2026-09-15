@@ -389,6 +389,7 @@ public struct OnboardingWizard: View {
             // treat those as user-provided. Tapping the explicitly labelled Save & Continue accepts both
             // visible profile inputs, including when the user intentionally keeps the shown defaults.
             ProfileStore.confirmFitnessInputsInDefaults()
+            ProfileStore.confirmBodyInputsInDefaults()
         }
         guard step != .notifications else {
             guard dailyReviewOptIn else {
@@ -397,7 +398,7 @@ public struct OnboardingWizard: View {
                 return
             }
             DailyReviewNotifications.setEnabled(true) { outcome in
-                dailyReviewOptIn = outcome == .scheduled
+                dailyReviewOptIn = outcome == .scheduled || outcome == .deferred
                 advanceStep()
             }
             return

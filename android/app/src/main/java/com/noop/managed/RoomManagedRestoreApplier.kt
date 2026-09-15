@@ -828,15 +828,15 @@ class RoomManagedRestoreApplier(
             if (end <= start) invalid()
             val payload = row.requiredObject("payload_json")
             val edited = payload.optionalBoolean("user_edited") ?: false
-            // Android does not yet persist gravitySparse; validate its type and retain all common fields.
-            payload.optionalBoolean("gravity_sparse")
+            val gravitySparse = payload.optionalBoolean("gravity_sparse")
             Sql(
                 """
                     INSERT INTO sleepSession (
                         deviceId, startTs, endTs, efficiency, restingHr, avgHrv,
                         stagesJSON, userEdited, startTsAdjusted, motionJSON,
-                        sleepStateJSON, rrEligibleWindowCount, rrValidWindowCount
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        sleepStateJSON, gravitySparse, rrEligibleWindowCount,
+                        rrValidWindowCount
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(deviceId, startTs) DO UPDATE SET
                         endTs = CASE
                             WHEN sleepSession.userEdited = 1 AND excluded.userEdited = 0
@@ -856,6 +856,9 @@ class RoomManagedRestoreApplier(
                         sleepStateJSON = CASE
                             WHEN sleepSession.userEdited = 1 AND excluded.userEdited = 0
                             THEN sleepSession.sleepStateJSON ELSE excluded.sleepStateJSON END,
+                        gravitySparse = CASE
+                            WHEN sleepSession.userEdited = 1 AND excluded.userEdited = 0
+                            THEN sleepSession.gravitySparse ELSE excluded.gravitySparse END,
                         rrEligibleWindowCount = CASE
                             WHEN sleepSession.userEdited = 1 AND excluded.userEdited = 0
                             THEN sleepSession.rrEligibleWindowCount
@@ -878,6 +881,7 @@ class RoomManagedRestoreApplier(
                     payload.optionalLong("start_ts_adjusted"),
                     payload.optionalString("motion_json"),
                     payload.optionalString("sleep_state_json"),
+                    gravitySparse?.let { if (it) 1 else 0 },
                     payload.optionalLong("rr_eligible_window_count"),
                     payload.optionalLong("rr_valid_window_count"),
                 ),

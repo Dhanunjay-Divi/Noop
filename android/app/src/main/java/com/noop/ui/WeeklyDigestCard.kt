@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -48,6 +49,7 @@ import com.noop.analytics.WeeklyDigestEngine
 import com.noop.analytics.WeeklyMetric
 import com.noop.analytics.WeeklyMetricSummary
 import com.noop.data.DailyMetric
+import kotlinx.coroutines.CancellationException
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -84,13 +86,17 @@ fun buildWeeklyDigest(
     days: List<DailyMetric>,
     anchorDay: String = logicalDayKeyNow(),
     effortDisplayFactor: Double = 1.0,
+    cancellationCheck: () -> Unit = {},
 ): WeeklyDigest {
     val charge = HashMap<String, Double>()
     val effort = HashMap<String, Double>()
     val rest = HashMap<String, Double>()
     val rhr = HashMap<String, Double>()
     val hrv = HashMap<String, Double>()
-    for (d in days) {
+    for ((index, d) in days.withIndex()) {
+        if (index % 256 == 0) {
+            cancellationCheck()
+        }
         d.recovery?.let { charge[d.day] = it }
         d.strain?.let { effort[d.day] = it }
         // Rest = the sleep-performance composite recomputed on the persisted day.
@@ -98,6 +104,7 @@ fun buildWeeklyDigest(
         d.restingHr?.let { rhr[d.day] = it.toDouble() }
         d.avgHrv?.let { hrv[d.day] = it }
     }
+    cancellationCheck()
     return WeeklyDigestEngine.build(
         byMetric = mapOf(
             WeeklyMetric.CHARGE to charge,
@@ -111,6 +118,47 @@ fun buildWeeklyDigest(
     )
 }
 
+internal fun hasImportedRestScore(
+    importedByDay: Map<String, Double>,
+    anchorDay: String,
+): Boolean {
+    val weekStart = WeeklyDigestEngine.mondayOfWeek(anchorDay) ?: return false
+    val weekEnd = WeeklyDigestEngine.addDays(weekStart, 6)
+    return importedByDay.any { (day, value) ->
+        day in weekStart..weekEnd && value.isFinite()
+    }
+}
+
+@Composable
+private fun importedRestAvailable(
+    vm: AppViewModel,
+    anchorDay: String,
+    metricDataVersion: Long,
+): Boolean {
+    val available by produceState(initialValue = false, vm, anchorDay, metricDataVersion) {
+        val weekStart = WeeklyDigestEngine.mondayOfWeek(anchorDay)
+        val weekEnd = weekStart?.let { WeeklyDigestEngine.addDays(it, 6) }
+        value = if (weekStart == null || weekEnd == null) {
+            false
+        } else {
+            try {
+                val imported = vm.repo.metricSeries(
+                    "my-whoop",
+                    "sleep_performance",
+                    weekStart,
+                    weekEnd,
+                ).associate { it.day to it.value }
+                hasImportedRestScore(imported, anchorDay)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+    return available
+}
+
 // MARK: - Embeddable card
 
 /**
@@ -120,11 +168,17 @@ fun buildWeeklyDigest(
 @Composable
 fun WeeklyDigestCard(vm: AppViewModel, modifier: Modifier = Modifier) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    val metricDataVersion by vm.metricDataVersion.collectAsStateWithLifecycle()
     val factor = effortDisplayFactor(UnitPrefs.effortScale(LocalContext.current))
-    val digest = buildWeeklyDigest(days, effortDisplayFactor = factor)
+    val anchorDay = logicalDayKeyNow()
+    val digest = buildWeeklyDigest(days, anchorDay = anchorDay, effortDisplayFactor = factor)
     if (digest.isEmpty) return
     Box(modifier = modifier) {
-        WeeklyDigestContent(digest = digest, compact = true)
+        WeeklyDigestContent(
+            digest = digest,
+            compact = true,
+            importedRestAvailable = importedRestAvailable(vm, anchorDay, metricDataVersion),
+        )
     }
 }
 
@@ -134,17 +188,22 @@ fun WeeklyDigestCard(vm: AppViewModel, modifier: Modifier = Modifier) {
 @Composable
 fun WeeklyDigestScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    val metricDataVersion by vm.metricDataVersion.collectAsStateWithLifecycle()
     val factor = effortDisplayFactor(UnitPrefs.effortScale(LocalContext.current))
     ScreenScaffold(title = uiString(R.string.l10n_weekly_digest_card_week_in_review_66d95a07), subtitle = "Your Monday-to-Sunday, read in one glance.") {
-        val digest = buildWeeklyDigest(days, effortDisplayFactor = factor)
+        val anchorDay = logicalDayKeyNow()
+        val digest = buildWeeklyDigest(days, anchorDay = anchorDay, effortDisplayFactor = factor)
         if (digest.isEmpty) {
             DataPendingNote(
                 title = uiString(R.string.l10n_weekly_digest_card_no_readings_this_week_yet_0745a2df),
-                body = "Wear your strap or import a wearable export in Data Sources. Once this week has a " +
-                    "day or two of data, your week-in-review appears here.",
+                body = stringResource(R.string.appwide_weekly_digest_history_help),
             )
         } else {
-            WeeklyDigestContent(digest = digest, compact = false)
+            WeeklyDigestContent(
+                digest = digest,
+                compact = false,
+                importedRestAvailable = importedRestAvailable(vm, anchorDay, metricDataVersion),
+            )
         }
     }
 }
@@ -178,7 +237,11 @@ private fun digestDomain(metric: WeeklyMetric): DigestDomain = when (metric) {
  * grid to the headline rows for the card; the full screen shows everything plus a footer.
  */
 @Composable
-fun WeeklyDigestContent(digest: WeeklyDigest, compact: Boolean = false) {
+fun WeeklyDigestContent(
+    digest: WeeklyDigest,
+    compact: Boolean = false,
+    importedRestAvailable: Boolean = false,
+) {
     val effortScale = UnitPrefs.effortScale(LocalContext.current)
     val scoreSummaries = SCORE_ORDER.mapNotNull(digest::summary)
     val secondarySignals = if (compact) {
@@ -190,7 +253,7 @@ fun WeeklyDigestContent(digest: WeeklyDigest, compact: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         DigestHeader(digest)
         if (scoreSummaries.isNotEmpty()) {
-            DigestScoreRow(scoreSummaries, effortScale)
+            DigestScoreRow(scoreSummaries, effortScale, importedRestAvailable)
         }
         if (digest.focalPoints.isNotEmpty() || secondarySignals.isNotEmpty() || !compact) {
             NoopCard {
@@ -283,6 +346,7 @@ private fun DigestHeader(digest: WeeklyDigest) {
 private fun DigestScoreRow(
     summaries: List<WeeklyMetricSummary>,
     effortScale: EffortScale,
+    importedRestAvailable: Boolean,
 ) {
     NoopCard(padding = Metrics.space8) {
         Row(
@@ -293,6 +357,7 @@ private fun DigestScoreRow(
                 DigestScoreColumn(
                     summary = summary,
                     effortScale = effortScale,
+                    importedRestAvailable = summary.metric == WeeklyMetric.REST && importedRestAvailable,
                     modifier = Modifier.weight(1f),
                 )
                 if (index < summaries.lastIndex) {
@@ -313,12 +378,24 @@ private fun DigestScoreRow(
 private fun DigestScoreColumn(
     summary: WeeklyMetricSummary,
     effortScale: EffortScale,
+    importedRestAvailable: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val domain = digestDomain(summary.metric)
+    val importedRestDisclosure = if (importedRestAvailable) {
+        stringResource(R.string.appwide_weekly_digest_imported_sleep_not_included)
+    } else {
+        null
+    }
     val hasValue = summary.thisWeek.n > 0
     val value = summary.thisWeek.mean.coerceIn(0.0, 100.0)
+    val accentColor = if (summary.metric == WeeklyMetric.CHARGE && hasValue) {
+        RecoveryBandPresentation.color(value)
+    } else {
+        domain.color
+    }
     val number = when {
+        !hasValue && importedRestAvailable -> NoopDisplayFormat.MISSING
         !hasValue -> null
         summary.metric == WeeklyMetric.EFFORT ->
             UnitFormatter.effortDisplay(summary.thisWeek.mean, effortScale)
@@ -333,7 +410,11 @@ private fun DigestScoreColumn(
     Column(
         modifier = modifier
             .semantics(mergeDescendants = true) {
-                contentDescription = rowAccessibility(summary, effortScale)
+                contentDescription = scoreAccessibility(
+                    summary,
+                    effortScale,
+                    importedRestDisclosure,
+                )
             }
             .padding(horizontal = Metrics.space4),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -342,7 +423,7 @@ private fun DigestScoreColumn(
         Text(
             summary.metric.label.uppercase(),
             style = NoopType.overline,
-            color = domain.color,
+            color = accentColor,
             textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -350,8 +431,12 @@ private fun DigestScoreColumn(
         )
         DigestGauge(
             fraction = if (hasValue) value / 100.0 else 0.0,
-            color = domain.color,
-            tipColor = domain.bright,
+            color = if (summary.metric == WeeklyMetric.CHARGE && hasValue) {
+                accentColor.copy(alpha = 0.68f)
+            } else {
+                domain.color
+            },
+            tipColor = if (summary.metric == WeeklyMetric.CHARGE && hasValue) accentColor else domain.bright,
             number = number,
         )
         if (hasValue) {
@@ -360,6 +445,14 @@ private fun DigestScoreColumn(
                 style = NoopType.footnote,
                 color = Palette.textTertiary,
                 maxLines = 1,
+            )
+        }
+        if (importedRestAvailable) {
+            Text(
+                stringResource(R.string.appwide_weekly_digest_imported_sleep_not_included),
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+                textAlign = TextAlign.Center,
             )
         }
         if (hasComparison(summary)) {
@@ -492,6 +585,7 @@ private fun MetricRow(s: WeeklyMetricSummary, effortScale: EffortScale) {
 private fun DeltaChip(s: WeeklyMetricSummary) {
     val tone = chipTone(s)
     val arrow: ImageVector = when {
+        !hasDefinedPercent(s) -> Icons.Filled.Remove
         s.wowDelta > 0 -> Icons.Filled.ArrowUpward
         s.wowDelta < 0 -> Icons.Filled.ArrowDownward
         else -> Icons.Filled.Remove
@@ -505,14 +599,8 @@ private fun DeltaChip(s: WeeklyMetricSummary) {
             .clearAndSetSemantics { },
     ) {
         Icon(arrow, contentDescription = null, tint = tone, modifier = Modifier.size(10.dp))
-        val sign = when {
-            !hasComparison(s) -> ""
-            s.wowDelta > 0 -> "+"
-            s.wowDelta < 0 -> "−"
-            else -> ""
-        }
         Text(
-            stringResource(R.string.weekly_digest_signed_delta, sign, deltaText(s)),
+            deltaText(s),
             style = NoopType.captionNumber,
             color = tone,
         )
@@ -546,7 +634,7 @@ private fun shortMonth(month: Int): String =
     if (month in 1..12) MONTHS[month - 1] else month.toString()
 
 internal fun meanText(s: WeeklyMetricSummary, effortScale: EffortScale): String {
-    if (s.thisWeek.n == 0) return "-"
+    if (s.thisWeek.n == 0) return NoopDisplayFormat.MISSING
     // #463: Effort is STORED 0-100; render it on the user's chosen display scale WITH the denominator
     // ("4.6 / 21", "21.6 / 100") so the card can't read as a different number than the Trends chart.
     if (s.metric == WeeklyMetric.EFFORT) {
@@ -559,11 +647,14 @@ internal fun meanText(s: WeeklyMetricSummary, effortScale: EffortScale): String 
 
 internal fun deltaText(s: WeeklyMetricSummary): String {
     if (s.weekOverWeek.current.n == 0 || s.weekOverWeek.previous.n == 0) return "new"
-    val pct = s.weekOverWeek.pctChange
+    val pct = s.weekOverWeek.pctChange ?: return "new"
     // Sub-1% (or unpercentable) moves read "<1%", matching Swift. The old fallback printed the raw
     // points delta: a bare "0.1", and for Effort a stored 0-100 figure the scale toggle never saw.
-    return if (pct != null && abs(pct) >= 1) "${abs(pct).roundToInt()}%" else "<1%"
+    return if (abs(pct) >= 1) "${abs(pct).roundToInt()}%" else "<1%"
 }
+
+internal fun hasDefinedPercent(s: WeeklyMetricSummary): Boolean =
+    s.weekOverWeek.pctChange != null
 
 /**
  * Tone: good moves green, bad moves rose, flat/uncomparable grey — folding in each
@@ -571,17 +662,35 @@ internal fun deltaText(s: WeeklyMetricSummary): String {
  * (either side thin, engine's [WeeklyMetricSummary.isRoughComparison], the deferred half of
  * the 4.2.10 fix for #463) keeps its arrow + % but stays grey regardless of direction.
  */
-private fun chipTone(s: WeeklyMetricSummary): Color = when {
-    s.isRoughComparison -> Palette.textTertiary
-    s.wowGoodness == 1 -> Palette.statusPositive
-    s.wowGoodness == -1 -> Palette.statusCritical
-    else -> Palette.textTertiary
+internal enum class WeeklyDigestChipTone {
+    NEUTRAL,
+    RECOVERY_BAND,
+    POSITIVE,
+    CRITICAL,
+}
+
+internal fun weeklyDigestChipTone(s: WeeklyMetricSummary): WeeklyDigestChipTone = when {
+    s.isRoughComparison || !hasDefinedPercent(s) -> WeeklyDigestChipTone.NEUTRAL
+    s.metric == WeeklyMetric.CHARGE -> WeeklyDigestChipTone.RECOVERY_BAND
+    s.wowGoodness == 1 -> WeeklyDigestChipTone.POSITIVE
+    s.wowGoodness == -1 -> WeeklyDigestChipTone.CRITICAL
+    else -> WeeklyDigestChipTone.NEUTRAL
+}
+
+private fun chipTone(s: WeeklyMetricSummary): Color = when (weeklyDigestChipTone(s)) {
+    WeeklyDigestChipTone.NEUTRAL -> Palette.textTertiary
+    WeeklyDigestChipTone.RECOVERY_BAND -> RecoveryBandPresentation.color(s.thisWeek.mean)
+    WeeklyDigestChipTone.POSITIVE -> Palette.statusPositive
+    WeeklyDigestChipTone.CRITICAL -> Palette.statusCritical
 }
 
 private fun rowAccessibility(s: WeeklyMetricSummary, effortScale: EffortScale): String {
     val mean = meanText(s, effortScale)
     if (s.weekOverWeek.current.n == 0 || s.weekOverWeek.previous.n == 0) {
         return "${s.metric.label}: $mean this week, no comparison."
+    }
+    if (!hasDefinedPercent(s)) {
+        return "${s.metric.label}: $mean this week, not comparable with last week."
     }
     val dir = if (s.wowDelta > 0) "up" else if (s.wowDelta < 0) "down" else "unchanged"
     // A rough comparison drops the verdict framing too, so VoiceOver/TalkBack matches the neutral chip.
@@ -592,6 +701,19 @@ private fun rowAccessibility(s: WeeklyMetricSummary, effortScale: EffortScale): 
         else -> ""
     }
     return "${s.metric.label}: $mean this week, $dir ${deltaText(s)} week over week$frame."
+}
+
+internal fun scoreAccessibility(
+    s: WeeklyMetricSummary,
+    effortScale: EffortScale,
+    importedRestDisclosure: String?,
+): String {
+    val base = rowAccessibility(s, effortScale)
+    return if (importedRestDisclosure != null) {
+        "$base $importedRestDisclosure."
+    } else {
+        base
+    }
 }
 
 private fun fmt1(x: Double): String = ((x * 10).roundToInt() / 10.0).toString()

@@ -41,4 +41,6 @@ jobs:
       - name: i18n audit (regression gate)
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
-        run: python3 Tools/i18n_audit.py --ci "origin/${BASE_REF}"
+        run: |
+          python3 Tools/FeedbackLocalization/generate.py --check
+          python3 Tools/i18n_audit.py --ci "origin/${BASE_REF}"

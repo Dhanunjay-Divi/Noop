@@ -13,8 +13,9 @@ import java.io.ByteArrayOutputStream
  *
  * The PNG is BINARY image bytes, not a text line, so it is NOT run through the strap-log PII scrub (that
  * is correct: redaction scrubs text identifiers, not pixels). The screenshot IS covered by the mandatory
- * review-before-share gate: the report never ships until the user taps Share, and the gate names the
- * attachment. A capture only ever happens for the DISPLAY profile, gated by the screen behind
+ * review-before-send gate: the report never ships until the user taps Send feedback, and the gate names
+ * the attachment. The feedback boundary strips PNG metadata before review. A capture only ever happens
+ * for the DISPLAY profile, gated by the screen behind
  * testCentre.active(DISPLAY), so a non-display report never grabs a shot.
  */
 object DisplayScreenshot {

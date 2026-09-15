@@ -5,6 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 
 /**
  * [DeviceRegistry] contract tests — mirror the Swift DeviceRegistryStoreTests in
@@ -27,6 +30,9 @@ class DeviceRegistryTest {
         val devices = LinkedHashMap<String, PairedDeviceRow>() // insertion order ≈ addedAt order
         val legacyNames = LinkedHashMap<String, String?>()
         val owners = LinkedHashMap<String, DayOwnershipRow>()
+        val analysisGenerations = LinkedHashMap<String, Long>()
+        val analysisBounds = LinkedHashMap<String, Pair<Long?, Long?>>()
+        var ownershipInputRange = AnalysisAffectedRange(null, null)
 
         override suspend fun pairedDevices(): List<PairedDeviceRow> =
             devices.values.sortedBy { it.addedAt }
@@ -48,6 +54,55 @@ class DeviceRegistryTest {
 
         override suspend fun promote(id: String, now: Long) {
             devices[id]?.let { devices[id] = it.copy(status = DeviceStatus.active.name, lastSeenAt = now) }
+        }
+        override suspend fun ownershipAnalysisInputRange(): AnalysisAffectedRange =
+            ownershipInputRange
+
+        override suspend fun advanceAnalysisInvalidation(
+            sourceId: String,
+            earliestAffectedTs: Long?,
+            latestAffectedTs: Long?,
+        ): Int {
+            val prior = analysisGenerations[sourceId] ?: return 0
+            analysisGenerations[sourceId] = prior + 1L
+            analysisBounds[sourceId] = mergeBounds(
+                analysisBounds[sourceId],
+                earliestAffectedTs,
+                latestAffectedTs,
+            )
+            return 1
+        }
+        override suspend fun insertAnalysisInvalidationIfAbsent(
+            sourceId: String,
+            earliestAffectedTs: Long?,
+            latestAffectedTs: Long?,
+        ): Long {
+            if (sourceId in analysisGenerations) return -1L
+            analysisGenerations[sourceId] = 1L
+            analysisBounds[sourceId] = earliestAffectedTs to latestAffectedTs
+            return 1L
+        }
+
+        private fun mergeBounds(
+            current: Pair<Long?, Long?>?,
+            earliest: Long?,
+            latest: Long?,
+        ): Pair<Long?, Long?> {
+            val currentEarliest = current?.first
+            val currentLatest = current?.second
+            return (
+                when {
+                    earliest == null -> currentEarliest
+                    currentEarliest == null -> earliest
+                    else -> minOf(currentEarliest, earliest)
+                }
+            ) to (
+                when {
+                    latest == null -> currentLatest
+                    currentLatest == null -> latest
+                    else -> maxOf(currentLatest, latest)
+                }
+            )
         }
 
         override suspend fun archiveDevice(id: String) {
@@ -119,6 +174,9 @@ class DeviceRegistryTest {
         override suspend fun deleteLiveSessionsFor(deviceId: String) { deletedTables += "liveSession" to deviceId }
         override suspend fun deleteDismissedWorkoutsFor(deviceId: String) { deletedTables += "dismissedWorkout" to deviceId }
         override suspend fun deleteDismissedSleepsFor(deviceId: String) { deletedTables += "dismissedSleep" to deviceId }
+        override suspend fun deleteAnalysisDirtyFor(deviceId: String) {
+            deletedTables += "analysisDirtySource" to deviceId
+        }
     }
 
     /** Registry over the fake DAO with a pass-through transactor (Room's withTransaction stand-in). */
@@ -164,6 +222,7 @@ class DeviceRegistryTest {
         reg.setActive("polar-1", now = 999)
 
         assertEquals("polar-1", reg.activeDeviceId())
+        assertEquals(1L, dao.analysisGenerations[AnalysisInvalidationSource.OWNERSHIP])
         val byId = reg.all().associate { it.id to it.status }
         assertEquals(DeviceStatus.active.name, byId["polar-1"])
         assertEquals(DeviceStatus.paired.name, byId["my-whoop"]) // the previously-active device demoted
@@ -173,13 +232,58 @@ class DeviceRegistryTest {
     }
 
     @Test
+    fun activeDeviceSwitchCarriesTheCompleteMeasuredHistoryRange() = runBlocking {
+        val dao = seededDao().apply {
+            ownershipInputRange = AnalysisAffectedRange(101L, 909L)
+            devices["polar-1"] = PairedDeviceRow(
+                id = "polar-1", brand = "Polar", model = "H10", nickname = null,
+                sourceKind = SourceKind.liveBLE.name, capabilities = "hr,hrv",
+                status = DeviceStatus.paired.name, addedAt = 200, lastSeenAt = 200,
+            )
+        }
+
+        registryWith(dao).setActive("polar-1", now = 999L)
+
+        assertEquals(
+            101L to 909L,
+            dao.analysisBounds[AnalysisInvalidationSource.OWNERSHIP],
+        )
+    }
+
+    @Test
+    fun repeatedActiveSelectionDoesNotManufactureOwnershipInvalidation() = runBlocking {
+        val dao = seededDao()
+        val reg = registryWith(dao)
+
+        reg.setActive("my-whoop", now = 999)
+
+        assertNull(dao.analysisGenerations[AnalysisInvalidationSource.OWNERSHIP])
+    }
+
+    @Test
     fun archiveKeepsRowAndClearsActive() = runBlocking {
-        val reg = registryWith(seededDao())
+        val dao = seededDao()
+        val reg = registryWith(dao)
+        reg.setDayOwner("2026-09-10", "my-whoop", locked = true)
         reg.archive("my-whoop")
         // I4: the row is kept (not deleted), just archived.
         assertEquals(1, reg.all().size)
         assertEquals(DeviceStatus.archived.name, reg.all().first().status)
         assertNull(reg.activeDeviceId())
+        assertNull(reg.dayOwner("2026-09-10"))
+        assertEquals(2L, dao.analysisGenerations[AnalysisInvalidationSource.OWNERSHIP])
+    }
+
+    @Test
+    fun reactivatingArchivedDeviceInvalidatesOwnershipAgainAndRestoresEligibility() = runBlocking {
+        val dao = seededDao()
+        val reg = registryWith(dao)
+
+        reg.archive("my-whoop")
+        reg.setActive("my-whoop", now = 1_234L)
+
+        assertEquals(DeviceStatus.active.name, reg.all().single().status)
+        assertEquals(2L, dao.analysisGenerations[AnalysisInvalidationSource.OWNERSHIP])
     }
 
     @Test
@@ -255,9 +359,13 @@ class DeviceRegistryTest {
             "bodyMeasurement", "dailyMetric", "sleepSession",
             "journal", "workout", "appleDaily", "metricSeries", "dayOwnership",
             "sleepStateSample", "labMarker", "nutritionEntry", "liveSession",
-            "dismissedWorkout", "dismissedSleep",
+            "dismissedWorkout", "dismissedSleep", "analysisDirtySource",
         )
         assertEquals(expectedTables, dao.deletedTables.map { it.first }.toSet())
+        assertEquals(
+            "analysisDirtySource",
+            dao.deletedTables.last().first,
+        )
         // Every delete was scoped to the requested device, not the seeded my-whoop.
         assertEquals(setOf("apple-health"), dao.deletedTables.map { it.second }.toSet())
         // I4: the pairedDevice registry row is left intact (apple-health is a source, not a device row).
@@ -323,17 +431,39 @@ class DeviceRegistryTest {
 
     @Test
     fun dayOwnerUpsertAndRead() = runBlocking {
-        val reg = registryWith(seededDao())
+        val dao = seededDao()
+        val reg = registryWith(dao)
         assertNull(reg.dayOwner("2000-01-01"))
 
         reg.setDayOwner("2026-06-15", "my-whoop", locked = true)
         assertNotNull(reg.dayOwner("2026-06-15"))
         assertEquals("my-whoop", reg.dayOwner("2026-06-15")!!.deviceId)
         assertEquals(true, reg.dayOwner("2026-06-15")!!.locked)
+        assertEquals(1L, dao.analysisGenerations[AnalysisInvalidationSource.OWNERSHIP])
+        val expectedDayTs = LocalDate.parse("2026-06-15")
+            .atTime(LocalTime.NOON)
+            .atZone(ZoneId.systemDefault())
+            .toEpochSecond()
+        assertEquals(
+            expectedDayTs to expectedDayTs,
+            dao.analysisBounds[AnalysisInvalidationSource.OWNERSHIP],
+        )
+
+        reg.setDayOwner("2026-06-15", "my-whoop", locked = true)
+        assertEquals(
+            "an exact replay must not manufacture analysis work",
+            1L,
+            dao.analysisGenerations[AnalysisInvalidationSource.OWNERSHIP],
+        )
 
         // Upsert: re-writing the same day replaces the owner + locked flag (no duplicate row).
         reg.setDayOwner("2026-06-15", "polar-1", locked = false)
         assertEquals("polar-1", reg.dayOwner("2026-06-15")!!.deviceId)
         assertEquals(false, reg.dayOwner("2026-06-15")!!.locked)
+        assertEquals(2L, dao.analysisGenerations[AnalysisInvalidationSource.OWNERSHIP])
+        assertEquals(
+            expectedDayTs to expectedDayTs,
+            dao.analysisBounds[AnalysisInvalidationSource.OWNERSHIP],
+        )
     }
 }

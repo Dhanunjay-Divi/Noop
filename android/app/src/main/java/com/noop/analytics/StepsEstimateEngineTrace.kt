@@ -97,13 +97,29 @@ object StepsEstimateEngineTrace {
         dayKey: String,
         tzOffsetSeconds: Long,
         ticksPerStep: Double,
+        civilDayStartTs: Long? = null,
+        civilDayEndTsExclusive: Long? = null,
     ): List<String> {
         // The SAME maxStepDelta gate AnalyticsEngine.analyzeDay uses for the daily steps total.
         val maxStepDelta = 512
 
         // The SAME filter + sort: keep only this LOCAL day's samples, time-ordered.
+        val civilBounds = AnalyticsEngine.validateCivilDayBounds(
+            startTs = civilDayStartTs,
+            endTsExclusive = civilDayEndTsExclusive,
+        )
+        if (civilBounds is AnalyticsEngine.CivilDayBoundsValidation.Invalid) return emptyList()
         val sorted = daySteps
-            .filter { AnalyticsEngine.dayString(it.ts, tzOffsetSeconds) == dayKey }
+            .filter {
+                when (civilBounds) {
+                    is AnalyticsEngine.CivilDayBoundsValidation.Valid ->
+                        it.ts >= civilBounds.startTs &&
+                            it.ts < civilBounds.endTsExclusive
+                    AnalyticsEngine.CivilDayBoundsValidation.Absent ->
+                        AnalyticsEngine.dayString(it.ts, tzOffsetSeconds) == dayKey
+                    AnalyticsEngine.CivilDayBoundsValidation.Invalid -> false
+                }
+            }
             .sortedBy { it.ts }
 
         val lines = ArrayList<String>()

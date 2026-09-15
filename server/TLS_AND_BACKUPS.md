@@ -94,6 +94,14 @@ docker compose exec backup \
   sh /opt/noop/restore-drill.sh /backups/noop-YYYYMMDDTHHMMSSZ-NNN.dump.gpg
 ```
 
+The backup container receives `NOOP_DATABASE_ENGINE` from Compose. The
+application smoke step selects the matching immutable migration manifest:
+`migration-manifest.sha256` for TimescaleDB or
+`migration-manifest-postgresql.sha256` for standard PostgreSQL. Custom
+orchestrators must pass the database engine explicitly. A supplied
+`NOOP_MIGRATION_MANIFEST` is accepted only when it is byte-identical to the
+bundled manifest for that engine; cross-engine or mixed manifests are rejected.
+
 The Compose `noop` database owner can create the disposable drill database. In
 a custom least-privilege deployment, run the drill with a separate maintenance
 credential that can create/drop databases; do not grant that capability to the

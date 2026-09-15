@@ -119,6 +119,14 @@ struct StrengthTrainerView: View {
         #endif
     }
 
+    private static var permitsAutomaticProgramBuilderPresentation: Bool {
+        #if DEBUG
+        !ProcessInfo.processInfo.arguments.contains("--demo-strength-body-map-controls")
+        #else
+        true
+        #endif
+    }
+
     private var massUnit: MassUnit {
         UnitPrefs.resolveMass(
             system: UnitSystem(rawValue: unitSystemRaw) ?? .metric,
@@ -1697,6 +1705,7 @@ struct StrengthTrainerView: View {
             if exerciseGuide == nil,
                loaded.routines.isEmpty,
                loaded.activeSession == nil,
+               Self.permitsAutomaticProgramBuilderPresentation,
                !didOfferProgramBuilder {
                 didOfferProgramBuilder = true
                 showingProgramBuilder = true

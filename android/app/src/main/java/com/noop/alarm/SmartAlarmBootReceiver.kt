@@ -45,12 +45,39 @@ class SmartAlarmBootReceiver : BroadcastReceiver() {
     }
 
     private fun rearmWindDown(context: Context) {
-        runCatching {
-            val wind = WindDownStore.from(context)
-            if (wind.enabled) {
-                val wake = SmartAlarmStore.from(context).targetMinutes
-                WindDownScheduler.schedule(context, wind, wake)
-            }
+        val result = reconcileWindDownForRestore(
+            reconcile = {
+                val wind = WindDownStore.from(context)
+                WindDownScheduler.reconcilePersisted(context, wind)
+            },
+            cancelStale = { WindDownScheduler.cancel(context) },
+        )
+        val outcome = when (result) {
+            null -> "retry_exception"
+            WindDownScheduler.ReconcileResult.RETRY_NOTIFICATIONS_OFF ->
+                "retry_notifications_off"
+            WindDownScheduler.ReconcileResult.RETRY_CHANNEL_OFF ->
+                "retry_channel_off"
+            WindDownScheduler.ReconcileResult.RETRY_DELIVERY_CHECK_FAILURE ->
+                "retry_delivery_check_failed"
+            WindDownScheduler.ReconcileResult.RETRY_SCHEDULE_FAILURE ->
+                "retry_schedule_failed"
+            else -> null
         }
+        if (outcome != null) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "wind_down.restore_reconcile",
+                fields = mapOf("outcome" to outcome),
+            )
+        }
+    }
+
+    companion object {
+        internal fun reconcileWindDownForRestore(
+            reconcile: () -> WindDownScheduler.ReconcileResult,
+            cancelStale: () -> Unit,
+        ): WindDownScheduler.ReconcileResult? = runCatching(reconcile)
+            .onFailure { runCatching(cancelStale) }
+            .getOrNull()
     }
 }

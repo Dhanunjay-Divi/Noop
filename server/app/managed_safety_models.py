@@ -103,6 +103,7 @@ class ManagedSafetyRequestDecision(StrictModel):
 
 class ManagedSafetyIncidentCreate(StrictModel):
     request_id: UUID
+    trigger: Literal["manual_sos", "band_sos"] = "manual_sos"
     duration_hours: Literal[8, 12] = 8
     share_location: bool = True
 

@@ -1,8 +1,10 @@
 package com.noop.ingest
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -68,6 +70,129 @@ class HealthConnectChangeEngineTest {
         assertEquals(null, rebuildRequest?.lookbackDays)
         assertEquals(mapOf("Steps" to "steps-0"), store.tokens)
         assertEquals(123L, store.savedAt)
+    }
+
+    @Test
+    fun forcedBootstrapRefreshesOnlyTheRequestedCursorAndPreservesUnrelatedProgress() = runTest {
+        val feed = Feed(
+            fresh = mutableMapOf("Weight" to "weight-fresh"),
+            pages = mutableMapOf(
+                "steps-old" to HealthConnectChangePage(
+                    nextToken = "steps-new",
+                    hasMore = false,
+                    tokenExpired = false,
+                ),
+            ),
+        )
+        val store = Store(
+            mapOf(
+                "Steps" to "steps-old",
+                "Weight" to "weight-old",
+            ),
+        )
+        var request: HealthConnectRebuildRequest? = null
+
+        val result = HealthConnectChangeEngine(
+            feed = feed,
+            tokenStore = store,
+            rebuild = {
+                request = it
+                true
+            },
+        ).reconcile(
+            recordTypes = setOf("Steps", "Weight"),
+            forceBootstrapRecordTypes = setOf("Weight"),
+        )
+
+        assertEquals(HealthConnectReconcileResult.Success(true, 1, 0, 0), result)
+        assertEquals(listOf("Weight"), feed.requestedTokens)
+        assertEquals(listOf("steps-old"), feed.requestedPages)
+        assertEquals(setOf("Weight"), request?.affectedRecordTypes)
+        assertEquals(HealthConnectRebuildRequest.Horizon.FULL_SUPPORTED_HISTORY, request?.horizon)
+        assertEquals("steps-new", store.tokens["Steps"])
+        assertEquals("weight-fresh", store.tokens["Weight"])
+    }
+
+    @Test
+    fun failedForcedBootstrapLeavesEveryStoredCursorUntouched() = runTest {
+        val feed = Feed(
+            fresh = mutableMapOf("Weight" to "weight-fresh"),
+            pages = mutableMapOf(
+                "steps-old" to HealthConnectChangePage(
+                    nextToken = "steps-new",
+                    hasMore = false,
+                    tokenExpired = false,
+                ),
+            ),
+        )
+        val store = Store(
+            mapOf(
+                "Steps" to "steps-old",
+                "Weight" to "weight-old",
+            ),
+        )
+
+        val result = HealthConnectChangeEngine(
+            feed = feed,
+            tokenStore = store,
+            rebuild = { false },
+        ).reconcile(
+            recordTypes = setOf("Steps", "Weight"),
+            forceBootstrapRecordTypes = setOf("Weight"),
+        )
+
+        assertTrue(result is HealthConnectReconcileResult.RetryableFailure)
+        assertEquals(0, store.saves)
+        assertEquals("steps-old", store.tokens["Steps"])
+        assertEquals("weight-old", store.tokens["Weight"])
+    }
+
+    @Test
+    fun cancellationFromChangeFeedEscapesWithoutSaving() = runTest {
+        val cancellation = CancellationException("synthetic feed cancellation")
+        val feed = object : HealthConnectChangeFeed {
+            override suspend fun createToken(recordType: String): String = error("not used")
+            override suspend fun changes(token: String): HealthConnectChangePage = throw cancellation
+        }
+        val store = Store(mapOf("Weight" to "weight-old"))
+
+        try {
+            HealthConnectChangeEngine(feed, store, rebuild = { true })
+                .reconcile(setOf("Weight"))
+        } catch (caught: CancellationException) {
+            assertSame(cancellation, caught)
+            assertEquals(0, store.saves)
+            assertEquals("weight-old", store.tokens["Weight"])
+            return@runTest
+        }
+        throw AssertionError("expected cancellation")
+    }
+
+    @Test
+    fun cancellationFromProjectionRebuildEscapesWithoutSaving() = runTest {
+        val cancellation = CancellationException("synthetic rebuild cancellation")
+        val feed = Feed(
+            pages = mutableMapOf(
+                "weight-old" to HealthConnectChangePage(
+                    nextToken = "weight-new",
+                    hasMore = false,
+                    tokenExpired = false,
+                    upsertions = 1,
+                ),
+            ),
+        )
+        val store = Store(mapOf("Weight" to "weight-old"))
+
+        try {
+            HealthConnectChangeEngine(feed, store, rebuild = { throw cancellation })
+                .reconcile(setOf("Weight"))
+        } catch (caught: CancellationException) {
+            assertSame(cancellation, caught)
+            assertEquals(0, store.saves)
+            assertEquals("weight-old", store.tokens["Weight"])
+            return@runTest
+        }
+        throw AssertionError("expected cancellation")
     }
 
     @Test

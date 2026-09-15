@@ -2,6 +2,42 @@ import XCTest
 import WhoopStore
 @testable import Strand
 
+private final class TrendsCancellationProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var checkCount = 0
+    private let cancelAfter: Int
+
+    init(cancelAfter: Int) {
+        self.cancelAfter = cancelAfter
+    }
+
+    var checks: Int {
+        lock.withLock { checkCount }
+    }
+
+    func shouldCancel() -> Bool {
+        lock.withLock {
+            checkCount += 1
+            return checkCount >= cancelAfter
+        }
+    }
+}
+
+private final class TrendsSourceRowProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var visitCount = 0
+
+    var visits: Int {
+        lock.withLock { visitCount }
+    }
+
+    func visit() {
+        lock.withLock {
+            visitCount += 1
+        }
+    }
+}
+
 @MainActor
 final class LiquidKeyMetricTrendTests: XCTestCase {
     func testTrendWindowIsChronologicalAndAnchoredToSelectedDay() {
@@ -107,13 +143,139 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
         XCTAssertNil(LiquidTodayView.keyMetricTrendDirection([.nan, 52]))
     }
 
+    func testTrendsSnapshotUsesTodayAnchoredQuarterWithoutChangingMetricValues() throws {
+        let days = [
+            metric("2026-06-14", hrv: 35, rhr: 55, recovery: 10, strain: 15),
+            metric("2026-06-15", hrv: 40, rhr: 53, recovery: 20, strain: 30),
+            metric("2026-09-12", hrv: 60, rhr: 48, recovery: 80, strain: 70),
+        ]
+
+        let snapshot = try XCTUnwrap(TrendsView.buildSnapshot(
+            days: days,
+            range: .quarter,
+            sleepPerfByDay: [
+                "2026-06-14": 65,
+                "2026-06-15": 75,
+                "2026-09-12": 90,
+            ],
+            todayKey: "2026-09-12"
+        ))
+
+        XCTAssertEqual(snapshot.recovery.points.map(\.value), [20, 80])
+        XCTAssertEqual(snapshot.hrv.points.map(\.value), [40, 60])
+        XCTAssertEqual(snapshot.rhr.points.map(\.value), [53, 48])
+        XCTAssertEqual(snapshot.strain.points.map(\.value), [30, 70])
+        XCTAssertEqual(snapshot.rest.points.map(\.value), [75, 90])
+        XCTAssertEqual(snapshot.recovery.effective, .quarter)
+        XCTAssertFalse(snapshot.recovery.widened)
+    }
+
+    func testTrendsSnapshotWidensSparseQuarterToAllHistory() throws {
+        let snapshot = try XCTUnwrap(TrendsView.buildSnapshot(
+            days: [metric("2025-01-01", recovery: 55)],
+            range: .quarter,
+            sleepPerfByDay: [:],
+            todayKey: "2026-09-12"
+        ))
+
+        XCTAssertEqual(snapshot.recovery.points.map(\.value), [55])
+        XCTAssertEqual(snapshot.recovery.effective, .all)
+        XCTAssertTrue(snapshot.recovery.widened)
+    }
+
+    func testTrendsSnapshotStopsWhenCancellationIsRequested() {
+        let probe = TrendsCancellationProbe(cancelAfter: 2)
+        let days = (0..<2_000).map { index in
+            metric(
+                String(format: "2026-01-%02d", (index % 28) + 1),
+                recovery: Double(index % 100)
+            )
+        }
+
+        let snapshot = TrendsView.buildSnapshot(
+            days: days,
+            range: .all,
+            sleepPerfByDay: [:],
+            todayKey: "2026-09-12",
+            shouldCancel: { probe.shouldCancel() }
+        )
+
+        XCTAssertNil(snapshot)
+        XCTAssertEqual(probe.checks, 2)
+    }
+
+    func testTrendsSnapshotVisitsEachSourceRowOnce() throws {
+        let days = (0..<4_000).map { index in
+            metric(
+                "2026-09-12",
+                hrv: Double(30 + index % 40),
+                rhr: 48 + index % 8,
+                recovery: Double(index % 100),
+                strain: Double(index % 80)
+            )
+        }
+        let probe = TrendsSourceRowProbe()
+
+        let snapshot = try XCTUnwrap(TrendsView.buildSnapshot(
+            days: days,
+            range: .all,
+            sleepPerfByDay: ["2026-09-12": 82],
+            todayKey: "2026-09-12",
+            onSourceRow: { probe.visit() }
+        ))
+
+        XCTAssertEqual(probe.visits, days.count)
+        XCTAssertEqual(snapshot.recovery.points.count, days.count)
+        XCTAssertEqual(snapshot.hrv.points.count, days.count)
+        XCTAssertEqual(snapshot.rhr.points.count, days.count)
+        XCTAssertEqual(snapshot.strain.points.count, days.count)
+        XCTAssertEqual(snapshot.rest.points.count, days.count)
+    }
+
+    func testTrendsSnapshotCacheIsBoundedAndUsesLRUOrder() throws {
+        let snapshot = try XCTUnwrap(TrendsView.buildSnapshot(
+            days: [metric("2026-09-12", recovery: 55)],
+            range: .all,
+            sleepPerfByDay: [:],
+            todayKey: "2026-09-12"
+        ))
+        let week = cacheKey(.week)
+        let month = cacheKey(.month)
+        let quarter = cacheKey(.quarter)
+        var cache = TrendsView.SnapshotCache(capacity: 2)
+
+        cache.insert(snapshot, for: week)
+        cache.insert(snapshot, for: month)
+        XCTAssertNotNil(cache.value(for: week))
+        cache.insert(snapshot, for: quarter)
+
+        XCTAssertEqual(cache.count, 2)
+        XCTAssertNotNil(cache.value(for: week))
+        XCTAssertNil(cache.value(for: month))
+        XCTAssertNotNil(cache.value(for: quarter))
+    }
+
+    private func cacheKey(_ range: TrendsView.Range) -> TrendsView.SnapshotCacheKey {
+        TrendsView.SnapshotCacheKey(
+            historyRevision: 1,
+            dayCount: 1,
+            firstDay: "2026-09-12",
+            lastDay: "2026-09-12",
+            sleepRevision: 1,
+            todayKey: "2026-09-12",
+            range: range
+        )
+    }
+
     private func metric(
         _ day: String,
         hrv: Double? = nil,
         rhr: Int? = nil,
         respiratory: Double? = nil,
         spo2: Double? = nil,
-        steps: Int? = nil
+        steps: Int? = nil,
+        recovery: Double? = nil,
+        strain: Double? = nil
     ) -> DailyMetric {
         DailyMetric(
             day: day,
@@ -125,8 +287,8 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
             disturbances: nil,
             restingHr: rhr,
             avgHrv: hrv,
-            recovery: nil,
-            strain: nil,
+            recovery: recovery,
+            strain: strain,
             exerciseCount: nil,
             spo2Pct: spo2,
             respRateBpm: respiratory,

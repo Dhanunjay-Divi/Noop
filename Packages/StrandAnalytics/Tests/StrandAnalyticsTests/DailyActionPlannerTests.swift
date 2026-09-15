@@ -31,6 +31,29 @@ final class DailyActionPlannerTests: XCTestCase {
         }
     }
 
+    private func plannedWorkout(
+        day: String = "2026-08-22",
+        startSec: Int = 1_003_600,
+        endSec: Int = 1_007_200
+    ) -> DailyActionPlanner.PlannedWorkout {
+        .init(day: day, startSec: startSec, endSec: endSec)
+    }
+
+    private func usualSleep(
+        todayMinutes: Double = 360,
+        observedAtSec: Int? = 999_000,
+        observedSessionDurationMinutes: Double? = 420
+    ) -> [DailyActionPlanner.SleepDay] {
+        (14...20).map {
+            .init(day: String(format: "2026-08-%02d", $0), minutes: 450)
+        } + [.init(
+            day: today,
+            minutes: todayMinutes,
+            observedAtSec: observedAtSec,
+            observedSessionDurationMinutes: observedSessionDurationMinutes
+        )]
+    }
+
     func testReadyRangeUsesPersonalHistoryAndNeverRisesForPrimed() {
         let balanced = DailyActionPlanner.plan(
             today: today, readiness: readiness(), checkIn: .asUsual, recentEffort: history()
@@ -138,5 +161,292 @@ final class DailyActionPlannerTests: XCTestCase {
         XCTAssertEqual(normal.action, .keepSleepWindow)
         XCTAssertEqual(recovery.action, .protectExtraSleep)
         XCTAssertEqual(recovery.evidence.last?.source, .sleepPlan)
+    }
+
+    func testPlannedWorkoutUsesPersonalUsualSleepWhenHistoryIsSupported() {
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            recentSleep: usualSleep(),
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertEqual(
+            plan.workoutAdjustment,
+            .init(
+                startSec: 1_003_600,
+                durationMinutes: 60,
+                reason: .sleepDeficit,
+                measuredSleepMinutes: 360,
+                referenceSleepMinutes: 450,
+                sleepDeficitMinutes: 90,
+                sleepReference: .personalUsual,
+                confidence: .solid
+            )
+        )
+    }
+
+    func testPlannedWorkoutFallsBackToExplicitSleepTargetWhileBaselineBuilds() {
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .unanswered,
+            recentEffort: [],
+            recentSleep: [.init(
+                day: today,
+                minutes: 410,
+                observedAtSec: 999_000,
+                observedSessionDurationMinutes: 480
+            )],
+            sleepTargetMinutes: 480,
+            sleepTargetIsExplicit: true,
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertEqual(plan.availability, .checkInNeeded)
+        XCTAssertEqual(plan.workoutAdjustment?.reason, .sleepDeficit)
+        XCTAssertEqual(plan.workoutAdjustment?.sleepDeficitMinutes, 70)
+        XCTAssertEqual(plan.workoutAdjustment?.sleepReference, .explicitTarget)
+        XCTAssertEqual(plan.workoutAdjustment?.confidence, .building)
+    }
+
+    func testImplicitDefaultSleepTargetCannotCreatePersonalizedDeficit() {
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .unanswered,
+            recentEffort: [],
+            recentSleep: [.init(
+                day: today,
+                minutes: 360,
+                observedAtSec: 999_000,
+                observedSessionDurationMinutes: 420
+            )],
+            sleepTargetMinutes: 480,
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertNil(plan.workoutAdjustment)
+    }
+
+    func testSleepAdjustmentRequiresFreshCurrentSessionEvidence() {
+        let missing = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            recentSleep: usualSleep(observedAtSec: nil),
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+        let stale = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            recentSleep: usualSleep(
+                observedAtSec: 1_000_000 -
+                    DailyActionPlanner.currentSleepMaximumAgeSeconds - 1
+            ),
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertNil(missing.workoutAdjustment)
+        XCTAssertNil(stale.workoutAdjustment)
+    }
+
+    func testSleepAggregateMatcherRejectsShortNapAndHonorsBoundaries() {
+        XCTAssertEqual(
+            DailyActionPlanner.matchedSleepObservationEndSec(
+                aggregateMinutes: 360,
+                sessionDurationMinutes: 345,
+                sessionEndSec: 999_000,
+                nowSec: 1_000_000
+            ),
+            999_000
+        )
+        XCTAssertNil(DailyActionPlanner.matchedSleepObservationEndSec(
+            aggregateMinutes: 360,
+            sessionDurationMinutes: 344,
+            sessionEndSec: 999_000,
+            nowSec: 1_000_000
+        ))
+        XCTAssertNil(DailyActionPlanner.matchedSleepObservationEndSec(
+            aggregateMinutes: 360,
+            sessionDurationMinutes: 30,
+            sessionEndSec: 999_000,
+            nowSec: 1_000_000
+        ))
+        XCTAssertEqual(
+            DailyActionPlanner.matchedSleepObservationEndSec(
+                aggregateMinutes: 360,
+                sessionDurationMinutes: 540,
+                sessionEndSec: 999_000,
+                nowSec: 1_000_000
+            ),
+            999_000
+        )
+        XCTAssertNil(DailyActionPlanner.matchedSleepObservationEndSec(
+            aggregateMinutes: 360,
+            sessionDurationMinutes: 541,
+            sessionEndSec: 999_000,
+            nowSec: 1_000_000
+        ))
+    }
+
+    func testFreshNapTimestampCannotCreateSleepDeficitAdjustment() {
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            recentSleep: usualSleep(observedSessionDurationMinutes: 30),
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertNil(plan.workoutAdjustment)
+    }
+
+    func testRecoveryShiftCanSupportWorkoutAdjustmentWithoutSleepDuration() {
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(level: .strained, confidence: .building),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertEqual(plan.workoutAdjustment?.reason, .recoveryShift)
+        XCTAssertNil(plan.workoutAdjustment?.measuredSleepMinutes)
+        XCTAssertEqual(plan.workoutAdjustment?.confidence, .building)
+    }
+
+    func testFallbackDayAllowsElapsedLeadBeyond24HoursButRejectsAnotherCivilDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(
+            TimeZone(identifier: "America/New_York")
+        )
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 1,
+            hour: 0
+        )))
+        let acceptedStart = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 1,
+            hour: 23,
+            minute: 30
+        )))
+        let acceptedEnd = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 1,
+            hour: 23,
+            minute: 55
+        )))
+        let nextDayStart = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 2,
+            hour: 0,
+            minute: 10
+        )))
+        let nextDayEnd = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 11,
+            day: 2,
+            hour: 0,
+            minute: 40
+        )))
+        let nowSec = Int(now.timeIntervalSince1970)
+        let acceptedLead = Int(acceptedStart.timeIntervalSince(now))
+        XCTAssertGreaterThan(acceptedLead, 24 * 60 * 60)
+        XCTAssertLessThan(acceptedLead, 25 * 60 * 60)
+
+        let day = "2026-11-01"
+        let accepted = DailyActionPlanner.plan(
+            today: day,
+            readiness: readiness(level: .strained, day: day),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            plannedWorkout: plannedWorkout(
+                day: day,
+                startSec: Int(acceptedStart.timeIntervalSince1970),
+                endSec: Int(acceptedEnd.timeIntervalSince1970)
+            ),
+            nowSec: nowSec
+        )
+        let rejected = DailyActionPlanner.plan(
+            today: day,
+            readiness: readiness(level: .strained, day: day),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            plannedWorkout: plannedWorkout(
+                day: "2026-11-02",
+                startSec: Int(nextDayStart.timeIntervalSince1970),
+                endSec: Int(nextDayEnd.timeIntervalSince1970)
+            ),
+            nowSec: nowSec
+        )
+
+        XCTAssertEqual(accepted.workoutAdjustment?.reason, .recoveryShift)
+        XCTAssertNil(rejected.workoutAdjustment)
+    }
+
+    func testThinSleepDifferenceAndInvalidWorkoutTimingFailClosed() {
+        let thinDifference = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            recentSleep: usualSleep(todayMinutes: 406),
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+        let alreadyStarted = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(level: .strained),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            plannedWorkout: plannedWorkout(startSec: 999_000, endSec: 1_002_600),
+            nowSec: 1_000_000
+        )
+        let wrongDay = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(level: .strained),
+            checkIn: .asUsual,
+            recentEffort: history(),
+            plannedWorkout: plannedWorkout(day: "2026-08-23"),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertNil(thinDifference.workoutAdjustment)
+        XCTAssertNil(alreadyStarted.workoutAdjustment)
+        XCTAssertNil(wrongDay.workoutAdjustment)
+    }
+
+    func testPainOrUnwellSuppressesPlannedWorkoutAdjustment() {
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(level: .strained),
+            checkIn: .painOrUnwell,
+            recentEffort: history(),
+            recentSleep: usualSleep(),
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertEqual(plan.availability, .stop)
+        XCTAssertNil(plan.workoutAdjustment)
     }
 }

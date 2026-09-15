@@ -28,7 +28,9 @@ enum HydrationReminders {
     private static let lastConfirmedStrapSlotKey = "hydrationReminders.lastConfirmedStrapSlot"
     private static let pendingEscalationSlotKey = "hydrationReminders.pendingEscalationSlot"
     private static let requestIDPrefix = "hydration-reminder-"
-    private static let missedResponseRequestID = "hydration-reminder-missed-response"
+    private static let phoneFallbackRequestIDPrefix = "hydration-reminder-phone-fallback-"
+    private static let legacyMissedResponseRequestID =
+        "hydration-reminder-missed-response"
     private static let adaptiveIntervalKey = "hydrationReminders.adaptiveIntervalMinutes"
     private static let adaptiveReasonKey = "hydrationReminders.adaptiveReason"
     private static let adaptiveDayKey = "hydrationReminders.adaptiveDay"
@@ -38,11 +40,28 @@ enum HydrationReminders {
     private static let quietEndMinutesKey = "notif.quietEndMinutes"
     private static let minimumIntervalMinutes = 60
     private static let maximumIntervalMinutes = 240
+    /// The live cue lane gets the same five-minute due grace as `dueSlot`; the durable phone fallback
+    /// remains one minute later so a fresh foreground sample can replace only that exact occurrence.
+    static let bandFirstFallbackDelayMinutes = 6
+    /// Do not replace a fallback that Notification Center may already be preparing to deliver.
+    static let bandFirstFallbackReplacementMarginSeconds: TimeInterval = 30
+    /// Keep the candidate count no larger than the previous all-day hourly repeating schedule. This
+    /// gives at least 24 hours of terminated-process phone coverage and is refreshed whenever NOOP opens.
+    nonisolated static let bandFirstScheduledOccurrenceCount = 24
+    private static var scheduleGeneration: UInt64 = 0
+    private static var missedResponseGeneration: UInt64 = 0
 
     enum EnableOutcome: Equatable, Sendable {
         case scheduled
+        case deferred
         case denied
         case off
+    }
+
+    private enum RestoreAuthorizationDisposition {
+        case reschedule
+        case retainOptIn
+        case disable
     }
 
     struct ReminderSpec: Equatable, Sendable {
@@ -137,16 +156,22 @@ enum HydrationReminders {
             now: now
         )
         if bandFirstEnabled, isEnabled {
-            scheduleMissedResponse(for: slot)
+            scheduleMissedResponse(for: slot, acceptedAt: now)
         }
     }
 
     static func markDoubleTapConfirmed(contextKey: String?) {
         guard let contextKey, !contextKey.isEmpty else { return }
         let defaults = UserDefaults.standard
+        scheduleGeneration &+= 1
         defaults.set(contextKey, forKey: lastConfirmedStrapSlotKey)
-        guard defaults.string(forKey: pendingEscalationSlotKey) == contextKey else { return }
-        cancelMissedResponse()
+        cancelPhoneFallback(contextKey: contextKey)
+        if defaults.string(forKey: pendingEscalationSlotKey) == contextKey {
+            cancelMissedResponse()
+        }
+        if isEnabled {
+            requestReschedule()
+        }
     }
 
     static var effectiveIntervalMinutes: Int {
@@ -190,6 +215,8 @@ enum HydrationReminders {
         _ on: Bool,
         completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
     ) {
+        scheduleGeneration &+= 1
+        let generation = scheduleGeneration
         guard on else {
             UserDefaults.standard.set(false, forKey: enabledKey)
             removeScheduledRequests()
@@ -203,22 +230,32 @@ enum HydrationReminders {
             let settings = await center.notificationSettings()
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                UserDefaults.standard.set(true, forKey: enabledKey)
-                schedule()
-                completion?(.scheduled)
+                await enableAndSchedule(
+                    generation: generation,
+                    center: center,
+                    completion: completion
+                )
             case .notDetermined:
                 let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
                 if granted {
-                    UserDefaults.standard.set(true, forKey: enabledKey)
-                    schedule()
-                    completion?(.scheduled)
+                    await enableAndSchedule(
+                        generation: generation,
+                        center: center,
+                        completion: completion
+                    )
                 } else {
-                    UserDefaults.standard.set(false, forKey: enabledKey)
+                    guard generation == scheduleGeneration else { return }
+                    UserDefaults.standard.set(true, forKey: enabledKey)
+                    removeScheduledRequests()
+                    cancelMissedResponse()
                     recordSuppressedRequests()
                     completion?(.denied)
                 }
             default:
-                UserDefaults.standard.set(false, forKey: enabledKey)
+                guard generation == scheduleGeneration else { return }
+                UserDefaults.standard.set(true, forKey: enabledKey)
+                removeScheduledRequests()
+                cancelMissedResponse()
                 recordSuppressedRequests()
                 completion?(.denied)
             }
@@ -231,7 +268,7 @@ enum HydrationReminders {
             UserDefaults.standard.set(clampedInterval(minutes), forKey: adaptiveIntervalKey)
             UserDefaults.standard.removeObject(forKey: adaptiveReasonKey)
         }
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func setAdaptiveEnabled(_ on: Bool) {
@@ -241,7 +278,7 @@ enum HydrationReminders {
             UserDefaults.standard.removeObject(forKey: adaptiveReasonKey)
             UserDefaults.standard.removeObject(forKey: adaptiveDayKey)
         }
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func updateAdaptiveContext(
@@ -274,7 +311,9 @@ enum HydrationReminders {
         defaults.set(plan.intervalMinutes, forKey: adaptiveIntervalKey)
         defaults.set(plan.reasons.joined(separator: " + "), forKey: adaptiveReasonKey)
         defaults.set(dayKey, forKey: adaptiveDayKey)
-        if isEnabled, previousDay != dayKey || previous != plan.intervalMinutes { schedule() }
+        if isEnabled, previousDay != dayKey || previous != plan.intervalMinutes {
+            requestReschedule()
+        }
     }
 
     static func adaptivePlan(
@@ -333,12 +372,12 @@ enum HydrationReminders {
 
     static func setActiveStartMinutes(_ minutes: Int) {
         UserDefaults.standard.set(DailyReviewNotifications.clampMinute(minutes), forKey: activeStartMinutesKey)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func setActiveEndMinutes(_ minutes: Int) {
         UserDefaults.standard.set(DailyReviewNotifications.clampMinute(minutes), forKey: activeEndMinutesKey)
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     static func setStrapBuzzEnabled(_ on: Bool) {
@@ -348,7 +387,7 @@ enum HydrationReminders {
             UserDefaults.standard.set(false, forKey: bandFirstEnabledKey)
             TapAutomationStore.clear(kind: .hydrationConfirm)
             cancelMissedResponse()
-            if isEnabled { schedule() }
+            if isEnabled { requestReschedule() }
         }
     }
 
@@ -358,7 +397,7 @@ enum HydrationReminders {
             UserDefaults.standard.set(false, forKey: bandFirstEnabledKey)
             TapAutomationStore.clear(kind: .hydrationConfirm)
             cancelMissedResponse()
-            if isEnabled { schedule() }
+            if isEnabled { requestReschedule() }
         }
     }
 
@@ -374,23 +413,42 @@ enum HydrationReminders {
         let enabled = on && strapBuzzEnabled && doubleTapConfirmEnabled
         UserDefaults.standard.set(enabled, forKey: bandFirstEnabledKey)
         if !enabled { cancelMissedResponse() }
-        if isEnabled { schedule() }
+        if isEnabled { requestReschedule() }
     }
 
     /// Rebuild pending requests after an upgrade without ever prompting for permission on launch.
-    static func restoreScheduleIfAuthorized() {
+    @discardableResult
+    static func restoreScheduleIfAuthorized(
+        authorizationStatus:
+            (@MainActor @Sendable () async -> UNAuthorizationStatus)? = nil
+    ) -> Task<Void, Never> {
         guard isEnabled else {
             removeScheduledRequests()
-            return
+            return Task {}
         }
-        Task { @MainActor in
-            let settings = await UNUserNotificationCenter.current().notificationSettings()
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
-                schedule()
-            default:
+        let generation = scheduleGeneration
+        return Task { @MainActor in
+            let status: UNAuthorizationStatus
+            if let authorizationStatus {
+                status = await authorizationStatus()
+            } else {
+                status = await UNUserNotificationCenter.current()
+                    .notificationSettings()
+                    .authorizationStatus
+            }
+            guard generation == scheduleGeneration, isEnabled else { return }
+            switch restoreAuthorizationDisposition(status) {
+            case .reschedule:
+                requestReschedule()
+            case .retainOptIn:
+                removeScheduledRequests()
+                cancelMissedResponse()
                 recordSuppressedRequests()
-                break
+            case .disable:
+                UserDefaults.standard.set(false, forKey: enabledKey)
+                removeScheduledRequests()
+                cancelMissedResponse()
+                recordSuppressedRequests()
             }
         }
     }
@@ -431,6 +489,19 @@ enum HydrationReminders {
         let end = DailyReviewNotifications.clampMinute(end)
         if start <= end { return minute >= start && minute < end }
         return minute >= start || minute < end
+    }
+
+    static func isInQuietHours(
+        _ date: Date,
+        calendar: Calendar = .current,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        guard defaults.bool(forKey: quietHoursEnabledKey) else { return false }
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        let minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        let start = defaults.object(forKey: quietStartMinutesKey) as? Int ?? 22 * 60
+        let end = defaults.object(forKey: quietEndMinutesKey) as? Int ?? 7 * 60
+        return windowContains(minute, start: start, end: end)
     }
 
     /// The most recent due occurrence inside a small grace window. Kept pure for deterministic tests.
@@ -542,39 +613,200 @@ enum HydrationReminders {
         UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
     }
 
-    private static func schedule() {
-        let center = UNUserNotificationCenter.current()
-        let oldIDs = storedRequestIDs
-        if !oldIDs.isEmpty {
-            LocalNotificationLifecycle.cancel(
-                identifiers: oldIDs,
-                on: center
+    private static func enableAndSchedule(
+        generation: UInt64,
+        center: UNUserNotificationCenter,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)?
+    ) async {
+        guard generation == scheduleGeneration else { return }
+        DailyReviewNotifications.registerPrivacyCategory(on: center)
+        let result = await reconcileSchedule(
+            expectedGeneration: generation,
+            client: .system(center: center)
+        )
+        guard generation == scheduleGeneration else { return }
+        let settings = await center.notificationSettings()
+        guard generation == scheduleGeneration else { return }
+        completion?(
+            applyScheduleResult(
+                result,
+                authorizationStatus: settings.authorizationStatus
+            )
+        )
+    }
+
+    private static func requestReschedule(now: Date = Date()) {
+        guard isEnabled else {
+            removeScheduledRequests()
+            cancelMissedResponse()
+            return
+        }
+        scheduleGeneration &+= 1
+        let generation = scheduleGeneration
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            let initialSettings = await center.notificationSettings()
+            guard generation == scheduleGeneration, isEnabled else { return }
+            switch restoreAuthorizationDisposition(initialSettings.authorizationStatus) {
+            case .retainOptIn:
+                UserDefaults.standard.set(true, forKey: enabledKey)
+                removeScheduledRequests()
+                cancelMissedResponse()
+                recordSuppressedRequests()
+                return
+            case .disable:
+                _ = applyScheduleResult(
+                    nil,
+                    authorizationStatus: initialSettings.authorizationStatus
+                )
+                return
+            case .reschedule:
+                break
+            }
+            DailyReviewNotifications.registerPrivacyCategory(on: center)
+            let result = await reconcileSchedule(
+                now: now,
+                expectedGeneration: generation,
+                client: .system(center: center)
+            )
+            guard generation == scheduleGeneration, isEnabled else { return }
+            let finalSettings = await center.notificationSettings()
+            guard generation == scheduleGeneration, isEnabled else { return }
+            _ = applyScheduleResult(
+                result,
+                authorizationStatus: finalSettings.authorizationStatus
             )
         }
-        DailyReviewNotifications.registerPrivacyCategory(on: center)
+    }
 
+    @discardableResult
+    static func applyScheduleResult(
+        _ result: LocalNotificationReconciliationResult?,
+        authorizationStatus: UNAuthorizationStatus
+    ) -> EnableOutcome {
+        switch restoreAuthorizationDisposition(authorizationStatus) {
+        case .reschedule:
+            return applyAuthorizedScheduleResult(result)
+        case .retainOptIn:
+            UserDefaults.standard.set(true, forKey: enabledKey)
+            removeScheduledRequests()
+            cancelMissedResponse()
+            recordSuppressedRequests()
+            return .deferred
+        case .disable:
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            removeScheduledRequests()
+            cancelMissedResponse()
+            recordSuppressedRequests()
+            return .denied
+        }
+    }
+
+    /// Keep the explicit phone-reminder opt-in across Notification Center rejection or capacity
+    /// deferral. Pending requests are suppressed while permission is unavailable and can be rebuilt
+    /// when the scene becomes active after the user changes Settings.
+    @discardableResult
+    static func applyAuthorizedScheduleResult(
+        _ result: LocalNotificationReconciliationResult?
+    ) -> EnableOutcome {
+        UserDefaults.standard.set(true, forKey: enabledKey)
+        return (result?.activeCount ?? 0) > 0
+            ? .scheduled
+            : .deferred
+    }
+
+    private static func restoreAuthorizationDisposition(
+        _ status: UNAuthorizationStatus
+    ) -> RestoreAuthorizationDisposition {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            return .reschedule
+        case .notDetermined:
+            return .retainOptIn
+        case .denied:
+            return .retainOptIn
+        @unknown default:
+            return .disable
+        }
+    }
+
+    @discardableResult
+    static func reconcileSchedule(
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        expectedGeneration: UInt64? = nil,
+        coordinator: LocalNotificationCapacityCoordinator? = nil,
+        client: LocalNotificationCenterClient
+    ) async -> LocalNotificationReconciliationResult? {
+        let oldIDs = storedRequestIDs
         let specs = reminderSpecs(
             start: activeStartMinutes,
             end: activeEndMinutes,
             interval: effectiveIntervalMinutes
         )
-        // In band-first mode the phone lane is occurrence-driven: an issued band cue schedules one delayed
-        // alert, and a confirmed tap cancels it. Keeping the repeating requests here would notify even
-        // after confirmation, which iOS cannot suppress per occurrence.
-        guard !bandFirstEnabled else {
-            for spec in specs {
-                LocalNotificationLifecycle.suppressed(
-                    identifier: spec.identifier,
-                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
-                )
-            }
-            UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
-            return
+        let defaults = UserDefaults.standard
+        let storedEscalationToken = defaults.string(
+            forKey: pendingEscalationSlotKey
+        )
+        let pendingRequests = await client.pendingRequests()
+        let activeEscalationToken = storedEscalationToken.flatMap { token in
+            pendingRequests.contains {
+                $0.identifier == phoneFallbackRequestID(contextKey: token)
+            } ? token : nil
         }
-        UserDefaults.standard.set(specs.map(\.identifier), forKey: scheduledRequestIDsKey)
+        if storedEscalationToken != nil, activeEscalationToken == nil {
+            defaults.removeObject(forKey: pendingEscalationSlotKey)
+        }
+        let requests = bandFirstEnabled
+            ? bandFirstNotificationRequests(
+                now: now,
+                calendar: calendar,
+                occurrenceCount: bandFirstScheduledOccurrenceCount
+            )
+            : notificationRequests(specs: specs)
+        let preservedEscalationIDs = Set(
+            [activeEscalationToken]
+            .compactMap { $0 }
+            .map(phoneFallbackRequestID(contextKey:))
+        )
+        let result = await LocalNotificationLifecycle.reconcile(
+            candidateRequests: requests,
+            replacingIdentifiers: Set(
+                oldIDs + requests.map(\.identifier)
+            ).subtracting(preservedEscalationIDs),
+            preservingExistingIdentifiers: preservedEscalationIDs,
+            now: now,
+            calendar: calendar,
+            coordinator: coordinator,
+            isStillCurrent: {
+                (expectedGeneration.map { $0 == scheduleGeneration } ?? true)
+                    && defaults.string(
+                        forKey: pendingEscalationSlotKey
+                    ) == activeEscalationToken
+            },
+            client: client
+        )
+        if let expectedGeneration,
+           expectedGeneration != scheduleGeneration {
+            return nil
+        }
+        if result.activeIdentifiers.isEmpty {
+            UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
+        } else {
+            UserDefaults.standard.set(
+                result.activeIdentifiers,
+                forKey: scheduledRequestIDsKey
+            )
+        }
+        return result
+    }
 
-        for spec in specs {
+    static func notificationRequests(
+        specs: [ReminderSpec]
+    ) -> [UNNotificationRequest] {
+        specs.map { spec -> UNNotificationRequest in
             let content = UNMutableNotificationContent()
+            content.applyProminence(.ambient)
             content.title = spec.title
             content.body = spec.body
             content.sound = .default
@@ -585,55 +817,346 @@ enum HydrationReminders {
             var components = DateComponents()
             components.hour = spec.minuteOfDay / 60
             components.minute = spec.minuteOfDay % 60
-            LocalNotificationLifecycle.schedule(
-                UNNotificationRequest(
-                    identifier: spec.identifier,
-                    content: content,
-                    trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-                ),
-                on: center
+            return UNNotificationRequest(
+                identifier: spec.identifier,
+                content: content,
+                trigger: UNCalendarNotificationTrigger(
+                    dateMatching: components,
+                    repeats: true
+                )
             )
         }
     }
 
-    private static func scheduleMissedResponse(for slot: DueSlot) {
+    /// Upcoming exact phone occurrences for band-first mode. These are one-shot rather than repeating so
+    /// a successfully queued cue can replace one occurrence without removing tomorrow's reminder. The
+    /// OS owns these requests after scheduling, so they remain available while NOOP is suspended or
+    /// terminated; the bounded horizon is refreshed on launch and settings changes.
+    static func bandFirstNotificationRequests(
+        now: Date,
+        calendar: Calendar = .current,
+        occurrenceCount: Int = bandFirstScheduledOccurrenceCount,
+        defaults: UserDefaults = .standard
+    ) -> [UNNotificationRequest] {
+        let minutes = reminderMinutes(
+            start: activeStartMinutes,
+            end: activeEndMinutes,
+            interval: effectiveIntervalMinutes
+        )
+        guard !minutes.isEmpty, occurrenceCount > 0 else { return [] }
+
+        struct Candidate {
+            let slot: DueSlot
+            let fireDate: Date
+            let fallbackMinute: Int
+        }
+
+        func dueSlot(for occurrence: Date, minuteOfDay: Int) -> DueSlot? {
+            let day = calendar.dateComponents([.year, .month, .day], from: occurrence)
+            guard let year = day.year, let month = day.month, let dayOfMonth = day.day else {
+                return nil
+            }
+            return DueSlot(
+                minuteOfDay: minuteOfDay,
+                localDay: String(format: "%04d-%02d-%02d", year, month, dayOfMonth)
+            )
+        }
+
+        func nextFire(after date: Date, fallbackMinute: Int) -> Date? {
+            calendar.nextDate(
+                after: date,
+                matching: DateComponents(
+                    hour: fallbackMinute / 60,
+                    minute: fallbackMinute % 60,
+                    second: 0
+                ),
+                matchingPolicy: .nextTimePreservingSmallerComponents,
+                repeatedTimePolicy: .first,
+                direction: .forward
+            )
+        }
+
+        var candidates: [Candidate] = minutes.compactMap { minute in
+            let fallbackMinute = (minute + bandFirstFallbackDelayMinutes) % (24 * 60)
+            guard let fireDate = nextFire(
+                after: now.addingTimeInterval(-1),
+                fallbackMinute: fallbackMinute
+            ),
+            !isInQuietHours(
+                fireDate,
+                calendar: calendar,
+                defaults: defaults
+            ),
+            let occurrence = calendar.date(
+                byAdding: .minute,
+                value: -bandFirstFallbackDelayMinutes,
+                to: fireDate
+            ),
+            let slot = dueSlot(for: occurrence, minuteOfDay: minute)
+            else { return nil }
+            return Candidate(slot: slot, fireDate: fireDate, fallbackMinute: fallbackMinute)
+        }
+
+        var selected: [Candidate] = []
+        selected.reserveCapacity(occurrenceCount)
+        while selected.count < occurrenceCount,
+              let index = candidates.indices.min(by: {
+                  candidates[$0].fireDate < candidates[$1].fireDate
+              }) {
+            let candidate = candidates[index]
+            selected.append(candidate)
+            guard let laterFire = nextFire(
+                after: candidate.fireDate.addingTimeInterval(1),
+                fallbackMinute: candidate.fallbackMinute
+            ),
+            let laterOccurrence = calendar.date(
+                byAdding: .minute,
+                value: -bandFirstFallbackDelayMinutes,
+                to: laterFire
+            ),
+            let laterSlot = dueSlot(
+                for: laterOccurrence,
+                minuteOfDay: candidate.slot.minuteOfDay
+            )
+            else {
+                candidates.remove(at: index)
+                continue
+            }
+            candidates[index] = Candidate(
+                slot: laterSlot,
+                fireDate: laterFire,
+                fallbackMinute: candidate.fallbackMinute
+            )
+        }
+
+        let excludedTokens = Set([
+            defaults.string(forKey: lastConfirmedStrapSlotKey),
+            defaults.string(forKey: pendingEscalationSlotKey),
+        ].compactMap { $0 })
+
+        return selected.compactMap { candidate in
+            guard !excludedTokens.contains(candidate.slot.token) else { return nil }
+            let content = UNMutableNotificationContent()
+            content.applyProminence(.ambient)
+            content.title = String(localized: "Hydration check-in")
+            content.body = String(localized: "Take a moment to drink some water if you need it.")
+            content.sound = .default
+            content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+            content.threadIdentifier = "noop.hydration"
+            content.userInfo = [
+                NotificationRouteBridge.userInfoKey: NoopNotificationRoute.hydration.rawValue
+            ]
+            let components = calendar.dateComponents(
+                [.calendar, .timeZone, .year, .month, .day, .hour, .minute],
+                from: candidate.fireDate
+            )
+            return UNNotificationRequest(
+                identifier: phoneFallbackRequestID(contextKey: candidate.slot.token),
+                content: content,
+                trigger: UNCalendarNotificationTrigger(
+                    dateMatching: components,
+                    repeats: false
+                )
+            )
+        }
+    }
+
+    static func phoneFallbackRequestID(contextKey: String) -> String {
+        phoneFallbackRequestIDPrefix + contextKey
+    }
+
+    private static func scheduleMissedResponse(
+        for slot: DueSlot,
+        acceptedAt: Date
+    ) {
         let defaults = UserDefaults.standard
         guard defaults.string(forKey: lastConfirmedStrapSlotKey) != slot.token else { return }
-        defaults.set(slot.token, forKey: pendingEscalationSlotKey)
+        missedResponseGeneration &+= 1
+        let generation = missedResponseGeneration
+        scheduleGeneration &+= 1
 
         let center = UNUserNotificationCenter.current()
         LocalNotificationLifecycle.cancel(
-            identifiers: [missedResponseRequestID],
+            identifiers: [legacyMissedResponseRequestID],
             on: center
         )
         DailyReviewNotifications.registerPrivacyCategory(on: center)
 
+        let fallbackID = phoneFallbackRequestID(contextKey: slot.token)
+        Task { @MainActor in
+            guard let request = missedResponseRequest(
+                for: slot,
+                windowMinutes: doubleTapWindowMinutes,
+                identifier: fallbackID,
+                acceptedAt: acceptedAt
+            ) else {
+                LocalNotificationLifecycle.cancel(
+                    identifiers: [fallbackID],
+                    on: center
+                )
+                if defaults.string(forKey: pendingEscalationSlotKey)
+                    == slot.token {
+                    defaults.removeObject(forKey: pendingEscalationSlotKey)
+                }
+                if isEnabled {
+                    requestReschedule()
+                }
+                return
+            }
+            var observedFallbackFireDate: Date?
+            let result = await LocalNotificationLifecycle.replacePending(
+                request,
+                matchingExisting: { existing in
+                    guard let fallbackFireDate = phoneFallbackFireDate(
+                        from: existing
+                    ) else {
+                        return false
+                    }
+                    observedFallbackFireDate = fallbackFireDate
+                    return canReplacePhoneFallback(
+                        fallbackFireDate: fallbackFireDate,
+                        replacementAt: Date()
+                    )
+                },
+                isStillCurrent: {
+                    guard generation == missedResponseGeneration,
+                          defaults.string(
+                            forKey: lastConfirmedStrapSlotKey
+                          ) != slot.token else {
+                        return false
+                    }
+                    guard let fallbackFireDate =
+                            observedFallbackFireDate else {
+                        return true
+                    }
+                    return canReplacePhoneFallback(
+                        fallbackFireDate: fallbackFireDate,
+                        replacementAt: Date()
+                    )
+                },
+                didAccept: {
+                    defaults.set(
+                        slot.token,
+                        forKey: pendingEscalationSlotKey
+                    )
+                },
+                on: center
+            )
+            guard generation == missedResponseGeneration else {
+                return
+            }
+            if result != .accepted,
+               defaults.string(forKey: pendingEscalationSlotKey)
+                == slot.token {
+                defaults.removeObject(forKey: pendingEscalationSlotKey)
+            }
+            if isEnabled {
+                requestReschedule()
+            }
+        }
+    }
+
+    static func phoneFallbackFireDate(
+        from request: UNNotificationRequest
+    ) -> Date? {
+        guard let trigger = request.trigger
+            as? UNCalendarNotificationTrigger else {
+            return nil
+        }
+        var components = trigger.dateComponents
+        var calendar =
+            components.calendar ?? Calendar(identifier: .gregorian)
+        if let timeZone = components.timeZone {
+            calendar.timeZone = timeZone
+        }
+        components.calendar = calendar
+        components.timeZone = calendar.timeZone
+        return calendar.date(from: components)
+    }
+
+    static func canReplacePhoneFallback(
+        fallbackFireDate: Date,
+        replacementAt: Date
+    ) -> Bool {
+        replacementAt < fallbackFireDate.addingTimeInterval(
+            -bandFirstFallbackReplacementMarginSeconds
+        )
+    }
+
+    static func missedResponseRequest(
+        for slot: DueSlot,
+        windowMinutes: Int,
+        identifier: String,
+        acceptedAt: Date = Date(),
+        calendar: Calendar = .current,
+        defaults: UserDefaults = .standard
+    ) -> UNNotificationRequest? {
+        _ = slot
+        let fireDate = acceptedAt.addingTimeInterval(
+            TimeInterval(min(max(windowMinutes, 5), 30) * 60)
+        )
+        guard !isInQuietHours(
+            fireDate,
+            calendar: calendar,
+            defaults: defaults
+        ) else { return nil }
+
         let content = UNMutableNotificationContent()
+        content.applyProminence(.standard)
         content.title = String(localized: "Hydration check-in")
         content.body = String(localized: "No water was logged from the band cue. Open Hydration if you drank.")
         content.sound = .default
         content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
         content.threadIdentifier = "noop.hydration"
-        content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.hydration.rawValue]
-
-        LocalNotificationLifecycle.schedule(
-            UNNotificationRequest(
-                identifier: missedResponseRequestID,
-                content: content,
-                trigger: UNTimeIntervalNotificationTrigger(
-                    timeInterval: TimeInterval(doubleTapWindowMinutes * 60),
-                    repeats: false
-                )
-            ),
-            on: center
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey: NoopNotificationRoute.hydration.rawValue,
+            LocalNotificationPriorityMarker.hydrationMissedResponse: true,
+        ]
+        let components = calendar.dateComponents(
+            [
+                .calendar,
+                .timeZone,
+                .year,
+                .month,
+                .day,
+                .hour,
+                .minute,
+                .second,
+            ],
+            from: fireDate
+        )
+        return UNNotificationRequest(
+            identifier: identifier,
+            content: content,
+            trigger: UNCalendarNotificationTrigger(
+                dateMatching: components,
+                repeats: false
+            )
         )
     }
 
+    private static func cancelPhoneFallback(contextKey: String) {
+        let identifier = phoneFallbackRequestID(contextKey: contextKey)
+        LocalNotificationLifecycle.cancel(identifiers: [identifier])
+        let remaining = storedRequestIDs.filter { $0 != identifier }
+        if remaining.isEmpty {
+            UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
+        } else {
+            UserDefaults.standard.set(remaining, forKey: scheduledRequestIDsKey)
+        }
+    }
+
     private static func cancelMissedResponse() {
+        let defaults = UserDefaults.standard
+        missedResponseGeneration &+= 1
+        let activeID = defaults.string(
+            forKey: pendingEscalationSlotKey
+        ).map(phoneFallbackRequestID(contextKey:))
         LocalNotificationLifecycle.cancel(
-            identifiers: [missedResponseRequestID]
+            identifiers: [legacyMissedResponseRequestID]
+                + [activeID].compactMap { $0 }
         )
-        UserDefaults.standard.removeObject(forKey: pendingEscalationSlotKey)
+        defaults.removeObject(forKey: pendingEscalationSlotKey)
     }
 
     private static func recordSuppressedRequests() {

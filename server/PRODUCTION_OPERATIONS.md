@@ -107,13 +107,57 @@ their production roles. Code cannot prove cloud IAM or managed-database grants.
 ### Deployment ordering
 
 Runtime processes refuse a database whose immutable migration manifest differs
-from the image. Drain old Safety workers before the migration job so an older
-worker cannot bypass a newly introduced runtime control. Apply migrations once,
-deploy matching workers, then deploy matching API replicas and wait for
-`/readyz` plus a fresh worker heartbeat. This strict contract favors a short
-maintenance window over unsafe mixed-version paging. A future zero-downtime
-rollout requires an explicitly backward-compatible expand/contract migration,
-not bypassing readiness.
+from the image. The runner hashes the exact raw migration bytes used for SQL
+execution, rejects changed checksums and forward/unknown applied versions before
+pending migration DDL, and the migration job verifies exact equality again
+before reporting success. The managed-storage and feedback lifecycle jobs
+perform the same exact check before constructing repositories, object-store
+clients, identity deleters, processors, or push services. The API performs it
+before starting embedded retention, Safety-retention, or feedback-lifecycle
+tasks.
+
+Before the migration job, stop admission of new API requests, drain in-flight
+API transactions, and drain old Safety and lifecycle workers so no prior
+process can bypass a newly introduced runtime control. For a fresh installation,
+the migration runner commits the `038`/`041` Safety writer compatibility bundle
+atomically before applying the independent `039` and `040` migrations. A fresh
+installation therefore never commits a `038`-only schema.
+
+If immutable migration `038` is already recorded, it is not rerun. The upgrade
+validates its checksum, obtains `ACCESS EXCLUSIVE` on
+`managed_safety_page_quota_events`, and applies pending migration `041` in its
+own transaction. That lock waits for existing table users and blocks new ones
+during the transition, but an historical `038`-only committed state already
+exists. The maintenance drain is therefore mandatory rather than replaced by
+the lock.
+
+After the migration job succeeds, deploy matching workers, then matching API
+replicas, and wait for `/readyz` plus a fresh worker heartbeat before reopening
+admission. This contract deliberately uses a bounded maintenance window.
+Rollback means deploying a reviewed code revert rebuilt with the current
+immutable migration directory and manifest, or disabling the new path through
+its kill switch. An exact older image is rejected by readiness and is not a
+supported rollback artifact. A future zero-downtime rollout requires a proven
+mixed-version compatibility matrix, not bypassing readiness or the drain gate.
+
+Global retention, Safety retention, feedback cleanup/retention, and managed
+lifecycle runs hold a shared `noop_schema_migrations` advisory lock from exact
+manifest validation through the bounded operation. Migration holds the
+exclusive form. Lock ordering is schema lock first, then the operation-specific
+retention or worker lease. One dedicated short-lived database connection holds
+the schema guard rather than consuming the operation pool; capacity and IAM
+planning must allow that extra connection. The guard prevents those destructive
+jobs from crossing a schema commit, but it deliberately does not wrap object
+storage and database changes in one transaction. Admission drain remains
+mandatory because ordinary API writers are not maintenance jobs and do not hold
+this shared lock.
+
+Restore validation is engine-specific. TimescaleDB uses
+`backup/migration-manifest.sha256`; standard PostgreSQL and Cloud SQL use
+`backup/migration-manifest-postgresql.sha256`, whose `001_init.sql` checksum is
+the PostgreSQL overlay checksum. Set `NOOP_DATABASE_ENGINE` consistently on the
+backup/restore worker. Restore smoke rejects an unknown engine and rejects any
+manifest override that is not byte-identical to that engine's bundled manifest.
 
 ## Capacity model and acceptance gate
 

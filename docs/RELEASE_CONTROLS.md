@@ -167,11 +167,14 @@ Applied migrations are immutable. Database and API evolution follows:
 4. **Contract:** remove old behavior only after the supported client window and
    rollback period close.
 
-Destructive down migrations are forbidden. Rollback deploys a compatible prior
-application/firmware version or disables a new path with its kill switch; it
-does not edit migration history or assume removed data can be recreated. Each
-release records the oldest compatible app, API, schema, protocol, firmware,
-metric revision, and restore version.
+Destructive down migrations are forbidden. Database-backed application rollback
+uses a reviewed code revert rebuilt with the current immutable migration set, or
+disables a new path with its kill switch. Exact older images are eligible only
+when a tested readiness compatibility matrix explicitly allows their migration
+set; the default exact-manifest readiness contract rejects them. Rollback never
+edits migration history or assumes removed data can be recreated. Each release
+records the oldest compatible app, API, schema, protocol, firmware, metric
+revision, and restore version.
 
 ## Evidence format
 

@@ -57,7 +57,7 @@ struct CoachView: View {
     private let customModelTag = "__custom__"
 
     private let suggestions = [
-        String(localized: "How's my charge trending?"),
+        String(localized: "appwide.coach.recovery_prompt"),
         String(localized: "What should today's training look like?"),
         String(localized: "Analyse my sleep"),
         String(localized: "Why am I run down?"),
@@ -75,7 +75,7 @@ struct CoachView: View {
         ScreenScaffold(title: usesFocusedNavigationHeader ? nil : "Coach",
                        subtitle: usesFocusedNavigationHeader
                             ? nil
-                            : "Ask about your charge, effort, rest and workouts, grounded in your own numbers.",
+                            : "appwide.coach.subtitle",
                        // Liquid finish: the same full-bleed day-of-sky backdrop Today + the other liquid
                        // tabs carry, so Coach sits in one atmosphere. Static + non-interactive; the frosted
                        // message/setup cards below sit on the opaque canvas and stay legible.
@@ -1133,9 +1133,9 @@ struct CoachView: View {
         } else {
             setupKeyFocused = true
         }
-        NSLog(
-            "Tab shell keyboard QA focused mode=%@",
-            keepsKeyboardVisible ? "visible" : "restored"
+        VisualQALog.emit(
+            "Tab shell keyboard QA focused mode=" +
+                (keepsKeyboardVisible ? "visible" : "restored")
         )
 
         guard restoresNavigation else { return }
@@ -1143,7 +1143,7 @@ struct CoachView: View {
         guard !Task.isCancelled else { return }
         composerFocused = false
         setupKeyFocused = false
-        NSLog("Tab shell keyboard QA dismissed mode=restored")
+        VisualQALog.emit("Tab shell keyboard QA dismissed mode=restored")
     }
     #endif
 

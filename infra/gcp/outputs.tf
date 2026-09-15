@@ -18,6 +18,11 @@ output "raw_bucket" {
   value       = google_storage_bucket.raw_chunks.name
 }
 
+output "feedback_bucket" {
+  description = "Private bounded-retention app-feedback bucket."
+  value       = google_storage_bucket.feedback.name
+}
+
 output "builder_service_account" {
   description = "Dedicated Cloud Build identity."
   value       = google_service_account.builder.email
@@ -53,7 +58,17 @@ output "service_accounts" {
     migration = google_service_account.migration.email
     lifecycle = google_service_account.managed_lifecycle.email
     scheduler = google_service_account.managed_scheduler.email
-    event     = google_service_account.managed_event_invoker.email
+    feedback_lifecycle = (
+      var.enable_feedback_lifecycle
+      ? google_service_account.feedback_lifecycle[0].email
+      : null
+    )
+    feedback_scheduler = (
+      var.enable_feedback_lifecycle
+      ? google_service_account.feedback_scheduler[0].email
+      : null
+    )
+    event = google_service_account.managed_event_invoker.email
   }
 }
 
@@ -101,10 +116,42 @@ output "managed_api" {
   } : null
 }
 
+output "feedback_public_ready" {
+  description = "True only when feedback ingestion is publicly reachable and every stack-owned feedback control is enabled."
+  value = (
+    var.enable_feedback_ingestion
+    && var.enable_public_managed_api
+    && var.enable_feedback_lifecycle
+    && var.feedback_external_abuse_gate_approved
+    && var.enable_managed_runtime
+    && var.enable_managed_identity
+    && var.enable_managed_app_check
+    && var.managed_auth_app_check_enforcement == "ENFORCED"
+    && var.enable_managed_database
+    && var.runtime_image != null
+    && var.feedback_capability_primary_key_version != var.feedback_capability_previous_key_version
+    && contains(
+      [
+        "legacy",
+        var.feedback_capability_primary_key_version,
+        var.feedback_capability_previous_key_version,
+      ],
+      var.feedback_capability_write_version,
+    )
+  )
+}
+
 output "managed_lifecycle_job" {
   description = "Scheduled NOOP+ lifecycle job name when enabled."
   value = var.enable_managed_runtime ? (
     google_cloud_run_v2_job.managed_lifecycle[0].name
+  ) : null
+}
+
+output "feedback_lifecycle_job" {
+  description = "Independent feedback cleanup and retention job name when enabled."
+  value = var.enable_feedback_lifecycle ? (
+    google_cloud_run_v2_job.feedback_lifecycle[0].name
   ) : null
 }
 

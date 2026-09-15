@@ -18,6 +18,12 @@ class DeviceDisplayNameTest {
         assertEquals("Morning Band", displayName(band(nickname = "  Morning Band  ")))
     }
 
+    @Test
+    fun duplicateModelIsHiddenButDistinctModelRemainsVisible() {
+        assertEquals(false, shouldShowDeviceModel(" Compatible band ", "compatible BAND"))
+        assertEquals(true, shouldShowDeviceModel("Morning Band", "Compatible band"))
+    }
+
     private fun band(nickname: String?) = PairedDeviceRow(
         id = "my-whoop",
         brand = "WHOOP",

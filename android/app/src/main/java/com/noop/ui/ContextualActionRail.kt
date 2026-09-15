@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bed
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,6 +63,7 @@ internal fun ContextualActionRail(
     expandedId: String?,
     onExpandedChange: (String?) -> Unit,
     onPrimary: (ContextualAction) -> Unit,
+    onSecondary: (ContextualAction) -> Unit,
     onDismiss: (ContextualAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -78,6 +81,7 @@ internal fun ContextualActionRail(
                     processing = action.id in processingIds,
                     onCollapse = { onExpandedChange(null) },
                     onPrimary = { onPrimary(action) },
+                    onSecondary = { onSecondary(action) },
                     onDismiss = {
                         onExpandedChange(null)
                         onDismiss(action)
@@ -115,7 +119,7 @@ private fun CollapsedContextualAction(
             },
         contentAlignment = Alignment.Center,
     ) {
-        ContextualActionGlyph(action.kind, tint, 19.dp)
+        ContextualActionGlyph(action, tint, 19.dp)
     }
 }
 
@@ -125,6 +129,7 @@ private fun ExpandedContextualAction(
     processing: Boolean,
     onCollapse: () -> Unit,
     onPrimary: () -> Unit,
+    onSecondary: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val tint = contextualActionTint(action.kind)
@@ -147,7 +152,7 @@ private fun ExpandedContextualAction(
                     .background(tint.copy(alpha = 0.13f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                ContextualActionGlyph(action.kind, tint, 17.dp)
+                ContextualActionGlyph(action, tint, 17.dp)
             }
             Text(
                 text = action.title,
@@ -222,7 +227,7 @@ private fun ExpandedContextualAction(
                 .alpha(if (processing) 0.72f else 1f),
         ) {
             Icon(
-                imageVector = primaryIcon(action.kind),
+                imageVector = primaryIcon(action),
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
             )
@@ -232,6 +237,27 @@ private fun ExpandedContextualAction(
                 style = NoopType.subhead,
                 maxLines = 2,
             )
+        }
+
+        if (action.isPlannedWorkoutDecision()) {
+            OutlinedButton(
+                onClick = onSecondary,
+                enabled = !processing,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 42.dp)
+                    .testTag("noop.context-action.keep-current-plan"),
+            ) {
+                Text(
+                    text = stringResource(
+                        R.string.appwide_adaptive_day_guidance_planned_workout_keep_plan,
+                    ),
+                    style = NoopType.subhead,
+                    color = Palette.textPrimary,
+                    maxLines = 2,
+                )
+            }
         }
     }
 }
@@ -260,11 +286,11 @@ private fun ContextualIconControl(
 
 @Composable
 private fun ContextualActionGlyph(
-    kind: ContextualActionKind,
+    action: ContextualAction,
     tint: Color,
     size: androidx.compose.ui.unit.Dp,
 ) {
-    if (kind == ContextualActionKind.HYDRATION) {
+    if (action.kind == ContextualActionKind.HYDRATION) {
         HydrationGlassGlyph(
             fill = 0.38f,
             tint = tint,
@@ -274,7 +300,7 @@ private fun ContextualActionGlyph(
         )
     } else {
         Icon(
-            imageVector = actionIcon(kind),
+            imageVector = actionIcon(action),
             contentDescription = null,
             tint = tint,
             modifier = Modifier.size(size),
@@ -356,22 +382,36 @@ private fun contextualActionTint(kind: ContextualActionKind): Color = when (kind
     ContextualActionKind.RECOVERY -> Palette.chargeColor
 }
 
-private fun actionIcon(kind: ContextualActionKind): ImageVector = when (kind) {
-    ContextualActionKind.HYDRATION -> Icons.Filled.WaterDrop
-    ContextualActionKind.BREATHE -> Icons.Filled.Air
-    ContextualActionKind.JOURNAL -> Icons.Filled.Edit
-    ContextualActionKind.WIND_DOWN -> Icons.Filled.Bedtime
-    ContextualActionKind.RECOVERY -> Icons.Filled.Bed
-}
+private fun actionIcon(action: ContextualAction): ImageVector =
+    if (action.kind == ContextualActionKind.RECOVERY &&
+        action.route == NoopNotificationRoute.WORKOUTS
+    ) {
+        Icons.AutoMirrored.Filled.DirectionsRun
+    } else {
+        when (action.kind) {
+            ContextualActionKind.HYDRATION -> Icons.Filled.WaterDrop
+            ContextualActionKind.BREATHE -> Icons.Filled.Air
+            ContextualActionKind.JOURNAL -> Icons.Filled.Edit
+            ContextualActionKind.WIND_DOWN -> Icons.Filled.Bedtime
+            ContextualActionKind.RECOVERY -> Icons.Filled.Bed
+        }
+    }
 
-private fun primaryIcon(kind: ContextualActionKind): ImageVector = when (kind) {
-    ContextualActionKind.HYDRATION -> Icons.Filled.Add
-    ContextualActionKind.BREATHE -> Icons.Filled.PlayArrow
-    ContextualActionKind.JOURNAL -> Icons.Filled.Edit
-    ContextualActionKind.WIND_DOWN,
-    ContextualActionKind.RECOVERY,
-    -> Icons.Filled.Bed
-}
+private fun primaryIcon(action: ContextualAction): ImageVector =
+    if (action.kind == ContextualActionKind.RECOVERY &&
+        action.route == NoopNotificationRoute.WORKOUTS
+    ) {
+        Icons.AutoMirrored.Filled.DirectionsRun
+    } else {
+        when (action.kind) {
+            ContextualActionKind.HYDRATION -> Icons.Filled.Add
+            ContextualActionKind.BREATHE -> Icons.Filled.PlayArrow
+            ContextualActionKind.JOURNAL -> Icons.Filled.Edit
+            ContextualActionKind.WIND_DOWN,
+            ContextualActionKind.RECOVERY,
+            -> Icons.Filled.Bed
+        }
+    }
 
 @Composable
 private fun primaryTitle(action: ContextualAction): String = when (action.kind) {
@@ -379,7 +419,13 @@ private fun primaryTitle(action: ContextualAction): String = when (action.kind) 
         stringResource(R.string.context_action_add_water, action.amountMl ?: 250)
     ContextualActionKind.BREATHE -> stringResource(R.string.context_action_start_breathing)
     ContextualActionKind.JOURNAL -> stringResource(R.string.context_action_open_journal)
-    ContextualActionKind.WIND_DOWN,
-    ContextualActionKind.RECOVERY,
-    -> stringResource(R.string.context_action_open_sleep)
+    ContextualActionKind.WIND_DOWN -> stringResource(R.string.context_action_open_sleep)
+    ContextualActionKind.RECOVERY ->
+        if (action.isPlannedWorkoutDecision()) {
+            stringResource(
+                R.string.appwide_adaptive_day_guidance_planned_workout_review_options,
+            )
+        } else {
+            stringResource(R.string.context_action_open_sleep)
+        }
 }

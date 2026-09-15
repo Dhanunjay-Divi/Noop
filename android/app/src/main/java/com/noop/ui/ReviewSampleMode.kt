@@ -346,7 +346,7 @@ internal fun ReviewSampleRoot(onExit: () -> Unit) {
         bottomBar = {
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                 val tabLabels = ReviewSampleTab.entries.map { stringResource(it.title) }
-                val showVisualLabels = rememberBottomBarShowsVisualLabels(
+                val labelLayout = rememberBottomBarLabelLayout(
                     labels = tabLabels,
                     availableWidth = maxWidth,
                     labelHorizontalSafetyPadding = 8.dp,
@@ -354,7 +354,9 @@ internal fun ReviewSampleRoot(onExit: () -> Unit) {
                 )
                 NavigationBar(
                     containerColor = Palette.surfaceRaised,
-                    modifier = Modifier.navigationBarsPadding(),
+                    modifier = Modifier
+                        .height(maxOf(80, labelLayout.barHeightDp).dp)
+                        .navigationBarsPadding(),
                 ) {
                     ReviewSampleTab.entries.forEachIndexed { index, tab ->
                         val tabLabel = tabLabels[index]
@@ -362,26 +364,18 @@ internal fun ReviewSampleRoot(onExit: () -> Unit) {
                             selected = selectedTab == tab,
                             onClick = { selectedTab = tab },
                             icon = { Icon(tab.icon, null) },
-                            label = if (showVisualLabels) {
-                                {
-                                    Text(
-                                        tabLabel,
-                                        maxLines = 1,
-                                    )
-                                }
-                            } else {
-                                null
+                            label = {
+                                Text(
+                                    tabLabel,
+                                    maxLines = labelLayout.maxLines,
+                                    overflow = TextOverflow.Clip,
+                                    textAlign = TextAlign.Center,
+                                )
                             },
-                            alwaysShowLabel = showVisualLabels,
+                            alwaysShowLabel = true,
                             modifier = Modifier
                                 .testTag("noop.review.tab.${tab.name.lowercase()}")
-                                .then(
-                                    if (showVisualLabels) {
-                                        Modifier
-                                    } else {
-                                        Modifier.semantics { contentDescription = tabLabel }
-                                    },
-                                ),
+                                .semantics { contentDescription = tabLabel },
                         )
                     }
                 }

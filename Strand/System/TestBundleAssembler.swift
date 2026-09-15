@@ -40,7 +40,6 @@ enum TestBundleAssembler {
     /// after explicit user opt-in. Eight MiB leaves ample room for the bounded runtime diagnostics under the
     /// 20 MiB bundle cap; an unexpectedly huge or malformed image fails closed instead of being shared.
     static let maxAppReportScreenshotBytes = 8 * 1024 * 1024
-    private static let pngSignature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
     static let appRuntimeReportText = """
     NOOP app runtime report
 
@@ -194,10 +193,14 @@ enum TestBundleAssembler {
     /// Validate an explicitly approved shake-time snapshot before it crosses the bundle boundary.
     static func appReportScreenshotEntry(_ png: Data?) -> FileExport.BundleEntry? {
         guard let png,
-              png.count >= pngSignature.count,
-              png.count <= maxAppReportScreenshotBytes,
-              png.prefix(pngSignature.count) == pngSignature else { return nil }
-        return FileExport.BundleEntry(name: DisplayScreenshot.bundleName, data: png)
+              let sanitized = FeedbackScreenshotSanitizer.sanitize(
+                png,
+                maximumBytes: maxAppReportScreenshotBytes
+              ) else { return nil }
+        return FileExport.BundleEntry(
+            name: DisplayScreenshot.bundleName,
+            data: sanitized
+        )
     }
 
     /// Hard cap the bundle at `capBytes` (20 MB default, under GitHub's 25 MB; spec section 5.4). The

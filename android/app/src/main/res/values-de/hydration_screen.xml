@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hydration_screen_sip">Schluck</string>
+    <string name="hydration_screen_cup">Glas</string>
+    <string name="hydration_screen_bottle">Flasche</string>
+    <string name="hydration_screen_quick_amounts_format">%1$s %2$s · %3$s %4$s · %5$s %6$s</string>
+    <string name="hydration_screen_custom_amount">Eigene Menge</string>
+    <string name="hydration_screen_log">Eintragen</string>
+    <string name="hydration_screen_cancel">Abbrechen</string>
+    <string name="hydration_screen_edit_entry">Wassereintrag bearbeiten</string>
+    <string name="hydration_screen_save">Speichern</string>
+    <string name="hydration_screen_amount_label">Milliliter (ml)</string>
+    <string name="hydration_screen_amount_range_format">Gib eine Menge von 1 bis %1$d ml ein.</string>
+    <string name="hydration_screen_guidance">Ein einfaches Ziel, das sich an deine Belastung anpasst. Allgemeine Wellness-Orientierung, keine medizinische Beratung.</string>
+    <string name="hydration_screen_last_seven_days">Letzte 7 Tage</string>
+    <string name="hydration_screen_litres_short_format">%1$s l</string>
+    <string name="hydration_screen_litres_accessibility_format">%1$s Liter</string>
+    <string name="hydration_screen_goal_visible_format">von %1$s</string>
+    <string name="hydration_screen_log_accessibility_format">%1$s eintragen</string>
+    <string name="hydration_screen_hero_status_accessibility_format">%1$s. %2$s. %3$s</string>
+    <string name="hydration_screen_hero_missing_with_goal_accessibility_format">%1$s. %2$s. Ziel: %3$s.</string>
+    <string name="hydration_screen_hero_progress_accessibility_format">%1$s. Erfasst: %2$s. Ziel: %3$s. %4$d Prozent des Ziels.</string>
+    <string name="hydration_screen_history_accessibility_format">%1$s. %2$s.</string>
+    <string name="hydration_screen_history_day_accessibility_format">%1$s: %2$s</string>
+</resources>

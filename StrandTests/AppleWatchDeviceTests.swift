@@ -150,4 +150,22 @@ final class AppleWatchDeviceTests: XCTestCase {
         XCTAssertTrue(source.contains("self.fail(.save)"))
         XCTAssertFalse(source.contains("builder.finishWorkout { [weak self] _, _ in"))
     }
+
+    func testWatchAndLiveActivityUseRecoveryVocabulary() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let watch = try String(
+            contentsOf: root.appendingPathComponent("NOOPWatch/WatchGlanceView.swift"),
+            encoding: .utf8)
+        let liveActivity = try String(
+            contentsOf: root.appendingPathComponent("StrandiOSWidgets/NOOPLiveActivity.swift"),
+            encoding: .utf8)
+
+        XCTAssertTrue(watch.contains(#"ScoreRing(label: String(localized: "Recovery")"#))
+        XCTAssertFalse(watch.contains(#"ScoreRing(label: String(localized: "Charge")"#))
+        XCTAssertTrue(liveActivity.contains(#"bannerStat(label: "Recovery""#))
+        XCTAssertTrue(liveActivity.contains(#"statColumn(label: "Recovery""#))
+        XCTAssertFalse(liveActivity.contains(#"label: "Charge""#))
+    }
 }

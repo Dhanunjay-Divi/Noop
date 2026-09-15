@@ -2,6 +2,8 @@ package com.noop.analytics
 
 import com.noop.data.RespSample
 import com.noop.data.RrInterval
+import java.time.Instant
+import java.time.ZoneId
 
 /*
  * ScoreConfidence.kt — per-score certainty tier for Charge / Effort / Rest.
@@ -394,11 +396,17 @@ enum class ScoreConfidence(val raw: String) {
             rr: List<RrInterval>,
             resp: List<RespSample>,
             offsetSec: Long,
+            timeZone: ZoneId? = null,
             habitualMidsleepSec: Long?,
         ): RestRawEvidence {
+            val offsetAtEpochSec: (Long) -> Long = { epochSecond ->
+                timeZone?.rules?.getOffset(Instant.ofEpochSecond(epochSecond))
+                    ?.totalSeconds?.toLong()
+                    ?: offsetSec
+            }
             val indices = SleepStageTotals.mainNightGroupIndices(
                 sessions.map { SleepStageTotals.NightBlock(it.start, it.end) },
-                offsetSec,
+                offsetAtEpochSec,
                 habitualMidsleepSec,
             ).orEmpty()
             val mainSessionStarts = indices.mapTo(mutableSetOf()) { sessions[it].start }

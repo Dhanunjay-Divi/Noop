@@ -641,6 +641,23 @@ extension WhoopStore {
         }
     }
 
+    /// Hide every locally computed Effort value before the one-shot axis migration re-scores source data.
+    ///
+    /// This deliberately updates one exact source instead of deleting daily rows: Recovery, Rest, sleep,
+    /// steps, and imported/vendor Effort remain intact. A failed or interrupted migration therefore exposes
+    /// an unavailable local Effort value rather than a stale legacy 0-21 value.
+    @discardableResult
+    public func clearDailyStrain(deviceId: String) async throws -> Int {
+        try syncWrite { db in
+            try db.execute(sql: """
+                UPDATE dailyMetric
+                SET strain = NULL
+                WHERE deviceId = ? AND strain IS NOT NULL
+                """, arguments: [deviceId])
+            return db.changesCount
+        }
+    }
+
     private static func upsertDailyMetric(
         _ d: DailyMetric,
         deviceId: String,

@@ -1,13 +1,26 @@
 package com.noop.data
 
+import com.noop.alarm.WindDownScheduler
+import com.noop.alarm.WindDownStore
+import com.noop.testing.FakeSharedPreferences
+import com.noop.ui.ProfileStore
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.IOException
+import java.time.Instant
+import java.time.ZoneId
+import java.util.TimeZone
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -18,8 +31,8 @@ import java.util.zip.ZipOutputStream
  * Plain JVM (real org.json + java.util.zip, no Robolectric); the SharedPreferences apply/snapshot
  * bridge needs a Context and is covered by the shared restore path at the platform level.
  *
- * Twin of the Apple `BackupSettingsTests` in Packages/WhoopStore — the canonical keys and kinds
- * asserted here are the cross-platform contract, so a drift on either side fails one of the twins.
+ * Shared fields mirror the Apple `BackupSettingsTests`; v5 planner-continuity and v6 split-review
+ * fields are additive and remain unknown-key-safe for older or cross-platform readers.
  */
 class BackupSettingsCodecTest {
 
@@ -60,6 +73,7 @@ class BackupSettingsCodecTest {
             "windDown.goalMode" to "extraOpportunity",
             "windDown.leadMinutes" to 45,
             "sleepPlanner.wakeMinutes" to 390,
+            "windDown.perDayWakeMinutes" to """{"1":480,"7":540}""",
             "notif.masterEnabled" to true,
             "notif.onlyWhenWorn" to true,
             "notif.quietHoursEnabled" to true,
@@ -78,6 +92,8 @@ class BackupSettingsCodecTest {
             "hydrationReminders.activeEndMinutes" to 1_260,
             "hydrationReminders.adaptiveEnabled" to false,
             "hydrationReminders.strapBuzzEnabled" to false,
+            "dailyReview.morningEnabled" to true,
+            "dailyReview.journalEnabled" to false,
         )
         assertEquals(
             "This fixture must cover every settings-schema field",
@@ -89,7 +105,7 @@ class BackupSettingsCodecTest {
 
         assertEquals(34, back["profile.age"])
         assertEquals("1992-11-03", back["profile.dateOfBirth"])
-        assertEquals(4, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
+        assertEquals(6, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
         assertEquals("female", back["profile.sex"])
         assertEquals(62.5, back["profile.weightKg"])
         assertEquals(60.0, back["profile.targetWeightKg"])
@@ -106,8 +122,14 @@ class BackupSettingsCodecTest {
         assertEquals(true, back["today.keyMetricsDetailed"])
         assertEquals("extraOpportunity", back["windDown.goalMode"])
         assertEquals(390, back["sleepPlanner.wakeMinutes"])
+        assertEquals(
+            mapOf(1 to 480, 7 to 540),
+            WindDownStore.decodeWakeOverrides(back["windDown.perDayWakeMinutes"] as? String),
+        )
         assertEquals(120, back["hydrationReminders.intervalMinutes"])
         assertEquals(false, back["hydrationReminders.adaptiveEnabled"])
+        assertEquals(true, back["dailyReview.morningEnabled"])
+        assertEquals(false, back["dailyReview.journalEnabled"])
         assertEquals(values.size + 1, back.size)
     }
 
@@ -145,6 +167,580 @@ class BackupSettingsCodecTest {
                 profileKeys,
             BackupSettingsBridge.mappedCanonicalKeys,
         )
+    }
+
+    @Test fun windDownOverridesAreValidatedRestoredAndUsedBySchedule() {
+        val json = JSONObject()
+            .put(BackupSettingsCodec.SCHEMA_VERSION_KEY, 5)
+            .put("windDown.enabled", true)
+            .put("windDown.sleepNeedMinutes", 8 * 60)
+            .put("windDown.leadMinutes", 30)
+            .put("sleepPlanner.wakeMinutes", 7 * 60)
+            .put("windDown.perDayWakeMinutes", """{"7":540}""")
+            .toString()
+        val restoredValues = BackupSettingsCodec.decode(json)
+        val prefs = FakeSharedPreferences()
+
+        BackupSettingsBridge.applyWindDownSettings(prefs, restoredValues)
+        val restored = WindDownStore(prefs)
+
+        assertTrue(restored.enabled)
+        assertEquals(0, restored.recoveryMinutes)
+        assertEquals(mapOf(7 to 9 * 60), restored.perDayWakeOverrides)
+        val plan = requireNotNull(
+            WindDownScheduler.nextDatedPlan(
+                defaultWakeMinutes = restored.wakeMinutes,
+                wakeOverrides = restored.perDayWakeOverrides,
+                targetSleepMinutes = restored.targetSleepMinutes,
+                leadMinutes = restored.leadMinutes,
+                nowMs = Instant.parse("2026-09-11T12:00:00Z").toEpochMilli(),
+                timeZone = TimeZone.getTimeZone("UTC"),
+            ),
+        )
+        val wake = Instant.ofEpochMilli(plan.wakeAtMillis).atZone(ZoneId.of("UTC"))
+        val windDown = Instant.ofEpochMilli(plan.windDownAtMillis).atZone(ZoneId.of("UTC"))
+        assertEquals(7, plan.wakeWeekday)
+        assertEquals(9, wake.hour)
+        assertEquals(0, wake.minute)
+        assertEquals(12, windDown.dayOfMonth)
+        assertEquals(0, windDown.hour)
+        assertEquals(30, windDown.minute)
+    }
+
+    @Test fun malformedWindDownPlannerBackupValuesAreDropped() {
+        val invalidOverrides = listOf(
+            """{"0":480}""",
+            """{"7":1440}""",
+            """{"7":540.5}""",
+            """{"07":540}""",
+            """[{"7":540}]""",
+        )
+        for (raw in invalidOverrides) {
+            val decoded = BackupSettingsCodec.decode(
+                JSONObject()
+                    .put("windDown.perDayWakeMinutes", raw)
+                    .toString(),
+            )
+            assertNull(raw, decoded["windDown.perDayWakeMinutes"])
+        }
+        val legacyRecovery = BackupSettingsCodec.decode(
+            """{"settings.schemaVersion":5,"windDown.recoveryMinutes":45}""",
+        )
+        assertEquals(45, legacyRecovery["windDown.recoveryMinutes"])
+        assertTrue(
+            requireNotNull(BackupSettingsCodec.encode(legacyRecovery))
+                .contains("\"windDown.recoveryMinutes\":45"),
+        )
+    }
+
+    @Test fun restoreClearsPreexistingDerivedRecovery() {
+        val prefs = FakeSharedPreferences()
+        prefs.edit().putInt("windDown.recoveryMinutes", 45).commit()
+        BackupSettingsBridge.applyWindDownSettings(
+            prefs,
+            mapOf("windDown.sleepNeedMinutes" to 8 * 60),
+        )
+        assertEquals(45, WindDownStore(prefs).recoveryMinutes)
+        BackupSettingsBridge.applyWindDownSettings(
+            prefs,
+            mapOf("windDown.sleepNeedMinutes" to 8 * 60),
+            clearDerivedPlannerState = true,
+        )
+        val restored = WindDownStore(prefs)
+        assertEquals(0, restored.recoveryMinutes)
+        assertFalse(prefs.contains("windDown.recoveryMinutes"))
+    }
+
+    @Test fun durableRestoreCommitsEachPreferenceFileAsOneBatch() {
+        fun singleCommitPrefs() = FakeSharedPreferences(commitResults = listOf(true, false))
+
+        val profile = singleCommitPrefs()
+        val noop = singleCommitPrefs()
+        val notifications = singleCommitPrefs()
+        val inactivity = singleCommitPrefs()
+        val hydrationReminders = singleCommitPrefs()
+        val windDown = singleCommitPrefs().also {
+            it.edit()
+                .putInt(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY, 45)
+                .apply()
+        }
+        val dailyReview = singleCommitPrefs()
+
+        BackupSettingsBridge.applyRestoreValuesDurably(
+            targets = BackupSettingsBridge.RestorePreferenceTargets(
+                profile = profile,
+                noop = noop,
+                notifications = notifications,
+                inactivity = inactivity,
+                hydrationReminders = hydrationReminders,
+                windDown = windDown,
+                dailyReview = dailyReview,
+            ),
+            values = mapOf(
+                "profile.age" to 34,
+                "profile.sex" to "female",
+                "profile.weightKg" to 62.5,
+                "profile.targetWeightKg" to 60.0,
+                "profile.heightCm" to 168.0,
+                "profile.waistCm" to 71.0,
+                "profile.hrMax" to 191,
+                "units.system" to "metric",
+                "notif.masterEnabled" to true,
+                "inactivity.enabled" to true,
+                "hydrationReminders.enabled" to true,
+                "windDown.enabled" to true,
+                "windDown.sleepNeedMinutes" to 8 * 60,
+                "dailyReview.morningEnabled" to true,
+                "dailyReview.journalEnabled" to false,
+            ),
+        )
+
+        val restoredProfile = ProfileStore(profile)
+        assertEquals(34, restoredProfile.age)
+        assertEquals("female", restoredProfile.sex)
+        assertEquals(62.5, restoredProfile.weightKg, 0.001)
+        assertEquals(60.0, restoredProfile.targetWeightKg ?: 0.0, 0.001)
+        assertEquals(168.0, restoredProfile.heightCm, 0.001)
+        assertEquals(71.0, restoredProfile.waistCm, 0.001)
+        assertEquals(191, restoredProfile.hrMaxOverride)
+        assertTrue(restoredProfile.ageInputConfirmed)
+        assertTrue(restoredProfile.sexInputConfirmed)
+        assertTrue(restoredProfile.bodyInputsConfirmed)
+        assertEquals("metric", noop.getString("units.system", null))
+        assertTrue(notifications.getBoolean("notif.masterEnabled", false))
+        assertTrue(inactivity.getBoolean("inactivity.enabled", false))
+        assertTrue(hydrationReminders.getBoolean("hydration.reminders.enabled", false))
+        assertTrue(windDown.getBoolean("windDown.enabled", false))
+        assertEquals(8 * 60, windDown.getInt("windDown.sleepNeedMinutes", 0))
+        assertFalse(windDown.contains(BackupSettingsCodec.LEGACY_RECOVERY_MINUTES_KEY))
+        assertTrue(dailyReview.getBoolean("morning_enabled", false))
+        assertFalse(dailyReview.getBoolean("journal_enabled", true))
+        assertTrue(dailyReview.getBoolean("enabled", false))
+        assertTrue(dailyReview.getBoolean("split_migrated_v1", false))
+    }
+
+    @Test fun partialDailyReviewRestorePreservesTheOtherTargetPreference() {
+        val preferences = FakeSharedPreferences().also {
+            it.edit()
+                .putBoolean("morning_enabled", true)
+                .putBoolean("journal_enabled", true)
+                .putBoolean("enabled", true)
+                .putBoolean("split_migrated_v1", true)
+                .apply()
+        }
+
+        BackupSettingsBridge.applyDailyReviewSettings(
+            preferences,
+            mapOf("dailyReview.morningEnabled" to false),
+        )
+
+        assertFalse(preferences.getBoolean("morning_enabled", true))
+        assertTrue(preferences.getBoolean("journal_enabled", false))
+        assertTrue(preferences.getBoolean("enabled", false))
+        assertTrue(preferences.getBoolean("split_migrated_v1", false))
+    }
+
+    @Test fun repairableSchedulerFailureDoesNotRejectRestoredDatabase() {
+        var failureRecorded = false
+
+        val succeeded = BackupSettingsBridge.runBestEffortReconcile(
+            operation = { throw IllegalStateException("scheduler unavailable") },
+            onFailure = { failureRecorded = true },
+        )
+
+        assertFalse(succeeded)
+        assertTrue(failureRecorded)
+        assertFalse(
+            BackupSettingsBridge.runBestEffortReconcile(
+                operation = { throw IllegalStateException("scheduler unavailable") },
+                onFailure = { throw AssertionError("diagnostics unavailable") },
+            ),
+        )
+        assertTrue(
+            BackupSettingsBridge.runBestEffortReconcile(
+                operation = {},
+                onFailure = { throw AssertionError("success must not record failure") },
+            ),
+        )
+    }
+
+    @Test fun dailyReviewRestoreReconcileRunsImmediatelyAndPersistsRetryOnFailure() {
+        val preferences = FakeSharedPreferences()
+        var calls = 0
+        val succeeded = BackupSettingsBridge.reconcileSchedulerForConfirmedRestore(
+            operation = { calls += 1 },
+            onFailure = { throw AssertionError("success must not record failure") },
+            persistRetryNeeded = { needed ->
+                BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                    preferences = preferences,
+                    key = BackupSettingsBridge.DAILY_REVIEW_RETRY_NEEDED,
+                    needed = needed,
+                )
+            },
+        )
+        assertTrue(succeeded)
+        assertEquals(1, calls)
+        assertFalse(preferences.contains(BackupSettingsBridge.DAILY_REVIEW_RETRY_NEEDED))
+
+        var failureRecorded = false
+        val failed = BackupSettingsBridge.reconcileSchedulerForConfirmedRestore(
+            operation = { throw IllegalStateException("scheduler unavailable") },
+            onFailure = { failureRecorded = true },
+            persistRetryNeeded = { needed ->
+                BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                    preferences = preferences,
+                    key = BackupSettingsBridge.DAILY_REVIEW_RETRY_NEEDED,
+                    needed = needed,
+                )
+            },
+        )
+
+        assertFalse(failed)
+        assertTrue(failureRecorded)
+        assertTrue(
+            preferences.getBoolean(
+                BackupSettingsBridge.DAILY_REVIEW_RETRY_NEEDED,
+                false,
+            ),
+        )
+    }
+
+    @Test fun hydrationMaintenanceWaitsForDatabaseBeforeReadingOrRetryingState() {
+        val events = mutableListOf<String>()
+        val outcomes = mutableListOf<BackupSettingsBridge.RestoreSchedulerRetryOutcome>()
+
+        val succeeded = BackupSettingsBridge.runRestoreSchedulerMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = { events += "database" },
+            retryNeeded = {
+                events += "read"
+                true
+            },
+            reconcile = { events += "reconcile" },
+            clearRetryNeeded = { events += "clear" },
+            onRetryOutcome = { outcomes += it },
+        )
+
+        assertTrue(succeeded)
+        assertEquals(listOf("database", "read", "reconcile", "clear"), events)
+        assertEquals(
+            listOf(BackupSettingsBridge.RestoreSchedulerRetryOutcome.RETRY_COMPLETED),
+            outcomes,
+        )
+    }
+
+    @Test fun successfulHydrationMaintenanceClearsPersistedRetryState() {
+        val preferences = FakeSharedPreferences().also {
+            BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                preferences = it,
+                key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                needed = true,
+            )
+        }
+
+        val succeeded = BackupSettingsBridge.runRestoreSchedulerMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = {},
+            retryNeeded = {
+                preferences.getBoolean(BackupSettingsBridge.HYDRATION_RETRY_NEEDED, false)
+            },
+            reconcile = {},
+            clearRetryNeeded = {
+                BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                    preferences = preferences,
+                    key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                    needed = false,
+                )
+            },
+            onRetryOutcome = {},
+        )
+
+        assertTrue(succeeded)
+        assertFalse(preferences.contains(BackupSettingsBridge.HYDRATION_RETRY_NEEDED))
+    }
+
+    @Test fun retryRequestedDuringMaintenanceSurvivesOlderClear() {
+        val preferences = FakeSharedPreferences().also {
+            BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                preferences = it,
+                key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                needed = true,
+            )
+        }
+        val reconcileEntered = CountDownLatch(1)
+        val releaseReconcile = CountDownLatch(1)
+        val maintenanceFinished = CountDownLatch(1)
+        val writerStarted = CountDownLatch(1)
+        val writerFinished = CountDownLatch(1)
+        val maintenanceResult = AtomicBoolean(false)
+
+        val maintenance = Thread {
+            maintenanceResult.set(
+                BackupSettingsBridge.runRestoreSchedulerMaintenanceAfterDatabaseReady(
+                    ensureDatabaseReady = {},
+                    retryNeeded = {
+                        preferences.getBoolean(
+                            BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                            false,
+                        )
+                    },
+                    reconcile = {
+                        reconcileEntered.countDown()
+                        releaseReconcile.await(5, TimeUnit.SECONDS)
+                    },
+                    clearRetryNeeded = {
+                        BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                            preferences = preferences,
+                            key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                            needed = false,
+                        )
+                    },
+                    onRetryOutcome = {},
+                ),
+            )
+            maintenanceFinished.countDown()
+        }
+        maintenance.start()
+        assertTrue(reconcileEntered.await(5, TimeUnit.SECONDS))
+
+        val writer = Thread {
+            writerStarted.countDown()
+            BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                preferences = preferences,
+                key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                needed = true,
+            )
+            writerFinished.countDown()
+        }
+        writer.start()
+        assertTrue(writerStarted.await(5, TimeUnit.SECONDS))
+        assertFalse(
+            "the newer request must wait until the older read/reconcile/clear transaction finishes",
+            writerFinished.await(100, TimeUnit.MILLISECONDS),
+        )
+
+        releaseReconcile.countDown()
+        assertTrue(maintenanceFinished.await(5, TimeUnit.SECONDS))
+        assertTrue(writerFinished.await(5, TimeUnit.SECONDS))
+        maintenance.join(1_000)
+        writer.join(1_000)
+
+        assertTrue(maintenanceResult.get())
+        assertTrue(
+            "the newer retry request must remain durable after the older maintenance transaction",
+            preferences.getBoolean(
+                BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                false,
+            ),
+        )
+    }
+
+    @Test fun newerRestoreFailureSurvivesOlderSuccessfulReconcile() {
+        val preferences = FakeSharedPreferences()
+        val olderEntered = CountDownLatch(1)
+        val releaseOlder = CountDownLatch(1)
+        val newerStarted = CountDownLatch(1)
+        val newerFinished = CountDownLatch(1)
+        val olderResult = AtomicBoolean(false)
+        val newerResult = AtomicBoolean(true)
+
+        val older = Thread {
+            olderResult.set(
+                BackupSettingsBridge.reconcileSchedulerForConfirmedRestore(
+                    operation = {
+                        olderEntered.countDown()
+                        releaseOlder.await(5, TimeUnit.SECONDS)
+                    },
+                    onFailure = {},
+                    persistRetryNeeded = { needed ->
+                        BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                            preferences = preferences,
+                            key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                            needed = needed,
+                        )
+                    },
+                ),
+            )
+        }
+        older.start()
+        assertTrue(olderEntered.await(5, TimeUnit.SECONDS))
+
+        val newer = Thread {
+            newerStarted.countDown()
+            newerResult.set(
+                BackupSettingsBridge.reconcileSchedulerForConfirmedRestore(
+                    operation = { throw IOException("synthetic scheduler failure") },
+                    onFailure = {},
+                    persistRetryNeeded = { needed ->
+                        BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                            preferences = preferences,
+                            key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                            needed = needed,
+                        )
+                    },
+                ),
+            )
+            newerFinished.countDown()
+        }
+        newer.start()
+        assertTrue(newerStarted.await(5, TimeUnit.SECONDS))
+        assertFalse(
+            "the newer reconcile must wait for the older outcome and marker write",
+            newerFinished.await(100, TimeUnit.MILLISECONDS),
+        )
+
+        releaseOlder.countDown()
+        older.join(5_000)
+        newer.join(5_000)
+
+        assertTrue(olderResult.get())
+        assertFalse(newerResult.get())
+        assertTrue(
+            "the newer failed reconcile must leave the retry marker durable",
+            preferences.getBoolean(
+                BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                false,
+            ),
+        )
+    }
+
+    @Test fun dailyReviewMaintenanceWithoutRetryPreservesStartupWork() {
+        val events = mutableListOf<String>()
+
+        val succeeded = BackupSettingsBridge.runRestoreSchedulerMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = { events += "database" },
+            retryNeeded = {
+                events += "read"
+                false
+            },
+            reconcileWithoutRetry = false,
+            reconcile = { events += "reconcile" },
+            clearRetryNeeded = { events += "clear" },
+            onRetryOutcome = { events += "outcome" },
+        )
+
+        assertTrue(succeeded)
+        assertEquals(listOf("database", "read"), events)
+    }
+
+    @Test fun pendingDailyReviewMaintenanceReconcilesAndClearsRetry() {
+        val events = mutableListOf<String>()
+
+        val succeeded = BackupSettingsBridge.runRestoreSchedulerMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = { events += "database" },
+            retryNeeded = {
+                events += "read"
+                true
+            },
+            reconcileWithoutRetry = false,
+            reconcile = { events += "reconcile" },
+            clearRetryNeeded = { events += "clear" },
+            onRetryOutcome = {
+                assertEquals(
+                    BackupSettingsBridge.RestoreSchedulerRetryOutcome.RETRY_COMPLETED,
+                    it,
+                )
+                events += "outcome"
+            },
+        )
+
+        assertTrue(succeeded)
+        assertEquals(listOf("database", "read", "reconcile", "clear", "outcome"), events)
+    }
+
+    @Test fun failedHydrationMaintenanceRetainsPersistedRetryState() {
+        val preferences = FakeSharedPreferences().also {
+            BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                preferences = it,
+                key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                needed = true,
+            )
+        }
+        val outcomes = mutableListOf<BackupSettingsBridge.RestoreSchedulerRetryOutcome>()
+
+        val succeeded = BackupSettingsBridge.runRestoreSchedulerMaintenanceAfterDatabaseReady(
+            ensureDatabaseReady = {},
+            retryNeeded = {
+                preferences.getBoolean(BackupSettingsBridge.HYDRATION_RETRY_NEEDED, false)
+            },
+            reconcile = { throw IllegalStateException("scheduler unavailable") },
+            clearRetryNeeded = {
+                BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                    preferences = preferences,
+                    key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                    needed = false,
+                )
+            },
+            onRetryOutcome = { outcomes += it },
+        )
+
+        assertFalse(succeeded)
+        assertTrue(preferences.getBoolean(BackupSettingsBridge.HYDRATION_RETRY_NEEDED, false))
+        assertEquals(
+            listOf(BackupSettingsBridge.RestoreSchedulerRetryOutcome.RETRY_FAILED),
+            outcomes,
+        )
+    }
+
+    @Test fun hydrationRetryStateMustBeDurableBeforeRestoreCleanup() {
+        val preferences = FakeSharedPreferences(commitResult = false)
+
+        assertThrows(java.io.IOException::class.java) {
+            BackupSettingsBridge.persistRestoreSchedulerRetryNeeded(
+                preferences = preferences,
+                key = BackupSettingsBridge.HYDRATION_RETRY_NEEDED,
+                needed = true,
+            )
+        }
+        assertFalse(preferences.contains(BackupSettingsBridge.HYDRATION_RETRY_NEEDED))
+    }
+
+    @Test fun confirmedRestorePersistsHydrationFailureBeforeAdvancing() {
+        val events = mutableListOf<String>()
+        var retryNeeded: Boolean? = null
+
+        val reconciled = BackupSettingsBridge.reconcileSchedulerForConfirmedRestore(
+            operation = {
+                events += "reconcile"
+                throw IllegalStateException("scheduler unavailable")
+            },
+            onFailure = { events += "diagnostic" },
+            persistRetryNeeded = { needed ->
+                events += "persist"
+                retryNeeded = needed
+            },
+        )
+
+        assertFalse(reconciled)
+        assertEquals(true, retryNeeded)
+        assertEquals(listOf("reconcile", "diagnostic", "persist"), events)
+    }
+
+    @Test fun hydrationRetryDiagnosticsContainOnlyFixedCategories() {
+        val expectedOutcomes = listOf(
+            "retry_completed",
+            "retry_failed",
+            "state_read_failed",
+            "state_clear_failed",
+        )
+        assertEquals(
+            expectedOutcomes,
+            BackupSettingsBridge.RestoreSchedulerRetryOutcome.entries.map { it.wireValue },
+        )
+        BackupSettingsBridge.RestoreSchedulerRetryOutcome.entries.forEach { outcome ->
+            listOf("hydration", "daily_review").forEach { component ->
+                val fields = BackupSettingsBridge.restoreSchedulerRetryDiagnosticFields(
+                    outcome,
+                    component,
+                )
+                assertEquals(setOf("outcome", "component"), fields.keys)
+                assertEquals(component, fields["component"])
+                assertTrue(fields.getValue("outcome").matches(Regex("[a-z_]+")))
+                val serialized = fields.entries.joinToString("|") { "${it.key}=${it.value}" }
+                assertFalse(serialized.contains("device", ignoreCase = true))
+                assertFalse(serialized.contains("source", ignoreCase = true))
+                assertFalse(serialized.contains("member", ignoreCase = true))
+                assertFalse(serialized.contains("value", ignoreCase = true))
+            }
+        }
     }
 
     // ── Codec: whitelist + type enforcement ──────────────────────────────────────

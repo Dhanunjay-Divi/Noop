@@ -243,7 +243,7 @@ private struct DevicesContent: View {
             }
             Button("Cancel", role: .cancel) { probeTarget = nil }
         } message: { _ in
-            Text("The WHOOP 4.0 reboot frame isn't confirmed - a normal Restart is ignored (#235). Send each candidate and watch BOTH the strap log and the strap itself. “no disconnect within 12s” means the strap ignored the frame. A “link dropped” line means the frame reached the strap - but a dropped link alone isn't a reboot: a real reboot also switches the strap's sensor light off for a few seconds, so if the light stayed on it was just a dropped connection, not a reboot. Non-destructive - your data is kept. Please share the log so we can pin the real frame.")
+            Text("The legacy band reboot frame isn't confirmed - a normal Restart is ignored (#235). Send each candidate and watch both the band log and the band itself. “No disconnect within 12s” means the band ignored the frame. A “link dropped” line means the frame reached the band, but a dropped link alone isn't a reboot: a real reboot also switches the sensor light off for a few seconds. Non-destructive - your data is kept. Please share the log so we can pin the real frame.")
         }
         // #592 extended-battery opcode probe: read-only, dumps the strap's full raw reply so a capture
         // settles the disputed GET_EXTENDED_BATTERY_INFO number (98 vs an APK decompile's 87).
@@ -255,7 +255,7 @@ private struct DevicesContent: View {
             Button("Send probe (read-only)") { model.probeExtendedBatteryInfo(); batteryProbeTarget = nil }
             Button("Cancel", role: .cancel) { batteryProbeTarget = nil }
         } message: { _ in
-            Text("Two independent protocol tables disagree on the extended-battery opcode (98 vs 87). This sends the curated read-only 98 and shows the strap's full raw reply. A battery-style payload confirms 98 on your firmware; a short stub means it stays ambiguous. Nothing is written to the strap.")
+            Text("Two independent protocol tables disagree on the extended-battery opcode (98 vs 87). This sends the curated read-only 98 and shows the band's full raw reply. A battery-style payload confirms 98 on your firmware; a short stub means it stays ambiguous. Nothing is written to the band.")
         }
         // #592 probe result: the strap's reply (or a "waiting…" state), readable + copyable in place.
         .sheet(isPresented: Binding(get: { live.extendedBatteryProbe != nil },
@@ -518,6 +518,14 @@ private struct DeviceCard: View {
                 // mislabel e.g. a "Blood oxygen" chip when no SpO₂ % ever comes off the strap).
                 capabilityRow(symbol: "waveform.path.ecg", text: profile.captures,
                               tint: StrandPalette.textSecondary)
+                // Keep the estimate/capability caveat beside the line it qualifies. The disclosure
+                // below remains for firmware and protocol diagnostics.
+                if !profile.footnote.isEmpty {
+                    Text(profile.footnote)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 // What NOOP USES it for — the scores/screens this device drives.
                 capabilityRow(symbol: "bolt.fill", text: profile.powers,
                               tint: StrandPalette.textSecondary)
@@ -610,11 +618,16 @@ private struct DeviceCard: View {
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("noop.device.\(device.id).name")
-                Text(profile.displayModel)
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                if DeviceCapabilityProfile.shouldShowModel(
+                    displayName: device.displayName,
+                    displayModel: profile.displayModel
+                ) {
+                    Text(profile.displayModel)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -636,9 +649,6 @@ private struct DeviceCard: View {
             VStack(alignment: .leading, spacing: 9) {
                 if device.sourceKind == .oura && !isLiveConnected && device.status == .paired {
                     ouraLocalStateNote
-                }
-                if !profile.footnote.isEmpty {
-                    technicalLine(symbol: "info.circle", text: profile.footnote)
                 }
                 if let fw = liveFirmware {
                     technicalLine(symbol: "cpu", text: String(localized: "Firmware \(fw)"))
@@ -896,6 +906,13 @@ struct DeviceCapabilityProfile {
     let powers: String         // the NOOP scores / screens this device drives
     let footnote: String       // one short honest caveat line ("*" estimates + the SpO₂/steps notes)
 
+    static func shouldShowModel(displayName: String, displayModel: String) -> Bool {
+        displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare(
+                displayModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            ) != .orderedSame
+    }
+
     static func make(for d: PairedDevice) -> DeviceCapabilityProfile {
         // FTMS gym machine: a live machine + (when reported) HR session, recorded via the existing
         // live-workout path. Honest — we surface the machine's metrics + HR live; the session is
@@ -1039,7 +1056,7 @@ private struct ExtendedBatteryProbeResultView: View {
                 .font(StrandFont.title2)
                 .foregroundStyle(StrandPalette.textPrimary)
             if waiting {
-                Text("Waiting for the strap's reply…")
+                Text("Waiting for the band's reply…")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
             } else {
@@ -1083,7 +1100,7 @@ private struct BodyLocationProbeSheets: ViewModifier {
                 Button("Send probe (read-only)") { model.probeBodyLocationAndStatus(); target = nil }
                 Button("Cancel", role: .cancel) { target = nil }
             } message: { _ in
-                Text("Sends the read-only GET_BODY_LOCATION_AND_STATUS (0x54) and shows the strap's full raw reply, decoding the body-location record (revision / location / confidence / status) on WHOOP 4.0. Nothing is written to the strap, and it never changes wear detection or scoring.")
+                Text("Sends the read-only GET_BODY_LOCATION_AND_STATUS (0x54) and shows the band's full raw reply, decoding the body-location record on the legacy band. Nothing is written to the band, and it never changes wear detection or scoring.")
             }
             .sheet(isPresented: Binding(get: { live.bodyLocationProbe != nil },
                                         set: { if !$0 { model.clearBodyLocationProbe() } })) {
@@ -1108,7 +1125,7 @@ private struct BodyLocationProbeResultView: View {
                 .font(StrandFont.title2)
                 .foregroundStyle(StrandPalette.textPrimary)
             if waiting {
-                Text("Waiting for the strap's reply…")
+                Text("Waiting for the band's reply…")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
             } else {
@@ -1196,7 +1213,7 @@ private struct EcgWristSheet: View {
             Text("Which wrist do you wear it on?")
                 .font(StrandFont.title2)
                 .foregroundStyle(StrandPalette.textPrimary)
-            Text("This choice is written to the strap and persists after disconnecting. The left/right wire mapping is inferred, not yet hardware-validated; selecting the other wrist reverses it.")
+            Text("This choice is written to the band and persists after disconnecting. The left/right wire mapping is inferred, not yet hardware-validated; selecting the other wrist reverses it.")
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.statusWarning)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1228,7 +1245,7 @@ private struct EcgProbeResultView: View {
                 .foregroundStyle(StrandPalette.statusWarning)
                 .fixedSize(horizontal: false, vertical: true)
             if waiting {
-                ProgressView("Listening for the strap for 30 seconds…")
+                ProgressView("Listening for the band for 30 seconds…")
             } else {
                 ScrollView {
                     Text(text)

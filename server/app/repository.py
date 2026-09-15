@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import json
 from collections import Counter
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -55,6 +57,10 @@ class FriendForbiddenError(Exception):
     """Raised when a profile does not own the requested social transition."""
 
 
+class MigrationManifestMismatchError(RuntimeError):
+    """Raised when a database does not match this build's immutable migrations."""
+
+
 FRIEND_METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "charge": ("recovery",),
     "effort": ("effort",),
@@ -66,6 +72,12 @@ FRIEND_METRIC_ALIASES: dict[str, tuple[str, ...]] = {
 FRIEND_DAILY_METRICS = frozenset(
     metric for aliases in FRIEND_METRIC_ALIASES.values() for metric in aliases
 )
+
+SAFETY_WRITER_COMPATIBILITY_BUNDLE = (
+    "038_managed_safety_band_sos.sql",
+    "041_managed_safety_writer_compatibility.sql",
+)
+SCHEMA_MIGRATION_LOCK_NAME = "noop_schema_migrations"
 
 
 def _friend_pair(first: str, second: str) -> tuple[str, str]:
@@ -1759,55 +1771,73 @@ class PostgresRepository:
             raise
 
     async def _run_migrations(self, connection: Any) -> None:
-        """Apply immutable SQL migrations once, in lexical version order."""
+        """Apply immutable SQL migrations once with explicit compatibility bundles."""
 
         await connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS noop_schema_migrations (
-                version text PRIMARY KEY,
-                checksum char(64) NOT NULL,
-                applied_at timestamptz NOT NULL DEFAULT now()
-            )
-            """
-        )
-        await connection.execute(
-            "SELECT pg_advisory_lock(hashtext('noop_schema_migrations'))"
+            "SELECT pg_advisory_lock(hashtext($1))",
+            SCHEMA_MIGRATION_LOCK_NAME,
         )
         try:
+            await connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS noop_schema_migrations (
+                    version text PRIMARY KEY,
+                    checksum char(64) NOT NULL,
+                    applied_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
             migrations = self._migration_files()
             if not migrations:
                 raise RuntimeError("no database migrations were found")
-            for path in migrations:
-                body = path.read_text(encoding="utf-8")
-                checksum = hashlib.sha256(body.encode("utf-8")).hexdigest()
-                applied = await connection.fetchrow(
-                    """
-                    SELECT checksum
-                    FROM noop_schema_migrations
-                    WHERE version = $1
-                    """,
-                    path.name,
+            rows = await connection.fetch(
+                "SELECT version, checksum FROM noop_schema_migrations"
+            )
+            applied = {
+                str(row["version"]): str(row["checksum"]).strip() for row in rows
+            }
+            expected = self._migration_manifest(migrations)
+            if set(applied) - set(expected):
+                raise MigrationManifestMismatchError(
+                    "database has applied migrations that are absent from this build"
                 )
-                if applied is not None:
-                    if applied["checksum"].strip() != checksum:
-                        raise RuntimeError(
-                            f"applied migration {path.name} has changed; "
-                            "create a new migration instead"
-                        )
-                    continue
-                async with connection.transaction():
-                    await connection.execute(body)
-                    await connection.execute(
-                        """
-                        INSERT INTO noop_schema_migrations (version, checksum)
-                        VALUES ($1, $2)
-                        """,
-                        path.name,
-                        checksum,
+            for version, checksum in applied.items():
+                if expected[version] != checksum:
+                    raise MigrationManifestMismatchError(
+                        "an applied migration checksum does not match this build"
                     )
+
+            for batch in self._migration_batches(migrations, set(applied)):
+                async with connection.transaction():
+                    if any(
+                        path.name in SAFETY_WRITER_COMPATIBILITY_BUNDLE
+                        for path in batch
+                    ):
+                        # Prevent a prior writer from observing 038's NOT NULL
+                        # contract before 041's compatibility trigger is active.
+                        await connection.execute(
+                            """
+                            LOCK TABLE managed_safety_page_quota_events
+                            IN ACCESS EXCLUSIVE MODE
+                            """
+                        )
+                    for path in batch:
+                        payload = path.read_bytes()
+                        checksum = hashlib.sha256(payload).hexdigest()
+                        body = payload.decode("utf-8")
+                        await connection.execute(body)
+                        await connection.execute(
+                            """
+                            INSERT INTO noop_schema_migrations (version, checksum)
+                            VALUES ($1, $2)
+                            """,
+                            path.name,
+                            checksum,
+                        )
         finally:
             await connection.execute(
-                "SELECT pg_advisory_unlock(hashtext('noop_schema_migrations'))"
+                "SELECT pg_advisory_unlock(hashtext($1))",
+                SCHEMA_MIGRATION_LOCK_NAME,
             )
 
     async def shutdown(self) -> None:
@@ -1816,24 +1846,122 @@ class PostgresRepository:
             self._pool = None
 
     async def ready(self) -> bool:
-        pool = self._require_pool()
         try:
-            await pool.fetchval("SELECT 1")
-            expected = {
-                path.name: hashlib.sha256(
-                    path.read_text(encoding="utf-8").encode("utf-8")
-                ).hexdigest()
-                for path in self._migration_files()
-            }
-            rows = await pool.fetch(
-                "SELECT version, checksum FROM noop_schema_migrations"
-            )
-            applied = {
-                str(row["version"]): str(row["checksum"]).strip() for row in rows
-            }
-            return applied == expected
+            await self.require_current_migration_manifest()
+            return True
         except Exception:
             return False
+
+    async def require_current_migration_manifest(self) -> None:
+        """Fail closed unless the database exactly matches this build."""
+
+        pool = self._require_pool()
+        await self._require_current_migration_manifest(pool)
+
+    @asynccontextmanager
+    async def maintenance_guard(self) -> AsyncIterator[None]:
+        """Hold schema compatibility stable for one bounded maintenance run.
+
+        The shared session lock is acquired before any operation-specific lock.
+        Migration uses the exclusive form of the same advisory lock, so it
+        cannot commit a new schema while a destructive lifecycle operation is
+        running. A dedicated connection holds the guard so a size-one
+        application pool remains available to the protected operation. The
+        lifecycle operation keeps its own short transactions and may perform
+        object-store work without opening one cross-system database transaction.
+        """
+
+        self._require_pool()
+        try:
+            import asyncpg
+        except ImportError as exc:  # pragma: no cover - deployment dependency
+            raise RuntimeError("asyncpg is required for PostgreSQL storage") from exc
+        connection = await asyncpg.connect(
+            dsn=self.database_url,
+            command_timeout=120,
+            statement_cache_size=self.statement_cache_size,
+        )
+        try:
+            await connection.execute(
+                "SELECT pg_advisory_lock_shared(hashtext($1))",
+                SCHEMA_MIGRATION_LOCK_NAME,
+            )
+            try:
+                await self._require_current_migration_manifest(connection)
+                yield
+            finally:
+                await connection.execute(
+                    "SELECT pg_advisory_unlock_shared(hashtext($1))",
+                    SCHEMA_MIGRATION_LOCK_NAME,
+                )
+        finally:
+            await connection.close()
+
+    async def _require_current_migration_manifest(self, connection: Any) -> None:
+        await connection.fetchval("SELECT 1")
+        expected = self._migration_manifest(self._migration_files())
+        rows = await connection.fetch(
+            "SELECT version, checksum FROM noop_schema_migrations"
+        )
+        applied = {str(row["version"]): str(row["checksum"]).strip() for row in rows}
+        # Exact equality is intentional. This rejects missing, changed, and
+        # forward/unknown migrations before a mutation-capable workload runs.
+        if applied != expected:
+            raise MigrationManifestMismatchError(
+                "database migration manifest does not match this build"
+            )
+
+    @staticmethod
+    def _migration_manifest(migrations: list[Path]) -> dict[str, str]:
+        return {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in migrations
+        }
+
+    @staticmethod
+    def _migration_batches(
+        migrations: list[Path],
+        applied_versions: set[str],
+    ) -> list[tuple[Path, ...]]:
+        by_name = {path.name: path for path in migrations}
+        missing_bundle_files = [
+            name for name in SAFETY_WRITER_COMPATIBILITY_BUNDLE if name not in by_name
+        ]
+        if missing_bundle_files:
+            raise RuntimeError(
+                "Safety writer compatibility migration bundle is incomplete: "
+                + ", ".join(missing_bundle_files)
+            )
+        if (
+            SAFETY_WRITER_COMPATIBILITY_BUNDLE[1] in applied_versions
+            and SAFETY_WRITER_COMPATIBILITY_BUNDLE[0] not in applied_versions
+        ):
+            raise RuntimeError(
+                "Safety writer compatibility migration was applied before its "
+                "band-SOS prerequisite"
+            )
+
+        bundle_floor = SAFETY_WRITER_COMPATIBILITY_BUNDLE[0]
+        batches = [
+            (path,)
+            for path in migrations
+            if path.name < bundle_floor and path.name not in applied_versions
+        ]
+        pending_bundle = tuple(
+            by_name[name]
+            for name in SAFETY_WRITER_COMPATIBILITY_BUNDLE
+            if name not in applied_versions
+        )
+        if pending_bundle:
+            batches.append(pending_bundle)
+        batches.extend(
+            (path,)
+            for path in migrations
+            if path.name >= bundle_floor
+            and path.name not in SAFETY_WRITER_COMPATIBILITY_BUNDLE
+            and path.name not in applied_versions
+        )
+        return batches
 
     def _migration_files(self) -> list[Path]:
         migration_dir = Path(__file__).resolve().parent.parent / "migrations"

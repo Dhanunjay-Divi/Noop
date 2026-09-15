@@ -76,7 +76,7 @@ class WeeklyDigestCardFormattingTest {
 
     @Test fun emptyWeekMeanIsADash() {
         val s = summary(WeeklyMetric.EFFORT, thisMean = 0.0, thisN = 0, prevMean = 40.0, prevN = 5)
-        assertEquals("-", meanText(s, EffortScale.HUNDRED))
+        assertEquals(NoopDisplayFormat.MISSING, meanText(s, EffortScale.HUNDRED))
     }
 
     // ── the engine's Effort display factor for focal sentences ──────────────────
@@ -99,15 +99,32 @@ class WeeklyDigestCardFormattingTest {
         assertEquals("<1%", deltaText(s))
     }
 
-    @Test fun unpercentableDeltaAlsoReadsLessThanOnePercent() {
-        // previous mean 0 → pctChange null; never leak a raw stored-scale number.
+    @Test fun unpercentableDeltaReadsNew() {
+        // previous mean 0 → pctChange null; there is no denominator for a percentage.
         val s = summary(WeeklyMetric.EFFORT, thisMean = 40.0, thisN = 5, prevMean = 0.0, prevN = 3)
-        assertEquals("<1%", deltaText(s))
+        assertEquals("new", deltaText(s))
+        assertFalse(hasDefinedPercent(s))
     }
 
     @Test fun missingSideStillReadsNew() {
         val s = summary(WeeklyMetric.CHARGE, thisMean = 60.0, thisN = 5, prevMean = 0.0, prevN = 0)
         assertEquals("new", deltaText(s))
+        assertFalse(hasDefinedPercent(s))
+    }
+
+    @Test fun importedRestDisclosureIsScopedToTheSelectedWeek() {
+        assertTrue(
+            hasImportedRestScore(
+                mapOf("2026-09-09" to 94.0, "2026-09-01" to 88.0),
+                anchorDay = "2026-09-12",
+            ),
+        )
+        assertFalse(
+            hasImportedRestScore(
+                mapOf("2026-09-01" to 88.0),
+                anchorDay = "2026-09-12",
+            ),
+        )
     }
 
     // ── rough comparisons (either side 1-2 days) ────────────────────────────────
@@ -118,6 +135,11 @@ class WeeklyDigestCardFormattingTest {
         assertFalse(summary(WeeklyMetric.CHARGE, 56.0, 5, 50.0, 5).isRoughComparison)
         // 3 days each side is exactly the focus floor: still a real comparison.
         assertFalse(summary(WeeklyMetric.CHARGE, 56.0, 3, 50.0, 3).isRoughComparison)
+    }
+
+    @Test fun recoveryDeclineUsesCurrentBandToneInsteadOfCriticalDirection() {
+        val decline = summary(WeeklyMetric.CHARGE, 72.0, 5, 82.0, 5)
+        assertEquals(WeeklyDigestChipTone.RECOVERY_BAND, weeklyDigestChipTone(decline))
     }
 
     @Test fun sparsePreviousWeekIsRough() {
@@ -132,5 +154,25 @@ class WeeklyDigestCardFormattingTest {
         // With a side at n=0 the chip already reads "new" and wowGoodness is 0 (neutral);
         // rough is only about thin-but-present sides.
         assertFalse(summary(WeeklyMetric.CHARGE, 60.0, 5, 0.0, 0).isRoughComparison)
+    }
+
+    @Test fun mixedImportedAndComputedSleepIsDisclosedToTalkBack() {
+        val s = summary(WeeklyMetric.REST, 78.0, 5, 74.0, 5)
+        assertEquals(
+            "Sleep Score: 78 this week, up 5% week over week, a good sign. Imported sleep not included.",
+            scoreAccessibility(
+                s,
+                EffortScale.HUNDRED,
+                importedRestDisclosure = "Imported sleep not included",
+            ),
+        )
+    }
+
+    @Test fun zeroBaselineIsNotSpokenAsDirectionalPercent() {
+        val s = summary(WeeklyMetric.EFFORT, 40.0, 5, 0.0, 3)
+        assertEquals(
+            "Effort: 40.0 / 100 this week, not comparable with last week.",
+            scoreAccessibility(s, EffortScale.HUNDRED, importedRestDisclosure = null),
+        )
     }
 }

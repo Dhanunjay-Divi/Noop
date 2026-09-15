@@ -61,6 +61,7 @@ data class ManagedSafetyContact(
 
 data class ManagedSafetyContacts(
     val contacts: List<ManagedSafetyContact>,
+    val deliveryCapableCount: Int,
     val minimumRequired: Int,
     val maximumAllowed: Int,
 )

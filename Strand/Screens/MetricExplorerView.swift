@@ -277,10 +277,22 @@ private let readingShortDateFormatter: DateFormatter = {
 /// MetricDetailView. A faint trailing "•" marks metrics whose series is empty.
 struct MetricExplorerView: View {
     @EnvironmentObject var repo: Repository
+    @EnvironmentObject private var profile: ProfileStore
     /// metric.id → whether its series is empty. Filled INCREMENTALLY by each visible category's probe; a metric
     /// absent from the map simply has no empty-dot yet (rows never wait on it — see `MetricRow`).
     @State private var emptyByID: [String: Bool] = [:]
     @State private var probedRefreshSeq: Int?
+
+    private var canPresentBMI: Bool {
+        BodyProfilePolicy.canPresentAdultBMI(
+            age: profile.age,
+            currentWeightKg: profile.weightKg,
+            heightCm: profile.heightCm,
+            ageConfirmed: profile.ageInputConfirmed,
+            heightConfirmed: profile.heightInputConfirmed,
+            currentWeightConfirmed: profile.weightInputConfirmed
+        )
+    }
 
     var body: some View {
         #if os(macOS)
@@ -320,7 +332,7 @@ struct MetricExplorerView: View {
             .padding(.bottom, NoopMetrics.sectionGap - 20)
 
             ForEach(MetricCatalog.categories, id: \.self) { category in
-                let metrics = MetricCatalog.inCategory(category)
+                let metrics = MetricCatalog.inCategory(category, allowsBMI: canPresentBMI)
                 if !metrics.isEmpty {
                     VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                         // Localized at the render site only; `category` itself stays the raw
@@ -509,6 +521,17 @@ struct MetricDetailView: View {
     @State private var refreshing = false
     /// Standard Apple-style information controls in the education card open the concise explainer.
     @State private var showingMetricExplanation = false
+
+    private var canPresentBMI: Bool {
+        BodyProfilePolicy.canPresentAdultBMI(
+            age: profile.age,
+            currentWeightKg: profile.weightKg,
+            heightCm: profile.heightCm,
+            ageConfirmed: profile.ageInputConfirmed,
+            heightConfirmed: profile.heightInputConfirmed,
+            currentWeightConfirmed: profile.weightInputConfirmed
+        )
+    }
 
     // Imperial/Metric display preference (D#103). Display-only: weight (kg) and skin temp (°C) re-label
     // here; everything else is unit-agnostic and renders unchanged.
@@ -756,7 +779,16 @@ struct MetricDetailView: View {
 
     // MARK: Body
 
+    @ViewBuilder
     var body: some View {
+        if metric.key == "bmi" && !canPresentBMI {
+            HealthView()
+        } else {
+            metricBody
+        }
+    }
+
+    private var metricBody: some View {
         // Compute the heavy window derivations ONCE per body eval, then hand them to
         // the subviews — instead of every subview re-deriving `effectiveRange` /
         // `windowed` (each of which re-parses + re-filters the full history).
@@ -1004,7 +1036,8 @@ struct MetricDetailView: View {
         }
 
         let relevantKeys = Set(education.relatedKeys)
-        let candidates = MetricCatalog.all.filter { $0.id != metric.id }
+        let candidates = MetricCatalog.visible(allowsBMI: canPresentBMI)
+            .filter { $0.id != metric.id }
         let relevant = candidates.filter { relevantKeys.contains($0.key) }
 
         // Load the handful used by "What may be influencing it" first. Publishing this partial set lets
@@ -1052,7 +1085,8 @@ struct MetricDetailView: View {
             if Task.isCancelled { correlationsLoading = false }
         }
 
-        for other in MetricCatalog.all where other.id != metric.id {
+        for other in MetricCatalog.visible(allowsBMI: canPresentBMI)
+        where other.id != metric.id {
             guard !Task.isCancelled else { return }
             if others.contains(where: { $0.metric.id == other.id }) { continue }
             let s = await repo.exploreSeries(key: other.key, source: other.source)

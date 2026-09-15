@@ -403,7 +403,7 @@ struct LiveView: View {
                 .foregroundStyle(StrandPalette.textPrimary)
             Text(liveHRConnection
                  ? "Start a workout when the stream matters. NOOP records the interval, HR, peak, average and effort from the same live feed."
-                 : "Connect the strap first, then mark a workout from the live stream.")
+                 : "Connect Noop Band first, then mark a workout from the live stream.")
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -424,7 +424,7 @@ struct LiveView: View {
                 model.getBattery()
             }
             .disabled(!activeConnection)
-            .help("Refresh strap battery and connection state.")
+            .help("Refresh Noop Band battery and connection state.")
 
             // Manual HRV snapshot (#127) — a still, seated 60s R-R reading. Needs the live R-R
             // stream, so it's gated on a bonded connection just like the workout/refresh actions.
@@ -434,7 +434,7 @@ struct LiveView: View {
             .disabled(!activeConnection)
             .help(activeConnection
                   ? "Take a 60-second seated HRV reading from the live R-R stream."
-                  : "Connect your strap first. The reading needs the live R-R stream.")
+                  : "Connect Noop Band first. The reading needs the live R-R stream.")
         }
     }
 
@@ -643,7 +643,7 @@ struct LiveView: View {
                 .accessibilityHidden(true)
 
             HStack(spacing: 0) {
-                offlineHeroMetric("Worn", "-")
+                offlineHeroMetric("Worn", StrandFormat.missing)
                 offlineMetricDivider
                 offlineHeroMetric("Last sync", LiveSyncFormat.lastSyncLabel(live.lastSyncedAt))
             }
@@ -705,7 +705,7 @@ struct LiveView: View {
             HStack(spacing: 6) {
                 LiveBatteryGlyph(level: live.batteryPct)
                     .frame(width: 25, height: 12)
-                Text(live.batteryPct.map { "\(Int($0.rounded()))%" } ?? "-")
+                Text(live.batteryPct.map { "\(Int($0.rounded()))%" } ?? StrandFormat.missing)
                     .font(StrandFont.captionNumber)
                     .foregroundStyle(StrandPalette.onDarkPrimary)
             }
@@ -873,7 +873,7 @@ struct LiveView: View {
             model.buzzStrapOnce()
         }
         .disabled(!activeConnection)
-        .help("Fire a test haptic buzz on the strap (requires an active strap connection)")
+        .help("Fire a test haptic buzz on Noop Band (requires an active band connection)")
     }
 
     private var disconnectButton: some View {
@@ -1097,8 +1097,13 @@ private struct LiveHeaderStats: View {
     var body: some View {
         HStack(spacing: 16) {
             stat(String(localized: "Device"), deviceName)
-            stat(String(localized: "Battery"), live.batteryPct.map { "\(Int($0))%" } ?? "-")
-            stat(String(localized: "Worn"), liveLink ? (wornNow ? String(localized: "Yes") : String(localized: "No")) : "-")
+            stat(String(localized: "Battery"), live.batteryPct.map { "\(Int($0))%" } ?? StrandFormat.missing)
+            stat(
+                String(localized: "Worn"),
+                liveLink
+                    ? (wornNow ? String(localized: "Yes") : String(localized: "No"))
+                    : StrandFormat.missing
+            )
             stat(String(localized: "Last sync"), lastSyncLabel)
         }
     }
@@ -1171,7 +1176,7 @@ private struct LiveHeartReadout: View {
                             .foregroundStyle(tint)
                             .shadow(color: .black.opacity(0.4), radius: 6, y: 1)
                     } else {
-                        Text("-")
+                        Text(StrandFormat.missing)
                             .font(StrandFont.rounded(88, weight: .semibold))
                             // The vessel well is permanently dark in every app theme.
                             .foregroundStyle(StrandPalette.onDarkPrimary)
@@ -1265,9 +1270,9 @@ private struct LivePhysiology: View {
                 // stream the real values (and their cyan/green/amber accents) return.
                 proofMetric("R-R", activeConnection ? rrSummary : String(localized: "Offline"),
                             StrandPalette.metricCyan, offline: !activeConnection)
-                proofMetric(String(localized: "Frame"), activeConnection ? (live.lastFrameType ?? "-") : String(localized: "Offline"),
+                proofMetric(String(localized: "Frame"), activeConnection ? (live.lastFrameType ?? StrandFormat.missing) : String(localized: "Offline"),
                             StrandPalette.accent, offline: !activeConnection)
-                proofMetric(String(localized: "Event"), activeConnection ? (live.lastEvent ?? "-") : String(localized: "Offline"),
+                proofMetric(String(localized: "Event"), activeConnection ? (live.lastEvent ?? StrandFormat.missing) : String(localized: "Offline"),
                             StrandPalette.statusWarning, offline: !activeConnection)
             }
         }
@@ -1331,7 +1336,7 @@ private struct LivePhysiology: View {
     }
 
     private var rrSummary: String {
-        guard let last = live.rr.last else { return "-" }
+        guard let last = live.rr.last else { return StrandFormat.missing }
         return "\(last) ms"
     }
 
@@ -1445,7 +1450,7 @@ private struct LiveSignalTrustRail: View {
             // Oura until its WEAR_EVENT is wired to `worn` (follow-up).
             .init(title: String(localized: "Wear state"),
                   value: liveLink ? (wornNow ? String(localized: "On wrist") : String(localized: "Off wrist")) : String(localized: "Unknown"),
-                  detail: liveLink ? (wornNow ? String(localized: "Eligible for live physiology") : String(localized: "Wear the strap for scoring")) : String(localized: "Connect to read wear state"),
+                  detail: liveLink ? (wornNow ? String(localized: "Eligible for live physiology") : String(localized: "Wear your wearable for scoring")) : String(localized: "Connect to read wear state"),
                   icon: "sensor.tag.radiowaves.forward",
                   tint: !liveLink ? StrandPalette.textTertiary : wornNow ? StrandPalette.accent : StrandPalette.statusWarning,
                   frac: !liveLink ? nil : (wornNow ? 1 : 0.25))
@@ -1463,10 +1468,10 @@ private struct ActiveWorkoutLive: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: NoopMetrics.gap) {
-                stat("HR", model.bpm.map { "\($0)" } ?? "-",
+                stat("HR", model.bpm.map { "\($0)" } ?? StrandFormat.missing,
                      tint: model.bpm == nil ? StrandPalette.textPrimary : StrandPalette.metricRose)
-                stat(String(localized: "Avg"), workout.avgHr > 0 ? "\(workout.avgHr)" : "-")
-                stat(String(localized: "Peak"), workout.peakHr > 0 ? "\(workout.peakHr)" : "-")
+                stat(String(localized: "Avg"), workout.avgHr > 0 ? "\(workout.avgHr)" : StrandFormat.missing)
+                stat(String(localized: "Peak"), workout.peakHr > 0 ? "\(workout.peakHr)" : StrandFormat.missing)
                 stat(String(localized: "Effort"), UnitFormatter.effortDisplay(workout.liveStrain, scale: effortScale),
                      tint: StrandPalette.strainColor(workout.liveStrain))
             }
@@ -1496,7 +1501,7 @@ private struct LiveLogCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                Text("STRAP LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
+                Text("BAND LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.textSecondary)
                 Spacer()
                 // Export the log so people can attach it to a bug report (issue #17 — macOS users
@@ -1564,7 +1569,7 @@ private struct LiveLogCard: View {
 /// both read identically.
 private enum LiveSyncFormat {
     static func lastSyncLabel(_ ts: TimeInterval?) -> String {
-        guard let ts else { return String(localized: "Never") }
+        guard let ts else { return StrandFormat.missing }
         let date = Date(timeIntervalSince1970: ts)
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short

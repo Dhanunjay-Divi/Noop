@@ -205,6 +205,7 @@ public actor ManagedHistoryExporter {
                 try await self.transport.createRestore(
                     requestID: requestID,
                     dataClasses: classes,
+                    includeDeletedDocuments: false,
                     authorization: credential
                 )
             }
@@ -348,6 +349,7 @@ public actor ManagedHistoryExporter {
                         snapshotAt: restore.snapshotAt,
                         after: pageCursor,
                         limit: pageSize,
+                        includeDeleted: false,
                         authorization: credential
                     )
                 }

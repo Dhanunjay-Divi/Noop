@@ -21,27 +21,34 @@ import WhoopStore
 /// Android has no shared `computing` lock (the forced post-backfill rescore runs on its own ioScope coroutine
 /// and is never dropped), so there is nothing to re-arm there.
 final class IntelligenceForcedRescoreRearmTests: XCTestCase {
+    private func historicalTimeZoneTimeline() -> AnalysisTimeZoneTimeline {
+        let timeZone = TimeZone.current
+        let firstDate = Date().addingTimeInterval(-400 * 86_400)
+        let firstObservation = Int(firstDate.timeIntervalSince1970)
+        return AnalysisTimeZoneTimeline(
+            observations: [
+                AnalysisTimeZoneObservation(
+                    observedAtSec: firstObservation,
+                    timeZoneIdentifier: timeZone.identifier,
+                    offsetSeconds: timeZone.secondsFromGMT(for: firstDate)
+                ),
+            ],
+            unresolvableBeforeTs: firstObservation
+        )
+    }
 
     /// Queue several real forced calls while the first production pass is suspended in its detached scan.
     /// Every overlapping call must be dropped, while their shared latch creates exactly one follow-up pass.
     @MainActor
     func testProductionForcedCallsDuringActivePassCollapseToOneRuntimeRerun() async throws {
-        let defaults = UserDefaults.standard
-        let watermarkKey = "noop.analyzeWatermark"
-        let priorWatermark = defaults.object(forKey: watermarkKey)
-        defer {
-            if let priorWatermark {
-                defaults.set(priorWatermark, forKey: watermarkKey)
-            } else {
-                defaults.removeObject(forKey: watermarkKey)
-            }
-        }
-
         let store = try await WhoopStore.inMemory()
         let repo = Repository(deviceId: "my-whoop")
         repo.setStoreForTesting(store)
         let engine = IntelligenceEngine(
             repo: repo, profile: ProfileStore(), deviceId: "my-whoop")
+        engine.setAnalysisTimeZoneTimelineForTesting(
+            historicalTimeZoneTimeline()
+        )
 
         let firstStarted = expectation(description: "first scoring pass acquired the gate")
         let rerunFinished = expectation(description: "single forced rerun finished")

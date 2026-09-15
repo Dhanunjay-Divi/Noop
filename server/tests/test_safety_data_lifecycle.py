@@ -59,6 +59,300 @@ async def _profile_with_contacts(
     return profile_id, token_hash, contact_ids
 
 
+async def _incident_with_location(
+    repository: MemorySafetyRepository,
+    *,
+    now: datetime,
+    expires_at: datetime | None = None,
+) -> tuple[str, str, list[str]]:
+    profile_id, _, contact_ids = await _profile_with_contacts(
+        repository,
+        now=now,
+    )
+    dispatch_id = str(uuid4())
+    await repository.create_dispatch(
+        dispatch_id=dispatch_id,
+        profile_id=profile_id,
+        idempotency_key=str(uuid4()),
+        request_hash=_digest(f"manual_sos-{dispatch_id}"),
+        trigger="manual_sos",
+        now=now,
+        expires_at=expires_at or now + timedelta(minutes=30),
+        voice_fallback_at=now + timedelta(seconds=90),
+    )
+    await repository.update_incident_location(
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        sequence=1,
+        latitude=37.7749,
+        longitude=-122.4194,
+        horizontal_accuracy_meters=12,
+        captured_at=now,
+        received_at=now,
+    )
+    return profile_id, dispatch_id, contact_ids
+
+
+async def _assert_terminal_location_deleted(
+    repository: MemorySafetyRepository,
+    *,
+    profile_id: str,
+    dispatch_id: str,
+    status: str,
+) -> None:
+    incident = await repository.dispatch(
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+    )
+    exported = await repository.export_profile(profile_id)
+    exported_incident = next(
+        row for row in exported["incidents"] if row["dispatch_id"] == dispatch_id
+    )
+
+    assert incident["status"] == status
+    assert incident["latest_location"] is None
+    assert dispatch_id not in repository._locations
+    assert exported_incident["status"] == status
+    assert exported_incident["latest_location"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "status"),
+    [("resolve", "resolved"), ("cancel", "cancelled")],
+)
+async def test_owner_terminal_transitions_delete_precise_location(
+    action: str,
+    status: str,
+) -> None:
+    repository = MemorySafetyRepository()
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
+    profile_id, dispatch_id, _ = await _incident_with_location(
+        repository,
+        now=now,
+    )
+
+    transitioned = await repository.transition_dispatch(
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        action=action,
+        note="owner completed incident",
+        now=now + timedelta(minutes=1),
+    )
+
+    assert transitioned["latest_location"] is None
+    await _assert_terminal_location_deleted(
+        repository,
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        status=status,
+    )
+
+
+@pytest.mark.asyncio
+async def test_expiry_sweep_deletes_precise_location() -> None:
+    repository = MemorySafetyRepository()
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
+    profile_id, dispatch_id, _ = await _incident_with_location(
+        repository,
+        now=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+
+    assert await repository.expire_due_dispatches(now=now + timedelta(minutes=5)) == 1
+
+    await _assert_terminal_location_deleted(
+        repository,
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        status="expired",
+    )
+
+
+@pytest.mark.asyncio
+async def test_elapsed_responder_action_deletes_precise_location() -> None:
+    repository = MemorySafetyRepository()
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
+    profile_id, dispatch_id, contact_ids = await _incident_with_location(
+        repository,
+        now=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+
+    with pytest.raises(SafetyConflictError, match="no longer accepting responses"):
+        await repository.record_responder_decision(
+            dispatch_id=dispatch_id,
+            contact_id=contact_ids[0],
+            decision="responding",
+            source="sms_link",
+            now=now + timedelta(minutes=5),
+        )
+
+    await _assert_terminal_location_deleted(
+        repository,
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        status="expired",
+    )
+
+
+@pytest.mark.asyncio
+async def test_elapsed_responder_preview_persists_expiry_and_deletes_location() -> None:
+    repository = MemorySafetyRepository()
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
+    profile_id, dispatch_id, contact_ids = await _incident_with_location(
+        repository,
+        now=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+
+    preview = await repository.responder_preview(
+        dispatch_id=dispatch_id,
+        contact_id=contact_ids[0],
+        now=now + timedelta(minutes=5),
+    )
+
+    assert preview is not None
+    assert preview["status"] == "expired"
+    assert preview["latest_location"] is None
+    await _assert_terminal_location_deleted(
+        repository,
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        status="expired",
+    )
+
+
+@pytest.mark.asyncio
+async def test_new_incident_preflight_deletes_elapsed_incident_location() -> None:
+    repository = MemorySafetyRepository()
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
+    profile_id, dispatch_id, _ = await _incident_with_location(
+        repository,
+        now=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+
+    await repository.create_dispatch(
+        dispatch_id=str(uuid4()),
+        profile_id=profile_id,
+        idempotency_key=str(uuid4()),
+        request_hash=_digest("replacement-manual-sos"),
+        trigger="manual_sos",
+        now=now + timedelta(minutes=5),
+        expires_at=now + timedelta(minutes=35),
+        voice_fallback_at=now + timedelta(minutes=6),
+    )
+
+    await _assert_terminal_location_deleted(
+        repository,
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        status="expired",
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_delivery_failures_delete_precise_location() -> None:
+    repository = MemorySafetyRepository()
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
+    profile_id, dispatch_id, _ = await _incident_with_location(
+        repository,
+        now=now,
+    )
+    for delivery in repository._deliveries.values():
+        if delivery["dispatch_id"] == dispatch_id:
+            delivery["max_attempts"] = 1
+
+    sms_jobs = await repository.claim_due_deliveries(
+        worker_id="worker-sms",
+        now=now,
+        lease_until=now + timedelta(seconds=30),
+        limit=10,
+    )
+    assert len(sms_jobs) == 2
+    for job in sms_jobs:
+        await repository.complete_delivery_attempt(
+            delivery_id=job["delivery_id"],
+            attempt_id=job["attempt_id"],
+            worker_id="worker-sms",
+            submission_status="failed",
+            provider_reference=None,
+            error="provider rejected delivery",
+            now=now + timedelta(seconds=1),
+            retry_at=now + timedelta(seconds=2),
+        )
+
+    voice_jobs = await repository.claim_due_deliveries(
+        worker_id="worker-voice",
+        now=now + timedelta(seconds=2),
+        lease_until=now + timedelta(seconds=32),
+        limit=10,
+    )
+    assert len(voice_jobs) == 2
+    for job in voice_jobs:
+        await repository.complete_delivery_attempt(
+            delivery_id=job["delivery_id"],
+            attempt_id=job["attempt_id"],
+            worker_id="worker-voice",
+            submission_status="failed",
+            provider_reference=None,
+            error="provider rejected delivery",
+            now=now + timedelta(seconds=3),
+            retry_at=now + timedelta(seconds=4),
+        )
+
+    await _assert_terminal_location_deleted(
+        repository,
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        status="failed",
+    )
+
+
+@pytest.mark.asyncio
+async def test_idempotent_terminal_replay_removes_legacy_coordinate() -> None:
+    repository = MemorySafetyRepository()
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
+    profile_id, dispatch_id, _ = await _incident_with_location(
+        repository,
+        now=now,
+    )
+    await repository.transition_dispatch(
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        action="resolve",
+        note=None,
+        now=now + timedelta(minutes=1),
+    )
+    repository._locations[dispatch_id] = {
+        "sequence": 2,
+        "latitude": 37.775,
+        "longitude": -122.419,
+        "horizontal_accuracy_meters": 10,
+        "captured_at": now + timedelta(seconds=1),
+        "received_at": now + timedelta(seconds=1),
+    }
+
+    exported = await repository.export_profile(profile_id)
+    assert exported["incidents"][0]["latest_location"] is None
+    replay = await repository.transition_dispatch(
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        action="resolve",
+        note=None,
+        now=now + timedelta(minutes=2),
+    )
+
+    assert replay["idempotent_replay"] is True
+    await _assert_terminal_location_deleted(
+        repository,
+        profile_id=profile_id,
+        dispatch_id=dispatch_id,
+        status="resolved",
+    )
+
+
 @pytest.mark.asyncio
 async def test_safety_token_rotation_is_versioned_retry_safe_and_private() -> None:
     repository = MemorySafetyRepository()

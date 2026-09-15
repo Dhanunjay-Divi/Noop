@@ -449,10 +449,16 @@ struct SettingsView: View {
                 rowDivider
                 FormRow(label: "Date of birth") {
                     HStack(spacing: 12) {
-                        Text("\(profile.age)")
-                            .font(StrandFont.bodyNumber)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                            .frame(minWidth: 28, alignment: .trailing)
+                        HStack(spacing: 4) {
+                            Text("Age")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                            Text("\(profile.age)")
+                                .font(StrandFont.bodyNumber)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .accessibilityHidden(true)
                         // #146: age is derived from the date of birth, so it advances on its own.
                         DatePicker("Date of birth",
                                    selection: $profile.dateOfBirth,
@@ -505,25 +511,33 @@ struct SettingsView: View {
                 }
                 rowDivider
                 FormRow(label: "BMI") {
-                    Text(FitnessAgeEngine.bmi(
-                        weightKg: profile.weightKg,
-                        heightCm: profile.heightCm
-                    ).formatted(.number.precision(.fractionLength(1))))
-                        .font(StrandFont.bodyNumber)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                        .accessibilityLabel("Body mass index")
-                        .accessibilityValue(FitnessAgeEngine.bmi(
-                            weightKg: profile.weightKg,
-                            heightCm: profile.heightCm
-                        ).formatted(.number.precision(.fractionLength(1))))
+                    if let bmi = profile.adultBMI {
+                        Text(bmi.formatted(.number.precision(.fractionLength(1))))
+                            .font(StrandFont.bodyNumber)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .accessibilityLabel("Body mass index")
+                            .accessibilityValue(
+                                bmi.formatted(.number.precision(.fractionLength(1)))
+                            )
+                    } else {
+                        Text(profile.ageInputConfirmed
+                             && profile.age < BodyProfilePolicy.adultMinimumAge
+                             ? "appwide.health.body_composition.bmi_under_20"
+                             : "appwide.health.body_composition.bmi_confirm_inputs")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                Text("BMI is a limited height-and-weight screening calculation. It is not a diagnosis or a measure of body composition.")
+                Text("appwide.health.body_composition.bmi_screening_note")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 rowDivider
                 FormRow(label: "Target weight (optional)") {
-                    if profile.targetWeightKg != nil {
+                    let availability = profile.targetWeightAvailability()
+                    if profile.targetWeightKg != nil, availability == .available {
                         HStack(spacing: 8) {
                             if massUnit == .pounds {
                                 poundsField(
@@ -550,7 +564,24 @@ struct SettingsView: View {
                             .help("Clear target weight")
                             .accessibilityLabel("Clear target weight")
                         }
-                    } else {
+                    } else if profile.targetWeightKg != nil {
+                        HStack(spacing: 8) {
+                            Text("appwide.health.body_composition.target_unavailable")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button {
+                                profile.setTargetWeightKg(nil)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear target weight")
+                            .accessibilityLabel("Clear target weight")
+                        }
+                    } else if availability == .available {
                         Button {
                             profile.setTargetWeightKg(profile.weightKg)
                         } label: {
@@ -561,9 +592,15 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                         .help("Add a target weight")
                         .accessibilityLabel("Add target weight")
+                    } else {
+                        Text("appwide.health.body_composition.target_unavailable")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Text("Optional and entirely your choice. NOOP does not recommend a target or a rate of change.")
+                Text("appwide.health.body_composition.target_safety_note")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1180,10 +1217,10 @@ struct SettingsView: View {
                 }
 
                 Divider().overlay(StrandPalette.hairline)
-                // MARK: Strap log — a Settings shortcut so people don't have to hunt for it on the Live
+                // MARK: Band log — a Settings shortcut so people don't have to hunt for it on the Live
                 // screen (#507: couldn't find it on Mac; #509: same on iPhone). Same text as the Live card.
                 HStack(spacing: 12) {
-                    Text("STRAP LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
+                    Text("BAND LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer()
                     Button("Copy") { FileExport.copyDiagnosticText(live.exportableLogText()) }
@@ -1454,7 +1491,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "testtube.2",
             title: "Test Centre",
-            blurb: "Turn on a test for the thing that's wrong, wear the strap, then tap Report. Your strap log, recalibrate, scheduled export and experimental probes all live here too."
+            blurb: "appwide.ui_audit.settings.test_centre"
         ) {
             NavigationLink(destination: TestCentreView()) {
                 HStack {
@@ -1669,15 +1706,13 @@ struct SettingsView: View {
         }
     }
 
-    /// Live Sessions (beta) — the silent-guardian in-workout coach. Default ON (the entry itself is
-    /// BETA-labelled on the Liquid Today); off removes the Start-session control entirely. Same key the
-    /// Today entry reads (`LiveSessionPrefs.betaKey`).
-    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = true
+    /// Live Sessions (beta) — explicit opt-in until supported-band cues are hardware validated.
+    @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = false
     private var liveSessionsCard: some View {
         SettingsSection(
             icon: "shield.lefthalf.filled",
             title: "Experimental · Live Sessions",
-            blurb: "A one-tap guarded workout: Noop Band watches your heart rate against a zone gated on today's Recovery and only vibrates to correct course. Silence means you're on track."
+            blurb: "Live heart-rate coaching against a range shaped by today's Recovery. The screen always shows state; wrist cues require a connected, bonded, supported band and enabled wrist alerts."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
                 Toggle(isOn: $liveSessionsBeta) {
@@ -1686,7 +1721,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
                 .toggleStyle(.noopSwitch)
-                Text("Silence-first Noop Band coaching during workouts.")
+                Text("appwide.live_session.start_detail")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1895,7 +1930,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
                 .toggleStyle(.noopSwitch)
-                Text("Saves every raw 5/MG frame (with a timestamp and the live heart rate) to a JSON file you can share to help map the biometric layout. This only records frames the strap already sent (it never writes to your strap), so it is safe to leave on. Export the file and attach it to a protocol-mapping issue.")
+                Text("appwide.ui_audit.settings.raw_capture_help")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1914,7 +1949,7 @@ struct SettingsView: View {
                         Spacer(minLength: 0)
                     }
                     // One-tap "matched pair" export (#510): hands a reporter BOTH the raw capture file
-                    // and the strap log together (timestamped, same minute) so a protocol-mapping issue
+                    // and the band log together (timestamped, same minute) so a protocol-mapping issue
                     // arrives with the frames AND the context that produced them.
                     NoopButton("Export raw + log", systemImage: "square.and.arrow.up.on.square", kind: .secondary) {
                         Task { await exportRawAndLog() }
@@ -1928,7 +1963,7 @@ struct SettingsView: View {
                                 .foregroundStyle(StrandPalette.textSecondary)
                         }
                     }
-                    Text("Saves the raw capture and the strap log together as a matched pair. Attach both to a protocol-mapping issue.")
+                    Text("Saves the raw capture and the band log together as a matched pair. Attach both to a protocol-mapping issue.")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1946,7 +1981,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "doc.text.magnifyingglass",
             title: "Diagnostics",
-            blurb: "A read-only export of the decoded sensor streams NOOP already stores. Works on any strap. Nothing is written to your device, and nothing is uploaded."
+            blurb: "appwide.ui_audit.settings.diagnostics_read_only"
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
                 // MARK: Export raw sensor data (CSV) — a read-only diagnostic over the decoded streams
@@ -2028,7 +2063,7 @@ struct SettingsView: View {
         }
     }
 
-    /// One-tap matched-pair export (#510): export the raw puffin capture AND the strap log together,
+    /// One-tap matched-pair export (#510): export the raw puffin capture AND the band log together,
     /// both stamped with the same `yyMMdd-HHmm` minute so they're obviously a pair. Reuses the existing
     /// export utilities — `FileExport.exportPair` shares both files in one iOS share sheet, and saves
     /// each via its own NSSavePanel on macOS (no new file plumbing).
@@ -2316,7 +2351,7 @@ struct SettingsView: View {
                             Text("About Apple Watch data")
                                 .font(StrandFont.body)
                                 .foregroundStyle(StrandPalette.textPrimary)
-                            Text("Use NOOP with just an Apple Watch. What it's great at, and where it's lighter than a strap.")
+                            Text("Use NOOP with just an Apple Watch. What it's great at, and where it differs from Noop Band.")
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -2671,7 +2706,7 @@ struct SettingsView: View {
                 iphoneExpectationLine(String(localized: "This build is delivered through Apple. TestFlight beta builds are available for up to 90 days; install the latest version when TestFlight prompts you."))
             }
             iphoneExpectationLine(String(localized: "After your iPhone reboots, unlock it once. Until you do, iOS keeps NOOP's files locked (Data Protection), so new history can't be written or synced."))
-            iphoneExpectationLine(String(localized: "Background Bluetooth has OS limits: iOS may pause NOOP when it's not in the foreground, so keep it open while syncing a fresh strap."))
+            iphoneExpectationLine(String(localized: "appwide.ui_audit.settings.background_bluetooth"))
             iphoneExpectationLine(String(localized: "On a beta version of iOS, things can break that work on the release build."))
 
             if let days = expiry {
@@ -2749,7 +2784,7 @@ struct LiveActivityPreferenceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: $liveActivityEnabled) {
-                Text("Live HR Live Activity")
+                Text("appwide.health.live_activity.lock_screen")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
             }
@@ -2765,7 +2800,10 @@ struct LiveActivityPreferenceRow: View {
 
             if liveActivityEnabled {
                 Toggle(isOn: $showCharge) {
-                    Label("Charge indicator", systemImage: "bolt.heart.fill")
+                    Label(
+                        "appwide.health.live_activity.recovery_indicator",
+                        systemImage: "bolt.heart.fill"
+                    )
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
@@ -3100,7 +3138,7 @@ struct StepsCalibrationSheet: View {
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("On the days your phone also counted steps, NOOP learns how much your motion maps to steps, then applies that to the strap-only days. The more matching days it has, the more it trusts the estimate.")
+                Text("appwide.ui_audit.settings.steps_calibration")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

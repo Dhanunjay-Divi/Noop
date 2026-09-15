@@ -404,7 +404,7 @@ private struct BreathingContent: View {
                 model.buzz(loops: 1)
             }
             .disabled(!live.bonded)
-            .help("Fire a single haptic pulse on the strap (requires a bonded connection)")
+            .help(String(localized: "appwide.breathe.test_buzz_help"))
         }
     }
 

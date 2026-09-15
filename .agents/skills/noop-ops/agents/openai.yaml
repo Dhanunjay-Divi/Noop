@@ -1,0 +1,4 @@
+interface:
+  display_name: "NOOP Operations"
+  short_description: "Run NOOP engineering rounds with durable evidence"
+  default_prompt: "Use $noop-ops to complete this NOOP engineering round with privacy-safe observability, verification, and durable records."

@@ -40,6 +40,7 @@ import com.noop.notif.NotificationLifecycleId
 import com.noop.notif.NotificationLifecycleLedger
 import com.noop.notif.NotificationPlatformIdentity
 import com.noop.notif.NotificationLifecycleState
+import com.noop.notif.protectPrivateContent
 import com.noop.safety.SafetyIncidentLocationTracker
 import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
@@ -121,7 +122,7 @@ internal fun connectionNotificationDetail(
     add(if (connected) "Streaming in the background" else "Keeping the link open")
     recoveryPct?.let { add("Recovery ${it.roundToInt()}%") }
     effort?.let { add("Effort ${it.roundToInt()}") }
-    batteryPct?.let { add("Strap ${it.roundToInt()}%") }
+    batteryPct?.let { add("Noop Band ${it.roundToInt()}%") }
 }.joinToString("  ·  ")
 
 class WhoopConnectionService : Service() {
@@ -874,7 +875,7 @@ class WhoopConnectionService : Service() {
         val title = when {
             safetyLocationActive -> "Safety location sharing active"
             !state.connected   -> "Reconnecting to Noop Band…"
-            state.backfilling  -> "Syncing strap history…"
+            state.backfilling  -> "Syncing Noop Band history…"
             else               -> "Connected to Noop Band"
         }
         val detail =
@@ -911,7 +912,7 @@ class WhoopConnectionService : Service() {
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .protectPrivateContent(this, CHANNEL_ID)
         if (!safetyLocationActive || state.connected) {
             builder.addAction(0, "Disconnect", stopAction)
         }

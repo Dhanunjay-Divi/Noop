@@ -109,13 +109,13 @@ fun TestCentreScreen(vm: AppViewModel) {
 
     ScreenScaffold(
         title = uiString(R.string.l10n_test_centre_screen_test_centre_37b36828),
-        subtitle = "Turn on a test for the thing that's wrong, wear the strap, then tap Report. Everything stays on this phone.",
+        subtitle = uiString(R.string.appwide_ui_audit_test_centre_subtitle_phone),
     ) {
         // --- Section 1: Domain test modes ---
         SettingsSectionTC(
             icon = Icons.Filled.BugReport,
             title = uiString(R.string.l10n_test_centre_screen_test_modes_e21f1d3c),
-            blurb = "Each test logs extra detail for one part of the app while you wear the strap, then bundles it for a bug report.",
+            blurb = uiString(R.string.appwide_ui_audit_test_centre_mode_blurb),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 TestCentreLayout.visibleModes(is5MG).forEach { mode ->
@@ -316,7 +316,7 @@ private fun TestModeRow(
                 onCheckedChange = { on = it; onToggle(it) },
             )
         }
-        Text(mode.blurb, style = NoopType.footnote, color = Palette.textTertiary)
+        Text(localizedTestModeBlurb(mode), style = NoopType.footnote, color = Palette.textTertiary)
         Row {
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onReport) {
@@ -324,6 +324,14 @@ private fun TestModeRow(
             }
         }
     }
+}
+
+@Composable
+private fun localizedTestModeBlurb(mode: TestMode): String = when (mode.domain) {
+    TestDomain.SLEEP -> uiString(R.string.appwide_ui_audit_test_mode_sleep_blurb)
+    TestDomain.CONNECTION -> uiString(R.string.appwide_ui_audit_test_mode_connection_blurb)
+    TestDomain.BATTERY -> uiString(R.string.appwide_ui_audit_test_mode_battery_blurb)
+    else -> mode.blurb
 }
 
 @Composable
@@ -337,7 +345,7 @@ private fun DiagnosticToolsCard(vm: AppViewModel) {
     SettingsSectionTC(
         icon = Icons.Filled.Info,
         title = uiString(R.string.l10n_test_centre_screen_diagnostic_tools_04ba4d3f),
-        blurb = "Your strap log, a Recovery recalibration, and the device environment. Nothing leaves the phone unless you share it.",
+        blurb = uiString(R.string.appwide_ui_audit_test_centre_diagnostic_blurb),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             NoopButton(
@@ -503,15 +511,12 @@ private fun ExperimentalAlgorithmsCard(vm: AppViewModel) {
     SettingsSectionTC(
         icon = Icons.Filled.Science,
         title = uiString(R.string.l10n_test_centre_screen_experimental_algorithms_e09581e2),
-        blurb = "Research-grade alternatives / precision tweaks. Opt-in, off by default, non-clinical.",
+        blurb = uiString(R.string.appwide_ui_audit_test_centre_experimental_blurb),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             ToggleRowTC(
                 title = uiString(R.string.l10n_test_centre_screen_hr_from_ppg_sub_lag_interpolation_a3ed1536),
-                description = "When NOOP reconstructs heart rate from the newer band's v26 optical waveform (the " +
-                    "seconds the strap stored no HR), refine the autocorrelation peak with a parabolic sub-lag " +
-                    "fit so the estimate is not quantized to roughly 16 bpm steps near a high HR. It only fills " +
-                    "seconds the strap never reported; it never overrides a stored HR. 5/MG only, off by default.",
+                description = uiString(R.string.appwide_ui_audit_test_centre_ppg_description),
                 checked = ppgHrSubLag,
                 onCheckedChange = { ppgHrSubLag = it; puffin.ppgHrSubLagInterp = it },
             )
@@ -618,9 +623,7 @@ private fun ReportReviewDialog(
                     // for the very thing being reported. Warn plainly, with the fix, BEFORE the user
                     // ships a report a maintainer can't act on. Twin of the Swift review-sheet warning.
                     Text(
-                        uiString(R.string.l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69) +
-                            "useful report, turn the mode on, reproduce the problem while wearing the " +
-                            "strap, then report again.",
+                        uiString(R.string.l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69),
                         style = NoopType.footnote, color = Palette.statusWarning,
                         modifier = Modifier.padding(bottom = 8.dp),
                     )

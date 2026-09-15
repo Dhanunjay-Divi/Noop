@@ -649,8 +649,8 @@ class Backfiller(
                     "Backfill: reached the end of available history (trim=0xFFFFFFFF) - caught up; the " +
                         "strap handed over its banked history earlier this sync. Nothing more to offload."
                 else ->
-                    "Backfill: strap reported no flash cursor (trim=0xFFFFFFFF) - it has no banked history " +
-                        "to offload. This is a clock/charge state on the strap, not a decode problem; fully " +
+                    "Backfill: the band reported no flash cursor (trim=0xFFFFFFFF) - it has no banked history " +
+                        "to offload. This is a clock/charge state on the band, not a decode problem; fully " +
                         "charge it and reconnect so it starts banking."
             }
 
@@ -678,10 +678,10 @@ class Backfiller(
          */
         fun futureRtcLine(endUnix: Long, wallNowUnix: Long): String {
             val aheadDays = maxOf(0L, endUnix - wallNowUnix) / 86_400L
-            return "Backfill: the strap reported a record dated about $aheadDays day(s) in the FUTURE - " +
+            return "Backfill: the band reported a record dated about $aheadDays day(s) in the FUTURE - " +
                 "its clock (RTC) is corrupt, not a NOOP problem. Those records can't be filed onto the " +
-                "right day. Fully charge the strap to 100% and reconnect so it re-syncs its clock; if it " +
-                "persists, forget and re-pair the strap."
+                "right day. Fully charge the band to 100% and reconnect so it re-syncs its clock; if it " +
+                "persists, forget and re-pair the band."
         }
     }
 }

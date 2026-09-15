@@ -78,4 +78,31 @@ class Issue299EditDayScopeTest {
             ),
         )
     }
+
+    @Test
+    fun `exact civil bounds keep a bridged wake inside the fall transition day`() {
+        val start = 1_793_505_600L // 2026-11-01T04:00:00Z
+        val endExclusive = start + 25L * 3_600L
+        val editedFirst = edit(
+            startTs = start + 20L * 3_600L,
+            endTs = endExclusive - 20L * 60L,
+        )
+        val continuation = SleepSession(
+            deviceId = editedFirst.deviceId,
+            startTs = endExclusive - 10L * 60L,
+            endTs = endExclusive - 1L,
+        )
+
+        assertEquals(
+            listOf(editedFirst),
+            IntelligenceEngine.editedRowsForDay(
+                editedRows = listOf(editedFirst),
+                day = "2026-11-01",
+                tzOffsetSeconds = -5L * 3_600L,
+                sourceTimeline = listOf(editedFirst, continuation),
+                civilDayStartTs = start,
+                civilDayEndTsExclusive = endExclusive,
+            ),
+        )
+    }
 }

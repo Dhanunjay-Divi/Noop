@@ -1,6 +1,11 @@
 {
   "schema_version": 1,
   "sqlite_tables": {
+    "analysisDirtySource": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
     "appleDaily": {
       "classification": "chunk_stream",
       "platforms": ["android", "ios"],
@@ -46,19 +51,19 @@
     },
     "device": {
       "classification": "managed_document",
-      "content_mode": "server_readable",
+      "content_mode": "client_encrypted",
       "platforms": ["android", "ios"],
       "target": "device_registry"
     },
     "dismissedSleep": {
       "classification": "managed_document",
-      "content_mode": "server_readable",
+      "content_mode": "client_encrypted",
       "platforms": ["android"],
       "target": "dismissal"
     },
     "dismissedWorkout": {
       "classification": "managed_document",
-      "content_mode": "server_readable",
+      "content_mode": "client_encrypted",
       "platforms": ["android"],
       "target": "dismissal"
     },
@@ -129,6 +134,11 @@
       "platforms": ["android", "ios"],
       "target": null
     },
+    "managedLocalProfile": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
     "managedDirtyWindow": {
       "classification": "local_operational",
       "platforms": ["android", "ios"],
@@ -159,6 +169,12 @@
       "platforms": ["android", "ios"],
       "target": null
     },
+    "hydrationEntry": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "hydration"
+    },
     "metricSeries": {
       "classification": "chunk_stream",
       "platforms": ["android", "ios"],
@@ -184,7 +200,7 @@
     },
     "pairedDevice": {
       "classification": "managed_document",
-      "content_mode": "server_readable",
+      "content_mode": "client_encrypted",
       "platforms": ["android", "ios"],
       "target": "device_registry"
     },

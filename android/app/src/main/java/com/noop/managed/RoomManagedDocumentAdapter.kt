@@ -4,11 +4,16 @@ import android.content.Context
 import android.database.Cursor
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.noop.data.AnalysisInvalidationSource
 import com.noop.data.BackupSettingsBridge
 import com.noop.data.BackupSettingsCodec
 import com.noop.data.WhoopDatabase
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,9 +29,16 @@ class RoomManagedDocumentAdapter(
     context: Context? = null,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : ManagedDocumentOutbox, ManagedDocumentRestoring {
+    private data class DayOwnershipValue(
+        val deviceId: String,
+        val locked: Long,
+    )
+
     private val appContext = context?.applicationContext
     private val candidateLock = Any()
     private val candidates = mutableMapOf<String, LocalCandidate>()
+    @Volatile
+    private var claimedLocalProfileId: String? = null
 
     init {
         require(accountScopeHash.matches(SHA256))
@@ -44,12 +56,20 @@ class RoomManagedDocumentAdapter(
         withContext(Dispatchers.IO) {
             database.runInTransaction {
                 val db = database.openHelper.writableDatabase
+                val localProfileId = requireLocalProfile(db)
+                discardConflictingDirtyProfiles(
+                    db,
+                    PREFERENCES_TABLE,
+                    PREFERENCES_KEY,
+                    localProfileId,
+                )
                 val existing = stringOrNull(
                     db,
                     """
                         SELECT payloadJSON FROM managedDocumentDirty
-                        WHERE tableName = ? AND localKey = ?
+                        WHERE localProfileId = ? AND tableName = ? AND localKey = ?
                     """.trimIndent(),
+                    localProfileId,
                     PREFERENCES_TABLE,
                     PREFERENCES_KEY,
                 )
@@ -57,10 +77,10 @@ class RoomManagedDocumentAdapter(
                 db.execSQL(
                     """
                         INSERT INTO managedDocumentDirty (
-                            tableName, localKey, documentKind, generation,
+                            localProfileId, tableName, localKey, documentKind, generation,
                             operation, updatedAtMs, payloadJSON
-                        ) VALUES (?, ?, ?, 1, 'upsert', ?, ?)
-                        ON CONFLICT(tableName, localKey) DO UPDATE SET
+                        ) VALUES (?, ?, ?, ?, 1, 'upsert', ?, ?)
+                        ON CONFLICT(localProfileId, tableName, localKey) DO UPDATE SET
                             documentKind = excluded.documentKind,
                             generation = managedDocumentDirty.generation + 1,
                             operation = 'upsert',
@@ -68,6 +88,7 @@ class RoomManagedDocumentAdapter(
                             payloadJSON = excluded.payloadJSON
                     """.trimIndent(),
                     arrayOf<Any?>(
+                        localProfileId,
                         PREFERENCES_TABLE,
                         PREFERENCES_KEY,
                         ManagedDocumentKind.PREFERENCES.wireValue,
@@ -83,9 +104,13 @@ class RoomManagedDocumentAdapter(
         // The coordinator reads one look-ahead record to report a truthful bounded backlog.
         require(limit in 1..101)
         return withContext(Dispatchers.IO) {
-            val local = pendingCandidates(limit)
+            val localProfileId = requireLocalProfile()
+            val local = pendingCandidates(localProfileId, limit)
             local.map { candidate ->
                 val kind = ManagedDocumentKind.fromWire(candidate.documentKind)
+                if (!isServerReadableKind(kind)) {
+                    throw ManagedStorageException.InvalidResponse()
+                }
                 val documentId = documentId(kind, candidate.tableName, candidate.keyJson)
                 val payload = candidate.payloadJson?.let(::JSONObject)
                 val digest = payload?.let {
@@ -130,6 +155,7 @@ class RoomManagedDocumentAdapter(
         pending: ManagedPendingDocument,
         remote: ManagedDocument,
     ) {
+        withContext(Dispatchers.IO) { requireLocalProfile() }
         val candidate = synchronized(candidateLock) {
             candidates[pending.localIdentifier]
         } ?: throw ManagedStorageException.InvalidResponse()
@@ -172,7 +198,16 @@ class RoomManagedDocumentAdapter(
     }
 
     override suspend fun apply(document: ManagedDocument, change: ManagedChange) {
-        validateDocumentChange(document, change)
+        val localProfileId = withContext(Dispatchers.IO) { requireLocalProfile() }
+        validateDocumentMetadata(document, change)
+        if (document.contentMode == "client_encrypted") {
+            validateIgnoredEncryptedDocument(document)
+            // This client has no key recovery or durable ciphertext inbox yet.
+            // Failing keeps the feed cursor anchored so a capable client can
+            // replay the document instead of silently losing it.
+            throw ManagedStorageException.InvalidResponse()
+        }
+        validateServerReadableDocument(document)
         val deleted = document.deletedAt != null
         val payloadText = if (deleted) {
             if (document.payloadJson != null || change.operation != "tombstone") {
@@ -182,6 +217,9 @@ class RoomManagedDocumentAdapter(
         } else {
             val payload = document.payloadJson ?: throw ManagedStorageException.InvalidResponse()
             if (change.operation != "upsert") throw ManagedStorageException.InvalidResponse()
+            if (document.documentKind == ManagedDocumentKind.DAY_OWNERSHIP) {
+                validateIncomingDayOwnershipPayload(payload)
+            }
             val canonical = ManagedCanonicalJson.encode(payload)
             if (ManagedDigest.sha256(canonical.toByteArray(StandardCharsets.UTF_8)) !=
                 document.contentSha256 ||
@@ -199,13 +237,28 @@ class RoomManagedDocumentAdapter(
         }
 
         if (document.documentKind == ManagedDocumentKind.PREFERENCES && !deleted) {
-            applyPreferences(payloadText ?: throw ManagedStorageException.InvalidResponse())
+            applyPreferences(
+                payloadText ?: throw ManagedStorageException.InvalidResponse(),
+                localProfileId,
+            )
         }
         applyVerifiedDocument(document, payloadText, deleted)
     }
 
-    private fun pendingCandidates(limit: Int): List<LocalCandidate> {
+    private fun pendingCandidates(localProfileId: String, limit: Int): List<LocalCandidate> {
         val db = database.openHelper.readableDatabase
+        val storagePredicates = SERVER_READABLE_TABLE_SPECS.joinToString(" OR ") {
+            "(dirty.tableName = ? AND dirty.documentKind = ?)"
+        }
+        val arguments = buildList<Any?> {
+            add(accountScopeHash)
+            add(localProfileId)
+            SERVER_READABLE_TABLE_SPECS.forEach { spec ->
+                add(spec.table)
+                add(spec.kind.wireValue)
+            }
+            add(limit)
+        }.toTypedArray()
         val dirty = db.query(
             SimpleSQLiteQuery(
                 """
@@ -217,10 +270,12 @@ class RoomManagedDocumentAdapter(
                       ON state.accountScopeHash = ?
                      AND state.tableName = dirty.tableName
                      AND state.localKey = dirty.localKey
-                    WHERE (
+                    WHERE dirty.localProfileId = ?
+                      AND (
                         state.acknowledgedGeneration IS NULL
                         OR state.acknowledgedGeneration < dirty.generation
                     )
+                      AND ($storagePredicates)
                       AND (
                         dirty.operation != 'delete'
                         OR COALESCE(state.remoteRevision, 0) > 0
@@ -228,7 +283,7 @@ class RoomManagedDocumentAdapter(
                     ORDER BY dirty.updatedAtMs, dirty.tableName, dirty.localKey
                     LIMIT ?
                 """.trimIndent(),
-                arrayOf<Any?>(accountScopeHash, limit),
+                arguments,
             ),
         ).use { cursor ->
             buildList {
@@ -277,6 +332,9 @@ class RoomManagedDocumentAdapter(
         val spec = TABLE_SPECS.firstOrNull {
             it.table == dirty.tableName && it.kind.wireValue == dirty.documentKind
         } ?: throw ManagedStorageException.InvalidResponse()
+        if (spec !in SERVER_READABLE_TABLE_SPECS) {
+            throw ManagedStorageException.InvalidResponse()
+        }
         val current = db.query(
             SimpleSQLiteQuery(
                 """
@@ -298,11 +356,15 @@ class RoomManagedDocumentAdapter(
                 dirty.tableName,
                 dirty.localKey,
             ) ?: throw ManagedStorageException.InvalidResponse()
+            val canonicalKey = canonicalObject(key)
+            if (spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
+                validateDayOwnershipKey(JSONObject(canonicalKey))
+            }
             return LocalCandidate(
                 dirty.tableName,
                 dirty.documentKind,
                 dirty.localKey,
-                canonicalObject(key),
+                canonicalKey,
                 dirty.generation,
                 dirty.baseRevision,
                 dirty.updatedAtMs,
@@ -313,6 +375,9 @@ class RoomManagedDocumentAdapter(
         spec.keyColumns.forEach { column ->
             if (!current.has(column)) throw ManagedStorageException.InvalidResponse()
             key.put(column, current.get(column))
+        }
+        if (spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
+            validateDayOwnership(key, current)
         }
         val envelope = JSONObject()
             .put("schema_version", 1)
@@ -335,12 +400,11 @@ class RoomManagedDocumentAdapter(
         )
     }
 
-    private fun validateDocumentChange(document: ManagedDocument, change: ManagedChange) {
+    private fun validateDocumentMetadata(document: ManagedDocument, change: ManagedChange) {
         val metadata = change.document
-        if (document.contentMode != "server_readable" ||
-            document.clientKeyId != null ||
-            document.payloadCiphertextBase64 != null ||
-            document.revision <= 0L ||
+        if (document.revision <= 0L ||
+            runCatching { Instant.parse(document.updatedAt) }.isFailure ||
+            document.deletedAt?.let { runCatching { Instant.parse(it) }.isFailure } == true ||
             change.resourceKind != "document" ||
             change.resourceId != document.documentId ||
             change.contentSha256 != document.contentSha256 ||
@@ -353,13 +417,56 @@ class RoomManagedDocumentAdapter(
             metadata.clientKeyId != document.clientKeyId ||
             metadata.updatedAt != document.updatedAt ||
             metadata.deletedAt != document.deletedAt ||
-            change.operation !in setOf("upsert", "tombstone")
+            (document.deletedAt == null && change.operation != "upsert") ||
+            (document.deletedAt != null && change.operation != "tombstone")
         ) {
             throw ManagedStorageException.InvalidResponse()
         }
     }
 
-    private fun applyPreferences(payload: String) {
+    private fun validateServerReadableDocument(document: ManagedDocument) {
+        if (!isServerReadableKind(document.documentKind) ||
+            document.contentMode != "server_readable" ||
+            document.clientKeyId != null ||
+            document.payloadCiphertextBase64 != null ||
+            (document.payloadJson == null && document.deletedAt == null)
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+    }
+
+    private fun validateIgnoredEncryptedDocument(document: ManagedDocument) {
+        if (isServerReadableKind(document.documentKind) || document.payloadJson != null) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        if (document.deletedAt != null) {
+            if (document.clientKeyId != null ||
+                document.payloadCiphertextBase64 != null ||
+                deletionDigest(
+                    document.documentKind,
+                    document.documentId,
+                    document.revision,
+                ) != document.contentSha256
+            ) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+            return
+        }
+
+        val encoded = document.payloadCiphertextBase64
+            ?: throw ManagedStorageException.InvalidResponse()
+        val ciphertext = runCatching { Base64.getDecoder().decode(encoded) }
+            .getOrElse { throw ManagedStorageException.InvalidResponse() }
+        if (document.clientKeyId == null ||
+            Base64.getEncoder().encodeToString(ciphertext) != encoded ||
+            ciphertext.size !in MIN_ENCRYPTED_DOCUMENT_BYTES..MAX_ENCRYPTED_DOCUMENT_BYTES ||
+            ManagedDigest.sha256(ciphertext) != document.contentSha256
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+    }
+
+    private fun applyPreferences(payload: String, localProfileId: String) {
         val context = appContext ?: throw ManagedStorageException.InvalidResponse()
         val values = BackupSettingsCodec.decode(payload)
         val normalized = BackupSettingsCodec.encode(values)
@@ -374,8 +481,9 @@ class RoomManagedDocumentAdapter(
                 it,
                 """
                     SELECT payloadJSON FROM managedDocumentDirty
-                    WHERE tableName = ? AND localKey = ?
+                    WHERE localProfileId = ? AND tableName = ? AND localKey = ?
                 """.trimIndent(),
+                localProfileId,
                 PREFERENCES_TABLE,
                 PREFERENCES_KEY,
             )
@@ -383,10 +491,10 @@ class RoomManagedDocumentAdapter(
                 it.execSQL(
                     """
                         INSERT INTO managedDocumentDirty (
-                            tableName, localKey, documentKind, generation,
+                            localProfileId, tableName, localKey, documentKind, generation,
                             operation, updatedAtMs, payloadJSON
-                        ) VALUES (?, ?, ?, 1, 'upsert', ?, ?)
-                        ON CONFLICT(tableName, localKey) DO UPDATE SET
+                        ) VALUES (?, ?, ?, ?, 1, 'upsert', ?, ?)
+                        ON CONFLICT(localProfileId, tableName, localKey) DO UPDATE SET
                             documentKind = excluded.documentKind,
                             generation = managedDocumentDirty.generation + 1,
                             operation = 'upsert',
@@ -394,6 +502,7 @@ class RoomManagedDocumentAdapter(
                             payloadJSON = excluded.payloadJSON
                     """.trimIndent(),
                     arrayOf<Any?>(
+                        localProfileId,
                         PREFERENCES_TABLE,
                         PREFERENCES_KEY,
                         ManagedDocumentKind.PREFERENCES.wireValue,
@@ -412,6 +521,7 @@ class RoomManagedDocumentAdapter(
     ) = withContext(Dispatchers.IO) {
         database.runInTransaction {
             val db = database.openHelper.writableDatabase
+            requireLocalProfile(db)
             db.execSQL(
                 "INSERT OR IGNORE INTO managedDocumentApplyGuard (guardId) VALUES (1)",
             )
@@ -449,7 +559,9 @@ class RoomManagedDocumentAdapter(
         val identity = db.query(
             SimpleSQLiteQuery(
                 """
-                    SELECT tableName, localKey, keyJSON
+                    SELECT tableName, localKey, keyJSON,
+                           acknowledgedGeneration, remoteRevision,
+                           remoteContentSHA256
                     FROM managedDocumentState
                     WHERE accountScopeHash = ? AND documentKind = ? AND documentId = ?
                 """.trimIndent(),
@@ -460,26 +572,56 @@ class RoomManagedDocumentAdapter(
                 ),
             ),
         ).use { cursor ->
-            if (!cursor.moveToFirst()) null else Triple(
-                cursor.getString(0),
-                cursor.getString(1),
-                cursor.getString(2),
+            if (!cursor.moveToFirst()) null else ManagedStateIdentity(
+                tableName = cursor.getString(0),
+                localKey = cursor.getString(1),
+                keyJson = cursor.getString(2),
+                acknowledgedGeneration = cursor.getLong(3),
+                remoteRevision = cursor.getLong(4),
+                remoteContentSha256 = cursor.getString(5),
             )
-        } ?: return
+        }
+        if (identity == null) {
+            rebaseUnknownTombstoneIfPending(db, document)
+            return
+        }
         val spec = TABLE_SPECS.firstOrNull {
-            it.table == identity.first && it.kind == document.documentKind
+            it.table == identity.tableName && it.kind == document.documentKind
         } ?: throw ManagedStorageException.InvalidResponse()
-        db.execSQL(
-            "DELETE FROM `${spec.table}` WHERE ${spec.localKey(spec.table)} = ?",
-            arrayOf<Any?>(identity.second),
+        if (spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
+            validateDayOwnershipKey(
+                runCatching { JSONObject(identity.keyJson) }
+                    .getOrElse { throw ManagedStorageException.InvalidResponse() },
+            )
+        }
+        discardConflictingDirtyProfiles(
+            db,
+            spec.table,
+            identity.localKey,
+            requiredLocalProfileId(),
         )
+        if (hasUnacknowledgedLocalGeneration(db, spec.table, identity.localKey)) {
+            if (advancePendingTombstoneBaseline(db, spec, identity, document)) {
+                return
+            }
+            throw ManagedStorageException.Conflict()
+        }
+        val changed = db.compileStatement(
+            "DELETE FROM `${spec.table}` WHERE ${spec.localKey(spec.table)} = ?",
+        ).let { statement ->
+            statement.bindString(1, identity.localKey)
+            statement.executeUpdateDelete()
+        }
+        if (changed > 0 && spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
+            invalidateOwnershipAnalysis(db, dayFromLocalKey(identity.localKey))
+        }
         upsertStateFromCurrentGeneration(
             db,
             spec.table,
-            identity.second,
+            identity.localKey,
             document.documentKind,
             document.documentId,
-            identity.third,
+            identity.keyJson,
             document.revision,
             document.contentSha256,
         )
@@ -522,6 +664,31 @@ class RoomManagedDocumentAdapter(
         ) {
             throw ManagedStorageException.InvalidResponse()
         }
+        if (spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
+            validateDayOwnership(key, record)
+        }
+        val keyValues = spec.keyColumns.map { databaseValue(key.get(it)) }
+        val localKey = localKey(db, spec, keyValues)
+        val day = if (spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
+            key.getString("day")
+        } else {
+            null
+        }
+        val priorDayOwnership = day?.let { storedDayOwnership(db, it) }
+        val incomingDayOwnership = day?.let {
+            DayOwnershipValue(
+                deviceId = record.getString("deviceId"),
+                locked = exactBinaryFlag(record.get("locked"))
+                    ?: throw ManagedStorageException.InvalidResponse(),
+            )
+        }
+        ensureNoUnacknowledgedLocalGeneration(db, spec.table, localKey)
+        discardConflictingDirtyProfiles(
+            db,
+            spec.table,
+            localKey,
+            requiredLocalProfileId(),
+        )
         val values = columns.map { databaseValue(record.get(it)) }
         val quotedColumns = columns.joinToString(", ") { "`$it`" }
         val placeholders = columns.joinToString(", ") { "?" }
@@ -536,17 +703,9 @@ class RoomManagedDocumentAdapter(
             """.trimIndent(),
             values.toTypedArray(),
         )
-        val predicates = spec.keyColumns.joinToString(" AND ") { "`$it` IS ?" }
-        val keyValues = spec.keyColumns.map { databaseValue(key.get(it)) }
-        val localKey = stringOrNull(
-            db,
-            """
-                SELECT ${spec.localKey("candidate")}
-                FROM `${spec.table}` AS candidate
-                WHERE $predicates
-            """.trimIndent(),
-            *keyValues.toTypedArray(),
-        ) ?: throw ManagedStorageException.InvalidResponse()
+        if (day != null && priorDayOwnership != incomingDayOwnership) {
+            invalidateOwnershipAnalysis(db, day)
+        }
         upsertStateFromCurrentGeneration(
             db,
             spec.table,
@@ -556,6 +715,387 @@ class RoomManagedDocumentAdapter(
             ManagedCanonicalJson.encode(key),
             document.revision,
             document.contentSha256,
+        )
+    }
+
+    private fun validateIncomingDayOwnershipPayload(payload: JSONObject) {
+        if (payload.opt("table") != "dayOwnership") {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        val key = payload.optJSONObject("key")
+            ?: throw ManagedStorageException.InvalidResponse()
+        val record = payload.optJSONObject("record")
+            ?: throw ManagedStorageException.InvalidResponse()
+        validateDayOwnership(key, record)
+    }
+
+    private fun advancePendingTombstoneBaseline(
+        db: SupportSQLiteDatabase,
+        spec: TableSpec,
+        identity: ManagedStateIdentity,
+        document: ManagedDocument,
+    ): Boolean {
+        val priorTombstoneDigest = deletionDigest(
+            document.documentKind,
+            document.documentId,
+            identity.remoteRevision,
+        )
+        if (identity.remoteContentSha256 != priorTombstoneDigest) return false
+        if (document.revision < identity.remoteRevision) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        if (document.revision == identity.remoteRevision) return true
+        upsertState(
+            db,
+            spec.table,
+            identity.localKey,
+            spec.kind.wireValue,
+            document.documentId,
+            identity.keyJson,
+            identity.acknowledgedGeneration,
+            document.revision,
+            document.contentSha256,
+            clock(),
+        )
+        return true
+    }
+
+    private fun rebaseUnknownTombstoneIfPending(
+        db: SupportSQLiteDatabase,
+        document: ManagedDocument,
+    ) {
+        val spec = SERVER_READABLE_TABLE_SPECS.singleOrNull {
+            it.kind == document.documentKind
+        } ?: throw ManagedStorageException.InvalidResponse()
+        val pendingRows = db.query(
+            SimpleSQLiteQuery(
+                """
+                    SELECT dirty.localKey,
+                           dirty.generation,
+                           dirty.operation,
+                           COALESCE(state.acknowledgedGeneration, 0),
+                           state.documentId,
+                           state.keyJSON
+                    FROM managedDocumentDirty AS dirty
+                    LEFT JOIN managedDocumentState AS state
+                      ON state.accountScopeHash = ?
+                     AND state.tableName = dirty.tableName
+                     AND state.localKey = dirty.localKey
+                    WHERE dirty.localProfileId = ?
+                      AND dirty.tableName = ?
+                      AND dirty.documentKind = ?
+                      AND dirty.generation > COALESCE(state.acknowledgedGeneration, 0)
+                    ORDER BY dirty.localKey
+                """.trimIndent(),
+                arrayOf<Any?>(
+                    accountScopeHash,
+                    requiredLocalProfileId(),
+                    spec.table,
+                    spec.kind.wireValue,
+                ),
+            ),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        PendingDirtyIdentityRow(
+                            localKey = cursor.getString(0),
+                            generation = cursor.getLong(1),
+                            operation = cursor.getString(2),
+                            acknowledgedGeneration = cursor.getLong(3),
+                            stateDocumentId = if (cursor.isNull(4)) {
+                                null
+                            } else {
+                                cursor.getString(4)
+                            },
+                            stateKeyJson = if (cursor.isNull(5)) {
+                                null
+                            } else {
+                                cursor.getString(5)
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+
+        var matching: PendingLocalIdentity? = null
+        for (row in pendingRows) {
+            val identity = pendingLocalIdentity(db, spec, row)
+            if (identity.documentId != document.documentId) continue
+            if (matching != null && matching.localKey != identity.localKey) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+            matching = identity
+        }
+        val identity = matching ?: return
+        val acknowledgedGeneration =
+            if (identity.operation == "delete" && !identity.hadState) {
+                identity.generation
+            } else {
+                identity.acknowledgedGeneration
+            }
+        upsertState(
+            db,
+            spec.table,
+            identity.localKey,
+            spec.kind.wireValue,
+            identity.documentId,
+            identity.keyJson,
+            acknowledgedGeneration,
+            document.revision,
+            document.contentSha256,
+            clock(),
+        )
+    }
+
+    private fun pendingLocalIdentity(
+        db: SupportSQLiteDatabase,
+        spec: TableSpec,
+        dirty: PendingDirtyIdentityRow,
+    ): PendingLocalIdentity {
+        if (dirty.generation <= dirty.acknowledgedGeneration ||
+            dirty.operation !in setOf("upsert", "delete")
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        val current = db.query(
+            SimpleSQLiteQuery(
+                """
+                    SELECT * FROM `${spec.table}` AS candidate
+                    WHERE ${spec.localKey("candidate")} = ?
+                      AND ${spec.eligibility("candidate")}
+                """.trimIndent(),
+                arrayOf<Any?>(dirty.localKey),
+            ),
+        ).use { cursor -> if (cursor.moveToFirst()) cursorObject(cursor) else null }
+        val key = if (current != null) {
+            JSONObject().also { keyObject ->
+                spec.keyColumns.forEach { column ->
+                    if (!current.has(column)) {
+                        throw ManagedStorageException.InvalidResponse()
+                    }
+                    keyObject.put(column, current.get(column))
+                }
+                if (spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
+                    validateDayOwnership(keyObject, current)
+                }
+            }
+        } else {
+            val keyObject = dirty.stateKeyJson?.let {
+                runCatching { JSONObject(it) }
+                    .getOrElse { throw ManagedStorageException.InvalidResponse() }
+            } ?: when (spec.kind) {
+                ManagedDocumentKind.DAY_OWNERSHIP -> JSONObject()
+                    .put("day", dayFromLocalKey(dirty.localKey))
+                else -> throw ManagedStorageException.InvalidResponse()
+            }
+            if (spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
+                validateDayOwnershipKey(keyObject)
+            }
+            keyObject
+        }
+        val keyJson = ManagedCanonicalJson.encode(key)
+        val expectedDocumentId = documentId(spec.kind, spec.table, keyJson)
+        if (dirty.stateDocumentId != null &&
+            dirty.stateDocumentId != expectedDocumentId.toString().lowercase()
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return PendingLocalIdentity(
+            localKey = dirty.localKey,
+            keyJson = keyJson,
+            generation = dirty.generation,
+            operation = dirty.operation,
+            hadState = dirty.stateDocumentId != null,
+            acknowledgedGeneration = dirty.acknowledgedGeneration,
+            documentId = expectedDocumentId,
+        )
+    }
+
+    private fun validateDayOwnership(key: JSONObject, record: JSONObject) {
+        validateDayOwnershipKey(key)
+        val keyDay = key.opt("day") as? String
+            ?: throw ManagedStorageException.InvalidResponse()
+        val recordDay = record.opt("day") as? String
+            ?: throw ManagedStorageException.InvalidResponse()
+        val deviceId = record.opt("deviceId") as? String
+            ?: throw ManagedStorageException.InvalidResponse()
+        if (keyDay != recordDay ||
+            deviceId != deviceId.trim() ||
+            deviceId.isBlank() ||
+            deviceId.toByteArray(StandardCharsets.UTF_8).size >
+            MAX_DAY_OWNERSHIP_DEVICE_ID_BYTES ||
+            deviceId.any { Character.isISOControl(it.code) } ||
+            exactBinaryFlag(record.opt("locked")) == null
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+    }
+
+    private fun validateDayOwnershipKey(key: JSONObject) {
+        val day = key.opt("day") as? String
+            ?: throw ManagedStorageException.InvalidResponse()
+        val parsed = if (VALID_CIVIL_DAY.matches(day)) {
+            runCatching { LocalDate.parse(day) }.getOrNull()
+        } else {
+            null
+        }
+        if (key.keys().asSequence().toSet() != setOf("day") ||
+            parsed == null ||
+            parsed.year !in 2000..2099
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+    }
+
+    private fun exactBinaryFlag(value: Any?): Long? = when (value) {
+        is Boolean -> if (value) 1L else 0L
+        is Byte, is Short, is Int, is Long -> (value as Number).toLong()
+            .takeIf { it == 0L || it == 1L }
+        else -> null
+    }
+
+    private fun dayFromLocalKey(localKey: String): String {
+        if (localKey.length % 2 != 0 || !HEX_BYTES.matches(localKey)) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        val bytes = ByteArray(localKey.length / 2) { index ->
+            localKey.substring(index * 2, index * 2 + 2).toInt(16).toByte()
+        }
+        val day = String(bytes, StandardCharsets.UTF_8)
+        if (!bytes.contentEquals(day.toByteArray(StandardCharsets.UTF_8))) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return day
+    }
+
+    private fun storedDayOwnership(
+        db: SupportSQLiteDatabase,
+        day: String,
+    ): DayOwnershipValue? = db.query(
+        SimpleSQLiteQuery(
+            "SELECT deviceId, locked FROM dayOwnership WHERE day = ?",
+            arrayOf<Any?>(day),
+        ),
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) {
+            null
+        } else {
+            DayOwnershipValue(
+                deviceId = cursor.getString(0),
+                locked = cursor.getLong(1),
+            )
+        }
+    }
+
+    private fun invalidateOwnershipAnalysis(
+        db: SupportSQLiteDatabase,
+        day: String,
+    ) {
+        val timestamp = runCatching {
+            LocalDate.parse(day)
+                .atTime(LocalTime.NOON)
+                .atZone(ZoneId.systemDefault())
+                .toEpochSecond()
+        }.getOrElse { throw ManagedStorageException.InvalidResponse() }
+        db.execSQL(
+            """
+                INSERT INTO analysisDirtySource (
+                    deviceId, generation, acknowledgedGeneration,
+                    earliestAffectedTs, latestAffectedTs
+                ) VALUES (?, 1, 0, ?, ?)
+                ON CONFLICT(deviceId) DO UPDATE SET
+                    generation = analysisDirtySource.generation + 1,
+                    earliestAffectedTs = CASE
+                        WHEN analysisDirtySource.earliestAffectedTs IS NULL
+                            THEN excluded.earliestAffectedTs
+                        ELSE MIN(
+                            analysisDirtySource.earliestAffectedTs,
+                            excluded.earliestAffectedTs
+                        )
+                    END,
+                    latestAffectedTs = CASE
+                        WHEN analysisDirtySource.latestAffectedTs IS NULL
+                            THEN excluded.latestAffectedTs
+                        ELSE MAX(
+                            analysisDirtySource.latestAffectedTs,
+                            excluded.latestAffectedTs
+                        )
+                    END
+            """.trimIndent(),
+            arrayOf<Any?>(
+                AnalysisInvalidationSource.OWNERSHIP,
+                timestamp,
+                timestamp,
+            ),
+        )
+    }
+
+    private fun localKey(
+        db: SupportSQLiteDatabase,
+        spec: TableSpec,
+        keyValues: List<Any?>,
+    ): String {
+        val projectedKey = spec.keyColumns.joinToString(", ") { "? AS `$it`" }
+        return stringOrNull(
+            db,
+            """
+                SELECT ${spec.localKey("candidate")}
+                FROM (SELECT $projectedKey) AS candidate
+            """.trimIndent(),
+            *keyValues.toTypedArray(),
+        ) ?: throw ManagedStorageException.InvalidResponse()
+    }
+
+    private fun ensureNoUnacknowledgedLocalGeneration(
+        db: SupportSQLiteDatabase,
+        tableName: String,
+        localKey: String,
+    ) {
+        if (hasUnacknowledgedLocalGeneration(db, tableName, localKey)) {
+            throw ManagedStorageException.Conflict()
+        }
+    }
+
+    private fun hasUnacknowledgedLocalGeneration(
+        db: SupportSQLiteDatabase,
+        tableName: String,
+        localKey: String,
+    ): Boolean = longOrNull(
+            db,
+            """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM managedDocumentDirty AS dirty
+                    LEFT JOIN managedDocumentState AS state
+                      ON state.accountScopeHash = ?
+                     AND state.tableName = dirty.tableName
+                     AND state.localKey = dirty.localKey
+                    WHERE dirty.localProfileId = ?
+                      AND dirty.tableName = ?
+                      AND dirty.localKey = ?
+                      AND dirty.generation > COALESCE(state.acknowledgedGeneration, 0)
+                )
+            """.trimIndent(),
+            accountScopeHash,
+            requiredLocalProfileId(),
+            tableName,
+            localKey,
+        ) == 1L
+
+    private fun discardConflictingDirtyProfiles(
+        db: SupportSQLiteDatabase,
+        tableName: String,
+        localKey: String,
+        localProfileId: String,
+    ) {
+        db.execSQL(
+            """
+                DELETE FROM managedDocumentDirty
+                WHERE tableName = ? AND localKey = ? AND localProfileId != ?
+            """.trimIndent(),
+            arrayOf<Any?>(tableName, localKey, localProfileId),
         )
     }
 
@@ -573,8 +1113,9 @@ class RoomManagedDocumentAdapter(
             db,
             """
                 SELECT generation FROM managedDocumentDirty
-                WHERE tableName = ? AND localKey = ?
+                WHERE localProfileId = ? AND tableName = ? AND localKey = ?
             """.trimIndent(),
+            requiredLocalProfileId(),
             tableName,
             localKey,
         ) ?: 0L
@@ -591,6 +1132,46 @@ class RoomManagedDocumentAdapter(
             clock(),
         )
     }
+
+    private fun requireLocalProfile(): String {
+        var required: String? = null
+        database.runInTransaction {
+            required = requireLocalProfile(database.openHelper.writableDatabase)
+        }
+        return required ?: throw ManagedStorageException.InvalidResponse()
+    }
+
+    private fun requireLocalProfile(db: SupportSQLiteDatabase): String {
+        val binding = db.query(
+            """
+                SELECT localProfileId, accountScopeHash
+                FROM managedLocalProfile
+                WHERE bindingId = 1
+            """.trimIndent(),
+        ).use { cursor ->
+            if (!cursor.moveToFirst() || cursor.isNull(0)) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+            LocalProfileBinding(
+                localProfileId = cursor.getString(0),
+                accountScopeHash = if (cursor.isNull(1)) null else cursor.getString(1),
+            )
+        }
+        val localProfileId = binding.localProfileId
+        if (localProfileId.isBlank() || localProfileId.length > 64) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        if (binding.accountScopeHash != accountScopeHash ||
+            binding.localProfileId != accountScopeHash
+        ) {
+            throw ManagedStorageException.Conflict()
+        }
+        claimedLocalProfileId = accountScopeHash
+        return accountScopeHash
+    }
+
+    private fun requiredLocalProfileId(): String =
+        claimedLocalProfileId ?: throw ManagedStorageException.InvalidResponse()
 
     private fun upsertState(
         db: SupportSQLiteDatabase,
@@ -724,6 +1305,39 @@ class RoomManagedDocumentAdapter(
         val payloadJson: String?,
     )
 
+    private data class PendingDirtyIdentityRow(
+        val localKey: String,
+        val generation: Long,
+        val operation: String,
+        val acknowledgedGeneration: Long,
+        val stateDocumentId: String?,
+        val stateKeyJson: String?,
+    )
+
+    private data class PendingLocalIdentity(
+        val localKey: String,
+        val keyJson: String,
+        val generation: Long,
+        val operation: String,
+        val hadState: Boolean,
+        val acknowledgedGeneration: Long,
+        val documentId: UUID,
+    )
+
+    private data class ManagedStateIdentity(
+        val tableName: String,
+        val localKey: String,
+        val keyJson: String,
+        val acknowledgedGeneration: Long,
+        val remoteRevision: Long,
+        val remoteContentSha256: String,
+    )
+
+    private data class LocalProfileBinding(
+        val localProfileId: String,
+        val accountScopeHash: String?,
+    )
+
     private data class TableSpec(
         val table: String,
         val kind: ManagedDocumentKind,
@@ -737,9 +1351,17 @@ class RoomManagedDocumentAdapter(
 
     companion object {
         private const val MAX_DOCUMENT_BYTES = 1_000_000
+        private const val MIN_ENCRYPTED_DOCUMENT_BYTES = 17
+        private const val MAX_ENCRYPTED_DOCUMENT_BYTES = 1_048_576
+        private const val MAX_DAY_OWNERSHIP_DEVICE_ID_BYTES = 256
         private const val PREFERENCES_TABLE = "preferences"
         private const val PREFERENCES_KEY = "global"
         private val SHA256 = Regex("^[0-9a-f]{64}$")
+        private val HEX_BYTES = Regex("^(?:[0-9A-Fa-f]{2})+$")
+        private val VALID_CIVIL_DAY = Regex("^(?:20[0-9]{2})-[0-9]{2}-[0-9]{2}$")
+        private val SERVER_READABLE_KINDS = setOf(
+            ManagedDocumentKind.DAY_OWNERSHIP,
+        )
         private val TABLE_SPECS = listOf(
             TableSpec(
                 "journal",
@@ -774,6 +1396,12 @@ class RoomManagedDocumentAdapter(
             TableSpec("coachMemory", ManagedDocumentKind.COACH_MEMORY, listOf("id")),
             TableSpec("dayOwnership", ManagedDocumentKind.DAY_OWNERSHIP, listOf("day")),
         )
+        private val SERVER_READABLE_TABLE_SPECS = TABLE_SPECS.filter {
+            it.kind in SERVER_READABLE_KINDS
+        }
+
+        internal fun isServerReadableKind(kind: ManagedDocumentKind): Boolean =
+            kind in SERVER_READABLE_KINDS
 
         internal fun documentId(
             kind: ManagedDocumentKind,

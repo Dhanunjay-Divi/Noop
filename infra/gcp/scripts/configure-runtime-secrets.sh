@@ -20,6 +20,8 @@ connection_name="$(
 database_secret="noop-staging-database-url"
 admin_secret="noop-staging-bootstrap-admin-token"
 managed_replay_secret="noop-staging-managed-replay-secret"
+feedback_capability_secret="noop-staging-feedback-capability-secret"
+feedback_capability_previous_secret="noop-staging-feedback-capability-previous-secret"
 managed_push_token_secret="noop-staging-managed-push-token-secret"
 managed_push_token_previous_secret="noop-staging-managed-push-token-previous-secret"
 database_user="noop_runtime"
@@ -60,6 +62,31 @@ if ! has_enabled_version "${managed_replay_secret}"; then
     --project="${project_id}" \
     --data-file=-
   unset replay_secret
+fi
+
+if ! has_enabled_version "${feedback_capability_secret}"; then
+  capability_secret="$(openssl rand -hex 32)"
+  printf '%s' "${capability_secret}" | gcloud secrets versions add \
+    "${feedback_capability_secret}" \
+    --project="${project_id}" \
+    --data-file=-
+  unset capability_secret
+fi
+
+if ! has_enabled_version "${feedback_capability_previous_secret}"; then
+  # Inactive bootstrap key. Rotation is intentionally staged:
+  # 1. Pin both key versions and deploy every instance while still writing the
+  #    old or legacy format.
+  # 2. Change only the explicit write version after the first rollout settles.
+  # 3. Retain the prior verification key for the full maximum report retention
+  #    period after the last capability issued with it, plus rollout overlap.
+  # Never use Secret Manager "latest" for either runtime key reference.
+  previous_capability_secret="$(openssl rand -hex 32)"
+  printf '%s' "${previous_capability_secret}" | gcloud secrets versions add \
+    "${feedback_capability_previous_secret}" \
+    --project="${project_id}" \
+    --data-file=-
+  unset previous_capability_secret
 fi
 
 if ! has_enabled_version "${managed_push_token_secret}"; then

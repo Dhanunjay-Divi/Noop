@@ -28,7 +28,7 @@ final class BrandLiteralRatchetTests: XCTestCase {
     /// The count measured when this ratchet was introduced (2026-08-23). LOWER THIS as strings are
     /// extracted; never raise it. Raising it means a user-visible English literal was shipped to eight
     /// locales and then hidden in the baseline.
-    private static let allowedBrandLiteralsInBaseline = 64
+    private static let allowedBrandLiteralsInBaseline = 61
 
     /// The brand name as users see it, kept in sync with `WhoopModel.customerName`.
     private static let brandName = "Noop Band"
@@ -107,6 +107,61 @@ final class BrandLiteralRatchetTests: XCTestCase {
                     "\"\(key)\" should still carry its eight locales plus source."
                 )
             }
+        }
+    }
+
+    func testMountedBluetoothErrorUsesBandVocabulary() throws {
+        let source = try String(
+            contentsOf: repoRoot.appendingPathComponent(
+                "Strand/BLE/BLEManager.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(
+            source.contains("Turn it on to connect to your strap."),
+            "The mounted Bluetooth error must use the customer-facing band term."
+        )
+        XCTAssertTrue(source.contains("Turn it on to connect to your band."))
+    }
+
+    func testMountedPrimaryBandCopyAvoidsLegacyStrapVocabulary() throws {
+        let paths = [
+            "Strand/BLE/BLEManager.swift",
+            "Strand/BLE/FrameRouter.swift",
+            "Strand/Collect/Backfiller.swift",
+            "Strand/MenuBar/MenuBarContent.swift",
+            "Strand/Screens/AppleWatchAboutView.swift",
+            "Strand/Screens/StressView.swift",
+        ]
+        let mountedCopy = try paths.map { path in
+            try String(
+                contentsOf: repoRoot.appendingPathComponent(path),
+                encoding: .utf8
+            )
+        }.joined(separator: "\n")
+        let forbidden = [
+            "Re-scan strap",
+            "strap RMSSD",
+            "same 0-100 scale as a strap's",
+            "unrecognised strap firmware layout",
+            "share a strap log",
+            "your strap had no stored history",
+            "the strap went quiet",
+            "your strap's clock",
+            "charge the strap",
+            "pair your strap",
+            "reconnect your strap",
+            "your strap reboots",
+            "The strap rejected",
+            "This strap firmware",
+        ]
+
+        for phrase in forbidden {
+            XCTAssertFalse(
+                mountedCopy.contains(phrase),
+                "Mounted primary-band copy still contains \(phrase)"
+            )
         }
     }
 }

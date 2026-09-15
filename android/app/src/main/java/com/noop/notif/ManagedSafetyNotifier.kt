@@ -87,7 +87,7 @@ internal object ManagedSafetyNotifier {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .protectPrivateContent(context, CHANNEL_ID)
             .build()
         if (
             NotificationLifecycleLedger.posted(

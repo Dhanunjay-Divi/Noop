@@ -58,7 +58,7 @@
     <string name="friends_waiting_shared_day">Ожидание общего дня</string>
     <string name="friends_scores_waiting">Показатели появятся после загрузки дневной сводки пользователем %1$s.</string>
     <string name="friends_open_sharing_named">Открыть настройки доступа для %1$s</string>
-    <string name="friends_score_charge">Заряд</string>
+    <string name="friends_score_charge">Восстановление</string>
     <string name="friends_score_effort">Нагрузка</string>
     <string name="friends_score_rest">Отдых</string>
     <string name="friends_detail_sleep">Сон %1$s</string>
@@ -88,7 +88,7 @@
     <string name="friends_server_address">Адрес сервера</string>
     <string name="friends_invite_code">Код приглашения</string>
     <string name="friends_join_default_title">Доступно по умолчанию</string>
-    <string name="friends_join_default_body">Заряд, Нагрузка и Отдых</string>
+    <string name="friends_join_default_body">Восстановление, Нагрузка и Оценка сна</string>
     <string name="friends_join_never_title">Никогда не отправляется в Друзья</string>
     <string name="friends_join_never_body">Исходные пульс и R-R, стадии сна, дневник, тренировки, маршруты, экспортированные данные и идентификаторы устройств</string>
     <string name="friends_join_trust_title">Доверие оператору</string>

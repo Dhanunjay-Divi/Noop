@@ -1,3 +1,4 @@
+import groovy.json.JsonSlurper
 import java.security.MessageDigest
 import java.util.Properties
 
@@ -339,26 +340,117 @@ ksp {
     arg("room.schemaLocation", roomSchemaDir.get().asFile.absolutePath)
 }
 
-// The schema oracle is intentionally produced by one canonical variant. Declaring the same directory as
-// an output of every flavor's KSP task makes Gradle treat those tasks as competing producers; a focused
-// demo test then fails validation even though it correctly depends on the full-debug oracle. Room's
-// entity schema is flavor-independent, so keep one explicit producer and snapshot that output below.
-tasks.matching { it.name == "kspFullDebugKotlin" }.configureEach {
-    outputs.dir(roomSchemaDir).withPropertyName("roomSchemaExport")
-    outputs.upToDateWhen {
-        roomSchemaDir.get().asFile.walkTopDown().any { it.isFile && it.extension == "json" }
-    }
-}
-
 val roomSchemaSnapshotDir = layout.buildDirectory.dir("roomSchemaOracle")
+val roomSchemaGenerationMarker = layout.buildDirectory.file(
+    "roomSchemaState/generated-schema-v2.sha256",
+)
 val roomSchemaInputs = files(
     "src/main/java/com/noop/data/Entities.kt",
+    "src/main/java/com/noop/data/ManagedSyncState.kt",
     "src/main/java/com/noop/data/NutritionEntry.kt",
     "src/main/java/com/noop/data/NutritionCatalogItem.kt",
     "src/main/java/com/noop/data/PairedDevice.kt",
     "src/main/java/com/noop/data/StrengthTraining.kt",
     "src/main/java/com/noop/data/WhoopDatabase.kt",
 )
+
+fun roomSchemaSourceHash(): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    roomSchemaInputs.files.sortedBy { it.absolutePath }.forEach { schemaInput ->
+        digest.update(schemaInput.absolutePath.toByteArray())
+        digest.update(0)
+        digest.update(schemaInput.readBytes())
+        digest.update(0)
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
+
+fun currentRoomSchemaVersion(): Int {
+    val source = file("src/main/java/com/noop/data/WhoopDatabase.kt").readText()
+    return Regex(
+        """const\s+val\s+NOOP_DATABASE_SCHEMA_VERSION\s*=\s*(\d+)""",
+    ).find(source)?.groupValues?.get(1)?.toInt()
+        ?: throw GradleException("Unable to read NOOP_DATABASE_SCHEMA_VERSION from WhoopDatabase.kt")
+}
+
+fun roomSchemaFile(): File = roomSchemaDir.get().asFile.resolve(
+    "com.noop.data.WhoopDatabase/${currentRoomSchemaVersion()}.json",
+)
+
+fun fileSha256(source: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    source.inputStream().use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
+
+fun validateCurrentRoomSchema(source: File) {
+    check(source.isFile) {
+        "KSP did not export Room schema ${currentRoomSchemaVersion()} at $source."
+    }
+    val root = JsonSlurper().parse(source) as? Map<*, *>
+        ?: throw GradleException("Room schema export is not a JSON object: $source")
+    val database = root["database"] as? Map<*, *>
+        ?: throw GradleException("Room schema export has no database object: $source")
+    val exportedVersion = (database["version"] as? Number)?.toInt()
+    check(exportedVersion == currentRoomSchemaVersion()) {
+        "Room schema export version $exportedVersion does not match " +
+            "NOOP_DATABASE_SCHEMA_VERSION ${currentRoomSchemaVersion()}."
+    }
+}
+
+fun roomSchemaGenerationProof(source: File): String =
+    "v2:${roomSchemaSourceHash()}:${fileSha256(source)}"
+
+// The schema oracle is intentionally produced by one canonical variant. Declaring the same directory as
+// an output of every flavor's KSP task makes Gradle treat those tasks as competing producers; a focused
+// demo test then fails validation even though it correctly depends on the full-debug oracle. Room's
+// entity schema is flavor-independent, so keep one explicit producer and bind acceptance to both the
+// schema-bearing source bytes and the generated current-version JSON before any test can consume it.
+// The schema directory and proof are deliberately not added as KSP task outputs: Gradle removes
+// declared outputs before some incremental KSP executions, while Room legitimately skips rewriting an
+// unchanged schema. The proof actions below retain a previously proven export for unrelated source
+// changes and delete any unproven export before KSP can establish a new proof.
+tasks.matching { it.name == "kspFullDebugKotlin" }.configureEach {
+    inputs.files(roomSchemaInputs).withPropertyName("roomSchemaSources")
+    outputs.upToDateWhen {
+        val schema = roomSchemaFile()
+        val marker = roomSchemaGenerationMarker.get().asFile
+        schema.isFile &&
+            marker.isFile &&
+            runCatching {
+                marker.readText().trim() == roomSchemaGenerationProof(schema)
+            }.getOrDefault(false)
+    }
+    doFirst {
+        val schema = roomSchemaFile()
+        val marker = roomSchemaGenerationMarker.get().asFile
+        val proven = schema.isFile &&
+            marker.isFile &&
+            runCatching {
+                marker.readText().trim() == roomSchemaGenerationProof(schema)
+            }.getOrDefault(false)
+        if (!proven) {
+            project.delete(roomSchemaDir.get().asFile)
+            project.delete(marker)
+        }
+    }
+    doLast {
+        val schema = roomSchemaFile()
+        validateCurrentRoomSchema(schema)
+        roomSchemaGenerationMarker.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(roomSchemaGenerationProof(schema))
+        }
+    }
+}
+
 val syncRoomSchemaSnapshot = tasks.register("syncRoomSchemaSnapshot") {
     inputs.files(roomSchemaInputs).withPropertyName("roomSchemaSources")
     outputs.dir(roomSchemaSnapshotDir).withPropertyName("roomSchemaSnapshot")
@@ -369,32 +461,23 @@ val syncRoomSchemaSnapshot = tasks.register("syncRoomSchemaSnapshot") {
     dependsOn(tasks.matching { it.name == "kspFullDebugKotlin" })
     doLast {
         val source = roomSchemaDir.get().asFile
-        val destination = roomSchemaSnapshotDir.get().asFile.apply { mkdirs() }
-        val marker = destination.resolve(".schema-inputs.sha256")
-        val digest = MessageDigest.getInstance("SHA-256")
-        roomSchemaInputs.files.sortedBy { it.absolutePath }.forEach { schemaInput ->
-            digest.update(schemaInput.absolutePath.toByteArray())
-            digest.update(0)
-            digest.update(schemaInput.readBytes())
-            digest.update(0)
+        val schema = roomSchemaFile()
+        validateCurrentRoomSchema(schema)
+        val expectedProof = roomSchemaGenerationProof(schema)
+        val generatedProof = roomSchemaGenerationMarker.get().asFile
+        check(generatedProof.isFile && generatedProof.readText().trim() == expectedProof) {
+            "Room schema has no current KSP generation proof; refusing to copy a stale snapshot. " +
+                "Run :app:kspFullDebugKotlin --rerun-tasks."
         }
-        val sourceHash = digest.digest().joinToString("") { "%02x".format(it) }
-        val generatedSchemaExists = source.walkTopDown()
-            .any { it.isFile && it.extension == "json" }
-
-        if (generatedSchemaExists) {
-            project.copy {
-                from(source)
-                into(destination)
-                include("**/*.json")
-            }
-            marker.writeText(sourceHash)
-        } else {
-            check(marker.isFile && marker.readText().trim() == sourceHash) {
-                "KSP produced no Room schema after schema-bearing sources changed; refusing to test " +
-                    "against a stale snapshot. Run :app:kspFullDebugKotlin --rerun-tasks."
-            }
+        val destination = roomSchemaSnapshotDir.get().asFile
+        project.delete(destination)
+        destination.mkdirs()
+        project.copy {
+            from(source)
+            into(destination)
+            include("**/*.json")
         }
+        destination.resolve(".schema-inputs.sha256").writeText(expectedProof)
     }
 }
 

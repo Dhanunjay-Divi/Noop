@@ -16,6 +16,15 @@ class IntelligenceSleepHealScopeTest {
     private fun sleep(deviceId: String, start: Long, end: Long, edited: Boolean = false) =
         SleepSession(deviceId = deviceId, startTs = start, endTs = end, userEdited = edited)
 
+    private fun civilWindow(start: Long, end: Long) =
+        IntelligenceEngine.AnalysisCivilDayWindow(
+            startTs = start,
+            endTs = end,
+            dayKey = AnalyticsEngine.dayString(start, 0L),
+            timezoneOffsetSeconds = 0L,
+            localSixPMTs = minOf(start + 18L * 3_600L, end + 1L),
+        )
+
     /** Minimal repository-backed sleep store; the production helper reaches only these two DAO calls. */
     private class SleepStoreFixture(
         sessions: List<SleepSession>,
@@ -103,9 +112,7 @@ class IntelligenceSleepHealScopeTest {
             deviceIds = listOf("oura", "computed", "edited", "oura"),
             windowStart = 0,
             windowEnd = 100_000,
-            oldestDay = "1970-01-01",
-            newestDay = "2100-01-01",
-            timezoneOffsetSeconds = 0,
+            civilDayWindows = listOf(civilWindow(0, 100_000)),
             freshStarts = setOf(10_600),
         )
 
@@ -125,9 +132,7 @@ class IntelligenceSleepHealScopeTest {
             deviceIds = listOf("computed", "oura", "edited"),
             windowStart = 0,
             windowEnd = 100_000,
-            oldestDay = "1970-01-01",
-            newestDay = "2100-01-01",
-            timezoneOffsetSeconds = 0,
+            civilDayWindows = listOf(civilWindow(0, 100_000)),
             freshStarts = setOf(10_600),
         )
         assertTrue(second.deleted.isEmpty())
@@ -148,9 +153,7 @@ class IntelligenceSleepHealScopeTest {
             deviceIds = listOf("oura"),
             windowStart = 0,
             windowEnd = 30_000,
-            oldestDay = "1970-01-01",
-            newestDay = "2100-01-01",
-            timezoneOffsetSeconds = 0,
+            civilDayWindows = listOf(civilWindow(0, 30_000)),
             freshStarts = emptySet(),
         )
 
@@ -182,7 +185,9 @@ class IntelligenceSleepHealScopeTest {
         )
         assertTrue(
             "post-offload analyzeRecent must forward the registry-backed source",
-            bleText.contains("ownerSource = dayOwnerSource"),
+            bleText.contains(
+                "ownerSource = IntelligenceEngine.boundDayOwnerSource(sourceId, dayOwnerSource)",
+            ),
         )
         assertFalse(
             "the production composition must not pass a null owner source",

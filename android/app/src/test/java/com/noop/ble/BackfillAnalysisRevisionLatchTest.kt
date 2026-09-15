@@ -5,10 +5,13 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -39,6 +42,7 @@ class BackfillAnalysisRevisionLatchTest {
                     firstStarted.complete(Unit)
                     finishFirst.await()
                 }
+                BackfillAnalysisProcessResult.Completed
             },
         )
 
@@ -68,6 +72,7 @@ class BackfillAnalysisRevisionLatchTest {
                     firstStarted.complete(Unit)
                     finishFirst.await()
                 }
+                BackfillAnalysisProcessResult.Completed
             },
             clearDurablyDirty = { durableClears += 1 },
         )
@@ -96,6 +101,7 @@ class BackfillAnalysisRevisionLatchTest {
             processRevision = {
                 attempts += 1
                 if (attempts == 1) error("database temporarily closed")
+                BackfillAnalysisProcessResult.Completed
             },
             markDurablyDirty = { durable += it },
             clearDurablyDirty = { durable -= it },
@@ -116,6 +122,70 @@ class BackfillAnalysisRevisionLatchTest {
     }
 
     @Test
+    fun foregroundClearFailureRetriesOnlyTheDurableClear() = runTest {
+        val durable = linkedSetOf("band-a")
+        val failures = mutableListOf<Throwable>()
+        var processAttempts = 0
+        var clearAttempts = 0
+        val worker = BackfillAnalysisWorker(
+            scope = this,
+            debounceMillis = 0L,
+            retryDelayMillis = 100L,
+            processRevision = {
+                processAttempts += 1
+                BackfillAnalysisProcessResult.Completed
+            },
+            clearDurablyDirty = {
+                clearAttempts += 1
+                if (clearAttempts == 1) error("preferences temporarily unavailable")
+                durable -= it
+            },
+            onFailure = { _, failure -> failures += failure },
+        )
+
+        worker.resume(durable.toList())
+        runCurrent()
+
+        assertEquals(1, processAttempts)
+        assertEquals(1, clearAttempts)
+        assertEquals(setOf("band-a"), durable)
+        assertEquals(setOf("band-a"), worker.pendingDeviceIds())
+        assertEquals(1, failures.size)
+
+        advanceTimeBy(100L)
+        runCurrent()
+
+        assertEquals(1, processAttempts)
+        assertEquals(2, clearAttempts)
+        assertTrue(durable.isEmpty())
+        assertTrue(worker.pendingDeviceIds().isEmpty())
+    }
+
+    @Test
+    fun callerClearFailureReturnsRetryAndKeepsDurableRevision() = runTest {
+        val durable = linkedSetOf("band-a")
+        var processAttempts = 0
+        val worker = BackfillAnalysisWorker(
+            scope = this,
+            debounceMillis = 0L,
+            retryDelayMillis = 100L,
+            processRevision = {
+                processAttempts += 1
+                BackfillAnalysisProcessResult.Completed
+            },
+            clearDurablyDirty = { error("preferences unavailable") },
+        )
+
+        val outcomes = worker.resumeAndAwait(durable.toList())
+
+        assertEquals(listOf(BackfillAnalysisProcessResult.RetryRequired), outcomes)
+        assertEquals(1, processAttempts)
+        assertEquals(setOf("band-a"), durable)
+        assertEquals(setOf("band-a"), worker.pendingDeviceIds())
+        assertFalse(worker.hasWorkerClaim())
+    }
+
+    @Test
     fun transientCancellationIsContainedAndRetriedWhileScopeRemainsActive() = runTest {
         val durable = linkedSetOf<String>()
         val failures = mutableListOf<Throwable>()
@@ -127,6 +197,7 @@ class BackfillAnalysisRevisionLatchTest {
             processRevision = {
                 attempts += 1
                 if (attempts == 1) throw CancellationException("dependency timed out")
+                BackfillAnalysisProcessResult.Completed
             },
             markDurablyDirty = { durable += it },
             clearDurablyDirty = { durable -= it },
@@ -162,6 +233,7 @@ class BackfillAnalysisRevisionLatchTest {
                 cancelledAttempts += 1
                 processStarted.complete(Unit)
                 neverCompletes.await()
+                BackfillAnalysisProcessResult.Completed
             },
             markDurablyDirty = { durable += it },
             clearDurablyDirty = { durable -= it },
@@ -182,7 +254,10 @@ class BackfillAnalysisRevisionLatchTest {
             scope = this,
             debounceMillis = 0L,
             retryDelayMillis = 100L,
-            processRevision = { resumedSources += it.deviceId },
+            processRevision = {
+                resumedSources += it.deviceId
+                BackfillAnalysisProcessResult.Completed
+            },
             clearDurablyDirty = { durable -= it },
         )
         restartedWorker.resume(durable.toList())
@@ -201,7 +276,10 @@ class BackfillAnalysisRevisionLatchTest {
             scope = cancelledScope,
             debounceMillis = 0L,
             retryDelayMillis = 100L,
-            processRevision = { fail("cancelled scope must not process work") },
+            processRevision = {
+                fail("cancelled scope must not process work")
+                BackfillAnalysisProcessResult.Completed
+            },
             latch = latch,
         )
 
@@ -216,7 +294,10 @@ class BackfillAnalysisRevisionLatchTest {
             scope = this,
             debounceMillis = 0L,
             retryDelayMillis = 100L,
-            processRevision = { recovered += it.deviceId },
+            processRevision = {
+                recovered += it.deviceId
+                BackfillAnalysisProcessResult.Completed
+            },
             latch = latch,
         )
         replacement.resume(emptyList())
@@ -224,6 +305,309 @@ class BackfillAnalysisRevisionLatchTest {
 
         assertEquals(listOf("band-a"), recovered)
         assertTrue(latch.pendingDeviceIds().isEmpty())
+    }
+
+    @Test
+    fun deferredRevisionReleasesWorkerAndKeepsDurableSourceForScheduledRetry() = runTest {
+        val durable = linkedSetOf<String>()
+        val scheduled = mutableListOf<Long>()
+        val cleared = mutableListOf<String>()
+        var attempts = 0
+        val worker = BackfillAnalysisWorker(
+            scope = this,
+            debounceMillis = 0L,
+            retryDelayMillis = 100L,
+            processRevision = {
+                attempts += 1
+                BackfillAnalysisProcessResult.Deferred(retryAtEpochMillis = 86_400_000L)
+            },
+            scheduleDeferredRetry = {
+                scheduled += it
+                true
+            },
+            markDurablyDirty = { durable += it },
+            clearDurablyDirty = {
+                cleared += it
+                durable -= it
+            },
+        )
+
+        worker.noteCommit("band-a")
+        advanceUntilIdle()
+
+        assertEquals(1, attempts)
+        assertEquals(listOf(86_400_000L), scheduled)
+        assertEquals(setOf("band-a"), durable)
+        assertTrue(cleared.isEmpty())
+        assertTrue(worker.pendingDeviceIds().isEmpty())
+        assertFalse(worker.hasWorkerClaim())
+    }
+
+    @Test
+    fun foregroundScheduleFailureRetriesOnlySchedulingAndRetainsDurableSource() = runTest {
+        val durable = linkedSetOf<String>()
+        var processAttempts = 0
+        var scheduleAttempts = 0
+        val worker = BackfillAnalysisWorker(
+            scope = this,
+            debounceMillis = 0L,
+            retryDelayMillis = 100L,
+            processRevision = {
+                processAttempts += 1
+                BackfillAnalysisProcessResult.Deferred(retryAtEpochMillis = 86_400_000L)
+            },
+            scheduleDeferredRetry = {
+                scheduleAttempts += 1
+                scheduleAttempts >= 2
+            },
+            markDurablyDirty = { durable += it },
+            clearDurablyDirty = { durable -= it },
+        )
+
+        worker.noteCommit("band-a")
+        runCurrent()
+
+        assertEquals(1, processAttempts)
+        assertEquals(1, scheduleAttempts)
+        assertEquals(setOf("band-a"), durable)
+        assertEquals(setOf("band-a"), worker.pendingDeviceIds())
+        assertTrue(worker.hasWorkerClaim())
+
+        advanceTimeBy(100L)
+        runCurrent()
+
+        assertEquals(1, processAttempts)
+        assertEquals(2, scheduleAttempts)
+        assertEquals(setOf("band-a"), durable)
+        assertTrue(worker.pendingDeviceIds().isEmpty())
+        assertFalse(worker.hasWorkerClaim())
+    }
+
+    @Test
+    fun callerScheduleFailureRequestsRetryAndRetainsDurableSource() = runTest {
+        val durable = linkedSetOf("band-a")
+        var processAttempts = 0
+        var scheduleAttempts = 0
+        val worker = BackfillAnalysisWorker(
+            scope = this,
+            debounceMillis = 0L,
+            retryDelayMillis = 100L,
+            processRevision = {
+                processAttempts += 1
+                BackfillAnalysisProcessResult.Deferred(retryAtEpochMillis = 86_400_000L)
+            },
+            scheduleDeferredRetry = {
+                scheduleAttempts += 1
+                false
+            },
+            clearDurablyDirty = { durable -= it },
+        )
+
+        val outcomes = worker.resumeAndAwait(durable.toList())
+
+        assertEquals(listOf(BackfillAnalysisProcessResult.RetryRequired), outcomes)
+        assertEquals(1, processAttempts)
+        assertEquals(1, scheduleAttempts)
+        assertEquals(setOf("band-a"), durable)
+        assertEquals(setOf("band-a"), worker.pendingDeviceIds())
+        assertFalse(worker.hasWorkerClaim())
+    }
+
+    @Test
+    fun cancellingCallerCancelsAnalysisAndRequeuesDurableSource() = runTest {
+        val durable = linkedSetOf("band-a")
+        val firstAttemptStarted = CompletableDeferred<Unit>()
+        var processAttempts = 0
+        var cancelledAttempts = 0
+        val worker = BackfillAnalysisWorker(
+            scope = this,
+            debounceMillis = 0L,
+            retryDelayMillis = 100L,
+            processRevision = {
+                processAttempts += 1
+                if (processAttempts == 1) {
+                    try {
+                        firstAttemptStarted.complete(Unit)
+                        awaitCancellation()
+                    } finally {
+                        cancelledAttempts += 1
+                    }
+                }
+                BackfillAnalysisProcessResult.Completed
+            },
+            clearDurablyDirty = { durable -= it },
+        )
+
+        val firstRun = launch {
+            worker.resumeAndAwait(durable.toList())
+        }
+        firstAttemptStarted.await()
+        firstRun.cancelAndJoin()
+
+        assertEquals(1, processAttempts)
+        assertEquals(1, cancelledAttempts)
+        assertEquals(setOf("band-a"), durable)
+        assertEquals(setOf("band-a"), worker.pendingDeviceIds())
+        assertFalse(worker.hasWorkerClaim())
+
+        val outcomes = worker.resumeAndAwait(durable.toList())
+
+        assertEquals(listOf(BackfillAnalysisProcessResult.Completed), outcomes)
+        assertEquals(2, processAttempts)
+        assertTrue(durable.isEmpty())
+        assertTrue(worker.pendingDeviceIds().isEmpty())
+        assertFalse(worker.hasWorkerClaim())
+    }
+
+    @Test
+    fun callerTakeoverCancelsExistingApplicationWorkerWithoutCancellingApplicationScope() =
+        runTest {
+            val durable = linkedSetOf<String>()
+            val applicationJob = Job()
+            val applicationScope =
+                CoroutineScope(applicationJob + StandardTestDispatcher(testScheduler))
+            val applicationAttemptStarted = CompletableDeferred<Unit>()
+            val callerAttemptStarted = CompletableDeferred<Unit>()
+            var processAttempts = 0
+            var cancelledAttempts = 0
+            val worker = BackfillAnalysisWorker(
+                scope = applicationScope,
+                debounceMillis = 0L,
+                retryDelayMillis = 100L,
+                processRevision = {
+                    processAttempts += 1
+                    when (processAttempts) {
+                        1 -> applicationAttemptStarted.complete(Unit)
+                        2 -> callerAttemptStarted.complete(Unit)
+                        else -> return@BackfillAnalysisWorker BackfillAnalysisProcessResult.Completed
+                    }
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        cancelledAttempts += 1
+                    }
+                },
+                markDurablyDirty = { durable += it },
+                clearDurablyDirty = { durable -= it },
+            )
+
+            worker.noteCommit("band-a")
+            runCurrent()
+            applicationAttemptStarted.await()
+
+            val caller = launch {
+                worker.resumeAndAwait(durable.toList())
+            }
+            callerAttemptStarted.await()
+
+            assertEquals(1, cancelledAttempts)
+            assertTrue(applicationJob.isActive)
+            assertEquals(setOf("band-a"), durable)
+
+            caller.cancelAndJoin()
+
+            assertEquals(2, cancelledAttempts)
+            assertTrue(applicationJob.isActive)
+            assertEquals(setOf("band-a"), durable)
+            assertEquals(setOf("band-a"), worker.pendingDeviceIds())
+            assertFalse(worker.hasWorkerClaim())
+
+            val outcomes = worker.resumeAndAwait(durable.toList())
+
+            assertEquals(listOf(BackfillAnalysisProcessResult.Completed), outcomes)
+            assertEquals(3, processAttempts)
+            assertTrue(durable.isEmpty())
+            assertTrue(worker.pendingDeviceIds().isEmpty())
+            assertFalse(worker.hasWorkerClaim())
+            assertTrue(applicationJob.isActive)
+            applicationJob.cancel()
+        }
+
+    @Test
+    fun deferredSourceDoesNotBlockAnotherSourceOrClearItsMarker() = runTest {
+        val durable = linkedSetOf("band-a", "band-b")
+        val processed = mutableListOf<String>()
+        val cleared = mutableListOf<String>()
+        val scheduled = mutableListOf<Long>()
+        val worker = BackfillAnalysisWorker(
+            scope = this,
+            debounceMillis = 0L,
+            retryDelayMillis = 100L,
+            processRevision = { revision ->
+                processed += revision.deviceId
+                if (revision.deviceId == "band-a") {
+                    BackfillAnalysisProcessResult.Deferred(retryAtEpochMillis = 86_400_000L)
+                } else {
+                    BackfillAnalysisProcessResult.Completed
+                }
+            },
+            scheduleDeferredRetry = {
+                scheduled += it
+                true
+            },
+            clearDurablyDirty = {
+                cleared += it
+                durable -= it
+            },
+        )
+
+        worker.resume(listOf("band-a", "band-b"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("band-a", "band-b"), processed)
+        assertEquals(listOf(86_400_000L), scheduled)
+        assertEquals(listOf("band-b"), cleared)
+        assertEquals(setOf("band-a"), durable)
+        assertFalse(worker.hasWorkerClaim())
+    }
+
+    @Test
+    fun scheduledNextDayResumeEventuallyProcessesAndClearsDeferredSource() = runTest {
+        val durable = linkedSetOf<String>()
+        val scheduled = mutableListOf<Long>()
+        var attempts = 0
+        val initialWorker = BackfillAnalysisWorker(
+            scope = this,
+            debounceMillis = 0L,
+            retryDelayMillis = 100L,
+            processRevision = {
+                attempts += 1
+                BackfillAnalysisProcessResult.Deferred(retryAtEpochMillis = 86_400_000L)
+            },
+            scheduleDeferredRetry = {
+                scheduled += it
+                true
+            },
+            markDurablyDirty = { durable += it },
+            clearDurablyDirty = { durable -= it },
+        )
+
+        initialWorker.noteCommit("band-a")
+        advanceUntilIdle()
+        assertEquals(setOf("band-a"), durable)
+        assertEquals(1, attempts)
+        assertFalse(initialWorker.hasWorkerClaim())
+
+        // A WorkManager-created process owns a fresh in-memory latch. The SharedPreferences source
+        // marker is the durable handoff, so the new service instance can retry without any ViewModel.
+        val restartedWorker = BackfillAnalysisWorker(
+            scope = this,
+            debounceMillis = 0L,
+            retryDelayMillis = 100L,
+            processRevision = {
+                attempts += 1
+                BackfillAnalysisProcessResult.Completed
+            },
+            clearDurablyDirty = { durable -= it },
+        )
+        val outcomes = restartedWorker.resumeAndAwait(durable.toList())
+        advanceUntilIdle()
+
+        assertEquals(listOf(BackfillAnalysisProcessResult.Completed), outcomes)
+        assertEquals(2, attempts)
+        assertEquals(listOf(86_400_000L), scheduled)
+        assertTrue(durable.isEmpty())
+        assertFalse(restartedWorker.hasWorkerClaim())
     }
 
     @Test
@@ -245,55 +629,6 @@ class BackfillAnalysisRevisionLatchTest {
         val replacement = requireNotNull(latch.claimPendingWorker())
         assertTrue(latch.workerStarted(replacement))
         assertEquals("band-a", latch.nextRevisionOrRelease(replacement)?.deviceId)
-    }
-
-    @Test
-    fun failedAnalysisCannotRunDependentsOrAdvanceWatermark() = runTest {
-        var watermark: String? = "old"
-        var dependents = 0
-        var writes = 0
-
-        try {
-            runFingerprintGatedBackfillAnalysis(
-                readFingerprint = { "new" },
-                readWatermark = { watermark },
-                analyze = { error("scoring failed") },
-                afterAnalysis = { dependents += 1 },
-                persistWatermark = {
-                    writes += 1
-                    watermark = it
-                },
-            )
-            fail("analysis failure must propagate to the retry worker")
-        } catch (expected: IllegalStateException) {
-            assertEquals("scoring failed", expected.message)
-        }
-
-        assertEquals(0, dependents)
-        assertEquals(0, writes)
-        assertEquals("old", watermark)
-    }
-
-    @Test
-    fun fingerprintFailureCannotRunAnalysisOrAdvanceWatermark() = runTest {
-        var analyses = 0
-        var writes = 0
-
-        try {
-            runFingerprintGatedBackfillAnalysis(
-                readFingerprint = { error("fingerprint unavailable") },
-                readWatermark = { "old" },
-                analyze = { analyses += 1 },
-                afterAnalysis = { fail("dependents must not run") },
-                persistWatermark = { writes += 1 },
-            )
-            fail("fingerprint failure must propagate to the retry worker")
-        } catch (expected: IllegalStateException) {
-            assertEquals("fingerprint unavailable", expected.message)
-        }
-
-        assertEquals(0, analyses)
-        assertEquals(0, writes)
     }
 
     private fun assertCommitReleaseOrdering(commitFirst: Boolean) {

@@ -168,6 +168,52 @@ final class EditMergePrecedenceTests: XCTestCase {
             [first])
     }
 
+    func testExactCivilBoundsUseTheBridgedTerminalWake() {
+        let midnight = 1_783_641_600
+        let first = CachedSleepSession(
+            startTs: midnight - 90 * 60,
+            endTs: midnight - 5 * 60,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil,
+            userEdited: true)
+        let continuation = CachedSleepSession(
+            startTs: midnight + 5 * 60,
+            endTs: midnight + 2 * 3_600,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil)
+
+        XCTAssertEqual(
+            IntelligenceEngine.editedRowsForDay(
+                [first],
+                day: AnalyticsEngine.dayString(
+                    continuation.endTs,
+                    offsetSec: 0),
+                tzOffsetSeconds: 0,
+                civilDayStartTs: midnight,
+                civilDayEndTsExclusive: midnight + 86_400,
+                sourceTimeline: [first, continuation]),
+            [first],
+            "The pre-midnight fragment inherits the complete bridged night's post-midnight wake."
+        )
+        XCTAssertTrue(
+            IntelligenceEngine.editedRowsForDay(
+                [first],
+                day: AnalyticsEngine.dayString(
+                    first.endTs,
+                    offsetSec: 0),
+                tzOffsetSeconds: 0,
+                civilDayStartTs: midnight - 86_400,
+                civilDayEndTsExclusive: midnight,
+                sourceTimeline: [first, continuation])
+                .isEmpty,
+            "Exact bounds must not publish the early fragment on the prior day."
+        )
+    }
+
     // MARK: - sleep_performance daily-column derivation (#614)
     //
     // The resolver derives the Rest composite from a banked DailyMetric's sleep totals when no

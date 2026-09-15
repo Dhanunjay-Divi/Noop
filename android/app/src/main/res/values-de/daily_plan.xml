@@ -59,4 +59,14 @@
     <string name="daily_plan_why_title">Warum sich der heutige Tag so darstellt</string>
     <string name="daily_plan_why_trailing">Dein Ausgangsbereich</string>
     <string name="daily_plan_why_unavailable">Noch verfügt kein aktuelles Erholungssignal über genug persönliche Verlaufsdaten für einen Vergleich.</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_hours_minutes">Du hast %1$d Std. %2$d Min. weniger als dein Ziel geschlafen.</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_minutes">Du hast %1$d Min. weniger als dein Ziel geschlafen.</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_hours_minutes">Du hast %1$d Std. %2$d Min. weniger als gewöhnlich geschlafen.</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_minutes">Du hast %1$d Min. weniger als gewöhnlich geschlafen.</string>
+    <string name="daily_plan_workout_adjustment_recovery_shift">Die heutigen Erholungssignale sprechen für eine leichtere Einheit. Prüfe dein Befinden.</string>
+    <string name="daily_plan_workout_adjustment_sleep_and_recovery">Schlaf und Erholung sprechen beide für eine leichtere Einheit. Prüfe dein Befinden.</string>
+    <string name="daily_plan_workout_adjustment_sleep_deficit">Dein Schlaf liegt unter deinem üblichen Wert oder Ziel. Halte diese Einheit flexibel und prüfe dein Befinden.</string>
+    <string name="daily_plan_workout_adjustment_sleep_label">Schlaf</string>
+    <string name="daily_plan_workout_adjustment_title">Geplantes Training</string>
+    <string name="daily_plan_workout_adjustment_workout_label">Beginn</string>
 </resources>

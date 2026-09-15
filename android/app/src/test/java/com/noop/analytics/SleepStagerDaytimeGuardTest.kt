@@ -6,6 +6,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * Tests SleepStager's daytime false-sleep guard (#90). A long, still, sedentary daytime
@@ -115,6 +117,25 @@ class SleepStagerDaytimeGuardTest {
         assertEquals(1, SleepStager.detectSleep(hr = hr, gravity = grav).size)
         val shifted = SleepStager.detectSleep(hr = hr, gravity = grav, tzOffsetSeconds = 10 * 3_600L)
         assertTrue("a +10h offset pushes the window into the daytime band → rejected", shifted.isEmpty())
+    }
+
+    @Test
+    fun namedZoneUsesHistoricalOffsetAcrossSpringTransition() {
+        val zone = ZoneId.of("America/New_York")
+        val center = Instant.parse("2026-03-08T00:30:00Z").epochSecond
+        val period = SleepStager.Period(
+            stage = "sleep",
+            start = center - 30,
+            end = center + 30,
+        )
+        val historicalOffset: (Long) -> Long = {
+            zone.rules.getOffset(Instant.ofEpochSecond(it)).totalSeconds.toLong()
+        }
+
+        assertFalse(SleepStager.isDaytimeCenter(period, -4L * 3_600L))
+        assertTrue(SleepStager.isDaytimeCenter(period, historicalOffset))
+        assertTrue(SleepStager.isOvernightOnset(center, -4L * 3_600L))
+        assertFalse(SleepStager.isOvernightOnset(center, historicalOffset))
     }
 
     @Test

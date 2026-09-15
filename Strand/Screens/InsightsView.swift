@@ -240,7 +240,7 @@ struct InsightsView: View {
                     if behaviours.isEmpty {
                         // No journal yet, explain, without dead-ending on a paid export.
                         NoopCard {
-                            Text("Log behaviours above. After a few days of answers, NOOP ranks how each one moves your charge, HRV and rest. Importing a wearable export (which includes its journal) backfills history instantly.")
+                            Text("appwide.insights.behaviour_history_help")
                                 .font(StrandFont.subhead)
                                 .foregroundStyle(StrandPalette.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1257,7 +1257,7 @@ struct InsightsView: View {
             CorrelationEngine.alignByDay(series("sleep_performance"), series("recovery"))) {
             out.append(.init(id: "sleep-rec",
                              title: String(localized: "Sleep Score ↔ Recovery"),
-                             blurb: String(localized: "How closely a good night tracks next-morning charge."),
+                             blurb: String(localized: "appwide.metric_education.recovery.why"),
                              corr: c))
         }
         // HRV ↔ recovery (same day).
@@ -1265,7 +1265,7 @@ struct InsightsView: View {
             CorrelationEngine.alignByDay(series("hrv"), series("recovery"))) {
             out.append(.init(id: "hrv-rec",
                              title: String(localized: "HRV ↔ Recovery"),
-                             blurb: String(localized: "Heart-rate variability as the engine behind your charge score."),
+                             blurb: String(localized: "appwide.metric_education.recovery.method"),
                              corr: c))
         }
         // Resting HR ↔ recovery (same day), expected to be negative.
@@ -1273,7 +1273,7 @@ struct InsightsView: View {
             CorrelationEngine.alignByDay(series("rhr"), series("recovery"))) {
             out.append(.init(id: "rhr-rec",
                              title: String(localized: "Resting HR ↔ Recovery"),
-                             blurb: String(localized: "A lower resting heart rate usually means a higher charge."),
+                             blurb: String(localized: "appwide.metric_education.recovery.method"),
                              corr: c))
         }
         // Today's recovery ↔ NEXT-day recovery (1-day lag) as a strain/carry-over proxy.
@@ -1282,7 +1282,7 @@ struct InsightsView: View {
         if let c = CorrelationEngine.lagged(x: series("recovery"), y: series("recovery"), lagDays: 1) {
             out.append(.init(id: "rec-lag",
                              title: String(localized: "Recovery → Next-day recovery"),
-                             blurb: String(localized: "How much one day's charge carries into the next."),
+                             blurb: String(localized: "appwide.metric_education.recovery.why"),
                              corr: c))
         }
 

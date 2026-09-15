@@ -71,9 +71,8 @@ import kotlin.math.roundToInt
 /** The 0-21 Day-Strain axis the coupled read always uses, regardless of the user's #268 display toggle. */
 private const val COUPLED_STRAIN_OUT_OF = 21.0
 
-/** The missing-value placeholder, matching the app's shipped "No Data" token (TodayScreen.COUPLED_NO_DATA is
- *  file-private, so the coupled screen carries its own copy of the same string). */
-private const val COUPLED_NO_DATA = "No Data"
+/** The shared app-wide missing-value token. */
+private const val COUPLED_NO_DATA = NoopDisplayFormat.MISSING
 
 // The liquid hero-card wrapper values, byte-identical to the liquid Today pilot (TodayScreen's
 // LIQUID_HERO_FILL / LIQUID_HERO_RADIUS are file-private, so the coupled screen carries its own copy):
@@ -572,7 +571,7 @@ private fun SleepCard(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(uiString(R.string.l10n_coupled_screen_sleep_performance_4611539f), style = NoopType.overline, color = Palette.textSecondary)
+                Text(uiString(R.string.appwide_day_overview_sleep_score), style = NoopType.overline, color = Palette.textSecondary)
                 if (asleepMin != null && asleepMin > 0) {
                     Text(uiString(R.string.l10n_coupled_screen_hoursminutes_asleepmin_slept_732a5b21, hoursMinutes(asleepMin)), style = NoopType.headline, color = Palette.textPrimary)
                     Text(uiString(R.string.l10n_coupled_screen_hoursminutes_needmin_needed_7fc1eb15, hoursMinutes(needMin)), style = NoopType.subhead, color = Palette.textSecondary)

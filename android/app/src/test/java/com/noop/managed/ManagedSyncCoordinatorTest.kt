@@ -2,6 +2,7 @@ package com.noop.managed
 
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -226,6 +227,188 @@ class ManagedSyncCoordinatorTest {
     }
 
     @Test
+    fun filteredEmptyChangePageAdvancesCursorToHighWatermark() = runTest {
+        val state = FakeState()
+        val transport = FakeTransport(feedHighWatermark = 7)
+        val coordinator = ManagedSyncCoordinator(
+            transport,
+            FakeExtractor(),
+            state,
+            FakeRestore(),
+        )
+
+        val result = coordinator.sync(
+            source,
+            authorization,
+            nowMs = 2_000,
+            dataClasses = emptyList(),
+            maxChangePages = 1,
+            maxDocumentUploads = 0,
+        )
+
+        assertEquals(0, result.appliedChanges)
+        assertFalse(result.hasMoreChanges)
+        assertEquals(7L, state.sequence)
+        assertEquals(0, transport.restoreCreations)
+    }
+
+    @Test
+    fun changeFeedCapabilityUpgradeSnapshotsBeforeIncrementalSync() = runTest {
+        val state = FakeState(capabilityVersion = 0)
+        val document = snapshotTombstone()
+        val restore = FakeRestore()
+        val transport = FakeTransport(
+            snapshotDocuments = listOf(document),
+            feedHighWatermark = 99,
+        )
+
+        val coordinator = ManagedSyncCoordinator(
+            transport,
+            FakeExtractor(),
+            state,
+            restore,
+        )
+        val first = coordinator.sync(
+            source,
+            authorization,
+            nowMs = 2_000,
+            dataClasses = listOf("essential_timeseries"),
+            maxChangePages = 1,
+            maxDocumentUploads = 0,
+        )
+        val result = coordinator.sync(
+            source,
+            authorization,
+            nowMs = 2_000,
+            dataClasses = listOf("essential_timeseries"),
+            maxChangePages = 1,
+            maxDocumentUploads = 0,
+        )
+
+        assertEquals(0, first.appliedChanges)
+        assertTrue(first.hasMoreChanges)
+        assertEquals(1, result.appliedChanges)
+        assertFalse(result.hasMoreChanges)
+        assertEquals(1, transport.restoreCreations)
+        assertEquals(listOf("tombstone"), restore.documentOperations)
+        assertEquals(listOf(true), transport.snapshotIncludeDeletedValues)
+        assertEquals(listOf(true), transport.restoreIncludeDeletedValues)
+        assertEquals(99L, state.sequence)
+        assertEquals(
+            ManagedSyncCoordinator.CHANGE_FEED_CAPABILITY_VERSION,
+            state.capabilityVersion,
+        )
+        assertNull(state.restoreCheckpoint)
+    }
+
+    @Test
+    fun rejectedCapabilityUpgradeTombstoneDoesNotAdvanceSnapshotCursor() = runTest {
+        val state = FakeState(capabilityVersion = 0)
+        val transport = FakeTransport(
+            snapshotDocuments = listOf(snapshotTombstone()),
+        )
+        val coordinator = ManagedSyncCoordinator(
+            transport,
+            FakeExtractor(),
+            state,
+            RejectingDocumentRestore(),
+        )
+
+        val first = coordinator.sync(
+            source,
+            authorization,
+            nowMs = 2_000,
+            dataClasses = listOf("essential_timeseries"),
+            maxChangePages = 1,
+            maxDocumentUploads = 0,
+        )
+        assertTrue(first.hasMoreChanges)
+
+        try {
+            coordinator.sync(
+                source,
+                authorization,
+                nowMs = 2_000,
+                dataClasses = listOf("essential_timeseries"),
+                maxChangePages = 1,
+                maxDocumentUploads = 0,
+            )
+            throw AssertionError("Expected rejected snapshot tombstone")
+        } catch (_: ManagedStorageException.InvalidResponse) {
+            // The tombstone must remain replayable from the unchanged cursor.
+        }
+
+        assertNull(state.restoreCheckpoint?.documentCursor)
+        assertEquals(0, state.restoreCheckpoint?.deliveredObjects)
+        assertEquals(0L, state.sequence)
+        assertEquals(0, state.capabilityVersion)
+        assertEquals(listOf(true), transport.snapshotIncludeDeletedValues)
+        assertEquals(listOf(true), transport.restoreIncludeDeletedValues)
+    }
+
+    @Test
+    fun failedCapabilityUpgradeSnapshotDoesNotAdvanceCursorOrVersion() = runTest {
+        val state = FakeState(capabilityVersion = 0)
+        val transport = FakeTransport(failSnapshotNotFound = true)
+
+        val result = ManagedSyncCoordinator(
+            transport,
+            FakeExtractor(),
+            state,
+            FakeRestore(),
+        ).sync(
+            source,
+            authorization,
+            nowMs = 2_000,
+            dataClasses = listOf("essential_timeseries"),
+            maxChangePages = 1,
+            maxDocumentUploads = 0,
+        )
+
+        assertTrue(result.hasMoreChanges)
+        assertEquals(0L, state.sequence)
+        assertEquals(0, state.capabilityVersion)
+        assertEquals(
+            ManagedSyncCoordinator.CHANGE_FEED_CAPABILITY_VERSION,
+            state.restoreCheckpoint?.changeFeedCapabilityVersion,
+        )
+    }
+
+    @Test
+    fun rejectedDocumentDoesNotAdvanceTheChangeCursor() = runTest {
+        val document = snapshotDocument()
+        val change = document.asChange().copy(sequence = 1)
+        val state = FakeState()
+        val restore = RejectingDocumentRestore()
+        val coordinator = ManagedSyncCoordinator(
+            FakeTransport(
+                changes = listOf(change),
+                snapshotDocuments = listOf(document),
+            ),
+            FakeExtractor(),
+            state,
+            restore,
+        )
+
+        try {
+            coordinator.sync(
+                source,
+                authorization,
+                nowMs = 2_000,
+                dataClasses = emptyList(),
+                maxChangePages = 1,
+            )
+            throw AssertionError("Expected rejected document restore")
+        } catch (_: ManagedStorageException.InvalidResponse) {
+            // The same change must remain replayable after client recovery.
+        }
+
+        assertEquals(1, restore.documentApplications)
+        assertEquals(0L, state.sequence)
+        assertTrue(state.applied.isEmpty())
+    }
+
+    @Test
     fun validatedLocalUploadAdvancesFeedWithoutDownloadingDuplicate() = runTest {
         val chunkId = UUID.randomUUID()
         val change = ManagedChange(
@@ -424,6 +607,8 @@ class ManagedSyncCoordinatorTest {
             restoreCheckpoint = ManagedSnapshotRestoreCheckpoint(
                 requestId = staleRequestId,
                 dataClasses = listOf("essential_timeseries"),
+                changeFeedCapabilityVersion =
+                    ManagedSyncCoordinator.CHANGE_FEED_CAPABILITY_VERSION,
                 restoreJobId = UUID.randomUUID(),
                 snapshotAt = "2026-09-01T00:00:00Z",
                 changeSequence = 7,
@@ -676,9 +861,15 @@ class ManagedSyncCoordinatorTest {
         ) = ManagedPruneResult(0, 0)
 
         override suspend fun changeSequence() = 0L
+        override suspend fun changeFeedCapabilityVersion() =
+            ManagedSyncCoordinator.CHANGE_FEED_CAPABILITY_VERSION
         override suspend fun saveChangeSequence(sequence: Long) = Unit
         override suspend fun isChangeApplied(change: ManagedChange) = false
         override suspend fun recordAppliedChange(change: ManagedChange) = Unit
+        override suspend fun finishSnapshotRestore(
+            changeSequence: Long,
+            changeFeedCapabilityVersion: Int,
+        ) = Unit
     }
 
     private class PrunedRestore(
@@ -856,6 +1047,8 @@ class ManagedSyncCoordinatorTest {
     private class FakeState(
         private val localChunkIds: Set<UUID> = emptySet(),
         var restoreCheckpoint: ManagedSnapshotRestoreCheckpoint? = null,
+        var capabilityVersion: Int =
+            ManagedSyncCoordinator.CHANGE_FEED_CAPABILITY_VERSION,
     ) : ManagedSyncStateStoring {
         var checkpoint = ManagedUploadCheckpoint()
         var window: ManagedWindowUpload? = null
@@ -956,6 +1149,8 @@ class ManagedSyncCoordinatorTest {
 
         override suspend fun changeSequence() = sequence
 
+        override suspend fun changeFeedCapabilityVersion() = capabilityVersion
+
         override suspend fun saveChangeSequence(sequence: Long) {
             this.sequence = maxOf(this.sequence, sequence)
         }
@@ -980,8 +1175,12 @@ class ManagedSyncCoordinatorTest {
             snapshotClears += 1
         }
 
-        override suspend fun finishSnapshotRestore(changeSequence: Long) {
+        override suspend fun finishSnapshotRestore(
+            changeSequence: Long,
+            changeFeedCapabilityVersion: Int,
+        ) {
             sequence = maxOf(sequence, changeSequence)
+            capabilityVersion = changeFeedCapabilityVersion
             restoreCheckpoint = null
         }
     }
@@ -990,6 +1189,7 @@ class ManagedSyncCoordinatorTest {
         var metadataApplications = 0
         var chunkApplications = 0
         var documentApplications = 0
+        val documentOperations = mutableListOf<String>()
 
         override suspend fun apply(chunk: ManagedChunkPayload, change: ManagedChange) {
             chunkApplications += 1
@@ -997,6 +1197,7 @@ class ManagedSyncCoordinatorTest {
 
         override suspend fun apply(document: ManagedDocument, change: ManagedChange) {
             documentApplications += 1
+            documentOperations += change.operation
         }
 
         override suspend fun hydrate(
@@ -1009,6 +1210,22 @@ class ManagedSyncCoordinatorTest {
         }
     }
 
+    private class RejectingDocumentRestore : ManagedRestoreApplying {
+        var documentApplications = 0
+
+        override suspend fun apply(chunk: ManagedChunkPayload, change: ManagedChange) = Unit
+
+        override suspend fun apply(document: ManagedDocument, change: ManagedChange) {
+            documentApplications += 1
+            throw ManagedStorageException.InvalidResponse()
+        }
+
+        override suspend fun hydrate(
+            chunk: ManagedChunkPayload,
+            source: ManagedSourceDescriptor,
+        ) = Unit
+    }
+
     private class FakeTransport(
         private val failFirstCompletion: Boolean = false,
         private val changes: List<ManagedChange> = emptyList(),
@@ -1017,6 +1234,7 @@ class ManagedSyncCoordinatorTest {
         private val changeFeedHasMore: Boolean = false,
         private val expireFirstChangeCursor: Boolean = false,
         private val failSnapshotNotFound: Boolean = false,
+        private val feedHighWatermark: Long? = null,
     ) : ManagedStorageTransport {
         var uploads = 0
         var completions = 0
@@ -1025,6 +1243,8 @@ class ManagedSyncCoordinatorTest {
         var documentPuts = 0
         val snapshotCursorChunkIds = mutableListOf<UUID?>()
         val snapshotCursorDocumentIds = mutableListOf<UUID?>()
+        val snapshotIncludeDeletedValues = mutableListOf<Boolean>()
+        val restoreIncludeDeletedValues = mutableListOf<Boolean>()
         private var changeRequests = 0
         private val restoreJobId = UUID.randomUUID()
 
@@ -1079,12 +1299,24 @@ class ManagedSyncCoordinatorTest {
             if (expireFirstChangeCursor && changeRequests == 1) {
                 throw ManagedStorageException.CursorExpired(10)
             }
+            val highWatermark = maxOf(
+                afterSequence,
+                feedHighWatermark ?: afterSequence,
+                changes.maxOfOrNull { it.sequence } ?: afterSequence,
+            )
+            val selected = changes.filter { it.sequence > afterSequence }.take(limit)
+            val hasMore = changeFeedHasMore ||
+                changes.any { it.sequence > (selected.lastOrNull()?.sequence ?: afterSequence) }
             return ManagedChangeFeed(
-                changes = changes.filter { it.sequence > afterSequence },
-                minimumSequence = 0,
-                highWatermark = changes.maxOfOrNull { it.sequence } ?: 0,
-                nextSequence = changes.maxOfOrNull { it.sequence } ?: afterSequence,
-                hasMore = changeFeedHasMore,
+                changes = selected,
+                minimumSequence = 1,
+                highWatermark = highWatermark,
+                nextSequence = if (hasMore) {
+                    selected.lastOrNull()?.sequence ?: afterSequence
+                } else {
+                    highWatermark
+                },
+                hasMore = hasMore,
             )
         }
 
@@ -1092,7 +1324,9 @@ class ManagedSyncCoordinatorTest {
             authorization: ManagedAuthorization,
             requestId: UUID,
             dataClasses: List<String>,
+            includeDeletedDocuments: Boolean,
         ): ManagedRestoreJob {
+            restoreIncludeDeletedValues += includeDeletedDocuments
             restoreCreations += 1
             return ManagedRestoreJob(
                 restoreJobId,
@@ -1158,14 +1392,28 @@ class ManagedSyncCoordinatorTest {
             )
         }
 
+        override suspend fun document(
+            authorization: ManagedAuthorization,
+            kind: ManagedDocumentKind,
+            id: UUID,
+            revision: Long?,
+        ): ManagedDocument = snapshotDocuments.singleOrNull {
+            it.documentKind == kind &&
+                it.documentId == id &&
+                (revision == null || it.revision == revision)
+        } ?: throw ManagedStorageException.InvalidResponse()
+
         override suspend fun documents(
             authorization: ManagedAuthorization,
             snapshotAt: String,
             after: ManagedDocumentCursor?,
             limit: Int,
+            includeDeleted: Boolean,
         ): ManagedDocumentPage {
+            snapshotIncludeDeletedValues += includeDeleted
             snapshotCursorDocumentIds += after?.afterDocumentId
             val remaining = snapshotDocuments
+                .filter { includeDeleted || it.deletedAt == null }
                 .sortedWith(
                     compareBy(
                         ManagedDocument::updatedAt,
@@ -1314,6 +1562,31 @@ class ManagedSyncCoordinatorTest {
                 payloadCiphertextBase64 = null,
                 updatedAt = pending.updatedAt,
                 deletedAt = null,
+                duplicate = false,
+            )
+        }
+
+        private fun snapshotTombstone(): ManagedDocument {
+            val documentId =
+                UUID.fromString("33333333-3333-5333-8333-333333333333")
+            val revision = 2L
+            return ManagedDocument(
+                documentKind = ManagedDocumentKind.DAY_OWNERSHIP,
+                documentId = documentId,
+                revision = revision,
+                originInstallationId = "remote-installation",
+                contentMode = "server_readable",
+                clientKeyId = null,
+                contentSha256 = ManagedDigest.sha256(
+                    (
+                        "deleted:day_ownership:" +
+                            "${documentId.toString().lowercase()}:$revision"
+                        ).toByteArray(),
+                ),
+                payloadJson = null,
+                payloadCiphertextBase64 = null,
+                updatedAt = "2026-09-01T01:00:00Z",
+                deletedAt = "2026-09-01T01:00:00Z",
                 duplicate = false,
             )
         }

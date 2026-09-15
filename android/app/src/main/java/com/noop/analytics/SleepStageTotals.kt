@@ -361,14 +361,26 @@ object SleepStageTotals {
      *  deterministic; shares the [bridgedNightGroups] pass + [mainNightIndex] so the pick stays
      *  cross-platform stable. Mirrors Swift `mainNightGroupIndices`. (#561) */
     fun mainNightGroupIndices(blocks: List<NightBlock>, offsetSec: Long, habitualMidsleepSec: Long? = null): List<Int>? {
+        return mainNightGroupIndices(blocks, { offsetSec }, habitualMidsleepSec)
+    }
+
+    fun mainNightGroupIndices(
+        blocks: List<NightBlock>,
+        offsetAtEpochSec: (Long) -> Long,
+        habitualMidsleepSec: Long? = null,
+    ): List<Int>? {
         if (blocks.isEmpty()) return null
-        val all = bridgedNightGroups(blocks, offsetSec)
+        val all = bridgedNightGroups(blocks, offsetAtEpochSec)
         // Rebuild each group's bridged span for scoring: sorted-ascending fragments make the span
         // (first start, running-max end) — identical to the span the one-pass loop accumulated.
         val bridgedSpans = all.map { g ->
             NightBlock(g.indices.minOf { blocks[it].start }, g.indices.maxOf { blocks[it].end })
         }
-        val winner = mainNightIndex(bridgedSpans, offsetSec, habitualMidsleepSec) ?: return null
+        val winner = mainNightIndex(
+            bridgedSpans,
+            offsetAtEpochSec,
+            habitualMidsleepSec,
+        ) ?: return null
         return all[winner].indices
     }
 
@@ -381,11 +393,22 @@ object SleepStageTotals {
      *  stages, so "asleep minutes" is the clock span - preserving the prior duration semantics for callers
      *  that rank by span (`analyzeDay`). Mirrors Swift `mainNightIndex`. (#525 / #547) */
     fun mainNightIndex(blocks: List<NightBlock>, offsetSec: Long, habitualMidsleepSec: Long? = null): Int? {
+        return mainNightIndex(blocks, { offsetSec }, habitualMidsleepSec)
+    }
+
+    fun mainNightIndex(
+        blocks: List<NightBlock>,
+        offsetAtEpochSec: (Long) -> Long,
+        habitualMidsleepSec: Long? = null,
+    ): Int? {
         if (blocks.isEmpty()) return null
         val target = targetMidsleepSec(habitualMidsleepSec)
         fun score(b: NightBlock): Double {
             val asleepMin = b.durationS.toDouble() / 60.0
-            val midSec = localSecOfDay(b.midpointSec, offsetSec)
+            val midSec = localSecOfDay(
+                b.midpointSec,
+                offsetAtEpochSec(b.midpointSec),
+            )
             return asleepMin + alignmentBonusMinutes(midSec, target)
         }
         var bestIdx = 0

@@ -49,6 +49,7 @@ import com.noop.data.DailyMetric
 import com.noop.data.MoodStore
 import com.noop.data.NutritionLogContract
 import com.noop.data.WhoopRepository
+import com.noop.analytics.BodyProfilePolicy
 import com.noop.ingest.HealthConnectImporter
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -220,6 +221,15 @@ private val knownSeriesMetrics: Map<String, MetricSpec> = mapOf(
         Palette.metricCyan, null, 0),
     "mood" to MetricSpec("mood", uiString(R.string.explore_metric_mood), "/5", uiString(R.string.explore_category_mind),
         Palette.metricPurple, true, 0),
+    "bmi" to MetricSpec(
+        "bmi",
+        uiString(R.string.profile_bmi_label),
+        "",
+        uiString(R.string.explore_category_health),
+        Palette.metricPurple,
+        null,
+        1,
+    ),
     HealthConnectImporter.BODY_TEMPERATURE_KEY to MetricSpec(
         HealthConnectImporter.BODY_TEMPERATURE_KEY,
         "Body Temperature",
@@ -282,6 +292,19 @@ fun TrendsExploreScreen(vm: AppViewModel) {
     val deviceId = vm.activeStrapId
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
     val ageMetricDataVersion by vm.ageMetricDataVersion.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val profile = remember(context) { ProfileStore.from(context) }
+    val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val canPresentBmi = remember(profileVersion) {
+        BodyProfilePolicy.canPresentAdultBmi(
+            age = profile.age,
+            currentWeightKg = profile.weightKg,
+            heightCm = profile.heightCm,
+            ageConfirmed = profile.ageInputConfirmed,
+            heightConfirmed = profile.heightInputConfirmed,
+            currentWeightConfirmed = profile.weightInputConfirmed,
+        )
+    }
 
     // #797 follow-up (Explore 'All' truncation): `recentDays` is the BOUNDED dashboard flow (capped at
     // WhoopRepository.RECENT_DAYS_CAP), so a 3000+ day import would silently show only the most-recent ~800
@@ -320,10 +343,11 @@ fun TrendsExploreScreen(vm: AppViewModel) {
     // The full picker: built-ins first, then any extra metricSeries keys not already covered.
     // Known import/check-in keys get their proper titles/units/categories (matching the macOS
     // MetricCatalog); anything else falls back to a prettified key under "Other".
-    val metrics = remember(extraKeys) {
+    val metrics = remember(extraKeys, canPresentBmi) {
         val builtInKeys = builtInMetrics.map { it.key }.toSet()
         val extras = extraKeys
             .filter { (k, _) -> k !in builtInKeys }
+            .filter { (k, _) -> canPresentBmi || k != "bmi" }
             .distinctBy { (k, src) -> "$src:$k" }
             .map { (k, src) ->
                 val known = knownSeriesMetrics[k]
@@ -347,6 +371,11 @@ fun TrendsExploreScreen(vm: AppViewModel) {
     val effortScale = UnitPrefs.effortScale(LocalContext.current)
 
     var selectedKey by remember { mutableStateOf(builtInMetrics.first().key) }
+    LaunchedEffect(canPresentBmi) {
+        if (!canPresentBmi && selectedKey == "bmi") {
+            selectedKey = builtInMetrics.first().key
+        }
+    }
     var range by remember { mutableStateOf(ExploreRange.Month) }
     val selected = (metrics.firstOrNull { it.key == selectedKey } ?: metrics.first())
         .copy(effortScale = effortScale)

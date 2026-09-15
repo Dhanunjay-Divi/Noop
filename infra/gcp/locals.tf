@@ -23,6 +23,10 @@ locals {
     var.raw_bucket_name,
     "${var.project_id}-noop-raw-${var.environment}",
   )
+  feedback_bucket_name = coalesce(
+    var.feedback_bucket_name,
+    "${var.project_id}-noop-feedback-${var.environment}",
+  )
 
   labels = {
     app         = "noop"

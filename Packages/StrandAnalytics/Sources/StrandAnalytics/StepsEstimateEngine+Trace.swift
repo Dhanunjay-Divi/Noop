@@ -85,13 +85,36 @@ extension StepsEstimateEngine {
     public static func rawCounterTrace(daySteps: [StepSample],
                                        dayKey: String,
                                        tzOffsetSeconds: Int,
-                                       ticksPerStep: Double) -> [String] {
+                                       ticksPerStep: Double,
+                                       civilDayStartTs: Int? = nil,
+                                       civilDayEndTsExclusive: Int? = nil) -> [String] {
         // The SAME maxStepDelta gate AnalyticsEngine.analyzeDay uses for the daily steps total.
         let maxStepDelta = 512
+        let civilBounds = AnalyticsEngine.validateCivilDayBounds(
+            startTs: civilDayStartTs,
+            endTsExclusive: civilDayEndTsExclusive
+        )
+        guard civilBounds != .invalid else {
+            return []
+        }
+        let explicitCivilBounds: Range<Int>?
+        if case .valid(let bounds) = civilBounds {
+            explicitCivilBounds = bounds
+        } else {
+            explicitCivilBounds = nil
+        }
 
         // The SAME filter + sort: keep only this LOCAL day's samples, time-ordered.
         let sorted = daySteps
-            .filter { AnalyticsEngine.dayString($0.ts, offsetSec: tzOffsetSeconds) == dayKey }
+            .filter {
+                if let explicitCivilBounds {
+                    return explicitCivilBounds.contains($0.ts)
+                }
+                return AnalyticsEngine.dayString(
+                    $0.ts,
+                    offsetSec: tzOffsetSeconds
+                ) == dayKey
+            }
             .sorted { $0.ts < $1.ts }
 
         var lines: [String] = []

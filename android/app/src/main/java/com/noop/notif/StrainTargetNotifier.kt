@@ -128,7 +128,7 @@ object StrainTargetNotifier {
             .setContentIntent(openApp)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .protectPrivateContent(context, CHANNEL_ID)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
         return NotificationLifecycleLedger.posted(

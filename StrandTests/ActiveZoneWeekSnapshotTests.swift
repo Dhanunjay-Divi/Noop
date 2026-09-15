@@ -5,6 +5,22 @@ import WhoopStore
 @testable import Strand
 
 final class ActiveZoneWeekSnapshotTests: XCTestCase {
+    private func historicalTimeZoneTimeline() -> AnalysisTimeZoneTimeline {
+        let timeZone = TimeZone.current
+        let firstDate = Date().addingTimeInterval(-400 * 86_400)
+        let firstObservation = Int(firstDate.timeIntervalSince1970)
+        return AnalysisTimeZoneTimeline(
+            observations: [
+                AnalysisTimeZoneObservation(
+                    observedAtSec: firstObservation,
+                    timeZoneIdentifier: timeZone.identifier,
+                    offsetSeconds: timeZone.secondsFromGMT(for: firstDate)
+                ),
+            ],
+            unresolvableBeforeTs: firstObservation
+        )
+    }
+
     func testResolveUsesOnlyCompleteIncludedDays() {
         let days: Set<String> = ["2026-08-25", "2026-08-26"]
         let result = ActiveZoneWeekSnapshot.resolve(
@@ -45,18 +61,6 @@ final class ActiveZoneWeekSnapshotTests: XCTestCase {
 
     @MainActor
     func testDaytimeActivityPersistsWhenNightIsBelowSleepSampleGate() async throws {
-        let defaults = UserDefaults.standard
-        let watermarkKey = "noop.analyzeWatermark"
-        let priorWatermark = defaults.object(forKey: watermarkKey)
-        defaults.removeObject(forKey: watermarkKey)
-        defer {
-            if let priorWatermark {
-                defaults.set(priorWatermark, forKey: watermarkKey)
-            } else {
-                defaults.removeObject(forKey: watermarkKey)
-            }
-        }
-
         let store = try await WhoopStore.inMemory()
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -72,6 +76,9 @@ final class ActiveZoneWeekSnapshotTests: XCTestCase {
             repo: repo,
             profile: ProfileStore(),
             deviceId: "my-whoop")
+        engine.setAnalysisTimeZoneTimelineForTesting(
+            historicalTimeZoneTimeline()
+        )
 
         let receipt = await engine.analyzeRecent(maxDays: 2, force: true)
         XCTAssertNotNil(receipt)

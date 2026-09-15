@@ -94,8 +94,8 @@ final class AppleHealthAutomaticIngestionContractTests: XCTestCase {
         XCTAssertTrue(app.contains("bridge.dataProjectionChanged ="))
         XCTAssertTrue(model.contains("func refreshAfterAppleHealthSync"))
         XCTAssertTrue(model.contains("AppleWatchDevice.shouldAutoActivate"))
-        XCTAssertTrue(app.contains("model.repo.noteAgeMetricsChanged()"),
-                      "Committed VO2/body projections must refresh Fitness Age surfaces.")
+        XCTAssertTrue(model.contains("repo.noteAgeMetricsChanged()"),
+                      "The coordinated projection-change owner must refresh Fitness Age surfaces.")
         XCTAssertGreaterThanOrEqual(
             bridge.components(separatedBy: "repo.noteWorkoutsChanged()").count - 1, 2,
             "Full and observer-driven Apple Health workout commits must refresh activity calendars."
@@ -180,7 +180,7 @@ final class AppleHealthAutomaticIngestionContractTests: XCTestCase {
         XCTAssertTrue(bridge.contains("HKQuery.predicateForObjects(from: HKSource.default())"),
                       "Legacy cleanup must remain scoped to samples authored by NOOP.")
         XCTAssertTrue(view.contains("HRV is read-only"))
-        XCTAssertTrue(view.contains("strap RMSSD as Apple Health SDNN"))
+        XCTAssertTrue(view.contains("band RMSSD as Apple Health SDNN"))
 
         let shortcut = try text("Strand/Data/ShortcutHealthExport.swift")
         XCTAssertTrue(shortcut.contains("return \"\\(hr),,,\\(timestamp"),

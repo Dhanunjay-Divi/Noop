@@ -24,6 +24,7 @@ import com.noop.notif.NotificationLifecycleId
 import com.noop.notif.NotificationLifecycleLedger
 import com.noop.notif.NotificationLifecycleState
 import com.noop.notif.NotificationPlatformIdentity
+import com.noop.notif.protectPrivateContent
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotificationRouteBridge
 import java.util.concurrent.TimeUnit
@@ -191,7 +192,7 @@ object SafetyCheckInReminderNotifier {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .protectPrivateContent(context, CHANNEL_ID)
             .build()
         NotificationLifecycleLedger.posted(
             context,

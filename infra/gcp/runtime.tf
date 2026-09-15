@@ -194,7 +194,7 @@ resource "google_cloud_run_v2_service" "api" {
   template {
     service_account                  = google_service_account.api.email
     timeout                          = "120s"
-    max_instance_request_concurrency = 20
+    max_instance_request_concurrency = 4
 
     scaling {
       min_instance_count = 0
@@ -438,6 +438,90 @@ resource "google_cloud_run_v2_service" "managed_api" {
         value = google_storage_bucket.raw_chunks.name
       }
       env {
+        name  = "NOOP_FEEDBACK_ENABLED"
+        value = tostring(var.enable_feedback_ingestion || var.enable_feedback_lifecycle)
+      }
+      env {
+        name  = "NOOP_FEEDBACK_ACCEPTING_RESERVATIONS"
+        value = tostring(var.enable_feedback_ingestion)
+      }
+      env {
+        name  = "NOOP_FEEDBACK_LIFECYCLE_ENABLED"
+        value = "false"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_BUCKET"
+        value = google_storage_bucket.feedback.name
+      }
+      env {
+        name  = "NOOP_FEEDBACK_RETENTION_DAYS"
+        value = tostring(var.feedback_retention_days)
+      }
+      env {
+        name  = "NOOP_FEEDBACK_LIFECYCLE_INTERVAL_SECONDS"
+        value = "300"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_LIFECYCLE_BATCH_SIZE"
+        value = "20"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_UPLOAD_TTL_SECONDS"
+        value = "900"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_UPLOAD_FINALIZATION_GRACE_SECONDS"
+        value = "300"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_CLEANUP_CONFIRMATION_DELAY_SECONDS"
+        value = "60"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_MAX_ARCHIVE_BYTES"
+        value = "20971520"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_DAILY_REPORT_LIMIT"
+        value = "6"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_PENDING_BYTE_LIMIT"
+        value = "67108864"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_APP_DAILY_REPORT_LIMIT"
+        value = "500"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_APP_PENDING_BYTE_LIMIT"
+        value = "1073741824"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_EXTERNAL_ABUSE_GATE_APPROVED"
+        value = tostring(var.feedback_external_abuse_gate_approved)
+      }
+      env {
+        name  = "NOOP_FEEDBACK_CAPABILITY_PRIMARY_KEY_VERSION"
+        value = var.feedback_capability_primary_key_version
+      }
+      env {
+        name  = "NOOP_FEEDBACK_CAPABILITY_PREVIOUS_KEY_VERSION"
+        value = var.feedback_capability_previous_key_version
+      }
+      env {
+        name  = "NOOP_FEEDBACK_CAPABILITY_WRITE_VERSION"
+        value = var.feedback_capability_write_version
+      }
+      env {
+        name  = "NOOP_FEEDBACK_VALIDATION_MAX_CONCURRENCY"
+        value = "2"
+      }
+      env {
+        name  = "NOOP_FEEDBACK_VALIDATION_TIMEOUT_SECONDS"
+        value = "10"
+      }
+      env {
         name  = "NOOP_MANAGED_SIGNER_EMAIL"
         value = google_service_account.managed_api.email
       }
@@ -488,6 +572,24 @@ resource "google_cloud_run_v2_service" "managed_api" {
         }
       }
       env {
+        name = "NOOP_FEEDBACK_CAPABILITY_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.feedback_capability_secret.secret_id
+            version = var.feedback_capability_primary_secret_manager_version
+          }
+        }
+      }
+      env {
+        name = "NOOP_FEEDBACK_CAPABILITY_PREVIOUS_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.feedback_capability_previous_secret.secret_id
+            version = var.feedback_capability_previous_secret_manager_version
+          }
+        }
+      }
+      env {
         name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"
         value_source {
           secret_key_ref {
@@ -513,7 +615,7 @@ resource "google_cloud_run_v2_service" "managed_api" {
       resources {
         limits = {
           cpu    = "1"
-          memory = "512Mi"
+          memory = "1Gi"
         }
         cpu_idle          = true
         startup_cpu_boost = true
@@ -558,8 +660,13 @@ resource "google_cloud_run_v2_service" "managed_api" {
     google_secret_manager_secret_iam_member.managed_api_push_token_secret,
     google_secret_manager_secret_iam_member.managed_api_push_token_previous_secret,
     google_secret_manager_secret_iam_member.managed_api_replay_secret,
+    google_secret_manager_secret_iam_member.managed_api_feedback_capability_secret,
+    google_secret_manager_secret_iam_member.managed_api_feedback_capability_previous_secret,
     google_storage_bucket_iam_member.managed_api_raw_creator,
     google_storage_bucket_iam_member.managed_api_raw_reader,
+    google_storage_bucket_iam_member.managed_api_feedback_creator,
+    google_storage_bucket_iam_member.managed_api_feedback_reader,
+    google_storage_bucket_iam_member.managed_api_feedback_deleter,
     google_service_account_iam_member.managed_api_self_signer,
   ]
 }
@@ -935,6 +1042,10 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value = var.project_id
         }
         env {
+          name  = "NOOP_MANAGED_STORAGE_ENABLED"
+          value = "true"
+        }
+        env {
           name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"
           value = "true"
         }
@@ -1059,6 +1170,165 @@ resource "google_cloud_scheduler_job" "managed_lifecycle" {
 
   depends_on = [
     google_cloud_run_v2_job_iam_member.managed_lifecycle_scheduler,
+    google_project_service.required["cloudscheduler.googleapis.com"],
+  ]
+}
+
+resource "google_cloud_run_v2_job" "feedback_lifecycle" {
+  count = var.enable_feedback_lifecycle ? 1 : 0
+
+  project             = var.project_id
+  name                = "${local.prefix}-feedback-lifecycle"
+  location            = var.region
+  deletion_protection = false
+
+  template {
+    template {
+      service_account = google_service_account.feedback_lifecycle[0].email
+      max_retries     = 1
+      timeout         = "600s"
+
+      volumes {
+        name = "cloudsql"
+        cloud_sql_instance {
+          instances = [google_sql_database_instance.primary[0].connection_name]
+        }
+      }
+
+      containers {
+        image   = var.runtime_image
+        command = ["python"]
+        args    = ["-m", "app.feedback_lifecycle"]
+
+        env {
+          name  = "NOOP_RUNTIME_RELEASE"
+          value = local.runtime_release_marker
+        }
+        env {
+          name  = "NOOP_DATABASE_ENGINE"
+          value = "postgresql"
+        }
+        env {
+          name  = "NOOP_RUN_MIGRATIONS"
+          value = "false"
+        }
+        env {
+          name  = "NOOP_DB_POOL_MIN_SIZE"
+          value = "1"
+        }
+        env {
+          name  = "NOOP_DB_POOL_MAX_SIZE"
+          value = "2"
+        }
+        env {
+          name  = "NOOP_MANAGED_STORAGE_ENABLED"
+          value = "false"
+        }
+        env {
+          name  = "NOOP_FEEDBACK_ENABLED"
+          value = "false"
+        }
+        env {
+          name  = "NOOP_FEEDBACK_ACCEPTING_RESERVATIONS"
+          value = "false"
+        }
+        env {
+          name  = "NOOP_FEEDBACK_LIFECYCLE_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "NOOP_FEEDBACK_BUCKET"
+          value = google_storage_bucket.feedback.name
+        }
+        env {
+          name  = "NOOP_FEEDBACK_RETENTION_DAYS"
+          value = tostring(var.feedback_retention_days)
+        }
+        env {
+          name  = "NOOP_FEEDBACK_LIFECYCLE_BATCH_SIZE"
+          value = "20"
+        }
+        env {
+          name  = "NOOP_FEEDBACK_CLEANUP_CONFIRMATION_DELAY_SECONDS"
+          value = "60"
+        }
+        env {
+          name  = "NOOP_MANAGED_SIGNER_EMAIL"
+          value = google_service_account.feedback_lifecycle[0].email
+        }
+        env {
+          name = "NOOP_DATABASE_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.database_url.secret_id
+              version = "latest"
+            }
+          }
+        }
+
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "512Mi"
+          }
+        }
+
+        volume_mounts {
+          name       = "cloudsql"
+          mount_path = "/cloudsql"
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    terraform_data.migration_execution,
+    google_project_iam_member.feedback_lifecycle_cloud_sql_client,
+    google_secret_manager_secret_iam_member.feedback_lifecycle_database_url,
+    google_storage_bucket_iam_member.feedback_lifecycle_deleter,
+  ]
+}
+
+resource "google_cloud_run_v2_job_iam_member" "feedback_lifecycle_scheduler" {
+  count = var.enable_feedback_lifecycle ? 1 : 0
+
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_job.feedback_lifecycle[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.feedback_scheduler[0].email}"
+}
+
+resource "google_cloud_scheduler_job" "feedback_lifecycle" {
+  count = var.enable_feedback_lifecycle ? 1 : 0
+
+  project          = var.project_id
+  region           = var.region
+  name             = "${local.prefix}-feedback-lifecycle"
+  description      = "Run bounded feedback object cleanup and retention independently"
+  schedule         = "*/5 * * * *"
+  time_zone        = "Etc/UTC"
+  attempt_deadline = "320s"
+
+  retry_config {
+    retry_count          = 3
+    min_backoff_duration = "10s"
+    max_backoff_duration = "300s"
+    max_doublings        = 3
+  }
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${google_cloud_run_v2_job.feedback_lifecycle[0].name}:run"
+
+    oauth_token {
+      service_account_email = google_service_account.feedback_scheduler[0].email
+      scope                 = "https://www.googleapis.com/auth/cloud-platform"
+    }
+  }
+
+  depends_on = [
+    google_cloud_run_v2_job_iam_member.feedback_lifecycle_scheduler,
     google_project_service.required["cloudscheduler.googleapis.com"],
   ]
 }

@@ -14,6 +14,19 @@ enum BackgroundSyncPolicy {
         success ? regularDelay : retryDelay
     }
 
+    static func nextBeginDate(
+        afterSuccess success: Bool,
+        now: Date,
+        requestedWake: Date?
+    ) -> Date {
+        let regular = now.addingTimeInterval(delay(afterSuccess: success))
+        guard let requestedWake else { return regular }
+        if requestedWake <= now {
+            return now.addingTimeInterval(60)
+        }
+        return min(regular, requestedWake)
+    }
+
     static func shouldStart(now: Date, lastAttempt: Date?) -> Bool {
         guard let lastAttempt else { return true }
         return now.timeIntervalSince(lastAttempt) >= duplicateAttemptFloor
@@ -162,6 +175,7 @@ enum BackgroundSyncScheduler {
         static let lastAttempt = "backgroundSync.lastAttempt"
         static let lastCompleted = "backgroundSync.lastCompleted"
         static let lastSubmission = "backgroundSync.lastSubmission"
+        static let requestedWake = "backgroundSync.requestedWake"
     }
 
     static let taskIdentifier =
@@ -200,8 +214,10 @@ enum BackgroundSyncScheduler {
         guard UIApplication.shared.backgroundRefreshStatus == .available else { return }
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: taskIdentifier)
         let request = BGAppRefreshTaskRequest(identifier: taskIdentifier)
-        request.earliestBeginDate = now.addingTimeInterval(
-            BackgroundSyncPolicy.delay(afterSuccess: success)
+        request.earliestBeginDate = BackgroundSyncPolicy.nextBeginDate(
+            afterSuccess: success,
+            now: now,
+            requestedWake: date(forKey: Key.requestedWake)
         )
         do {
             try BGTaskScheduler.shared.submit(request)
@@ -212,9 +228,30 @@ enum BackgroundSyncScheduler {
         }
     }
 
+    /// Ask the existing refresh lane to wake by a privacy-sensitive reevaluation boundary. This is a
+    /// one-shot hint, not a delivery guarantee; the operation still rechecks all current consent and
+    /// evidence before producing any user-visible effect.
+    static func requestWake(noLaterThan date: Date, now: Date = Date()) {
+        guard date > now else { return }
+        let prior = self.date(forKey: Key.requestedWake)
+        if prior == nil || date < prior! {
+            UserDefaults.standard.set(
+                date.timeIntervalSince1970,
+                forKey: Key.requestedWake
+            )
+        }
+        scheduleNext(afterSuccess: true, now: now)
+    }
+
+    static func clearRequestedWake() {
+        UserDefaults.standard.removeObject(forKey: Key.requestedWake)
+    }
+
     private static func run(_ backgroundTask: BGAppRefreshTask, now: Date = Date()) {
         let lastAttempt = date(forKey: Key.lastAttempt)
-        guard BackgroundSyncPolicy.shouldStart(now: now, lastAttempt: lastAttempt) else {
+        let requestedWakeDue = date(forKey: Key.requestedWake).map { $0 <= now } ?? false
+        guard requestedWakeDue ||
+                BackgroundSyncPolicy.shouldStart(now: now, lastAttempt: lastAttempt) else {
             scheduleNext(afterSuccess: true, now: now)
             backgroundTask.setTaskCompleted(success: true)
             return
@@ -225,6 +262,9 @@ enum BackgroundSyncScheduler {
             return
         }
 
+        if requestedWakeDue {
+            clearRequestedWake()
+        }
         UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Key.lastAttempt)
         let generation = UUID()
         activeGeneration = generation
