@@ -35715,8 +35715,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        178,
-        257
+        183,
+        262
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/ACTIVE.md",
@@ -35980,8 +35980,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        141,
-        336
+        145,
+        340
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-14-pr15-late-review-closeout.md",
@@ -36001,7 +36001,7 @@
       ],
       "occurrenceCount": 4,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "09c8fb7631d7117ace2b105bb582ef506432949e32e7afd3fecfec3b957c050b",
+      "sha256": "4c3115aaf96c19bfceca916c5a808af954173beb455c08e5f884f22f93db10f5",
       "tokenCounts": {
         "whoop": 2,
         "whoopstore": 2
