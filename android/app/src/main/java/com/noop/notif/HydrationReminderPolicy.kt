@@ -205,6 +205,14 @@ internal object HydrationReminderPolicy {
     fun shouldNotify(enabled: Boolean, currentSlotKey: String?, lastNotifiedSlotKey: String?): Boolean =
         enabled && sufficientlySeparated(currentSlotKey, lastNotifiedSlotKey)
 
+    fun shouldDeliverPhoneOccurrence(
+        enabled: Boolean,
+        currentSlotKey: String?,
+        lastNotifiedSlotKey: String?,
+        lastBandFirstCueSlotKey: String?,
+    ): Boolean = currentSlotKey != lastBandFirstCueSlotKey &&
+        shouldNotify(enabled, currentSlotKey, lastNotifiedSlotKey)
+
     fun shouldEscalateAfterTapWindow(
         enabled: Boolean,
         bandFirst: Boolean,
@@ -228,9 +236,11 @@ internal object HydrationReminderPolicy {
         inQuietHours: Boolean,
         currentSlotKey: String?,
         lastBuzzedSlotKey: String?,
+        lastNotifiedSlotKey: String?,
     ): Boolean = enabled && strapBuzzEnabled && wristAlertsMasterOn &&
         connected && bonded && encryptedBond && worn && freshLiveSample && !inQuietHours &&
-        sufficientlySeparated(currentSlotKey, lastBuzzedSlotKey)
+        sufficientlySeparated(currentSlotKey, lastBuzzedSlotKey) &&
+        sufficientlySeparated(currentSlotKey, lastNotifiedSlotKey)
 
     /** Generic lock-screen copy: deliberately contains no intake, goal, score or biometric value. */
     fun notificationCopy(): Pair<String, String> =

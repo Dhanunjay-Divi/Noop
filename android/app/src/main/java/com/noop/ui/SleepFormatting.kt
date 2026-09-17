@@ -12,11 +12,14 @@ import kotlin.math.roundToInt
 internal fun pct(minutes: Double, total: Double): Int =
     if (total > 0.0) (minutes / total * 100.0).roundToInt() else 0
 
-internal fun pctValue(v: Double?): String = v?.let { "${it.roundToInt()}%" } ?: "-"
+internal fun pctValue(v: Double?): String =
+    v?.let { "${it.roundToInt()}%" } ?: NoopDisplayFormat.MISSING
 
 /** "+12% vs typical" / "−0.4 rpm vs typical" - the latest-vs-mean caption every tile carries. */
 internal fun vsTypical(latest: Double?, typical: Double?, suffix: String, decimals: Int = 0): String {
-    if (latest == null || typical == null || typical == 0.0) return "vs typical - "
+    if (latest == null || typical == null || typical == 0.0) {
+        return "vs typical ${NoopDisplayFormat.MISSING}"
+    }
     val diff = latest - typical
     val sign = if (diff >= 0) "+" else "−"
     val mag = abs(diff)

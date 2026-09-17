@@ -148,6 +148,44 @@ class SafetyShareMessageTest {
         assertFalse(SafetyLocation(40.7128, -74.0060, capturedAtUnix = captured).isUsable(0L))
     }
 
+    @Test fun locationAccuracyRejectsMalformedValuesAndKeepsBoundsInclusive() {
+        val withoutAccuracy = SafetyLocation(
+            latitude = 40.7128,
+            longitude = -74.0060,
+            capturedAtUnix = captured,
+        )
+        assertTrue(withoutAccuracy.isValid)
+        assertFalse(withoutAccuracy.hasUsableHorizontalAccuracy)
+
+        listOf(0.0, SafetyLocation.MAXIMUM_HORIZONTAL_ACCURACY_METERS).forEach { accuracy ->
+            val location = SafetyLocation(
+                latitude = 40.7128,
+                longitude = -74.0060,
+                horizontalAccuracyMeters = accuracy,
+                capturedAtUnix = captured,
+            )
+            assertTrue(location.isValid)
+            assertTrue(location.hasUsableHorizontalAccuracy)
+        }
+
+        listOf(
+            -1.0,
+            SafetyLocation.MAXIMUM_HORIZONTAL_ACCURACY_METERS + 1.0,
+            Double.POSITIVE_INFINITY,
+            Double.NaN,
+        ).forEach { accuracy ->
+            val location = SafetyLocation(
+                latitude = 40.7128,
+                longitude = -74.0060,
+                horizontalAccuracyMeters = accuracy,
+                capturedAtUnix = captured,
+            )
+            assertFalse(location.isValid)
+            assertFalse(location.hasUsableHorizontalAccuracy)
+            assertFalse(location.isUsable(captured))
+        }
+    }
+
     @Test fun blankNameAndNoteAreOmitted() {
         val message = SafetyShareMessage.build(
             intent = SafetyShareIntent.MISSED_CHECK_IN,

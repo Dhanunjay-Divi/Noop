@@ -5,9 +5,17 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.changes.DeletionChange
 import androidx.health.connect.client.changes.UpsertionChange
 import androidx.health.connect.client.records.Record
+import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ChangesTokenRequest
 import com.noop.data.HealthConnectSyncStateRow
+import com.noop.data.ImportSummary
+import com.noop.data.MetricSeriesRow
 import com.noop.data.WhoopRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** Provider-neutral page so the token state machine has deterministic plain-JVM tests. */
 internal data class HealthConnectChangePage(
@@ -27,6 +35,133 @@ internal interface HealthConnectChangeFeed {
 internal interface HealthConnectTokenStore {
     suspend fun load(recordTypes: Set<String>): Map<String, String>
     suspend fun save(tokens: Map<String, String>, updatedAtMs: Long)
+}
+
+internal interface HealthConnectBmiProjectionStateStore {
+    suspend fun loadFingerprint(): String?
+    suspend fun reconcileLocalProjection(heightCm: Double): Int
+    suspend fun commitProjectionAndFingerprint(
+        heightCm: Double,
+        fingerprint: String,
+        updatedAtMs: Long,
+    ): Int
+}
+
+/**
+ * Durable dependency token for Health Connect's derived BMI projection.
+ *
+ * Health Connect supplies weight but no BMI record, so the projection is valid only for the exact
+ * confirmed profile height used to derive it. ProfileStore persists height as Float; fingerprinting
+ * those exact bits avoids locale/format drift while still distinguishing confirmation, correction,
+ * and removal. The value stays local in the existing sync-state table.
+ */
+internal object HealthConnectBmiProjectionFingerprint {
+    const val STATE_RECORD_TYPE = "noop.internal.health-connect.bmi-height-fingerprint.v1"
+    const val UNCONFIRMED = "v1:unconfirmed"
+
+    val weightRecordType: String =
+        HealthConnectImporter.recordTypeKey(WeightRecord::class)
+
+    fun forHeight(heightCm: Double): String {
+        if (!heightCm.isFinite() || heightCm <= 0.0) return UNCONFIRMED
+        val bits = heightCm.toFloat().toRawBits().toUInt().toString(16).padStart(8, '0')
+        return "v1:confirmed:$bits"
+    }
+}
+
+/**
+ * Couples the provider Weight cursor to the local profile input used for BMI derivation.
+ *
+ * A mismatch first rebuilds local derived BMI from already stored Health Connect weight rows. With no
+ * Weight permission, that replacement and the fingerprint commit are atomic. With Weight permission, the
+ * old fingerprint remains durable until the forced complete-history provider bootstrap succeeds, then a
+ * final local projection and fingerprint commit are atomic. Failure or cancellation therefore retries.
+ */
+internal class HealthConnectBmiProjectionCoordinator(
+    private val stateStore: HealthConnectBmiProjectionStateStore,
+    private val nowMs: () -> Long = System::currentTimeMillis,
+) {
+    suspend fun reconcile(
+        recordTypes: Set<String>,
+        heightCm: Double,
+        runReconcile: suspend (forceBootstrapRecordTypes: Set<String>) -> HealthConnectReconcileResult,
+    ): HealthConnectReconcileResult {
+        val weightRecordType = HealthConnectBmiProjectionFingerprint.weightRecordType
+        val desiredFingerprint = HealthConnectBmiProjectionFingerprint.forHeight(heightCm)
+        val appliedFingerprint = try {
+            stateStore.loadFingerprint()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return HealthConnectReconcileResult.RetryableFailure(
+                "Health Connect BMI projection state could not be read",
+            )
+        }
+        val forceBootstrap = appliedFingerprint != desiredFingerprint
+        val forceWeightBootstrap = forceBootstrap && weightRecordType in recordTypes
+        if (forceWeightBootstrap) {
+            try {
+                stateStore.reconcileLocalProjection(heightCm)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return HealthConnectReconcileResult.RetryableFailure(
+                    "Health Connect BMI projection state could not be applied",
+                )
+            }
+
+            val result = runReconcile(setOf(weightRecordType))
+            if (result !is HealthConnectReconcileResult.Success) return result
+            try {
+                stateStore.commitProjectionAndFingerprint(
+                    heightCm = heightCm,
+                    fingerprint = desiredFingerprint,
+                    updatedAtMs = nowMs(),
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return HealthConnectReconcileResult.RetryableFailure(
+                    "Health Connect BMI projection state could not be committed",
+                )
+            }
+            return result
+        }
+
+        if (forceBootstrap) {
+            try {
+                stateStore.commitProjectionAndFingerprint(
+                    heightCm = heightCm,
+                    fingerprint = desiredFingerprint,
+                    updatedAtMs = nowMs(),
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return HealthConnectReconcileResult.RetryableFailure(
+                    "Health Connect BMI projection state could not be applied",
+                )
+            }
+        }
+
+        return runReconcile(emptySet())
+    }
+}
+
+/**
+ * Process-wide gate for foreground and WorkManager reconciliation. The current profile height is read only
+ * after the caller owns the lock, so a queued run cannot replay a stale height captured before a newer run.
+ */
+internal class HealthConnectReconciliationGate {
+    private val mutex = Mutex()
+
+    suspend fun <T> run(
+        currentHeightCm: () -> Double,
+        block: suspend (heightCm: Double) -> T,
+    ): T = mutex.withLock {
+        currentCoroutineContext().ensureActive()
+        block(currentHeightCm())
+    }
 }
 
 /**
@@ -81,12 +216,16 @@ internal class HealthConnectChangeEngine(
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val maxPagesPerType: Int = 10_000,
 ) {
-    suspend fun reconcile(recordTypes: Set<String>): HealthConnectReconcileResult {
+    suspend fun reconcile(
+        recordTypes: Set<String>,
+        forceBootstrapRecordTypes: Set<String> = emptySet(),
+    ): HealthConnectReconcileResult {
         if (recordTypes.isEmpty()) {
             return HealthConnectReconcileResult.Success(false, 0, 0, 0)
         }
         return try {
             val stored = tokenStore.load(recordTypes)
+            val forcedBootstrap = forceBootstrapRecordTypes.intersect(recordTypes)
             val next = LinkedHashMap<String, String>()
             var requiresRebuild = false
             var requiresFullHistory = false
@@ -96,7 +235,9 @@ internal class HealthConnectChangeEngine(
             var deletions = 0
 
             for (recordType in recordTypes.sorted()) {
-                val initial = stored[recordType]
+                // A derived-projection dependency changed. Treat only that record type as missing for
+                // this run; do not delete its durable cursor unless the complete rebuild succeeds.
+                val initial = stored[recordType].takeUnless { recordType in forcedBootstrap }
                 if (initial == null) {
                     val fresh = feed.createToken(recordType)
                     if (fresh.isBlank()) return HealthConnectReconcileResult.RetryableFailure(
@@ -183,6 +324,8 @@ internal class HealthConnectChangeEngine(
                 upsertions = upsertions,
                 deletions = deletions,
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             HealthConnectReconcileResult.RetryableFailure(
                 t.message ?: t.javaClass.simpleName,
@@ -263,13 +406,135 @@ private class RoomHealthConnectTokenStore(
     }
 }
 
+private class RoomHealthConnectBmiProjectionStateStore(
+    private val repository: WhoopRepository,
+) : HealthConnectBmiProjectionStateStore {
+    override suspend fun loadFingerprint(): String? =
+        repository.healthConnectSyncStates(
+            listOf(HealthConnectBmiProjectionFingerprint.STATE_RECORD_TYPE),
+        ).firstOrNull()?.changesToken
+
+    override suspend fun reconcileLocalProjection(heightCm: Double): Int =
+        reconcileProjection(heightCm = heightCm, fingerprint = null)
+
+    override suspend fun commitProjectionAndFingerprint(
+        heightCm: Double,
+        fingerprint: String,
+        updatedAtMs: Long,
+    ): Int = reconcileProjection(
+        heightCm = heightCm,
+        fingerprint = HealthConnectSyncStateRow(
+            HealthConnectBmiProjectionFingerprint.STATE_RECORD_TYPE,
+            fingerprint,
+            updatedAtMs,
+        ),
+    )
+
+    private suspend fun reconcileProjection(
+        heightCm: Double,
+        fingerprint: HealthConnectSyncStateRow?,
+    ): Int = repository.reconcileHealthConnectDerivedBmi(fingerprint) { weight ->
+        HealthConnectImporter.derivedBmi(weight.value, heightCm)?.let { bmi ->
+            MetricSeriesRow(
+                deviceId = WhoopRepository.HEALTH_CONNECT_SOURCE,
+                day = weight.day,
+                key = "bmi",
+                value = bmi,
+            )
+        }
+    }
+}
+
 internal object HealthConnectReconciler {
+    private val reconciliationGate = HealthConnectReconciliationGate()
+
+    /**
+     * Reconcile only the local BMI dependency projection. This does not access the provider and is
+     * therefore safe when Health Connect or Weight permission is unavailable. It shares the same gate
+     * as foreground and worker imports so profile changes cannot race a provider rebuild.
+     */
+    suspend fun reconcileLocalBmiProjection(
+        repository: WhoopRepository,
+        currentHeightCm: () -> Double,
+    ): HealthConnectReconcileResult = reconciliationGate.run(currentHeightCm) { heightCm ->
+        HealthConnectBmiProjectionCoordinator(
+            stateStore = RoomHealthConnectBmiProjectionStateStore(repository),
+        ).reconcile(
+            recordTypes = emptySet(),
+            heightCm = heightCm,
+        ) {
+            HealthConnectReconcileResult.Success(
+                rebuilt = false,
+                bootstrappedTypes = 0,
+                upsertions = 0,
+                deletions = 0,
+            )
+        }
+    }
+
+    /**
+     * Manual/onboarding Health Connect import. Every UI entry point uses this gate so the profile height
+     * is read after serialization and a queued stale value cannot overwrite a newer BMI projection.
+     */
+    suspend fun importNow(
+        context: Context,
+        repository: WhoopRepository,
+        currentHeightCm: () -> Double,
+    ): ImportSummary = reconciliationGate.run(currentHeightCm) importGate@ { heightCm ->
+        val grantedPermissions = try {
+            HealthConnectImporter.client(context).permissionController.getGrantedPermissions()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return@importGate ImportSummary.failure(
+                HealthConnectImporter.SOURCE,
+                "Could not read Health Connect permissions",
+            )
+        }
+        val keys = HealthConnectImporter.grantedRecordTypes(grantedPermissions)
+            .mapTo(linkedSetOf(), HealthConnectImporter::recordTypeKey)
+        var summary: ImportSummary? = null
+        val result = HealthConnectBmiProjectionCoordinator(
+            stateStore = RoomHealthConnectBmiProjectionStateStore(repository),
+        ).reconcile(
+            recordTypes = keys,
+            heightCm = heightCm,
+        ) {
+            val imported = HealthConnectImporter.import(
+                context = context,
+                repo = repository,
+                heightCm = heightCm,
+            )
+            summary = imported
+            if (imported.succeeded) {
+                HealthConnectReconcileResult.Success(
+                    rebuilt = true,
+                    bootstrappedTypes = 0,
+                    upsertions = 0,
+                    deletions = 0,
+                )
+            } else {
+                HealthConnectReconcileResult.RetryableFailure(imported.message)
+            }
+        }
+        when (result) {
+            is HealthConnectReconcileResult.Success ->
+                summary ?: ImportSummary.failure(
+                    HealthConnectImporter.SOURCE,
+                    "Health Connect import did not run",
+                )
+            is HealthConnectReconcileResult.RetryableFailure ->
+                summary?.takeUnless { it.succeeded }
+                    ?: ImportSummary.failure(HealthConnectImporter.SOURCE, result.reason)
+        }
+    }
+
     suspend fun reconcile(
         context: Context,
         repository: WhoopRepository,
         grantedPermissions: Set<String>,
-        heightCm: Double,
-    ): HealthConnectReconcileResult {
+        currentHeightCm: () -> Double,
+    ): HealthConnectReconcileResult = reconciliationGate.run(currentHeightCm) { heightCm ->
         val recordTypes = HealthConnectImporter.grantedRecordTypes(grantedPermissions)
         val keys = recordTypes.mapTo(linkedSetOf(), HealthConnectImporter::recordTypeKey)
         val engine = HealthConnectChangeEngine(
@@ -288,6 +553,16 @@ internal object HealthConnectReconciler {
                 ).succeeded
             },
         )
-        return engine.reconcile(keys)
+        HealthConnectBmiProjectionCoordinator(
+            stateStore = RoomHealthConnectBmiProjectionStateStore(repository),
+        ).reconcile(
+            recordTypes = keys,
+            heightCm = heightCm,
+        ) { forceBootstrapRecordTypes ->
+            engine.reconcile(
+                recordTypes = keys,
+                forceBootstrapRecordTypes = forceBootstrapRecordTypes,
+            )
+        }
     }
 }

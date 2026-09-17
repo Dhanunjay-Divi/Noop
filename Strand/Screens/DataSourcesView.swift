@@ -129,7 +129,7 @@ struct DataSourcesView: View {
             Button("Cancel", role: .cancel) { }
             Button("Remove", role: .destructive) { deleteAppleHealthData() }
         } message: {
-            Text("This permanently deletes everything imported from Apple Health: heart rate, HRV, sleep, steps, workouts and more. Your live strap data is untouched. This can't be undone.")
+            Text("This permanently deletes everything imported from Apple Health: heart rate, HRV, sleep, steps, workouts and more. Your live band data is untouched. This can't be undone.")
         }
     }
 
@@ -856,7 +856,7 @@ struct DataSourcesView: View {
             .onChangeCompat(of: broadcastHrEnabled) { on in
                 if on { hrBroadcaster.start() } else { hrBroadcaster.stop() }
             }
-            Text("Acts as a standard Bluetooth heart-rate strap. Pair NOOP from your treadmill, bike or app to see your strap's heart rate there.")
+            Text("Acts as a standard Bluetooth heart-rate strap. Pair NOOP from your treadmill, bike or app to see Noop Band's heart rate there.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -982,11 +982,37 @@ struct DataSourcesView: View {
     }
 }
 
+enum WeightScaleDataSourcePresentation {
+    static func displayedBMI(
+        measurement: WeightScaleMeasurement,
+        mayUpdateProfile: Bool,
+        age: Int,
+        heightCm: Double,
+        ageConfirmed: Bool,
+        heightConfirmed: Bool
+    ) -> Double? {
+        guard mayUpdateProfile,
+              let bmi = measurement.bmi,
+              BodyProfilePolicy.canPresentAdultBMI(
+                  age: age,
+                  currentWeightKg: measurement.weightKg,
+                  heightCm: heightCm,
+                  ageConfirmed: ageConfirmed,
+                  heightConfirmed: heightConfirmed,
+                  currentWeightConfirmed: true
+              ) else {
+            return nil
+        }
+        return bmi
+    }
+}
+
 /// Explicit pairing surface for standards-compliant Bluetooth weight scales. This is intentionally a
 /// Data Source rather than an "active wearable": it contributes timestamped body measurements and can
 /// never take over the live HR/WHOOP source coordinator.
 private struct WeightScaleDataSourceCard: View {
     @ObservedObject var source: WeightScaleSource
+    @EnvironmentObject private var profile: ProfileStore
     @State private var confirmForget = false
 
     private var statusPill: StatePill {
@@ -1097,7 +1123,14 @@ private struct WeightScaleDataSourceCard: View {
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
                         }
-                        if let bmi = capture.measurement.bmi {
+                        if let bmi = WeightScaleDataSourcePresentation.displayedBMI(
+                            measurement: capture.measurement,
+                            mayUpdateProfile: source.mayUpdateProfile(for: capture.measurement),
+                            age: profile.age,
+                            heightCm: profile.heightCm,
+                            ageConfirmed: profile.ageInputConfirmed,
+                            heightConfirmed: profile.heightInputConfirmed
+                        ) {
                             Text(String(format: "BMI %.1f", bmi))
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textSecondary)

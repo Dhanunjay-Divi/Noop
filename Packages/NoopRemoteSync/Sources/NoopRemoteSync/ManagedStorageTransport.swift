@@ -31,6 +31,7 @@ public protocol ManagedStorageTransport: Sendable {
     func createRestore(
         requestID: UUID,
         dataClasses: [String],
+        includeDeletedDocuments: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob
 
@@ -73,6 +74,7 @@ public protocol ManagedStorageTransport: Sendable {
         snapshotAt: String,
         after cursor: ManagedDocumentPage.Cursor?,
         limit: Int,
+        includeDeleted: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedDocumentPage
 }
@@ -81,6 +83,7 @@ public extension ManagedStorageTransport {
     func createRestore(
         requestID: UUID,
         dataClasses: [String],
+        includeDeletedDocuments: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
         throw ManagedStorageError.invalidResponse
@@ -125,6 +128,7 @@ public extension ManagedStorageTransport {
         snapshotAt: String,
         after cursor: ManagedDocumentPage.Cursor?,
         limit: Int,
+        includeDeleted: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedDocumentPage {
         throw ManagedStorageError.invalidResponse

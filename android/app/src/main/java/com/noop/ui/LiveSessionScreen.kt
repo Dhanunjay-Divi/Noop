@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.noop.analytics.LiveSessionEngine
+import com.noop.ble.LiveState
 import com.noop.notif.WorkoutCautionNotifier
 import kotlinx.coroutines.delay
 import java.time.Instant
@@ -158,10 +159,17 @@ fun LiveSessionScreen(vm: AppViewModel, onClose: () -> Unit) {
     val active by LiveSessionRunner.active.collectAsStateWithLifecycle()
     val runner = active
     val context = LocalContext.current
+    val live by vm.live.collectAsStateWithLifecycle()
     if (runner == null) {
         LiveSessionPreflight(
+            live = live,
+            wristAlertsEnabled = NotifPrefs.getBool(context, NotifPrefs.MASTER, false),
             onClose = onClose,
-            onStart = { startOrResumeLiveSession(vm, context) },
+            onStart = {
+                if (liveSessionBandReady(vm.live.value)) {
+                    startOrResumeLiveSession(vm, context)
+                }
+            },
         )
         return
     }
@@ -204,9 +212,19 @@ private fun LiveSessionBackdrop() {
  */
 @Composable
 private fun LiveSessionPreflight(
+    live: LiveState,
+    wristAlertsEnabled: Boolean,
     onClose: () -> Unit,
     onStart: () -> Unit,
 ) {
+    val bandReady = liveSessionBandReady(live)
+    val wristCuesReady = bandReady && wristAlertsEnabled
+    val capabilityMessage = when {
+        !bandReady -> stringResource(R.string.appwide_live_session_band_required)
+        wristCuesReady -> stringResource(R.string.appwide_live_session_wrist_ready)
+        else -> stringResource(R.string.appwide_live_session_screen_only)
+    }
+
     Box(
         modifier = Modifier.fillMaxSize().background(Palette.surfaceBase),
     ) {
@@ -298,6 +316,13 @@ private fun LiveSessionPreflight(
                         body = stringResource(R.string.appwide_live_session_preflight_stop_body),
                     )
                 }
+
+                Text(
+                    capabilityMessage,
+                    style = NoopType.footnote,
+                    color = if (bandReady) Palette.textSecondary else Palette.statusWarning,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
 
             NoopButton(
@@ -305,12 +330,16 @@ private fun LiveSessionPreflight(
                 leadingIcon = Icons.Filled.PlayArrow,
                 kind = NoopButtonKind.Primary,
                 fullWidth = true,
+                enabled = bandReady,
                 modifier = Modifier.padding(top = 8.dp),
                 onClick = onStart,
             )
         }
     }
 }
+
+internal fun liveSessionBandReady(live: LiveState): Boolean =
+    live.connected && live.bonded && live.encryptedBond && live.worn
 
 @Composable
 private fun LiveSessionGuideRow(

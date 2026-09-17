@@ -2,10 +2,30 @@
 set -eu
 
 database=${1:-${PGDATABASE:?PGDATABASE is required}}
-manifest=${NOOP_MIGRATION_MANIFEST:-/opt/noop/migration-manifest.sha256}
+engine=${NOOP_DATABASE_ENGINE:-timescaledb}
+manifest_directory=${NOOP_MIGRATION_MANIFEST_DIRECTORY:-/opt/noop}
 
-if [ ! -r "$manifest" ]; then
-    echo "migration manifest is required: $manifest" >&2
+case "$engine" in
+    timescaledb)
+        selected_manifest="$manifest_directory/migration-manifest.sha256"
+        ;;
+    postgresql)
+        selected_manifest="$manifest_directory/migration-manifest-postgresql.sha256"
+        ;;
+    *)
+        echo "NOOP_DATABASE_ENGINE must be timescaledb or postgresql" >&2
+        exit 64
+        ;;
+esac
+
+manifest=${NOOP_MIGRATION_MANIFEST:-$selected_manifest}
+
+if [ ! -r "$selected_manifest" ]; then
+    echo "migration manifest is required: $selected_manifest" >&2
+    exit 66
+fi
+if [ ! -r "$manifest" ] || ! cmp -s "$manifest" "$selected_manifest"; then
+    echo "migration manifest does not match NOOP_DATABASE_ENGINE=$engine" >&2
     exit 66
 fi
 

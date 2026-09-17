@@ -24,8 +24,7 @@ import WhoopStore
 
 /// UserDefaults keys for the Live Sessions beta gate (the Settings toggle + the Today entry point).
 enum LiveSessionPrefs {
-    /// Master switch for the whole entry. Default ON — the feature is BETA-labelled in-UI instead of
-    /// hidden; turning it off removes the Start-session control from the Liquid Today entirely.
+    /// Master switch for the whole entry. Default OFF until the user explicitly opts into the beta.
     static let betaKey = "noop.liveSessionsBeta"
 }
 
@@ -256,10 +255,9 @@ final class LiveSessionRunner: ObservableObject {
         if caution?.cue == .pauseAndAssess {
             firePauseAndAssess()
             WorkoutCautionNotifier.post()
-        } else if let cue = out.cue {
+        } else if let cue = out.cue, canDeliverWristCue {
             fire(cue)
-        } else if caution?.cue == .easeOff,
-                  UserDefaults.standard.bool(forKey: AppModel.wristAlertsMasterKey) {
+        } else if caution?.cue == .easeOff, canDeliverWristCue {
             fire(.easeOff)
         }
         output = out
@@ -275,7 +273,9 @@ final class LiveSessionRunner: ObservableObject {
     /// guard covers the push-after-ease edge.) Only a delivered cue is counted.
     private func fire(_ cue: LiveSessionEngine.Cue) {
         let nowDate = Date()
-        guard nowDate >= hapticWalkUntil, let ble else { return }
+        guard canDeliverWristCue,
+              nowDate >= hapticWalkUntil,
+              let ble else { return }
 
         let signal: LiveSessionHaptics.Signal = (cue == .pushNudge) ? .push : .easeOff
         let pulses = LiveSessionHaptics.pulses(for: signal)
@@ -301,12 +301,24 @@ final class LiveSessionRunner: ObservableObject {
     /// as ordinary session cues, so a delayed warning is never delivered after the physiology changed.
     private func firePauseAndAssess() {
         let nowDate = Date()
-        guard UserDefaults.standard.bool(forKey: AppModel.wristAlertsMasterKey),
+        guard canDeliverWristCue,
               nowDate >= hapticWalkUntil,
               let ble else { return }
         ble.send(.runHapticsPattern, payload: [2, 5, 0, 0, 0])
         hapticWalkUntil = nowDate.addingTimeInterval(4)
         easeCount += 1
+    }
+
+    private var canDeliverWristCue: Bool {
+        guard UserDefaults.standard.bool(
+            forKey: AppModel.wristAlertsMasterKey
+        ), let live = model?.live else {
+            return false
+        }
+        return live.connected
+            && live.bonded
+            && live.encryptedBond
+            && live.worn
     }
 
     // MARK: - Persistence

@@ -74,6 +74,20 @@ class RetainedScreenPerformanceTest {
     }
 
     @Test
+    fun dashboardProjectionPublishesLiveSessionReadinessChanges() = runTest {
+        val observed = flowOf(
+            LiveState(connected = true, bonded = true, encryptedBond = false, worn = true),
+            LiveState(connected = true, bonded = true, encryptedBond = true, worn = true),
+            LiveState(connected = true, bonded = true, encryptedBond = true, worn = false),
+        ).dashboardLiveChanges().toList()
+
+        assertEquals(3, observed.size)
+        assertFalse(observed[0].encryptedBond)
+        assertTrue(observed[1].encryptedBond)
+        assertFalse(observed[2].worn)
+    }
+
+    @Test
     fun sleepHistoryUsesBatchedMotionReadsAndBoundedDiagnostics() {
         val sleep = source("com/noop/ui/SleepScreen.kt")
         val repository = source("com/noop/data/WhoopRepository.kt")

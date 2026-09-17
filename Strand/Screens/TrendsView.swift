@@ -13,6 +13,31 @@ import Foundation
 // recovery YearHeatStrip in a NoopCard. No hand-sized cards anywhere.
 
 struct TrendsView: View {
+    enum LoadFailure: Equatable, Sendable {
+        case trends
+        case weeklyDigest
+    }
+
+    enum LoadPolicy {
+        static let productionTimeoutNanoseconds: UInt64 = 12_000_000_000
+        static let demoTimeoutNanoseconds: UInt64 = 75_000_000
+
+        static func timeoutNanoseconds(
+            arguments: [String] = CommandLine.arguments,
+            retryGeneration: Int = 0
+        ) -> UInt64 {
+            arguments.contains("--demo-trends-timeout") && retryGeneration == 0
+                ? demoTimeoutNanoseconds
+                : productionTimeoutNanoseconds
+        }
+    }
+
+    private enum LoadRaceResult<Value: Sendable>: Sendable {
+        case value(Value?)
+        case timedOut
+        case canceled
+    }
+
     @EnvironmentObject var repo: Repository
     @Environment(\.pushTabRoute) private var pushTabRoute
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -20,7 +45,7 @@ struct TrendsView: View {
     // observing it forced a full re-render of this subtree on every ~1 Hz live-HR tick.
 
     // The shared range control: W(7) / M(30) / 3M(90) / 6M(180) / 1Y(365) / ALL.
-    enum Range: Int, CaseIterable, Identifiable {
+    enum Range: Int, CaseIterable, Identifiable, Sendable {
         case week = 7, month = 30, quarter = 90, half = 180, year = 365, all = 0
         var id: Int { rawValue }
         var label: String {
@@ -57,6 +82,18 @@ struct TrendsView: View {
     /// the Today Rest score (#732). sleep_performance is a metricSeries, not a DailyMetric field, so load
     /// it once (mirroring TodayView's restScore source) and key by day for `resolve` below.
     @State private var sleepPerfByDay: [String: Double] = [:]
+    @State private var sleepPerfLoaded = false
+    @State private var sleepPerfRevision = 0
+
+    /// Immutable, background-built data for the selected range. Keeping this
+    /// separate from SwiftUI's body guarantees the header can paint before a
+    /// multi-year history is filtered and converted into chart points.
+    @State private var trendsSnapshot: TrendsSnapshot?
+    @State private var trendsSnapshotKey: SnapshotCacheKey?
+    @State private var trendsSnapshotCache = SnapshotCache(capacity: 6)
+    @State private var weeklyDigestPresentation: WeeklyDigestPresentation?
+    @State private var loadFailure: LoadFailure?
+    @State private var retryGeneration = 0
 
     // #710 — browse previous weeks in the Week-in-review digest. 0 = the week containing today; each step
     // back is one Mon–Sun week earlier. Clamped so it never runs past the earliest day we hold (see
@@ -75,15 +112,6 @@ struct TrendsView: View {
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     private var effortScale: EffortScale { UnitPrefs.resolveEffortScale(effortScaleRaw) }
 
-    // yyyy-MM-dd → Date (en_US_POSIX, UTC), per task spec.
-    private static let dayParser: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-    private func date(_ day: String) -> Date? { Self.dayParser.date(from: day) }
     private static let utc = TimeZone(secondsFromGMT: 0)!
     private static let chartDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -103,38 +131,19 @@ struct TrendsView: View {
         calendar.timeZone = utc
         return calendar
     }()
-
-    // MARK: Window selection (relative to the LATEST day, with auto-expand)
-
-    /// The latest recorded day across all history (anchors every window).
-    private var latestDay: Date? {
-        guard let d = repo.days.last?.day else { return nil }
-        return date(d)
-    }
-
-    /// Days for a given range, taken RELATIVE TO TODAY (the phone's local date) — not the latest
-    /// recorded day, which on a stale import anchored W/M/3M to months-old data so it looked current
-    /// (issue #23). Empty short windows auto-widen (see `resolve`), so old imports surface under a
-    /// wider range / All history instead of masquerading as recent. `.all` returns everything.
-    /// ISO yyyy-MM-dd compares chronologically.
-    private func days(for r: Range) -> [DailyMetric] {
-        guard let n = r.days else { return repo.days }
-        let cutoffKey = Repository.localDayKey(Calendar.current.date(byAdding: .day, value: -(n - 1), to: Date()) ?? Date())
-        return repo.days.filter { $0.day >= cutoffKey }
-    }
-
-    /// Build trend points from a metric accessor over a day slice.
-    private func points(_ days: ArraySlice<DailyMetric>, _ value: (DailyMetric) -> Double?) -> [TrendPoint] {
-        days.compactMap { d in
-            guard let v = value(d), let dt = date(d.day) else { return nil }
-            return TrendPoint(date: dt, value: v)
+    private nonisolated static func date(_ day: String) -> Date? {
+        guard let (year, month, dayOfMonth) = WeeklyDigestEngine.parseYMD(day) else {
+            return nil
         }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar.date(
+            from: DateComponents(year: year, month: month, day: dayOfMonth)
+        )
     }
-    private func points(_ days: [DailyMetric], _ value: (DailyMetric) -> Double?) -> [TrendPoint] {
-        points(days[...], value)
-    }
+    private func date(_ day: String) -> Date? { Self.date(day) }
 
-    // MARK: Resolved metric (memoized per body)
+    // MARK: Background presentation snapshot
     //
     // days(for:) / points each re-filter the full multi-year `repo.days` array,
     // and the subviews used to fan out to them many times per render (caption +
@@ -145,26 +154,344 @@ struct TrendsView: View {
     // filters each metric's window once instead of dozens of times. Identical
     // results to the old per-helper (effectiveRange / windowPoints / caption /
     // widened) computation.
-    private struct ResolvedMetric {
-        var points: [TrendPoint]
-        var effective: Range
-        var widened: Bool
+    struct ResolvedMetric: Sendable {
+        let points: [TrendPoint]
+        let effective: Range
+        let widened: Bool
     }
 
-    private func resolve(_ value: (DailyMetric) -> Double?) -> ResolvedMetric {
+    struct TrendsSnapshot: Sendable {
+        let recovery: ResolvedMetric
+        let hrv: ResolvedMetric
+        let rhr: ResolvedMetric
+        let strain: ResolvedMetric
+        let rest: ResolvedMetric
+        let minWeekOffset: Int
+    }
+
+    struct SnapshotCacheKey: Hashable, Sendable {
+        let historyRevision: Int
+        let dayCount: Int
+        let firstDay: String?
+        let lastDay: String?
+        let sleepRevision: Int
+        let todayKey: String
+        let range: Range
+    }
+
+    struct SnapshotCache {
+        let capacity: Int
+        private var values: [SnapshotCacheKey: TrendsSnapshot] = [:]
+        private var recency: [SnapshotCacheKey] = []
+
+        init(capacity: Int) {
+            self.capacity = max(1, capacity)
+        }
+
+        var count: Int { values.count }
+
+        mutating func value(for key: SnapshotCacheKey) -> TrendsSnapshot? {
+            guard let value = values[key] else { return nil }
+            recency.removeAll { $0 == key }
+            recency.append(key)
+            return value
+        }
+
+        mutating func insert(_ value: TrendsSnapshot, for key: SnapshotCacheKey) {
+            values[key] = value
+            recency.removeAll { $0 == key }
+            recency.append(key)
+            while recency.count > capacity {
+                values.removeValue(forKey: recency.removeFirst())
+            }
+        }
+    }
+
+    private struct DatedTrendPoint: Sendable {
+        let day: String
+        let point: TrendPoint
+    }
+
+    private struct WeeklyDigestPresentation: Sendable {
+        let sourceKey: String
+        let weekOffset: Int
+        let digest: WeeklyDigest
+    }
+
+    nonisolated static func buildSnapshot(
+        days: [DailyMetric],
+        range: Range,
+        sleepPerfByDay: [String: Double],
+        todayKey: String,
+        shouldCancel: @Sendable () -> Bool = { false },
+        onSourceRow: (@Sendable () -> Void)? = nil
+    ) -> TrendsSnapshot? {
+        guard !shouldCancel() else { return nil }
+
+        var recoveryPoints: [DatedTrendPoint] = []
+        var hrvPoints: [DatedTrendPoint] = []
+        var rhrPoints: [DatedTrendPoint] = []
+        var strainPoints: [DatedTrendPoint] = []
+        var restPoints: [DatedTrendPoint] = []
+        recoveryPoints.reserveCapacity(days.count)
+        hrvPoints.reserveCapacity(days.count)
+        rhrPoints.reserveCapacity(days.count)
+        strainPoints.reserveCapacity(days.count)
+        restPoints.reserveCapacity(days.count)
+
+        for (index, day) in days.enumerated() {
+            if index.isMultiple(of: 256), shouldCancel() {
+                return nil
+            }
+            onSourceRow?()
+
+            let recovery = day.recovery
+            let hrv = day.avgHrv
+            let rhr = day.restingHr.map(Double.init)
+            let strain = day.strain
+            let rest = sleepPerfByDay[day.day]
+            guard recovery != nil || hrv != nil || rhr != nil || strain != nil || rest != nil,
+                  let metricDate = date(day.day) else {
+                continue
+            }
+
+            if let recovery {
+                recoveryPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: recovery)
+                    )
+                )
+            }
+            if let hrv {
+                hrvPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: hrv)
+                    )
+                )
+            }
+            if let rhr {
+                rhrPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: rhr)
+                    )
+                )
+            }
+            if let strain {
+                strainPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: strain)
+                    )
+                )
+            }
+            if let rest {
+                restPoints.append(
+                    DatedTrendPoint(
+                        day: day.day,
+                        point: TrendPoint(date: metricDate, value: rest)
+                    )
+                )
+            }
+        }
+        guard !shouldCancel() else { return nil }
+
+        guard
+            let recovery = resolve(
+                points: recoveryPoints,
+                selected: range,
+                todayKey: todayKey,
+                shouldCancel: shouldCancel
+            ),
+            let hrv = resolve(
+                points: hrvPoints,
+                selected: range,
+                todayKey: todayKey,
+                shouldCancel: shouldCancel
+            ),
+            let rhr = resolve(
+                points: rhrPoints,
+                selected: range,
+                todayKey: todayKey,
+                shouldCancel: shouldCancel
+            ),
+            let strain = resolve(
+                points: strainPoints,
+                selected: range,
+                todayKey: todayKey,
+                shouldCancel: shouldCancel
+            ),
+            let rest = resolve(
+                points: restPoints,
+                selected: range,
+                todayKey: todayKey,
+                shouldCancel: shouldCancel
+            ),
+            let minimumOffset = minWeekOffset(
+                days: days,
+                todayKey: todayKey,
+                shouldCancel: shouldCancel
+            )
+        else {
+            return nil
+        }
+        return TrendsSnapshot(
+            recovery: recovery,
+            hrv: hrv,
+            rhr: rhr,
+            strain: strain,
+            rest: rest,
+            minWeekOffset: minimumOffset
+        )
+    }
+
+    private nonisolated static func resolve(
+        points: [DatedTrendPoint],
+        selected: Range,
+        todayKey: String,
+        shouldCancel: @Sendable () -> Bool
+    ) -> ResolvedMetric? {
         // Find the smallest range ≥ selected whose window has ≥1 point, keeping
-        // that window's points so we don't re-filter to read them back.
-        for r in range.widening {
-            let pts = points(days(for: r), value)
-            if !pts.isEmpty {
-                return ResolvedMetric(points: pts, effective: r,
-                                      widened: r != range)
+        // that window's points so we don't re-filter the source history.
+        for range in selected.widening {
+            guard let window = windowPoints(
+                points: points,
+                range: range,
+                todayKey: todayKey,
+                shouldCancel: shouldCancel
+            ) else {
+                return nil
+            }
+            if !window.isEmpty {
+                return ResolvedMetric(
+                    points: window,
+                    effective: range,
+                    widened: range != selected
+                )
             }
         }
         // No range held data: fall back to ALL (matches effectiveRange()).
-        let pts = points(days(for: .all), value)
-        return ResolvedMetric(points: pts, effective: .all,
-                              widened: .all != range)
+        guard let window = windowPoints(
+            points: points,
+            range: .all,
+            todayKey: todayKey,
+            shouldCancel: shouldCancel
+        ) else {
+            return nil
+        }
+        return ResolvedMetric(
+            points: window,
+            effective: .all,
+            widened: .all != selected
+        )
+    }
+
+    private nonisolated static func windowPoints(
+        points: [DatedTrendPoint],
+        range: Range,
+        todayKey: String,
+        shouldCancel: @Sendable () -> Bool
+    ) -> [TrendPoint]? {
+        guard !shouldCancel() else { return nil }
+        let startIndex: Int
+        if let dayCount = range.days {
+            let cutoff = WeeklyDigestEngine.addDays(todayKey, -(dayCount - 1))
+            startIndex = lowerBound(points, day: cutoff)
+        } else {
+            startIndex = 0
+        }
+        guard startIndex < points.count else { return [] }
+
+        var result: [TrendPoint] = []
+        result.reserveCapacity(points.count - startIndex)
+        for (offset, item) in points[startIndex...].enumerated() {
+            if offset.isMultiple(of: 256), shouldCancel() {
+                return nil
+            }
+            result.append(item.point)
+        }
+        return shouldCancel() ? nil : result
+    }
+
+    private nonisolated static func lowerBound(
+        _ points: [DatedTrendPoint],
+        day: String
+    ) -> Int {
+        // Repository history is oldest-first; ISO day keys preserve chronological ordering.
+        var lower = 0
+        var upper = points.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if points[middle].day < day {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        return lower
+    }
+
+    private nonisolated static func minWeekOffset(
+        days: [DailyMetric],
+        todayKey: String,
+        shouldCancel: @Sendable () -> Bool
+    ) -> Int? {
+        guard !shouldCancel() else { return nil }
+        guard
+            let earliest = days.first?.day,
+            let earliestMonday = WeeklyDigestEngine.mondayOfWeek(containing: earliest),
+            let currentMonday = WeeklyDigestEngine.mondayOfWeek(containing: todayKey)
+        else { return 0 }
+
+        var offset = 0
+        var monday = currentMonday
+        while monday > earliestMonday && offset > -520 {
+            guard !shouldCancel() else { return nil }
+            monday = WeeklyDigestEngine.addDays(monday, -7)
+            offset -= 1
+        }
+        return offset
+    }
+
+    private nonisolated static func awaitWorker<Value: Sendable>(
+        _ worker: Task<Value?, Never>,
+        timeoutNanoseconds: UInt64
+    ) async -> LoadRaceResult<Value> {
+        await withTaskCancellationHandler {
+            await withTaskGroup(
+                of: LoadRaceResult<Value>.self,
+                returning: LoadRaceResult<Value>.self
+            ) { group in
+                group.addTask {
+                    .value(await worker.value)
+                }
+                group.addTask {
+                    do {
+                        try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    } catch {
+                        return .canceled
+                    }
+                    return .timedOut
+                }
+
+                guard let first = await group.next() else {
+                    worker.cancel()
+                    return .canceled
+                }
+                switch first {
+                case .timedOut, .canceled:
+                    worker.cancel()
+                case .value:
+                    break
+                }
+                group.cancelAll()
+                return first
+            }
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     /// A padded value range for a series so the line isn't flat against the axis.
@@ -257,6 +584,75 @@ struct TrendsView: View {
         return Self.rangeDateFormatter.string(from: start, to: end)
     }
 
+    private var historyTaskIdentity: String {
+        [
+            String(repo.refreshSeq),
+            String(repo.days.count),
+            repo.days.first?.day ?? "none",
+            repo.days.last?.day ?? "none",
+            String(retryGeneration),
+        ].joined(separator: "|")
+    }
+
+    private var trendsTaskIdentity: String {
+        [
+            historyTaskIdentity,
+            String(range.rawValue),
+            String(sleepPerfRevision),
+            sleepPerfLoaded ? "ready" : "loading",
+        ].joined(separator: "|")
+    }
+
+    private var currentSnapshotCacheKey: SnapshotCacheKey? {
+        guard !repo.days.isEmpty, sleepPerfLoaded else { return nil }
+        return SnapshotCacheKey(
+            historyRevision: repo.refreshSeq,
+            dayCount: repo.days.count,
+            firstDay: repo.days.first?.day,
+            lastDay: repo.days.last?.day,
+            sleepRevision: sleepPerfRevision,
+            todayKey: Repository.localDayKey(Date()),
+            range: range
+        )
+    }
+
+    private nonisolated static func diagnosticRange(_ range: Range) -> String {
+        switch range {
+        case .week: return "week"
+        case .month: return "month"
+        case .quarter: return "quarter"
+        case .half: return "half"
+        case .year: return "year"
+        case .all: return "all"
+        }
+    }
+
+    private nonisolated static func diagnosticDayCountBucket(_ count: Int) -> String {
+        switch count {
+        case 0: return "0"
+        case 1...7: return "1_7"
+        case 8...30: return "8_30"
+        case 31...90: return "31_90"
+        case 91...365: return "91_365"
+        default: return "366_plus"
+        }
+    }
+
+    private var weeklyDigestTaskIdentity: String {
+        [
+            historyTaskIdentity,
+            String(weekOffset),
+            effortScaleRaw,
+            hasChosenLandingWeek ? "chosen" : "landing",
+            String(trendsSnapshot?.minWeekOffset ?? 1),
+            String(retryGeneration),
+        ].joined(separator: "|")
+    }
+
+    private func weeklyDigestSourceKey(offset: Int) -> String {
+        [historyTaskIdentity, String(offset), effortScaleRaw].joined(separator: "|")
+    }
+
     var body: some View {
         // The liquid metric cards now tap through to their MetricDetailView (matching Today's card
         // taps + Explore's rows). On iOS each tab already supplies a NavigationStack, so those pushes
@@ -279,23 +675,16 @@ struct TrendsView: View {
                        // section reveal is unchanged; this only defers building that stack until it scrolls in.
                        onRefresh: { await repo.refresh() },
                        lazy: true,
-                       topBackground: liquidScaffoldSky()) {
+                       topBackground: liquidScaffoldSky(),
+                       scrollAccessibilityIdentifier: "noop.trends.scroll") {
             if repo.days.isEmpty {
                 ComingSoon(what: repo.loaded
                     ? "Trends need history to draw. Import your wearable export in Data Sources to see weeks, months and years instantly."
                     : "Loading your history…")
-            } else {
-                // Resolve each metric's window ONCE per body and pass the results
-                // down — rangeBar/heroRecovery/smallMultiples all reuse these
-                // instead of re-filtering repo.days through caption/widened/
-                // windowPoints on every render (hover, animation, 1 Hz HR tick).
-                let recovery = resolve { $0.recovery }
-                let hrv = resolve { $0.avgHrv }
-                let rhr = resolve { $0.restingHr.map(Double.init) }
-                let strain = resolve { $0.strain }
-                // Rest = the sleep_performance composite — the same number the Today Rest score shows
-                // (#732); see sleepPerfByDay. resolve() still does the windowing/widening.
-                let rest = resolve { sleepPerfByDay[$0.day] }
+            } else if loadFailure == .trends {
+                trendsFailureCard
+            } else if let snapshot = trendsSnapshot,
+                      trendsSnapshotKey == currentSnapshotCacheKey {
                 VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
                     // The main card list ripples in once on appear (Reduce-Motion safe).
                     Group {
@@ -304,13 +693,21 @@ struct TrendsView: View {
                         weeklyDigestNav
                             .staggeredAppear(index: 0)
                         // The Charge / Effort / Rest trio, presented in NOOP's pip language.
-                        rangeBar(recovery: recovery)
+                        rangeBar(recovery: snapshot.recovery)
                             .staggeredAppear(index: 1)
-                        selectedRangeSummary(charge: recovery, effort: strain, rest: rest)
+                        selectedRangeSummary(
+                            charge: snapshot.recovery,
+                            effort: snapshot.strain,
+                            rest: snapshot.rest
+                        )
                             .staggeredAppear(index: 2)
-                        heroRecovery(recovery: recovery)
+                        heroRecovery(recovery: snapshot.recovery)
                             .staggeredAppear(index: 3)
-                        smallMultiples(hrv: hrv, rhr: rhr, strain: strain)
+                        smallMultiples(
+                            hrv: snapshot.hrv,
+                            rhr: snapshot.rhr,
+                            strain: snapshot.strain
+                        )
                             .staggeredAppear(index: 4)
                         yearStrip
                             .staggeredAppear(index: 5)
@@ -318,6 +715,8 @@ struct TrendsView: View {
                             .staggeredAppear(index: 6)
                     }
                 }
+            } else {
+                trendsLoadingSkeleton
             }
         }
         // #436 — present the offline trends-report exporter (range picker + PDF export).
@@ -325,42 +724,304 @@ struct TrendsView: View {
             TrendsReportSheet(days: repo.days)
         }
         // #732 — load the resolved sleep_performance series so Rest plots the SAME composite the Today
-        // Rest score uses (not raw efficiency). Mirrors TodayView's restScore read. Keyed on the day
-        // count so a newly-banked/-scored night refreshes Rest reactively, like the other metrics that
-        // read `repo.days` directly (and like the Android LaunchedEffect(days) twin).
-        .task(id: repo.days.count) {
+        // Rest score uses (not raw efficiency). The presentation snapshot waits for this read, so it never
+        // flashes a false "missing Sleep" row while the local series is still arriving.
+        .task(id: historyTaskIdentity) {
+            loadFailure = nil
+            sleepPerfLoaded = false
+            guard !Task.isCancelled else { return }
             let s = await repo.exploreSeries(key: "sleep_performance", source: "my-whoop")
+            guard !Task.isCancelled else { return }
             sleepPerfByDay = Dictionary(s.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
+            sleepPerfRevision &+= 1
+            sleepPerfLoaded = true
         }
+        .task(id: trendsTaskIdentity) {
+            await loadTrendsSnapshot()
+        }
+        .task(id: weeklyDigestTaskIdentity) {
+            await loadWeeklyDigest()
+        }
+    }
+
+    private func loadTrendsSnapshot() async {
+        guard let cacheKey = currentSnapshotCacheKey else {
+            trendsSnapshot = nil
+            trendsSnapshotKey = nil
+            return
+        }
+
+        var diagnosticFields = [
+            "range": Self.diagnosticRange(cacheKey.range),
+            "day_count_bucket": Self.diagnosticDayCountBucket(cacheKey.dayCount),
+            "cache_capacity": String(trendsSnapshotCache.capacity),
+        ]
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "trends.aggregate_prepare",
+            fields: diagnosticFields
+        )
+        var outcome = "completed"
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: outcome,
+                fields: diagnosticFields
+            )
+        }
+
+        if let cached = trendsSnapshotCache.value(for: cacheKey) {
+            trendsSnapshot = cached
+            trendsSnapshotKey = cacheKey
+            diagnosticFields["cache_status"] = "hit"
+            diagnosticFields["cache_entries"] = String(trendsSnapshotCache.count)
+            outcome = "cache_hit"
+            return
+        }
+
+        trendsSnapshot = nil
+        trendsSnapshotKey = nil
+        diagnosticFields["cache_status"] = "miss"
+
+        // Give SwiftUI one turn to paint the static skeleton before starting CPU work.
+        await Task.yield()
+        guard !Task.isCancelled else {
+            outcome = "canceled"
+            return
+        }
+
+        let requestIdentity = trendsTaskIdentity
+        let inputDays = repo.days
+        let inputRange = cacheKey.range
+        let inputSleep = sleepPerfByDay
+        let todayKey = cacheKey.todayKey
+        let timeoutNanoseconds = LoadPolicy.timeoutNanoseconds(
+            retryGeneration: retryGeneration
+        )
+        let forceDemoTimeout = CommandLine.arguments.contains("--demo-trends-timeout")
+            && retryGeneration == 0
+
+        let worker = Task.detached(priority: .userInitiated) {
+            if forceDemoTimeout {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            guard !Task.isCancelled else { return Optional<TrendsSnapshot>.none }
+            return Self.buildSnapshot(
+                days: inputDays,
+                range: inputRange,
+                sleepPerfByDay: inputSleep,
+                todayKey: todayKey,
+                shouldCancel: { Task.isCancelled }
+            )
+        }
+        let race = await Self.awaitWorker(
+            worker,
+            timeoutNanoseconds: timeoutNanoseconds
+        )
+
+        guard !Task.isCancelled else {
+            outcome = "canceled"
+            return
+        }
+        guard requestIdentity == trendsTaskIdentity else {
+            outcome = "superseded"
+            return
+        }
+        let prepared: TrendsSnapshot?
+        switch race {
+        case .value(let value):
+            prepared = value
+        case .timedOut:
+            outcome = "timed_out"
+            loadFailure = .trends
+            return
+        case .canceled:
+            outcome = "canceled"
+            return
+        }
+        guard let prepared else {
+            outcome = "canceled"
+            return
+        }
+        trendsSnapshotCache.insert(prepared, for: cacheKey)
+        trendsSnapshot = prepared
+        trendsSnapshotKey = cacheKey
+        diagnosticFields["cache_entries"] = String(trendsSnapshotCache.count)
+    }
+
+    private func loadWeeklyDigest() async {
+        guard let snapshot = trendsSnapshot, !repo.days.isEmpty else {
+            weeklyDigestPresentation = nil
+            return
+        }
+
+        let requestedSourceKey = weeklyDigestSourceKey(offset: weekOffset)
+        if hasChosenLandingWeek,
+           weeklyDigestPresentation?.sourceKey == requestedSourceKey {
+            return
+        }
+
+        weeklyDigestPresentation = nil
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+
+        let requestIdentity = weeklyDigestTaskIdentity
+        let inputDays = repo.days
+        let initialOffset = weekOffset
+        let chooseLandingWeek = !hasChosenLandingWeek
+        let minimumOffset = snapshot.minWeekOffset
+        let todayKey = Repository.localDayKey(Date())
+        let effortFactor = UnitPrefs.currentEffortDisplayFactor()
+        let historyIdentity = historyTaskIdentity
+        let effortScaleIdentity = effortScaleRaw
+        let timeoutNanoseconds = LoadPolicy.timeoutNanoseconds(
+            retryGeneration: retryGeneration
+        )
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("trends.weekly_digest_prepare")
+        var outcome = "completed"
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(diagnostic, outcome: outcome)
+        }
+
+        let worker = Task.detached(priority: .userInitiated) {
+            var resolvedOffset = initialOffset
+            if chooseLandingWeek {
+                let floor = max(minimumOffset, -8)
+                var candidate = 0
+                while candidate >= floor, !Task.isCancelled {
+                    let anchor = WeeklyDigestEngine.addDays(todayKey, candidate * 7)
+                    let candidateDigest = WeeklyDigestSource.digest(
+                        from: inputDays,
+                        anchorDay: anchor,
+                        effortDisplayFactor: effortFactor
+                    )
+                    guard !Task.isCancelled else {
+                        return Optional<WeeklyDigestPresentation>.none
+                    }
+                    if !candidateDigest.isEmpty {
+                        resolvedOffset = candidate
+                        break
+                    }
+                    candidate -= 1
+                }
+            }
+            guard !Task.isCancelled else {
+                return Optional<WeeklyDigestPresentation>.none
+            }
+            let anchor = WeeklyDigestEngine.addDays(todayKey, resolvedOffset * 7)
+            let digest = WeeklyDigestSource.digest(
+                from: inputDays,
+                anchorDay: anchor,
+                effortDisplayFactor: effortFactor
+            )
+            guard !Task.isCancelled else {
+                return Optional<WeeklyDigestPresentation>.none
+            }
+            let sourceKey = [
+                historyIdentity,
+                String(resolvedOffset),
+                effortScaleIdentity,
+            ].joined(separator: "|")
+            return WeeklyDigestPresentation(
+                sourceKey: sourceKey,
+                weekOffset: resolvedOffset,
+                digest: digest
+            )
+        }
+        let race = await Self.awaitWorker(
+            worker,
+            timeoutNanoseconds: timeoutNanoseconds
+        )
+
+        guard !Task.isCancelled else {
+            outcome = "canceled"
+            return
+        }
+        guard requestIdentity == weeklyDigestTaskIdentity else {
+            outcome = "superseded"
+            return
+        }
+        let prepared: WeeklyDigestPresentation?
+        switch race {
+        case .value(let value):
+            prepared = value
+        case .timedOut:
+            outcome = "timed_out"
+            loadFailure = .weeklyDigest
+            return
+        case .canceled:
+            outcome = "canceled"
+            return
+        }
+        guard let prepared else {
+            outcome = "canceled"
+            return
+        }
+        hasChosenLandingWeek = true
+        weekOffset = prepared.weekOffset
+        weeklyDigestPresentation = prepared
+    }
+
+    private func retryTrends() {
+        loadFailure = nil
+        trendsSnapshot = nil
+        trendsSnapshotKey = nil
+        weeklyDigestPresentation = nil
+        retryGeneration &+= 1
+    }
+
+    private var trendsFailureCard: some View {
+        ScreenStateCard(
+            kind: .error,
+            title: "appwide.trends.load_failed_title",
+            message: "appwide.trends.load_failed_body",
+            actionTitle: "appwide.trends.retry",
+            action: retryTrends
+        )
+        .accessibilityIdentifier("noop.trends.failure")
+    }
+
+    private var trendsLoadingSkeleton: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
+            trendsSkeletonCard(chartHeight: 132)
+            trendsSkeletonCard(chartHeight: NoopMetrics.chartHeight)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Loading"))
+        .accessibilityValue(Text("Loading your history…"))
+        .accessibilityIdentifier("noop.trends.loading")
+    }
+
+    private var weeklyDigestLoadingSkeleton: some View {
+        trendsSkeletonCard(chartHeight: 156)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Loading"))
+            .accessibilityValue(Text("Loading your history…"))
+            .accessibilityIdentifier("noop.trends.weekly-digest-loading")
+    }
+
+    private func trendsSkeletonCard(chartHeight: CGFloat) -> some View {
+        NoopCard {
+            VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
+                Capsule()
+                    .fill(StrandPalette.textTertiary.opacity(0.18))
+                    .frame(width: 116, height: NoopMetrics.space2)
+                Capsule()
+                    .fill(StrandPalette.textTertiary.opacity(0.12))
+                    .frame(width: 176, height: NoopMetrics.space3)
+                RoundedRectangle(
+                    cornerRadius: NoopMetrics.space2,
+                    style: .continuous
+                )
+                .fill(StrandPalette.surfaceInset.opacity(0.72))
+                .frame(maxWidth: .infinity)
+                .frame(height: chartHeight)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     // MARK: Week-in-review digest with prev/next week browsing (#710)
 
-    /// The earliest "yyyy-MM-dd" we hold (history is oldest → newest), used to clamp how far back the
-    /// week stepper can go.
-    private var earliestDay: String? { repo.days.first?.day }
-
-    /// The most negative `weekOffset` allowed: the number of whole weeks between the earliest day's week
-    /// and this week. Beyond that there's no data to digest, so the back chevron disables. 0 when history
-    /// is empty or unparseable (so we stay on this week).
-    private var minWeekOffset: Int {
-        guard
-            let earliest = earliestDay,
-            let earliestMon = WeeklyDigestEngine.mondayOfWeek(containing: earliest),
-            let thisMon = WeeklyDigestEngine.mondayOfWeek(containing: Repository.localDayKey(Date()))
-        else { return 0 }
-        // Walk weeks back from this Monday until we pass the earliest week. Bounded by history length.
-        var off = 0
-        var mon = thisMon
-        while mon > earliestMon && off > -520 {           // hard cap ~10 years so a bad date can't spin
-            mon = WeeklyDigestEngine.addDays(mon, -7)
-            off -= 1
-        }
-        return off
-    }
-
-    /// The anchor day (any day in the target week) for the current `weekOffset`: today shifted back by
-    /// `weekOffset` whole weeks. The engine snaps it to that week's Monday.
     /// Joins two ALREADY-localized fragments for a VoiceOver hint. Kept as a helper so no string literal
     /// sits inside an accessibility modifier: the i18n audit rightly treats literals there as
     /// un-extracted copy, and a bare interpolation would also become a phantom catalog key.
@@ -368,39 +1029,14 @@ struct TrendsView: View {
         [descriptor, scope].filter { !$0.isEmpty }.joined(separator: ". ")
     }
 
-    private var weekAnchorDay: String {
-        WeeklyDigestEngine.addDays(Repository.localDayKey(Date()), weekOffset * 7)
-    }
-
-    /// The most recent week at or before this one that actually holds readings, as a `weekOffset`.
-    ///
-    /// WHY: `weekOffset` used to start at 0 — the week containing today — so anyone opening Trends early
-    /// in their week saw "No readings this week" sitting directly above a panel reporting months of
-    /// history ("Recovery scores: 89 of 90 days"). That reads as a broken app, and on a Monday morning it
-    /// was the DEFAULT experience. Landing on the newest week that has something to review is what the
-    /// user actually wants; the header already labels it honestly ("Last week"), and the forward chevron
-    /// still walks to the current week.
-    ///
-    /// Bounded to 8 weeks: if nothing has been recorded for two months, the empty state is the truthful
-    /// thing to show, and this also keeps the scan cheap regardless of history length.
-    private func mostRecentWeekWithReadings() -> Int {
-        let today = Repository.localDayKey(Date())
-        let floor = max(minWeekOffset, -8)
-        var offset = 0
-        while offset >= floor {
-            let anchor = WeeklyDigestEngine.addDays(today, offset * 7)
-            if !WeeklyDigestSource.digest(from: repo.days, anchorDay: anchor).isEmpty { return offset }
-            offset -= 1
-        }
-        return 0
-    }
-
     /// Move the digest one week earlier (-1) or later (+1), clamped to [minWeekOffset, 0] — never into a
     /// future week, never past the earliest week we hold.
     private func stepWeek(_ delta: Int) {
         hasChosenLandingWeek = true          // the user is driving now; don't re-home the digest
         let next = weekOffset + delta
-        weekOffset = max(minWeekOffset, min(0, next))
+        let minimumOffset = trendsSnapshot?.minWeekOffset ?? 0
+        weekOffset = max(minimumOffset, min(0, next))
+        weeklyDigestPresentation = nil
     }
 
     /// The week-in-review digest for the selected week, with prev/next chevrons in its header. The digest
@@ -409,7 +1045,6 @@ struct TrendsView: View {
     /// self-hides only when there's no data in ANY week (an all-empty history), matching the old card.
     @ViewBuilder
     private var weeklyDigestNav: some View {
-        let digest = WeeklyDigestSource.digest(from: repo.days, anchorDay: weekAnchorDay)
         // Only hide the navigation entirely when the WHOLE history is empty — an empty PAST week still
         // shows the header + chevrons so the user can step to a week that does hold data.
         if repo.days.isEmpty {
@@ -417,22 +1052,38 @@ struct TrendsView: View {
         } else {
             VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                 weekNavBar
-                if digest.isEmpty {
+                if let presentation = weeklyDigestPresentation,
+                   presentation.weekOffset == weekOffset,
+                   presentation.digest.isEmpty {
                     // This particular week had no readings — keep the chevrons above so the user can move on.
                     DataPendingNote(
                         title: "No readings this week",
                         message: "Step to another week with the arrows above to see its review.")
+                } else if let presentation = weeklyDigestPresentation,
+                          presentation.weekOffset == weekOffset {
+                    WeeklyDigestContent(
+                        digest: presentation.digest,
+                        compact: true,
+                        importedRestAvailable: WeeklyDigestSource.hasImportedRestScore(
+                            repo.importedSleep,
+                            anchorDay: WeeklyDigestEngine.addDays(
+                                Repository.localDayKey(Date()),
+                                presentation.weekOffset * 7
+                            )
+                        )
+                    )
+                } else if loadFailure == .weeklyDigest {
+                    ScreenStateCard(
+                        kind: .error,
+                        title: "appwide.trends.weekly_digest_failed_title",
+                        message: "appwide.trends.weekly_digest_failed_body",
+                        actionTitle: "appwide.trends.retry",
+                        action: retryTrends
+                    )
+                    .accessibilityIdentifier("noop.trends.weekly-digest-failure")
                 } else {
-                    WeeklyDigestContent(digest: digest, compact: true)
+                    weeklyDigestLoadingSkeleton
                 }
-            }
-            // Pick the landing week ONCE per history load, and only while the user has not navigated
-            // themselves — stepping to a deliberately empty week must stick, not bounce back.
-            .task(id: repo.days.count) {
-                guard !hasChosenLandingWeek else { return }
-                hasChosenLandingWeek = true
-                let landing = mostRecentWeekWithReadings()
-                if landing != weekOffset { weekOffset = landing }
             }
         }
     }
@@ -440,7 +1091,7 @@ struct TrendsView: View {
     /// Prev/next week stepper. Back is clamped at the earliest week we hold; forward is clamped at this
     /// week (no future weeks). Mirrors the FullDayChartView day stepper's flat accent chevrons (#597).
     private var weekNavBar: some View {
-        let atOldest = weekOffset <= minWeekOffset
+        let atOldest = weekOffset <= (trendsSnapshot?.minWeekOffset ?? 0)
         let atNewest = weekOffset >= 0
         return HStack(spacing: NoopMetrics.cardInnerSpacing) {
             Button { stepWeek(-1) } label: {
@@ -806,10 +1457,18 @@ struct TrendsView: View {
                         ChartFooter([
                             ("Latest", pts.last.map {
                                 "\(Int($0.value.rounded())) · \(Self.chartDateFormatter.string(from: $0.date))"
-                            } ?? "-"),
-                            ("Avg", avg.map { "\(Int($0.rounded()))" } ?? "-"),
-                            ("Peak", pts.map(\.value).max().map { "\(Int($0.rounded()))" } ?? "-"),
-                            ("Low", pts.map(\.value).min().map { "\(Int($0.rounded()))" } ?? "-"),
+                            } ?? StrandFormat.missing),
+                            ("Avg", avg.map { "\(Int($0.rounded()))" } ?? StrandFormat.missing),
+                            (
+                                "Peak",
+                                pts.map(\.value).max().map { "\(Int($0.rounded()))" } ??
+                                    StrandFormat.missing
+                            ),
+                            (
+                                "Low",
+                                pts.map(\.value).min().map { "\(Int($0.rounded()))" } ??
+                                    StrandFormat.missing
+                            ),
                         ])
                         changeChip(pts, higherIsBetter: true, fmt: { "\(Int($0.rounded()))" })
                     }
@@ -928,12 +1587,12 @@ struct TrendsView: View {
                     ChartFooter([
                         ("Latest", pts.last.map {
                             "\(fmt($0.value)) · \(Self.chartDateFormatter.string(from: $0.date))"
-                        } ?? "-"),
+                        } ?? StrandFormat.missing),
                         // Plain "MEAN" to match the bare MIN/MAX columns; the unit moves into
                         // the value (e.g. "58 ms") so uppercasing can't render a shouty "MEAN MS".
-                        ("Mean", avg.map { "\(fmt($0)) \(unit)" } ?? "-"),
-                        ("Min", pts.map(\.value).min().map(fmt) ?? "-"),
-                        ("Max", pts.map(\.value).max().map(fmt) ?? "-"),
+                        ("Mean", avg.map { "\(fmt($0)) \(unit)" } ?? StrandFormat.missing),
+                        ("Min", pts.map(\.value).min().map(fmt) ?? StrandFormat.missing),
+                        ("Max", pts.map(\.value).max().map(fmt) ?? StrandFormat.missing),
                     ])
                     changeChip(pts, higherIsBetter: higherIsBetter, fmt: fmt)
                 }

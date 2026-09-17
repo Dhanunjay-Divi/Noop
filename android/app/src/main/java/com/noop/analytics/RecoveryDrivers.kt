@@ -9,8 +9,8 @@ import kotlin.math.roundToInt
 // Kotlin twin of the Swift RecoveryScorer chargeDrivers reference. Where RecoveryScorerTrace emits a
 // terse engineer-facing strap-log trace, this produces the ordered, plain-English driver rows the
 // dashboard renders UNDER the Charge ring: one row per real term, each carrying the signed point
-// contribution to the score (deltaPoints), the night's value, the personal baseline it was scored
-// against, and a short verdict.
+// contribution to the score (deltaPoints), the night's numeric value, the personal baseline it was
+// scored against, and a short verdict. Presentation code applies the active locale and translated unit.
 //
 // HONEST BY CONSTRUCTION. Every row is recomputed from the SAME inputs RecoveryScorer.recovery reads,
 // with the SAME zScore call, weights and logistic, so a driver can never describe a term the score
@@ -24,21 +24,32 @@ import kotlin.math.roundToInt
 
 /**
  * One driver row behind the Charge (recovery) score, in the SHARED CONTRACT shape the iOS/macOS and
- * Android dashboards both render. Field names are byte-identical across platforms.
+ * Android dashboards both render. Numeric values remain structured until the Android UI formats them
+ * with the active locale; analytics must not bake English units or a process-default locale into them.
  *
  * @property label short signal name, e.g. "Resting HR".
  * @property deltaPoints signed contribution to the 0-100 Charge score versus this signal sitting at
  *   the personal baseline (positive = lifted Charge, negative = pulled it down). A real marginal
  *   sensitivity, never a fabricated apportionment.
- * @property valueText the night's value, formatted with its unit, e.g. "58 bpm".
- * @property baselineText the personal baseline the value was scored against, e.g. "61 bpm baseline".
+ * @property value the night's numeric value in [valueFormat]'s unit.
+ * @property baseline the personal baseline in the same unit, or null when no learned baseline exists.
+ * @property valueFormat the unit and precision contract used by presentation code.
  * @property verdict short plain-English read, e.g. "below baseline, supporting recovery".
  */
+enum class ChargeDriverValueFormat {
+    MILLISECONDS,
+    BEATS_PER_MINUTE,
+    PERCENT,
+    BREATHS_PER_MINUTE,
+    CELSIUS_DEVIATION,
+}
+
 data class ChargeDriver(
     val label: String,
     val deltaPoints: Int,
-    val valueText: String,
-    val baselineText: String,
+    val value: Double,
+    val baseline: Double?,
+    val valueFormat: ChargeDriverValueFormat,
     val verdict: String,
 )
 
@@ -164,15 +175,17 @@ object RecoveryDrivers {
 
         // One row per present term, appended in the SAME order the iOS twin uses (HRV, resting HR,
         // Sleep, respiration, skin temp), then sorted biggest-mover-first so the row that explains the
-        // most sits on top. Labels / value text / verdicts are byte-identical to the Swift canonical.
+        // most sits on top. Labels and verdicts remain canonical lookup keys; numeric presentation stays
+        // structured so Android can localize decimal separators, units and accessibility output.
         val drivers = ArrayList<ChargeDriver>()
 
         drivers.add(
             ChargeDriver(
                 label = "Heart rate variability",
                 deltaPoints = delta(hrvIdx),
-                valueText = "${hrv.roundToInt()} ms",
-                baselineText = "${hrvBaseline.baseline.roundToInt()} ms baseline",
+                value = hrv,
+                baseline = hrvBaseline.baseline,
+                valueFormat = ChargeDriverValueFormat.MILLISECONDS,
                 verdict = directionVerdict(hrvZ, good = "above baseline, supporting recovery",
                     flat = "at baseline", bad = "below baseline, limiting recovery"),
             ),
@@ -183,8 +196,9 @@ object RecoveryDrivers {
                 ChargeDriver(
                     label = "Resting heart rate",
                     deltaPoints = delta(rhrIdx),
-                    valueText = "${rhr.roundToInt()} bpm",
-                    baselineText = "${validRhrBaseline.baseline.roundToInt()} bpm baseline",
+                    value = rhr,
+                    baseline = validRhrBaseline.baseline,
+                    valueFormat = ChargeDriverValueFormat.BEATS_PER_MINUTE,
                     verdict = directionVerdict(terms[rhrIdx].z, good = "below baseline, supporting recovery",
                         flat = "at baseline", bad = "above baseline, limiting recovery"),
                 ),
@@ -195,18 +209,24 @@ object RecoveryDrivers {
                 ChargeDriver(
                     label = "Sleep quality",
                     deltaPoints = delta(sleepIdx),
-                    valueText = "${(validRest * 100.0).roundToInt()}%",
-                    baselineText = if (usableRestBaseline == null) {
-                        ""
+                    value = validRest * 100.0,
+                    baseline = usableRestBaseline?.let { restCenter * 100.0 },
+                    valueFormat = ChargeDriverValueFormat.PERCENT,
+                    verdict = if (usableRestBaseline == null) {
+                        directionVerdict(
+                            terms[sleepIdx].z,
+                            good = "sleep quality supported recovery",
+                            flat = "sleep quality was neutral",
+                            bad = "sleep quality limited recovery",
+                        )
                     } else {
-                        "${(restCenter * 100.0).roundToInt()}% baseline"
+                        directionVerdict(
+                            terms[sleepIdx].z,
+                            good = "above baseline, supporting recovery",
+                            flat = "a typical night",
+                            bad = "below baseline, limiting recovery",
+                        )
                     },
-                    verdict = directionVerdict(
-                        terms[sleepIdx].z,
-                        good = "above baseline, supporting recovery",
-                        flat = "a typical night",
-                        bad = "below baseline, limiting recovery",
-                    ),
                 ),
             )
         }
@@ -215,8 +235,9 @@ object RecoveryDrivers {
                 ChargeDriver(
                     label = "Respiratory rate",
                     deltaPoints = delta(respIdx),
-                    valueText = String.format(java.util.Locale.US, "%.1f br/min", resp),
-                    baselineText = String.format(java.util.Locale.US, "%.1f br/min baseline", validRespBaseline.baseline),
+                    value = resp,
+                    baseline = validRespBaseline.baseline,
+                    valueFormat = ChargeDriverValueFormat.BREATHS_PER_MINUTE,
                     verdict = directionVerdict(terms[respIdx].z, good = "below baseline, supporting recovery",
                         flat = "at baseline", bad = "above baseline, limiting recovery"),
                 ),
@@ -224,13 +245,14 @@ object RecoveryDrivers {
         }
         if (skinIdx >= 0 && validSkinTempDev != null) {
             // Skin temp is a SYMMETRIC penalty: only |deviation| matters. Surface it as a RELATIVE
-            // deviation (signed +/- C from baseline), never an absolute temperature.
+            // deviation (signed °C from baseline), never an absolute temperature.
             drivers.add(
                 ChargeDriver(
                     label = "Skin temperature",
                     deltaPoints = delta(skinIdx),
-                    valueText = String.format(java.util.Locale.US, "%+.1f C vs baseline", validSkinTempDev),
-                    baselineText = "",   // a deviation already; the reference is the personal baseline (0)
+                    value = validSkinTempDev,
+                    baseline = null, // A deviation already references the personal baseline (0).
+                    valueFormat = ChargeDriverValueFormat.CELSIUS_DEVIATION,
                     verdict = skinTempVerdict(validSkinTempDev),
                 ),
             )

@@ -64,7 +64,9 @@ class RuntimePerformanceContractTest {
 
         assertFalse(workouts.contains(".collectAsState()"))
         assertFalse(insights.contains(".collectAsState()"))
-        assertTrue(workouts.contains("vm.workouts.collectAsStateWithLifecycle()"))
+        assertTrue(workouts.contains("vm.selectedDeviceId.collectAsStateWithLifecycle()"))
+        assertTrue(workouts.contains("vm.workoutDataVersion.collectAsStateWithLifecycle()"))
+        assertFalse(workouts.contains("vm.workouts.collectAsStateWithLifecycle()"))
         assertTrue(insights.contains("vm.recentDays.collectAsStateWithLifecycle()"))
         assertTrue(insights.contains("hub.state.collectAsStateWithLifecycle()"))
     }
@@ -191,6 +193,64 @@ class RuntimePerformanceContractTest {
         assertTrue(components.contains("HISTORY_QUERY_QUIET_MS = 2_000L"))
         assertTrue(components.contains("rememberHistoryQueryGate"))
         assertTrue(components.contains("delay(HISTORY_QUERY_QUIET_MS)"))
+    }
+
+    @Test
+    fun todayKeepsExactEffortAndDailyAggregateReadsOffTheHotUiPath() {
+        val today = source("com/noop/ui/TodayScreen.kt")
+        val repository = source("com/noop/data/WhoopRepository.kt")
+        val dao = source("com/noop/data/WhoopDao.kt")
+
+        val effortStart = today.indexOf("// LIVE in-progress Effort for TODAY")
+        val effortEnd = today.indexOf("// Resolve once for every read-out", effortStart)
+        assertTrue(effortStart >= 0 && effortEnd > effortStart)
+        val effortBlock = today.substring(effortStart, effortEnd)
+        assertTrue(effortBlock.contains("hrSamplesUnion(activeStrapId, start, now)"))
+        assertTrue(effortBlock.contains("withContext(Dispatchers.Default)"))
+        assertTrue(effortBlock.contains("StrainScorer.strain("))
+
+        val weightStart = today.indexOf("// The newest Apple Health / Health Connect body weight")
+        val weightEnd = today.indexOf("// Steps for the selected day", weightStart)
+        assertTrue(weightStart >= 0 && weightEnd > weightStart)
+        val weightBlock = today.substring(weightStart, weightEnd)
+        assertTrue(weightBlock.contains("latestAppleDailyWeight(\"apple-health\")"))
+        assertTrue(weightBlock.contains("latestAppleDailyWeight(\"health-connect\")"))
+        assertFalse(weightBlock.contains("\"0000-01-01\""))
+        assertFalse(weightBlock.contains("\"9999-12-31\""))
+        assertTrue(repository.contains("suspend fun latestAppleDailyWeight"))
+        assertTrue(
+            dao.contains(
+                "ORDER BY day DESC LIMIT 1",
+            ),
+        )
+
+        val stepsStart = today.indexOf("// Steps for the selected day")
+        val stepsEnd = today.indexOf("// On-device steps ESTIMATE", stepsStart)
+        assertTrue(stepsStart >= 0 && stepsEnd > stepsStart)
+        val stepsBlock = today.substring(stepsStart, stepsEnd)
+        assertTrue(stepsBlock.contains("days.minOfOrNull { it.day }"))
+        assertTrue(stepsBlock.contains("days.maxOfOrNull { it.day }"))
+        assertFalse(stepsBlock.contains("\"0000-01-01\""))
+        assertFalse(stepsBlock.contains("\"9999-12-31\""))
+    }
+
+    @Test
+    fun boundedDashboardFlowDoesNotRetainTheCompleteSleepTimeline() {
+        val repository = source("com/noop/data/WhoopRepository.kt")
+        val dao = source("com/noop/data/WhoopDao.kt")
+        val start = repository.indexOf("fun recentDaysMergedFlow")
+        val end = repository.indexOf("private fun computedSleepSessionsFlow", start)
+        assertTrue(start >= 0 && end > start)
+        val recentFlow = repository.substring(start, end)
+
+        assertTrue(recentFlow.contains("computedRecentSleepSessionsFlow(deviceId)"))
+        assertFalse(recentFlow.contains("computedSleepSessionsFlow(deviceId)"))
+        assertTrue(repository.contains("dao.recentSleepSessionsFlow"))
+        assertTrue(repository.contains("RECENT_SLEEP_SESSION_CAP"))
+        assertTrue(dao.contains("fun recentSleepSessionsFlow("))
+        assertTrue(dao.contains("endTs >= :from"))
+        assertTrue(dao.contains("ORDER BY startTs DESC LIMIT :limit"))
+        assertTrue(dao.contains("AS recent ORDER BY startTs ASC"))
     }
 
     @Test

@@ -347,10 +347,23 @@ enum MetricCatalog {
         d("stress", String(localized: "Stress"), "Health", "/100", "xiaomi-band", "gauge.with.dots.needle.50percent", 0, false),
     ]
 
-    static func inCategory(_ c: String) -> [MetricDescriptor] { all.filter { $0.category == c } }
+    /// Customer-visible catalog entries for the current profile context. BMI stays in the canonical
+    /// catalog so stored/imported rows and internal provenance remain intact, but it is not offered as
+    /// a personal metric until the adult profile gate has passed.
+    static func visible(allowsBMI: Bool) -> [MetricDescriptor] {
+        all.filter { allowsBMI || $0.key != "bmi" }
+    }
 
-    static func metric(key: String, source: String) -> MetricDescriptor? {
-        all.first { $0.key == key && $0.source == source }
+    static func inCategory(_ c: String, allowsBMI: Bool = true) -> [MetricDescriptor] {
+        visible(allowsBMI: allowsBMI).filter { $0.category == c }
+    }
+
+    static func metric(key: String, allowsBMI: Bool) -> MetricDescriptor? {
+        visible(allowsBMI: allowsBMI).first { $0.key == key }
+    }
+
+    static func metric(key: String, source: String, allowsBMI: Bool = true) -> MetricDescriptor? {
+        visible(allowsBMI: allowsBMI).first { $0.key == key && $0.source == source }
     }
 
     /// The source the Today steps tile taps through to, matching the value it displays. A measured

@@ -29,10 +29,21 @@ class DailyActionTodayContractTest {
         assertTrue(today.contains("import com.noop.analytics.DailyActionPlanner"))
         assertTrue(today.contains("NoopPrefs.dailyActionCheckIn(context, selectedDayKey)"))
         assertTrue(today.contains("NoopPrefs.setDailyActionCheckIn("))
+        assertTrue(today.contains("viewModel.onAdaptiveDayInputsChanged()"))
         assertTrue(today.contains("DailyActionPlanner.plan("))
-        assertTrue(today.contains("TodaySection.WHY -> DailyPlanWhySection("))
-        assertTrue(today.contains("TodaySection.TARGET -> DailyPlanTargetSection("))
-        assertTrue(today.contains("TodaySection.WATCH -> DailyPlanWatchSection("))
+        assertTrue(today.contains("TodaySection.WHY -> TodayDetailSection("))
+        assertTrue(today.contains("DailyPlanWhySection("))
+        assertTrue(today.contains("TodaySection.TARGET -> TodayDetailSection("))
+        assertTrue(today.contains("DailyPlanTargetSection("))
+        assertTrue(today.contains("TodaySection.WATCH -> TodayDetailSection("))
+        assertTrue(today.contains("DailyPlanWatchSection("))
+        assertTrue(
+            today.contains(
+                "compactAdjustment = dailyActionPlan.workoutAdjustment",
+            ),
+        )
+        assertTrue(today.contains("if (!expanded && compactAdjustment != null)"))
+        assertTrue(today.contains("LocalDensity.current.fontScale >= 1.3f"))
         assertTrue(
             today.contains(
                 "it.flag == ReadinessEngine.Flag.WATCH || it.flag == ReadinessEngine.Flag.BAD"
@@ -44,6 +55,24 @@ class DailyActionTodayContractTest {
         assertTrue(today.contains("R.string.daily_plan_effort_scale"))
         assertFalse(today.contains("Your body can take a demanding session"))
         assertFalse(today.contains("A solid session is well supported"))
+    }
+
+    @Test
+    fun checkInAndSleepTargetChangesReevaluateAdaptiveGuidance() {
+        val today = source("src/main/java/com/noop/ui/TodayScreen.kt")
+        val viewModel = source("src/main/java/com/noop/ui/AppViewModel.kt")
+        assumeTrue("Adaptive-day sources unavailable", today != null && viewModel != null)
+
+        assertTrue(today!!.contains("viewModel.onAdaptiveDayInputsChanged()"))
+        assertTrue(viewModel!!.contains("fun onAdaptiveDayInputsChanged()"))
+        assertTrue(viewModel.contains("adaptiveDayInputEvaluationJob?.cancel()"))
+        assertTrue(viewModel.contains("val wasExplicit = windDownStore.hasExplicitSleepNeed"))
+        assertTrue(
+            viewModel.contains(
+                "if (!wasExplicit || windDownStore.sleepNeedMinutes != prior)"
+            )
+        )
+        assertTrue(viewModel.contains("onAdaptiveDayInputsChanged()"))
     }
 
     @Test

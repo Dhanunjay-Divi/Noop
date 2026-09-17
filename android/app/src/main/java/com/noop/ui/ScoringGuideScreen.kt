@@ -274,13 +274,9 @@ private fun Header(onClose: () -> Unit) {
 private fun IntroCard() {
     NoopCard(padding = 20.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Overline("The three scores")
+            Overline(uiString(R.string.appwide_ui_audit_scoring_guide_overline))
             Text(
-                uiString(R.string.l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209) +
-                    "scale. They're built from your strap's raw signals using published, " +
-                    "peer-reviewed sport science, and computed entirely on your device. They are " +
-                    "independent scores and may not match other apps number-for-number. Source and " +
-                    "confidence stay visible so you can compare them honestly.",
+                uiString(R.string.appwide_ui_audit_scoring_guide_intro),
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )

@@ -347,7 +347,7 @@ final class Backfiller {
         if continuedAfterRows {
             return "Backfill: reached the end of available history (trim=0xFFFFFFFF) - caught up; the strap handed over its banked history earlier this sync. Nothing more to offload."
         }
-        return "Backfill: strap reported no flash cursor (trim=0xFFFFFFFF) - it has no banked history to offload. This is a clock/charge state on the strap, not a decode problem; fully charge it and reconnect so it starts banking."
+        return "Backfill: the band reported no flash cursor (trim=0xFFFFFFFF) - it has no banked history to offload. This is a clock/charge state on the band, not a decode problem; fully charge it and reconnect so it starts banking."
     }
 
     /// #773: how far ahead of the wall clock a HISTORY_END's own timestamp may sit before we call the strap
@@ -367,7 +367,7 @@ final class Backfiller {
     /// to the Android twin. No em-dash (project rule).
     nonisolated static func futureRtcLine(endUnix: Int, wallNowUnix: Int) -> String {
         let aheadDays = max(0, (endUnix - wallNowUnix)) / 86_400
-        return "Backfill: the strap reported a record dated about \(aheadDays) day(s) in the FUTURE - its clock (RTC) is corrupt, not a NOOP problem. Those records can't be filed onto the right day. Fully charge the strap to 100% and reconnect so it re-syncs its clock; if it persists, forget and re-pair the strap."
+        return "Backfill: the band reported a record dated about \(aheadDays) day(s) in the FUTURE - its clock (RTC) is corrupt, not a NOOP problem. Those records can't be filed onto the right day. Fully charge the band to 100% and reconnect so it re-syncs its clock; if it persists, forget and re-pair the band."
     }
 
     /// Commit one HISTORY_END chunk: (persist decoded → enqueueRaw when present) → setCursor → ackTrim.
@@ -493,7 +493,7 @@ final class Backfiller {
                       p.parsed["ppg_waveform"] == nil,
                       !loggedUnmappedVersions.contains(v) else { continue }
                 loggedUnmappedVersions.insert(v)
-                log?("Historical records use firmware layout v\(v), which NOOP doesn't decode yet - no motion data, so sleep can't be computed from the strap. Please report this (issue #30).")
+                log?("Historical records use firmware layout v\(v), which NOOP doesn't decode yet - no motion data, so sleep can't be computed from the band. Please send a diagnostics report.")
             }
             let decoded = d.decoded
             // #547: surface a bad-clock strap. extractHistoricalStreams DROPPED any record whose own unix
@@ -513,7 +513,7 @@ final class Backfiller {
                         oldest: decoded.droppedImplausibleOldestTs,
                         newest: decoded.droppedImplausibleNewestTs,
                         now: Int(Date().timeIntervalSince1970))
-                    log?("Backfill: dropped record(s) with an implausible timestamp (trim=\(trim))\(span) - the strap's clock is wrong (records dated far in the past or future), so those samples were skipped rather than misfiled onto the wrong day. Fully charge and reconnect the strap so its clock re-syncs.")
+                    log?("Backfill: dropped record(s) with an implausible timestamp (trim=\(trim))\(span) - the band's clock is wrong (records dated far in the past or future), so those samples were skipped rather than misfiled onto the wrong day. Fully charge and reconnect the band so its clock re-syncs.")
                 }
             }
             // #324: the strap RTC-state events (RTC_LOST / BOOT / SET_RTC) the #547 gate dropped for a bad
@@ -521,7 +521,7 @@ final class Backfiller {
             // it appears; the bad `rawTs` is the future/past base the RTC jumped to.
             let nowForRtc = Int(Date().timeIntervalSince1970)
             for ev in decoded.droppedRtcEvents {
-                log?("Backfill: strap reported \(ev.kind) with an implausible own-timestamp \(BadClockDiagnostics.isoDay(ev.rawTs)) (\(BadClockDiagnostics.hoursOffset(ev.rawTs, now: nowForRtc)) vs now) - the strap's RTC reset to a wrong base (#324/#928); this is the ground-truth cause of the future-dated banking, not a NOOP decode bug.")
+                log?("Backfill: the band reported \(ev.kind) with an implausible own-timestamp \(BadClockDiagnostics.isoDay(ev.rawTs)) (\(BadClockDiagnostics.hoursOffset(ev.rawTs, now: nowForRtc)) vs now) - the band's RTC reset to a wrong base (#324/#928); this is the ground-truth cause of the future-dated banking, not a NOOP decode bug.")
             }
             // Diagnostic (#77): the AGGREGATE silent-loss case — frames arrived but produced no rows at
             // all (CRC fail / unmapped layout / out-of-range timestamp), so this chunk persists nothing

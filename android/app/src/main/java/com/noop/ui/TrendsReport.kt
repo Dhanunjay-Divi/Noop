@@ -63,6 +63,17 @@ enum class ReportRange(val days: Int?, val label: String, val longName: String) 
     All(null, "All", "All history"),
 }
 
+private fun ReportRange.localizedLongName(context: Context): String =
+    context.getString(
+        when (this) {
+            ReportRange.Days30 -> R.string.appwide_trends_last_30_days
+            ReportRange.Days90 -> R.string.appwide_trends_last_3_months
+            ReportRange.Days180 -> R.string.appwide_trends_last_6_months
+            ReportRange.Days365 -> R.string.appwide_trends_last_year
+            ReportRange.All -> R.string.appwide_trends_all_history
+        },
+    )
+
 // MARK: - Data builder (pure glue over the engine)
 
 object TrendsReportData {
@@ -212,16 +223,16 @@ object TrendsReportRenderer {
         canvas.drawColor(SURFACE_BASE)
 
         var y = MARGIN
-        y = drawHeader(canvas, report, range, y)
+        y = drawHeader(canvas, report, range, y, context)
         y += 18f
         if (report.isEmpty) {
-            drawEmptyState(canvas, range, y)
+            drawEmptyState(canvas, range, y, context)
         } else {
             y = drawHeadlines(canvas, report, y)
             y += 18f
             drawMetrics(canvas, report, series, y)
         }
-        drawFooter(canvas, generatedOn)
+        drawFooter(canvas, generatedOn, context)
 
         doc.finishPage(page)
 
@@ -234,7 +245,13 @@ object TrendsReportRenderer {
 
     // --- Header ---
 
-    private fun drawHeader(canvas: Canvas, report: RangeReport, range: ReportRange, top: Float): Float {
+    private fun drawHeader(
+        canvas: Canvas,
+        report: RangeReport,
+        range: ReportRange,
+        top: Float,
+        context: Context,
+    ): Float {
         val cardTop = top
         val cardH = 92f
         drawCard(canvas, MARGIN, cardTop, PAGE_W - MARGIN, cardTop + cardH, ACCENT)
@@ -242,7 +259,15 @@ object TrendsReportRenderer {
         val left = MARGIN + 16f
         var ty = cardTop + 26f
         text(canvas, "NOOP", left, ty, 11f, sansBold, ACCENT, letterSpacing = 0f)
-        textRight(canvas, range.longName.uppercase(), PAGE_W - MARGIN - 16f, ty, 10f, sansBold, TEXT_TERTIARY)
+        textRight(
+            canvas,
+            range.localizedLongName(context).uppercase(Locale.getDefault()),
+            PAGE_W - MARGIN - 16f,
+            ty,
+            10f,
+            sansBold,
+            TEXT_TERTIARY,
+        )
         ty += 30f
         text(canvas, "Trends report", left, ty, 26f, sansBold, TEXT_PRIMARY)
         ty += 22f
@@ -379,30 +404,31 @@ object TrendsReportRenderer {
 
     // --- Empty state ---
 
-    private fun drawEmptyState(canvas: Canvas, range: ReportRange, top: Float) {
+    private fun drawEmptyState(
+        canvas: Canvas,
+        range: ReportRange,
+        top: Float,
+        context: Context,
+    ) {
         val cardH = 110f
         drawCard(canvas, MARGIN, top, PAGE_W - MARGIN, top + cardH, null)
         val left = MARGIN + 16f
         text(canvas, "Not enough data in this range yet", left, top + 30f, 16f, sansBold, TEXT_PRIMARY)
-        val body = "No workout, stress, recovery, sleep, HRV, resting-HR, strain, respiratory-rate or " +
-            "skin-temp readings fell inside ${range.longName.lowercase()}. Wear your strap a few more days, " +
-            "or pick a wider range, then export again."
+        val body = context.getString(
+            R.string.appwide_trends_report_no_data_format,
+            range.localizedLongName(context).lowercase(Locale.getDefault()),
+        )
         drawWrapped(canvas, body, left, top + 52f, PAGE_W - MARGIN - left - 16f, 16f, 12f, sans, TEXT_SECONDARY)
     }
 
     // --- Footer ---
 
-    private fun drawFooter(canvas: Canvas, generatedOn: String) {
+    private fun drawFooter(canvas: Canvas, generatedOn: String, context: Context) {
         val y = PAGE_H - MARGIN - 12f
         // Provenance legend (#457): make clear which numbers are measured vs. NOOP's own derived scores,
         // so a clinician reading the PDF isn't misled into treating Recovery/Strain as clinical measures.
         // Sits above the hairline; wraps to the page width (~4 lines at this size).
-        val legend = "How to read this: HRV, Resting HR, Sleep duration, Respiratory rate and Skin " +
-            "temperature are measured from the strap (skin temp is shown as the deviation from your own " +
-            "baseline). Workouts is the count of activities you logged or that were detected. Recovery, " +
-            "Strain and Stress are NOOP's own on-device scores, not clinical measures - Recovery is a daily " +
-            "readiness composite (HRV, resting HR, sleep and skin-temp trend), Strain is cardiovascular load " +
-            "derived from heart rate, and Stress is a 0-3 autonomic-load index from resting HR and HRV."
+        val legend = context.getString(R.string.appwide_trends_report_explainer)
         drawWrapped(canvas, legend, MARGIN, y - 52f, PAGE_W - 2 * MARGIN, 11f, 9f, sans, TEXT_TERTIARY)
         line(canvas, MARGIN, y - 14f, PAGE_W - MARGIN, y - 14f, HAIRLINE)
         text(
@@ -636,7 +662,11 @@ fun TrendsReportExportSection(vm: AppViewModel, modifier: Modifier = Modifier) {
                 label = { it.label },
                 onSelect = { range = it },
             )
-            Text(range.longName, style = NoopType.footnote, color = Palette.textTertiary)
+            Text(
+                range.localizedLongName(context),
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
 
             // Routed through the unified NoopButton (crisp filled accent, no gold) — the same button
             // system every other CTA uses, mirroring the iOS exportReportRow.

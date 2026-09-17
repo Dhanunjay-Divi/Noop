@@ -59,4 +59,14 @@
     <string name="daily_plan_why_title">Почему сегодняшний день выглядит так</string>
     <string name="daily_plan_why_trailing">Ваша базовая линия</string>
     <string name="daily_plan_why_unavailable">Пока ни для одного текущего сигнала восстановления недостаточно личной истории для сравнения.</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_hours_minutes">Вы спали на %1$d ч %2$d мин меньше целевого времени.</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_minutes">Вы спали на %1$d мин меньше целевого времени.</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_hours_minutes">Вы спали на %1$d ч %2$d мин меньше обычного.</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_minutes">Вы спали на %1$d мин меньше обычного.</string>
+    <string name="daily_plan_workout_adjustment_recovery_shift">Сегодняшние сигналы восстановления указывают на более лёгкую тренировку. Оцените самочувствие.</string>
+    <string name="daily_plan_workout_adjustment_sleep_and_recovery">Сон и восстановление указывают на более лёгкую тренировку. Оцените самочувствие.</string>
+    <string name="daily_plan_workout_adjustment_sleep_deficit">Сон был короче обычного или целевого. Сохраняйте гибкость тренировки и оцените самочувствие.</string>
+    <string name="daily_plan_workout_adjustment_sleep_label">Сон</string>
+    <string name="daily_plan_workout_adjustment_title">Запланированная тренировка</string>
+    <string name="daily_plan_workout_adjustment_workout_label">Начало</string>
 </resources>

@@ -447,7 +447,7 @@ struct FriendsView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            Text(value.map { String(Int($0.rounded())) } ?? "-")
+            Text(value.map { String(Int($0.rounded())) } ?? StrandFormat.missing)
                 .font(StrandFont.number(26))
                 .foregroundStyle(value == nil ? StrandPalette.textTertiary : color)
         }

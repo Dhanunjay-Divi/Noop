@@ -9,6 +9,18 @@ import WhoopStore
 /// revives opaque imported stress values or a fabricated neutral score.
 final class StressModelCarryTests: XCTestCase {
 
+    func testStressTimeInBandRendersMeasuredZeroAsZeroHours() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("Strand/Screens/StressView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(source.contains(#"String(localized: "\(max(0, hours))h")"#))
+        XCTAssertFalse(source.contains(#"hours <= 0 ? "-""#))
+    }
+
     private func day(_ d: String, rhr: Int?, hrv: Double?) -> DailyMetric {
         DailyMetric(day: d, totalSleepMin: nil, efficiency: nil, deepMin: nil, remMin: nil,
                     lightMin: nil, disturbances: nil, restingHr: rhr, avgHrv: hrv, recovery: nil,

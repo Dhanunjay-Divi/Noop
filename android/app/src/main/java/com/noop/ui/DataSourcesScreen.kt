@@ -66,6 +66,7 @@ import com.noop.data.SourceKind
 import com.noop.ingest.AppleHealthImporter
 import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.HealthConnectBackgroundPolicy
+import com.noop.ingest.HealthConnectReconciler
 import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.ActivityFileImporter
 import com.noop.ingest.LiftingImporter
@@ -298,7 +299,15 @@ fun DataSourcesScreen(vm: AppViewModel) {
             hcHasAnyReadAccess = allGranted.any { it in HealthConnectImporter.PERMISSIONS }
             hcMissingTemperaturePermissions = HealthConnectImporter.TEMPERATURE_PERMISSIONS - allGranted
             if (allGranted.any { it in HealthConnectImporter.PERMISSIONS }) {
-                runImport { HealthConnectImporter.import(context, vm.repo, ProfileStore.from(context).heightCm) }
+                runImport {
+                    HealthConnectReconciler.importNow(
+                        context = context,
+                        repository = vm.repo,
+                        currentHeightCm = {
+                            ProfileStore.from(context).bodyCompositionImportHeightCm
+                        },
+                    )
+                }
             } else {
                 Toast.makeText(context, "Health Connect access not granted.", Toast.LENGTH_LONG).show()
             }
@@ -340,7 +349,15 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 HealthConnectImporter.missingReadPermissions(granted)
             }
             if (missing.isEmpty()) {
-                runImport { HealthConnectImporter.import(context, vm.repo, ProfileStore.from(context).heightCm) }
+                runImport {
+                    HealthConnectReconciler.importNow(
+                        context = context,
+                        repository = vm.repo,
+                        currentHeightCm = {
+                            ProfileStore.from(context).bodyCompositionImportHeightCm
+                        },
+                    )
+                }
             } else {
                 hcPermissionLauncher.launch(missing)
             }
@@ -509,9 +526,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(uiString(R.string.l10n_data_sources_screen_auto_sync_periodically_5f3041e8), style = NoopType.subhead, color = Palette.textPrimary)
                         Text(
-                            uiString(R.string.l10n_data_sources_screen_re_pull_new_health_connect_data_3e9c3914) +
-                                "time you open NOOP, if it's been longer than the interval below. " +
-                                "Read-only; never overwrites strap data.",
+                            uiString(R.string.appwide_ui_audit_health_connect_auto_sync_detail),
                             style = NoopType.footnote,
                             color = Palette.textTertiary,
                         )

@@ -52,7 +52,7 @@ struct WatchGlanceView: View {
             HStack(spacing: 8) {
                 // The labels ride a plain String property into ScoreRing, so they must be wrapped HERE;
                 // a bare literal would bypass the string catalog entirely.
-                ScoreRing(label: String(localized: "Charge"), value: snap.charge,
+                ScoreRing(label: String(localized: "Recovery"), value: snap.charge,
                           calibrating: snap.chargeCalibrating || stale,
                           color: StrandPalette.chargeColor)
                 ScoreRing(label: String(localized: "Effort"), value: snap.effort,

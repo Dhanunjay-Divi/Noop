@@ -212,6 +212,8 @@ interface ManagedSyncDao {
                 ManagedChangeCursorEntity(
                     accountScopeHash = accountScopeHash,
                     sequence = sequence.coerceAtLeast(0),
+                    changeFeedCapabilityVersion =
+                        current?.changeFeedCapabilityVersion ?: 0,
                     updatedAtMs = updatedAtMs,
                 )
             )
@@ -272,6 +274,7 @@ interface ManagedSyncDao {
     suspend fun finishSnapshotRestore(
         accountScopeHash: String,
         changeSequence: Long,
+        changeFeedCapabilityVersion: Int,
         updatedAtMs: Long,
     ) {
         val current = changeCursor(accountScopeHash)
@@ -280,6 +283,8 @@ interface ManagedSyncDao {
                 ManagedChangeCursorEntity(
                     accountScopeHash = accountScopeHash,
                     sequence = changeSequence.coerceAtLeast(0),
+                    changeFeedCapabilityVersion =
+                        changeFeedCapabilityVersion.coerceAtLeast(0),
                     updatedAtMs = updatedAtMs,
                 )
             )

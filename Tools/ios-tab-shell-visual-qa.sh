@@ -115,6 +115,7 @@ scenario_names=(
     today-top
     today-alert
     today-bottom
+    today-accessibility
     trends-bottom
     workouts-bottom
     workouts-accessibility
@@ -133,7 +134,7 @@ scenario_names=(
 )
 
 manifest="$output_dir/manifest.tsv"
-launch_log_dir="$repo_root/noop_WIP/screenshots/ios/.tab-shell-launch-logs-$$"
+launch_log_dir="$HOME/Library/Caches/com.noop.visual-qa/tab-shell-launch-logs-$$"
 if (( validate_only == 0 )); then
     mkdir -p "$output_dir"
     mkdir -p "$launch_log_dir"
@@ -339,8 +340,9 @@ capture_scenario() {
     xcrun simctl ui "$current_udid" content_size "$content_size"
     xcrun simctl ui "$current_udid" increase_contrast "$contrast"
 
-    # CoreSimulator 26 silently drops app redirects under /private/tmp. Capture from the workspace,
-    # then move the flushed evidence beside the screenshot so arbitrary --output paths remain valid.
+    # CoreSimulator 26 silently drops app redirects under /private/tmp, including temporary Git
+    # worktrees. Capture from the user cache, then move the flushed evidence beside the screenshot
+    # so arbitrary --output paths remain valid.
     : > "$redirected_stdout"
     : > "$redirected_stderr"
     launch_result=""
@@ -429,6 +431,8 @@ run_device_matrix() {
         --demo-tab today --demo-daily-signal alert
     capture_scenario today-bottom light large disabled 5 \
         --demo-tab today --demo-scroll-bottom
+    capture_scenario today-accessibility light accessibility-large disabled 5 \
+        --demo-tab today --demo-daily-plan
     capture_scenario trends-bottom light large disabled 4 \
         --demo-tab trends --demo-scroll-bottom
     capture_scenario workouts-bottom light large disabled 4 \

@@ -52,6 +52,7 @@ class TrustedReleaseControlTests(unittest.TestCase):
             "Tools/homebrew-version-gate.py",
             "Tools/release.sh",
             "Tools/required-ci-gate.py",
+            "Tools/run-bounded-command.py",
             "Tools/trusted-release-controls.py",
             "Tools/update-homebrew-cask.sh",
         ):

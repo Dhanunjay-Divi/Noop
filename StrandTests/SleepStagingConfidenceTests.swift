@@ -805,6 +805,119 @@ final class SleepStagingConfidenceTests: XCTestCase {
             3 * 3_600)
     }
 
+    func testAnalysisHabitualMidsleepUsesResolvedHistoricalTimeZone() async throws {
+        let zone = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+        let store = try await WhoopStore.inMemory()
+        let importedID = "historical-zone-import"
+        let computedID = importedID + "-noop"
+        let baseMidpoint = 1_767_254_400 // 2026-01-01 08:00 UTC
+        let sessions = (0..<14).map { index in
+            let midpoint = baseMidpoint + index * 86_400
+            return CachedSleepSession(
+                startTs: midpoint - 4 * 3_600,
+                endTs: midpoint + 4 * 3_600,
+                efficiency: nil,
+                restingHr: nil,
+                avgHrv: nil,
+                stagesJSON: nil
+            )
+        }
+        try await store.upsertSleepSessions(sessions, deviceId: importedID)
+
+        let learned = try await IntelligenceEngine.computeHabitualMidsleep(
+            store: store,
+            importedId: importedID,
+            computedId: computedID,
+            windowStart: sessions.first!.startTs - 1,
+            windowEnd: sessions.last!.endTs + 1,
+            timeZone: zone
+        )
+
+        XCTAssertEqual(learned, 17 * 3_600)
+    }
+
+    func testHabitualMidsleepLearningDoesNotCrossTravelProvenanceBoundary() async throws {
+        let zone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let store = try await WhoopStore.inMemory()
+        let importedID = "travel-bounded-habitual-import"
+        let computedID = importedID + "-noop"
+        let boundary = 1_768_435_200 // 2026-01-15 00:00 UTC
+        let priorSessions = (0..<14).map { index in
+            let midpoint =
+                boundary - (14 - index) * 86_400 + 4 * 3_600
+            return CachedSleepSession(
+                startTs: midpoint - 4 * 3_600,
+                endTs: midpoint + 4 * 3_600,
+                efficiency: nil,
+                restingHr: nil,
+                avgHrv: nil,
+                stagesJSON: nil
+            )
+        }
+        let currentSessions = (0..<5).map { index in
+            let midpoint = boundary + index * 86_400 + 4 * 3_600
+            return CachedSleepSession(
+                startTs: midpoint - 4 * 3_600,
+                endTs: midpoint + 4 * 3_600,
+                efficiency: nil,
+                restingHr: nil,
+                avgHrv: nil,
+                stagesJSON: nil
+            )
+        }
+        try await store.upsertSleepSessions(
+            priorSessions + currentSessions,
+            deviceId: importedID
+        )
+
+        let unbounded = try await IntelligenceEngine.computeHabitualMidsleep(
+            store: store,
+            importedId: importedID,
+            computedId: computedID,
+            windowStart: priorSessions.first!.startTs,
+            windowEnd: currentSessions.last!.endTs,
+            timeZone: zone
+        )
+        let currentWindow = try XCTUnwrap(
+            IntelligenceEngine.habitualMidsleepReadWindow(
+                analysisWindowStart: priorSessions.first!.startTs,
+                analysisWindowEnd: currentSessions.last!.endTs,
+                lowerTravelBoundaryTs: boundary,
+                upperTravelBoundaryTs: nil
+            )
+        )
+        let currentOnly = try await IntelligenceEngine.computeHabitualMidsleep(
+            store: store,
+            importedId: importedID,
+            computedId: computedID,
+            windowStart: currentWindow.lowerBound,
+            windowEnd: currentWindow.upperBound,
+            timeZone: zone
+        )
+        let priorWindow = try XCTUnwrap(
+            IntelligenceEngine.habitualMidsleepReadWindow(
+                analysisWindowStart: priorSessions.first!.startTs,
+                analysisWindowEnd: currentSessions.last!.endTs,
+                lowerTravelBoundaryTs: priorSessions.first!.startTs,
+                upperTravelBoundaryTs: boundary
+            )
+        )
+        let priorOnly = try await IntelligenceEngine.computeHabitualMidsleep(
+            store: store,
+            importedId: importedID,
+            computedId: computedID,
+            windowStart: priorWindow.lowerBound,
+            windowEnd: priorWindow.upperBound,
+            timeZone: zone
+        )
+
+        XCTAssertNotNil(unbounded)
+        XCTAssertEqual(currentWindow.lowerBound, boundary)
+        XCTAssertNil(currentOnly)
+        XCTAssertEqual(priorWindow.upperBound, boundary - 1)
+        XCTAssertNotNil(priorOnly)
+    }
+
     @MainActor
     func testExploreGatesDetailedStagesPerComputedSourceBeforeMerging() async throws {
         let store = try await WhoopStore.inMemory()

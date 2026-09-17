@@ -10,7 +10,7 @@ struct ManagedSafetyView: View {
     @Binding var durationHours: Int
 
     @State private var noopID = ""
-    @State private var shareLocation = true
+    @State private var shareLocation = false
     @State private var confirmPage = false
     @State private var contactToRemove: ManagedSafetyContact?
 
@@ -21,8 +21,8 @@ struct ManagedSafetyView: View {
                 overline: "managed.safety.section.overline"
             )
             if service.phase == .enrolled {
-                setupCard
                 pageCard
+                setupCard
             } else {
                 unavailableCard
             }
@@ -56,7 +56,14 @@ struct ManagedSafetyView: View {
             }
             Button("safety.cancel", role: .cancel) {}
         } message: {
-            Text("managed.safety.confirm.body")
+            Text(
+                shareLocation
+                    ? localizedFormat(
+                        "managed.safety.confirm.location.body",
+                        Int64(durationHours == 12 ? 12 : 8)
+                    )
+                    : String(localized: "managed.safety.confirm.body")
+            )
         }
         .confirmationDialog(
             "managed.safety.remove.contact",
@@ -336,7 +343,7 @@ struct ManagedSafetyView: View {
         Text(verbatim: contactCountLabel)
         .font(StrandFont.caption)
         .foregroundStyle(
-            outboundContacts.count >= minimumContacts
+            deliveryCapableContacts >= minimumContacts
                 ? StrandPalette.statusPositive
                 : StrandPalette.textTertiary
         )
@@ -461,7 +468,7 @@ struct ManagedSafetyView: View {
                 }
                 .disabled(!canStartPage)
 
-                if outboundContacts.count < minimumContacts {
+                if deliveryCapableContacts < minimumContacts {
                     Text(verbatim: contactsRemainingLabel)
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -533,6 +540,12 @@ struct ManagedSafetyView: View {
                         .buttonStyle(
                             NoopButtonStyle(.secondary, fullWidth: true)
                         )
+                        if let detail = locationDetail(location) {
+                            Text(verbatim: detail)
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     if incident.role == "owner" {
                         if incident.shareLocation && locationReady {
@@ -542,7 +555,16 @@ struct ManagedSafetyView: View {
                                 kind: .secondary,
                                 fullWidth: true
                             ) {
-                                Task { await replaceLocation(for: incident) }
+                                Task {
+                                    guard let location =
+                                            locationProvider.location else {
+                                        return
+                                    }
+                                    await replaceLocation(
+                                        location,
+                                        for: incident
+                                    )
+                                }
                             }
                             .disabled(service.isBusy)
                         }
@@ -639,6 +661,10 @@ struct ManagedSafetyView: View {
         service.safetyContacts?.minimumRequired ?? 2
     }
 
+    private var deliveryCapableContacts: Int {
+        service.safetyContacts?.deliveryCapableCount ?? 0
+    }
+
     private var activeOwnerIncident: ManagedSafetyIncident? {
         service.safetyIncidents.first {
             $0.role == "owner"
@@ -647,15 +673,18 @@ struct ManagedSafetyView: View {
     }
 
     private var locationReady: Bool {
-        locationProvider.state == .ready
-            && locationProvider.location?.isUsable(
-                atUnix: Int(Date().timeIntervalSince1970)
-            ) == true
+        guard locationProvider.state == .ready,
+              let location = locationProvider.location else {
+            return false
+        }
+        return location.isUsable(
+            atUnix: Int(Date().timeIntervalSince1970)
+        ) && location.hasUsableHorizontalAccuracy
     }
 
     private var canStartPage: Bool {
         !service.isBusy
-            && outboundContacts.count >= minimumContacts
+            && deliveryCapableContacts >= minimumContacts
             && activeOwnerIncident == nil
             && (!shareLocation || locationReady)
     }
@@ -663,7 +692,7 @@ struct ManagedSafetyView: View {
     private var contactCountLabel: String {
         localizedFormat(
             "managed.safety.contact.count.format",
-            Int64(outboundContacts.count),
+            Int64(deliveryCapableContacts),
             Int64(minimumContacts)
         )
     }
@@ -671,7 +700,7 @@ struct ManagedSafetyView: View {
     private var contactsRemainingLabel: String {
         localizedFormat(
             "managed.safety.threshold.remaining.format",
-            Int64(max(0, minimumContacts - outboundContacts.count))
+            Int64(max(0, minimumContacts - deliveryCapableContacts))
         )
     }
 
@@ -777,27 +806,31 @@ struct ManagedSafetyView: View {
     }
 
     private func startPage() async {
+        let initialLocation = shareLocation
+            ? locationProvider.location
+            : nil
         guard let incident = await service.createSafetyIncident(
             durationHours: durationHours == 12 ? 12 : 8,
-            shareLocation: shareLocation
+            shareLocation: shareLocation,
+            initialLocation: initialLocation
         ) else {
             return
         }
-        if shareLocation {
-            await replaceLocation(for: incident)
+        if initialLocation != nil {
             locationProvider.requestBackgroundAuthorization()
         }
         await service.refreshSafety()
     }
 
     private func replaceLocation(
+        _ location: SafetyLocation,
         for incident: ManagedSafetyIncident
     ) async {
-        guard let location = locationProvider.location,
-              let horizontalAccuracy = location.horizontalAccuracyMeters,
+        guard let horizontalAccuracy = location.horizontalAccuracyMeters,
               location.isUsable(
                 atUnix: Int(Date().timeIntervalSince1970)
-              ) else {
+              ),
+              location.hasUsableHorizontalAccuracy else {
             return
         }
         await service.updateSafetyLocation(
@@ -812,6 +845,37 @@ struct ManagedSafetyView: View {
             )
         )
         await service.refreshSafety()
+    }
+
+    private func locationDetail(
+        _ location: ManagedSafetyLocation
+    ) -> String? {
+        guard location.horizontalAccuracyM.isFinite,
+              (0.0...SafetyLocation.maximumHorizontalAccuracyMeters)
+                .contains(location.horizontalAccuracyM),
+              let capturedAt = managedSafetyLocationDate(
+                location.capturedAt
+              ) else {
+            return nil
+        }
+        return localizedFormat(
+            "safety.location.accuracy_format",
+            capturedAt.formatted(
+                date: .abbreviated,
+                time: .shortened
+            ),
+            Int64(location.horizontalAccuracyM.rounded())
+        )
+    }
+
+    private func managedSafetyLocationDate(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [
+            .withInternetDateTime,
+            .withFractionalSeconds,
+        ]
+        return fractional.date(from: value)
+            ?? ISO8601DateFormatter().date(from: value)
     }
 
     private func mapURL(_ location: ManagedSafetyLocation) -> URL? {

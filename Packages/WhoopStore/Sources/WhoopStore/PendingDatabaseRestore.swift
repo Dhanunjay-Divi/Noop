@@ -280,9 +280,11 @@ public enum PendingDatabaseRestore {
             }
         }
 
-        if let pendingSettings {
-            BackupSettings.apply(pendingSettings, to: settingsDefaults)
-        }
+        BackupSettings.apply(
+            pendingSettings ?? [:],
+            to: settingsDefaults,
+            clearDerivedPlannerState: true
+        )
         settingsDefaults.set(Date().timeIntervalSince1970, forKey: "backup.lastRestoreAt")
         finishPendingRestore(manifest, manifestURL: manifestURL, directory: directory)
         let result = ApplyResult.applied(safetySnapshot: hadLiveDatabase ? safetySnapshot : liveURL)

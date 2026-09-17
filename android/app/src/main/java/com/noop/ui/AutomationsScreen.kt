@@ -56,17 +56,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.noop.analytics.NapCandidate
+import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.AdaptiveDayNotifier
+import com.noop.notif.HydrationReminderNotifier
 import com.noop.notif.HydrationReminderPrefs
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.notif.ScheduledReportNotifier
@@ -84,15 +85,13 @@ private enum class AutomationReportKind {
     WORKOUT,
 }
 
+private enum class DailyReviewPreference {
+    MORNING,
+    JOURNAL,
+}
+
 private fun automationReportsCanNotify(context: Context): Boolean {
-    val runtimePermissionGranted =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
-    return runtimePermissionGranted &&
-        NotificationManagerCompat.from(context).areNotificationsEnabled()
+    return ScheduledReportNotifier.canNotify(context)
 }
 
 @Composable
@@ -118,6 +117,16 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     var adaptiveNotificationsUnavailable by remember {
         mutableStateOf(
             adaptiveDayGuidance && !AdaptiveDayNotifier.canNotify(ctx),
+        )
+    }
+    var plannedWorkoutCalendarEnabled by remember {
+        mutableStateOf(AdaptiveDayConsentGate.plannedWorkoutCalendar(ctx))
+    }
+    var plannedWorkoutCalendarPermissionUnavailable by remember {
+        mutableStateOf(
+            plannedWorkoutCalendarEnabled &&
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALENDAR) !=
+                PackageManager.PERMISSION_GRANTED,
         )
     }
     var workoutNotificationsUnavailable by remember { mutableStateOf(false) }
@@ -154,13 +163,24 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         )
     }
 
-    // Daily guidance mirrors iOS's explicit opt-in pair: a persisted morning Sleep review and an
-    // evening Journal prompt that checks completion at delivery time.
-    var dailyReviewEnabled by remember { mutableStateOf(DailyReviewReminders.isEnabled(ctx)) }
+    // Morning review and evening Journal are independent, explicit opt-ins. The old pair preference
+    // migrates once to both enabled, after which each schedule follows its own user intent.
+    var morningReviewEnabled by remember {
+        mutableStateOf(DailyReviewReminders.isMorningEnabled(ctx))
+    }
+    var journalReviewEnabled by remember {
+        mutableStateOf(DailyReviewReminders.isJournalEnabled(ctx))
+    }
     var dailyReviewMorning by remember { mutableStateOf(DailyReviewReminders.morningMinutes(ctx)) }
     var dailyReviewEvening by remember { mutableStateOf(DailyReviewReminders.eveningMinutes(ctx)) }
     var dailyReviewNotificationsUnavailable by remember {
-        mutableStateOf(dailyReviewEnabled && !DailyReviewReminders.canNotify(ctx))
+        mutableStateOf(
+            (morningReviewEnabled || journalReviewEnabled) &&
+                !DailyReviewReminders.canNotify(ctx),
+        )
+    }
+    var pendingDailyReviewPermission by remember {
+        mutableStateOf<DailyReviewPreference?>(null)
     }
     val reportsInitiallyAvailable = automationReportsCanNotify(ctx)
     var morningRecapEnabled by remember {
@@ -198,12 +218,22 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     var hydrationTapAmountMl by remember { mutableStateOf(hydrationConfig.tapAmountMl) }
     var hydrationTapWindow by remember { mutableStateOf(hydrationConfig.tapWindowMinutes) }
     var hydrationBandFirst by remember { mutableStateOf(hydrationConfig.bandFirst) }
+    var hydrationNotificationsUnavailable by remember {
+        mutableStateOf(
+            hydrationConfig.enabled && !HydrationReminderNotifier.canNotify(ctx),
+        )
+    }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        hydrationRemindersEnabled = granted
-        HydrationReminderPrefs.setEnabled(ctx, granted)
+    ) {
+        // Keep the user's explicit reminder intent even when Android permission is denied. The
+        // scheduler suppresses phone work until authorization becomes available; band-only choices
+        // remain intact, and a later permission grant can restore delivery without asking the user
+        // to rediscover and re-enable this preference.
+        hydrationRemindersEnabled = true
+        HydrationReminderPrefs.setEnabled(ctx, true)
         HydrationReminderScheduler.reconcile(ctx)
+        hydrationNotificationsUnavailable = !HydrationReminderNotifier.canNotify(ctx)
     }
     val stressNotificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -216,8 +246,30 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     val dailyReviewPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        dailyReviewEnabled = granted && DailyReviewReminders.setEnabled(ctx, true)
-        dailyReviewNotificationsUnavailable = !dailyReviewEnabled
+        val preference = pendingDailyReviewPermission
+        pendingDailyReviewPermission = null
+        val enabled = granted && when (preference) {
+            DailyReviewPreference.MORNING ->
+                DailyReviewReminders.setMorningEnabled(ctx, true)
+            DailyReviewPreference.JOURNAL ->
+                DailyReviewReminders.setJournalEnabled(ctx, true)
+            null -> false
+        }
+        when (preference) {
+            DailyReviewPreference.MORNING -> {
+                morningReviewEnabled = enabled
+                if (enabled && morningRecapEnabled) {
+                    morningRecapEnabled = false
+                    NoopPrefs.setMorningReportEnabled(ctx, false)
+                    ScheduledReportNotifier.cancelMorning(ctx)
+                }
+            }
+            DailyReviewPreference.JOURNAL -> journalReviewEnabled = enabled
+            null -> Unit
+        }
+        dailyReviewNotificationsUnavailable =
+            (morningReviewEnabled || journalReviewEnabled) &&
+                !DailyReviewReminders.canNotify(ctx)
     }
     val workoutPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -231,7 +283,13 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             AutomationReportKind.MORNING -> {
                 morningRecapEnabled = allowed
                 NoopPrefs.setMorningReportEnabled(ctx, allowed)
-                if (!allowed) ScheduledReportNotifier.cancelMorning(ctx)
+                if (allowed && morningReviewEnabled) {
+                    morningReviewEnabled = false
+                    DailyReviewReminders.setMorningEnabled(ctx, false)
+                }
+                if (!allowed) {
+                    ScheduledReportNotifier.cancelMorning(ctx)
+                }
             }
             AutomationReportKind.WORKOUT -> {
                 if (!allowed) {
@@ -254,17 +312,68 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         val kind = pendingReportPermission
         pendingReportPermission = null
         if (kind != null) {
-            val allowed = granted && NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+            val allowed = granted && automationReportsCanNotify(ctx)
             applyReportPreference(kind, allowed)
             reportNotificationsUnavailable = !allowed
+        }
+    }
+    fun commitPlannedWorkoutCalendarConsent(enabled: Boolean): Boolean {
+        val committed = AdaptiveDayNotifier.setPlannedWorkoutCalendarConsent(ctx, enabled)
+        plannedWorkoutCalendarEnabled = if (committed) {
+            enabled
+        } else {
+            AdaptiveDayConsentGate.plannedWorkoutCalendar(ctx)
+        }
+        return committed
+    }
+    val plannedWorkoutCalendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        plannedWorkoutCalendarPermissionUnavailable = !granted
+        if (commitPlannedWorkoutCalendarConsent(granted)) {
+            if (granted) {
+                viewModel.onPlannedWorkoutCalendarChanged()
+            } else {
+                PlannedWorkoutCalendarStore.clear()
+                viewModel.onPlannedWorkoutCalendarChanged()
+            }
         }
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                morningReviewEnabled = DailyReviewReminders.isMorningEnabled(ctx)
+                journalReviewEnabled = DailyReviewReminders.isJournalEnabled(ctx)
+                morningRecapEnabled = NoopPrefs.morningReportEnabled(ctx)
+                postWorkoutSummaryEnabled = NoopPrefs.postWorkoutReportEnabled(ctx)
+                dailyReviewNotificationsUnavailable =
+                    (morningReviewEnabled || journalReviewEnabled) &&
+                        !DailyReviewReminders.canNotify(ctx)
                 reportNotificationsUnavailable =
                     !automationReportsCanNotify(ctx) &&
                         (morningRecapEnabled || postWorkoutSummaryEnabled)
+                hydrationRemindersEnabled = HydrationReminderPrefs.config(ctx).enabled
+                hydrationNotificationsUnavailable =
+                    hydrationRemindersEnabled && !HydrationReminderNotifier.canNotify(ctx)
+                stressPhoneNudge = BiofeedbackPrefs.phoneNudge(ctx)
+                stressNotificationsUnavailable =
+                    stressPhoneNudge && !StressBreathingNotifier.prepareAndCanNotify(ctx)
+                if (plannedWorkoutCalendarEnabled) {
+                    val calendarGranted = ContextCompat.checkSelfPermission(
+                        ctx,
+                        Manifest.permission.READ_CALENDAR,
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (calendarGranted) {
+                        plannedWorkoutCalendarPermissionUnavailable = false
+                        viewModel.refreshPlannedWorkoutCalendar()
+                    } else {
+                        plannedWorkoutCalendarPermissionUnavailable = true
+                        if (commitPlannedWorkoutCalendarConsent(false)) {
+                            PlannedWorkoutCalendarStore.clear()
+                            viewModel.onPlannedWorkoutCalendarChanged()
+                        }
+                    }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -280,13 +389,13 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 "vo2" -> viewModel.setContextualVo2ReviewEnabled(true)
                 "adaptive" -> {
                     val available = AdaptiveDayNotifier.prepareAndCanNotify(ctx)
-                    adaptiveNotificationsUnavailable = !available
-                    viewModel.setAdaptiveDayGuidanceEnabled(available)
+                    val committed = viewModel.setAdaptiveDayGuidanceEnabled(available)
+                    adaptiveNotificationsUnavailable = !available || !committed
                 }
             }
         } else if (pendingContextualPermission == "adaptive") {
-            adaptiveNotificationsUnavailable = true
-            viewModel.setAdaptiveDayGuidanceEnabled(false)
+            adaptiveNotificationsUnavailable =
+                !viewModel.setAdaptiveDayGuidanceEnabled(false)
         }
         pendingContextualPermission = null
     }
@@ -296,8 +405,8 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             if (target == "vitals") viewModel.setContextualVitalReviewEnabled(false)
             else if (target == "vo2") viewModel.setContextualVo2ReviewEnabled(false)
             else {
-                adaptiveNotificationsUnavailable = false
-                viewModel.setAdaptiveDayGuidanceEnabled(false)
+                adaptiveNotificationsUnavailable =
+                    !viewModel.setAdaptiveDayGuidanceEnabled(false)
             }
             return
         }
@@ -313,9 +422,29 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         else if (target == "vo2") viewModel.setContextualVo2ReviewEnabled(true)
         else {
             val available = AdaptiveDayNotifier.prepareAndCanNotify(ctx)
-            adaptiveNotificationsUnavailable = !available
-            viewModel.setAdaptiveDayGuidanceEnabled(available)
+            val committed = viewModel.setAdaptiveDayGuidanceEnabled(available)
+            adaptiveNotificationsUnavailable = !available || !committed
         }
+    }
+
+    fun setPlannedWorkoutCalendarEnabled(enabled: Boolean) {
+        if (!enabled) {
+            if (!commitPlannedWorkoutCalendarConsent(false)) return
+            plannedWorkoutCalendarPermissionUnavailable = false
+            PlannedWorkoutCalendarStore.clear()
+            viewModel.onPlannedWorkoutCalendarChanged()
+            return
+        }
+        if (
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALENDAR) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            plannedWorkoutCalendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+            return
+        }
+        if (!commitPlannedWorkoutCalendarConsent(true)) return
+        plannedWorkoutCalendarPermissionUnavailable = false
+        viewModel.onPlannedWorkoutCalendarChanged()
     }
 
     fun setWorkoutGuidanceEnabled(enabled: Boolean) {
@@ -338,6 +467,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     fun setHydrationReminderEnabled(enabled: Boolean) {
         if (!enabled) {
             hydrationRemindersEnabled = false
+            hydrationNotificationsUnavailable = false
             HydrationReminderPrefs.setEnabled(ctx, false)
             HydrationReminderScheduler.reconcile(ctx)
             return
@@ -346,19 +476,37 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            hydrationRemindersEnabled = true
+            hydrationNotificationsUnavailable = true
+            HydrationReminderPrefs.setEnabled(ctx, true)
+            HydrationReminderScheduler.reconcile(ctx)
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
         hydrationRemindersEnabled = true
         HydrationReminderPrefs.setEnabled(ctx, true)
         HydrationReminderScheduler.reconcile(ctx)
+        hydrationNotificationsUnavailable = !HydrationReminderNotifier.canNotify(ctx)
     }
 
-    fun setDailyReviewEnabled(enabled: Boolean) {
+    fun setDailyReviewPreference(
+        preference: DailyReviewPreference,
+        enabled: Boolean,
+    ) {
         if (!enabled) {
-            dailyReviewEnabled = false
-            dailyReviewNotificationsUnavailable = false
-            DailyReviewReminders.setEnabled(ctx, false)
+            when (preference) {
+                DailyReviewPreference.MORNING -> {
+                    morningReviewEnabled = false
+                    DailyReviewReminders.setMorningEnabled(ctx, false)
+                }
+                DailyReviewPreference.JOURNAL -> {
+                    journalReviewEnabled = false
+                    DailyReviewReminders.setJournalEnabled(ctx, false)
+                }
+            }
+            dailyReviewNotificationsUnavailable =
+                (morningReviewEnabled || journalReviewEnabled) &&
+                    !DailyReviewReminders.canNotify(ctx)
             return
         }
         if (
@@ -366,11 +514,33 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            pendingDailyReviewPermission = preference
             dailyReviewPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
-        dailyReviewEnabled = DailyReviewReminders.setEnabled(ctx, true)
-        dailyReviewNotificationsUnavailable = !dailyReviewEnabled
+        val committed = when (preference) {
+            DailyReviewPreference.MORNING ->
+                DailyReviewReminders.setMorningEnabled(ctx, true)
+            DailyReviewPreference.JOURNAL ->
+                DailyReviewReminders.setJournalEnabled(ctx, true)
+        }
+        when (preference) {
+            DailyReviewPreference.MORNING -> {
+                morningReviewEnabled = committed
+                if (committed && morningRecapEnabled) {
+                    morningRecapEnabled = false
+                    NoopPrefs.setMorningReportEnabled(ctx, false)
+                    ScheduledReportNotifier.cancelMorning(ctx)
+                }
+            }
+            DailyReviewPreference.JOURNAL -> journalReviewEnabled = committed
+        }
+        dailyReviewNotificationsUnavailable =
+            !committed ||
+                (
+                    (morningReviewEnabled || journalReviewEnabled) &&
+                        !DailyReviewReminders.canNotify(ctx)
+                    )
     }
 
     fun setReportPreference(kind: AutomationReportKind, enabled: Boolean) {
@@ -513,6 +683,30 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 checked = adaptiveDayGuidance,
                 onChange = { setContextualReview("adaptive", it) },
             )
+            if (adaptiveDayGuidance) {
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(
+                        R.string.appwide_adaptive_day_guidance_calendar_label,
+                    ),
+                    help = stringResource(
+                        R.string.appwide_adaptive_day_guidance_calendar_help,
+                    ),
+                    checked = plannedWorkoutCalendarEnabled,
+                    onChange = ::setPlannedWorkoutCalendarEnabled,
+                )
+                if (plannedWorkoutCalendarPermissionUnavailable) {
+                    RowDivider()
+                    Text(
+                        stringResource(
+                            R.string
+                                .appwide_adaptive_day_guidance_calendar_permission_unavailable,
+                        ),
+                        style = NoopType.footnote,
+                        color = Palette.statusWarning,
+                    )
+                }
+            }
             if (adaptiveNotificationsUnavailable) {
                 RowDivider()
                 Text(
@@ -637,17 +831,22 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             icon = Icons.Filled.NotificationsActive,
             title = stringResource(R.string.daily_review_section_title),
             blurb = stringResource(R.string.daily_review_section_body),
-            active = (dailyReviewEnabled && !dailyReviewNotificationsUnavailable) ||
+            active = (
+                (morningReviewEnabled || journalReviewEnabled) &&
+                    !dailyReviewNotificationsUnavailable
+                ) ||
                 morningRecapEnabled ||
                 postWorkoutSummaryEnabled,
         ) {
             ToggleRow(
-                label = stringResource(R.string.daily_review_toggle),
-                help = stringResource(R.string.daily_review_toggle_help),
-                checked = dailyReviewEnabled,
-                onChange = ::setDailyReviewEnabled,
+                label = stringResource(R.string.appwide_daily_review_morning_label),
+                help = stringResource(R.string.appwide_daily_review_morning_help),
+                checked = morningReviewEnabled,
+                onChange = {
+                    setDailyReviewPreference(DailyReviewPreference.MORNING, it)
+                },
             )
-            if (dailyReviewEnabled) {
+            if (morningReviewEnabled) {
                 RowDivider()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -668,6 +867,17 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                         },
                     )
                 }
+            }
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.appwide_daily_review_journal_label),
+                help = stringResource(R.string.appwide_daily_review_journal_help),
+                checked = journalReviewEnabled,
+                onChange = {
+                    setDailyReviewPreference(DailyReviewPreference.JOURNAL, it)
+                },
+            )
+            if (journalReviewEnabled) {
                 RowDivider()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -688,9 +898,11 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                         },
                     )
                 }
+            }
+            if (morningReviewEnabled || journalReviewEnabled) {
                 RowDivider()
                 Text(
-                    stringResource(R.string.daily_review_privacy_note),
+                    stringResource(R.string.appwide_daily_review_quiet_hours_note),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
@@ -700,7 +912,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 label = uiString(
                     R.string.l10n_notifications_settings_screen_morning_recap_45ec05c5,
                 ),
-                help = stringResource(R.string.automation_morning_recap_help),
+                help = stringResource(R.string.appwide_daily_review_morning_recap_help),
                 checked = morningRecapEnabled,
                 onChange = {
                     setReportPreference(AutomationReportKind.MORNING, it)
@@ -772,6 +984,38 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 onChange = ::setHydrationReminderEnabled,
             )
             if (hydrationRemindersEnabled) {
+                if (hydrationNotificationsUnavailable) {
+                    RowDivider()
+                    Text(
+                        stringResource(R.string.appwide_hydration_notifications_unavailable),
+                        style = NoopType.footnote,
+                        color = Palette.statusWarning,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            runCatching {
+                                ctx.startActivity(
+                                    android.content.Intent(
+                                        android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+                                    ).putExtra(
+                                        android.provider.Settings.EXTRA_APP_PACKAGE,
+                                        ctx.packageName,
+                                    ),
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Palette.accent,
+                        ),
+                    ) {
+                        Text(
+                            stringResource(
+                                R.string.daily_review_open_notification_settings,
+                            ),
+                            style = NoopType.body,
+                        )
+                    }
+                }
                 RowDivider()
                 ToggleRow(
                     label = stringResource(R.string.hydration_adaptive_timing_label),

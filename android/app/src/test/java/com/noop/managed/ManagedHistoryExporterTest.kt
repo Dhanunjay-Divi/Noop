@@ -65,6 +65,8 @@ class ManagedHistoryExporterTest {
         assertEquals(ExportTransport.Completion(4, 23), transport.completion)
         assertEquals(listOf(null, null, first.chunkId), transport.chunkStarts)
         assertEquals(listOf(null, firstDocument.documentId), transport.documentStarts)
+        assertEquals(listOf(false, false), transport.documentIncludeDeletedValues)
+        assertEquals(listOf(false), transport.restoreIncludeDeletedValues)
         assertEquals(
             listOf(false, false, true, false, false, false, false, false, false),
             refreshes,
@@ -207,6 +209,8 @@ private class ExportTransport(
 
     val chunkStarts = mutableListOf<UUID?>()
     val documentStarts = mutableListOf<UUID?>()
+    val documentIncludeDeletedValues = mutableListOf<Boolean>()
+    val restoreIncludeDeletedValues = mutableListOf<Boolean>()
     var completion: Completion? = null
     private val restoreId = UUID.fromString("50000000-0000-5000-8000-000000000001")
     private val snapshot = "2026-09-04T12:00:00Z"
@@ -244,7 +248,11 @@ private class ExportTransport(
         authorization: ManagedAuthorization,
         requestId: UUID,
         dataClasses: List<String>,
-    ): ManagedRestoreJob = restore("running", 0, 0)
+        includeDeletedDocuments: Boolean,
+    ): ManagedRestoreJob {
+        restoreIncludeDeletedValues += includeDeletedDocuments
+        return restore("running", 0, 0)
+    }
 
     override suspend fun availableChunks(
         authorization: ManagedAuthorization,
@@ -313,7 +321,9 @@ private class ExportTransport(
         snapshotAt: String,
         after: ManagedDocumentCursor?,
         limit: Int,
+        includeDeleted: Boolean,
     ): ManagedDocumentPage {
+        documentIncludeDeletedValues += includeDeleted
         documentStarts += after?.afterDocumentId
         val start = after?.let { cursor ->
             documents.indexOfFirst { it.documentId == cursor.afterDocumentId }

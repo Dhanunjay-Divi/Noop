@@ -52,7 +52,7 @@
     <string name="friends_waiting_shared_day">等待共享每日数据</string>
     <string name="friends_scores_waiting">%1$s 上传每日摘要后，分数将显示在这里。</string>
     <string name="friends_open_sharing_named">打开与 %1$s 的共享设置</string>
-    <string name="friends_score_charge">精力</string>
+    <string name="friends_score_charge">恢复</string>
     <string name="friends_score_effort">负荷</string>
     <string name="friends_score_rest">休息</string>
     <string name="friends_detail_sleep">睡眠 %1$s</string>
@@ -82,7 +82,7 @@
     <string name="friends_server_address">服务器地址</string>
     <string name="friends_invite_code">邀请码</string>
     <string name="friends_join_default_title">默认共享</string>
-    <string name="friends_join_default_body">精力、负荷和休息</string>
+    <string name="friends_join_default_body">恢复、消耗和睡眠评分</string>
     <string name="friends_join_never_title">绝不发送到好友</string>
     <string name="friends_join_never_body">原始心率和 R-R、睡眠阶段、日志、锻炼、路线、导出内容及设备标识符</string>
     <string name="friends_join_trust_title">信任运营方</string>

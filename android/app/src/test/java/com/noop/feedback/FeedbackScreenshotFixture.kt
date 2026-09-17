@@ -1,0 +1,12 @@
+package com.noop.feedback
+
+import java.util.Base64
+
+internal object FeedbackScreenshotFixture {
+    val rawMetadataBearing: ByteArray = Base64.getDecoder().decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAAXNSR0IArs4c6QAAACxlWElmTk9PUCBzeW50aGV0aWMgbWV0YWRhdGEgdGhhdCBtdXN0IGJlIHJlbW92ZWQJg4JOAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAHGlET1QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQhYJ0AAAABFJREFUeJxjUEhY8B+EGWAMAEa0CH0mQ0nfAAAAAElFTkSuQmCC",
+    )
+    val sanitized: ByteArray = Base64.getDecoder().decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAAXNSR0IArs4c6QAAAAlwSFlzAAALEwAACxMBAJqcGAAAABFJREFUeJxjUEhY8B+EGWAMAEa0CH0mQ0nfAAAAAElFTkSuQmCC",
+    )
+}

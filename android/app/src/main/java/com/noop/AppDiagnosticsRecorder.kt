@@ -21,6 +21,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 
@@ -51,6 +52,7 @@ object AppDiagnosticsRecorder {
     private const val TRIM_SLACK_BYTES = 64 * 1024
     private const val WATCHDOG_INTERVAL_MS = 500L
     private const val SMOOTH_FRAME_SUMMARY_INTERVAL_MS = 60_000L
+    private const val SNAPSHOT_TIMEOUT_SECONDS = 5L
     private const val FRAME_WINDOW_SIZE = 120
     private const val HITCH_MS = 50L
     private const val SEVERE_HITCH_MS = 150L
@@ -110,6 +112,9 @@ object AppDiagnosticsRecorder {
     private val ioExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "noop-app-diagnostics-io").apply { isDaemon = true }
     }
+    private val historicalExitExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "noop-app-diagnostics-exits").apply { isDaemon = true }
+    }
     private val watchdogExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "noop-app-diagnostics-watchdog").apply { isDaemon = true }
     }
@@ -118,6 +123,8 @@ object AppDiagnosticsRecorder {
 
     @Volatile
     private var started = false
+    @Volatile
+    private var historicalExitCaptureComplete = false
     private lateinit var appContext: Context
     private var watchdogFuture: ScheduledFuture<*>? = null
     private var pendingPingId = 0L
@@ -166,6 +173,7 @@ object AppDiagnosticsRecorder {
                 lastAnrFile().delete()
                 currentSessionFile().createNewFile()
             }
+            historicalExitCaptureComplete = false
             started = true
         }
         record(
@@ -178,11 +186,25 @@ object AppDiagnosticsRecorder {
             ),
             includeResourceSnapshot = true,
         )
-        runCatching {
-            ioExecutor.execute {
-                runCatching { captureHistoricalExits() }
+        val scheduled = try {
+            historicalExitExecutor.execute {
+                val outcome = try {
+                    captureHistoricalExits()
+                    "completed"
+                } catch (_: Exception) {
+                    "failed"
+                }
+                historicalExitCaptureComplete = true
+                record(
+                    "diagnostics.historical_exit_capture",
+                    fields = mapOf("outcome" to outcome),
+                )
             }
+            true
+        } catch (_: RuntimeException) {
+            false
         }
+        if (!scheduled) historicalExitCaptureComplete = true
     }
 
     fun record(
@@ -336,24 +358,64 @@ object AppDiagnosticsRecorder {
     }
 
     /**
-     * Read a consistent snapshot after all previously queued breadcrumbs. Call this from a worker
-     * dispatcher; it intentionally blocks only that worker while the serial file queue drains.
+     * Read a consistent live-session snapshot after all previously queued breadcrumbs. Completed OS
+     * exit evidence is included, but an in-progress historical trace never blocks or leaks a partial file
+     * into the report. Call this from a worker dispatcher; it intentionally blocks only that worker while
+     * the serial live-session queue drains.
      */
     fun diagnosticEntries(): List<Pair<String, ByteArray>> {
         if (!started) return emptyList()
-        val task: Future<List<Pair<String, ByteArray>>> = runCatching {
+        val task: Future<List<Pair<String, ByteArray>>> = try {
             ioExecutor.submit<List<Pair<String, ByteArray>>> {
-                listOf(
-                    CURRENT_SESSION_ENTRY to currentSessionFile(),
-                    PREVIOUS_SESSION_ENTRY to previousSessionFile(),
-                    EXIT_HISTORY_ENTRY to exitHistoryFile(),
-                    LAST_ANR_ENTRY to lastAnrFile(),
-                ).mapNotNull { (name, file) ->
+                val files = buildList {
+                    add(
+                        CURRENT_SESSION_ENTRY to currentSessionFile(),
+                    )
+                    add(
+                        PREVIOUS_SESSION_ENTRY to previousSessionFile(),
+                    )
+                    if (historicalExitCaptureComplete) {
+                        add(EXIT_HISTORY_ENTRY to exitHistoryFile())
+                        add(LAST_ANR_ENTRY to lastAnrFile())
+                    }
+                }
+                files.mapNotNull { (name, file) ->
                     file.takeIf { it.isFile && it.length() > 0L }?.readBytes()?.let { name to it }
                 }
             }
-        }.getOrNull() ?: return emptyList()
-        return runCatching { task.get(2, TimeUnit.SECONDS) }.getOrDefault(emptyList())
+        } catch (_: RuntimeException) {
+            return listOf(diagnosticSnapshotFallback("queue_unavailable"))
+        }
+        return try {
+            task.get(SNAPSHOT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } catch (_: TimeoutException) {
+            task.cancel(false)
+            listOf(diagnosticSnapshotFallback("queue_timeout"))
+        } catch (_: InterruptedException) {
+            task.cancel(false)
+            Thread.currentThread().interrupt()
+            listOf(diagnosticSnapshotFallback("interrupted"))
+        } catch (_: Exception) {
+            task.cancel(false)
+            listOf(diagnosticSnapshotFallback("snapshot_failed"))
+        }
+    }
+
+    internal fun diagnosticSnapshotFallback(reason: String): Pair<String, ByteArray> {
+        val safeReason = when (reason) {
+            "queue_unavailable",
+            "queue_timeout",
+            "interrupted",
+            "snapshot_failed",
+            -> reason
+            else -> "unknown"
+        }
+        val line = JSONObject()
+            .put("schema", 1)
+            .put("event", "diagnostics.snapshot_unavailable")
+            .put("fields", JSONObject(mapOf("reason" to safeReason)))
+            .toString() + "\n"
+        return CURRENT_SESSION_ENTRY to line.toByteArray(Charsets.UTF_8)
     }
 
     private fun appendEvent(

@@ -373,62 +373,63 @@ async def _run() -> ManagedLifecycleResult:
         run_migrations=False,
         database_engine=settings.database_engine,
     )
-    repository = PostgresManagedRepository(
-        primary,
-        home_region=settings.managed_home_region,
-        residency_policy_version=settings.managed_residency_policy_version,
-        default_plan_code=settings.managed_default_plan_code,
-        default_plan_revision=settings.managed_default_plan_revision,
-        consent_policy_kind=settings.managed_consent_policy_kind,
-        entitlement_mode=settings.managed_entitlement_mode,
-        replay_secret=settings.managed_replay_secret or "",
-    )
-    safety_repository = PostgresManagedSafetyRepository(primary)
-    object_store = GCSV4ObjectStore(
-        bucket=settings.managed_raw_bucket or "",
-        signer=IAMBlobSigner(settings.managed_signer_email or ""),
-    )
-    chunk_processor = ManagedChunkProcessor(
-        repository,
-        object_store,
-        processor_revision="managed-json-v1",
-    )
-    identity_ticket_codec = ManagedIdentityDeletionTicketCodec(
-        settings.managed_replay_secret or ""
-    )
-    identity_deleter = IdentityToolkitAccountDeleter(
-        project_id=settings.managed_project_id or "",
-        ticket_codec=identity_ticket_codec,
-    )
-    safety_push_service = None
-    if settings.managed_push_retry_enabled:
-        safety_push_service = ManagedSafetyPushService(
-            repository=safety_repository,
-            token_codec=ManagedPushTokenCodec(
-                settings.managed_push_token_secret or "",
-                previous_secrets=(
-                    (settings.managed_push_token_previous_secret,)
-                    if settings.managed_push_token_previous_secret
-                    else ()
-                ),
-                write_version=settings.managed_push_token_write_version,
-            ),
-            provider=FirebaseCloudMessagingProvider(
-                project_id=settings.managed_project_id or "",
-                timeout_seconds=settings.managed_push_timeout_seconds,
-            ),
-            max_concurrency=settings.managed_push_max_concurrency,
-        )
     await primary.startup()
     try:
-        return await ManagedLifecycleRunner(
-            repository,
-            object_store,
-            identity_deleter,
-            chunk_processor,
-            safety_repository,
-            safety_push_service,
-        ).run_once()
+        async with primary.maintenance_guard():
+            repository = PostgresManagedRepository(
+                primary,
+                home_region=settings.managed_home_region,
+                residency_policy_version=settings.managed_residency_policy_version,
+                default_plan_code=settings.managed_default_plan_code,
+                default_plan_revision=settings.managed_default_plan_revision,
+                consent_policy_kind=settings.managed_consent_policy_kind,
+                entitlement_mode=settings.managed_entitlement_mode,
+                replay_secret=settings.managed_replay_secret or "",
+            )
+            safety_repository = PostgresManagedSafetyRepository(primary)
+            object_store = GCSV4ObjectStore(
+                bucket=settings.managed_raw_bucket or "",
+                signer=IAMBlobSigner(settings.managed_signer_email or ""),
+            )
+            chunk_processor = ManagedChunkProcessor(
+                repository,
+                object_store,
+                processor_revision="managed-json-v1",
+            )
+            identity_ticket_codec = ManagedIdentityDeletionTicketCodec(
+                settings.managed_replay_secret or ""
+            )
+            identity_deleter = IdentityToolkitAccountDeleter(
+                project_id=settings.managed_project_id or "",
+                ticket_codec=identity_ticket_codec,
+            )
+            safety_push_service = None
+            if settings.managed_push_retry_enabled:
+                safety_push_service = ManagedSafetyPushService(
+                    repository=safety_repository,
+                    token_codec=ManagedPushTokenCodec(
+                        settings.managed_push_token_secret or "",
+                        previous_secrets=(
+                            (settings.managed_push_token_previous_secret,)
+                            if settings.managed_push_token_previous_secret
+                            else ()
+                        ),
+                        write_version=settings.managed_push_token_write_version,
+                    ),
+                    provider=FirebaseCloudMessagingProvider(
+                        project_id=settings.managed_project_id or "",
+                        timeout_seconds=settings.managed_push_timeout_seconds,
+                    ),
+                    max_concurrency=settings.managed_push_max_concurrency,
+                )
+            return await ManagedLifecycleRunner(
+                repository,
+                object_store,
+                identity_deleter,
+                chunk_processor,
+                safety_repository,
+                safety_push_service,
+            ).run_once()
     finally:
         await primary.shutdown()
 

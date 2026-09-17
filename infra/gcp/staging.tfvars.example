@@ -8,6 +8,12 @@ environment = "staging"
 # Synthetic raw chunks only. Production retention is a separate reviewed policy.
 raw_retention_days = 30
 
+# Explicit user-submitted diagnostics only. Never upload participant health data.
+feedback_retention_days = 28
+enable_feedback_lifecycle = false
+enable_feedback_ingestion = false
+feedback_external_abuse_gate_approved = false
+
 # Keep these false/null through the foundation apply. Enable the database only
 # after the standard-PostgreSQL integration suite passes.
 enable_managed_database = false

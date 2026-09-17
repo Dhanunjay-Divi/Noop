@@ -166,9 +166,19 @@ final class ManagedStorageClientTests: XCTestCase {
     func testChangeFeedAndDocumentDecodeProductionSnakeCaseResponses() async throws {
         let (client, authorization) = try makeClient()
         let documentID = UUID(uuidString: "a2810672-1c29-5e68-9ddd-45e8c3164500")!
+        let clientKeyID = UUID(
+            uuidString: "11111111-2222-4333-8444-555555555555"
+        )!
+        let ciphertext = Data("noop-encrypted-journal-payload".utf8)
+        let digest = ManagedDigest.sha256(ciphertext)
         ManagedURLProtocolStub.handler = { request in
             switch (request.httpMethod, request.url?.path) {
             case ("GET", "/v1/managed/changes"):
+                XCTAssertTrue(
+                    request.url?.query?.contains(
+                        "document_kind=day_ownership"
+                    ) == true
+                )
                 return (
                     HTTPURLResponse(
                         url: request.url!,
@@ -185,14 +195,14 @@ final class ManagedStorageClientTests: XCTestCase {
                         "resource_id": "\(documentID.uuidString.lowercased())",
                         "resource_revision": 1,
                         "operation": "upsert",
-                        "content_sha256": "\(String(repeating: "a", count: 64))",
+                        "content_sha256": "\(digest)",
                         "data_class": null,
                         "event_start": null,
                         "event_end": null,
                         "metadata": {},
                         "occurred_at": "2026-09-04T12:00:00Z",
                         "document": {
-                          "document_kind": "preferences",
+                          "document_kind": "day_ownership",
                           "document_id": "\(documentID.uuidString.lowercased())",
                           "revision": 1,
                           "content_mode": "server_readable",
@@ -208,7 +218,7 @@ final class ManagedStorageClientTests: XCTestCase {
                     }
                     """.utf8)
                 )
-            case ("GET", "/v1/managed/documents/preferences/\(documentID.uuidString.lowercased())"):
+            case ("GET", "/v1/managed/documents/journal/\(documentID.uuidString.lowercased())"):
                 return (
                     HTTPURLResponse(
                         url: request.url!,
@@ -219,15 +229,15 @@ final class ManagedStorageClientTests: XCTestCase {
                     Data("""
                     {
                       "document": {
-                        "document_kind": "preferences",
+                        "document_kind": "journal",
                         "document_id": "\(documentID.uuidString.lowercased())",
                         "revision": 1,
                         "origin_installation_id": "android-installation",
-                        "content_mode": "server_readable",
-                        "client_key_id": null,
-                        "content_sha256": "\(String(repeating: "a", count: 64))",
-                        "payload_json": {"theme": "dark"},
-                        "payload_ciphertext_base64": null,
+                        "content_mode": "client_encrypted",
+                        "client_key_id": "\(clientKeyID.uuidString.lowercased())",
+                        "content_sha256": "\(digest)",
+                        "payload_json": null,
+                        "payload_ciphertext_base64": "\(ciphertext.base64EncodedString())",
                         "updated_at": "2026-09-04T12:00:00Z",
                         "deleted_at": null,
                         "duplicate": false
@@ -247,20 +257,401 @@ final class ManagedStorageClientTests: XCTestCase {
         )
         let change = try XCTUnwrap(feed.changes.first)
         XCTAssertEqual(change.resourceID, documentID)
-        XCTAssertEqual(change.contentSHA256, String(repeating: "a", count: 64))
+        XCTAssertEqual(change.contentSHA256, digest)
         XCTAssertEqual(change.document?.documentID, documentID)
         XCTAssertNil(change.document?.clientKeyID)
 
         let document = try await client.document(
-            kind: .preferences,
+            kind: .journal,
             id: documentID,
             revision: 1,
             authorization: authorization
         )
         XCTAssertEqual(document.documentID, documentID)
         XCTAssertEqual(document.originInstallationID, "android-installation")
-        XCTAssertEqual(document.payloadJSON?["theme"], .string("dark"))
-        XCTAssertNil(document.clientKeyID)
+        XCTAssertNil(document.payloadJSON)
+        XCTAssertEqual(document.clientKeyID, clientKeyID)
+        XCTAssertEqual(
+            document.payloadCiphertextBase64,
+            ciphertext.base64EncodedString()
+        )
+    }
+
+    func testChangeFeedRejectsSensitiveServerReadableMetadata() async throws {
+        let (client, authorization) = try makeClient()
+        let documentID = UUID(
+            uuidString: "44444444-4444-5444-8444-444444444444"
+        )!
+        ManagedURLProtocolStub.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                  "changes": [{
+                    "sequence": 1,
+                    "resource_kind": "document",
+                    "resource_id": "\(documentID.uuidString.lowercased())",
+                    "operation": "upsert",
+                    "content_sha256": "\(String(repeating: "a", count: 64))",
+                    "data_class": "user_documents",
+                    "event_start": null,
+                    "event_end": null,
+                    "document": {
+                      "document_kind": "journal",
+                      "document_id": "\(documentID.uuidString.lowercased())",
+                      "revision": 1,
+                      "content_mode": "server_readable",
+                      "client_key_id": null,
+                      "updated_at": "2026-09-11T15:00:00Z",
+                      "deleted_at": null
+                    }
+                  }],
+                  "minimum_sequence": 1,
+                  "high_watermark": 1,
+                  "next_sequence": 1,
+                  "has_more": false
+                }
+                """.utf8)
+            )
+        }
+
+        do {
+            _ = try await client.changes(
+                after: 0,
+                authorization: authorization
+            )
+            XCTFail("Expected plaintext journal metadata to fail closed")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+    }
+
+    func testChangeFeedRejectsMissingOrMisroutedDocumentMetadata() async throws {
+        let (client, authorization) = try makeClient()
+        let documentID = UUID(
+            uuidString: "55555555-5555-5555-8555-555555555555"
+        )!
+        let clientKeyID = UUID(
+            uuidString: "66666666-6666-5666-8666-666666666666"
+        )!
+        let digest = ManagedDigest.sha256(
+            Data("noop-encrypted-journal-payload".utf8)
+        )
+        let rows = [
+            """
+            {
+              "sequence": 1,
+              "resource_kind": "document",
+              "resource_id": "\(documentID.uuidString.lowercased())",
+              "operation": "upsert",
+              "content_sha256": "\(digest)",
+              "data_class": "user_documents",
+              "event_start": null,
+              "event_end": null
+            }
+            """,
+            """
+            {
+              "sequence": 1,
+              "resource_kind": "chunk",
+              "resource_id": "\(documentID.uuidString.lowercased())",
+              "operation": "upsert",
+              "content_sha256": "\(digest)",
+              "data_class": "user_documents",
+              "event_start": null,
+              "event_end": null,
+              "document": {
+                "document_kind": "journal",
+                "document_id": "\(documentID.uuidString.lowercased())",
+                "revision": 1,
+                "content_mode": "client_encrypted",
+                "client_key_id": "\(clientKeyID.uuidString.lowercased())",
+                "updated_at": "2026-09-11T15:00:00Z",
+                "deleted_at": null
+              }
+            }
+            """,
+        ]
+
+        for row in rows {
+            ManagedURLProtocolStub.handler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    Data("""
+                    {
+                      "changes": [\(row)],
+                      "minimum_sequence": 1,
+                      "high_watermark": 1,
+                      "next_sequence": 1,
+                      "has_more": false
+                    }
+                    """.utf8)
+                )
+            }
+
+            do {
+                _ = try await client.changes(
+                    after: 0,
+                    authorization: authorization
+                )
+                XCTFail("Expected inconsistent document metadata to fail closed")
+            } catch {
+                XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+            }
+        }
+    }
+
+    func testSnapshotDocumentListRequestsOnlySupportedKindsAndRejectsSensitivePlaintext() async throws {
+        let (client, authorization) = try makeClient()
+        let journalID = UUID(
+            uuidString: "11111111-1111-5111-8111-111111111111"
+        )!
+        let ownershipID = UUID(
+            uuidString: "22222222-2222-5222-8222-222222222222"
+        )!
+        let ownershipPayload: [String: Any] = [
+            "schema_version": 1,
+            "table": "dayOwnership",
+            "key": ["day": "2026-09-11"],
+            "record": [
+                "day": "2026-09-11",
+                "deviceId": "remote-band",
+                "locked": 1,
+            ],
+        ]
+        let ownership: [String: Any] = [
+            "document_kind": "day_ownership",
+            "document_id": ownershipID.uuidString.lowercased(),
+            "revision": 1,
+            "origin_installation_id": "android-installation",
+            "content_mode": "server_readable",
+            "client_key_id": NSNull(),
+            "content_sha256": try canonicalDigest(ownershipPayload),
+            "payload_json": ownershipPayload,
+            "payload_ciphertext_base64": NSNull(),
+            "updated_at": "2026-09-11T15:01:00Z",
+            "deleted_at": NSNull(),
+            "duplicate": false,
+        ]
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertTrue(
+                request.url?.query?.contains(
+                    "document_kind=day_ownership"
+                ) == true
+            )
+            XCTAssertTrue(
+                request.url?.query?.contains("include_deleted=false") == true
+            )
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                try JSONSerialization.data(
+                    withJSONObject: [
+                        "documents": [ownership],
+                        "next_cursor": NSNull(),
+                    ]
+                )
+            )
+        }
+
+        let page = try await client.documents(
+            snapshotAt: "2026-09-11T16:00:00Z",
+            limit: 25,
+            includeDeleted: false,
+            authorization: authorization
+        )
+
+        XCTAssertEqual(page.documents.map(\.contentMode), ["server_readable"])
+        XCTAssertNil(page.nextCursor)
+
+        let plaintextPayload: [String: Any] = ["secret": "not-readable"]
+        let plaintextDigest = try canonicalDigest(plaintextPayload)
+        ManagedURLProtocolStub.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                try JSONSerialization.data(
+                    withJSONObject: [
+                        "documents": [[
+                            "document_kind": "journal",
+                            "document_id": journalID.uuidString.lowercased(),
+                            "revision": 1,
+                            "origin_installation_id": "ios-installation",
+                            "content_mode": "server_readable",
+                            "client_key_id": NSNull(),
+                            "content_sha256": plaintextDigest,
+                            "payload_json": plaintextPayload,
+                            "payload_ciphertext_base64": NSNull(),
+                            "updated_at": "2026-09-11T15:00:00Z",
+                            "deleted_at": NSNull(),
+                            "duplicate": false,
+                        ]],
+                        "next_cursor": NSNull(),
+                    ]
+                )
+            )
+        }
+
+        do {
+            _ = try await client.documents(
+                snapshotAt: "2026-09-11T16:00:00Z",
+                limit: 25,
+                includeDeleted: false,
+                authorization: authorization
+            )
+            XCTFail("Expected plaintext journal snapshot to fail closed")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+    }
+
+    func testSnapshotDocumentListRejectsMalformedEncryptedMetadata() async throws {
+        let (client, authorization) = try makeClient()
+        let documentID = UUID(
+            uuidString: "77777777-7777-5777-8777-777777777777"
+        )!
+        let clientKeyID = UUID(
+            uuidString: "88888888-8888-5888-8888-888888888888"
+        )!
+        let ciphertext = Data("noop-encrypted-journal-payload".utf8)
+        let encoded = ciphertext.base64EncodedString()
+        let digest = ManagedDigest.sha256(ciphertext)
+        let invalidDocuments: [[String: Any]] = [
+            [
+                "document_kind": "journal",
+                "document_id": documentID.uuidString.lowercased(),
+                "revision": 1,
+                "origin_installation_id": "ios-installation",
+                "content_mode": "client_encrypted",
+                "client_key_id": NSNull(),
+                "content_sha256": digest,
+                "payload_json": NSNull(),
+                "payload_ciphertext_base64": encoded,
+                "updated_at": "2026-09-11T15:00:00Z",
+                "deleted_at": NSNull(),
+                "duplicate": false,
+            ],
+            [
+                "document_kind": "day_ownership",
+                "document_id": documentID.uuidString.lowercased(),
+                "revision": 1,
+                "origin_installation_id": "ios-installation",
+                "content_mode": "client_encrypted",
+                "client_key_id": clientKeyID.uuidString.lowercased(),
+                "content_sha256": digest,
+                "payload_json": NSNull(),
+                "payload_ciphertext_base64": encoded,
+                "updated_at": "2026-09-11T15:00:00Z",
+                "deleted_at": NSNull(),
+                "duplicate": false,
+            ],
+        ]
+
+        for document in invalidDocuments {
+            ManagedURLProtocolStub.handler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    try JSONSerialization.data(
+                        withJSONObject: [
+                            "documents": [document],
+                            "next_cursor": NSNull(),
+                        ]
+                    )
+                )
+            }
+
+            do {
+                _ = try await client.documents(
+                    snapshotAt: "2026-09-11T16:00:00Z",
+                    limit: 25,
+                    includeDeleted: false,
+                    authorization: authorization
+                )
+                XCTFail("Expected malformed encrypted snapshot to fail closed")
+            } catch {
+                XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+            }
+        }
+    }
+
+    func testSnapshotDocumentListRequestsAndAcceptsDeletionTombstones() async throws {
+        let (client, authorization) = try makeClient()
+        let documentID = UUID(
+            uuidString: "33333333-3333-5333-8333-333333333333"
+        )!
+        let digest = ManagedDigest.sha256(
+            Data(
+                (
+                    "deleted:day_ownership:"
+                        + "\(documentID.uuidString.lowercased()):2"
+                ).utf8
+            )
+        )
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertTrue(
+                request.url?.query?.contains("include_deleted=true") == true
+            )
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                try JSONSerialization.data(
+                    withJSONObject: [
+                        "documents": [[
+                            "document_kind": "day_ownership",
+                            "document_id": documentID.uuidString.lowercased(),
+                            "revision": 2,
+                            "origin_installation_id": "ios-installation",
+                            "content_mode": "server_readable",
+                            "client_key_id": NSNull(),
+                            "content_sha256": digest,
+                            "payload_json": NSNull(),
+                            "payload_ciphertext_base64": NSNull(),
+                            "updated_at": "2026-09-11T15:00:00Z",
+                            "deleted_at": "2026-09-11T15:00:00Z",
+                            "duplicate": false,
+                        ]],
+                        "next_cursor": NSNull(),
+                    ]
+                )
+            )
+        }
+
+        let page = try await client.documents(
+            snapshotAt: "2026-09-11T16:00:00Z",
+            limit: 25,
+            includeDeleted: true,
+            authorization: authorization
+        )
+
+        XCTAssertEqual(page.documents.map(\.documentID), [documentID])
+        XCTAssertEqual(page.documents.first?.deletedAt, "2026-09-11T15:00:00Z")
     }
 
     func testManagedResponseModelsDecodeAcronymWireKeys() throws {
@@ -665,10 +1056,17 @@ final class ManagedStorageClientTests: XCTestCase {
                     as? [String: Any]
             )
             XCTAssertEqual(body["include_documents"] as? Bool, true)
-            XCTAssertEqual(body["document_kinds"] as? [String], [])
+            XCTAssertEqual(
+                body["document_kinds"] as? [String],
+                ["day_ownership"]
+            )
             XCTAssertEqual(
                 body["data_classes"] as? [String],
                 ["essential_timeseries", "raw_ppg"]
+            )
+            XCTAssertEqual(
+                body["include_deleted_documents"] as? Bool,
+                true
             )
             return (
                 HTTPURLResponse(
@@ -700,6 +1098,7 @@ final class ManagedStorageClientTests: XCTestCase {
             _ = try await client.createRestore(
                 requestID: requestID,
                 dataClasses: ["raw_ppg", "essential_timeseries"],
+                includeDeletedDocuments: true,
                 authorization: authorization
             )
             XCTFail("Expected stale restore replay")
@@ -1127,6 +1526,7 @@ final class ManagedStorageClientTests: XCTestCase {
                       "accepted_at":"2026-09-08T09:01:00Z"
                     }
                   ],
+                  "delivery_capable_count":2,
                   "minimum_required":2,
                   "maximum_allowed":5
                 }
@@ -1137,8 +1537,20 @@ final class ManagedStorageClientTests: XCTestCase {
                         with: requestBody(request)
                     ) as? [String: Any]
                 )
+                XCTAssertEqual(body["trigger"] as? String, "band_sos")
                 XCTAssertEqual(body["duration_hours"] as? Int, 8)
                 XCTAssertEqual(body["share_location"] as? Bool, true)
+                let initialLocation = try XCTUnwrap(
+                    body["initial_location"] as? [String: Any]
+                )
+                XCTAssertEqual(
+                    (initialLocation["sequence"] as? NSNumber)?.int64Value,
+                    1
+                )
+                XCTAssertEqual(
+                    initialLocation["captured_at"] as? String,
+                    "2026-09-08T10:00:00Z"
+                )
                 json = """
                 {
                   "incident":\(safetyIncidentJSON(
@@ -1146,7 +1558,8 @@ final class ManagedStorageClientTests: XCTestCase {
                     ownerID: ownerID,
                     firstID: firstID,
                     secondID: secondID,
-                    includeLocation: false
+                    trigger: "band_sos",
+                    includeLocation: true
                   )),
                   "push_outcome":"attempted"
                 }
@@ -1201,9 +1614,17 @@ final class ManagedStorageClientTests: XCTestCase {
             authorization: authorization
         )
         XCTAssertEqual(contacts.contacts.count, 2)
+        XCTAssertEqual(contacts.deliveryCapableCount, 2)
         let creation = try await client.createSafetyIncident(
+            trigger: "band_sos",
             durationHours: 8,
             shareLocation: true,
+            initialLocation: ManagedSafetyLocationCreate(
+                latitude: 17.385,
+                longitude: 78.4867,
+                horizontalAccuracyM: 12.5,
+                capturedAt: "2026-09-08T10:00:00Z"
+            ),
             requestID: UUID(),
             authorization: authorization
         )
@@ -1219,6 +1640,204 @@ final class ManagedStorageClientTests: XCTestCase {
             authorization: authorization
         )
         XCTAssertEqual(location.sequence, 3)
+    }
+
+    func testManagedSafetyContactsMissingDeliveryCapabilityFailsClosed() async throws {
+        let (client, authorization) = try makeClient()
+        let contactID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000109"
+        )!
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/managed/safety/contacts")
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                  "contacts":[{
+                    "profile_id":"\(contactID)",
+                    "display_name":"Contact",
+                    "role":"contact",
+                    "accepted_at":"2026-09-08T09:00:00Z"
+                  }],
+                  "minimum_required":2,
+                  "maximum_allowed":5
+                }
+                """.utf8)
+            )
+        }
+
+        let contacts = try await client.safetyContacts(
+            authorization: authorization
+        )
+        XCTAssertEqual(contacts.contacts.count, 1)
+        XCTAssertEqual(contacts.deliveryCapableCount, 0)
+    }
+
+    func testManagedSafetyCreateAllowsMissingLocationForDuplicateReplay() async throws {
+        let (client, authorization) = try makeClient()
+        let incidentID = UUID()
+        let ownerID = UUID()
+        let firstID = UUID()
+        let secondID = UUID()
+        let initialLocation = ManagedSafetyLocationCreate(
+            latitude: 17.385,
+            longitude: 78.4867,
+            horizontalAccuracyM: 12.5,
+            capturedAt: "2026-09-08T10:00:00Z"
+        )
+
+        ManagedURLProtocolStub.handler = { request in
+            let json = """
+            {
+              "incident":\(safetyIncidentJSON(
+                incidentID: incidentID,
+                ownerID: ownerID,
+                firstID: firstID,
+                secondID: secondID,
+                includeLocation: false,
+                status: "expired",
+                duplicate: true
+              )),
+              "push_outcome":"deferred"
+            }
+            """
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        let replay = try await client.createSafetyIncident(
+            durationHours: 8,
+            shareLocation: true,
+            initialLocation: initialLocation,
+            requestID: UUID(),
+            authorization: authorization
+        )
+        XCTAssertTrue(replay.incident.duplicate)
+        XCTAssertEqual(replay.incident.status, "expired")
+        XCTAssertNil(replay.incident.location)
+
+        ManagedURLProtocolStub.handler = { request in
+            let json = """
+            {
+              "incident":\(safetyIncidentJSON(
+                incidentID: incidentID,
+                ownerID: ownerID,
+                firstID: firstID,
+                secondID: secondID,
+                includeLocation: false,
+                duplicate: true
+              )),
+              "push_outcome":"deferred"
+            }
+            """
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        let activeReplay = try await client.createSafetyIncident(
+            durationHours: 8,
+            shareLocation: true,
+            initialLocation: initialLocation,
+            requestID: UUID(),
+            authorization: authorization
+        )
+        XCTAssertTrue(activeReplay.incident.duplicate)
+        XCTAssertEqual(activeReplay.incident.status, "open")
+        XCTAssertNil(activeReplay.incident.location)
+
+        ManagedURLProtocolStub.handler = { request in
+            let json = """
+            {
+              "incident":\(safetyIncidentJSON(
+                incidentID: incidentID,
+                ownerID: ownerID,
+                firstID: firstID,
+                secondID: secondID,
+                includeLocation: false
+              )),
+              "push_outcome":"deferred"
+            }
+            """
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        do {
+            _ = try await client.createSafetyIncident(
+                durationHours: 8,
+                shareLocation: true,
+                initialLocation: initialLocation,
+                requestID: UUID(),
+                authorization: authorization
+            )
+            XCTFail("New incident without its accepted initial location was accepted")
+        } catch ManagedStorageError.invalidResponse {
+            // Expected.
+        }
+    }
+
+    func testManagedSafetyRejectsLocationWhenSharingIsOff() async throws {
+        let (client, authorization) = try makeClient()
+        let incidentID = UUID()
+        let ownerID = UUID()
+        let firstID = UUID()
+        let secondID = UUID()
+        ManagedURLProtocolStub.handler = { request in
+            let json = """
+            {"incidents":[\(safetyIncidentJSON(
+              incidentID: incidentID,
+              ownerID: ownerID,
+              firstID: firstID,
+              secondID: secondID,
+              includeLocation: true,
+              shareLocation: false
+            ))]}
+            """
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        do {
+            _ = try await client.safetyIncidents(
+                authorization: authorization
+            )
+            XCTFail("Location was accepted while sharing was off")
+        } catch ManagedStorageError.invalidResponse {
+            // Expected.
+        }
     }
 
     func testManagedSafetyRetainedOwnerIncidentAllowsErasedParticipants() async throws {
@@ -1315,6 +1934,15 @@ final class ManagedStorageClientTests: XCTestCase {
             authorization
         )
     }
+
+    private func canonicalDigest(_ object: [String: Any]) throws -> String {
+        ManagedDigest.sha256(
+            try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys, .withoutEscapingSlashes]
+            )
+        )
+    }
 }
 
 private func safetyIncidentJSON(
@@ -1322,12 +1950,17 @@ private func safetyIncidentJSON(
     ownerID: UUID,
     firstID: UUID,
     secondID: UUID,
-    includeLocation: Bool
+    trigger: String = "manual_sos",
+    includeLocation: Bool,
+    status: String = "open",
+    shareLocation: Bool = true,
+    duplicate: Bool = false
 ) -> String {
+    let active = ["open", "acknowledged"].contains(status)
     let location = includeLocation
         ? """
         {
-          "sequence":2,
+          "sequence":1,
           "latitude":17.385,
           "longitude":78.4867,
           "horizontal_accuracy_m":12.5,
@@ -1336,20 +1969,24 @@ private func safetyIncidentJSON(
         }
         """
         : "null"
+    let acknowledgedAt = status == "acknowledged"
+        ? #""2026-09-08T10:05:00Z""#
+        : "null"
+    let endedAt = active ? "null" : #""2026-09-08T18:00:00Z""#
     return """
     {
       "incident_id":"\(incidentID)",
       "role":"owner",
       "owner_profile_id":"\(ownerID)",
       "owner_display_name":"Owner",
-      "trigger":"manual_sos",
-      "status":"open",
+      "trigger":"\(trigger)",
+      "status":"\(status)",
       "duration_hours":8,
-      "share_location":true,
+      "share_location":\(shareLocation),
       "created_at":"2026-09-08T10:00:00Z",
       "expires_at":"2026-09-08T18:00:00Z",
-      "acknowledged_at":null,
-      "ended_at":null,
+      "acknowledged_at":\(acknowledgedAt),
+      "ended_at":\(endedAt),
       "participants":[
         {
           "profile_id":"\(firstID)",
@@ -1377,7 +2014,7 @@ private func safetyIncidentJSON(
         "installations_retryable":1,
         "installations_terminal":0
       },
-      "duplicate":false
+      "duplicate":\(duplicate)
     }
     """
 }

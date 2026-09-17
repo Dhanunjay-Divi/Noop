@@ -213,6 +213,14 @@ position without changing its ID. This inbox intentionally starts empty.
   corresponding dossier section is approved. (Evidence:
   `Tools/terminology-audit.py`,
   `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] HW-190 [ENG] Statically inventory the owner-supplied Android/iPhone SDK
+  package without importing binaries or claiming physical capability.
+  (Evidence: `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`,
+  `ops/rounds/2026-09-11-product-safety-quality-audit.md`)
+- [ ] HW-200 [EXT] Obtain the exact supplier project/model code, complete
+  function-support report, written binary/dependency redistribution and update
+  authority, notices/SBOM, printed-label mapping, and named firmware support
+  owner for the production units.
 
 ## 4. Band firmware foundation
 
@@ -259,6 +267,24 @@ position without changing its ID. This inbox intentionally starts empty.
 
 ## 5. First-party NOOP Band SDK
 
+- [x] SDK-005 [ENG] Record the candidate vendor SDK's hashes, platform slices,
+  confirmation/password/history surface, serialization requirement, runtime
+  network findings, claims boundary, and physical acceptance matrix without
+  copying the private package into Git. (Evidence:
+  `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`)
+- [x] SDK-006 [ENG] Establish a separate private, English-only, binary-free
+  `Dhanunjay-Divi/NoopBandSDK` repository with local language/binary/JSON
+  validation and no hosted Actions workflow. (Evidence: initial `main` commit
+  `ee82cc0`, `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`)
+- [ ] SDK-007 [ENG] Build quarantined Apple and Android supplier adapters behind
+  neutral NOOP session/sample types; keep vendor callbacks, persistence, and
+  errors out of screens, analytics, storage, and cloud code.
+- [ ] SDK-008 [ENG] Deny or detect unexpected vendor network egress and prove
+  signed-app traffic, privacy declarations, dependency notices, and SBOM before
+  enabling the adapter.
+- [ ] SDK-009 [ENG] Enforce one active phone collector and one serialized
+  per-band operation queue; implement an explicit durable collector-handoff
+  protocol before allowing another supported phone to collect.
 - [ ] SDK-010 [ENG] Create the canonical versioned protocol and capability
   schema.
 - [ ] SDK-020 [ENG] Create synthetic golden, malformed, replay, duplicate, and

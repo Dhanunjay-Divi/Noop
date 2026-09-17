@@ -3,7 +3,9 @@ package com.noop.managed
 import java.time.Instant
 import java.util.UUID
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ManagedSafetyLiveLocationSessionTest {
@@ -95,6 +97,78 @@ class ManagedSafetyLiveLocationSessionTest {
             ManagedSafetyLocationRetryPolicy.delayMillis(2),
         )
         assertNull(ManagedSafetyLocationRetryPolicy.delayMillis(3))
+    }
+
+    @Test
+    fun permissionRevocationStopsAndExplicitRegrantRestartsOnlyActiveIncident() {
+        assertEquals(
+            ManagedSafetyLocationRuntimeAction.STOP,
+            ManagedSafetyLocationRuntimePolicy.decide(
+                locationAuthorized = false,
+                enrolled = true,
+                activeCloudIncident = true,
+                activeLocalSession = true,
+            ),
+        )
+        assertEquals(
+            ManagedSafetyLocationRuntimeAction.NONE,
+            ManagedSafetyLocationRuntimePolicy.decide(
+                locationAuthorized = false,
+                enrolled = true,
+                activeCloudIncident = true,
+                activeLocalSession = false,
+            ),
+        )
+        assertEquals(
+            ManagedSafetyLocationRuntimeAction.START,
+            ManagedSafetyLocationRuntimePolicy.decide(
+                locationAuthorized = true,
+                enrolled = true,
+                activeCloudIncident = true,
+                activeLocalSession = false,
+            ),
+        )
+        assertEquals(
+            ManagedSafetyLocationRuntimeAction.NONE,
+            ManagedSafetyLocationRuntimePolicy.decide(
+                locationAuthorized = true,
+                enrolled = false,
+                activeCloudIncident = true,
+                activeLocalSession = false,
+            ),
+        )
+        assertEquals(
+            ManagedSafetyLocationRuntimeAction.NONE,
+            ManagedSafetyLocationRuntimePolicy.decide(
+                locationAuthorized = true,
+                enrolled = true,
+                activeCloudIncident = false,
+                activeLocalSession = false,
+            ),
+        )
+    }
+
+    @Test
+    fun authorizationWatchdogStopsOnlyAnActiveUnauthorizedSession() {
+        assertEquals(5_000L, ManagedSafetyLocationAuthorizationWatchdog.INTERVAL_MILLIS)
+        assertTrue(
+            ManagedSafetyLocationAuthorizationWatchdog.shouldStop(
+                locationAuthorized = false,
+                activeLocalSession = true,
+            ),
+        )
+        assertFalse(
+            ManagedSafetyLocationAuthorizationWatchdog.shouldStop(
+                locationAuthorized = true,
+                activeLocalSession = true,
+            ),
+        )
+        assertFalse(
+            ManagedSafetyLocationAuthorizationWatchdog.shouldStop(
+                locationAuthorized = false,
+                activeLocalSession = false,
+            ),
+        )
     }
 
     private fun incident(

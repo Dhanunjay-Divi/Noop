@@ -25,7 +25,7 @@ struct NOOPLiveActivity: Widget {
                         // Keep the same at-a-glance daily and strap state as Android's ongoing notification.
                         HStack(spacing: 10) {
                             if let r = context.state.recovery {
-                                bannerStat(label: "Charge", value: "\(r)%")
+                                bannerStat(label: "Recovery", value: "\(r)%")
                             }
                             if let e = context.state.effort {
                                 bannerStat(label: "Effort", value: "\(e)")
@@ -59,10 +59,10 @@ struct NOOPLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     if authorized {
-                        // Charge + Effort (#446) — one more stat alongside the leading live HR.
+                        // Recovery + Effort (#446) — one more stat alongside the leading live HR.
                         HStack(spacing: 10) {
                             if let r = context.state.recovery {
-                                statColumn(label: "Charge", value: "\(r)%")
+                                statColumn(label: "Recovery", value: "\(r)%")
                             }
                             if let e = context.state.effort {
                                 statColumn(label: "Effort", value: "\(e)")

@@ -11,7 +11,8 @@
     <string name="managed_safety_cannot_respond">Не могу ответить</string>
     <string name="managed_safety_channel_description">Срочные личные уведомления от принятых контактов NOOP Safety.</string>
     <string name="managed_safety_channel_name">Контакты NOOP Safety</string>
-    <string name="managed_safety_confirm_body">NOOP постарается отправить уведомление в приложении каждому принятому контакту Safety. Он не связывается с экстренными службами и не гарантирует, что кто-либо увидит уведомление или отреагирует.</string>
+    <string name="managed_safety_confirm_body">NOOP постарается отправить уведомление в приложении каждому принятому контакту Safety. Местоположение передаваться не будет. NOOP не связывается с экстренными службами и не гарантирует, что кто-либо увидит уведомление или отреагирует.</string>
+    <string name="managed_safety_confirm_location_body">NOOP постарается отправить уведомление в приложении каждому принятому контакту Safety и будет передавать только последнее подтверждённое местоположение не более %1$d часов. Доступ прекращается после завершения или истечения оповещения. NOOP не связывается с экстренными службами и не гарантирует ответ.</string>
     <string name="managed_safety_confirm_send">Начать оповещение Safety</string>
     <string name="managed_safety_confirm_title">Оповестить контакты NOOP Safety сейчас?</string>
     <string name="managed_safety_contact_count_format">Принято контактов: %1$d из %2$d</string>

@@ -53,6 +53,7 @@ struct SafetySOSGestureAccumulator {
 enum SafetySOSGesturePreferences {
     static let enabledKey = "safety.sosGesture.enabled"
     static let requiredEventsKey = "safety.sosGesture.requiredEvents"
+    static let shareLocationKey = "safety.sosGesture.shareLocation"
 
     static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: enabledKey)
@@ -64,6 +65,10 @@ enum SafetySOSGesturePreferences {
             max(stored, SafetySOSGestureAccumulator.minimumEvents),
             SafetySOSGestureAccumulator.maximumEvents
         )
+    }
+
+    static var sharesLocation: Bool {
+        UserDefaults.standard.bool(forKey: shareLocationKey)
     }
 
     static func setEnabled(_ enabled: Bool) {
@@ -78,5 +83,9 @@ enum SafetySOSGesturePreferences {
             ),
             forKey: requiredEventsKey
         )
+    }
+
+    static func setSharesLocation(_ sharesLocation: Bool) {
+        UserDefaults.standard.set(sharesLocation, forKey: shareLocationKey)
     }
 }

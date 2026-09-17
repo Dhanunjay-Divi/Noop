@@ -37,6 +37,8 @@ struct RootTabView: View {
     @EnvironmentObject private var router: NavRouter
     @EnvironmentObject private var updateStore: UpdateStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption2) private var scaledTabLabelLineHeight: CGFloat = 13
     @ObservedObject private var contextualActions = ContextualActionCenter.shared
 
     /// Which quick-action screen the centre FAB is presenting (nil = sheet closed).
@@ -82,6 +84,7 @@ struct RootTabView: View {
     @State private var keyboardVisible = false
     @State private var expandedContextualActionID: String?
     @State private var hydrationConfirmationML: Int?
+    @State private var showLighterWorkoutOptions = false
     /// One `NavigationPath` per tab, indexed by tab tag. Re-tapping the already-active tab pops
     /// that tab's stack to its root (#135) by clearing its path — an animated pop that leaves the
     /// root view alive, so an at-root re-tap keeps scroll position and never re-runs `.task`
@@ -185,8 +188,9 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        // Keep the custom bar over a full-bleed page and reserve its measured height inside scroll
-        // content. Content remains fully opaque up to that reserved strip.
+        // Keep the custom bar over a full-bleed page and reserve its measured height as a real safe-area
+        // inset. A content margin only extends a ScrollView's endpoint; it still lets large Dynamic Type
+        // rows render underneath the persistent controls while the user is reading them.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
@@ -218,7 +222,29 @@ struct RootTabView: View {
             // steal gestures from Trends' year strip (and other horizontally scrolling controls), while
             // pushed pages already need the system edge-swipe for Back. Native iOS tab bars do not require
             // page swiping, so leave horizontal gestures to the content that owns them.
-            .contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear
+                    .frame(height: visibleTabBarHeight)
+                    .accessibilityHidden(true)
+            }
+            if !keyboardVisible, dynamicTypeSize.isAccessibilitySize {
+                // At accessibility text sizes a single line can be taller than the floating rail. Keep
+                // the glass treatment, but give it an opaque reading boundary so active content never
+                // competes with persistent navigation. The safe-area inset above preserves reachability.
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: StrandPalette.surfaceBase.opacity(0), location: 0),
+                        .init(color: StrandPalette.surfaceBase.opacity(0.98), location: 0.08),
+                        .init(color: StrandPalette.surfaceBase, location: 1),
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: visibleTabBarHeight + 28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
 
             if !keyboardVisible {
                 HStack(alignment: .center, spacing: 8) {
@@ -233,11 +259,11 @@ struct RootTabView: View {
                             resetTabBarScrollTracking()
                         },
                         onReselect: { tag in
-                            // Re-tapping the active tab refreshes that page's data (2026-07-02) and, from a
-                            // subpage, pops that tab's stack back to its root (#135) — an animated pop via the
-                            // path, not a rebuild. At the root the pop is skipped, so scroll position survives
-                            // and the refresh doesn't double with a re-run of the root's `.task` (#198).
-                            Task { await repo.refresh() }
+                            // Re-tapping the active tab is navigation-only: from a subpage it pops that tab's
+                            // stack to its root (#135); at the root it scrolls the existing screen to the top
+                            // (#198). Data refresh remains owned by explicit pull-to-refresh and the app's
+                            // launch/sync/staleness paths, so this frequent gesture never starts a broad
+                            // history read or invalidates an otherwise-current Today screen.
                             tabBarCompact = false
                             if !tabPaths[tag].isEmpty {
                                 tabPaths[tag] = NavigationPath()
@@ -251,7 +277,6 @@ struct RootTabView: View {
                         withAnimation(Self.sheetEase) { quickAction = .menu }
                     }
                 }
-                .frame(height: 48)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
                 .background {
@@ -270,6 +295,7 @@ struct RootTabView: View {
                     processingIDs: contextualActions.processingIDs,
                     expandedID: $expandedContextualActionID,
                     onPrimary: performContextualAction,
+                    onSecondary: keepCurrentWorkoutPlan,
                     onDismiss: contextualActions.dismiss
                 )
                 .padding(.trailing, 12)
@@ -406,6 +432,9 @@ struct RootTabView: View {
                 AppScrollHitchMonitor.shared.end(reason: "scene_inactive")
                 return
             }
+            DailyReviewNotifications.restoreScheduleIfAuthorized()
+            HydrationReminders.restoreScheduleIfAuthorized()
+            WindDownNudge.restoreScheduleIfAuthorized()
             Task { await contextualActions.importDeliveredNotifications() }
         }
         // Quick-action sheet presents with the calm easing (~0.42s) per the README sheet spec —
@@ -416,6 +445,30 @@ struct RootTabView: View {
         }
         .sheet(isPresented: $showUpdatesInbox) {
             UpdatesInboxView(onClose: { showUpdatesInbox = false })
+        }
+        .sheet(isPresented: $showLighterWorkoutOptions) {
+            LighterWorkoutOptionsSheet(
+                onOpenWorkouts: {
+                    showLighterWorkoutOptions = false
+                    AppDiagnosticsRecorder.shared.record(
+                        "adaptive_day.lighter_options_action",
+                        fields: ["destination": "workouts"]
+                    )
+                    openNotificationRoute(.workouts)
+                },
+                onOpenStrength: {
+                    showLighterWorkoutOptions = false
+                    AppDiagnosticsRecorder.shared.record(
+                        "adaptive_day.lighter_options_action",
+                        fields: ["destination": "strength"]
+                    )
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                        quickAction = .strength
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         // Honour a router request. Ordinary destinations enter through More's OWN NavigationStack so
         // the persistent five-tab glass bar behaves identically whether a page was opened from the More
@@ -447,7 +500,14 @@ struct RootTabView: View {
     }
 
     private var visibleTabBarHeight: CGFloat {
-        keyboardVisible ? 0 : measuredTabBarHeight
+        guard !keyboardVisible else { return 0 }
+        return max(
+            measuredTabBarHeight,
+            FloatingTabBar.expandedBodyHeight(
+                labelLineHeight: scaledTabLabelLineHeight,
+                labelLineCount: dynamicTypeSize.isAccessibilitySize ? 2 : 1
+            ) + 8
+        )
     }
 
     private static func diagnosticTabName(_ rawValue: Int) -> String {
@@ -486,24 +546,68 @@ struct RootTabView: View {
         case .journal:
             contextualActions.complete(action)
             expandedContextualActionID = nil
+            router.pendingJournalDayOffset = NotificationRouteBridge.journalDayOffset(
+                for: PendingNotificationRouteRequest(
+                    route: .journal,
+                    journalDay: action.journalDay
+                )
+            )
             routeToMore(.insights)
-        case .windDown, .recovery:
+        case .windDown:
             contextualActions.complete(action)
             expandedContextualActionID = nil
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
-                selectedTab = IPhonePrimaryTab.sleep.rawValue
+            openNotificationRoute(.sleep)
+        case .recovery:
+            if action.isPlannedWorkoutDecision,
+               let fingerprint = action.fingerprint {
+                Task { @MainActor in
+                    guard await ContextualInterventionCenter.acknowledgePlannedWorkoutDecision(
+                        fingerprint: fingerprint,
+                        decision: .reviewLighterOptions
+                    ) else { return }
+                    expandedContextualActionID = nil
+                    openNotificationRoute(action.resolvedRecoveryRoute)
+                    await Task.yield()
+                    presentLighterWorkoutOptions(source: "in_app")
+                }
+                return
+            } else {
+                contextualActions.complete(action)
             }
+            expandedContextualActionID = nil
+            openNotificationRoute(action.resolvedRecoveryRoute)
+        }
+    }
+
+    private func keepCurrentWorkoutPlan(_ action: ContextualAction) {
+        guard action.isPlannedWorkoutDecision,
+              let fingerprint = action.fingerprint else { return }
+        Task { @MainActor in
+            guard await ContextualInterventionCenter.acknowledgePlannedWorkoutDecision(
+                fingerprint: fingerprint,
+                decision: .keepCurrentPlan
+            ) else { return }
+            expandedContextualActionID = nil
         }
     }
 
     private func refreshAdaptiveHydrationContext() async {
         let day = Repository.localDayKey(Date())
-        let reading = await repo.hydrationReading(day: day)
+        let reading = try? await repo.hydrationReading(day: day)
         HydrationReminders.updateAdaptiveContext(
             temperatureC: nil,
             effort: repo.localCalendarToday?.strain,
             consumedML: reading?.valueML,
-            goalML: repo.hydrationGoalML(profileSex: profile.sex)
+            goalML: reading.flatMap { _ in
+                repo.hydrationGoalML(
+                    profileAge: profile.age,
+                    ageConfirmed: profile.ageInputConfirmed,
+                    profileSex: profile.sex,
+                    sexConfirmed: profile.sexInputConfirmed,
+                    weightKg: profile.weightKg,
+                    weightConfirmed: profile.weightInputConfirmed
+                )
+            }
         )
     }
 
@@ -534,7 +638,14 @@ struct RootTabView: View {
 
         guard let previous = tracker.lastOffset else {
             tracker.lastOffset = offset
-            if offset >= -10 { tabBarCompact = false }
+            // The native scroll-geometry callback is allowed to coalesce its first delivery. If the
+            // page has already advanced by then, treating that negative sample only as a baseline leaves
+            // the expanded rail stranded until another scroll event arrives.
+            if offset <= -24 {
+                tabBarCompact = true
+            } else if offset >= -10 {
+                tabBarCompact = false
+            }
             return
         }
 
@@ -648,7 +759,32 @@ struct RootTabView: View {
     /// morning lands on the Sleep root and evening on the Today root, even if that tab was last left
     /// on a pushed detail page.
     private func consumePendingNotificationRoute() {
-        guard let route = NotificationRouteBridge.consumePending() else { return }
+        guard let request = NotificationRouteBridge.consumePendingRequest() else {
+            return
+        }
+        if request.route == .journal {
+            router.pendingJournalDayOffset =
+                NotificationRouteBridge.journalDayOffset(for: request)
+        }
+        openNotificationRoute(request.route)
+        if request.presentation == .lighterWorkoutOptions {
+            Task { @MainActor in
+                await Task.yield()
+                presentLighterWorkoutOptions(source: "notification")
+            }
+        }
+    }
+
+    private func presentLighterWorkoutOptions(source: String) {
+        guard !showLighterWorkoutOptions else { return }
+        AppDiagnosticsRecorder.shared.record(
+            "adaptive_day.lighter_options_presented",
+            fields: ["source": source]
+        )
+        showLighterWorkoutOptions = true
+    }
+
+    private func openNotificationRoute(_ route: NoopNotificationRoute) {
         quickAction = nil
         pendingMoreDestination = nil
         withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
@@ -812,7 +948,9 @@ struct RootTabView: View {
             view
                 .background(StrandPalette.surfaceBase.ignoresSafeArea())
                 .toolbar(.hidden, for: .navigationBar)
-                .tabRouteDestinations()
+                .tabRouteDestinations(
+                    persistentBottomChromeInset: visibleTabBarHeight
+                )
         }
         // Drive this tab's root scroll-to-top on an at-root re-tap (#198 follow-up); read by ScreenScaffold
         // / LiquidTodayView inside. Only THIS tab's token changes on its reselect, so the others don't scroll.
@@ -922,6 +1060,14 @@ struct RootTabView: View {
                 ZStack {
                     StrandPalette.surfaceBase.ignoresSafeArea()
                     route.destination
+                        // The shell's safe-area inset protects the live viewport. iOS 26 does not
+                        // consistently translate that ancestor inset into scroll-content tail space
+                        // for pushed destinations, so only the pushed subtree receives a matching
+                        // endpoint reservation. The More root keeps the single shell-owned inset.
+                        .environment(
+                            \.persistentBottomChromeInset,
+                            visibleTabBarHeight
+                        )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .onAppear {
                             AppDiagnosticsRecorder.shared.record(
@@ -1069,7 +1215,7 @@ struct RootTabView: View {
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(StrandFont.footnote.weight(.semibold))
                         .foregroundStyle(StrandPalette.textTertiary)
                         .rotationEffect(.degrees(isOpen ? 0 : -90))
                 }
@@ -1710,7 +1856,7 @@ private struct FloatingTabBar: View {
     /// Compact mode is an explicit disclosure control, not a re-select gesture. Expanding must therefore
     /// preserve the current navigation stack, scroll position, and cached data.
     var onExpand: () -> Void = {}
-    /// Fires when the user taps the ALREADY-active tab (2026-07-02: re-tap should refresh).
+    /// Fires when the user taps the already-active tab so the shell can pop or scroll to the root.
     var onReselect: (Int) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -1718,6 +1864,7 @@ private struct FloatingTabBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.noopAppearanceMode) private var appearanceMode
+    @ScaledMetric(relativeTo: .caption2) private var scaledLabelLineHeight: CGFloat = 13
     @Namespace private var navigationMorph
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
@@ -1731,10 +1878,25 @@ private struct FloatingTabBar: View {
 
     /// Compaction is suppressed at accessibility text sizes. A sighted low-vision user who asked for larger
     /// text is exactly the person who cannot afford an icon-only rail: they lose the one persistent cue for
-    /// which section they are in. This is complementary to the `.dynamicTypeSize(...xxLarge)` cap below,
-    /// not replaced by it - the cap makes expanded labels FIT, this keeps them PRESENT. VoiceOver is
-    /// unaffected either way, since every control keeps `.accessibilityLabel(item.title)`.
+    /// which section they are in. The expanded rail grows with the semantic caption metric and gives labels
+    /// two lines at accessibility sizes; Large Content Viewer still exposes every full localized title.
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
+    private var labelLineCount: Int { dynamicTypeSize.isAccessibilitySize ? 2 : 1 }
+    private var expandedHeight: CGFloat {
+        Self.expandedBodyHeight(
+            labelLineHeight: scaledLabelLineHeight,
+            labelLineCount: labelLineCount
+        )
+    }
+
+    static func expandedBodyHeight(
+        labelLineHeight: CGFloat,
+        labelLineCount: Int
+    ) -> CGFloat {
+        let labelHeight = max(1, labelLineHeight) * CGFloat(max(1, labelLineCount))
+        return max(48, 12 + 18 + 3 + labelHeight)
+    }
+
     private var currentItem: Item {
         nav.first(where: { $0.tag == selection }) ?? nav[0]
     }
@@ -1810,7 +1972,7 @@ private struct FloatingTabBar: View {
             }
         }
         .frame(width: visuallyCompact ? IPhonePrimaryTab.compactControlDimension : nil,
-               height: 48,
+               height: visuallyCompact ? IPhonePrimaryTab.compactControlDimension : expandedHeight,
                alignment: .leading)
         .background {
             if visuallyCompact {
@@ -1855,9 +2017,6 @@ private struct FloatingTabBar: View {
                                      ? (appearanceMode == .black ? 0.18 : 0.26)
                                      : 0.075),
                 radius: visuallyCompact ? 8 : 11, x: 0, y: visuallyCompact ? 3 : 5)
-        // Native tab bars keep their labels compact while destination content honors Larger Text.
-        // Cap only this navigation chrome so five stable destinations never truncate or overlap.
-        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .animation(reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28),
                    value: visuallyCompact)
     }
@@ -1869,7 +2028,7 @@ private struct FloatingTabBar: View {
             ForEach(nav) { item in tabButton(item) }
         }
         .padding(.horizontal, 6)
-        .frame(height: 48)
+        .frame(height: expandedHeight)
         .animation(
             reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.26),
             value: selection
@@ -1905,6 +2064,9 @@ private struct FloatingTabBar: View {
         .accessibilityLabel("Show navigation")
         .accessibilityValue(Text(currentItem.title))
         .accessibilityHint("Expands the tab bar")
+        .accessibilityShowsLargeContentViewer {
+            Label(currentItem.title, systemImage: currentItem.icon)
+        }
         .accessibilityIdentifier("noop.tab.compact")
     }
 
@@ -1925,15 +2087,14 @@ private struct FloatingTabBar: View {
                     .scaleEffect(active ? 1.08 : 1)
                     .offset(y: active ? -1 : 0)
                 Text(visualTitle(for: item))
-                    // Native tab labels remain optically stable while destination content follows
-                    // Dynamic Type. The visible label is the LOCALIZED destination title; the five-item
-                    // rail stays whole via lineLimit(1) + minimumScaleFactor(0.8) rather than by
-                    // hard-coding a shorter English word. The previous "Train" shortening was a bare
-                    // English literal with no String Catalog entry, so it shipped untranslated in all
-                    // nine locales - a worse defect than a slightly tighter label.
-                    .font(.system(size: 11, weight: active ? .semibold : .medium, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    // The visible label is the localized destination title. A semantic caption style
+                    // follows Dynamic Type through accessibility sizes. Two bounded lines avoid vertical
+                    // overlap; truncation and Large Content Viewer handle titles wider than one tab slot.
+                    .font(StrandFont.footnote.weight(active ? .semibold : .medium))
+                    .lineLimit(labelLineCount)
+                    .truncationMode(.tail)
+                    .multilineTextAlignment(.center)
+                    .frame(minHeight: scaledLabelLineHeight * CGFloat(labelLineCount))
             }
             .foregroundStyle(navigationInk(active: active))
             .frame(maxWidth: .infinity)
@@ -1959,8 +2120,13 @@ private struct FloatingTabBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(item.title)
+        .accessibilityShowsLargeContentViewer {
+            Label(item.title, systemImage: item.icon)
+        }
         .accessibilityIdentifier("noop.tab.\(item.tag)")
-        .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(active ? .isSelected : [])
+        .accessibilityRemoveTraits(active ? [] : .isSelected)
     }
 
 }
@@ -2025,11 +2191,124 @@ private struct FloatingQuickAddButton: View {
 
 // MARK: - Contextual action rail
 
+private struct LighterWorkoutOptionsSheet: View {
+    let onOpenWorkouts: () -> Void
+    let onOpenStrength: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("appwide.adaptive_day_guidance.lighter_options.intro")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 18)
+
+                    option(
+                        icon: "gauge.with.dots.needle.33percent",
+                        title: "appwide.adaptive_day_guidance.lighter_options.intensity.title",
+                        detail: "appwide.adaptive_day_guidance.lighter_options.intensity.detail"
+                    )
+                    Divider().overlay(StrandPalette.hairline)
+                    option(
+                        icon: "timer",
+                        title: "appwide.adaptive_day_guidance.lighter_options.duration.title",
+                        detail: "appwide.adaptive_day_guidance.lighter_options.duration.detail"
+                    )
+                    Divider().overlay(StrandPalette.hairline)
+                    option(
+                        icon: "figure.walk",
+                        title: "appwide.adaptive_day_guidance.lighter_options.recovery.title",
+                        detail: "appwide.adaptive_day_guidance.lighter_options.recovery.detail"
+                    )
+
+                    Text("appwide.adaptive_day_guidance.lighter_options.disclaimer")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 18)
+
+                    VStack(spacing: 10) {
+                        Button(action: onOpenWorkouts) {
+                            Label(
+                                "appwide.adaptive_day_guidance.lighter_options.open_workouts",
+                                systemImage: "figure.run"
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(StrandPalette.accent)
+
+                        Button(action: onOpenStrength) {
+                            Label(
+                                "appwide.adaptive_day_guidance.lighter_options.open_strength",
+                                systemImage: "dumbbell.fill"
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(StrandPalette.accent)
+                    }
+                    .padding(.top, 20)
+                }
+                .padding(20)
+            }
+            .background(StrandPalette.surfaceBase)
+            .navigationTitle(
+                String(
+                    localized:
+                        "appwide.adaptive_day_guidance.lighter_options.title"
+                )
+            )
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Close")
+                }
+            }
+        }
+    }
+
+    private func option(
+        icon: String,
+        title: LocalizedStringKey,
+        detail: LocalizedStringKey
+    ) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(StrandPalette.chargeColor)
+                .frame(width: 28, height: 28)
+                .background(StrandPalette.chargeColor.opacity(0.12), in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(detail)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 14)
+    }
+}
+
 private struct ContextualActionRail: View {
     let actions: [ContextualAction]
     let processingIDs: Set<String>
     @Binding var expandedID: String?
     let onPrimary: (ContextualAction) -> Void
+    let onSecondary: (ContextualAction) -> Void
     let onDismiss: (ContextualAction) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -2153,13 +2432,41 @@ private struct ContextualActionRail: View {
                     .lineLimit(2)
                     .minimumScaleFactor(0.82)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, minHeight: 42)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .background(tint(action), in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
             .disabled(processingIDs.contains(action.id))
             .opacity(processingIDs.contains(action.id) ? 0.58 : 1)
             .accessibilityIdentifier("noop.context-action.primary.\(action.kind.rawValue)")
+
+            if action.isPlannedWorkoutDecision {
+                Button {
+                    onSecondary(action)
+                } label: {
+                    Text(
+                        "appwide.adaptive_day_guidance.planned_workout.keep_plan"
+                    )
+                    .font(StrandFont.subhead.weight(.semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(
+                                StrandPalette.hairlineStrong,
+                                lineWidth: 1
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(processingIDs.contains(action.id))
+                .accessibilityIdentifier(
+                    "noop.context-action.keep-current-plan"
+                )
+            }
         }
         .padding(14)
         .frame(width: 274, alignment: .leading)
@@ -2186,14 +2493,17 @@ private struct ContextualActionRail: View {
             HydrationGlassGlyph(fill: 0.38, tint: tint(action))
                 .frame(width: size, height: size + 3)
         } else {
-            Image(systemName: symbol(action.kind))
+            Image(systemName: symbol(action))
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(tint(action))
         }
     }
 
-    private func symbol(_ kind: ContextualActionKind) -> String {
-        switch kind {
+    private func symbol(_ action: ContextualAction) -> String {
+        if action.kind == .recovery, action.route == .workouts {
+            return "figure.run"
+        }
+        switch action.kind {
         case .hydration: return "drop.fill"
         case .breathe: return "wind"
         case .journal: return "square.and.pencil"
@@ -2217,11 +2527,21 @@ private struct ContextualActionRail: View {
         case .hydration: return String(localized: "Add \(action.amountML ?? 250) ml")
         case .breathe: return String(localized: "Start breathing")
         case .journal: return String(localized: "Open journal")
-        case .windDown, .recovery: return String(localized: "Open Sleep")
+        case .windDown: return String(localized: "Open Sleep")
+        case .recovery:
+            return action.isPlannedWorkoutDecision
+                ? String(
+                    localized:
+                        "appwide.adaptive_day_guidance.planned_workout.review_options"
+                )
+                : String(localized: "Open Sleep")
         }
     }
 
     private func primaryIcon(_ action: ContextualAction) -> String {
+        if action.kind == .recovery, action.route == .workouts {
+            return "figure.run"
+        }
         switch action.kind {
         case .hydration: return "plus"
         case .breathe: return "play.fill"

@@ -220,6 +220,36 @@ final class PendingDatabaseRestoreTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "profile.age"))
     }
 
+    func testDatabaseOnlyRestoreClearsDerivedPlannerStateAfterVerifiedReplacement() throws {
+        let replacement = tempPath("database-only-replacement")
+        let live = tempPath("database-only-live")
+        paths += [replacement, live]
+        try seedV1Store(at: replacement, deviceID: "replacement")
+        try seedFullDatabaseDirect(at: live, deviceID: "original")
+
+        let suiteName = "pending-database-only-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(45, forKey: BackupSettings.legacyRecoveryMinutesKey)
+
+        try PendingDatabaseRestore.stage(
+            databaseAt: replacement,
+            settingsJSON: nil,
+            forDatabaseAt: live,
+            safetySnapshot: siblingSnapshot(of: live, name: "database-only"))
+
+        let result = try PendingDatabaseRestore.applyIfPresent(
+            toDatabaseAt: live,
+            settingsDefaults: defaults)
+        guard case .applied = result else {
+            return XCTFail("a valid DB-only restore must be applied")
+        }
+        XCTAssertEqual(try readDeviceIDs(at: live), ["replacement"])
+        XCTAssertNil(
+            defaults.object(forKey: BackupSettings.legacyRecoveryMinutesKey),
+            "a DB-only replacement must not retain planner output derived from the old database")
+    }
+
     /// `PRAGMA wal_checkpoint` returns a row even when it could not finish. Hold an old reader snapshot,
     /// append a newer WAL frame, and prove `checkpointWAL` fails closed until that reader releases it.
     func testCheckpointWALRejectsBusyIncompleteResult() async throws {

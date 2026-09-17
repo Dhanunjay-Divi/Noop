@@ -78,6 +78,29 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | `NOOP_RATE_LIMIT_MAX_KEYS` | no | `10000` | Maximum in-memory limiter identities before new identities share a fail-closed overflow bucket |
 | `NOOP_FORWARDED_ALLOW_IPS` | no | `127.0.0.1` | Comma-separated exact proxy IPs/CIDRs trusted to supply client addresses; wildcard and all-address networks are rejected |
 | `NOOP_DASHBOARD_ENABLED` | no | `true` | Serve the static dashboard |
+| `NOOP_FEEDBACK_ENABLED` | no | `false` | Expose feedback routes protected by App Check plus a dedicated auto-cleaned anonymous Firebase identity; no NOOP+ account is required |
+| `NOOP_FEEDBACK_ACCEPTING_RESERVATIONS` | no | `false` | Admit new report reservations only after feedback is enabled and the independent external abuse-control release gate is approved; existing status, completion, and deletion remain available while this drain switch is off |
+| `NOOP_FEEDBACK_LIFECYCLE_ENABLED` | no | `false` | Run the isolated bounded cleanup/retention job without requiring the API to accept new feedback |
+| `NOOP_FEEDBACK_BUCKET` | when feedback or its lifecycle job is enabled | none | Separate private object bucket for explicitly submitted redacted app-report ZIPs |
+| `NOOP_FEEDBACK_CAPABILITY_SECRET` | when feedback is enabled | none | Independent random secret, at least 32 bytes, used only for report-scoped status/deletion capabilities and receipts |
+| `NOOP_FEEDBACK_CAPABILITY_PREVIOUS_SECRET` | no | none | Previous independent capability secret retained during a staged rotation; it must differ from the primary secret |
+| `NOOP_FEEDBACK_CAPABILITY_PRIMARY_KEY_VERSION` | no | `v1` | Version label for the primary capability key |
+| `NOOP_FEEDBACK_CAPABILITY_PREVIOUS_KEY_VERSION` | with a previous secret | none | Distinct version label for the staged previous capability key |
+| `NOOP_FEEDBACK_CAPABILITY_WRITE_VERSION` | no | `legacy` | Capability format issued to new reservations: `legacy` during compatibility rollout, then an explicitly configured version after both clients accept versioned tokens |
+| `NOOP_FEEDBACK_RETENTION_DAYS` | no | `28` | Server metadata and bucket lifecycle ceiling for submitted feedback; allowed range 1 through 28 days so report access does not outlive anonymous identity cleanup |
+| `NOOP_FEEDBACK_LIFECYCLE_INTERVAL_SECONDS` | no | `300` | Seconds between immediate startup and bounded object-cleanup/metadata-retention cycles; allowed range 60 through 3600 |
+| `NOOP_FEEDBACK_LIFECYCLE_BATCH_SIZE` | no | `20` | Maximum feedback rows claimed by each cleanup or retention phase; capped so two worst-case object-operation phases fit the 20-minute job |
+| `NOOP_FEEDBACK_UPLOAD_TTL_SECONDS` | no | `900` | Lifetime of one generation-creating signed upload capability; allowed range 60 through 3600 seconds |
+| `NOOP_FEEDBACK_UPLOAD_FINALIZATION_GRACE_SECONDS` | no | `300` | Bounded delay after signed-capability expiry before abandoned or cancelled upload cleanup begins |
+| `NOOP_FEEDBACK_CLEANUP_CONFIRMATION_DELAY_SECONDS` | no | `60` | Delay between object deletion and the absence-confirmation pass that finalizes the cleanup tombstone |
+| `NOOP_FEEDBACK_MAX_ARCHIVE_BYTES` | no | `20971520` | Maximum compressed report size; cannot exceed 20 MiB |
+| `NOOP_FEEDBACK_DAILY_REPORT_LIMIT` | no | `6` | Maximum reports reserved per tenant-aware anonymous principal in one UTC day |
+| `NOOP_FEEDBACK_PENDING_BYTE_LIMIT` | no | `67108864` | Maximum pending compressed bytes for one tenant-aware anonymous principal |
+| `NOOP_FEEDBACK_APP_DAILY_REPORT_LIMIT` | no | `500` | App-wide daily reservation ceiling independent of principal churn |
+| `NOOP_FEEDBACK_APP_PENDING_BYTE_LIMIT` | no | `1073741824` | App-wide pending compressed-byte ceiling independent of principal churn |
+| `NOOP_FEEDBACK_VALIDATION_MAX_CONCURRENCY` | no | `2` | Maximum concurrent archive validators; timed-out workers retain their slot until the underlying thread exits |
+| `NOOP_FEEDBACK_VALIDATION_TIMEOUT_SECONDS` | no | `10` | Maximum queue wait and execution wait for one archive-validation attempt |
+| `NOOP_FEEDBACK_EXTERNAL_ABUSE_GATE_APPROVED` | no | `false` | Explicit release gate proving edge throttling, monitoring, ownership, and incident response exist; required before new reservations can be enabled |
 | `NOOP_PUBLIC_BASE_URL` | for paging | none | Exact public HTTPS origin used in responder links and Twilio signature validation |
 | `NOOP_TWILIO_ACCOUNT_SID` | for paging | none | Twilio account SID |
 | `NOOP_TWILIO_AUTH_TOKEN` | for paging | none | Twilio account Auth Token used to validate provider webhook signatures; also the outbound fallback when no API key is configured |
@@ -101,7 +124,7 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | `NOOP_SAFETY_WORKER_ENABLED` | no | `true` | Run the in-process paging loop; Compose disables it on API processes and uses `safety-worker` |
 | `NOOP_SAFETY_WORKER_BATCH_SIZE` | no | `20` | Maximum jobs leased per worker cycle |
 | `NOOP_SAFETY_WORKER_MAX_CONCURRENCY` | no | `6` | Maximum concurrent submissions; must remain below the worker database-pool maximum |
-| `NOOP_SAFETY_INCIDENT_RETENTION_DAYS` | no | `0` | Days to keep terminal Safety incidents; `0` disables incident retention |
+| `NOOP_SAFETY_INCIDENT_RETENTION_DAYS` | no | `0` | Days to keep coordinate-free terminal Safety incident history; precise location is deleted at terminal transition; `0` disables history retention |
 | `NOOP_SAFETY_CONTACT_RETENTION_DAYS` | no | `0` | Days after expiry/decline/revocation to keep inactive contacts; accepted contacts are never aged; `0` disables |
 | `NOOP_SAFETY_RETENTION_INTERVAL_HOURS` | no | `24` | Hours between bounded Safety retention runs |
 | `NOOP_SAFETY_RETENTION_MAX_BATCHES_PER_RUN` | no | `20` | Maximum Safety retention batches per scheduled or manual run |
@@ -125,6 +148,36 @@ thresholds, and the explicit non-emergency boundary.
 For multi-replica deployment, capacity testing, paging controls, and the honest
 10,000-user tenancy boundary, see
 [PRODUCTION_OPERATIONS.md](PRODUCTION_OPERATIONS.md).
+
+### Explicit app feedback
+
+The managed API can accept an app report without requiring a NOOP+ account.
+The installed app still must present a valid Firebase App Check assertion.
+After the user reviews the exact attachment list and taps **Send feedback**, the
+client creates a durable local outbox item and calls:
+
+1. `POST /v1/feedback/reports/reservations` with an idempotency UUID and only
+   archive size/digest, platform/version, and note/screenshot consent flags;
+2. the returned short-lived generation-creating `PUT` capability to upload the
+   immutable ZIP directly into the private feedback bucket;
+3. `POST /v1/feedback/reports/{report_id}/complete` with the report-scoped
+   capability so the API can verify object metadata, digest, ZIP structure,
+   attachment allowlist, app-report metadata, and consent flags;
+4. `GET` on that report for recovery and `DELETE` for cancellation or
+   user-requested removal.
+
+Completion is the only transition that returns a support receipt. The API
+rejects databases, raw captures, unknown paths, duplicate names, exact health
+timestamps, row-level health counts, malformed text, invalid screenshots, and
+consent mismatches. It has no public archive-download route. Operators obtain
+an approved report through private database/object IAM, and bucket plus
+database retention removes it after the configured window.
+
+This is explicit support data, not automatic crash telemetry. Closing the
+mobile report sheet may allow a consented queued transfer to continue, but
+neither platform creates or uploads a report before the user presses **Send
+feedback**. See
+[`../docs/FEEDBACK_REPORTING.md`](../docs/FEEDBACK_REPORTING.md).
 
 ## API contract
 
@@ -446,8 +499,13 @@ Compose also starts an encrypted backup worker. It performs a custom-format
 AES-256 using the mounted secret file, publishes it atomically with a SHA-256
 manifest, and prunes only archives it owns. The worker fails before invoking
 `pg_dump` when the secret is missing, unreadable, empty, or shorter than 32
-bytes. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md) for off-host copies and the
-required disposable restore drill.
+bytes. Restore application smoke selects the immutable migration manifest using
+the same `NOOP_DATABASE_ENGINE`: `migration-manifest.sha256` for TimescaleDB and
+`migration-manifest-postgresql.sha256` for standard PostgreSQL. An override is
+accepted only when it is byte-identical to the selected engine manifest, so a
+mixed-engine restore fails closed. See
+[TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md) for off-host copies and the required
+disposable restore drill.
 
 ## Development and tests
 
@@ -460,15 +518,47 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The production repository applies immutable SQL files in lexical order, records
-each checksum in `noop_schema_migrations`, and refuses to start if an
-already-applied migration was edited. `NOOP_DATABASE_ENGINE=timescaledb` uses
-`migrations/` and makes the metric-sample table a hypertable.
+The production repository hashes the exact raw bytes that it decodes and
+executes, validates every applied checksum before changing the database, and
+rejects applied versions that are absent from the running image. It records the
+same raw-byte SHA-256 in `noop_schema_migrations`; each engine-specific backup
+manifest and restore check uses that identical byte contract.
+
+On a fresh database, the explicit Safety writer compatibility bundle applies
+migrations `038` and `041` in one transaction before the independent `039` and
+`040` migrations. A prior writer therefore cannot observe a committed
+fresh-install schema containing `038` without `041`. An existing database that
+already committed immutable migration `038` necessarily takes a different
+upgrade path: the runner validates `038`, obtains an `ACCESS EXCLUSIVE` lock on
+the quota table, and applies only pending migration `041` transactionally.
+Admission and in-flight prior writers must be drained before that upgrade; the
+lock protects the transition but cannot erase the historical committed
+`038`-only state.
+
+`NOOP_DATABASE_ENGINE=timescaledb` uses `migrations/` and makes the metric-sample
+table a hypertable.
 `NOOP_DATABASE_ENGINE=postgresql` substitutes only
 `migrations-postgresql/001_init.sql`, which removes the Timescale extension and
 hypertable calls; all later migrations remain canonical. The two initial
 migrations intentionally have different checksums, so changing engines under an
 existing database fails rather than silently changing its storage contract.
+Readiness requires the database migration set to exactly equal the running
+image's set. The migration command verifies exact equality after applying
+pending files, and the managed-storage and feedback lifecycle commands verify it
+before constructing mutation-capable dependencies. The API process performs the
+same check before starting its embedded retention and feedback lifecycle tasks.
+Missing, changed, and forward/unknown versions all fail closed. A code rollback
+must therefore be rebuilt with the current immutable migration directory and
+manifest; redeploying an exact older image is not a supported database rollback.
+
+Bounded destructive maintenance acquires the shared
+`noop_schema_migrations` advisory lock, validates the exact manifest while that
+lock is held, and only then acquires operation-specific retention or lifecycle
+locks. A dedicated short-lived connection holds the schema guard, so a
+size-one operation pool remains usable. The migration runner takes the exclusive
+form of the schema lock. Database mutations retain their existing short
+transactions; object deletion and identity-provider calls do not run inside one
+giant database transaction.
 
 Migration `002_row_provenance.sql` preserves `sync_batch_id`,
 `source_platform`, and the full `source_metadata` object on each metric, event,

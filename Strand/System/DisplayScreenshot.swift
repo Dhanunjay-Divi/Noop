@@ -6,14 +6,16 @@ import UIKit
 import AppKit
 #endif
 
-// Captures the current screen as PNG bytes for the Display & Performance test bundle or for the
-// transient, explicitly approved app-report attachment.
+// Captures screen pixels as PNG bytes for the Display & Performance test bundle or, only after a
+// separate explicit opt-in, for the transient app-report attachment. The feedback boundary strips
+// PNG metadata before review so pixels cannot carry hidden EXIF, text, timestamp, or private chunks.
 //
 // The PNG is BINARY image bytes, not a text line, so it is NOT run through redactPii (that is correct and
 // intentional - redaction scrubs text identifiers, not pixels). The screenshot IS covered by the mandatory
-// review-before-share gate: the report never ships until the user taps Share on the review sheet, and the
-// gate names the attachment. Test Centre captures only for an enabled screenshot profile. The app-report
-// controller keeps its pre-sheet capture in memory, excludes it by default, and discards it on dismissal.
+// review-before-send gate: the report never ships until the user taps Send feedback on the review
+// sheet, and the gate names the attachment. Test Centre captures only for an enabled screenshot
+// profile. The app-report controller requests its separate underlying-content capture only when the
+// user enables that attachment and discards it on opt-out or dismissal.
 
 enum DisplayScreenshot {
 
@@ -25,18 +27,8 @@ enum DisplayScreenshot {
     @MainActor
     static func capturePNG() -> Data? {
         #if os(iOS)
-        let scene = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first { $0.activationState == .foregroundActive }
-            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        guard let window = scene?.keyWindow ?? scene?.windows.first else { return nil }
-        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
-        let image = renderer.image { _ in
-            // afterScreenUpdates=false: snapshot what is currently on screen without forcing a relayout,
-            // so the shot shows exactly the (possibly broken) frame the user is reporting.
-            window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
-        }
-        return image.pngData()
+        guard let window = foregroundWindow() else { return nil }
+        return capture(view: window)
         #elseif os(macOS)
         guard let window = NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first,
               let view = window.contentView,
@@ -47,4 +39,39 @@ enum DisplayScreenshot {
         return nil
         #endif
     }
+
+    #if os(iOS)
+    /// Captures the presenting app content beneath the report sheet. Callers must invoke this only
+    /// after the user explicitly opts into the feedback screenshot.
+    @MainActor
+    static func captureFeedbackPNG() -> Data? {
+        guard let window = foregroundWindow(),
+              let rootView = window.rootViewController?.view,
+              rootView.bounds.width > 0,
+              rootView.bounds.height > 0 else {
+            return nil
+        }
+        return capture(view: rootView)
+    }
+
+    @MainActor
+    private static func foregroundWindow() -> UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive }
+            ?? scenes.first
+        return scene?.keyWindow ?? scene?.windows.first
+    }
+
+    @MainActor
+    private static func capture(view: UIView) -> Data? {
+        guard view.bounds.width > 0, view.bounds.height > 0 else { return nil }
+        let renderer = UIGraphicsImageRenderer(bounds: view.bounds)
+        let image = renderer.image { _ in
+            // Preserve the visible frame without forcing a relayout at the reporting boundary.
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
+        }
+        return image.pngData()
+    }
+    #endif
 }

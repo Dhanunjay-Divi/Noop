@@ -49,7 +49,7 @@ RELEASE_SOURCE_DIGESTS = {
         "98f9b95510411d6c84aa3e78233c73cb8e2263b2b0d798c23104b775f1b876ce"
     ),
     ".github/workflows/release.yml": (
-        "c79dbea991420931a246e7874b663f257fb99c53e9718a7a9d33313cc25dfc82"
+        "08751fb8e82e0c14fdb4630f45262892077b42e644d740219e7750494c34c01b"
     ),
     ".github/workflows/testing-build.yml": (
         "44cd2ac7ad024429fd885b02236267604207ff6e54f4199f7ae116d755041c10"
@@ -70,10 +70,10 @@ RELEASE_SOURCE_DIGESTS = {
         "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
-        "5bc10ff910277ea941ed4025ccda11a766082a34f46a9394ef241c6979fd36a9"
+        "49123ea0b0c8a67c4c3eb950d3b8761f85108d08fefda54dd79baa3611a7193d"
     ),
     "release/terminology/legacy-inventory.json": (
-        "45e622637c744033ad1186802d6b010c6b2c7b0fbc278e48053677f8963469c7"
+        "44818ba2b1a23c187b02b2d7853f714988ddffae8e9daf67c00da38bdd751e29"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -112,7 +112,7 @@ RELEASE_SOURCE_DIGESTS = {
         "86e2040fd6ce9f7abc1126e0b16a056ba84a39fa878caa3367f7273d6306e8b4"
     ),
     "Tools/i18n_audit_baseline.json": (
-        "5b7519589dbeeca37ce22a0fe35e51756a66247ecda7f27662d488fea7ed00d7"
+        "3a1b7e134bdc8dc9cef09e11eea14ab4e0c1baa18822fbd9e65561e44cdc9c95"
     ),
     "Tools/prepare-ios-sideload-app.sh": (
         "d81bf5b8086c21a648a1417afa58cbb5bb9781c1738f2ff9d1cae6950ab2f097"
@@ -135,11 +135,14 @@ RELEASE_SOURCE_DIGESTS = {
     "Tools/release.sh": (
         "76d015c094ef603515d70cd56ead7501be52ad68b8286c4d04a0ee84dff81b95"
     ),
+    "Tools/run-bounded-command.py": (
+        "60b4472f3187543609c5bf8f59a2d596aaf9005e8d5ef2fc617fe4c7667101c8"
+    ),
     "Tools/terminology-audit.py": (
         "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"
     ),
     "Tools/trusted-release-controls.py": (
-        "979d6870507e2bc50d46d4300b74814f58679a93a1351792a9bfad0a23e4ef2d"
+        "b8471dbafd2260e630f6a676c6b42ddd72b8f827c838a97e1ce039f33f0da37a"
     ),
     "Tools/update-homebrew-cask.sh": (
         "1733e7b43266ac7f16ed3043cef4bea51f8353ebe533fb9aa3d260fa76639989"

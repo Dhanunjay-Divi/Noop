@@ -52,6 +52,7 @@ import com.noop.protocol.extractStreams
 import com.noop.protocol.WhoopGattServiceFamily
 import com.noop.protocol.whoopGattScanDecision
 import com.noop.analytics.Baselines
+import com.noop.analytics.AnalysisTimeZoneHistory
 import com.noop.analytics.BatterySocLine
 import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.NapDetector
@@ -70,6 +71,7 @@ import com.noop.ingest.HealthConnectWriter
 import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.notif.AdaptiveDayEvaluator
 import com.noop.notif.InactivityNotifier
+import com.noop.notif.PostSyncRoutineNotificationBudget
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StaleSyncReminderScheduler
 import com.noop.notif.StressBreathingNotifier
@@ -97,6 +99,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import java.time.ZoneId
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -940,6 +943,30 @@ class WhoopBleClient(
         private const val POST_BACKFILL_RETRY_DELAY_MS = 2_000L
         private const val POST_BACKFILL_PENDING_PREFS = "noop_post_backfill_analysis"
         private const val POST_BACKFILL_PENDING_SOURCES = "pending_sources"
+        internal fun readPersistedPostBackfillSources(
+            context: Context,
+        ): PostBackfillPendingSourcesRead = classifyPersistedPostBackfillSources {
+            context.getSharedPreferences(POST_BACKFILL_PENDING_PREFS, Context.MODE_PRIVATE)
+                .getStringSet(POST_BACKFILL_PENDING_SOURCES, emptySet())
+        }
+
+        internal fun readPersistedPostBackfillSourceState(
+            context: Context,
+        ): PostBackfillPendingSourceRead = readPersistedPostBackfillSources(context).state()
+
+        internal fun classifyPersistedPostBackfillSources(
+            readSources: () -> Set<String>?,
+        ): PostBackfillPendingSourcesRead = try {
+            PostBackfillPendingSourcesRead.Available(
+                readSources()
+                    .orEmpty()
+                    .asSequence()
+                    .filter(String::isNotBlank)
+                    .toCollection(linkedSetOf()),
+            )
+        } catch (_: Throwable) {
+            PostBackfillPendingSourcesRead.Failed
+        }
         /** #174: window after the last offload frame/HISTORY_COMPLETE during which a type-0x2F frame is
          *  treated as trailing-historical, not live. Mirrors macOS deepPacketLiveCooldownSeconds (10s). */
         private const val DEEP_PACKET_LIVE_COOLDOWN_MS = 10_000L
@@ -1316,7 +1343,7 @@ class WhoopBleClient(
         fun timeoutSyncError(futureClockBanner: String?, bankedThisOffload: Boolean): String? =
             futureClockBanner
                 ?: if (bankedThisOffload) null
-                else "Sync interrupted - the strap went quiet. It will retry on the next sync."
+                else "Sync interrupted - the band went quiet. It will retry on the next sync."
 
         /**
          * Pure classification of a COMPLETED (HISTORY_COMPLETE) offload, extracted from exitBackfilling
@@ -1625,9 +1652,9 @@ class WhoopBleClient(
          */
         fun futureDatedStrapBanner(strapNewestTs: Long?, wallNowUnix: Long): String? =
             if (!isFutureDatedNewest(strapNewestTs, wallNowUnix)) null
-            else "Synced, but your strap's clock is set in the future - its banked history is dated ahead of " +
+            else "Synced, but your band's clock is set in the future - its banked history is dated ahead of " +
                 "today, so NOOP can't trust those timestamps and didn't import them (importing them would " +
-                "misfile your data days or years ahead). Fully charge the strap to 100% and power-cycle it so " +
+                "misfile your data days or years ahead). Fully charge the band to 100% and power-cycle it so " +
                 "its clock re-syncs, then reconnect."
 
         /**
@@ -2194,12 +2221,15 @@ class WhoopBleClient(
         debounceMillis = POST_BACKFILL_ANALYZE_DELAY_MS,
         retryDelayMillis = POST_BACKFILL_RETRY_DELAY_MS,
         processRevision = { revision -> runPostBackfillAnalysisPass(revision.deviceId) },
+        scheduleDeferredRetry = { retryAtEpochMillis ->
+            PostBackfillAnalysisRetryScheduler.schedule(context, retryAtEpochMillis)
+        },
         markDurablyDirty = ::markPostBackfillSourceDirty,
         clearDurablyDirty = ::clearPostBackfillSourceDirty,
-        onFailure = { sourceId, failure ->
+        onFailure = { _, failure ->
             log(
-                "Backfill: post-sync worker for $sourceId failed " +
-                    "(${failure.javaClass.simpleName}: ${failure.message}); kept pending for retry.",
+                "Backfill: post-sync worker failed " +
+                    "(${failure.javaClass.simpleName}); kept pending for retry.",
             )
         },
     )
@@ -2304,11 +2334,26 @@ class WhoopBleClient(
     /**
      * Background-process backstop for rows committed before cancellation or process restart. Sources whose
      * worker did not finish are persisted separately from the in-memory latch. Reconcile them first and the
-     * current source last, so the shared fingerprint watermark finishes on the source the UI currently reads.
+     * current source last, preserving deterministic active-source ordering while each source uses its own
+     * durable generation acknowledgement.
      */
     fun reconcilePersistedHistory() {
         val activeSourceId = deviceId
-        val pending = persistedPostBackfillSourceIds()
+        val sourceRead = persistedPostBackfillSources()
+        if (sourceRead is PostBackfillPendingSourcesRead.Failed) {
+            AppDiagnosticsRecorder.record(
+                "analysis.post_backfill_retry",
+                fields = mapOf("outcome" to "source_read_failed"),
+            )
+            ioScope.launch {
+                PostBackfillAnalysisRetryScheduler.schedule(
+                    context = context,
+                    retryAtEpochMillis = System.currentTimeMillis(),
+                )
+            }
+            return
+        }
+        val pending = (sourceRead as PostBackfillPendingSourcesRead.Available).sourceIds
             .asSequence()
             .filter { it != activeSourceId }
             .sorted()
@@ -2316,22 +2361,41 @@ class WhoopBleClient(
         postBackfillAnalysisWorker.resume(pending + activeSourceId)
     }
 
-    private fun persistedPostBackfillSourceIds(): Set<String> =
-        try {
+    /**
+     * WorkManager entry point for a previously deferred late-only claim. Unlike the foreground-service
+     * fire-and-forget path, this waits for every durable source to complete or rearm before the platform
+     * worker reports success.
+     */
+    internal suspend fun retryPersistedHistoryFromScheduler():
+        List<BackfillAnalysisProcessResult> {
+        val activeSourceId = deviceId
+        val pending = when (val sourceRead = persistedPostBackfillSources()) {
+            PostBackfillPendingSourcesRead.Failed ->
+                return listOf(BackfillAnalysisProcessResult.RetryRequired)
+            is PostBackfillPendingSourcesRead.Available -> sourceRead.sourceIds
+        }
+        if (pending.isEmpty()) return emptyList()
+        val ordered = pending
+            .asSequence()
+            .filter { it != activeSourceId }
+            .sorted()
+            .toList() + listOfNotNull(activeSourceId.takeIf(pending::contains))
+        return postBackfillAnalysisWorker.resumeAndAwait(ordered)
+    }
+
+    private fun persistedPostBackfillSources(): PostBackfillPendingSourcesRead =
+        classifyPersistedPostBackfillSources {
             postBackfillPrefs
                 .getStringSet(POST_BACKFILL_PENDING_SOURCES, emptySet())
-                .orEmpty()
-                .filterTo(linkedSetOf()) { it.isNotBlank() }
-        } catch (failure: Throwable) {
-            log(
-                "Backfill: could not read pending post-sync sources " +
-                    "(${failure.javaClass.simpleName}: ${failure.message})",
-            )
-            emptySet()
         }
 
     private fun markPostBackfillSourceDirty(sourceId: String) {
-        val pending = persistedPostBackfillSourceIds().toMutableSet()
+        val pending = when (val sourceRead = persistedPostBackfillSources()) {
+            PostBackfillPendingSourcesRead.Failed ->
+                throw IllegalStateException("Pending post-sync source state is unavailable.")
+            is PostBackfillPendingSourcesRead.Available ->
+                sourceRead.sourceIds.toMutableSet()
+        }
         if (!pending.add(sourceId)) return
         check(
             postBackfillPrefs.edit()
@@ -2341,7 +2405,12 @@ class WhoopBleClient(
     }
 
     private fun clearPostBackfillSourceDirty(sourceId: String) {
-        val pending = persistedPostBackfillSourceIds().toMutableSet()
+        val pending = when (val sourceRead = persistedPostBackfillSources()) {
+            PostBackfillPendingSourcesRead.Failed ->
+                throw IllegalStateException("Pending post-sync source state is unavailable.")
+            is PostBackfillPendingSourcesRead.Available ->
+                sourceRead.sourceIds.toMutableSet()
+        }
         if (!pending.remove(sourceId)) return
         check(
             postBackfillPrefs.edit()
@@ -2350,20 +2419,116 @@ class WhoopBleClient(
         ) { "could not clear pending post-sync source" }
     }
 
-    /** One fingerprint-gated scoring pass. The revision worker reruns this if another chunk lands mid-pass. */
-    private suspend fun runPostBackfillAnalysisPass(sourceId: String) =
-        runFingerprintGatedBackfillAnalysis(
-            // Any exception escapes only to BackfillAnalysisWorker, which retains this immutable source
-            // revision and retries without an uncaught root coroutine.
-            readFingerprint = { repository.analysisFingerprint(sourceId) },
-            readWatermark = { NoopPrefs.analyzeWatermark(context) },
-            onUpToDate = {
-                log("re-score: trigger=post-offload newData=no - skipping (empty/duplicate offload)")
-            },
-            analyze = {
-                val profileStore = ProfileStore.from(context)
-                IntelligenceEngine.analyzeRecent(
-                    repo = repository,
+    /**
+     * One generation-snapshotted scoring pass. The revision worker retains its immutable source revision
+     * until this whole analysis/notification/writeback sequence succeeds and the exact generation is
+     * acknowledged.
+     */
+    private suspend fun runPostBackfillAnalysisPass(
+        sourceId: String,
+    ): BackfillAnalysisProcessResult {
+        val analysisLease = repository.claimAnalysisInput(
+            sourceIds = listOf(sourceId),
+            force = false,
+        )
+        if (analysisLease == null) {
+            log("re-score: trigger=post-offload newData=no - skipping (empty/duplicate offload)")
+            return BackfillAnalysisProcessResult.Completed
+        }
+        val analysisNowSeconds = System.currentTimeMillis() / 1_000L
+        val analysisTimeZoneHistory = AnalysisTimeZoneHistory.from(context).observe(
+            observedAtEpochSeconds = analysisNowSeconds,
+            zoneId = ZoneId.systemDefault(),
+        )
+        if (analysisTimeZoneHistory == null) {
+            AppDiagnosticsRecorder.record(
+                "analysis.post_backfill",
+                fields = mapOf(
+                    "outcome" to "deferred",
+                    "reason" to "timezone_persistence",
+                    "pass_kind" to "deferred",
+                    "scan_days" to "0",
+                ),
+            )
+            return BackfillAnalysisProcessResult.RetryRequired
+        }
+        val analysisPlan = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 21,
+            claims = analysisLease.claims,
+            nowSeconds = analysisNowSeconds,
+            timeZoneHistory = analysisTimeZoneHistory,
+        )
+        if (!analysisPlan.shouldAnalyze) {
+            val terminalExclusion = analysisPlan.terminalUnknownRange
+            val exclusionResult = if (terminalExclusion != null) {
+                repository.excludeClaimedAnalysisRange(
+                    lease = analysisLease,
+                    exclusionStartTs = terminalExclusion.startTs,
+                    exclusionEndTs = terminalExclusion.endTs,
+                )
+            } else {
+                null
+            }
+            AppDiagnosticsRecorder.record(
+                "analysis.post_backfill",
+                fields = mapOf(
+                    "outcome" to when {
+                        exclusionResult?.madeProgress == true -> "excluded"
+                        else -> "deferred"
+                    },
+                    "reason" to when (analysisPlan.deferralReason) {
+                        IntelligenceEngine.AnalysisDeferralReason.LATE_EVENING ->
+                            "late_evening"
+                        IntelligenceEngine.AnalysisDeferralReason.TIMEZONE_PROVENANCE ->
+                            "timezone_provenance"
+                        IntelligenceEngine.AnalysisDeferralReason.TERMINAL_TIMEZONE_UNKNOWN ->
+                            when (terminalExclusion?.reason) {
+                                AnalysisTimeZoneHistory.Uncertainty.TRUNCATED_HISTORY ->
+                                    "truncated_history"
+                                AnalysisTimeZoneHistory.Uncertainty.RECORDED_ZONE_BOUNDARY ->
+                                    "travel_boundary"
+                                else -> "timezone_terminal_unknown"
+                            }
+                        null -> "unknown"
+                    },
+                    "pass_kind" to analysisPlan.passKind.name.lowercase(),
+                    "scan_days" to "0",
+                    "excluded" to minOf(
+                        exclusionResult?.excludedCount ?: 0,
+                        64,
+                    ).toString(),
+                    "advanced" to minOf(
+                        exclusionResult?.advancedCount ?: 0,
+                        64,
+                    ).toString(),
+                ),
+            )
+            log(
+                if (exclusionResult?.madeProgress == true) {
+                    "Backfill: skipped a permanently unknown timezone boundary; continuing older history"
+                } else {
+                    "Backfill: post-sync scoring deferred until the next local-day window"
+                },
+            )
+            val retryAtSeconds = if (exclusionResult?.madeProgress == true) {
+                analysisNowSeconds + 5L
+            } else {
+                analysisPlan.deferUntilSeconds ?: (analysisNowSeconds + 900L)
+            }
+            // The database claim remains unacknowledged. The explicit deferred outcome preserves the
+            // durable source marker, releases this single worker, and arms the process-independent retry.
+            return BackfillAnalysisProcessResult.Deferred(
+                retryAtEpochMillis = retryAtSeconds * 1_000L,
+            )
+        }
+
+        // Any exception escapes only to BackfillAnalysisWorker, which retains this immutable source
+        // revision and retries without an uncaught root coroutine. The repository leaves every claimed
+        // generation unacknowledged when this pass fails, is cancelled, or dies.
+        repository.runClaimedAnalysis(analysisLease) { analysisConsumption ->
+            val profileStore = ProfileStore.from(context)
+            IntelligenceEngine.analyzeRecent(
+                repo = repository,
                     // Resolve after IntelligenceEngine owns its serialization gate. A queued profile
                     // reconciliation must not be overwritten by an older age/sex snapshot.
                     profileProvider = {
@@ -2381,9 +2546,17 @@ class WhoopBleClient(
                             vitalityProvenanceRequired = profileStore.vitalityProvenanceRequired,
                         )
                     },
+                    maxDays = analysisPlan.maxDays,
+                    nowSeconds = analysisPlan.anchorNowSeconds,
+                    analysisTimezoneOffsetSeconds = analysisPlan.timezoneOffsetSeconds,
+                    analysisTimeZone = analysisPlan.timeZone,
+                    providedCivilDayWindows = analysisPlan.civilDayWindows,
+                    providedCalibrationCivilDayWindows =
+                        analysisPlan.calibrationCivilDayWindows,
+                    historicalCatchUp = analysisPlan.isHistoricalCatchUp,
                     importedDeviceId = sourceId,
                     maxHROverride = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble(),
-                    ownerSource = dayOwnerSource,
+                    ownerSource = IntelligenceEngine.boundDayOwnerSource(sourceId, dayOwnerSource),
                     manualStepCoefficient = profileStore.stepsManualOverride,
                     persistStepsCalibration = { calibration ->
                         profileStore.stepsCalibrationCoefficient = calibration.coefficient
@@ -2417,42 +2590,19 @@ class WhoopBleClient(
                         } else {
                             null
                         },
+                    sourceConsumed = analysisConsumption::markSourceConsumed,
+                    sourcesEvaluatedForOwnership =
+                        analysisConsumption::markSourcesEvaluatedForOwnership,
                 )
-            },
-            afterAnalysis = {
-                // These actions are structurally unreachable until IntelligenceEngine succeeds.
-                try {
-                    val merged = repository.daysMerged(sourceId)
-                    val newest = merged.maxByOrNull { it.day }?.day ?: "-"
-                    val todayKey = com.noop.ui.logicalDayKeyNow()
-                    val present = if (merged.any { it.day == todayKey }) "present" else "MISSING"
-                    log(
-                        "Backfill: ${merged.size} day(s) banked; newest=$newest, " +
-                            "dashboard-today=$todayKey ($present)",
-                    )
-                    val localKey = java.time.LocalDate.now().toString()
-                    val todayRow = com.noop.ui.resolveTodayRow(merged, todayKey, localKey)
-                    if (todayRow?.totalSleepMin != null) {
-                        ScheduledReportNotifier.onMorning(
-                            context = context,
-                            reportDay = todayRow.day,
-                            chargePct = todayRow.recovery.scorePctOrNull(),
-                            restPct = RestScorer.restFromDaily(todayRow).scorePctOrNull(),
-                            materializedAfterSync = true,
-                        )
-                    }
-                    ScheduledReportNotifier.onWorkout(
-                        context = context,
-                        newestWorkoutTs = repository.latestWorkoutStartAllSources(),
-                        title = "",
-                        body = "",
-                    )
-                } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
-                    throw cancelled
-                } catch (failure: Throwable) {
-                    log("Backfill: post-sync report refresh failed: ${failure.message}")
+
+                if (analysisPlan.isHistoricalCatchUp) {
+                    // Historical catch-up updates only its bounded score range. Current-day notifications,
+                    // profile projections, and external writeback belong to the next normal recent pass.
+                    log("Backfill: bounded historical scoring batch done")
+                    return@runClaimedAnalysis
                 }
 
+                val notificationBudget = PostSyncRoutineNotificationBudget()
                 try {
                     AutoWorkoutCandidateNotifier.afterReanalysis(
                         context = context,
@@ -2464,11 +2614,15 @@ class WhoopBleClient(
                             } else {
                                 null
                             },
+                        budget = notificationBudget,
                     )
                 } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
-                    log("Backfill: post-sync workout suggestion failed: ${failure.message}")
+                    log(
+                        "Backfill: post-sync workout suggestion failed " +
+                            "(${failure.javaClass.simpleName})",
+                    )
                 }
 
                 try {
@@ -2476,11 +2630,62 @@ class WhoopBleClient(
                         context = context,
                         repository = repository,
                         deviceId = sourceId,
+                        notificationBudget = notificationBudget,
                     )
                 } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
-                    log("Backfill: adaptive day guidance failed: ${failure.message}")
+                    log(
+                        "Backfill: adaptive day guidance failed " +
+                            "(${failure.javaClass.simpleName})",
+                    )
+                }
+
+                // These actions are structurally unreachable until IntelligenceEngine succeeds.
+                try {
+                    val merged = repository.daysMerged(sourceId)
+                    val todayKey = com.noop.ui.logicalDayKeyNow()
+                    val present = if (merged.any { it.day == todayKey }) "present" else "missing"
+                    log("Backfill: daily cache refreshed; rows=${merged.size}, today=$present")
+                    val localKey = java.time.LocalDate.now().toString()
+                    val todayRow = com.noop.ui.resolveTodayRow(merged, todayKey, localKey)
+                    if (!notificationBudget.isClaimed) {
+                        ScheduledReportNotifier.onWorkout(
+                            context = context,
+                            newestWorkoutTs = repository.latestWorkoutStartAllSources(),
+                            title = "",
+                            body = "",
+                            budget = notificationBudget,
+                        )
+                    }
+                    if (!notificationBudget.isClaimed && todayRow?.totalSleepMin != null) {
+                        ScheduledReportNotifier.onMorning(
+                            context = context,
+                            reportDay = todayRow.day,
+                            chargePct = todayRow.recovery.scorePctOrNull(),
+                            restPct = RestScorer.restFromDaily(todayRow).scorePctOrNull(),
+                            materializedAfterSync = true,
+                            budget = notificationBudget,
+                        )
+                    }
+                } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    log(
+                        "Backfill: post-sync report refresh failed " +
+                            "(${failure.javaClass.simpleName})",
+                    )
+                }
+
+                notificationBudget.claimedLane?.let { lane ->
+                    AppDiagnosticsRecorder.record(
+                        "post_sync.notification_budget",
+                        fields = mapOf(
+                            "lane" to lane.storageKey,
+                            "outcome" to "claimed",
+                            "source" to "band_history",
+                        ),
+                    )
                 }
 
                 if (NoopPrefs.hcWriteback(context)) {
@@ -2488,21 +2693,22 @@ class WhoopBleClient(
                         val result = HealthConnectWriter.write(context, repository, sourceId)
                         log(
                             "HC writeback: ${result.written} record(s)" +
-                                if (result.ok) "" else " (failed: ${result.failures.joinToString()})",
+                                if (result.ok) "" else " (failed)",
                         )
                     } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                         throw cancelled
                     } catch (failure: Throwable) {
-                        log("HC writeback failed after post-sync scoring: ${failure.message}")
+                        log(
+                            "HC writeback failed after post-sync scoring " +
+                                "(${failure.javaClass.simpleName})",
+                        )
                     }
                 }
-            },
-            // The watermark is the commit record for the whole pass and therefore remains last.
-            persistWatermark = { analyzeFp ->
-                NoopPrefs.setAnalyzeWatermark(context, analyzeFp)
-                log("Backfill: post-sync scoring pass done")
-            },
-        )
+
+            log("Backfill: post-sync scoring pass done")
+        }
+        return BackfillAnalysisProcessResult.Completed
+    }
 
     /** True while a historical offload is in progress (offload frames route to the Backfiller). */
     @Volatile
@@ -2770,7 +2976,7 @@ class WhoopBleClient(
             _state.update { it.copy(
                 scanning = false,
                 statusNote = "This device has no Bluetooth LE. NOOP has to run on a real phone with " +
-                    "Bluetooth, near your strap. It can't connect from an emulator or virtual device.") }
+                    "Bluetooth, near Noop Band. It can't connect from an emulator or virtual device.") }
             return
         }
         if (!adp.isEnabled) {
@@ -3636,7 +3842,7 @@ class WhoopBleClient(
             return
         }
         if (!_state.value.connected || !_state.value.bonded) {
-            _state.update { it.copy(renameStatus = "Connect and pair your strap first.") }
+            _state.update { it.copy(renameStatus = "Connect and pair Noop Band first.") }
             return
         }
         if (name.isEmpty()) {
@@ -3651,7 +3857,7 @@ class WhoopBleClient(
         send(CommandNumber.SET_ADVERTISING_NAME, payload, withResponse = true)
         log("Strap rename: wrote advertising name=$clamped")
         _state.update { it.copy(
-            renameStatus = "Sent - your strap will reboot to apply, then reconnect with the new name.",
+            renameStatus = "Sent - the band will reboot to apply, then reconnect with the new name.",
         ) }
     }
 
@@ -4794,7 +5000,7 @@ class WhoopBleClient(
                 _state.update { it.copy(
                     whoop5Detected = true,
                     statusNote = "Newer compatible band connected - experimental. After bonding, NOOP brings up live " +
-                        "heart rate from the strap's realtime stream. Deeper metrics (recovery, strain, " +
+                        "heart rate from the band's realtime stream. Deeper metrics (recovery, strain, " +
                         "sleep) are still being validated. Legacy compatible bands have full support today.",
                 ) }
                 cmdCharacteristic = whoop5.getCharacteristic(WHOOP5_CMD_WRITE_CHAR)
@@ -6868,7 +7074,7 @@ class WhoopBleClient(
                 // the two platforms never disagree on which banner a given sync shows.
                 lastSyncError = when {
                     bankedNothing && sustainedEmpty ->
-                        "Synced, but your strap had no stored history to hand over - only its diagnostic output. This usually means its clock has lost sync, so it isn't saving data to flash. Fully charge it to 100%, then reconnect, and it should start banking again."
+                        "Synced, but your band had no stored history to hand over - only its diagnostic output. This usually means its clock has lost sync, so it isn't saving data to flash. Fully charge it to 100%, then reconnect, and it should start banking again."
                     bankedNothing -> null   // banked nothing but not yet sustained — stay silent (matches Swift)
                     // #324/#928: the strap banked records but its newest is dated implausibly in the future
                     // (RTC relatched ahead). #773 drops the samples so nothing is misfiled, but this path
@@ -7099,7 +7305,7 @@ class WhoopBleClient(
         payload[0] = 0x01
         System.arraycopy(endData, 0, payload, 1, endData.size)
         send(CommandNumber.HISTORICAL_DATA_RESULT, payload, withResponse = true)
-        // Progress signal for the "Syncing strap history…" UI (#77). The per-session count remains
+        // Progress signal for the "Syncing Noop Band history…" UI (#77). The per-session count remains
         // separate for outcome classification; the visible count spans auto-continue slices.
         ackedChunksThisSession += 1
         if (trimAdvanced) {
@@ -7303,7 +7509,7 @@ class WhoopBleClient(
         ioScope.launch { flushLive(); flushStandardHr() }
 
         // Reset all per-connection state and clear UI flags (incl. the syncing pill — a dropped link
-        // mid-offload must not leave "Syncing strap history…" stuck on, #77). clearedBiometrics() also
+        // mid-offload must not leave "Syncing Noop Band history…" stuck on, #77). clearedBiometrics() also
         // blanks HR / R-R / the rolling buffer so a stale heart rate or R-R strip can't outlive the link
         // (parity with macOS LiveState.clearBiometrics — PR#191; the Android client previously cleared
         // `charging` but left heartRate/rr stale).

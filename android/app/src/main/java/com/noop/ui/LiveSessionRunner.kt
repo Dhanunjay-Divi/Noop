@@ -52,7 +52,7 @@ class LiveSessionRunner(
     /** Current provenance/wear gate. Untrusted time clears the warning window instead of accruing. */
     private val workoutGuidanceSignalTrusted: () -> Boolean = { false },
     /** Wrist-alert master. Phone guidance remains independent when this is false. */
-    private val workoutGuidanceHapticsEnabled: () -> Boolean = { true },
+    private val workoutGuidanceHapticsEnabled: () -> Boolean = { false },
     /** Phone companion for the strongest sustained cue; injected to keep this runner JVM-testable. */
     private val pauseAndAssess: () -> Unit = {},
     /** Provenance token stored on the row (which live source fed the session). */
@@ -190,12 +190,12 @@ class LiveSessionRunner(
 
         when {
             caution?.cue == WorkoutCautionPolicy.Cue.PAUSE_AND_ASSESS -> {
-                if (workoutGuidanceHapticsEnabled()) firePauseAndAssess()
+                if (canDeliverWristCue()) firePauseAndAssess()
                 pauseAndAssess()
             }
-            out.cue != null -> fireCue(out.cue)
+            out.cue != null && canDeliverWristCue() -> fireCue(out.cue)
             caution?.cue == WorkoutCautionPolicy.Cue.EASE_OFF &&
-                workoutGuidanceHapticsEnabled() ->
+                canDeliverWristCue() ->
                 fireCue(LiveSessionEngine.Cue.EASE_OFF)
         }
         publish(out)
@@ -211,7 +211,7 @@ class LiveSessionRunner(
      * and a stacked or late one is not (a wrong buzz is unforgivable; a missed buzz is fine).
      */
     private fun fireCue(cue: LiveSessionEngine.Cue) {
-        if (walkJob?.isActive == true) return
+        if (!canDeliverWristCue() || walkJob?.isActive == true) return
         val signal = when (cue) {
             LiveSessionEngine.Cue.PUSH_NUDGE -> LiveSessionHaptics.Signal.PUSH
             LiveSessionEngine.Cue.EASE_OFF -> LiveSessionHaptics.Signal.EASE_OFF
@@ -230,11 +230,14 @@ class LiveSessionRunner(
 
     /** One distinct five-loop command. The short guard job makes it share the drop-not-queue gate. */
     private fun firePauseAndAssess() {
-        if (walkJob?.isActive == true) return
+        if (!canDeliverWristCue() || walkJob?.isActive == true) return
         easeCount += 1
         buzz(5)
         walkJob = scope.launch { delay(PAUSE_HAPTIC_GUARD_MILLIS) }
     }
+
+    private fun canDeliverWristCue(): Boolean =
+        workoutGuidanceHapticsEnabled() && workoutGuidanceSignalTrusted()
 
     private fun publish(out: LiveSessionEngine.Output? = _snapshot.value.output) {
         val until = endTs ?: lastTickTs
@@ -295,14 +298,14 @@ class LiveSessionRunner(
     }
 }
 
-// MARK: - LiveSessionPrefs — the `live_sessions_beta` feature flag (Settings toggle, default ON)
+// MARK: - LiveSessionPrefs — the `live_sessions_beta` feature flag (Settings toggle, default OFF)
 
-/** Gate for the Today entry + the Settings row. BETA-labelled at every surface; flag default ON. */
+/** Gate for the Today entry + the Settings row. The beta requires explicit user opt-in. */
 object LiveSessionPrefs {
     const val KEY_ENABLED = "live_sessions_beta"
 
     fun enabled(context: Context): Boolean =
-        NoopPrefs.of(context).getBoolean(KEY_ENABLED, true)
+        NoopPrefs.of(context).getBoolean(KEY_ENABLED, false)
 
     fun setEnabled(context: Context, enabled: Boolean) {
         NoopPrefs.of(context).edit().putBoolean(KEY_ENABLED, enabled).apply()

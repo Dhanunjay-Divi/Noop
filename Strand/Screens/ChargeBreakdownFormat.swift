@@ -29,8 +29,9 @@ enum ChargeBreakdownFormat {
                                     : String(localized: "+\(deltaPoints) pts")
         }
         if deltaPoints < 0 {   // the minus sign rides the value
-            return deltaPoints == -1 ? String(localized: "\(deltaPoints) pt")
-                                     : String(localized: "\(deltaPoints) pts")
+            let localized = deltaPoints == -1 ? String(localized: "\(deltaPoints) pt")
+                                              : String(localized: "\(deltaPoints) pts")
+            return localized.replacingOccurrences(of: "-", with: "−", options: .anchored)
         }
         return String(localized: "0 pts")
     }
@@ -81,9 +82,9 @@ enum ChargeBreakdownFormat {
     /// solid -> REL. (reliable). Unit-tested.
     static func tierTag(_ confidence: ScoreConfidence) -> String {
         switch confidence {
-        case .calibrating: return String(localized: "CALIBRATING")
-        case .building:    return String(localized: "EST.")
-        case .solid:       return String(localized: "REL.")
+        case .calibrating: return String(localized: "appwide.charge.confidence.calibrating")
+        case .building:    return String(localized: "appwide.charge.confidence.estimate")
+        case .solid:       return String(localized: "appwide.charge.confidence.reliable")
         }
     }
 
@@ -134,8 +135,19 @@ enum ChargeBreakdownFormat {
     /// Built from the engine's signed deviation; one decimal, explicit sign, never a fake absolute.
     /// Pure + unit-tested.
     static func skinTempDeviationLabel(_ rel: SkinTempRelative) -> String {
-        let sign = rel.deviationC >= 0 ? "+" : ""
-        return String(localized: "\(sign)\(String(format: "%.1f", rel.deviationC)) C vs your normal")
+        let sign = rel.deviationC < 0 ? "−" : "+"
+        let magnitude = String(format: "%.1f", abs(rel.deviationC))
+        let localized = String(localized: "\(sign)\(magnitude) C vs your normal")
+        return localized.replacingOccurrences(of: " C", with: " °C")
+    }
+
+    static func showsSeparateSkinTemperatureDeviation(
+        drivers: [ChargeDriver],
+        relative: SkinTempRelative?
+    ) -> Bool {
+        relative != nil && !drivers.contains {
+            $0.label.caseInsensitiveCompare("Skin temperature") == .orderedSame
+        }
     }
 
     /// The plain-English tier word for the relative skin-temp marker. Pure.
@@ -241,7 +253,11 @@ struct ChargeBreakdownSection: View {
             }
             // A5 , the night's relative skin-temp marker, tagged REL., shown as a deviation from the
             // personal normal rather than a fake clinical absolute. Only when the night carries one.
-            if let rel = skinTempRel {
+            if let rel = skinTempRel,
+               ChargeBreakdownFormat.showsSeparateSkinTemperatureDeviation(
+                   drivers: drivers,
+                   relative: rel
+               ) {
                 SkinTempDeviationRow(rel: rel)
                     .padding(.top, NoopMetrics.space1)
             }

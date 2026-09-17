@@ -16,6 +16,11 @@ import StrandDesign
 import StrandAnalytics
 import WhoopStore
 
+@MainActor
+internal func liveSessionBandReady(_ live: LiveState) -> Bool {
+    live.connected && live.bonded && live.encryptedBond && live.worn
+}
+
 struct LiveSessionView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var repo: Repository
@@ -111,7 +116,8 @@ struct LiveSessionView: View {
     }
 
     private func startSession() {
-        guard !hasStarted else { return }
+        guard !hasStarted,
+              liveSessionBandReady(model.live) else { return }
         chargeLineVisible = true
         runner.start(model: model, repo: repo, ble: model.ble, profile: profile)
         hasStarted = true
@@ -311,6 +317,9 @@ private struct LiveSessionBackdrop: View {
 /// Informational gate shown before any runner side effect. Its copy mirrors Android and is intentionally
 /// specific about the engine's actual warm-up, dwell, cooldown, stale, and auto-end thresholds.
 private struct LiveSessionPreflightView: View {
+    @EnvironmentObject private var model: AppModel
+    @AppStorage(AppModel.wristAlertsMasterKey) private var wristAlertsEnabled = false
+
     let onStart: () -> Void
     let onClose: () -> Void
 
@@ -352,6 +361,20 @@ private struct LiveSessionPreflightView: View {
                             washStrength: 0.7
                         )
                     )
+
+                    Label(
+                        capabilityMessage,
+                        systemImage: canStart
+                            ? (wristCuesReady ? "wave.3.right.circle.fill" : "iphone")
+                            : "antenna.radiowaves.left.and.right.slash"
+                    )
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(
+                        canStart
+                            ? StrandPalette.textSecondary
+                            : StrandPalette.statusWarning
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, NoopMetrics.space6)
             }
@@ -362,6 +385,7 @@ private struct LiveSessionPreflightView: View {
                 kind: .primary,
                 fullWidth: true,
                 action: onStart)
+                .disabled(!canStart)
                 .padding(.top, NoopMetrics.space2)
         }
         .screenPadding()
@@ -370,6 +394,24 @@ private struct LiveSessionPreflightView: View {
         #if os(macOS)
         .frame(minWidth: 480, minHeight: 640)
         #endif
+    }
+
+    private var canStart: Bool {
+        liveSessionBandReady(model.live)
+    }
+
+    private var wristCuesReady: Bool {
+        canStart && wristAlertsEnabled
+    }
+
+    private var capabilityMessage: LocalizedStringKey {
+        if !canStart {
+            return "appwide.live_session.band_required"
+        }
+        if wristCuesReady {
+            return "appwide.live_session.wrist_ready"
+        }
+        return "appwide.live_session.screen_only"
     }
 
     private var header: some View {

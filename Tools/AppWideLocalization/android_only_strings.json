@@ -1,0 +1,555 @@
+{
+  "strings": {
+    "ui_audit_recovery_driver_baseline_format": {
+      "en": "Baseline %1$s",
+      "de": "Ausgangswert %1$s",
+      "es": "Referencia %1$s",
+      "fr": "Référence %1$s",
+      "it": "Riferimento %1$s",
+      "pt-PT": "Referência %1$s",
+      "ru": "Исходный уровень %1$s",
+      "zh-Hans": "基线 %1$s",
+      "zh-Hant": "基準 %1$s"
+    },
+    "ui_audit_recovery_driver_value_beats_per_minute": {
+      "en": "%1$s bpm",
+      "de": "%1$s Schläge/min",
+      "es": "%1$s lpm",
+      "fr": "%1$s bpm",
+      "it": "%1$s battiti/min",
+      "pt-PT": "%1$s batimentos/min",
+      "ru": "%1$s уд/мин",
+      "zh-Hans": "%1$s 次/分钟",
+      "zh-Hant": "%1$s 次/分鐘"
+    },
+    "ui_audit_recovery_driver_value_breaths_per_minute": {
+      "en": "%1$s breaths/min",
+      "de": "%1$s Atemzüge/min",
+      "es": "%1$s resp/min",
+      "fr": "%1$s respirations/min",
+      "it": "%1$s respiri/min",
+      "pt-PT": "%1$s respirações/min",
+      "ru": "%1$s дыханий/мин",
+      "zh-Hans": "%1$s 次呼吸/分钟",
+      "zh-Hant": "%1$s 次呼吸/分鐘"
+    },
+    "ui_audit_recovery_driver_value_celsius_deviation": {
+      "en": "%1$s °C",
+      "de": "%1$s °C",
+      "es": "%1$s °C",
+      "fr": "%1$s °C",
+      "it": "%1$s °C",
+      "pt-PT": "%1$s °C",
+      "ru": "%1$s °C",
+      "zh-Hans": "%1$s °C",
+      "zh-Hant": "%1$s °C"
+    },
+    "ui_audit_recovery_driver_value_milliseconds": {
+      "en": "%1$s ms",
+      "de": "%1$s ms",
+      "es": "%1$s ms",
+      "fr": "%1$s ms",
+      "it": "%1$s ms",
+      "pt-PT": "%1$s ms",
+      "ru": "%1$s мс",
+      "zh-Hans": "%1$s 毫秒",
+      "zh-Hant": "%1$s 毫秒"
+    },
+    "ui_audit_recovery_driver_value_percent": {
+      "en": "%1$s%%",
+      "de": "%1$s %%",
+      "es": "%1$s %%",
+      "fr": "%1$s %%",
+      "it": "%1$s %%",
+      "pt-PT": "%1$s %%",
+      "ru": "%1$s %%",
+      "zh-Hans": "%1$s%%",
+      "zh-Hant": "%1$s%%"
+    },
+    "ui_audit_recovery_driver_verdict_above_limiting": {
+      "en": "above baseline, limiting recovery",
+      "de": "über dem Ausgangswert und begrenzt die Erholung",
+      "es": "por encima de la referencia, limita la recuperación",
+      "fr": "au-dessus de la référence, limitant la récupération",
+      "it": "sopra il riferimento, limita il recupero",
+      "pt-PT": "acima da referência, limita a recuperação",
+      "ru": "выше исходного уровня, ограничивает восстановление",
+      "zh-Hans": "高于基线，限制恢复",
+      "zh-Hant": "高於基準，限制恢復"
+    },
+    "ui_audit_recovery_driver_verdict_above_supporting": {
+      "en": "above baseline, supporting recovery",
+      "de": "über dem Ausgangswert und unterstützt die Erholung",
+      "es": "por encima de la referencia, favorece la recuperación",
+      "fr": "au-dessus de la référence, favorable à la récupération",
+      "it": "sopra il riferimento, favorisce il recupero",
+      "pt-PT": "acima da referência, favorece a recuperação",
+      "ru": "выше исходного уровня, способствует восстановлению",
+      "zh-Hans": "高于基线，有助于恢复",
+      "zh-Hant": "高於基準，有助於恢復"
+    },
+    "ui_audit_recovery_driver_verdict_at_baseline": {
+      "en": "at baseline",
+      "de": "auf dem Ausgangswert",
+      "es": "en la referencia",
+      "fr": "au niveau de référence",
+      "it": "al valore di riferimento",
+      "pt-PT": "no valor de referência",
+      "ru": "на исходном уровне",
+      "zh-Hans": "处于基线",
+      "zh-Hant": "處於基準"
+    },
+    "ui_audit_recovery_driver_verdict_below_limiting": {
+      "en": "below baseline, limiting recovery",
+      "de": "unter dem Ausgangswert und begrenzt die Erholung",
+      "es": "por debajo de la referencia, limita la recuperación",
+      "fr": "en dessous de la référence, limitant la récupération",
+      "it": "sotto il riferimento, limita il recupero",
+      "pt-PT": "abaixo da referência, limita a recuperação",
+      "ru": "ниже исходного уровня, ограничивает восстановление",
+      "zh-Hans": "低于基线，限制恢复",
+      "zh-Hant": "低於基準，限制恢復"
+    },
+    "ui_audit_recovery_driver_verdict_below_supporting": {
+      "en": "below baseline, supporting recovery",
+      "de": "unter dem Ausgangswert und unterstützt die Erholung",
+      "es": "por debajo de la referencia, favorece la recuperación",
+      "fr": "en dessous de la référence, favorable à la récupération",
+      "it": "sotto il riferimento, favorisce il recupero",
+      "pt-PT": "abaixo da referência, favorece a recuperação",
+      "ru": "ниже исходного уровня, способствует восстановлению",
+      "zh-Hans": "低于基线，有助于恢复",
+      "zh-Hant": "低於基準，有助於恢復"
+    },
+    "ui_audit_recovery_driver_verdict_cooler_limiting": {
+      "en": "cooler than baseline, limiting recovery",
+      "de": "kühler als der Ausgangswert und begrenzt die Erholung",
+      "es": "más fría que la referencia, limita la recuperación",
+      "fr": "plus froide que la référence, limitant la récupération",
+      "it": "più fredda del riferimento, limita il recupero",
+      "pt-PT": "mais fria do que a referência, limita a recuperação",
+      "ru": "холоднее исходного уровня, ограничивает восстановление",
+      "zh-Hans": "低于基线温度，限制恢复",
+      "zh-Hant": "低於基準溫度，限制恢復"
+    },
+    "ui_audit_recovery_driver_verdict_near_baseline": {
+      "en": "near baseline",
+      "de": "nahe am Ausgangswert",
+      "es": "cerca de la referencia",
+      "fr": "près de la référence",
+      "it": "vicino al riferimento",
+      "pt-PT": "perto da referência",
+      "ru": "близко к исходному уровню",
+      "zh-Hans": "接近基线",
+      "zh-Hant": "接近基準"
+    },
+    "ui_audit_recovery_driver_verdict_sleep_limited": {
+      "en": "sleep quality limited recovery",
+      "de": "Die Schlafqualität begrenzte die Erholung",
+      "es": "la calidad del sueño limitó la recuperación",
+      "fr": "la qualité du sommeil a limité la récupération",
+      "it": "la qualità del sonno ha limitato il recupero",
+      "pt-PT": "a qualidade do sono limitou a recuperação",
+      "ru": "качество сна ограничило восстановление",
+      "zh-Hans": "睡眠质量限制了恢复",
+      "zh-Hant": "睡眠品質限制了恢復"
+    },
+    "ui_audit_recovery_driver_verdict_sleep_neutral": {
+      "en": "sleep quality was neutral",
+      "de": "Die Schlafqualität war neutral",
+      "es": "la calidad del sueño fue neutral",
+      "fr": "la qualité du sommeil était neutre",
+      "it": "la qualità del sonno è stata neutra",
+      "pt-PT": "a qualidade do sono foi neutra",
+      "ru": "качество сна было нейтральным",
+      "zh-Hans": "睡眠质量对恢复影响中性",
+      "zh-Hant": "睡眠品質對恢復影響中性"
+    },
+    "ui_audit_recovery_driver_verdict_sleep_supported": {
+      "en": "sleep quality supported recovery",
+      "de": "Die Schlafqualität unterstützte die Erholung",
+      "es": "la calidad del sueño favoreció la recuperación",
+      "fr": "la qualité du sommeil a favorisé la récupération",
+      "it": "la qualità del sonno ha favorito il recupero",
+      "pt-PT": "a qualidade do sono favoreceu a recuperação",
+      "ru": "качество сна поддержало восстановление",
+      "zh-Hans": "睡眠质量有助于恢复",
+      "zh-Hant": "睡眠品質有助於恢復"
+    },
+    "ui_audit_recovery_driver_verdict_typical_night": {
+      "en": "a typical night",
+      "de": "eine typische Nacht",
+      "es": "una noche habitual",
+      "fr": "une nuit habituelle",
+      "it": "una notte tipica",
+      "pt-PT": "uma noite habitual",
+      "ru": "обычная ночь",
+      "zh-Hans": "典型的一晚",
+      "zh-Hant": "典型的一晚"
+    },
+    "ui_audit_recovery_driver_verdict_warmer_limiting": {
+      "en": "warmer than baseline, limiting recovery",
+      "de": "wärmer als der Ausgangswert und begrenzt die Erholung",
+      "es": "más cálida que la referencia, limita la recuperación",
+      "fr": "plus chaude que la référence, limitant la récupération",
+      "it": "più calda del riferimento, limita il recupero",
+      "pt-PT": "mais quente do que a referência, limita a recuperação",
+      "ru": "теплее исходного уровня, ограничивает восстановление",
+      "zh-Hans": "高于基线温度，限制恢复",
+      "zh-Hant": "高於基準溫度，限制恢復"
+    },
+    "ui_audit_stress_at_baseline": {
+      "en": "at baseline",
+      "de": "auf dem Ausgangswert",
+      "es": "en la referencia",
+      "fr": "au niveau de référence",
+      "it": "al valore di riferimento",
+      "pt-PT": "no valor de referência",
+      "ru": "на исходном уровне",
+      "zh-Hans": "处于基线",
+      "zh-Hant": "處於基準"
+    },
+    "ui_audit_stress_delta_vs_baseline": {
+      "en": "%1$s vs baseline",
+      "de": "%1$s ggü. Ausgangswert",
+      "es": "%1$s vs. referencia",
+      "fr": "%1$s vs référence",
+      "it": "%1$s vs riferimento",
+      "pt-PT": "%1$s vs referência",
+      "ru": "%1$s к исходному уровню",
+      "zh-Hans": "%1$s（与基线相比）",
+      "zh-Hant": "%1$s（與基準相比）"
+    },
+    "ui_audit_stress_explanation_derived_high_both": {
+      "en": "Resting HR is above and HRV is below your prior baseline. That combination raises this experimental physiological-load estimate.",
+      "de": "Der Ruhepuls liegt über und die HRV unter deinem bisherigen Ausgangswert. Diese Kombination erhöht die experimentelle Schätzung der körperlichen Belastung.",
+      "es": "La frecuencia cardiaca en reposo está por encima y la VFC por debajo de tu referencia anterior. Esa combinación eleva esta estimación experimental de carga fisiológica.",
+      "fr": "La fréquence cardiaque au repos est au-dessus et la VFC en dessous de votre référence antérieure. Cette combinaison augmente l’estimation expérimentale de la charge physiologique.",
+      "it": "La frequenza cardiaca a riposo è sopra e l’HRV sotto il tuo riferimento precedente. Questa combinazione aumenta la stima sperimentale del carico fisiologico.",
+      "pt-PT": "A frequência cardíaca em repouso está acima e a VFC abaixo da sua referência anterior. Esta combinação eleva a estimativa experimental de carga fisiológica.",
+      "ru": "Пульс в покое выше, а ВСР ниже вашего прежнего исходного уровня. Такое сочетание повышает экспериментальную оценку физиологической нагрузки.",
+      "zh-Hans": "静息心率高于、HRV 低于你先前的基线。这种组合会提高实验性生理负荷估算。",
+      "zh-Hant": "靜息心率高於、HRV 低於你先前的基準。這種組合會提高實驗性生理負荷估算。"
+    },
+    "ui_audit_stress_explanation_derived_high_hrv": {
+      "en": "HRV is below your prior baseline, which raises this experimental estimate. Check the context and how you feel before acting on it.",
+      "de": "Die HRV liegt unter deinem bisherigen Ausgangswert und erhöht diese experimentelle Schätzung. Prüfe Kontext und Befinden, bevor du danach handelst.",
+      "es": "La VFC está por debajo de tu referencia anterior, lo que eleva esta estimación experimental. Revisa el contexto y cómo te sientes antes de actuar.",
+      "fr": "La VFC est inférieure à votre référence antérieure, ce qui augmente cette estimation expérimentale. Vérifiez le contexte et votre ressenti avant d’agir.",
+      "it": "L’HRV è sotto il tuo riferimento precedente e aumenta questa stima sperimentale. Controlla il contesto e come ti senti prima di agire.",
+      "pt-PT": "A VFC está abaixo da sua referência anterior, elevando esta estimativa experimental. Verifique o contexto e a forma como se sente antes de agir.",
+      "ru": "ВСР ниже вашего прежнего исходного уровня, что повышает эту экспериментальную оценку. Перед действиями учитывайте контекст и самочувствие.",
+      "zh-Hans": "HRV 低于你先前的基线，因此提高了这项实验性估算。采取行动前请结合情境和自身感受。",
+      "zh-Hant": "HRV 低於你先前的基準，因此提高了這項實驗性估算。採取行動前請結合情境和自身感受。"
+    },
+    "ui_audit_stress_explanation_derived_high_other": {
+      "en": "Available autonomic markers sit above their recent range. This is a physiological pattern, not a diagnosis or emotional-stress reading.",
+      "de": "Die verfügbaren autonomen Marker liegen über ihrem jüngsten Bereich. Das ist ein physiologisches Muster, keine Diagnose oder Messung emotionalen Stresses.",
+      "es": "Los marcadores autonómicos disponibles están por encima de su rango reciente. Es un patrón fisiológico, no un diagnóstico ni una lectura de estrés emocional.",
+      "fr": "Les marqueurs autonomes disponibles dépassent leur plage récente. Il s’agit d’un profil physiologique, pas d’un diagnostic ni d’une mesure du stress émotionnel.",
+      "it": "I marcatori autonomici disponibili sono sopra il loro intervallo recente. È un modello fisiologico, non una diagnosi né una lettura dello stress emotivo.",
+      "pt-PT": "Os marcadores autonómicos disponíveis estão acima do intervalo recente. É um padrão fisiológico, não um diagnóstico nem uma leitura de stress emocional.",
+      "ru": "Доступные вегетативные маркеры выше своего недавнего диапазона. Это физиологическая картина, а не диагноз или показатель эмоционального стресса.",
+      "zh-Hans": "可用的自主神经指标高于近期范围。这是一种生理模式，不是诊断或情绪压力读数。",
+      "zh-Hant": "可用的自律神經指標高於近期範圍。這是一種生理模式，不是診斷或情緒壓力讀數。"
+    },
+    "ui_audit_stress_explanation_derived_high_rhr": {
+      "en": "Resting HR is above your prior baseline, which raises this experimental estimate. One signal cannot identify the cause.",
+      "de": "Der Ruhepuls liegt über deinem bisherigen Ausgangswert und erhöht diese experimentelle Schätzung. Ein einzelnes Signal kann die Ursache nicht bestimmen.",
+      "es": "La frecuencia cardiaca en reposo está por encima de tu referencia anterior, lo que eleva esta estimación experimental. Una sola señal no identifica la causa.",
+      "fr": "La fréquence cardiaque au repos est supérieure à votre référence antérieure, ce qui augmente cette estimation expérimentale. Un seul signal ne permet pas d’identifier la cause.",
+      "it": "La frequenza cardiaca a riposo è sopra il tuo riferimento precedente e aumenta questa stima sperimentale. Un singolo segnale non identifica la causa.",
+      "pt-PT": "A frequência cardíaca em repouso está acima da sua referência anterior, elevando esta estimativa experimental. Um só sinal não identifica a causa.",
+      "ru": "Пульс в покое выше вашего прежнего исходного уровня, что повышает эту экспериментальную оценку. Один сигнал не может определить причину.",
+      "zh-Hans": "静息心率高于你先前的基线，因此提高了这项实验性估算。单一信号无法确定原因。",
+      "zh-Hant": "靜息心率高於你先前的基準，因此提高了這項實驗性估算。單一訊號無法確定原因。"
+    },
+    "ui_audit_stress_explanation_derived_low_both": {
+      "en": "Resting HR is below and HRV is above your prior baseline, lowering this physiological-load estimate.",
+      "de": "Der Ruhepuls liegt unter und die HRV über deinem bisherigen Ausgangswert. Dadurch sinkt die Schätzung der körperlichen Belastung.",
+      "es": "La frecuencia cardiaca en reposo está por debajo y la VFC por encima de tu referencia anterior, lo que reduce esta estimación de carga fisiológica.",
+      "fr": "La fréquence cardiaque au repos est inférieure et la VFC supérieure à votre référence antérieure, ce qui réduit cette estimation de la charge physiologique.",
+      "it": "La frequenza cardiaca a riposo è sotto e l’HRV sopra il tuo riferimento precedente, riducendo questa stima del carico fisiologico.",
+      "pt-PT": "A frequência cardíaca em repouso está abaixo e a VFC acima da sua referência anterior, reduzindo esta estimativa de carga fisiológica.",
+      "ru": "Пульс в покое ниже, а ВСР выше вашего прежнего исходного уровня, что снижает оценку физиологической нагрузки.",
+      "zh-Hans": "静息心率低于、HRV 高于你先前的基线，因此降低了生理负荷估算。",
+      "zh-Hant": "靜息心率低於、HRV 高於你先前的基準，因此降低了生理負荷估算。"
+    },
+    "ui_audit_stress_explanation_derived_low_hrv": {
+      "en": "HRV is above your prior baseline, lowering this estimate. It does not by itself establish recovery or emotional state.",
+      "de": "Die HRV liegt über deinem bisherigen Ausgangswert und senkt diese Schätzung. Sie belegt allein weder Erholung noch einen emotionalen Zustand.",
+      "es": "La VFC está por encima de tu referencia anterior, lo que reduce esta estimación. Por sí sola no demuestra recuperación ni un estado emocional.",
+      "fr": "La VFC est supérieure à votre référence antérieure, ce qui réduit cette estimation. À elle seule, elle n’établit ni une récupération ni un état émotionnel.",
+      "it": "L’HRV è sopra il tuo riferimento precedente e riduce questa stima. Da sola non dimostra recupero né uno stato emotivo.",
+      "pt-PT": "A VFC está acima da sua referência anterior, reduzindo esta estimativa. Por si só, não comprova recuperação nem um estado emocional.",
+      "ru": "ВСР выше вашего прежнего исходного уровня, что снижает эту оценку. Сама по себе она не подтверждает восстановление или эмоциональное состояние.",
+      "zh-Hans": "HRV 高于你先前的基线，因此降低了这项估算。仅凭该信号不能证明恢复状态或情绪状态。",
+      "zh-Hant": "HRV 高於你先前的基準，因此降低了這項估算。僅憑此訊號無法證明恢復狀態或情緒狀態。"
+    },
+    "ui_audit_stress_explanation_derived_low_other": {
+      "en": "Available autonomic markers sit below their recent range. Interpret this experimental estimate alongside context and how you feel.",
+      "de": "Die verfügbaren autonomen Marker liegen unter ihrem jüngsten Bereich. Interpretiere diese experimentelle Schätzung zusammen mit Kontext und Befinden.",
+      "es": "Los marcadores autonómicos disponibles están por debajo de su rango reciente. Interpreta esta estimación experimental junto con el contexto y cómo te sientes.",
+      "fr": "Les marqueurs autonomes disponibles sont inférieurs à leur plage récente. Interprétez cette estimation expérimentale avec le contexte et votre ressenti.",
+      "it": "I marcatori autonomici disponibili sono sotto il loro intervallo recente. Interpreta questa stima sperimentale insieme al contesto e a come ti senti.",
+      "pt-PT": "Os marcadores autonómicos disponíveis estão abaixo do intervalo recente. Interprete esta estimativa experimental com o contexto e com a forma como se sente.",
+      "ru": "Доступные вегетативные маркеры ниже своего недавнего диапазона. Интерпретируйте эту экспериментальную оценку с учетом контекста и самочувствия.",
+      "zh-Hans": "可用的自主神经指标低于近期范围。请结合情境和自身感受理解这项实验性估算。",
+      "zh-Hant": "可用的自律神經指標低於近期範圍。請結合情境和自身感受理解這項實驗性估算。"
+    },
+    "ui_audit_stress_explanation_derived_low_rhr": {
+      "en": "Resting HR is below your prior baseline, lowering this estimate. It does not by itself establish recovery or emotional state.",
+      "de": "Der Ruhepuls liegt unter deinem bisherigen Ausgangswert und senkt diese Schätzung. Er belegt allein weder Erholung noch einen emotionalen Zustand.",
+      "es": "La frecuencia cardiaca en reposo está por debajo de tu referencia anterior, lo que reduce esta estimación. Por sí sola no demuestra recuperación ni un estado emocional.",
+      "fr": "La fréquence cardiaque au repos est inférieure à votre référence antérieure, ce qui réduit cette estimation. À elle seule, elle n’établit ni une récupération ni un état émotionnel.",
+      "it": "La frequenza cardiaca a riposo è sotto il tuo riferimento precedente e riduce questa stima. Da sola non dimostra recupero né uno stato emotivo.",
+      "pt-PT": "A frequência cardíaca em repouso está abaixo da sua referência anterior, reduzindo esta estimativa. Por si só, não comprova recuperação nem um estado emocional.",
+      "ru": "Пульс в покое ниже вашего прежнего исходного уровня, что снижает эту оценку. Сам по себе он не подтверждает восстановление или эмоциональное состояние.",
+      "zh-Hans": "静息心率低于你先前的基线，因此降低了这项估算。仅凭该信号不能证明恢复状态或情绪状态。",
+      "zh-Hant": "靜息心率低於你先前的基準，因此降低了這項估算。僅憑此訊號無法證明恢復狀態或情緒狀態。"
+    },
+    "ui_audit_stress_explanation_derived_medium_hrv": {
+      "en": "HRV is modestly below your prior baseline. Consider sleep, training, illness and measurement context.",
+      "de": "Die HRV liegt etwas unter deinem bisherigen Ausgangswert. Berücksichtige Schlaf, Training, Krankheit und Messumstände.",
+      "es": "La VFC está moderadamente por debajo de tu referencia anterior. Considera el sueño, el entrenamiento, una enfermedad y el contexto de medición.",
+      "fr": "La VFC est légèrement inférieure à votre référence antérieure. Tenez compte du sommeil, de l’entraînement, d’une maladie et du contexte de mesure.",
+      "it": "L’HRV è moderatamente sotto il tuo riferimento precedente. Considera sonno, allenamento, malattia e contesto di misurazione.",
+      "pt-PT": "A VFC está moderadamente abaixo da sua referência anterior. Considere sono, treino, doença e contexto de medição.",
+      "ru": "ВСР немного ниже вашего прежнего исходного уровня. Учитывайте сон, тренировки, болезнь и условия измерения.",
+      "zh-Hans": "HRV 略低于你先前的基线。请考虑睡眠、训练、疾病和测量情境。",
+      "zh-Hant": "HRV 略低於你先前的基準。請考慮睡眠、訓練、疾病和測量情境。"
+    },
+    "ui_audit_stress_explanation_derived_medium_other": {
+      "en": "The normalized RHR and HRV effects offset each other or stayed near baseline. That does not establish how stressed or recovered you feel.",
+      "de": "Die normalisierten Effekte von Ruhepuls und HRV gleichen sich aus oder liegen nahe am Ausgangswert. Das belegt nicht, wie gestresst oder erholt du dich fühlst.",
+      "es": "Los efectos normalizados de la frecuencia cardiaca en reposo y la VFC se compensan o permanecen cerca de la referencia. Eso no demuestra lo estresado o recuperado que te sientes.",
+      "fr": "Les effets normalisés de la fréquence cardiaque au repos et de la VFC se compensent ou restent proches de la référence. Cela n’établit pas à quel point vous vous sentez stressé ou récupéré.",
+      "it": "Gli effetti normalizzati della frequenza cardiaca a riposo e dell’HRV si compensano o restano vicini al riferimento. Questo non dimostra quanto ti senti stressato o recuperato.",
+      "pt-PT": "Os efeitos normalizados da frequência cardíaca em repouso e da VFC compensam-se ou permanecem perto da referência. Isto não comprova o nível de stress ou recuperação que sente.",
+      "ru": "Нормализованные эффекты пульса в покое и ВСР компенсируют друг друга или остаются близкими к исходному уровню. Это не подтверждает, насколько вы чувствуете стресс или восстановление.",
+      "zh-Hans": "静息心率和 HRV 的标准化影响相互抵消或保持在基线附近。这不能证明你感受到的压力或恢复程度。",
+      "zh-Hant": "靜息心率和 HRV 的標準化影響相互抵消或維持在基準附近。這無法證明你感受到的壓力或恢復程度。"
+    },
+    "ui_audit_stress_explanation_derived_medium_rhr": {
+      "en": "Resting HR is modestly above your prior baseline. Consider sleep, training, illness and measurement context.",
+      "de": "Der Ruhepuls liegt etwas über deinem bisherigen Ausgangswert. Berücksichtige Schlaf, Training, Krankheit und Messumstände.",
+      "es": "La frecuencia cardiaca en reposo está moderadamente por encima de tu referencia anterior. Considera el sueño, el entrenamiento, una enfermedad y el contexto de medición.",
+      "fr": "La fréquence cardiaque au repos est légèrement supérieure à votre référence antérieure. Tenez compte du sommeil, de l’entraînement, d’une maladie et du contexte de mesure.",
+      "it": "La frequenza cardiaca a riposo è moderatamente sopra il tuo riferimento precedente. Considera sonno, allenamento, malattia e contesto di misurazione.",
+      "pt-PT": "A frequência cardíaca em repouso está moderadamente acima da sua referência anterior. Considere sono, treino, doença e contexto de medição.",
+      "ru": "Пульс в покое немного выше вашего прежнего исходного уровня. Учитывайте сон, тренировки, болезнь и условия измерения.",
+      "zh-Hans": "静息心率略高于你先前的基线。请考虑睡眠、训练、疾病和测量情境。",
+      "zh-Hant": "靜息心率略高於你先前的基準。請考慮睡眠、訓練、疾病和測量情境。"
+    },
+    "ui_audit_stress_explanation_stored_high": {
+      "en": "A stored experimental physiological-load estimate is high. Current resting HR and HRV may add context, but they do not establish the cause or emotional stress.",
+      "de": "Eine gespeicherte experimentelle Schätzung der körperlichen Belastung ist hoch. Aktueller Ruhepuls und HRV können Kontext liefern, belegen aber weder die Ursache noch emotionalen Stress.",
+      "es": "Una estimación experimental guardada de carga fisiológica es alta. La frecuencia cardiaca en reposo y la VFC actuales pueden aportar contexto, pero no demuestran la causa ni el estrés emocional.",
+      "fr": "Une estimation expérimentale enregistrée de la charge physiologique est élevée. La fréquence cardiaque au repos et la VFC actuelles peuvent apporter du contexte, mais elles n’établissent ni la cause ni un stress émotionnel.",
+      "it": "Una stima sperimentale memorizzata del carico fisiologico è alta. La frequenza cardiaca a riposo e l’HRV attuali possono aggiungere contesto, ma non dimostrano la causa né lo stress emotivo.",
+      "pt-PT": "Uma estimativa experimental guardada de carga fisiológica está elevada. A frequência cardíaca em repouso e a VFC atuais podem acrescentar contexto, mas não comprovam a causa nem o stress emocional.",
+      "ru": "Сохраненная экспериментальная оценка физиологической нагрузки высокая. Текущие пульс в покое и ВСР могут добавить контекст, но не подтверждают причину или эмоциональный стресс.",
+      "zh-Hans": "已存储的实验性生理负荷估算较高。当前静息心率和 HRV 可以提供背景信息，但不能证明原因或情绪压力。",
+      "zh-Hant": "已儲存的實驗性生理負荷估算偏高。目前靜息心率和 HRV 可提供背景資訊，但無法證明原因或情緒壓力。"
+    },
+    "ui_audit_stress_explanation_stored_low": {
+      "en": "A stored experimental physiological-load estimate is low. It does not by itself establish recovery or emotional state.",
+      "de": "Eine gespeicherte experimentelle Schätzung der körperlichen Belastung ist niedrig. Sie belegt allein weder Erholung noch einen emotionalen Zustand.",
+      "es": "Una estimación experimental guardada de carga fisiológica es baja. Por sí sola no demuestra recuperación ni un estado emocional.",
+      "fr": "Une estimation expérimentale enregistrée de la charge physiologique est basse. À elle seule, elle n’établit ni une récupération ni un état émotionnel.",
+      "it": "Una stima sperimentale memorizzata del carico fisiologico è bassa. Da sola non dimostra recupero né uno stato emotivo.",
+      "pt-PT": "Uma estimativa experimental guardada de carga fisiológica está baixa. Por si só, não comprova recuperação nem um estado emocional.",
+      "ru": "Сохраненная экспериментальная оценка физиологической нагрузки низкая. Сама по себе она не подтверждает восстановление или эмоциональное состояние.",
+      "zh-Hans": "已存储的实验性生理负荷估算较低。仅凭该数值不能证明恢复状态或情绪状态。",
+      "zh-Hant": "已儲存的實驗性生理負荷估算偏低。僅憑此數值無法證明恢復狀態或情緒狀態。"
+    },
+    "ui_audit_stress_explanation_stored_medium": {
+      "en": "A stored experimental physiological-load estimate is in the middle range. Use current context and how you feel rather than treating it as a diagnosis.",
+      "de": "Eine gespeicherte experimentelle Schätzung der körperlichen Belastung liegt im mittleren Bereich. Berücksichtige den aktuellen Kontext und dein Befinden, statt sie als Diagnose zu verstehen.",
+      "es": "Una estimación experimental guardada de carga fisiológica está en el rango medio. Usa el contexto actual y cómo te sientes en vez de tratarla como un diagnóstico.",
+      "fr": "Une estimation expérimentale enregistrée de la charge physiologique se situe dans la zone moyenne. Tenez compte du contexte actuel et de votre ressenti plutôt que de la considérer comme un diagnostic.",
+      "it": "Una stima sperimentale memorizzata del carico fisiologico è nella fascia media. Considera il contesto attuale e come ti senti invece di trattarla come una diagnosi.",
+      "pt-PT": "Uma estimativa experimental guardada de carga fisiológica está no intervalo médio. Considere o contexto atual e a forma como se sente, em vez de a tratar como um diagnóstico.",
+      "ru": "Сохраненная экспериментальная оценка физиологической нагрузки находится в среднем диапазоне. Учитывайте текущий контекст и самочувствие, а не воспринимайте ее как диагноз.",
+      "zh-Hans": "已存储的实验性生理负荷估算处于中等范围。请结合当前情境和自身感受，不要将其视为诊断。",
+      "zh-Hant": "已儲存的實驗性生理負荷估算處於中等範圍。請結合目前情境和自身感受，不要將其視為診斷。"
+    },
+    "ui_audit_stress_methodology_derived_detail": {
+      "en": "NOOP compares resting HR and HRV with your prior personal baseline. Higher resting HR and lower HRV can raise the 0-3 estimate. The pattern cannot identify its cause or establish emotional stress or recovery, so use it with context and how you feel.",
+      "de": "NOOP vergleicht Ruhepuls und HRV mit deinem bisherigen persönlichen Ausgangswert. Ein höherer Ruhepuls und eine niedrigere HRV können die Schätzung von 0 bis 3 erhöhen. Das Muster kann weder die Ursache bestimmen noch emotionalen Stress oder Erholung belegen. Berücksichtige den Kontext und dein Befinden.",
+      "es": "NOOP compara la frecuencia cardiaca en reposo y la VFC con tu referencia personal anterior. Una frecuencia más alta y una VFC más baja pueden elevar la estimación de 0 a 3. El patrón no identifica la causa ni demuestra estrés emocional o recuperación; úsalo junto con el contexto y cómo te sientes.",
+      "fr": "NOOP compare la fréquence cardiaque au repos et la VFC à votre référence personnelle antérieure. Une fréquence plus élevée et une VFC plus basse peuvent augmenter l’estimation de 0 à 3. Ce profil ne permet pas d’identifier sa cause ni d’établir un stress émotionnel ou une récupération. Utilisez-le avec le contexte et votre ressenti.",
+      "it": "NOOP confronta la frequenza cardiaca a riposo e l’HRV con il tuo riferimento personale precedente. Una frequenza più alta e un’HRV più bassa possono aumentare la stima da 0 a 3. Il modello non identifica la causa né dimostra stress emotivo o recupero; usalo insieme al contesto e a come ti senti.",
+      "pt-PT": "A NOOP compara a frequência cardíaca em repouso e a VFC com a sua referência pessoal anterior. Uma frequência mais alta e uma VFC mais baixa podem elevar a estimativa de 0 a 3. O padrão não identifica a causa nem comprova stress emocional ou recuperação; utilize-o com o contexto e com a forma como se sente.",
+      "ru": "NOOP сравнивает пульс в покое и ВСР с вашим прежним личным исходным уровнем. Более высокий пульс и более низкая ВСР могут повысить оценку от 0 до 3. Такая картина не определяет причину и не подтверждает эмоциональный стресс или восстановление. Учитывайте контекст и свое самочувствие.",
+      "zh-Hans": "NOOP 会将静息心率和 HRV 与你先前的个人基线比较。较高的静息心率和较低的 HRV 可能会提高 0 到 3 的估算值。该模式不能确定原因，也不能证明情绪压力或恢复状态，请结合情境和自身感受理解。",
+      "zh-Hant": "NOOP 會將靜息心率和 HRV 與你先前的個人基準比較。較高的靜息心率和較低的 HRV 可能會提高 0 到 3 的估算值。此模式無法確定原因，也無法證明情緒壓力或恢復狀態，請結合情境和自身感受理解。"
+    },
+    "ui_audit_stress_methodology_derived_summary": {
+      "en": "This experimental estimate is calculated from two autonomic signals.",
+      "de": "Diese experimentelle Schätzung wird aus zwei autonomen Signalen berechnet.",
+      "es": "Esta estimación experimental se calcula con dos señales autonómicas.",
+      "fr": "Cette estimation expérimentale est calculée à partir de deux signaux autonomes.",
+      "it": "Questa stima sperimentale è calcolata da due segnali autonomici.",
+      "pt-PT": "Esta estimativa experimental é calculada a partir de dois sinais autonómicos.",
+      "ru": "Эта экспериментальная оценка рассчитывается по двум вегетативным сигналам.",
+      "zh-Hans": "这项实验性估算由两个自主神经信号计算得出。",
+      "zh-Hant": "這項實驗性估算由兩個自律神經訊號計算得出。"
+    },
+    "ui_audit_stress_methodology_stored_detail": {
+      "en": "NOOP displays the stored 0-3 value as an experimental physiological-load estimate. It does not infer the cause from your current resting HR or HRV, and it is not a diagnosis or emotional-stress reading. Use it with context and how you feel.",
+      "de": "NOOP zeigt den gespeicherten Wert von 0 bis 3 als experimentelle Schätzung der körperlichen Belastung. Die Ursache wird nicht aus dem aktuellen Ruhepuls oder der HRV abgeleitet, und der Wert ist weder eine Diagnose noch eine Messung emotionalen Stresses. Berücksichtige den Kontext und dein Befinden.",
+      "es": "NOOP muestra el valor guardado de 0 a 3 como una estimación experimental de carga fisiológica. No deduce la causa a partir de la frecuencia cardiaca en reposo o la VFC actuales, y no es un diagnóstico ni una lectura de estrés emocional. Úsalo junto con el contexto y cómo te sientes.",
+      "fr": "NOOP affiche la valeur enregistrée de 0 à 3 comme une estimation expérimentale de la charge physiologique. Il ne déduit pas la cause à partir de la fréquence cardiaque au repos ou de la VFC actuelles, et il ne s’agit ni d’un diagnostic ni d’une mesure du stress émotionnel. Utilisez-la avec le contexte et votre ressenti.",
+      "it": "NOOP mostra il valore memorizzato da 0 a 3 come stima sperimentale del carico fisiologico. Non deduce la causa dalla frequenza cardiaca a riposo o dall’HRV attuali e non è una diagnosi né una lettura dello stress emotivo. Usalo insieme al contesto e a come ti senti.",
+      "pt-PT": "A NOOP mostra o valor guardado de 0 a 3 como uma estimativa experimental de carga fisiológica. Não deduz a causa a partir da frequência cardíaca em repouso ou da VFC atuais, e não é um diagnóstico nem uma leitura de stress emocional. Utilize-o com o contexto e com a forma como se sente.",
+      "ru": "NOOP показывает сохраненное значение от 0 до 3 как экспериментальную оценку физиологической нагрузки. Причина не выводится из текущего пульса в покое или ВСР, а значение не является диагнозом или показателем эмоционального стресса. Учитывайте контекст и свое самочувствие.",
+      "zh-Hans": "NOOP 将已存储的 0 到 3 数值显示为实验性生理负荷估算。它不会根据当前静息心率或 HRV 推断原因，也不是诊断或情绪压力读数。请结合情境和自身感受理解。",
+      "zh-Hant": "NOOP 將已儲存的 0 到 3 數值顯示為實驗性生理負荷估算。它不會根據目前靜息心率或 HRV 推斷原因，也不是診斷或情緒壓力讀數。請結合情境和自身感受理解。"
+    },
+    "ui_audit_stress_methodology_stored_summary": {
+      "en": "This value was recorded or imported from its source.",
+      "de": "Dieser Wert wurde von seiner Quelle erfasst oder importiert.",
+      "es": "Este valor fue registrado o importado desde su fuente.",
+      "fr": "Cette valeur a été enregistrée ou importée depuis sa source.",
+      "it": "Questo valore è stato registrato o importato dalla sua fonte.",
+      "pt-PT": "Este valor foi registado ou importado da respetiva fonte.",
+      "ru": "Это значение было записано или импортировано из источника.",
+      "zh-Hans": "此数值由其来源记录或导入。",
+      "zh-Hant": "此數值由其來源記錄或匯入。"
+    },
+    "ui_audit_stress_methodology_title": {
+      "en": "How this estimate is built",
+      "de": "So entsteht diese Schätzung",
+      "es": "Cómo se obtiene esta estimación",
+      "fr": "Comment cette estimation est calculée",
+      "it": "Come viene creata questa stima",
+      "pt-PT": "Como esta estimativa é criada",
+      "ru": "Как формируется эта оценка",
+      "zh-Hans": "这项估算如何生成",
+      "zh-Hant": "這項估算如何產生"
+    },
+    "ui_audit_stress_score_caption": {
+      "en": "of 3 · %1$s",
+      "de": "von 3 · %1$s",
+      "es": "de 3 · %1$s",
+      "fr": "sur 3 · %1$s",
+      "it": "su 3 · %1$s",
+      "pt-PT": "de 3 · %1$s",
+      "ru": "из 3 · %1$s",
+      "zh-Hans": "满分 3 · %1$s",
+      "zh-Hant": "滿分 3 · %1$s"
+    },
+    "ui_audit_stress_totals_band_calm": {
+      "en": "Calm",
+      "de": "Ruhig",
+      "es": "En calma",
+      "fr": "Calme",
+      "it": "Calmo",
+      "pt-PT": "Calmo",
+      "ru": "Спокойно",
+      "zh-Hans": "平静",
+      "zh-Hant": "平靜"
+    },
+    "ui_audit_stress_totals_band_high": {
+      "en": "High",
+      "de": "Hoch",
+      "es": "Alto",
+      "fr": "Élevé",
+      "it": "Alto",
+      "pt-PT": "Elevado",
+      "ru": "Высоко",
+      "zh-Hans": "高",
+      "zh-Hant": "高"
+    },
+    "ui_audit_stress_totals_band_moderate": {
+      "en": "Moderate",
+      "de": "Mittel",
+      "es": "Moderado",
+      "fr": "Modéré",
+      "it": "Moderato",
+      "pt-PT": "Moderado",
+      "ru": "Умеренно",
+      "zh-Hans": "中等",
+      "zh-Hant": "中等"
+    }
+  },
+  "plurals": {
+    "ui_audit_recovery_driver_accessibility_with_baseline": {
+      "en": {
+        "one": "%1$s. Current value %2$s; baseline %3$s. Contribution: %4$s point. %5$s.",
+        "other": "%1$s. Current value %2$s; baseline %3$s. Contribution: %4$s points. %5$s."
+      },
+      "de": {
+        "one": "%1$s. Aktueller Wert %2$s; Ausgangswert %3$s. Beitrag: %4$s Punkt. %5$s.",
+        "other": "%1$s. Aktueller Wert %2$s; Ausgangswert %3$s. Beitrag: %4$s Punkte. %5$s."
+      },
+      "es": {
+        "one": "%1$s. Valor actual: %2$s; referencia: %3$s. Contribución: %4$s punto. %5$s.",
+        "other": "%1$s. Valor actual: %2$s; referencia: %3$s. Contribución: %4$s puntos. %5$s."
+      },
+      "fr": {
+        "one": "%1$s. Valeur actuelle : %2$s ; référence : %3$s. Contribution : %4$s point. %5$s.",
+        "other": "%1$s. Valeur actuelle : %2$s ; référence : %3$s. Contribution : %4$s points. %5$s."
+      },
+      "it": {
+        "one": "%1$s. Valore attuale: %2$s; riferimento: %3$s. Contributo: %4$s punto. %5$s.",
+        "other": "%1$s. Valore attuale: %2$s; riferimento: %3$s. Contributo: %4$s punti. %5$s."
+      },
+      "pt-PT": {
+        "one": "%1$s. Valor atual: %2$s; referência: %3$s. Contributo: %4$s ponto. %5$s.",
+        "other": "%1$s. Valor atual: %2$s; referência: %3$s. Contributo: %4$s pontos. %5$s."
+      },
+      "ru": {
+        "one": "%1$s. Текущее значение: %2$s; исходный уровень: %3$s. Вклад: %4$s балл. %5$s.",
+        "few": "%1$s. Текущее значение: %2$s; исходный уровень: %3$s. Вклад: %4$s балла. %5$s.",
+        "many": "%1$s. Текущее значение: %2$s; исходный уровень: %3$s. Вклад: %4$s баллов. %5$s.",
+        "other": "%1$s. Текущее значение: %2$s; исходный уровень: %3$s. Вклад: %4$s балла. %5$s."
+      },
+      "zh-Hans": {
+        "other": "%1$s。当前值：%2$s；基线：%3$s。贡献：%4$s 分。%5$s。"
+      },
+      "zh-Hant": {
+        "other": "%1$s。目前值：%2$s；基準：%3$s。貢獻：%4$s 分。%5$s。"
+      }
+    },
+    "ui_audit_recovery_driver_accessibility_without_baseline": {
+      "en": {
+        "one": "%1$s. Current value %2$s. Contribution: %3$s point. %4$s.",
+        "other": "%1$s. Current value %2$s. Contribution: %3$s points. %4$s."
+      },
+      "de": {
+        "one": "%1$s. Aktueller Wert %2$s. Beitrag: %3$s Punkt. %4$s.",
+        "other": "%1$s. Aktueller Wert %2$s. Beitrag: %3$s Punkte. %4$s."
+      },
+      "es": {
+        "one": "%1$s. Valor actual: %2$s. Contribución: %3$s punto. %4$s.",
+        "other": "%1$s. Valor actual: %2$s. Contribución: %3$s puntos. %4$s."
+      },
+      "fr": {
+        "one": "%1$s. Valeur actuelle : %2$s. Contribution : %3$s point. %4$s.",
+        "other": "%1$s. Valeur actuelle : %2$s. Contribution : %3$s points. %4$s."
+      },
+      "it": {
+        "one": "%1$s. Valore attuale: %2$s. Contributo: %3$s punto. %4$s.",
+        "other": "%1$s. Valore attuale: %2$s. Contributo: %3$s punti. %4$s."
+      },
+      "pt-PT": {
+        "one": "%1$s. Valor atual: %2$s. Contributo: %3$s ponto. %4$s.",
+        "other": "%1$s. Valor atual: %2$s. Contributo: %3$s pontos. %4$s."
+      },
+      "ru": {
+        "one": "%1$s. Текущее значение: %2$s. Вклад: %3$s балл. %4$s.",
+        "few": "%1$s. Текущее значение: %2$s. Вклад: %3$s балла. %4$s.",
+        "many": "%1$s. Текущее значение: %2$s. Вклад: %3$s баллов. %4$s.",
+        "other": "%1$s. Текущее значение: %2$s. Вклад: %3$s балла. %4$s."
+      },
+      "zh-Hans": {
+        "other": "%1$s。当前值：%2$s。贡献：%3$s 分。%4$s。"
+      },
+      "zh-Hant": {
+        "other": "%1$s。目前值：%2$s。貢獻：%3$s 分。%4$s。"
+      }
+    }
+  }
+}

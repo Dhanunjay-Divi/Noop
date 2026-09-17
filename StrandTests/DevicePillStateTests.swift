@@ -55,6 +55,21 @@ final class DevicePillStateTests: XCTestCase {
         XCTAssertEqual(WhoopModel.whoop5mg.transportName, "newer band")
     }
 
+    func testDeviceModelIsHiddenOnlyWhenItDuplicatesTheDisplayName() {
+        XCTAssertFalse(
+            DeviceCapabilityProfile.shouldShowModel(
+                displayName: " Compatible band ",
+                displayModel: "compatible BAND"
+            )
+        )
+        XCTAssertTrue(
+            DeviceCapabilityProfile.shouldShowModel(
+                displayName: "Morning Band",
+                displayModel: "Compatible band"
+            )
+        )
+    }
+
     func testDevicesDefaultHierarchyKeepsDiagnosticsBehindDisclosure() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("Strand/Screens/DevicesView.swift"))

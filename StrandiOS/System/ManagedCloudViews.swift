@@ -44,12 +44,23 @@ struct ManagedCloudBackupCard: View {
                     stateLabel
                 }
 
-                Text(
-                    "Optional storage and multi-device restore. Core metrics, coaching, workouts, journal, automations and exports stay available without an account."
-                )
-                .font(StrandFont.footnote)
-                .foregroundStyle(StrandPalette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 10) {
+                    managedBenefit(
+                        systemImage: "waveform.path.ecg",
+                        title: "Backed up",
+                        detail: "Sensor streams, sleep, workouts and daily summaries needed for restore"
+                    )
+                    managedBenefit(
+                        systemImage: "arrow.triangle.2.circlepath",
+                        title: "Used for",
+                        detail: "A server-readable copy, protected in transit and at rest, for managed storage and multi-device restore"
+                    )
+                    managedBenefit(
+                        systemImage: "iphone",
+                        title: "Stays local-first",
+                        detail: "Band collection and calculations continue on this device; cloud cannot prevent iOS suspension or BLE gaps"
+                    )
+                }
 
                 if !service.status.isEmpty {
                     Text(service.status)
@@ -95,6 +106,29 @@ struct ManagedCloudBackupCard: View {
             service.bootstrap()
             if service.phase == .deletionScheduled {
                 await service.refreshDeletionStatus()
+            }
+        }
+    }
+
+    private func managedBenefit(
+        systemImage: String,
+        title: LocalizedStringKey,
+        detail: LocalizedStringKey
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(StrandPalette.accent)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(detail)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

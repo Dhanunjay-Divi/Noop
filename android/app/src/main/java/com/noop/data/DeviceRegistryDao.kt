@@ -34,6 +34,53 @@ interface DeviceRegistryDao {
     @Query("UPDATE pairedDevice SET status = 'active', lastSeenAt = :now WHERE id = :id")
     suspend fun promote(id: String, now: Long)
 
+    @Query(
+        "SELECT MIN(ts) AS earliestAffectedTs, MAX(ts) AS latestAffectedTs FROM (" +
+            "SELECT ts FROM hrSample " +
+            "UNION ALL SELECT ts FROM ppgHrSample " +
+            "UNION ALL SELECT ts FROM rrInterval " +
+            "UNION ALL SELECT ts FROM gravitySample " +
+            "UNION ALL SELECT ts FROM respSample " +
+            "UNION ALL SELECT ts FROM skinTempSample " +
+            "UNION ALL SELECT ts FROM spo2Sample " +
+            "UNION ALL SELECT ts FROM stepSample " +
+            "UNION ALL SELECT ts FROM sleepStateSample " +
+            "UNION ALL SELECT ts FROM event)",
+    )
+    suspend fun ownershipAnalysisInputRange(): AnalysisAffectedRange
+
+    @Query(
+        "UPDATE analysisDirtySource SET generation = generation + 1, " +
+            "earliestAffectedTs = CASE " +
+            "WHEN :earliestAffectedTs IS NULL THEN earliestAffectedTs " +
+            "WHEN earliestAffectedTs IS NULL THEN :earliestAffectedTs " +
+            "ELSE MIN(earliestAffectedTs, :earliestAffectedTs) END, " +
+            "latestAffectedTs = CASE " +
+            "WHEN :latestAffectedTs IS NULL THEN latestAffectedTs " +
+            "WHEN latestAffectedTs IS NULL THEN :latestAffectedTs " +
+            "ELSE MAX(latestAffectedTs, :latestAffectedTs) END " +
+            "WHERE deviceId = :sourceId",
+    )
+    suspend fun advanceAnalysisInvalidation(
+        sourceId: String,
+        earliestAffectedTs: Long?,
+        latestAffectedTs: Long?,
+    ): Int
+
+    @Query(
+        "INSERT INTO analysisDirtySource (" +
+            "deviceId, generation, acknowledgedGeneration, " +
+            "earliestAffectedTs, latestAffectedTs) " +
+            "SELECT :sourceId, 1, 0, :earliestAffectedTs, :latestAffectedTs " +
+            "WHERE NOT EXISTS (" +
+            "SELECT 1 FROM analysisDirtySource WHERE deviceId = :sourceId)",
+    )
+    suspend fun insertAnalysisInvalidationIfAbsent(
+        sourceId: String,
+        earliestAffectedTs: Long?,
+        latestAffectedTs: Long?,
+    ): Long
+
     /** Archive a device (keeps the row + its samples — invariant I4). */
     @Query("UPDATE pairedDevice SET status = 'archived' WHERE id = :id")
     suspend fun archiveDevice(id: String)
@@ -115,6 +162,8 @@ interface DeviceRegistryDao {
     @Query("DELETE FROM liveSession WHERE deviceId = :deviceId") suspend fun deleteLiveSessionsFor(deviceId: String)
     @Query("DELETE FROM dismissedWorkout WHERE deviceId = :deviceId") suspend fun deleteDismissedWorkoutsFor(deviceId: String)
     @Query("DELETE FROM dismissedSleep WHERE deviceId = :deviceId") suspend fun deleteDismissedSleepsFor(deviceId: String)
+    @Query("DELETE FROM analysisDirtySource WHERE deviceId = :deviceId")
+    suspend fun deleteAnalysisDirtyFor(deviceId: String)
 
     /** Set the owner override for a day (insert-or-replace by the day PK). */
     @Insert(onConflict = OnConflictStrategy.REPLACE)

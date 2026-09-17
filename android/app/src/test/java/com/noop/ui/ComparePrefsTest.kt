@@ -67,4 +67,28 @@ class ComparePrefsTest {
             parsed?.map { it.id },
         )
     }
+
+    @Test
+    fun parseSelection_bmiRequiresEligibleProfile() {
+        val raw = "apple-health:bmi,my-whoop:recovery"
+
+        assertEquals(
+            listOf("my-whoop:recovery"),
+            parseCompareSelection(
+                raw = raw,
+                minSelection = 1,
+                maxSelection = 4,
+                canPresentBmi = false,
+            )?.map { it.id },
+        )
+        assertEquals(
+            listOf("apple-health:bmi", "my-whoop:recovery"),
+            parseCompareSelection(
+                raw = raw,
+                minSelection = 1,
+                maxSelection = 4,
+                canPresentBmi = true,
+            )?.map { it.id },
+        )
+    }
 }

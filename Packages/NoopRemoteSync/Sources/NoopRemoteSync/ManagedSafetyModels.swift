@@ -192,15 +192,18 @@ public struct ManagedSafetyContact: Codable, Equatable, Sendable, Identifiable {
 
 public struct ManagedSafetyContacts: Equatable, Sendable {
     public let contacts: [ManagedSafetyContact]
+    public let deliveryCapableCount: Int
     public let minimumRequired: Int
     public let maximumAllowed: Int
 
     public init(
         contacts: [ManagedSafetyContact],
+        deliveryCapableCount: Int,
         minimumRequired: Int,
         maximumAllowed: Int
     ) {
         self.contacts = contacts
+        self.deliveryCapableCount = deliveryCapableCount
         self.minimumRequired = minimumRequired
         self.maximumAllowed = maximumAllowed
     }
@@ -275,6 +278,28 @@ public struct ManagedSafetyLocation: Codable, Equatable, Sendable {
             Bool.self,
             forKey: .duplicate
         ) ?? false
+    }
+}
+
+public struct ManagedSafetyLocationCreate: Encodable, Equatable, Sendable {
+    public let sequence: Int64
+    public let latitude: Double
+    public let longitude: Double
+    public let horizontalAccuracyM: Double
+    public let capturedAt: String
+
+    public init(
+        sequence: Int64 = 1,
+        latitude: Double,
+        longitude: Double,
+        horizontalAccuracyM: Double,
+        capturedAt: String
+    ) {
+        self.sequence = sequence
+        self.latitude = latitude
+        self.longitude = longitude
+        self.horizontalAccuracyM = horizontalAccuracyM
+        self.capturedAt = capturedAt
     }
 }
 

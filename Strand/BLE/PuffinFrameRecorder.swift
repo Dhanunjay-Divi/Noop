@@ -5,7 +5,8 @@ import WhoopProtocol
 /// App-side glue around the pure `PuffinCapture`: gates on a user toggle, stamps each frame with a
 /// wall-clock time and the live (standard-profile) heart rate, and persists the growing capture to a
 /// JSON file under Application Support. Read-only with respect to the strap — it only records frames
-/// that already arrived, it never writes to the device — so it is always safe to leave on.
+/// that already arrived and never writes to the device. The output contains raw biometric data, so
+/// capture must stay opt-in, be enabled only while reproducing an issue, and be reviewed before sharing.
 ///
 /// `@MainActor` because it reads `LiveState.heartRate` and updates published capture status; the
 /// BLEManager delegate callbacks that feed it are already on the main queue.

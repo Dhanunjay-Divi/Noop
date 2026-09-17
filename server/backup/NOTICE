@@ -40,7 +40,7 @@ Generated runtime inventory
 
 swiftpm: 18 components
   - abseil-cpp-binary 1.2024072200.0 (bbe8b69694d7873315fd3a4ad41efe043e1c07c5) — Apache-2.0 — https://github.com/google/abseil-cpp-binary
-  - app-check 11.3.1 (3e33dd27dd4c69bd81c7c81fe61d8ccf58846902) — Apache-2.0 — https://github.com/google/app-check
+  - app-check 11.3.2 (97f7d74dd0e8f3d0fe5fc75cc8957aa73bdc948a) — Apache-2.0 — https://github.com/google/app-check
   - firebase-ios-sdk 12.18.0 (346daa9f46316aa372b35b317e18224acc2e9063) — Apache-2.0 — https://github.com/firebase/firebase-ios-sdk
   - google-ads-on-device-conversion-ios-sdk 3.6.1 (dc39082d8881109d35b94b1c122164c0e8d08a55) — Apache-2.0 — https://github.com/googleads/google-ads-on-device-conversion-ios-sdk
   - googleappmeasurement 12.18.0 (f04760d460296cc0fa430935a7be212e5bd67fc5) — Apache-2.0 — https://github.com/google/GoogleAppMeasurement

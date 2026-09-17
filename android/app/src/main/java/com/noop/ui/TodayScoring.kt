@@ -173,7 +173,7 @@ internal data class LastCharge(val value: Double, val caption: String)
  *  the key and falls back to the raw key so the caption is never empty. Mirrors iOS lastChargeDateFmt. */
 internal fun lastChargeDateLabel(dayKey: String): String =
     runCatching {
-        LocalDate.parse(dayKey).format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
+        LocalDate.parse(dayKey).format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
     }.getOrDefault(dayKey)
 
 /** Carry-over recency cap (#779): the "Last night" framing only holds when the carried scored day is
@@ -249,6 +249,9 @@ sealed class ScoreState {
     /** No data for today at all, strap not worn / not connected / not synced. Shows NO number. */
     object NeedsStrap : ScoreState()
 
+    /** A historical date has no Recovery score. Shows no number and never borrows live/today copy. */
+    object MissingForDay : ScoreState()
+
     /** The status title shown in the tile's state slot. VERBATIM, mirror Swift exactly. */
     val title: String
         get() = when (this) {
@@ -257,6 +260,7 @@ sealed class ScoreState {
             BaselineReady -> "Baseline ready"
             is CarriedLastNight -> if (stale) "Latest sleep · $dateLabel" else "Last night · $dateLabel"
             NeedsStrap -> "Needs wearable data"
+            MissingForDay -> "No Recovery score"
         }
 
     /** The one-line plain-English what-to-do. VERBATIM, mirror Swift exactly. The night(s) plural in
@@ -277,8 +281,13 @@ sealed class ScoreState {
                 if (stale) "This is your last scored session. Wear Noop Band overnight for a fresh score."
                 else "Tonight's lands after you sleep with Noop Band on."
             NeedsStrap -> "No data for today. Was Noop Band worn and connected overnight?"
+            MissingForDay -> "No Recovery score was recorded for this date."
         }
 }
+
+/** Resolve a historical day's score without fabricating zero or borrowing today's live-state copy. */
+internal fun scoreStateForHistorical(recovery: Double?): ScoreState =
+    recovery?.let(ScoreState::Scored) ?: ScoreState.MissingForDay
 
 /**
  * Resolve the honest [ScoreState] for the Today score side from the same signals the tiles already use,

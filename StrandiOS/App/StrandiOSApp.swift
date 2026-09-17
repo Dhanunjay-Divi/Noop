@@ -88,6 +88,20 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
 
     func application(
         _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        _ = application
+        Task {
+            await FeedbackUploadCoordinator.shared.handleBackgroundEvents(
+                identifier: identifier,
+                completionHandler: completionHandler
+            )
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
@@ -286,6 +300,9 @@ struct StrandiOSApp: App {
 
     init() {
         AppDiagnosticsRecorder.shared.start()
+        Task {
+            await FeedbackUploadCoordinator.shared.start()
+        }
         let launchTrace = AppDiagnosticsRecorder.shared.beginOperation("ios.launch.bootstrap")
         _ = Self._quietMotionTierDefault
         // 9.2 data-truth migration: clear a legacy Shortcuts file that may contain WHOOP @57 motion
@@ -318,13 +335,18 @@ struct StrandiOSApp: App {
         let demoFixtureRequested = false
         let reviewSampleFixtureRequested = false
         #endif
+        let hasAcceptedCurrentTerms =
+            UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
+                == Terms.currentVersion
+        if !access.isUnlocked || !hasAcceptedCurrentTerms {
+            AdaptiveDayTimeZoneStore.markOperationalAccessBlocked()
+        }
         // Screenshot/UI-test fixtures own synthetic transport state. Never let a simulator's stale
         // launch-access receipt start CoreBluetooth or background services that can overwrite it.
         let operationallyAllowed = !demoFixtureRequested
             && !reviewSampleFixtureRequested
             && access.isUnlocked
-            && UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
-                == Terms.currentVersion
+            && hasAcceptedCurrentTerms
         Self.reconcileLaunchSurfaceAuthorization(allowed: access.isUnlocked)
         // WatchConnectivity is the one intentionally permitted subsystem on a locked launch. It sends
         // only a legacy-decodable empty context, ensuring a build-229 Watch/complication cannot retain
@@ -368,7 +390,7 @@ struct StrandiOSApp: App {
             model?.requestManagedSocialPokeHaptic() ?? false
         }
         if operationallyAllowed {
-            ManagedCloudService.shared.bootstrap()
+            ManagedCloudService.shared.bootstrap(repo: model.repo)
         }
         let bridge = HealthKitBridge(
             repo: model.repo,
@@ -385,9 +407,9 @@ struct StrandiOSApp: App {
         }
         bridge.dataProjectionChanged = { [weak bridge, weak model] in
             guard let model else { return }
-            await model.refreshAfterAppleHealthSync(
-                authorized: bridge?.auth == .authorized)
-            model.repo.noteAgeMetricsChanged()
+            await model.processAppleHealthProjectionChange(
+                authorized: bridge?.auth == .authorized
+            )
         }
         // HealthKit may relaunch a terminated app in the background to deliver an observer update,
         // before a SwiftUI scene becomes active. Install observers at this process-launch boundary for
@@ -402,12 +424,16 @@ struct StrandiOSApp: App {
         // The injected operation preserves each feature's existing privacy gate: Health reads require a
         // prior explicit grant, self-hosted upload remains opt-in, and Friends needs an enrolled member.
         BackgroundSyncScheduler.register { [weak model, weak bridge] in
+            _ = await FeedbackUploadCoordinator.shared.retryDueReports()
             guard await MainActor.run(body: { access.isUnlocked }),
                   UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
                     == Terms.currentVersion,
                   let model,
                   let bridge,
                   await model.repo.storeHandle() != nil else { return false }
+
+            await WindDownNudge.renewScheduleIfAuthorized()
+            guard !Task.isCancelled else { return false }
 
             // If CoreBluetooth already restored/retained a bonded link, ask for the same rate-limited
             // historical offload as the 15-minute connected timer. This never starts dense Live HR and
@@ -541,10 +567,6 @@ struct StrandiOSApp: App {
                     WidgetCenter.shared.reloadAllTimelines()
                 }
                 .chartStyle(chartStyleRaw)
-                // Dynamic Type now scales the prose/label roles (StrandFont). Cap the upper end so the
-                // fixed-geometry tiles/gauges stay legible at the largest accessibility sizes rather than
-                // clipping; the common Larger-Text range still scales fully.
-                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .onReceive(model.live.heartRateSamplePublisher) { sample in
                     guard launchAccess.isUnlocked,
                           acceptedTermsVersion == Terms.currentVersion,
@@ -815,6 +837,9 @@ struct StrandiOSApp: App {
             }
             model.setRealtimeForeground(phase == .active)
             if phase == .active {
+                Task {
+                    _ = await FeedbackUploadCoordinator.shared.retryDueReports()
+                }
                 BandSyncStaleReminder.cancel()
                 model.refreshAgeMetricsIfProfileChanged()
                 model.reevaluateContextualInterventions()
@@ -952,7 +977,7 @@ struct StrandiOSApp: App {
         guard launchAccess.isUnlocked,
               acceptedTermsVersion == Terms.currentVersion else { return }
         model.startOperationalWorkAfterLaunchAccess()
-        ManagedCloudService.shared.bootstrap()
+        ManagedCloudService.shared.bootstrap(repo: model.repo)
         ScheduledDebugExport.activateIfEnabled()
         health.registerObserversAtLaunchIfPreviouslyRequested()
         configureWatchHandlers()

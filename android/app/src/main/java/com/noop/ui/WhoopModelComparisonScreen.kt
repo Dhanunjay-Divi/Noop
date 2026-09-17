@@ -76,9 +76,9 @@ private val CAPABILITIES: List<CapabilityRow> = listOf(
             "your phone.",
     ),
     CapabilityRow(
-        "Strap broadcasts its own HR (firmware flag)",
+        "Band broadcasts its own HR (firmware flag)",
         Support.NO, Support.YES,
-        "Making the STRAP itself advertise HR (the band broadcast setting) only exists on " +
+        "Making the BAND itself advertise HR (the band broadcast setting) only exists on " +
             "5/MG firmware. A 4.0 can't do this, but the phone re-broadcast above covers the same use.",
     ),
     CapabilityRow(
@@ -88,12 +88,12 @@ private val CAPABILITIES: List<CapabilityRow> = listOf(
             "(Settings → Profile → Steps estimate). A 5/MG reports a motion counter NOOP reads directly.",
     ),
     CapabilityRow(
-        "Rename the strap's Bluetooth name",
+        "Rename the band's Bluetooth name",
         Support.YES, Support.NO,
         "Renaming works over the 4.0's firmware command; the 5/MG path isn't supported.",
     ),
     CapabilityRow(
-        "Buzz the strap (alarms, haptics, time)",
+        "Buzz the band (alarms, haptics, time)",
         Support.YES, Support.YES,
     ),
 )
@@ -130,7 +130,7 @@ private fun IntroCard() {
             Text(uiString(R.string.l10n_whoop_model_comparison_screen_both_straps_are_supported_8545557a), style = NoopType.headline, color = Palette.textPrimary)
             Text(
                 uiString(R.string.l10n_whoop_model_comparison_screen_noop_pairs_with_the_whoop_4_599b088c) +
-                    "heart rate, your scores, buzzing the strap), but a few firmware features differ. Here's " +
+                    "heart rate, your scores, buzzing the band), but a few firmware features differ. Here's " +
                     "what each can do, and why.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
@@ -143,7 +143,7 @@ private fun IntroCard() {
 private fun CapabilityTableCard() {
     NoopCard(padding = 20.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Overline("Feature by strap")
+            Overline("Feature by band")
             // Column header.
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(uiString(R.string.l10n_whoop_model_comparison_screen_feature_ad565d9d), style = NoopType.caption, color = Palette.textTertiary, modifier = Modifier.weight(1f))
@@ -197,8 +197,8 @@ private fun ReassuranceCard() {
             Text(
                 uiString(R.string.l10n_whoop_model_comparison_screen_you_re_not_missing_the_broadcast_1d2fa907) +
                     "Zwift, Peloton or a Garmin, open Data Sources and turn on \"Broadcast heart rate\": " +
-                    "your phone becomes a standard Bluetooth HR sensor using your strap's live reading. The " +
-                    "firmware-only flag a 5/MG has just does the same job from the strap instead of the phone.",
+                    "your phone becomes a standard Bluetooth HR sensor using your band's live reading. The " +
+                    "firmware-only flag a 5/MG has just does the same job from the band instead of the phone.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
@@ -216,7 +216,7 @@ private fun Header(onClose: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Overline("Your strap", color = Palette.textTertiary)
+            Overline("Your band", color = Palette.textTertiary)
             Text(uiString(R.string.l10n_whoop_model_comparison_screen_4_0_vs_5_0_mg_56099a02), style = NoopType.display(26f), color = Palette.textPrimary)
             Text(uiString(R.string.l10n_whoop_model_comparison_screen_what_each_can_read_and_why_4348bd67), style = NoopType.caption, color = Palette.textSecondary)
         }

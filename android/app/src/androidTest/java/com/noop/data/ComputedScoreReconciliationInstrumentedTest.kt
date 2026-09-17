@@ -110,6 +110,48 @@ class ComputedScoreReconciliationInstrumentedTest {
     }
 
     @Test
+    fun clearingComputedEffortPreservesOtherMetricsAndImportedOwner() = runBlocking {
+        val computed = "compatible-band-noop"
+        val imported = "compatible-band"
+        dao.upsertDailyMetrics(
+            listOf(
+                DailyMetric(
+                    deviceId = computed,
+                    day = "2026-05-20",
+                    totalSleepMin = 420.0,
+                    recovery = 78.0,
+                    strain = 13.5,
+                ),
+                DailyMetric(
+                    deviceId = computed,
+                    day = "2026-05-21",
+                    recovery = 66.0,
+                ),
+                DailyMetric(
+                    deviceId = imported,
+                    day = "2026-05-20",
+                    strain = 17.2,
+                ),
+            ),
+        )
+
+        assertEquals(1, repository.clearDailyStrain(computed))
+
+        val computedRows = dao.dailyMetricsRange(computed, "2026-05-20", "2026-05-21")
+        assertEquals(2, computedRows.size)
+        assertEquals(null, computedRows[0].strain)
+        assertEquals(78.0, computedRows[0].recovery!!, 0.0)
+        assertEquals(420.0, computedRows[0].totalSleepMin!!, 0.0)
+        assertEquals(66.0, computedRows[1].recovery!!, 0.0)
+        assertEquals(
+            17.2,
+            dao.dailyMetricsRange(imported, "2026-05-20", "2026-05-20")
+                .single().strain!!,
+            0.0,
+        )
+    }
+
+    @Test
     fun invalidOwnershipFailsBeforeAnyMutation() = runBlocking {
         val computed = "compatible-band-noop"
         dao.upsertDailyMetrics(listOf(DailyMetric(computed, "2026-05-02", recovery = 52.0)))

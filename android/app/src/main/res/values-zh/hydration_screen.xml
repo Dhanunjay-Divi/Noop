@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hydration_screen_sip">一口</string>
+    <string name="hydration_screen_cup">水杯</string>
+    <string name="hydration_screen_bottle">水瓶</string>
+    <string name="hydration_screen_quick_amounts_format">%1$s %2$s · %3$s %4$s · %5$s %6$s</string>
+    <string name="hydration_screen_custom_amount">自定义容量</string>
+    <string name="hydration_screen_log">记录</string>
+    <string name="hydration_screen_cancel">取消</string>
+    <string name="hydration_screen_edit_entry">编辑饮水记录</string>
+    <string name="hydration_screen_save">保存</string>
+    <string name="hydration_screen_amount_label">毫升 (ml)</string>
+    <string name="hydration_screen_amount_range_format">输入 1 到 %1$d 毫升的容量。</string>
+    <string name="hydration_screen_guidance">一个会根据运动负荷调整的简单目标。仅为常规健康指导，不是医疗建议。</string>
+    <string name="hydration_screen_last_seven_days">过去 7 天</string>
+    <string name="hydration_screen_litres_short_format">%1$s 升</string>
+    <string name="hydration_screen_litres_accessibility_format">%1$s 升</string>
+    <string name="hydration_screen_goal_visible_format">目标 %1$s</string>
+    <string name="hydration_screen_log_accessibility_format">记录%1$s</string>
+    <string name="hydration_screen_hero_status_accessibility_format">%1$s。%2$s。%3$s</string>
+    <string name="hydration_screen_hero_missing_with_goal_accessibility_format">%1$s。%2$s。目标：%3$s。</string>
+    <string name="hydration_screen_hero_progress_accessibility_format">%1$s。已记录：%2$s。目标：%3$s。已完成目标的百分之%4$d。</string>
+    <string name="hydration_screen_history_accessibility_format">%1$s。%2$s。</string>
+    <string name="hydration_screen_history_day_accessibility_format">%1$s：%2$s</string>
+</resources>

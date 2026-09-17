@@ -11,9 +11,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,10 +25,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
@@ -47,6 +51,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Edit
@@ -70,6 +75,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.filled.WaterDrop
@@ -99,6 +105,8 @@ import com.noop.BuildConfig
 import com.noop.R
 import com.noop.analytics.FusionSource
 import com.noop.analytics.HydrationStore
+import com.noop.notif.AdaptiveDayNotifier
+import com.noop.notif.AdaptivePlannedWorkoutDecision
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -122,12 +130,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -377,6 +384,7 @@ fun AppRoot(
     val contextualProcessingIds by ContextualActionCenter.processingIds.collectAsStateWithLifecycle()
     var expandedContextualActionId by rememberSaveable { mutableStateOf<String?>(null) }
     var hydrationConfirmationMl by remember { mutableIntStateOf(0) }
+    var showLighterWorkoutOptions by rememberSaveable { mutableStateOf(false) }
     val contextualActionScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val keyboardVisible = WindowInsets.ime.getBottom(density) > 0
@@ -411,19 +419,61 @@ fun AppRoot(
             ContextualActionKind.JOURNAL -> {
                 ContextualActionCenter.complete(context, action)
                 expandedContextualActionId = null
+                NotificationRouteBridge.journalDayOffset(action.journalDay)?.let {
+                    viewModel.requestJournalDay(it)
+                }
                 openTopLevel(Destination.Insights.route)
             }
-            ContextualActionKind.WIND_DOWN,
-            ContextualActionKind.RECOVERY,
-            -> {
+            ContextualActionKind.WIND_DOWN -> {
                 ContextualActionCenter.complete(context, action)
                 expandedContextualActionId = null
                 openTopLevel(Destination.Sleep.route)
+            }
+            ContextualActionKind.RECOVERY -> {
+                if (action.isPlannedWorkoutDecision()) {
+                    val fingerprint = action.fingerprint() ?: return
+                    contextualActionScope.launch {
+                        if (!AdaptiveDayNotifier.acknowledgePlannedWorkoutDecision(
+                            context,
+                            fingerprint,
+                            AdaptivePlannedWorkoutDecision.REVIEW_OPTIONS,
+                        )) {
+                            return@launch
+                        }
+                        expandedContextualActionId = null
+                        openTopLevel(action.resolvedRecoveryRoute().navRoute)
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "adaptive_day.lighter_options_presented",
+                            fields = mapOf("source" to "in_app"),
+                        )
+                        showLighterWorkoutOptions = true
+                    }
+                    return
+                } else {
+                    ContextualActionCenter.complete(context, action)
+                }
+                expandedContextualActionId = null
+                openTopLevel(action.resolvedRecoveryRoute().navRoute)
+            }
+        }
+    }
+
+    fun keepCurrentWorkoutPlan(action: ContextualAction) {
+        if (!action.isPlannedWorkoutDecision()) return
+        val fingerprint = action.fingerprint() ?: return
+        contextualActionScope.launch {
+            if (AdaptiveDayNotifier.acknowledgePlannedWorkoutDecision(
+                context,
+                fingerprint,
+                AdaptivePlannedWorkoutDecision.KEEP_CURRENT,
+            )) {
+                expandedContextualActionId = null
             }
         }
     }
 
     LaunchedEffect(context, initialRoute) {
+        AdaptiveDayNotifier.recoverResolvedPlannedWorkoutDecision(context)
         ContextualActionCenter.refresh(context)
         if (BuildConfig.DEBUG && initialRoute == "context-actions") {
             ContextualActionCenter.applyDemoActions(context)
@@ -444,8 +494,21 @@ fun AppRoot(
     // routes can enter the bridge, and consumePending removes each request before navigation.
     LaunchedEffect(nav, context) {
         NotificationRouteBridge.routeRequests.collect {
-            NotificationRouteBridge.consumePending(context)?.let { route ->
-                openTopLevel(route.navRoute)
+            NotificationRouteBridge.consumePendingRequest(context)?.let { request ->
+                NotificationRouteBridge.journalDayOffset(request)?.let {
+                    viewModel.requestJournalDay(it)
+                }
+                openTopLevel(request.route.navRoute)
+                if (
+                    request.presentation ==
+                    NotificationRoutePresentation.LIGHTER_WORKOUT_OPTIONS
+                ) {
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "adaptive_day.lighter_options_presented",
+                        fields = mapOf("source" to "notification"),
+                    )
+                    showLighterWorkoutOptions = true
+                }
             }
         }
     }
@@ -498,7 +561,7 @@ fun AppRoot(
                         onOpenSettings = { openTopLevel(Destination.Settings.route) },
                         // The opt-in Hydration card (only shown when Hydration tracking is on) pushes its
                         // detail. A normal push so the back-stack returns to Today.
-                        onOpenHydration = { nav.navigate(Destination.Hydration.route) },
+                        onOpenHydration = { dayKey -> nav.navigate(hydrationRoute(dayKey)) },
                         // #706/#684: the dashboard cards draw a tappable chevron; wire each to its detail,
                         // matching iOS. Stress + the vitals are pushes; Sleep is a top-level tab switch.
                         onOpenStress = { nav.navigate(Destination.Stress.route) },
@@ -522,6 +585,8 @@ fun AppRoot(
                         // destination the Sleep screen's morning sheet uses.
                         onOpenJournal = { openTopLevel(Destination.Insights.route) },
                         onOpenCalendar = { nav.navigate(Destination.Calendar.route) },
+                        demoPlannedWorkout =
+                            BuildConfig.DEBUG && initialRoute == DEMO_PLANNED_WORKOUT_ROUTE,
                     )
                 }
                 composable(Destination.Calendar.route) {
@@ -579,7 +644,18 @@ fun AppRoot(
                         },
                     )
                 }
-                composable(Destination.Hydration.route) { HydrationScreen(viewModel) }
+                composable(Destination.Hydration.route) {
+                    HydrationScreen(
+                        viewModel = viewModel,
+                        dayKey = HydrationStore.dayKey(),
+                    )
+                }
+                composable(HYDRATION_ROUTE_PATTERN) { backStackEntry ->
+                    HydrationScreen(
+                        viewModel = viewModel,
+                        dayKey = backStackEntry.arguments?.getString(HYDRATION_DAY_ARGUMENT),
+                    )
+                }
                 composable(Destination.VitalSigns.route) {
                     VitalSignsScreen(
                         vm = viewModel,
@@ -651,6 +727,7 @@ fun AppRoot(
                 expandedId = expandedContextualActionId,
                 onExpandedChange = { expandedContextualActionId = it },
                 onPrimary = ::performContextualAction,
+                onSecondary = ::keepCurrentWorkoutPlan,
                 onDismiss = { ContextualActionCenter.dismiss(context, it) },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -760,6 +837,168 @@ fun AppRoot(
                     },
                 )
             }
+        }
+
+        if (showLighterWorkoutOptions) {
+            ModalBottomSheet(
+                onDismissRequest = { showLighterWorkoutOptions = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = Palette.surfaceOverlay,
+                contentColor = Palette.textPrimary,
+            ) {
+                LighterWorkoutOptionsSheet(
+                    onOpenWorkouts = {
+                        showLighterWorkoutOptions = false
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "adaptive_day.lighter_options_action",
+                            fields = mapOf("destination" to "workouts"),
+                        )
+                        openTopLevel(Destination.Workouts.route)
+                    },
+                    onOpenStrength = {
+                        showLighterWorkoutOptions = false
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "adaptive_day.lighter_options_action",
+                            fields = mapOf("destination" to "strength"),
+                        )
+                        quickOverlay = QuickActionKind.STRENGTH
+                    },
+                    onDismiss = { showLighterWorkoutOptions = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LighterWorkoutOptionsSheet(
+    onOpenWorkouts: () -> Unit,
+    onOpenStrength: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.appwide_adaptive_day_guidance_lighter_options_title,
+                ),
+                style = NoopType.title2,
+                color = Palette.textPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.appwide_action_dismiss),
+                    tint = Palette.textSecondary,
+                )
+            }
+        }
+        Text(
+            text = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_intro,
+            ),
+            style = NoopType.body,
+            color = Palette.textSecondary,
+        )
+        LighterWorkoutOptionRow(
+            icon = Icons.Filled.Bolt,
+            title = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_intensity_title,
+            ),
+            detail = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_intensity_detail,
+            ),
+        )
+        HorizontalDivider(color = Palette.hairline)
+        LighterWorkoutOptionRow(
+            icon = Icons.Filled.Timer,
+            title = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_duration_title,
+            ),
+            detail = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_duration_detail,
+            ),
+        )
+        HorizontalDivider(color = Palette.hairline)
+        LighterWorkoutOptionRow(
+            icon = Icons.Filled.Spa,
+            title = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_recovery_title,
+            ),
+            detail = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_recovery_detail,
+            ),
+        )
+        Text(
+            text = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_disclaimer,
+            ),
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+        )
+        NoopButton(
+            text = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_open_workouts,
+            ),
+            leadingIcon = Icons.AutoMirrored.Filled.DirectionsRun,
+            kind = NoopButtonKind.Primary,
+            fullWidth = true,
+            onClick = onOpenWorkouts,
+        )
+        NoopButton(
+            text = stringResource(
+                R.string.appwide_adaptive_day_guidance_lighter_options_open_strength,
+            ),
+            leadingIcon = Icons.Filled.FitnessCenter,
+            kind = NoopButtonKind.Secondary,
+            fullWidth = true,
+            onClick = onOpenStrength,
+        )
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun LighterWorkoutOptionRow(
+    icon: ImageVector,
+    title: String,
+    detail: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .background(Palette.chargeColor.copy(alpha = 0.12f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Palette.chargeColor,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(title, style = NoopType.headline, color = Palette.textPrimary)
+            Text(detail, style = NoopType.footnote, color = Palette.textSecondary)
         }
     }
 }
@@ -1137,55 +1376,33 @@ private val barTrailingTabs = listOf(
     BarTab(Destination.Sleep, Icons.Filled.Bed, R.string.nav_sleep),
 )
 
-internal fun bottomBarShowsVisualLabels(
+internal data class BottomBarLabelLayout(
+    val maxLines: Int,
+    val barHeightDp: Int,
+)
+
+internal fun bottomBarLabelLayout(
     fontScale: Float,
-    availableSlotWidthPx: Int = Int.MAX_VALUE,
-    widestLabelWidthPx: Int = 0,
-    horizontalSafetyPaddingPx: Int = 0,
-): Boolean = fontScale <= 1.30f &&
-    widestLabelWidthPx + horizontalSafetyPaddingPx <= availableSlotWidthPx
-
-@Composable
-internal fun rememberBottomBarShowsVisualLabels(
-    labels: List<String>,
-    availableWidth: Dp,
-    horizontalContentPadding: Dp = 0.dp,
-    interItemSpacing: Dp = 0.dp,
-    labelHorizontalSafetyPadding: Dp = 6.dp,
-    labelFontSize: TextUnit = 10.sp,
-): Boolean {
-    if (labels.isEmpty()) return false
-
-    val density = LocalDensity.current
-    val textMeasurer = rememberTextMeasurer(cacheSize = labels.size * 2)
-    val labelStyle = NoopType.footnote.copy(
-        fontSize = labelFontSize,
-        fontWeight = FontWeight.SemiBold,
-    )
-    val usableWidth = (availableWidth - horizontalContentPadding - interItemSpacing)
-        .coerceAtLeast(0.dp)
-    val availableSlotWidthPx = with(density) {
-        (usableWidth.value / labels.size).dp.roundToPx()
-    }
-    val widestLabelWidthPx = labels.maxOf { label ->
-        textMeasurer.measure(
-            text = label,
-            style = labelStyle,
-            softWrap = false,
-            maxLines = 1,
-        ).size.width
-    }
-    val horizontalSafetyPaddingPx = with(density) {
-        labelHorizontalSafetyPadding.roundToPx()
-    }
-
-    return bottomBarShowsVisualLabels(
-        fontScale = density.fontScale,
-        availableSlotWidthPx = availableSlotWidthPx,
-        widestLabelWidthPx = widestLabelWidthPx,
-        horizontalSafetyPaddingPx = horizontalSafetyPaddingPx,
+): BottomBarLabelLayout {
+    val scaledLineHeightDp = kotlin.math.ceil(12f * fontScale.coerceAtLeast(1f))
+        .toInt()
+    val contentHeightDp = 6 + 18 + 3 + scaledLineHeightDp + 6
+    return BottomBarLabelLayout(
+        maxLines = 1,
+        barHeightDp = maxOf(56, contentHeightDp),
     )
 }
+
+@Composable
+internal fun rememberBottomBarLabelLayout(
+    @Suppress("UNUSED_PARAMETER") labels: List<String> = emptyList(),
+    @Suppress("UNUSED_PARAMETER") availableWidth: Dp = 0.dp,
+    @Suppress("UNUSED_PARAMETER") horizontalContentPadding: Dp = 0.dp,
+    @Suppress("UNUSED_PARAMETER") interItemSpacing: Dp = 0.dp,
+    @Suppress("UNUSED_PARAMETER") labelHorizontalSafetyPadding: Dp = 6.dp,
+    @Suppress("UNUSED_PARAMETER") labelFontSize: TextUnit = 10.sp,
+): BottomBarLabelLayout =
+    bottomBarLabelLayout(fontScale = LocalDensity.current.fontScale)
 
 @Composable
 private fun GlassBottomBar(
@@ -1209,27 +1426,18 @@ private fun GlassBottomBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BoxWithConstraints(
+            Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp)
-                    .navigationGlassSurface(barShape),
+                    .weight(1f),
             ) {
-                val tabLabels = buildList {
-                    barLeadingTabs.forEach { add(stringResource(it.labelRes)) }
-                    barTrailingTabs.forEach { add(stringResource(it.labelRes)) }
-                    add(stringResource(R.string.nav_more))
-                }
-                val showVisualLabels = rememberBottomBarShowsVisualLabels(
-                    labels = tabLabels,
-                    availableWidth = maxWidth,
-                    horizontalContentPadding = 12.dp,
-                    interItemSpacing = 4.dp,
-                )
+                val labelLayout = rememberBottomBarLabelLayout()
                 Row(
                     modifier = Modifier
+                        .height(labelLayout.barHeightDp.dp)
                         .fillMaxSize()
-                        .padding(horizontal = 6.dp),
+                        .navigationGlassSurface(barShape)
+                        .padding(horizontal = 6.dp)
+                        .selectableGroup(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
@@ -1239,7 +1447,7 @@ private fun GlassBottomBar(
                             label = stringResource(tab.labelRes),
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
-                            showLabel = showVisualLabels,
+                            labelMaxLines = labelLayout.maxLines,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1250,7 +1458,7 @@ private fun GlassBottomBar(
                             label = stringResource(tab.labelRes),
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
-                            showLabel = showVisualLabels,
+                            labelMaxLines = labelLayout.maxLines,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1260,7 +1468,7 @@ private fun GlassBottomBar(
                         label = stringResource(R.string.nav_more),
                         active = selected == Destination.More,
                         testTag = "noop.tab.more",
-                        showLabel = showVisualLabels,
+                        labelMaxLines = labelLayout.maxLines,
                         modifier = Modifier.weight(1f),
                         onClick = { onTabSelected(Destination.More) },
                     )
@@ -1406,7 +1614,7 @@ private fun BarSlot(
     label: String,
     active: Boolean,
     testTag: String,
-    showLabel: Boolean,
+    labelMaxLines: Int,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -1420,7 +1628,7 @@ private fun BarSlot(
     )
     Column(
         modifier = modifier
-            .height(44.dp)
+            .fillMaxHeight()
             .testTag(testTag)
             .clip(shape)
             .background(
@@ -1438,15 +1646,16 @@ private fun BarSlot(
                     Modifier
                 },
             )
-            .clickable(
+            .selectable(
+                selected = active,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                role = Role.Tab,
                 onClick = onClick,
             )
             .padding(vertical = 3.dp)
             .semantics {
                 contentDescription = label
-                selected = active
             },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
@@ -1456,24 +1665,29 @@ private fun BarSlot(
             contentDescription = null,
             tint = tint,
             modifier = Modifier
-                .size(if (showLabel) Metrics.iconSmall else 22.dp)
+                .size(Metrics.iconSmall)
                 .graphicsLayer {
                     scaleX = selectedScale
                     scaleY = selectedScale
                     translationY = if (active) -1.dp.toPx() else 0f
                 },
         )
-        if (showLabel) {
-            Text(
-                label,
-                style = NoopType.footnote.copy(
-                    fontSize = 10.sp,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                ),
-                color = tint,
-                maxLines = 1,
-            )
-        }
+        Text(
+            label,
+            style = NoopType.footnote.copy(
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            ),
+            color = tint,
+            maxLines = labelMaxLines,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 1.dp),
+        )
     }
 }
 

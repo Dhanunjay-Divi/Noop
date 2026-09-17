@@ -2297,9 +2297,9 @@ public final class BLEManager: NSObject, ObservableObject {
                 bankedSensorRecords: bankedSensorRecords, consoleOnly: banking.bankedNothing)
             state.sustainedEmptyOffload = sustainedEmpty
             if unarchived > 0 {
-                state.lastSyncError = "Synced, but \(archived + unarchived) record(s) couldn't be decoded (unrecognised strap firmware layout), and the on-device archive is full - the \(unarchived) newest weren't preserved. Please share a strap log so the layout can be mapped."
+                state.lastSyncError = "Synced, but \(archived + unarchived) record(s) couldn't be decoded (unrecognised band firmware layout), and the on-device archive is full - the \(unarchived) newest weren't preserved. Please send a diagnostics report so the layout can be mapped."
             } else if archived > 0 {
-                state.lastSyncError = "Synced, but \(archived) record(s) couldn't be decoded (unrecognised strap firmware layout). The raw bytes were saved on this Mac - please share a strap log so the layout can be mapped."
+                state.lastSyncError = "Synced, but \(archived) record(s) couldn't be decoded (unrecognised band firmware layout). The raw bytes were saved on this Mac - please send a diagnostics report so the layout can be mapped."
             } else if bankedNothing {
                 // #77 / #214 family: the offload COMPLETED but the strap handed over no sensor records
                 // at all — either console/diagnostic output across many chunks, OR a near-empty
@@ -2311,7 +2311,7 @@ public final class BLEManager: NSObject, ObservableObject {
                     : "metadata-only, 0 sensor rows persisted"
                 log("Backfill: completed but the strap banked no sensor history (\(detail)); consecutive empty syncs = \(emptySyncTracker.consecutiveEmptySyncs).")
                 state.lastSyncError = sustainedEmpty
-                    ? "Synced, but your strap had no stored history to hand over - only its diagnostic output. This usually means its clock has lost sync, so it isn't saving data to flash. Fully charge it to 100%, then reconnect, and it should start banking again."
+                    ? "Synced, but your band had no stored history to hand over - only its diagnostic output. This usually means its clock has lost sync, so it isn't saving data to flash. Fully charge it to 100%, then reconnect, and it should start banking again."
                     : nil
             } else if let futureBanner = futureClockBanner {
                 // #324/#928: the strap banked records but its newest is dated implausibly in the FUTURE
@@ -2364,7 +2364,7 @@ public final class BLEManager: NSObject, ObservableObject {
                 }
             } else {
                 // #324/#928: a future-dated strap TIMES OUT on its deep future-dated backlog — that's not
-                // "the strap went quiet", it's the clock being set ahead. Prefer the honest future-clock
+                // "the band went quiet", it's the clock being set ahead. Prefer the honest future-clock
                 // banner so the reporter's timeout case (the common one) names the real cause + remedy.
                 //
                 // A productive legacy-band transfer can also finish on the idle timeout instead of
@@ -2542,7 +2542,7 @@ public final class BLEManager: NSObject, ObservableObject {
         if let futureClockBanner { return futureClockBanner }
         return bankedThisOffload
             ? nil
-            : "Sync interrupted - the strap went quiet. It will retry on the next sync."
+            : "Sync interrupted - the band went quiet. It will retry on the next sync."
     }
 
     /// Pure classification of a COMPLETED (HISTORY_COMPLETE) offload, extracted from exitBackfilling so
@@ -2574,9 +2574,9 @@ public final class BLEManager: NSObject, ObservableObject {
     /// gate is needed. Mirrors Android `futureDatedStrapBanner`.
     nonisolated static func futureDatedStrapBanner(strapNewestTs: Int?, wallNowUnix: Int) -> String? {
         guard BackfillContinuation.isFutureDatedNewest(strapNewestTs, wallNowUnix: wallNowUnix) else { return nil }
-        return "Synced, but your strap's clock is set in the future - its banked history is dated ahead of "
+        return "Synced, but your band's clock is set in the future - its banked history is dated ahead of "
             + "today, so NOOP can't trust those timestamps and didn't import them (importing them would "
-            + "misfile your data days or years ahead). Fully charge the strap to 100% and power-cycle it so "
+            + "misfile your data days or years ahead). Fully charge the band to 100% and power-cycle it so "
             + "its clock re-syncs, then reconnect."
     }
 
@@ -2857,7 +2857,7 @@ public final class BLEManager: NSObject, ObservableObject {
             log("Strap rename: WHOOP 4.0 only - ignored on a 5/MG."); return
         }
         guard state.connected, state.bonded else {
-            state.renameStatus = "Connect and pair your strap first."
+            state.renameStatus = "Connect and pair Noop Band first."
             log("Strap rename: connect + bond first - ignored."); return
         }
         guard !name.isEmpty else {
@@ -2880,7 +2880,7 @@ public final class BLEManager: NSObject, ObservableObject {
         // re-read overwrites this the moment it arrives.
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(8)) { [weak self] in
             guard let self, self.state.renameStatus == "Renaming…" else { return }
-            self.state.renameStatus = "Rename sent - reconnect your strap to confirm the new name."
+            self.state.renameStatus = "Rename sent - reconnect Noop Band to confirm the new name."
             self.log("Strap rename: no ack within 8s - firmware may apply it on reboot/reconnect.")
         }
     }
@@ -4266,7 +4266,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
                     armUnauthorizedSettleDeadline()
                 }
             case .poweredOff:
-                state.lastSyncError = "Bluetooth is off. Turn it on to connect to your strap."
+                state.lastSyncError = "Bluetooth is off. Turn it on to connect to your band."
                 log("Bluetooth is off - cannot scan or connect")
                 radioStateErrorShown = true
                 let startsNewOutage = radioWasPoweredOnSinceRecovery

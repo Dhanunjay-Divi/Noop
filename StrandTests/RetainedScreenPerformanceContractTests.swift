@@ -253,6 +253,56 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         )
     }
 
+    func testActiveTabReselectionOnlyNavigatesOrScrollsWithoutRefreshing() throws {
+        let shell = try source("StrandiOS/App/RootTabView.swift")
+        let start = try XCTUnwrap(shell.range(of: "onReselect: { tag in"))
+        let end = try XCTUnwrap(
+            shell.range(
+                of: "})\n                    .frame(maxWidth: .infinity",
+                range: start.upperBound..<shell.endIndex
+            )
+        )
+        let reselect = shell[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(reselect.contains("tabBarCompact = false"))
+        XCTAssertTrue(reselect.contains("if !tabPaths[tag].isEmpty"))
+        XCTAssertTrue(reselect.contains("tabPaths[tag] = NavigationPath()"))
+        XCTAssertTrue(reselect.contains("scrollTop[tag] += 1"))
+        XCTAssertFalse(
+            reselect.contains("repo.refresh"),
+            "An active-tab reselect is a navigation gesture and must not scan repository history."
+        )
+        XCTAssertFalse(
+            reselect.contains("Task {"),
+            "Reselect should complete synchronously without launching hidden background work."
+        )
+
+        XCTAssertTrue(
+            shell.contains("onRefresh: { await repo.refresh() }"),
+            "Explicit pull-to-refresh must remain available after removing refresh from tab reselect."
+        )
+    }
+
+    func testAppleShellsDoNotStartASecondColdLaunchRepositoryRefresh() throws {
+        let macShell = try source("Strand/App/RootView.swift")
+        let iosShell = try source("StrandiOS/App/RootTabView.swift")
+
+        for shell in [macShell, iosShell] {
+            XCTAssertTrue(shell.contains("if !repo.loaded"))
+            XCTAssertTrue(shell.contains("for _ in 0..<200"))
+            XCTAssertTrue(shell.contains("if repo.loaded { break }"))
+        }
+
+        XCTAssertFalse(
+            macShell.contains(".task {\n            await repo.refresh()"),
+            "AppModel owns launch refresh; the macOS shell must not launch a duplicate history scan."
+        )
+        XCTAssertFalse(
+            iosShell.contains(".task {\n            await repo.refresh()"),
+            "AppModel owns launch refresh; the iOS shell must not launch a duplicate history scan."
+        )
+    }
+
     func testScrollInteractionTrackerSettlesAgainstTheLatestMovementEdge() {
         let settleNanoseconds: UInt64 = 180_000_000
 

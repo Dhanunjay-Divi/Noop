@@ -1,5 +1,6 @@
 #if os(iOS)
 import Combine
+import CoreLocation
 import FirebaseAppCheck
 import FirebaseAuth
 import FirebaseCore
@@ -14,6 +15,12 @@ import WhoopStore
 
 @MainActor
 final class ManagedCloudService: ObservableObject {
+    enum BandSOSOutcome: Equatable {
+        case opened
+        case alreadyActive
+        case unavailable(String)
+    }
+
     enum Phase: Equatable {
         case unavailable
         case signedOut
@@ -84,6 +91,38 @@ final class ManagedCloudService: ObservableObject {
         Self.maskedPhone(Auth.auth().currentUser?.phoneNumber)
     }
 
+    var bandSOSSetupReady: Bool {
+        guard phase == .enrolled,
+              let contacts = safetyContacts else { return false }
+        return contacts.deliveryCapableCount >= contacts.minimumRequired
+    }
+
+    var bandSOSSetupMessage: String {
+        guard phase == .enrolled else {
+            return String(
+                localized: "appwide.managed_safety.band_sos.sign_in"
+            )
+        }
+        guard let contacts = safetyContacts else {
+            return String(
+                localized: "appwide.managed_safety.band_sos.load_contacts"
+            )
+        }
+        let remaining = max(
+            contacts.minimumRequired - contacts.deliveryCapableCount,
+            0
+        )
+        return remaining == 0
+            ? ""
+            : String(
+                format: String(
+                    localized:
+                        "appwide.managed_safety.band_sos.contacts_remaining"
+                ),
+                Int64(remaining)
+            )
+    }
+
     private enum Key {
         static let enrolledScopeHash = "managedCloud.enrolledScopeHash.v1"
         static let enrolledPolicy = "managedCloud.enrolledPolicy.v1"
@@ -136,10 +175,16 @@ final class ManagedCloudService: ObservableObject {
     private var running = false
     private var socialRunning = false
     private var safetyRunning = false
+    private var safetyRefreshTask: Task<Void, Error>?
     private var safetyBootstrapTask: Task<Void, Never>?
+    private let safetyIncidentGate = ManagedSafetyIncidentGate()
+    private weak var managedRepository: Repository?
+    private var managedDocumentProfileBindingTask: Task<Void, Never>?
     private var disconnecting = false
     private var managedPushRegistrationsInFlight = 0
     private var managedPushRegistrationWaiters:
+        [CheckedContinuation<Void, Never>] = []
+    private var managedSyncCompletionWaiters:
         [CheckedContinuation<Void, Never>] = []
     private var socialPokeHaptic: (() -> Bool)?
     private let managedSafetyLocationStreamer =
@@ -164,7 +209,10 @@ final class ManagedCloudService: ObservableObject {
         phase = configuration == nil ? .unavailable : .signedOut
     }
 
-    func bootstrap() {
+    func bootstrap(repo: Repository? = nil) {
+        if let repo {
+            managedRepository = repo
+        }
         reconcilePersistedManagedState()
         restoreManagedSafetyLocationSharingIfNeeded()
         scheduleManagedSafetyBootstrap()
@@ -271,6 +319,7 @@ final class ManagedCloudService: ObservableObject {
 
     func enroll(repo: Repository) async {
         guard !isBusy, configuration != nil else { return }
+        managedRepository = repo
         isBusy = true
         defer { isBusy = false }
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
@@ -296,6 +345,10 @@ final class ManagedCloudService: ObservableObject {
             defaults.set(true, forKey: Key.automatic)
             defaults.removeObject(forKey: Key.enrollmentRequestID)
             phase = .enrolled
+            try await updateManagedDocumentProfileBinding(
+                accountScopeHash: scope,
+                repo: repo
+            )
             scheduleManagedSafetyBootstrap()
             setStatus(
                 String(localized:
@@ -583,6 +636,26 @@ final class ManagedCloudService: ObservableObject {
         }
     }
 
+    private func waitForManagedSyncCompletion() async {
+        guard running else { return }
+        await withCheckedContinuation { continuation in
+            if running {
+                managedSyncCompletionWaiters.append(continuation)
+            } else {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func finishManagedSync() {
+        running = false
+        let waiters = managedSyncCompletionWaiters
+        managedSyncCompletionWaiters.removeAll(keepingCapacity: true)
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
     @discardableResult
     func enableManagedSafetyNotifications() async -> Bool {
         guard phase == .enrolled else { return false }
@@ -617,8 +690,135 @@ final class ManagedCloudService: ObservableObject {
         guard beginSafetyAction() else { return }
         defer { endSafetyAction() }
         await runSafetyOperation("refresh") {
-            try await refreshSafetyData()
+            try await refreshSafetyData(requireNewGeneration: true)
         }
+    }
+
+    func triggerBandSOS(
+        durationHours: Int,
+        shareLocation: Bool
+    ) async -> BandSOSOutcome {
+        bootstrap()
+        return await performBandSOS(
+            durationHours: durationHours == 12 ? 12 : 8,
+            shareLocation: shareLocation
+        )
+    }
+
+    private func performBandSOS(
+        durationHours: Int,
+        shareLocation: Bool
+    ) async -> BandSOSOutcome {
+        do {
+            try await safetyIncidentGate.acquire()
+        } catch {
+            recordBandSOSOutcome("canceled")
+            return .unavailable(
+                String(
+                    localized:
+                        "appwide.managed_safety.band_sos.request_rejected"
+                )
+            )
+        }
+        defer { safetyIncidentGate.release() }
+        guard phase == .enrolled else {
+            recordBandSOSOutcome("setup_unavailable")
+            return .unavailable(bandSOSSetupMessage)
+        }
+        do {
+            try await refreshSafetyData(requireNewGeneration: true)
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            recordBandSOSOutcome("canceled")
+            return .unavailable(
+                String(
+                    localized:
+                        "appwide.managed_safety.band_sos.request_rejected"
+                )
+            )
+        } catch {
+            safetyStatus = Self.userMessage(for: error)
+            recordBandSOSOutcome("setup_unavailable")
+            return .unavailable(
+                safetyStatus.isEmpty
+                    ? bandSOSSetupMessage
+                    : safetyStatus
+            )
+        }
+        guard bandSOSSetupReady else {
+            recordBandSOSOutcome("setup_unavailable")
+            return .unavailable(bandSOSSetupMessage)
+        }
+        if safetyIncidents.contains(where: {
+            $0.role == "owner"
+                && ["open", "acknowledged"].contains($0.status)
+        }) {
+            recordBandSOSOutcome("already_active")
+            return .alreadyActive
+        }
+
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_safety",
+            fields: ["operation": "band_sos"]
+        )
+        do {
+            let incident = try await createSafetyIncidentRequest(
+                trigger: "band_sos",
+                durationHours: durationHours,
+                shareLocation: shareLocation,
+                initialLocation: nil,
+                refreshAfterCreation: false
+            )
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: ["operation": "band_sos"]
+            )
+            scheduleBandSOSRefresh()
+            if ["open", "acknowledged"].contains(incident.status) {
+                recordBandSOSOutcome("opened")
+                return .opened
+            }
+        } catch is CancellationError {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "canceled",
+                fields: ["operation": "band_sos"]
+            )
+            recordBandSOSOutcome("canceled")
+            return .unavailable(
+                String(
+                    localized:
+                        "appwide.managed_safety.band_sos.request_rejected"
+                )
+            )
+        } catch {
+            safetyStatus = Self.userMessage(for: error)
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOperationOutcome(error),
+                fields: [
+                    "operation": "band_sos",
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+        }
+        recordBandSOSOutcome("rejected")
+        return .unavailable(
+            safetyStatus.isEmpty
+                ? String(
+                    localized:
+                        "appwide.managed_safety.band_sos.request_rejected"
+                )
+                : safetyStatus
+        )
+    }
+
+    private func recordBandSOSOutcome(_ outcome: String) {
+        AppDiagnosticsRecorder.shared.record(
+            "managed_safety.band_sos",
+            fields: ["outcome": outcome]
+        )
     }
 
     func createSafetyInvite() async {
@@ -788,45 +988,178 @@ final class ManagedCloudService: ObservableObject {
 
     @discardableResult
     func createSafetyIncident(
+        trigger: String = "manual_sos",
         durationHours: Int,
-        shareLocation: Bool
+        shareLocation: Bool,
+        initialLocation: SafetyLocation? = nil
     ) async -> ManagedSafetyIncident? {
         guard beginSafetyAction() else { return nil }
         defer { endSafetyAction() }
+        do {
+            try await safetyIncidentGate.acquire()
+        } catch {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.incident_gate",
+                fields: [
+                    "operation": "incident_create",
+                    "outcome": "canceled",
+                ]
+            )
+            return nil
+        }
+        defer { safetyIncidentGate.release() }
         var createdIncident: ManagedSafetyIncident?
         await runSafetyOperation("incident_create") {
-            let request = try safetyIncidentRequest(
-                durationHours: durationHours,
-                shareLocation: shareLocation
-            )
-            let creation: ManagedSafetyIncidentCreation
-            do {
-                creation = try await client().createSafetyIncident(
-                    durationHours: durationHours,
-                    shareLocation: shareLocation,
-                    requestID: request.requestID,
-                    authorization: try await authorization(forceRefresh: true)
-                )
-            } catch {
-                if Self.shouldRetireSafetyIncidentRequest(error) {
-                    clearSafetyIncidentRequest(request.requestID)
-                }
-                throw error
+            try await refreshSafetyData(requireNewGeneration: true)
+            try Task.checkCancellation()
+            guard bandSOSSetupReady else {
+                safetyStatus = bandSOSSetupMessage
+                return
             }
-            clearSafetyIncidentRequest(request.requestID)
-            defaults.set(true, forKey: Key.safetyEnabled)
-            safetyIncidents = Self.replacing(
-                creation.incident,
-                in: safetyIncidents
+            guard !safetyIncidents.contains(where: {
+                $0.role == "owner"
+                    && ["open", "acknowledged"].contains($0.status)
+            }) else {
+                safetyStatus = String(localized: "A Safety page is already active.")
+                return
+            }
+            if shareLocation {
+                guard let initialLocation,
+                      initialLocation.isUsable(
+                        atUnix: Int(Date().timeIntervalSince1970)
+                      ),
+                      initialLocation.hasUsableHorizontalAccuracy else {
+                    AppDiagnosticsRecorder.shared.record(
+                        "managed_safety.location_validation",
+                        fields: [
+                            "outcome": "incident_rejected",
+                            "failure_kind": "invalid_location",
+                        ]
+                    )
+                    safetyStatus = String(
+                        localized: "managed.safety.location.needed"
+                    )
+                    return
+                }
+            }
+            try Task.checkCancellation()
+            createdIncident = try await createSafetyIncidentRequest(
+                trigger: trigger,
+                durationHours: durationHours,
+                shareLocation: shareLocation,
+                initialLocation: initialLocation,
+                refreshAfterCreation: true
             )
-            reconcileManagedSafetyLocationSharing()
-            createdIncident = creation.incident
-            safetyStatus = String(
-                localized: "Safety page started. Push delivery is best effort; call emergency services for immediate danger."
-            )
-            try await refreshSafetyData()
         }
         return createdIncident
+    }
+
+    private func createSafetyIncidentRequest(
+        trigger: String,
+        durationHours: Int,
+        shareLocation: Bool,
+        initialLocation: SafetyLocation?,
+        refreshAfterCreation: Bool
+    ) async throws -> ManagedSafetyIncident {
+        if shareLocation,
+           !Self.locationSharingAuthorized(requested: true) {
+            throw ManagedCloudError.locationAuthorizationRequired
+        }
+        let request = try safetyIncidentRequest(
+            trigger: trigger,
+            durationHours: durationHours,
+            shareLocation: shareLocation
+        )
+        let managedInitialLocation: ManagedSafetyLocationCreate?
+        if let initialLocation {
+            guard let horizontalAccuracyM =
+                    initialLocation.horizontalAccuracyMeters,
+                  initialLocation.hasUsableHorizontalAccuracy else {
+                throw ManagedStorageError.invalidResponse
+            }
+            managedInitialLocation = ManagedSafetyLocationCreate(
+                latitude: initialLocation.latitude,
+                longitude: initialLocation.longitude,
+                horizontalAccuracyM: horizontalAccuracyM,
+                capturedAt: ManagedTimestamp.iso8601(
+                    milliseconds:
+                        Int64(initialLocation.capturedAtUnix) * 1_000
+                )
+            )
+        } else {
+            managedInitialLocation = nil
+        }
+        try Task.checkCancellation()
+        let creation: ManagedSafetyIncidentCreation
+        do {
+            let auth = try await authorization(forceRefresh: true)
+            try Task.checkCancellation()
+            creation = try await client().createSafetyIncident(
+                trigger: trigger,
+                durationHours: durationHours,
+                shareLocation: shareLocation,
+                initialLocation: managedInitialLocation,
+                requestID: request.requestID,
+                authorization: auth
+            )
+        } catch {
+            if Self.shouldRetireSafetyIncidentRequest(error) {
+                clearSafetyIncidentRequest(request.requestID)
+            }
+            throw error
+        }
+        clearSafetyIncidentRequest(request.requestID)
+        defaults.set(true, forKey: Key.safetyEnabled)
+        let terminalReplay = Self.isTerminalSafetyIncidentReplay(
+            creation.incident
+        )
+        safetyIncidents = Self.replacing(
+            creation.incident,
+            in: safetyIncidents
+        )
+        reconcileManagedSafetyLocationSharing()
+        safetyStatus = terminalReplay
+            ? String(localized: "Managed Safety is up to date.")
+            : String(
+                localized: "Safety page started. Push delivery is best effort; call emergency services for immediate danger."
+            )
+        if refreshAfterCreation {
+            Task { @MainActor [weak self] in
+                try? await self?.refreshSafetyData()
+            }
+        }
+        return creation.incident
+    }
+
+    private static func isTerminalSafetyIncidentReplay(
+        _ incident: ManagedSafetyIncident
+    ) -> Bool {
+        incident.duplicate
+            && ["resolved", "canceled", "expired"].contains(incident.status)
+    }
+
+    private func scheduleBandSOSRefresh() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for _ in 0..<40 {
+                guard self.safetyRunning else { break }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            guard self.phase == .enrolled else { return }
+            try? await self.refreshSafetyData()
+        }
+    }
+
+    private static func locationSharingAuthorized(
+        requested: Bool
+    ) -> Bool {
+        guard requested else { return false }
+        switch CLLocationManager().authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            return true
+        default:
+            return false
+        }
     }
 
     func updateSafetyLocation(
@@ -844,12 +1177,23 @@ final class ManagedCloudService: ObservableObject {
         )
         guard location.isUsable(
             atUnix: Int(Date().timeIntervalSince1970)
-        ) else { return }
+        ), location.hasUsableHorizontalAccuracy else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_replace",
+                fields: [
+                    "outcome": "rejected",
+                    "source": "manual",
+                    "failure_kind": "invalid_location",
+                ]
+            )
+            return
+        }
         _ = await submitManagedSafetyLocation(
             incidentID: incidentID,
             sequence: proposedSafetyLocationSequence(for: incidentID),
             location: location,
-            source: "manual"
+            source: "manual",
+            requireActiveSession: false
         )
     }
 
@@ -1307,10 +1651,12 @@ final class ManagedCloudService: ObservableObject {
 
     @discardableResult
     func catchUpIfDue(repo: Repository) async -> Bool {
+        managedRepository = repo
         if !firebaseConfigured {
-            bootstrap()
+            bootstrap(repo: repo)
         }
         guard phase == .enrolled,
+              !disconnecting,
               !isBusy,
               !running,
               !socialRunning,
@@ -1390,7 +1736,9 @@ final class ManagedCloudService: ObservableObject {
     func disconnect() async {
         guard !isBusy else { return }
         disconnecting = true
+        isBusy = true
         defer {
+            isBusy = false
             disconnecting = false
             if phase == .enrolled {
                 reconcileManagedSafetyLocationSharing()
@@ -1399,9 +1747,21 @@ final class ManagedCloudService: ObservableObject {
         }
         safetyBootstrapTask?.cancel()
         safetyBootstrapTask = nil
+        managedDocumentProfileBindingTask?.cancel()
+        if let profileBindingTask = managedDocumentProfileBindingTask {
+            await profileBindingTask.value
+        }
+        managedDocumentProfileBindingTask = nil
         stopManagedSafetyLocationSharing(reason: "disconnect")
-        isBusy = true
-        defer { isBusy = false }
+        let syncSerialization = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_sync.disconnect_serialization",
+            fields: ["sync_in_flight": running ? "true" : "false"]
+        )
+        await waitForManagedSyncCompletion()
+        AppDiagnosticsRecorder.shared.endOperation(
+            syncSerialization,
+            outcome: "completed"
+        )
         await waitForManagedPushRegistrations()
         let requiresPushRevocation =
             phase == .enrolled || phase == .deletionScheduled
@@ -1462,6 +1822,14 @@ final class ManagedCloudService: ObservableObject {
             return
         }
         do {
+            if let repo = managedRepository {
+                try await updateManagedDocumentProfileBinding(
+                    accountScopeHash: nil,
+                    repo: repo
+                )
+            } else {
+                throw ManagedCloudError.storeUnavailable
+            }
             try configureFirebaseIfNeeded()
             try Auth.auth().signOut()
         } catch {
@@ -1658,11 +2026,34 @@ final class ManagedCloudService: ObservableObject {
         }
     }
 
-    private func refreshSafetyData() async throws {
+    private func refreshSafetyData(
+        requireNewGeneration: Bool = false
+    ) async throws {
+        if let safetyRefreshTask {
+            try await safetyRefreshTask.value
+            try Task.checkCancellation()
+            if !requireNewGeneration {
+                return
+            }
+            while self.safetyRefreshTask != nil {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.loadSafetyData()
+        }
+        safetyRefreshTask = task
+        defer { safetyRefreshTask = nil }
+        try await task.value
+        try Task.checkCancellation()
+    }
+
+    private func loadSafetyData() async throws {
         guard phase == .enrolled else {
             throw ManagedCloudError.consentRequired
         }
-        guard !safetyRunning else { return }
         safetyRunning = true
         defer { safetyRunning = false }
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
@@ -1700,6 +2091,8 @@ final class ManagedCloudService: ObservableObject {
                 outcome: "completed",
                 fields: [
                     "contacts": String(contacts.contacts.count),
+                    "delivery_capable_contacts":
+                        String(contacts.deliveryCapableCount),
                     "requests": String(requests.count),
                     "incidents": String(incidents.count),
                     "active_incidents": String(
@@ -1880,7 +2273,8 @@ final class ManagedCloudService: ObservableObject {
                 incidentID: incidentID,
                 sequence: sequence,
                 location: location,
-                source: "stream"
+                source: "stream",
+                requireActiveSession: true
             )
         }
         if isNewSession {
@@ -1937,11 +2331,41 @@ final class ManagedCloudService: ObservableObject {
         incidentID: UUID,
         sequence: Int64,
         location: SafetyLocation,
-        source: String
+        source: String,
+        requireActiveSession: Bool
     ) async -> SafetyIncidentLocationStreamer.SubmissionDisposition {
-        guard phase == .enrolled,
-              managedSafetyLocationIncidentID == incidentID else {
+        guard phase == .enrolled else {
             return .stop
+        }
+        if requireActiveSession,
+           managedSafetyLocationIncidentID != incidentID {
+            return .stop
+        }
+        guard Self.locationSharingAuthorized(requested: true) else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_replace",
+                fields: [
+                    "outcome": "rejected",
+                    "source": source,
+                    "failure_kind": "location_not_authorized",
+                ]
+            )
+            stopManagedSafetyLocationSharing(
+                reason: "authorization_revoked"
+            )
+            return .stop
+        }
+        guard let horizontalAccuracyM = location.horizontalAccuracyMeters,
+              location.hasUsableHorizontalAccuracy else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_replace",
+                fields: [
+                    "outcome": "rejected",
+                    "source": source,
+                    "failure_kind": "invalid_location",
+                ]
+            )
+            return .retry
         }
         guard !managedSafetyLocationUpdateInFlight else {
             AppDiagnosticsRecorder.shared.record(
@@ -1965,8 +2389,7 @@ final class ManagedCloudService: ObservableObject {
                 sequence: sequence,
                 latitude: location.latitude,
                 longitude: location.longitude,
-                horizontalAccuracyM:
-                    location.horizontalAccuracyMeters ?? 10_000,
+                horizontalAccuracyM: horizontalAccuracyM,
                 capturedAt: ManagedTimestamp.iso8601(
                     milliseconds: Int64(location.capturedAtUnix) * 1_000
                 ),
@@ -2584,10 +3007,12 @@ final class ManagedCloudService: ObservableObject {
     }
 
     private func safetyIncidentRequest(
+        trigger: String,
         durationHours: Int,
         shareLocation: Bool
     ) throws -> ManagedCloudSafetyIncidentRequest {
-        guard [8, 12].contains(durationHours) else {
+        guard ["manual_sos", "band_sos"].contains(trigger),
+              [8, 12].contains(durationHours) else {
             throw ManagedStorageError.conflict
         }
         let scope = try accountScopeHash()
@@ -2596,16 +3021,16 @@ final class ManagedCloudService: ObservableObject {
                ManagedCloudSafetyIncidentRequest.self,
                from: data
            ),
-           existing.accountScopeHash == scope {
-            guard existing.durationHours == durationHours,
-                  existing.shareLocation == shareLocation else {
-                throw ManagedStorageError.conflict
-            }
+           existing.accountScopeHash == scope,
+           existing.trigger == trigger,
+           existing.durationHours == durationHours,
+           existing.shareLocation == shareLocation {
             return existing
         }
         let created = ManagedCloudSafetyIncidentRequest(
             requestID: UUID(),
             accountScopeHash: scope,
+            trigger: trigger,
             durationHours: durationHours,
             shareLocation: shareLocation
         )
@@ -2754,6 +3179,7 @@ final class ManagedCloudService: ObservableObject {
 
     private func sync(repo: Repository, mode: SyncMode) async throws -> SyncSummary {
         guard phase == .enrolled else { throw ManagedCloudError.consentRequired }
+        guard !disconnecting else { throw CancellationError() }
         guard !running else { return SyncSummary(
             uploadedChunks: 0,
             uploadedBytes: 0,
@@ -2768,7 +3194,7 @@ final class ManagedCloudService: ObservableObject {
         }
 
         running = true
-        defer { running = false }
+        defer { finishManagedSync() }
         defaults.set(Date().timeIntervalSince1970, forKey: Key.lastAttempt)
         switch mode {
         case .manual:
@@ -2940,6 +3366,8 @@ final class ManagedCloudService: ObservableObject {
                 return "configuration"
             case .exportPreparationIncomplete:
                 return "continuation_required"
+            case .locationAuthorizationRequired:
+                return "location_not_authorized"
             case .invalidPhone, .invalidCode:
                 return "input"
             }
@@ -2954,7 +3382,8 @@ final class ManagedCloudService: ObservableObject {
         case "input", "authentication", "forbidden", "consent",
              "identity_input", "app_verification", "identity_provider_disabled",
              "verification_expired", "rate_limited", "policy_changed",
-             "quota_exceeded", "conflict", "server_rejected":
+             "quota_exceeded", "conflict", "server_rejected",
+             "location_not_authorized":
             return "rejected"
         case "canceled":
             return "canceled"
@@ -2973,6 +3402,10 @@ final class ManagedCloudService: ObservableObject {
         let state = try WhoopManagedSyncStateStore(
             store: store,
             accountScopeHash: scopeHash
+        )
+        try await store.activateManagedDocumentProfile(
+            accountScopeHash: scopeHash,
+            updatedAtMs: Self.managedNowMilliseconds()
         )
         if let settings = BackupSettings.encode(
             BackupSettings.snapshot(from: defaults)
@@ -3167,6 +3600,82 @@ final class ManagedCloudService: ObservableObject {
         ManagedDigest.sha256(Data("noop-managed-account-v1\0\(user.uid)".utf8))
     }
 
+    private func scheduleManagedDocumentProfileBinding(
+        accountScopeHash: String?
+    ) {
+        guard let repo = managedRepository else { return }
+        guard accountScopeHash == nil || !disconnecting else { return }
+        managedDocumentProfileBindingTask?.cancel()
+        managedDocumentProfileBindingTask = Task { @MainActor [weak self, weak repo] in
+            guard let self,
+                  let repo,
+                  !Task.isCancelled,
+                  accountScopeHash == nil || !self.disconnecting else {
+                return
+            }
+            do {
+                try await self.updateManagedDocumentProfileBinding(
+                    accountScopeHash: accountScopeHash,
+                    repo: repo
+                )
+            } catch {
+                // The operation records a bounded categorical failure. A later
+                // bootstrap or sync pass retries the same idempotent binding.
+            }
+        }
+    }
+
+    private func updateManagedDocumentProfileBinding(
+        accountScopeHash: String?,
+        repo: Repository
+    ) async throws {
+        let state = accountScopeHash == nil ? "unbound" : "bound"
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_sync.profile_binding",
+            fields: ["state": state]
+        )
+        do {
+            try Task.checkCancellation()
+            guard accountScopeHash == nil || !disconnecting else {
+                throw CancellationError()
+            }
+            guard let store = await repo.storeHandle() else {
+                throw ManagedCloudError.storeUnavailable
+            }
+            try Task.checkCancellation()
+            if let accountScopeHash {
+                try await store.activateManagedDocumentProfile(
+                    accountScopeHash: accountScopeHash,
+                    updatedAtMs: Self.managedNowMilliseconds()
+                )
+            } else {
+                try await store.releaseManagedDocumentProfile(
+                    updatedAtMs: Self.managedNowMilliseconds()
+                )
+            }
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed"
+            )
+        } catch {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError ? "canceled" : "failed",
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+            throw error
+        }
+    }
+
+    nonisolated private static func managedNowMilliseconds() -> Int64 {
+        max(
+            0,
+            Int64((Date().timeIntervalSince1970 * 1_000).rounded(.down))
+        )
+    }
+
     private func enrollmentRequestID() -> UUID {
         if let raw = defaults.string(forKey: Key.enrollmentRequestID),
            let existing = UUID(uuidString: raw) {
@@ -3184,6 +3693,7 @@ final class ManagedCloudService: ObservableObject {
         guard Auth.auth().currentUser != nil else {
             stopManagedSafetyLocationSharing(reason: "signed_out")
             phase = .signedOut
+            scheduleManagedDocumentProfileBinding(accountScopeHash: nil)
             return
         }
         let scope = try? accountScopeHash()
@@ -3195,6 +3705,7 @@ final class ManagedCloudService: ObservableObject {
         } else {
             phase = enrolled ? .enrolled : .consentRequired
         }
+        scheduleManagedDocumentProfileBinding(accountScopeHash: scope)
     }
 
     private func clearEnrollment() {
@@ -3291,6 +3802,7 @@ final class ManagedCloudService: ObservableObject {
     private func completeLocalErasureState() {
         disableManagedMessagingLocally()
         try? Auth.auth().signOut()
+        scheduleManagedDocumentProfileBinding(accountScopeHash: nil)
         clearEnrollment()
         phase = .signedOut
         setStatus(
@@ -3303,6 +3815,7 @@ final class ManagedCloudService: ObservableObject {
     private func completeLocalDeletionHandoff() {
         disableManagedMessagingLocally()
         try? Auth.auth().signOut()
+        scheduleManagedDocumentProfileBinding(accountScopeHash: nil)
         clearEnrollment()
         phase = .signedOut
         setStatus(
@@ -3336,6 +3849,9 @@ final class ManagedCloudService: ObservableObject {
         defaults.set(true, forKey: Key.automatic)
         deletionNotBefore = nil
         phase = .enrolled
+        scheduleManagedDocumentProfileBinding(
+            accountScopeHash: try? accountScopeHash()
+        )
         scheduleManagedSafetyBootstrap()
         setStatus(String(localized: "NOOP+ account deletion was canceled."))
     }
@@ -3784,8 +4300,46 @@ final class ManagedCloudService: ObservableObject {
 private struct ManagedCloudSafetyIncidentRequest: Codable, Equatable {
     let requestID: UUID
     let accountScopeHash: String
+    let trigger: String
     let durationHours: Int
     let shareLocation: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case requestID
+        case accountScopeHash
+        case trigger
+        case durationHours
+        case shareLocation
+    }
+
+    init(
+        requestID: UUID,
+        accountScopeHash: String,
+        trigger: String,
+        durationHours: Int,
+        shareLocation: Bool
+    ) {
+        self.requestID = requestID
+        self.accountScopeHash = accountScopeHash
+        self.trigger = trigger
+        self.durationHours = durationHours
+        self.shareLocation = shareLocation
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        requestID = try values.decode(UUID.self, forKey: .requestID)
+        accountScopeHash = try values.decode(
+            String.self,
+            forKey: .accountScopeHash
+        )
+        trigger = try values.decodeIfPresent(
+            String.self,
+            forKey: .trigger
+        ) ?? "manual_sos"
+        durationHours = try values.decode(Int.self, forKey: .durationHours)
+        shareLocation = try values.decode(Bool.self, forKey: .shareLocation)
+    }
 }
 
 private enum ManagedCloudError: LocalizedError {
@@ -3796,6 +4350,7 @@ private enum ManagedCloudError: LocalizedError {
     case storeUnavailable
     case firebaseProjectConflict
     case exportPreparationIncomplete
+    case locationAuthorizationRequired
 
     var errorDescription: String? {
         switch self {
@@ -3819,6 +4374,8 @@ private enum ManagedCloudError: LocalizedError {
             return String(
                 localized: "NOOP safely paused after a large backup catch-up. Keep the app open, sync again, then retry the complete cloud-history export."
             )
+        case .locationAuthorizationRequired:
+            return String(localized: "managed.safety.location.needed")
         }
     }
 }

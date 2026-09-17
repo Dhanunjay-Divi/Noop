@@ -47,19 +47,23 @@ class ReviewSampleModeContractTest {
             source.indexOf("\n        },\n    ) { inner ->"),
         )
 
-        assertTrue(source.contains("rememberBottomBarShowsVisualLabels("))
+        assertTrue(source.contains("rememberBottomBarLabelLayout("))
         assertTrue(source.contains("availableWidth = maxWidth"))
-        assertTrue(block.contains("label = if (showVisualLabels)"))
+        assertTrue(block.contains("label = {"))
         assertTrue(block.contains("contentDescription = tabLabel"))
-        assertTrue(block.contains("if (showVisualLabels) {"))
-        assertTrue(block.contains("Modifier.semantics { contentDescription = tabLabel }"))
+        assertTrue(block.contains("maxLines = labelLayout.maxLines"))
+        assertTrue(block.contains("alwaysShowLabel = true"))
+        assertTrue(block.contains(".semantics { contentDescription = tabLabel }"))
+        assertTrue(block.contains(".fillMaxWidth()\n                    .navigationBarsPadding()"))
+        assertTrue(block.contains("windowInsets = WindowInsets(0, 0, 0, 0)"))
         assertFalse(
             block.contains(
-                """.testTag("noop.review.tab.${'$'}{tab.name.lowercase()}")
-                                .semantics""",
+                ".height(maxOf(80, labelLayout.barHeightDp).dp)\n" +
+                    "                        .navigationBarsPadding()",
             ),
         )
         assertFalse(block.contains("TextOverflow.Ellipsis"))
+        assertFalse(block.contains("showVisualLabels"))
     }
 
     @Test

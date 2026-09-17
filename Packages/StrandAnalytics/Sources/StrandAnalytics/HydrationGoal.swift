@@ -3,7 +3,7 @@ import Foundation
 // HydrationGoal.swift — pure daily hydration goal math for the opt-in Hydration tracker (MVP).
 //
 // LOCAL-ONLY, OPT-IN, MANUAL-FIRST: the user logs water with quick taps; this enum computes the day's
-// target in ml. It is a plain, transparent guide built from a sex baseline plus a small bump scaled by
+// target in ml. It is a plain, transparent estimate built from a sex baseline plus a small bump scaled by
 // the day's Effort (strain) — NEVER medical advice and never an invented measurement. The whole formula
 // lives here so it is headless and unit-tested, and is BYTE-IDENTICAL to the Android twin
 // (com.noop.analytics.HydrationGoal): same Int constants, same round-then-clamp, same integer rounding.
@@ -11,8 +11,8 @@ import Foundation
 //
 //   GOAL(ml) = roundToNearest( sexBaseline + effortBump, 50 )
 //     sexBaseline : male 2960, female 2160, unspecified/other 2560 ml (DRINK water: the
-//                   EFSA/IOM total-water references 3700/2700/3200 minus the ~20% that
-//                   comes from food, so this is what you must actually DRINK)
+//                   EFSA/IOM total-water references 3700/2700/3200 minus the approximate
+//                   share commonly obtained from food)
 //     effortBump  : clamp(round(effort/100 · 700), 0…700); 0 when no Effort is available
 //
 // `effort` is the day's Effort/strain score on NOOP's native 0…100 scale (the value stored as
@@ -112,14 +112,15 @@ public enum HydrationGoal {
         return min(1.0, max(0.0, totalML / Double(goalML)))
     }
 
-    // MARK: - R3: metric-aware inputs (weight + heat) — mirror EXACTLY in the Kotlin twin
+    // MARK: - R3: metric-aware input (weight) - mirror EXACTLY in the Kotlin twin
     //
     // These EXTEND the goal without changing `dailyGoalML(sex:effort:)` (that overload still returns the
     // sex-baseline result, so existing history/tests are unaffected). The metric-aware overload below uses
-    // body weight when known (more personal than a flat sex baseline) and adds a heat bump on hot days.
-    // Still a transparent wellness GUIDE — never medical advice, never a hard rule.
+    // body weight when known (more personal than a flat sex baseline). Wrist skin-temperature deviation is
+    // deliberately not used: it is not validated evidence of an individual's fluid requirement.
+    // Still a transparent wellness estimate — never medical advice, never a hard rule.
     //
-    //   GOAL(ml) = roundToNearest( weightBaseline(sex,kg) + effortBump + heatBump, 50 )
+    //   GOAL(ml) = roundToNearest( weightBaseline(sex,kg) + effortBump, 50 )
 
     /// ~35 ml per kg body mass per day — the standard adult maintenance estimate.
     public static let mlPerKg = 35
@@ -127,11 +128,6 @@ public enum HydrationGoal {
     /// absurd target.
     public static let weightBaselineFloorML = 1500
     public static let weightBaselineCeilML = 5000
-    /// Heat bump: extra ml per whole °C of skin-temperature elevation above the personal baseline, capped.
-    /// Only POSITIVE deviations add fluid; a cool day never reduces the guide below baseline.
-    public static let heatBumpPerDegML = 300
-    public static let maxHeatBumpML = 600
-
     /// Baseline ml: weight-based (`round(35·kg)` clamped to the sane range) when `weightKg` is a finite
     /// positive value, otherwise the sex baseline. `nil`/non-finite/≤0 weight ⇒ sex baseline (back-compat).
     public static func weightBaselineML(sex: String, weightKg: Double?) -> Int {
@@ -140,23 +136,52 @@ public enum HydrationGoal {
         return min(weightBaselineCeilML, max(weightBaselineFloorML, raw))
     }
 
-    /// Heat bump (ml) from skin-temperature deviation in °C above baseline: `round(devC·300)` clamped to
-    /// 0…600. `nil`/non-finite, an absolute imported skin temperature, an implausible deviation, or a
-    /// non-positive deviation (at/below baseline) ⇒ 0.
-    public static func heatBumpML(skinTempDevC: Double?) -> Int {
-        guard let dev = VitalBands.skinTempDeviation(from: skinTempDevC), dev > 0 else { return 0 }
-        let raw = Int((dev * Double(heatBumpPerDegML)).rounded())
-        return min(maxHeatBumpML, max(0, raw))
+    /// Compatibility shim for older callers. Skin temperature is not used to infer fluid need.
+    public static func heatBumpML(skinTempDevC _: Double?) -> Int {
+        0
     }
 
-    /// The metric-aware daily goal (ml): `roundToNearest(weightBaseline + effortBump + heatBump, 50)`.
-    /// Pure. With `weightKg == nil` and `skinTempDevC == nil` this equals `dailyGoalML(sex:effort:)`.
-    public static func dailyGoalML(sex: String, weightKg: Double?, effort: Double?,
-                                   skinTempDevC: Double?) -> Int {
+    /// The metric-aware daily goal (ml): `roundToNearest(weightBaseline + effortBump, 50)`.
+    public static func dailyGoalML(sex: String, weightKg: Double?, effort: Double?) -> Int {
         let raw = weightBaselineML(sex: sex, weightKg: weightKg)
             + effortBump(effort: effort)
-            + heatBumpML(skinTempDevC: skinTempDevC)
         return roundToNearest(raw, step: roundToML)
+    }
+
+    /// Source-compatible overload for older call sites. `skinTempDevC` is intentionally ignored.
+    public static func dailyGoalML(
+        sex: String,
+        weightKg: Double?,
+        effort: Double?,
+        skinTempDevC _: Double?
+    ) -> Int {
+        dailyGoalML(sex: sex, weightKg: weightKg, effort: effort)
+    }
+
+    /// Product-facing adult hydration estimate. Unlike the compatibility overloads above, this returns
+    /// `nil` until the profile inputs used to derive a target are explicitly confirmed. Manual intake
+    /// logging remains available without a target.
+    ///
+    /// A confirmed plausible weight is preferred. When weight has not been confirmed, a confirmed sex
+    /// baseline may be used. Age must always be confirmed and within the adult product context.
+    public static func personalizedDailyGoalML(
+        age: Int,
+        ageConfirmed: Bool,
+        sex: String,
+        sexConfirmed: Bool,
+        weightKg: Double?,
+        weightConfirmed: Bool,
+        effort: Double?
+    ) -> Int? {
+        guard ageConfirmed, age >= BodyProfilePolicy.adultMinimumAge else { return nil }
+        if weightConfirmed,
+           let weightKg,
+           weightKg.isFinite,
+           (20.0...400.0).contains(weightKg) {
+            return dailyGoalML(sex: sex, weightKg: weightKg, effort: effort)
+        }
+        guard sexConfirmed else { return nil }
+        return dailyGoalML(sex: sex, effort: effort)
     }
 
     // MARK: - R3: smart reminder schedule (pure; platform notification wiring consumes this)

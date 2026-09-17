@@ -37,20 +37,21 @@ class RecoveryDriversTest {
         // Rows are sorted biggest-mover-first, matching the Swift twin.
         val magnitudes = drivers.map { kotlin.math.abs(it.deltaPoints) }
         assertEquals(magnitudes.sortedDescending(), magnitudes)
-        // Every row carries a non-blank value + verdict (never fabricated-empty). HRV / resting HR /
-        // respiration name a learned baseline; Sleep + Skin temp intentionally carry an empty baseline
-        // (no learned per-night baseline), exactly as the Swift twin does.
+        // Every row carries a finite numeric value + verdict (never fabricated-empty). HRV / resting
+        // HR / respiration name a learned baseline; Sleep + Skin temp may intentionally carry no
+        // learned per-night baseline.
         drivers.forEach {
-            assertTrue(it.valueText.isNotBlank())
+            assertTrue(it.value.isFinite())
             assertTrue(it.verdict.isNotBlank())
         }
         listOf("Heart rate variability", "Resting heart rate", "Respiratory rate").forEach { label ->
-            assertTrue(drivers.first { it.label == label }.baselineText.isNotBlank())
+            assertTrue(drivers.first { it.label == label }.baseline != null)
         }
         // The HRV row names the night's value + the personal baseline it was scored against.
         val hrv = drivers.first { it.label == "Heart rate variability" }
-        assertEquals("62 ms", hrv.valueText)
-        assertEquals("50 ms baseline", hrv.baselineText)
+        assertEquals(62.0, hrv.value, 0.0)
+        assertEquals(50.0, hrv.baseline!!, 0.0)
+        assertEquals(ChargeDriverValueFormat.MILLISECONDS, hrv.valueFormat)
     }
 
     @Test fun missingInputYieldsNoRowNotAFakeZero() {
@@ -67,6 +68,42 @@ class RecoveryDriversTest {
         assertFalse(labels.contains("Resting heart rate"))
         assertFalse(labels.contains("Respiratory rate"))
         assertFalse(labels.contains("Skin temperature"))
+    }
+
+    @Test fun sleepWithoutLearnedBaselineDescribesItsContributionNotAPersonalBaseline() {
+        val supportive = RecoveryDrivers.chargeDrivers(
+            hrv = 55.0, rhr = 55.0, resp = null,
+            hrvBaseline = baseline(50.0, 6.0),
+            rhrBaseline = null, respBaseline = null,
+            sleepPerf = 0.95, restQualityBaseline = null,
+        ).first { it.label == "Sleep quality" }
+        val limiting = RecoveryDrivers.chargeDrivers(
+            hrv = 55.0, rhr = 55.0, resp = null,
+            hrvBaseline = baseline(50.0, 6.0),
+            rhrBaseline = null, respBaseline = null,
+            sleepPerf = 0.50, restQualityBaseline = null,
+        ).first { it.label == "Sleep quality" }
+
+        assertNull(supportive.baseline)
+        assertEquals("sleep quality supported recovery", supportive.verdict)
+        assertNull(limiting.baseline)
+        assertEquals("sleep quality limited recovery", limiting.verdict)
+        assertFalse(supportive.verdict.contains("baseline"))
+        assertFalse(limiting.verdict.contains("baseline"))
+    }
+
+    @Test fun sleepWithLearnedBaselineKeepsPersonalComparisonCopy() {
+        val sleep = RecoveryDrivers.chargeDrivers(
+            hrv = 55.0, rhr = 55.0, resp = null,
+            hrvBaseline = baseline(50.0, 6.0),
+            rhrBaseline = null, respBaseline = null,
+            sleepPerf = 0.90,
+            restQualityBaseline = baseline(0.80, 0.05),
+        ).first { it.label == "Sleep quality" }
+
+        assertEquals(80.0, sleep.baseline!!, 0.0)
+        assertEquals(ChargeDriverValueFormat.PERCENT, sleep.valueFormat)
+        assertEquals("above baseline, supporting recovery", sleep.verdict)
     }
 
     @Test fun deltaSignTracksDirection() {
@@ -93,10 +130,25 @@ class RecoveryDriversTest {
             respBaseline = null, sleepPerf = null, skinTempDev = 0.4,
         )
         val skin = drivers.first { it.label == "Skin temperature" }
-        assertTrue("skin temp must read as a +/- deviation", skin.valueText.contains("vs baseline"))
-        assertTrue(skin.valueText.contains("+0.4"))
+        assertEquals(0.4, skin.value, 0.0)
+        assertNull(skin.baseline)
+        assertEquals(ChargeDriverValueFormat.CELSIUS_DEVIATION, skin.valueFormat)
         // The symmetric penalty never lifts Charge.
         assertTrue(skin.deltaPoints <= 0)
+    }
+
+    @Test fun respiratoryValuesStayStructuredUntilLocalizedPresentation() {
+        val respiratory = RecoveryDrivers.chargeDrivers(
+            hrv = 50.0, rhr = 55.0, resp = 15.2,
+            hrvBaseline = baseline(50.0, 6.0),
+            rhrBaseline = baseline(55.0, 3.0),
+            respBaseline = baseline(15.7, 1.0),
+            sleepPerf = null,
+        ).first { it.label == "Respiratory rate" }
+
+        assertEquals(15.2, respiratory.value, 0.0)
+        assertEquals(15.7, respiratory.baseline!!, 0.0)
+        assertEquals(ChargeDriverValueFormat.BREATHS_PER_MINUTE, respiratory.valueFormat)
     }
 
     @Test fun absoluteSkinTemperatureDoesNotCreateDeviationDriver() {
@@ -131,7 +183,7 @@ class RecoveryDriversTest {
             sleepPerf = 0.9, skinTempDev = -0.5,
         )
         drivers.forEach { d ->
-            val all = "${d.label}${d.valueText}${d.baselineText}${d.verdict}"
+            val all = "${d.label}${d.verdict}"
             assertFalse("driver row must not contain an em-dash", all.contains("\u2014"))
         }
     }

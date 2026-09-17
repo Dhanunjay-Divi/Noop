@@ -54,7 +54,7 @@
     <string name="friends_waiting_shared_day">En attente d\'une journée partagée</string>
     <string name="friends_scores_waiting">Les scores apparaîtront après l\'envoi d\'un résumé quotidien par %1$s.</string>
     <string name="friends_open_sharing_named">Ouvrir les réglages de partage pour %1$s</string>
-    <string name="friends_score_charge">Énergie</string>
+    <string name="friends_score_charge">Récupération</string>
     <string name="friends_score_effort">Effort</string>
     <string name="friends_score_rest">Repos</string>
     <string name="friends_detail_sleep">Sommeil %1$s</string>
@@ -84,7 +84,7 @@
     <string name="friends_server_address">Adresse du serveur</string>
     <string name="friends_invite_code">Code d\'invitation</string>
     <string name="friends_join_default_title">Partagé par défaut</string>
-    <string name="friends_join_default_body">Énergie, Effort et Repos</string>
+    <string name="friends_join_default_body">Récupération, Effort et Score de sommeil</string>
     <string name="friends_join_never_title">Jamais envoyé à Amis</string>
     <string name="friends_join_never_body">FC et R-R bruts, phases de sommeil, journal, entraînements, itinéraires, exports et identifiants d\'appareil</string>
     <string name="friends_join_trust_title">Confiance envers l\'opérateur</string>

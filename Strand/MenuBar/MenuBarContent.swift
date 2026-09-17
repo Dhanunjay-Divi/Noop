@@ -296,7 +296,7 @@ public struct MenuBarContent: View {
                 }
             } else {
                 menuButton(
-                    live.connected ? "Re-scan strap" : "Scan & connect",
+                    live.connected ? "Re-scan Noop Band" : "Scan & connect",
                     systemImage: "antenna.radiowaves.left.and.right",
                     tone: .accent
                 ) {

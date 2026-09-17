@@ -1,694 +1,424 @@
 <p align="center">
-  <img src="docs/assets/noop-mark-master.png" alt="NOOP open-loop N mark" width="88">
+  <img src="docs/assets/readme/noop-mark.png" alt="NOOP Obsidian app mark" width="92">
 </p>
 
 <h1 align="center">NOOP</h1>
 
-<p align="center"><b>Your strap. Your data. Your machine. Local first; self-host when you choose.</b></p>
-
-<p align="center"><sub>Local biometric ownership, with an optional private circle on a server you control.</sub></p>
-
 <p align="center">
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Android%20%C2%B7%20iOS-E8B84B?style=flat-square">
-  <img alt="Local first" src="https://img.shields.io/badge/local-first-E8B84B?style=flat-square">
-  <img alt="Account free" src="https://img.shields.io/badge/account-free-C8902F?style=flat-square">
-  <img alt="WHOOP 4 supported; WHOOP 5 and MG experimental" src="https://img.shields.io/badge/WHOOP%204-supported%20%C2%B7%205%2FMG%20experimental-6B737B?style=flat-square">
-  <a href="LICENSE"><img alt="License: PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-6B737B?style=flat-square"></a>
-  <a href="https://www.reddit.com/r/NoopBand/"><img alt="Community: r/NoopBand" src="https://img.shields.io/badge/community-r%2FNoopBand-E8B84B?style=flat-square&logo=reddit&logoColor=white"></a>
-  <a href="https://discord.com/invite/wKgyqVdjrP"><img alt="Chat: Discord" src="https://img.shields.io/badge/chat-Discord-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
+  <strong>A local-first health, fitness, sleep, nutrition, and Safety companion.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Dhanunjay-Divi/Noop"><img alt="Source: Dhanunjay-Divi/Noop" src="https://img.shields.io/badge/source-Dhanunjay--Divi%2FNoop-44E2B0?style=flat-square&logo=github"></a>
-  <a href="https://github.com/Dhanunjay-Divi/Noop/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Dhanunjay-Divi/Noop?style=flat-square"></a>
+  NOOP turns wearable and phone signals into an explainable daily picture while
+  keeping core collection, scoring, history, and export on the user's device.
 </p>
 
 <p align="center">
-  <a href="#build-and-run">🛠&nbsp;Build</a> ·
-  <a href="SUPPORT.md">❓&nbsp;Help</a> ·
-  <a href="https://discord.com/invite/wKgyqVdjrP">💬&nbsp;Discord</a> ·
-  <a href="https://www.reddit.com/r/NoopBand/">👽&nbsp;Reddit</a> ·
-  <a href="#features">Features</a> ·
-  <a href="docs/README.md">Docs index</a> ·
-  <a href="docs/FEATURE_PARITY.md">WHOOP comparison</a> ·
-  <a href="docs/COMPETITIVE_CAPABILITY_AUDIT.md">Wearable audit</a> ·
-  <a href="docs/PROTOCOL.md">Protocol</a> ·
+  <a href="#product-surfaces">Visuals</a> |
+  <a href="#product">Product</a> |
+  <a href="#build-and-run">Build</a> |
+  <a href="#architecture">Architecture</a> |
+  <a href="#privacy-and-safety">Privacy and safety</a> |
+  <a href="#release-status">Release status</a> |
+  <a href="docs/README.md">Documentation</a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/Dhanunjay-Divi/Noop"><img src="docs/assets/hero-v8.jpg" alt="NOOP on iPhone, Mac and Android" width="820"></a>
-</p>
+> [!IMPORTANT]
+> NOOP is pre-release software. Source, tests, simulators, and synthetic staging
+> do not prove physical-band behavior, background delivery, sensor accuracy,
+> clinical validity, signing, or store readiness. See
+> [Production readiness](docs/PRODUCTION_READINESS.md) and
+> [Release blockers](docs/handoff/RELEASE-BLOCKERS.md).
 
-<p align="center">
-  <img src="docs/assets/shot-ios-today.png" alt="Today on iPhone" width="218">
-  &nbsp;&nbsp;
-  <img src="docs/assets/shot-android-today.png" alt="Today on Android" width="218">
-  &nbsp;&nbsp;
-  <img src="docs/assets/shot-android-trend.png" alt="A metric's own trend on Android" width="218">
-</p>
-<p align="center"><sub>Today on iPhone and Android, plus a metric&rsquo;s own trend. Platform-native clients, one transparent scoring model.</sub></p>
+## Product Surfaces
 
----
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/readme/ios-today.png">
+        <img src="docs/assets/readme/ios-today.png" alt="NOOP Today screen with deterministic synthetic demo data" width="100%">
+      </a>
+      <br>
+      <sub><strong>Today.</strong> Deterministic synthetic demo data shows the daily signal, source labels, confidence, and key metrics.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/readme/ios-today-calibrating.png">
+        <img src="docs/assets/readme/ios-today-calibrating.png" alt="NOOP Today screen with deterministic synthetic empty-state demo data" width="100%">
+      </a>
+      <br>
+      <sub><strong>Honest states.</strong> Deterministic synthetic empty-state demo data intentionally retains Building, Calibrating, and missing values.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/readme/ios-sleep.png">
+        <img src="docs/assets/readme/ios-sleep.png" alt="NOOP Sleep screen with deterministic synthetic demo data" width="100%">
+      </a>
+      <br>
+      <sub><strong>Sleep detail.</strong> A bottom-scroll capture with deterministic synthetic demo data visualizes stage context, sleep debt, and a 30-day trend without implying clinical validation.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/readme/ios-trends.png">
+        <img src="docs/assets/readme/ios-trends.png" alt="NOOP Trends screen with deterministic synthetic demo data" width="100%">
+      </a>
+      <br>
+      <sub><strong>Trends detail.</strong> A bottom-scroll capture from the deterministic 120-day fixture shows range controls, calendar context, and export affordances.</sub>
+    </td>
+  </tr>
+</table>
 
-## Build and run
+These are unretouched, full-resolution captures from the audited base commit
+recorded in the [visual manifest](docs/assets/readme/manifest.json), not a claim
+about the current dirty worktree. Android and macOS are not pictured because
+this documentation slice did not produce deterministic captures for those
+clients. The manifest records generalized capture commands, fixtures,
+checksums, dimensions, and limitations.
 
-Source builds are currently the canonical distribution. App Store distribution
-must remain disabled until every signing, privacy, physical-device, and
-redistribution gate in
-[`docs/APP_STORE_RELEASE.md`](docs/APP_STORE_RELEASE.md) passes. When builds are
-published, use only artifacts linked from the canonical
-[`Dhanunjay-Divi/Noop` repository](https://github.com/Dhanunjay-Divi/Noop).
+## Product
 
-Want to test a downloadable build against WHOOP or another wearable? Read the
-[beta testing guide](docs/BETA_TESTING.md), then submit aggregate,
-same-day results with the
-[metric difference form](https://github.com/Dhanunjay-Divi/Noop/issues/new?template=metric_difference.yml).
-Never upload a raw health export, account credential, database, or another
-person's data.
+NOOP is built around four questions:
 
-| Platform | Build | Notes |
-|---|---|---|
-| **macOS** | Generate the project and run the `Strand` scheme | macOS 13+, Xcode, and XcodeGen. |
-| **Android** | `cd android && ./gradlew assembleFullDebug` | Android 8+; install the generated debug APK on a real Bluetooth-capable device. |
-| **iOS** | Generate the project and run the `NOOPiOS` scheme | iOS 17+ on a real iPhone; select your own signing team. |
+1. What is my state today?
+2. How confident is that reading?
+3. What changed?
+4. What is one useful thing I can do next?
 
-See [`docs/BUILD.md`](docs/BUILD.md), [`docs/IOS.md`](docs/IOS.md), and the
-[`App Store release gates`](docs/APP_STORE_RELEASE.md).
+The primary phone navigation is the same on iPhone and Android:
 
-Collection and analysis work **offline**. Data-bearing network features are
-separate opt-ins: the **AI Coach** uses your own provider/key, **Oura cloud
-import** talks only to Oura when configured, and **Self-hosted Sync** sends data
-only to a server and API key you configure. **Friends** is an optional,
-least-privilege view of daily summaries on that same self-hosted server. None is
-required for strap collection or local analysis.
+```text
+Today | Trends | Workouts | Sleep | More
+```
 
----
-
-NOOP is a standalone, **local-first** companion app for WHOOP straps (4.0 and
-5.0). It pairs directly with the strap over Bluetooth, stores everything on your
-own device in SQLite, imports your existing WHOOP and Apple Health history, and
-computes recovery, strain, HRV, and sleep **locally**, with no WHOOP account and
-no WHOOP cloud. If you opt in, it can also replicate your data to your own
-FastAPI + TimescaleDB server.
-
-It is built on prior community interoperability work and exists for one
-reason: to let someone who owns a WHOOP strap read **their own biometric data**
-from **their own device**, on a machine **they** control.
-
-> **Not affiliated with WHOOP.** NOOP is an independent, unofficial
-> interoperability project. It is not affiliated with, endorsed by, or connected
-> to WHOOP, Inc. "WHOOP" is used only to identify the hardware NOOP talks to. Use
-> it only with a device you own, and not in breach of any agreement that applies
-> to you. **NOOP is not a medical device**; every derived metric is an
-> approximation, not clinical data. See [`DISCLAIMER.md`](DISCLAIMER.md).
-
----
-
-## Contents
-
-- [Build and run](#build-and-run)
-- [Why NOOP](#why-noop)
-- [Features](#features)
-- [WHOOP feature comparison](docs/FEATURE_PARITY.md)
-- [Platform status](#platform-status)
-- [Architecture](#architecture)
-- [Quickstart (macOS)](#quickstart-macos)
-- [How your data flows](#how-your-data-flows)
-- [Self-hosted sync](#self-hosted-sync)
-- [Private Friends](#private-friends)
-- [Privacy](#privacy)
-- [Attribution](#attribution)
-- [Disclaimer](#disclaimer)
-- [License](#license)
-- [Docs](#docs)
-
----
-
-## Why NOOP
-
-You bought the strap. The biometric stream it produces is yours. NOOP is built on
-that premise:
-
-- **Own your data.** NOOP reads heart rate, R-R intervals, SpO₂, skin temperature,
-  respiration, accelerometer/gravity, battery, and event data straight off the
-  strap over Bluetooth and writes it to a local SQLite database. Upload remains
-  off unless you explicitly configure your own server.
-- **Account-free and local.** NOOP never logs into a WHOOP account and never hits
-  a WHOOP server. It does not bypass any login, paywall, or DRM; it simply talks to
-  a device you own and reads data you generated.
-- **Bring your history.** Already have years of data in the official app or in
-  Apple Health? Import the WHOOP CSV export and/or your Apple Health `export.xml`
-  once, and it's permanently on your machine.
-- **Transparent math.** Recovery, strain, HRV, and sleep are recomputed on-device
-  from documented, citable methods (Task Force 1996 HRV, Karvonen %HRR, Edwards /
-  Banister TRIMP, Tanaka HRmax, and so on). The algorithms are approximations of —
-  not reproductions of — any proprietary model, and every analyzer file documents
-  exactly what it does.
-
----
-
-## Features
-
-The macOS reference app organizes everything behind a single sidebar
-(`Strand/App/RootView.swift`). Each item below is a real screen in
-`Strand/Screens/`. Apple targets share the core Swift packages; Android has a
-native Kotlin implementation. Screens and OS integrations are not identical on
-every platform—see [the capability map](docs/FEATURE_PARITY.md) for the gaps.
-
-The iPhone and Mac shell now uses the **Obsidian** visual system: monochrome
-black/pearl chrome, dimensional system-symbol plates, solid high-contrast content
-cards, and restrained glass for navigation and controls. Physiological colors
-remain reserved for Recovery, Effort, Sleep Score, heart-rate zones, and alerts. On iPhone,
-the private **Circle** stays visible at the top of More, while Devices and **Live
-HR** are separate destinations; Mac exposes the same Circle in its sidebar, and
-Android exposes Friends from More.
-
-| Screen | What it does |
+| Surface | Purpose |
 |---|---|
-| **Today** (Control Center) | Home dashboard: recovery ring, a "today's synthesis" insight, a grid of stat tiles (recovery, strain, sleep, HRV, RHR, SpO₂, respiratory, steps, weight, calories) each with a 14-day sparkline, live strap **battery %** and HR trend, recent workouts, and a data-sources footer. |
-| **Friends** (Circle; Apple and Android) | Invitation-only sharing through a server the circle operates. Accepted friends can see the latest daily Recovery, Effort, and Sleep Score values; sleep duration, HRV, and resting HR are separate per-friend opt-ins. There is no public profile, discovery, follower count, team ranking, or raw-data view. |
-| **Readiness** | An on-device trend read that synthesizes HRV vs your baseline, resting-HR drift, and sleeping respiratory-rate drift into a headline (Primed / Balanced / Strained / Run down) with the drivers behind it. Recent bounded Effort can add a descriptive variety note, but it cannot change readiness or enter additive training-load math. Pure local math, not medical advice. |
-| **Live HR** | Real-time view of the connected strap — heart rate and beat-to-beat signal as they arrive. Pairing and band switching live in the separate Devices screen. |
-| **Breathe** | **HRV haptic breathing biofeedback.** The strap both *measures* HRV (R-R intervals) and *buzzes* its haptic motor, so NOOP paces your breath with felt cues (one buzz inhale, two exhale) and shows live HR + rolling RMSSD responding as the session deepens. Presets: Relax 4-6, Coherence 5.5, Box 4-4. Each session reports a **pre/post HRV outcome** so you can see how much you settled. |
-| **Intervals** | **Silent haptic HIIT timer.** The strap buzzes every transition (triple-buzz into WORK, single into REST, 3-2-1 tick at phase ends, long buzz on finish) so you train hands-free. Falls back to a glanceable visual timer with no strap. |
-| **Explore** (Metric Explorer) | Interrogate any single metric over time, built from the metric catalog (`Strand/Data/MetricCatalog.swift`). |
-| **Compare** | Plot metrics together and compare imported official WHOOP-export days with independent Noop days. Shows bias/MAE/RMSE/correlation and validates any optional personal presentation calibration on untouched chronological holdout days; neither source is overwritten. |
-| **Insights** | Behavioral and correlational insights derived from your own series — including **Activity Cost**, which learns what each activity type typically costs your next-morning recovery (and how long you take to bounce back) from your own history. |
-| **Sleep** | Sleep sessions with total sleep, efficiency, resting HR, and HRV from the on-device pipeline. Detailed local stages and the hypnogram appear only when the night has sustained beat-to-beat timing evidence; independently classified imports retain their disclosed provenance. Browse back through **past nights**, not just last night. |
-| **Trends** | Long-range trends across recovery, strain, sleep, and biometrics — and a **shareable one-page PDF report** (recovery / sleep / HRV / resting HR / strain over a range you choose), rendered entirely on-device for a doctor, coach, or your own records. |
-| **Workouts** | Detected and manual exercise sessions with strain and heart-rate detail. Tap any session for a full **detail view** — its HR curve over the workout, time in each HR zone, duration, avg/max HR, and the Effort it added. |
-| **Health** | Biometric overview (HR, HRV, SpO₂, skin temperature, respiratory rate, etc.). |
-| **Backup & Sync** | Local `.noopbak` snapshots plus optional authenticated upload to your own FastAPI + TimescaleDB server. Tokens use platform secure storage, public endpoints require HTTPS, and failed raw rows remain pending. |
-| **Stress** | Day-level stress / autonomic load visualization. |
-| **Mind** | A quick **daily mood check-in** that correlates how you feel against your own recovery, sleep and HRV over time — so you can see what actually moves your mood. On-device and **non-clinical**: a self-reflection log, not a mental-health assessment. |
-| **Apple Health** | Browse and reconcile data imported from your Apple Health export. |
+| **Today** | Recovery, Sleep, Effort, Fitness Age, freshness, calibration, evidence, and one useful next action. |
+| **Trends** | Long-range metric views, calendar navigation, comparisons, and source-aware history. |
+| **Workouts** | Manual and reviewed activity sessions, live zones, routines, strength sets, goals, history, and personal records. |
+| **Sleep** | Last-night summary, sleep history, planning, wake windows, editable sessions, and evidence-qualified detail. |
+| **Journal and Coach** | Private journal and local memory, optional user-configured model transport, check-ins, and proposed actions that require confirmation before changing records. |
+| **Nutrition and Hydration** | Editable meals, nullable nutrients, saved foods, hydration goals, exact entries, and accessible quick logging. |
+| **Safety** | Opt-in paging to accepted NOOP contacts with incident status and optional latest-only location sharing. |
+| **Friends** | Invitation-only, directional sharing with exact-match IDs, explicit field controls, removal, blocking, and receiver-controlled pokes. |
+| **Data controls** | Imports, local backup, export, diagnostics, self-hosted sync, optional NOOP+, device revocation, and erasure. |
 
-| **Data Sources** | One-tap import of a WHOOP CSV export, an Apple Health export, or a **nutrition CSV** (Cronometer / MacroFactor), plus live-strap status. "Bring your history in once, then it's yours." |
-| **Notifications** | Configure local notifications and thresholds (`Strand/Data/NotificationSettingsStore.swift`). |
-| **Automations** | Turn the strap's physical inputs and live biometrics into Mac actions — all on-device (see below). |
-| **Coach** | An optional **AI Coach** you can ask about your data in plain language. Like self-hosted sync and Oura cloud import, it is an explicit opt-in network feature: off until you add your own key — Anthropic, OpenAI, or any OpenAI-compatible endpoint including a local/self-hosted model (Ollama, LM Studio) — and it sends only a short text summary of recent metrics plus your question, never raw streams or identifiers. With a local model the conversation never leaves your machine. Available on macOS, Android, and iOS. See [`docs/PRIVACY_SECURITY.md`](docs/PRIVACY_SECURITY.md). |
-| **Settings** | Profile, preferences, **step calibration** (tune the stride/step estimate to your own walking), unit choices, the in-app **What's new** changelog, and an opt-in **Experimental** section (WHOOP 5/MG protocol probes). On **iOS**, also **Export for Shortcuts** — a HealthKit-free path that hands your metrics to Apple Health via the Shortcuts app. |
+NOOP does not manufacture a score when evidence is absent. Missing input stays
+missing; building, stale, partial, unsupported, and unavailable states remain
+visible to the user.
 
-**ATL / CTL / TSB availability:** the shared analytics layer now has a transparent additive-load
-model (7-day ATL, 42-day CTL, `TSB = CTL - ATL`, coverage and missing-day status), exposed through
-`ReadinessEngine.Context`. It is intentionally not shown as a user score yet: NOOP's current daily
-Effort/strain value is bounded and nonlinear, so summing it would create a convincing but invalid
-training-load history. The context remains absent until an importer or session pipeline supplies one
-consistent additive unit such as TRIMP, session-RPE minutes, or MET-minutes.
+## A Day With NOOP
 
-There is also a **menu-bar extra** (`Strand/MenuBar/MenuBarContent.swift`) with a
-glanceable live HR readout and a compact popover, a first-run **onboarding wizard**
-that sets expectations (independent/experimental, WHOOP 4.0 vs 5/MG, private by default),
-and an in-app **"What's new"** changelog shown after each update.
+```text
+Wearable / Health API / import
+              |
+              v
+       durable local storage
+              |
+              v
+    source and quality checks
+              |
+              v
+       on-device analytics
+              |
+              v
+ Today / Sleep / Workouts / Trends
+              |
+              v
+ evidence-qualified optional action
+```
 
-For an explicit capability-by-capability audit—including features Noop only
-approximates or does not yet provide—see [**Noop and WHOOP feature
-map**](docs/FEATURE_PARITY.md). Official values imported from a WHOOP export and
-independent Noop values retain separate provenance; Noop never presents its
-transparent scores as WHOOP's proprietary scores.
+- **Morning:** explain sleep and recovery, show uncertainty, and offer a
+  realistic plan rather than a judgment.
+- **During the day:** surface at most one useful hydration, breathing,
+  movement, journal, or recovery interruption when evidence is current and the
+  exact preference is enabled.
+- **During a workout:** show fresh heart rate and zones, keep ordinary coaching
+  separate from Safety, and use cautious pause language rather than diagnosis.
+- **Evening:** protect the selected sleep window, support a short journal
+  check-in, and avoid repeated prompts after completion.
+- **After a data gap:** keep the app interactive, explain freshness, and resume
+  bounded catch-up without pretending that an animation completed the work.
 
-### Automations (on-device)
+See [Platform architecture](docs/PLATFORM_ARCHITECTURE.md) for the complete day
+orchestrator and evidence contract.
 
-`Strand/Screens/AutomationsView.swift` + `Strand/System/MacActions.swift`:
+## First-Run Flow
 
-- **Double-tap → Mac action.** Double-tap the strap to lock the Mac, buzz back to
-  confirm, mark a moment, do nothing, or run any macOS **Shortcut** by name (via
-  the `shortcuts://` URL scheme, so it's sandbox-friendly).
-- **Wear & presence.** Lock the Mac (or run a Shortcut) the moment the strap
-  leaves your wrist; run a Shortcut when it goes back on. *(macOS reserves true
-  auto-**unlock** for Apple Watch — NOOP can lock, not unlock.)*
-- **Haptic coaching.** HR-zone coaching and an experimental resting-stress nudge —
-  the strap buzzes so you don't have to watch a screen.
-- **Inactivity reminder.** An optional gentle wrist buzz after you've been sitting
-  still too long — your idle threshold, your active hours, a re-nudge cooldown,
-  respects quiet hours, **off by default**.
-- **Smart alarm.** Arms the strap's own **firmware** alarm to buzz at your wake
-  time (still fires if the Mac is asleep or NOOP is closed), with an optional
-  light-sleep wake window when the Mac stays awake and connected.
+The matched Apple and Android onboarding sequence is:
 
----
+```text
+Welcome
+  -> product and evidence expectations
+  -> Bluetooth explanation
+  -> wear and connect
+  -> optional first-party ownership flow
+  -> profile
+  -> imports
+  -> explicit notification choice
+  -> optional Safety contacts
+  -> appearance and daily rhythm
+  -> NOOP or NOOP+ preference
+  -> Today
+```
 
-## Platform status
+App exploration, imports, local user records, and exports remain account-free.
+A future first-party NOOP Band requires a narrow ownership account for initial
+claim and replacement-phone authorization. Once activated, core collection,
+scoring, history, export, and supported local control must continue without
+NOOP+, payment, subscription, or continuous network access.
 
-NOOP's logic lives in cross-platform Swift packages, and the same protocol,
-storage, analytics, and scoring is ported to Kotlin on Android. Both apps pair
-with the strap and **score recovery, strain and sleep on your own device** — no
-import required.
+The production possession sequence remains hardware-dependent:
 
-<p>
-  <a href="https://github.com/Dhanunjay-Divi/Noop"><img alt="Source and community builds" src="https://img.shields.io/badge/distribution-source%20%C2%B7%20community%20builds-44E2B0?style=flat-square"></a>
-  <img alt="Top language" src="https://img.shields.io/badge/languages-Swift%20%C2%B7%20Kotlin-E8B84B?style=flat-square">
-</p>
+```text
+match printed identifier
+  -> identify vibration
+  -> deliberate gesture on the worn band
+  -> authenticated possession proof
+  -> atomic single-owner claim
+```
 
-| Platform | Status |
+That sequence is not presented as implemented until the approved firmware,
+supplier contract, neutral SDK adapters, and physical-device matrix exist.
+
+## NOOP And NOOP+
+
+| Capability | NOOP | NOOP+ |
+|---|---:|---:|
+| Local collection and storage | Yes | Yes |
+| On-device metrics and history | Yes | Yes |
+| Workouts, Journal, Coach, nutrition, and automations | Yes | Yes |
+| Local backup and export | Yes | Yes |
+| Managed multi-device storage and restore | No | Optional |
+| Managed Friends and app Safety transport | No | Optional |
+| Core operation during a cloud outage | Yes | Yes |
+
+NOOP+ is a separate, explicit consent boundary. Selecting a preference does
+not itself upload data, open checkout, grant entitlement, or turn ownership
+identity into health-data consent. Public NOOP+ enrollment remains disabled
+until production identity, client encryption and key recovery, physical
+clients, operations, privacy, security, deletion, and recovery gates pass.
+
+## Privacy And Safety
+
+- Core health storage and analytics are local-first.
+- AI Coach, cloud imports, self-hosted services, and NOOP+ are separate
+  destinations. Each remains off until the user deliberately configures or
+  consents to it.
+- Calendar content is classified locally and discarded; event text is not
+  placed in health notifications.
+- Lock-screen notifications use private copy and do not expose scores, raw
+  health values, journal content, event names, or precise location.
+- Mobile diagnostics are bounded, local, user-initiated, and previewed before
+  sharing. They do not include the health database.
+- User reports may include optional context and an optional screenshot; neither
+  is silently uploaded.
+- Automatic medical, fall, rhythm, SpO2, temperature, stress, and wellness SOS
+  paging is intentionally disabled.
+- The first-release Safety target is manual, user-confirmed paging to accepted
+  contacts. It is not emergency dispatch and cannot guarantee delivery or
+  response.
+- Shared Safety location is the newest approved point only, for a selected
+  incident window, and is deleted at terminal lifecycle states.
+
+NOOP is a general-wellness product, not a medical device. It does not diagnose
+sleep apnea, disease, injury, dehydration, emergency state, or body
+composition from unsupported signals. Read [DISCLAIMER.md](DISCLAIMER.md),
+[Privacy and security](docs/PRIVACY_SECURITY.md), and
+[Security policy](SECURITY.md).
+
+## Platform Status
+
+| Platform | Current source status |
 |---|---|
-| **macOS** | ✅ Full app (`Strand/`, SwiftUI, macOS 13+). Pairs over BLE, offloads the strap's history, and scores recovery / strain / sleep on-device. The complete feature set above runs here. |
-| **Android** | ✅ Full app (`android/`, Jetpack Compose, Android 8+). Pairs over BLE, persists and scores on-device, and imports WHOOP / Apple Health / Health Connect. Build from source or use a clearly labeled artifact from the canonical Releases page after its release gates pass. |
-| **iOS** | 📲 Build and sign the `NOOPiOS` target yourself for development. App Store archives must not be uploaded until every gate in [docs/APP_STORE_RELEASE.md](docs/APP_STORE_RELEASE.md) passes. It shares the cross-platform Swift packages, so scoring matches macOS. Newer and less battle-tested than macOS/Android; live BLE on a real iPhone is still being validated, and Apple Health plus Live Activity widgets can be limited under a free signing identity. |
+| **iPhone** | Native SwiftUI app for iOS 17+, with widgets, Live Activities, Watch companion targets, HealthKit integration, and the five-destination phone shell. |
+| **Android** | Native Kotlin and Jetpack Compose app for Android 8+, with Room, Health Connect, WorkManager, alarms, notifications, and matched product semantics. |
+| **macOS** | SwiftUI reference and desktop management experience with a sidebar shell over the shared Apple data and analytics layers. |
 
-### Strap support
+Apple and Android use separate native implementations but share one behavioral
+contract. Stored data, formulas, provenance, missing states, consent, and safety
+boundaries must agree even when native rendering differs.
 
-NOOP is an independent, **experimental** project — capable, but a work in progress.
+The repository still contains compatibility adapters and historical
+provenance for third-party wearable development. They are independent,
+experimental paths and must not be confused with production evidence for a
+first-party NOOP Band.
 
-| Strap | Status |
-|---|---|
-| **WHOOP 4.0** | ✅ The tested, supported path. Live HR, recovery, strain, sleep, history offload — the full experience. (v1.95 also unlocked sleep + recovery on the newer "v25" 4.0 firmware layout that earlier versions could only read live HR from.) |
-| **WHOOP 5.0 / MG** | 🧪 **Live heart rate works** (confirmed on real hardware). Pick "WHOOP 5.0 / MG" before connecting — and see the pairing note below, because you can't just scan for it. Deeper 5/MG metrics (recovery, strain, sleep) are still being mapped; there's an opt-in **Settings → Experimental** toggle for 5/MG owners who want to help document the protocol. |
+## Build And Run
 
-> ### WHOOP 5.0 / MG analysis limits
->
-> NOOP's analysis screens and algorithms can only be as complete as the sensor inputs it can
-> reliably decode. On WHOOP 5.0 / MG, important overnight inputs remain unavailable or incomplete:
->
-> | Input / output | Current direct-from-strap status |
-> |---|---|
-> | Sleep duration / detection | Experimental; can fall back to heart rate when motion is sparse |
-> | Sleep stages | Approximate and not reliable while full overnight motion and cardiorespiratory inputs remain incomplete |
-> | Skin temperature | Raw values decode on supported historical layouts; not available consistently across 5/MG firmware |
-> | Blood oxygen / SpO₂ | Not recoverable offline from current time-multiplexed PPG data |
-> | Overnight HRV and respiratory rate | Incomplete unless sufficient R-R intervals are captured |
->
-> In short: seeing the Sleep, Health, Readiness, or Insights screens doesn't mean their deepest
-> analysis is available from a WHOOP 5.0 / MG alone yet — scoring and correlations can't conjure a
-> measurement the strap hasn't given up. Decoding these inputs reliably is what we're working on, and
-> it's the prerequisite for the full 5/MG picture. We'd always rather tell you that straight.
->
-> ### Pairing a WHOOP 5.0 / MG — read this first
->
-> A WHOOP strap holds an encrypted Bluetooth **bond with only one device at a time**, and yours is
-> normally bonded to the **official WHOOP app** on your phone. **You can't just scan for it in NOOP** —
-> if the strap is still bonded to the WHOOP app, NOOP's pairing is refused and the strap log shows
-> *"Encryption is insufficient"* / *"bond refused."* (Live **heart rate** is the exception — it rides the
-> standard Bluetooth heart-rate profile, so it streams without a bond. But pairing — needed for the
-> deeper features — does not.)
->
-> **To pair properly:**
-> 1. **Close the official WHOOP app** on your phone (fully quit it, or turn that phone's Bluetooth off) so
->    it isn't holding the bond.
-> 2. **Put the strap in pairing mode** — on a 5.0/MG, **tap the band repeatedly** (firm taps on the
->    sensor) until the **LEDs flash blue**.
-> 3. In NOOP: **Live → choose "WHOOP 5.0 / MG" → Scan & Connect.** Success looks like
->    *"CLIENT_HELLO acked — link established"* in the strap log (not *"bond refused"*). It can take a
->    couple of attempts.
->
-> **Only one device at a time.** Because the strap holds a single bond, don't leave it connected to your
-> phone *and* your Mac (or the WHOOP app) at once — live heart rate will still show on all of them
-> (that rides the bond-free standard profile), but **none** of them will have the real encrypted bond.
-> If HR streams fine yet **buzz, alarm, double-tap and history don't work**, that's the tell: the strap
-> isn't truly bonded to this device. Free it from everything else, then pair here.
->
-> Bonding to NOOP may take the strap's bond away from the WHOOP app, so the official app might need to
-> re-pair afterwards. This is the **hardest part of 5/MG support** — if it refuses, you're almost
-> certainly still bonded to the WHOOP app (or another device); free the strap and retry.
+### Requirements
 
-The app always tells you what's live now versus still building, both in onboarding and on each screen.
+- macOS with a supported Xcode and the Swift toolchain
+- XcodeGen for Apple project generation
+- JDK 17 and the Android SDK for Android
+- Python 3 for repository policy and operations tools
+- A physical phone and supported hardware for BLE validation
 
-### What to expect when you start
+### Apple
 
-NOOP computes your scores on your own device, so like any recovery wearable it
-needs a little data before everything fills in:
+```bash
+xcodegen generate
 
-- **Live Tracking** is available once the strap connects. Tap **Start Live Tracking** for the
-  high-rate, beat-by-beat view; it is foreground-only and uses more strap and phone battery.
-- **Strain and sleep** appear after you've worn it and synced — the strap's last
-  ~14 days offload automatically over the first few minutes.
-- **Recovery** needs a few nights for the app to learn your personal baseline,
-  then sharpens each night. WHOOP makes you wait for the same reason.
-- **In a hurry?** Import your WHOOP export in Data Sources and your full history
-  fills in about a minute.
+xcodebuild \
+  -project Strand.xcodeproj \
+  -scheme Strand \
+  -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
 
----
+For iPhone development, open the generated project, select `NOOPiOS`, choose
+your own signing team, and use a device you are authorized to test.
+
+### Android
+
+```bash
+cd android
+./gradlew assembleFullDebug
+./gradlew testFullDebugUnitTest
+```
+
+The APK is generated under `android/app/build/outputs/apk/full/debug/`.
+
+### Shared Packages
+
+```bash
+swift test --package-path Packages/WhoopProtocol
+swift test --package-path Packages/WhoopStore
+swift test --package-path Packages/StrandAnalytics
+swift test --package-path Packages/NoopRemoteSync
+```
+
+Package tests do not compile the application targets. App changes require the
+corresponding Xcode or Gradle build. Builds and simulators do not validate BLE,
+background execution, haptics, battery behavior, or physiological accuracy.
+
+Detailed setup:
+
+- [Build guide](docs/BUILD.md)
+- [iOS guide](docs/IOS.md)
+- [Android guide](docs/ANDROID.md)
+- [Contributor guide](docs/CONTRIBUTING.md)
+- [Controlled testing boundaries](docs/BETA_TESTING.md)
 
 ## Architecture
 
-The repository is split into platform-pure Swift packages plus a macOS app target.
-All packages declare both `.iOS(.v16)` and `.macOS(.v13)`; framework-specific UI is
-guarded with `#if canImport(UIKit)` / `#if canImport(AppKit)`.
-
-```
-Strand/                  macOS SwiftUI reference app (this is what you build)
-Packages/
-  WhoopProtocol/         BLE frame parsing, CRC, command/event/packet decode
-  WhoopStore/            GRDB/SQLite persistence (migrations, streams, caches)
-  StrandAnalytics/       HRV / recovery / strain / sleep / correlation math
-  StrandImport/          WHOOP CSV + Apple Health importers
-  StrandDesign/          SwiftUI design system (palette, components, charts)
-Tools/Backfill/          CLI tool for backfilling decoded data
-Fixtures/                sample WHOOP export for tests
-```
-
-### `WhoopProtocol` — the protocol-support core
-
-Platform-pure (no CoreBluetooth import) so it runs in tests and CLI tools
-unchanged. It implements the on-wire frame format for both strap generations,
-so NOOP can speak to a device you own:
-
-```swift
-public enum DeviceFamily: String, Sendable, CaseIterable {
-    case whoop4   // CRC8 (poly 0x07) header check; service 61080001-…
-    case whoop5   // CRC16-Modbus header check, "puffin" packet types; service fd4b0001-…
-}
+```text
+Platform BLE / Health APIs / imports
+                  |
+                  v
+          ingestion coordinator
+                  |
+          durable transaction
+                  |
+       +----------+-----------+
+       |                      |
+       v                      v
+ local analytics       optional sync outbox
+       |                      |
+       v                      v
+ bounded read models    resumable transfer
+       |
+       +--> Today / Sleep / Workouts / Trends
+       |
+       +--> guidance candidates and local notifications
 ```
 
-Decoding is schema-driven (`Resources/whoop_protocol.json`) and includes CRC8,
-CRC16-Modbus, and zlib CRC-32 implementations, frame framing, value
-interpretation, and historical-stream reassembly. The app layer (`Strand/BLE/`,
-`Strand/Collect/`) wraps these UUID *strings* in `CBUUID` and handles bonding,
-offload, and live notifications.
+```text
+Packages/WhoopProtocol     Pure protocol parsing and framing
+Packages/WhoopStore        GRDB/SQLite storage and migrations
+Packages/StrandAnalytics   Pure health and fitness policies
+Packages/StrandImport      File and health-data import
+Packages/StrandDesign      Shared Apple design system
+Packages/NoopRemoteSync    Optional self-hosted and managed clients
 
-### `WhoopStore` — local SQLite via GRDB
-
-Everything is stored on-device in SQLite (using
-[GRDB.swift](https://github.com/groue/GRDB.swift)). The schema is a versioned
-migrator (`Database.swift`, currently through `v30`). Examples of decoded-stream
-tables created in `v1`–`v3`:
-
-```sql
-CREATE TABLE hrSample      (deviceId TEXT, ts INTEGER, bpm INTEGER, PRIMARY KEY(deviceId, ts));
-CREATE TABLE rrInterval    (deviceId TEXT, ts INTEGER, rrMs INTEGER, seq INTEGER,
-                            PRIMARY KEY(deviceId, ts, rrMs, seq));
-CREATE TABLE spo2Sample    (deviceId TEXT, ts INTEGER, red INTEGER, ir INTEGER, PRIMARY KEY(deviceId, ts));
-CREATE TABLE skinTempSample(deviceId TEXT, ts INTEGER, raw INTEGER, PRIMARY KEY(deviceId, ts));
-CREATE TABLE respSample    (deviceId TEXT, ts INTEGER, raw INTEGER, PRIMARY KEY(deviceId, ts));
+Strand/                    Shared Apple app and macOS shell
+StrandiOS/                 iPhone lifecycle and navigation
+StrandiOSWidgets/          Widgets and Live Activities
+NOOPWatch*/                Watch companion targets
+android/                   Android app, storage, analytics, and background work
+server/                    Optional account, sync, Friends, and Safety services
+Tools/                     Verification, localization, release, and QA gates
 ```
 
-Later migrations add metric caches (`sleepSession`, `dailyMetric`), device/source
-registries, additional decoded streams, a raw frame outbox, and durable
-self-hosted-delivery markers/indexes.
+Core rules:
 
-### `StrandAnalytics` — transparent, on-device math
+1. Durable data is committed before derived state or acknowledgement.
+2. High-rate history is immutable and idempotent.
+3. Long work is bounded, resumable, cancellable, and kept off the UI thread.
+4. Missing input remains missing.
+5. Every score retains source, formula revision, and explainable evidence.
+6. Core local operation cannot depend on NOOP+ availability.
+7. Safety transport cannot be entered by an ordinary wellness score.
 
-Pure, database-free analyzers. Each is documented and grounded in published
-methods (and is explicitly an approximation, not a reproduction of any proprietary
-model):
+Read [System architecture](docs/ARCHITECTURE.md),
+[Platform architecture](docs/PLATFORM_ARCHITECTURE.md), and
+[Data model](docs/DATA_MODEL.md).
 
-| File | Computes |
+## Release Status
+
+This repository contains substantial implemented and tested product code, but
+it is not a production-release claim.
+
+The supplier-independent source currently includes:
+
+- native Apple and Android product flows;
+- local storage, imports, analytics, workouts, sleep, Journal, Coach,
+  nutrition, hydration, diagnostics, backup, and export;
+- optional managed-storage, Friends, and app Safety foundations;
+- bounded observability and cross-platform policy gates;
+- protected release controls and evidence tooling.
+
+The following still require evidence outside normal source tests:
+
+- final first-party band, firmware, GATT/wire contract, neutral SDK adapters,
+  possession proof, manufacturing, certification, battery, history, and OTA;
+- representative physical iPhone and Android matrices;
+- sensor and metric validation with held-out participants and devices;
+- production identity, encryption/key recovery, carrier/provider delivery,
+  monitoring, recovery, and staffed operations;
+- legal, privacy, terms, returns, payments, trademark, signing, and store
+  approval;
+- professionally reviewed launch localization and licensed exercise media.
+
+No public release should be described as ready until the checked-in release
+ledger and exact release commit prove every applicable gate.
+
+## Contributing And Support
+
+- [Contributing](CONTRIBUTING.md)
+- [Engineering contributor guide](docs/CONTRIBUTING.md)
+- [Support](SUPPORT.md)
+- [Security](SECURITY.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Current operations handoff](docs/ops/ACTIVE.md)
+
+For an app problem, use the in-app shake-to-report flow when available. Review
+the attachment list before sending and never post credentials, raw health
+exports, precise location, or another person's data in a public issue.
+
+## Documentation
+
+| Question | Start here |
 |---|---|
-| `HRVAnalyzer.swift` | RMSSD + SDNN from R-R intervals (Task Force 1996), with range + Malik ectopic filtering. |
-| `RecoveryScorer.swift` | A 0–100 recovery score: HRV-dominant z-score + logistic composite vs personal baselines. |
-| `StrainScorer.swift` | A 0–21 logarithmic strain scale from %HRR (Karvonen) and Edwards / Banister TRIMP. |
-| `SleepStager.swift` | Sleep/wake detection + approximate 4-class staging from cardiorespiratory + gravity features. |
-| `CorrelationEngine.swift` | Pearson r, OLS regression, day-aligned and lagged correlations between two series. |
-| `WorkoutDetector.swift`, `Baselines.swift`, `BehaviorInsights.swift`, `AnalyticsEngine.swift` | Workout detection, rolling baselines, behavioral insights, and the per-day orchestrator. |
+| What is implemented? | [Features](docs/FEATURES.md), [Production readiness](docs/PRODUCTION_READINESS.md) |
+| How does it work? | [Architecture](docs/ARCHITECTURE.md), [Platform architecture](docs/PLATFORM_ARCHITECTURE.md) |
+| Where is data stored? | [Data model](docs/DATA_MODEL.md), [Privacy and security](docs/PRIVACY_SECURITY.md) |
+| How are metrics interpreted? | [Analytics](docs/ANALYTICS.md), [Validation](docs/validation/) |
+| What blocks release? | [Release blockers](docs/handoff/RELEASE-BLOCKERS.md), [First-release checklist](docs/FIRST_PRODUCTION_RELEASE_CHECKLIST.md) |
+| What is being worked on now? | [Active operations record](docs/ops/ACTIVE.md) |
 
-### `StrandImport` — bring your own history
+The complete documentation index is [docs/README.md](docs/README.md).
 
-- **WHOOP CSV export** (`WhoopExportImporter.swift`): header-name-driven, tolerant
-  parser for `physiological_cycles.csv`, `sleeps.csv`, `workouts.csv`, and
-  `journal_entries.csv`, from a folder or `.zip`. The same schema covers WHOOP 4 /
-  5 / MG.
-- **Apple Health export** (`AppleHealthImporter.swift`): a **streaming** SAX parser
-  (`XMLParser`) for `export.xml` (which can exceed 1 GB), with correlation-dedupe,
-  unit normalization (e.g. SpO₂ fraction → %), and sleep-stage mapping.
-- **Nutrition CSV** — a tolerant importer for daily-nutrition exports from
-  **Cronometer** and **MacroFactor**, so calories and macros line up alongside your
-  recovery and sleep on a shared timeline.
+## Independence, Attribution, And License
 
-### `StrandDesign` — the SwiftUI design system
+NOOP is independent and is not affiliated with or endorsed by third-party
+wearable manufacturers. Third-party names in compatibility code, imports,
+migrations, tests, and provenance identify the relevant source or device; they
+do not imply sponsorship.
 
-Palette, typography, motion, and reusable components/charts (`RecoveryRing`,
-`StrainGauge`, `Hypnogram`, `Sparkline`, `TrendChart`, `YearHeatStrip`,
-`StrandCard`, `StatePill`, …) — no external UI dependencies.
+Do not add proprietary firmware, decompiled applications, credentials,
+production keys, private health data, or supplier binaries to this repository.
 
----
-
-## Quickstart (macOS)
-
-**Requirements:** macOS 13+, Xcode 15+ (Swift 5.9), and a Mac with Bluetooth. To
-pair live, you need your own WHOOP strap; to just explore, you can import a CSV /
-Apple Health export instead.
-
-The Xcode project is generated from [`project.yml`](project.yml) with
-[XcodeGen](https://github.com/yonaskolb/XcodeGen).
-
-```bash
-# 1. Clone
-git clone https://github.com/Dhanunjay-Divi/Noop.git NOOP
-cd NOOP
-
-# 2. (Re)generate the Xcode project from project.yml
-brew install xcodegen   # if you don't have it
-xcodegen generate
-
-# 3. Open and run
-open Strand.xcodeproj
-# Select the "Strand" scheme → Run (⌘R). The built app is named NOOP.
-```
-
-Notes:
-
-- Bundle id `com.noopapp.noop`, product name **NOOP**, sandboxed with the
-  Bluetooth and user-selected-files entitlements.
-- Swift Package Manager resolves the only third-party dependencies automatically:
-  **GRDB.swift** (SQLite) and **ZIPFoundation** (export unzip).
-- Run the tests from Xcode (the `StrandTests` target + each package's test target),
-  or per-package with `swift test` inside `Packages/<Name>/`.
-
-To explore without an Xcode project, the packages build on their own:
-
-```bash
-cd Packages/WhoopProtocol && swift build && swift test
-```
-
----
-
-## How your data flows
-
-```
-WHOOP strap ──BLE──▶ Strand/BLE + Strand/Collect ──▶ WhoopProtocol (decode)
-                                                          │
-WHOOP CSV   ─┐                                            ▼
-Apple Health ├─▶ StrandImport (parse) ──────────▶ WhoopStore (local SQLite)
-Nutrition CSV┘                                            │
-                                       ┌──────────────────┴──────────────────┐
-                                       ▼                                     ▼ opt-in
-                         StrandAnalytics (recovery/strain/          Your Noop server
-                         HRV/sleep + reference validation)          FastAPI + TimescaleDB
-                                       │                           ┌───────────┴───────────┐
-                                       ▼                           ▼                       ▼
-                         Strand (SwiftUI) + StrandDesign      Archive/API       Friends allowlist
-                                                                                  │ accepted
-                                                                                  ▼
-                                                                         Apple Circle clients
-```
-
-The local path always works by itself. Archive sync appears only after you enter
-an endpoint/token and enable it; Friends appears only after an explicit profile
-bootstrap or invite join.
-
----
-
-## Self-hosted sync
-
-The `server/` stack stores the **v1 sync subset** on infrastructure you control:
-HR, R-R intervals, battery, raw optical/temperature/respiration channels, steps,
-protocol events, daily metrics, sleep summaries/stage totals, workouts, and
-journal answers. It includes:
-
-- Docker Compose for FastAPI + PostgreSQL/TimescaleDB;
-- Bearer-token authentication and idempotent batch ingestion;
-- a responsive read-only dashboard plus JSON read/export APIs;
-- durable client outboxes that acknowledge raw rows only after success;
-- provenance separating strap measurements, imported official references, and
-  transparent Noop computations.
-
-Source identities are scoped to the client platform and installation so two
-phones cannot overwrite one another accidentally. Metadata retains the
-installation id, human/logical source (`logical_source_id`), unsuffixed
-paired-device identity, producer namespace, `privacy=explicit_opt_in`, score
-provenance, and the Noop algorithm revision where applicable. The server rejects
-mixed-role envelopes (for example, raw strap streams inside an official import).
-
-Sync v1 is intentionally not a byte-for-byte mirror of the local database. It
-does **not** upload gravity vectors, band sleep-state samples, PPG waveform blobs,
-raw IMU blobs, the compressed `rawBatch` archive, Oura raw API pages, arbitrary
-`metricSeries` rows, labs, nutrition, hydration, mood, or per-epoch sleep
-motion/state JSON. Keep a local `.noopbak`/database backup when those records
-matter.
-
-Uploads are archival, idempotent upserts. Editing a supported local row can
-replace the same server natural key, but deleting a row locally does **not**
-create a server tombstone. Delete server data with the authenticated delete API
-or dashboard. Disconnecting a client only stops future uploads. On Apple
-platforms automatic delivery catches up while the app is launched/active; it is
-not an iOS background-processing guarantee. Android uses best-effort WorkManager
-scheduling. Manual **Run now** is available on both.
-
-See [`server/README.md`](server/README.md) for deployment, TLS, backups, retention,
-key rotation, export, and deletion. Public endpoints must use HTTPS; plain HTTP is
-accepted only on localhost/private LANs.
-
-This self-hosted mode is a personal data service controlled by its operator,
-who is responsible for access, updates, backups, retention, applicable privacy
-law, and breach response. It is distinct from the unreleased, separately
-consented NOOP+ managed-sync staging path.
-
----
-
-## Private Friends
-
-Friends is a small-group sharing layer on the self-hosted server, available in
-the Apple and Android clients. It is deliberately not a public social network:
-
-- A server owner bootstraps a local profile once with `NOOP_API_TOKEN`. The app
-  stores the separately issued member token in this-device-only Keychain storage
-  on Apple or encrypted preferences backed by Android Keystore; the administrator
-  token is never placed in an invitation.
-- An invitation is shared as plain text: the full server address plus a
-  short-lived, single-use code. The recipient reviews and enters both values
-  manually. NOOP deliberately does not put this bearer capability in a custom
-  app URL, avoiding custom-scheme interception.
-- On a first join, the recipient's app generates an enrollment UUID and a
-  256-bit member token, saves the token in this-device-only Keychain storage
-  before contacting the server, and reuses that enrollment for a safe retry if
-  the response is lost. The server stores only the token digest.
-- Visibility is directional and per friend. Recovery, Effort, and Sleep Score start
-  enabled after acceptance; sleep duration, HRV, and resting HR start disabled.
-  Either person can change what they expose or remove the friendship.
-- No biometric summary value is uploaded while every relationship is still
-  pending. Empty replacement maps may be sent to clear a previously shared
-  Friends window. After acceptance, the app uploads only the union of fields
-  currently enabled for its accepted friends, from at most six range-checked
-  `noop_computed` daily values. Each friend still receives only their own
-  directional projection.
-- Friends uses a dedicated logical `*-noop-friends` producer, separate from the
-  full self-hosted backup. A feed begins on the friendship's acceptance date and
-  never exposes earlier history. Member tokens cannot read raw streams, exports,
-  workouts, journals, sleep stages, routes, device identifiers, or server
-  administration.
-- Friends is **not end-to-end encrypted**. HTTPS protects transport, but the
-  self-hosted server operator can inspect the summary fields the app sends.
-  Share the server address and code only with the intended recipient, and join
-  only a server whose operator you trust.
-- Apple foreground activation and Android WorkManager perform best-effort
-  catch-up; neither OS guarantees a delivery time. Opening Friends provides the
-  reliable manual refresh path.
-- If a first-join response is interrupted, Android preserves the original
-  enrollment identity and credential instead of creating another profile. The
-  user can retry the same invitation or ask the server to idempotently delete
-  any profile tied to that pending enrollment before the local secret is removed.
-- **Leave & delete profile** removes the member profile, credential, social
-  relationships, and dedicated Friends summary copy from the server. It leaves
-  local health data and any separately configured full self-hosted backup intact.
-- There is no federation yet: a profile belongs to one configured server, and the
-  client refuses to silently switch an existing profile to a different invite
-  origin.
-
-The server API also supports token rotation, profile disable, invite revocation,
-and blocking. See [`server/FRIENDS.md`](server/FRIENDS.md) for the complete
-authorization and projection contract.
-
----
-
-## Privacy
-
-**Local by default.** Noop has no telemetry and core use requires no account.
-Your strap data, imports, and computed metrics live in local SQLite. Data-bearing
-network access occurs only through a feature you explicitly configure: your AI
-provider, Oura cloud import, or your self-hosted server (including its optional
-Friends projection). NOOP+ managed sync is not connected to released clients;
-if shipped, it remains a separate explicit opt-in. A user-tapped update check
-reads public release metadata without sending biometric data. Server upload is
-off by default, credentials stay in platform secure storage. A destination
-change schedules a resumable, idempotent replay of pending raw rows and up to
-ten years of the supported derived-history subset; records outside the v1
-boundary still require a local backup/export.
-
----
-
-## Attribution
-
-NOOP-controlled source and contributions in this canonical repository are
-offered under the PolyForm Noncommercial License 1.0.0. The owner authorization
-is recorded in
-[`docs/provenance/OWNER-RIGHTS-DECLARATION.md`](docs/provenance/OWNER-RIGHTS-DECLARATION.md).
-
-Independent runtime dependencies retain their own licenses. The exact resolved
-inventory and required texts are generated in [`NOTICE`](NOTICE); research and
-interoperability boundaries are recorded in [`ATTRIBUTION.md`](ATTRIBUTION.md).
-
----
-
-## Disclaimer
-
-NOOP is an independent, unofficial, non-commercial interoperability project. It is
-**not affiliated with, endorsed by, or connected to WHOOP, Inc.** All references to
-"WHOOP" are nominative — used only to identify the third-party hardware NOOP
-interoperates with.
-
-**NOOP is not a medical device.** Heart rate, HRV, recovery, strain, sleep stages,
-SpO₂, respiratory rate, and skin temperature are **approximations** computed from
-published methods. They are not clinically validated and are not medical advice. Do
-not use them to diagnose, treat, or make health decisions — consult a qualified
-professional.
-
-Provided **as-is**, with **no warranty**, for **personal and educational use**. You
-use it at your own risk. Read the full notice in [`DISCLAIMER.md`](DISCLAIMER.md).
-
----
-
-## License
-
-NOOP is **source-available** under the [PolyForm Noncommercial License 1.0.0](LICENSE):
-**free for personal and other non-commercial use** — read it, run it, fork it, and
-contribute. Commercial use is not granted by this license. (PolyForm Noncommercial is
-a proper software license with patent terms; it is deliberately *not* an OSI
-"open-source" licence, because that would permit the commercial use this project's
-non-commercial nature rules out.)
-
-The license covers NOOP's own original code and docs. Third-party source remains
-under its own terms; review [`ATTRIBUTION.md`](ATTRIBUTION.md), [`NOTICE`](NOTICE),
-and the release legal gate before redistribution. Bundled dependencies keep
-their own licenses (GRDB.swift and ZIPFoundation are MIT — see
-[`NOTICE`](NOTICE)). By opening a pull request you agree your contribution is licensed
-under the same terms — see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
-
-### Source redistribution
-
-Before publishing a source mirror or binary, run
-`python3 Tools/release-legal-gate.py distribution`. The gate verifies the
-owner-rights record, NOOP's project license, and the exact required dependency
-notices.
-
-- **Keep it non-commercial** and retain the [`LICENSE`](LICENSE), [`NOTICE`](NOTICE),
-  [`ATTRIBUTION.md`](ATTRIBUTION.md), and copyright notices.
-- **Identify the canonical project home:**
-  [github.com/Dhanunjay-Divi/Noop](https://github.com/Dhanunjay-Divi/Noop).
-
----
-
-## Docs
-
-- [`CHANGELOG.md`](CHANGELOG.md) — release history and what to expect (also shown in-app under **What's new**).
-- [`docs/ops/README.md`](docs/ops/README.md) — round-by-round operating record, active handoff, durable decisions, and verification evidence.
-- [`DISCLAIMER.md`](DISCLAIMER.md) — trademark, interoperability, and medical/legal notice.
-- [`ATTRIBUTION.md`](ATTRIBUTION.md) — full credits and licensing notes.
-- [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md) — honest WHOOP capability comparison, gaps, and parallel-reference workflow.
-- [`docs/COMPETITIVE_CAPABILITY_AUDIT.md`](docs/COMPETITIVE_CAPABILITY_AUDIT.md) — measured-versus-derived comparison for WHOOP, Oura, RingConn, and Hume, with evidence and release gates.
-- [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) — verified code status and the hardware, carrier, study, signing, store, and regulatory gates that code alone cannot close.
-- [`docs/REPOSITORY_INDEPENDENCE.md`](docs/REPOSITORY_INDEPENDENCE.md) — canonical-host migration, commercial provenance status, and the evidence required before attribution can change.
-- [`docs/DEVICE_SUPPORT_ROADMAP.md`](docs/DEVICE_SUPPORT_ROADMAP.md) — source-by-source live, platform-bridge, and owner-import support boundaries.
-- [`server/README.md`](server/README.md) — deploy, secure, back up, export, and operate the optional self-hosted service.
-- [`server/SAFETY.md`](server/SAFETY.md) — configure, stage, monitor, and test acknowledged Safety Network paging.
-- [`server/FRIENDS.md`](server/FRIENDS.md) — invitation, member-token, per-friend visibility, and feed projection contract.
-- [`project.yml`](project.yml) — XcodeGen project definition (source of `Strand.xcodeproj`).
-
----
-
-## Activity
-
-A live snapshot of the last 30 days — issues, pull requests, pushes, and the people moving NOOP
-forward. Huge thanks to everyone filing reports, sharing strap logs, and reverse-engineering the
-protocol alongside us — this project is built on it.
-
-<p>
-  <a href="https://github.com/Dhanunjay-Divi/Noop/issues"><img alt="Open issues" src="https://img.shields.io/github/issues/Dhanunjay-Divi/Noop?style=flat-square"></a>
-  <a href="https://github.com/Dhanunjay-Divi/Noop/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Dhanunjay-Divi/Noop?style=flat-square"></a>
-  <img alt="Last commit" src="https://img.shields.io/github/last-commit/Dhanunjay-Divi/Noop?style=flat-square">
-</p>
-
-### Star history
-
-If NOOP's useful to you, a ⭐ genuinely helps it reach more WHOOP users — and it's the single best free way to support the project.
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Dhanunjay-Divi/Noop&type=Date)](https://star-history.com/#Dhanunjay-Divi/Noop&Date)
+The project is licensed under
+[PolyForm Noncommercial 1.0.0](LICENSE). Dependency and historical attribution
+is preserved in [NOTICE](NOTICE), [ATTRIBUTION.md](ATTRIBUTION.md), and the
+runtime legal inventory.

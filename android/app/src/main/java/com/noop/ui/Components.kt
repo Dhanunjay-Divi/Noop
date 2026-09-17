@@ -1669,6 +1669,9 @@ fun LazyScreenScaffold(
     title: String?,
     subtitle: String? = null,
     modifier: Modifier = Modifier,
+    // Applied to the actual LazyColumn. Scene-backed screens apply [modifier] to the containing
+    // backdrop Box, so callers needing list semantics or list-local behavior use this separate hook.
+    listModifier: Modifier = Modifier,
     // Mirrors ScreenScaffold: a screen with a scene-backed header (Today-style) can tighten the gap
     // above its first row, and supply leading/trailing header actions + a screen-level scene backdrop.
     // All defaulted, so the existing flat callers (Intelligence) are byte-for-byte untouched.
@@ -1727,15 +1730,18 @@ fun LazyScreenScaffold(
     // is transparent (scene shows through) while keeping the SAME page inset + shared row spacing as
     // the eager ScreenScaffold. The top inset honours [topPadding] (so a custom-header screen can tighten
     // the gap above the first row, exactly like ScreenScaffold's `padding(top = topPadding)`).
-    val listModifier: Modifier =
+    val resolvedListModifier: Modifier =
         if (topBackground == null) {
-            modifier.fillMaxWidth().background(Palette.surfaceBase)
+            modifier
+                .then(listModifier)
+                .fillMaxWidth()
+                .background(Palette.surfaceBase)
         } else {
-            Modifier.fillMaxWidth()
+            listModifier.fillMaxWidth()
         }
     val list: @Composable () -> Unit = {
         LazyColumn(
-            modifier = listModifier,
+            modifier = resolvedListModifier,
             state = listState,
             contentPadding = PaddingValues(
                 start = Metrics.screenPadding,

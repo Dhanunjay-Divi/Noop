@@ -76,7 +76,7 @@ final class WhoopModelFallbackTests: XCTestCase {
 }
 
 final class TimeoutSyncErrorTests: XCTestCase {
-    private let interrupted = "Sync interrupted - the strap went quiet. It will retry on the next sync."
+    private let interrupted = "Sync interrupted - the band went quiet. It will retry on the next sync."
 
     func testProductiveTimeoutRaisesNoBanner() {
         XCTAssertNil(BLEManager.timeoutSyncError(futureClockBanner: nil, bankedThisOffload: true))

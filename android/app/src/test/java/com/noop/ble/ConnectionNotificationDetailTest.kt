@@ -7,7 +7,7 @@ class ConnectionNotificationDetailTest {
     @Test
     fun connectedDetailIncludesEveryAvailableMetric() {
         assertEquals(
-            "Streaming in the background  ·  Recovery 78%  ·  Effort 42  ·  Strap 65%",
+            "Streaming in the background  ·  Recovery 78%  ·  Effort 42  ·  Noop Band 65%",
             connectionNotificationDetail(
                 connected = true,
                 recoveryPct = 77.6,

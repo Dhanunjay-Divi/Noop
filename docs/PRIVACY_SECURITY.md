@@ -60,7 +60,7 @@ one of the explicit outputs:
 | Oura history import (opt-in build flag, §1.1b) | HTTPS OAuth + REST, `api.ouraring.com` → device | Read-only from your own Oura account |
 | Self-hosted Sync + Friends (§1.1c–d) | HTTPS, or HTTP only on loopback/private LAN | Selected records and optional friend summaries ↔ the server you configure |
 | Safety Network (§1.1e, §1.4) | HTTPS to the configured server; server-to-provider HTTPS; carrier SMS/voice | Contact enrollment and an explicit app/band SOS, or a separately approved possible-fall event → the server and its configured provider; delivery/response state → NOOP |
-| NOOP+ managed backup and Friends (§1.1f) | HTTPS with phone identity, App Check, and per-installation authorization | Selected server-readable backup chunks/control records and explicitly consented six-field Friends projections ↔ NOOP's managed service, only after verification and the relevant controls |
+| NOOP+ managed backup and Friends (§1.1f) | HTTPS with phone identity, App Check, and per-installation authorization | Selected server-readable sensor chunks/control records, the strict `day_ownership` operational document, and explicitly consented six-field Friends projections ↔ NOOP's managed service; personal managed documents require client encryption and remain local until encryption and key recovery are available |
 | Check for updates | HTTPS GET to GitHub's public releases API, only when tapped | Public version metadata → device; no biometric payload |
 | Apple Health export, incl. iOS "Export for Shortcuts" | On-device, user-initiated | NOOP → your Apple Health, on your device only (§1.3) |
 | Safety message handoff | OS share sheet, user-initiated | Prepared text and an optional fresh one-shot location → the destination app and recipient you choose (§1.4) |
@@ -371,31 +371,47 @@ does not participate in BLE collection or local scoring:
   the entered phone number and anti-abuse/request metadata to Google/Firebase
   and the SMS delivery chain so it can issue a one-time code. Signing in does
   not upload health data. A separate screen identifies the data classes,
-  server-readable purpose, local-first boundary, and exact policy revision; the
-  user must explicitly allow backup before enrollment or upload.
+  content modes, disclosed processing purpose, local-first boundary, and exact
+  policy revision; the user must explicitly allow backup before enrollment or
+  upload.
 - **Application and installation authorization.** App Attest on iOS or Play
   Integrity on Android supplies an App Check assertion. The API separately
   validates the Firebase identity token, a random per-installation credential,
   the internal account/tenant, resource ownership, quota, and state. App Check
   cannot replace tenant authorization. Mobile Firebase API keys are restricted
   public identifiers, not bearer secrets.
-- **What is uploaded.** Supported sensor streams and restore records are grouped
-  into bounded, compressed, checksummed chunks with source provenance and exact
-  event-time windows. The current product is a **server-readable managed
-  backup**, not end-to-end encrypted storage. NOOP's managed operator can
-  technically process the uploaded records under the disclosed purpose.
+- **What is uploaded.** Supported sensor streams are grouped into bounded,
+  compressed, checksummed chunks with source provenance and exact event-time
+  windows. Those chunks, strict `day_ownership` operational records, and
+  consented Friends projections are server-readable under the disclosed
+  purpose. Personal managed documents such as hydration, journals, and
+  preferences have a `client_encrypted` wire contract. The server rejects them
+  in plaintext, and the mobile clients keep them local because client
+  encryption and key recovery are not implemented yet. NOOP+ is therefore not
+  end-to-end encrypted across every uploaded data class: the managed operator
+  can technically process the server-readable classes, while personal managed
+  documents are not eligible for production transfer. PostgreSQL currently
+  enforces the expanded document-kind registry but does not activate the
+  stricter content-mode check: migrations record aggregate readiness only and
+  never erase, relabel, or tombstone legacy payloads. Database activation
+  requires version-gated encryption, restore, key recovery, and backfill first.
 - **Cloud representation.** High-rate chunks are immutable generations in
   regional CMEK Cloud Storage. PostgreSQL keeps hashed external identity,
   internal tenant/account state, installations, policy consent, source and
   object manifests, quotas, cursors, summaries, audit, export, and erasure
   state. Object keys contain no phone number, email, user name, wearable serial,
   or readable health label.
-- **Delivery and restore.** Local writes remain authoritative. Upload and
-  restore use durable checkpoints, stable idempotency identities, checksum
-  validation, bounded decompression, transactional apply, and change-feed
-  cursors. iOS background execution and Android WorkManager remain best effort;
-  foreground catch-up is always required. Cloud cannot prevent a BLE dropout or
-  operating-system suspension.
+- **Delivery and restore.** Local writes remain authoritative. Enabled
+  server-readable classes use durable checkpoints, stable idempotency
+  identities, checksum validation, bounded decompression, transactional apply,
+  and change-feed cursors. Managed document feeds are partitioned by content
+  mode; only strict `day_ownership` may enter the server-readable adapter, and
+  encrypted personal rows cannot be relabeled or silently downgraded. iOS
+  background execution and Android WorkManager remain best effort; foreground
+  catch-up is always required. Current clients fail closed rather than consume
+  an encrypted document they cannot decrypt, and no migration manufactures
+  such a row. Cloud cannot prevent a BLE dropout or operating-system
+  suspension.
 - **Optional local storage reduction.** The setting is off by default. When
   enabled, it keeps seven days of high-rate raw optical, motion, and auxiliary
   streams and 30 days of essential time series. It prunes only an exact clean
@@ -554,6 +570,42 @@ operating system may delay or suppress delivery.
 - Turning the setting off removes any pending or presented summary. A delivery
   frontier advances only after Notification Center accepts the request, so a
   failed attempt does not silently discard the newly synced workout.
+
+### 1.6 Local calendar-aware daily guidance
+
+Planned-workout guidance is an optional extension of Adaptive Day Guidance. It
+is off by default and requires a separate Calendar permission on iOS and
+Android. Turning Adaptive Day Guidance or its calendar option off immediately
+clears the in-memory result, invalidates any read already in flight, and stops
+future reads; revoking the operating-system permission does the same.
+
+- **Classification stays inside the calendar query.** NOOP reads only same-day,
+  future, non-all-day event instances and conservatively checks the title for
+  an unambiguous workout term. Ambiguous work, meeting, spectator, shopping,
+  ticket, and equipment-service titles fail closed. The initial classifier
+  recognizes a bounded set of explicit workout keywords; unsupported or
+  ambiguous titles are ignored. The title is discarded inside the query loop.
+- **Only a generic time window survives.** The published in-memory value
+  contains the civil day, start time, end time, observation time, and an
+  in-process revision. NOOP does not retain event title, notes, location,
+  attendees, organizer, calendar name, recurrence data, event ID, or calendar
+  ID in SQLite, Room, preferences, diagnostics, exports, backups, or network
+  requests.
+- **The recommendation is local and advisory.** Today may combine that generic
+  future window with NOOP's already-local sleep and readiness evidence to
+  suggest considering a lighter session. The user's same-day symptom check
+  overrides wearable guidance. Calendar edits and deletions refresh the card,
+  and the adjustment expires when the planned start passes. This is not
+  medical, injury, or training clearance.
+- **Lock-screen copy stays private.** A bounded local notification can say that
+  a planned session may need adjustment and open Workouts. It does not expose
+  the event name, exact event time, sleep duration, sleep deficit, score,
+  calendar provider, or inferred cause.
+- **Diagnostics are categorical only.** The app report can show the permission
+  category, whether zero/one/multiple candidates matched, operation duration,
+  and fixed success/rejection/failure outcomes. It never includes calendar
+  content, exact times, health values, identifiers, or arbitrary provider
+  errors.
 
 ---
 

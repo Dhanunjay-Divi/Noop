@@ -10,6 +10,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -31,6 +32,8 @@ import com.noop.location.GpsSession
 import com.noop.location.LocationTracker
 import com.noop.managed.ManagedCloudService
 import com.noop.managed.ManagedSafetyLiveLocationSession
+import com.noop.managed.ManagedSafetyLocationAuthorization
+import com.noop.managed.ManagedSafetyLocationAuthorizationWatchdog
 import com.noop.managed.ManagedSafetyLocationRetryPolicy
 import com.noop.notif.BatteryAlertNotifier
 import com.noop.notif.HydrationReminderDelivery
@@ -40,6 +43,7 @@ import com.noop.notif.NotificationLifecycleId
 import com.noop.notif.NotificationLifecycleLedger
 import com.noop.notif.NotificationPlatformIdentity
 import com.noop.notif.NotificationLifecycleState
+import com.noop.notif.protectPrivateContent
 import com.noop.safety.SafetyIncidentLocationTracker
 import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
@@ -121,7 +125,7 @@ internal fun connectionNotificationDetail(
     add(if (connected) "Streaming in the background" else "Keeping the link open")
     recoveryPct?.let { add("Recovery ${it.roundToInt()}%") }
     effort?.let { add("Effort ${it.roundToInt()}") }
-    batteryPct?.let { add("Strap ${it.roundToInt()}%") }
+    batteryPct?.let { add("Noop Band ${it.roundToInt()}%") }
 }.joinToString("  ·  ")
 
 class WhoopConnectionService : Service() {
@@ -210,7 +214,6 @@ class WhoopConnectionService : Service() {
             }
         }
     }
-
     /** True once [bluetoothStateReceiver] is registered, so repeat onStartCommands don't double-register
      *  (which would later throw on a single unregister). */
     private var bluetoothReceiverRegistered = false
@@ -222,6 +225,8 @@ class WhoopConnectionService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         SafetyLiveLocationSession.initialize(this)
         ManagedSafetyLiveLocationSession.initialize(this)
+        (application as NoopApplication).managedCloud
+            .reconcileSafetyLocationAuthorizationForRuntime()
 
         // The notification "Disconnect" action routes back here as a self-intent.
         if (intent?.action == ACTION_STOP) {
@@ -547,7 +552,6 @@ class WhoopConnectionService : Service() {
                         )
                         return@collect
                     }
-
                     startForegroundCompat(
                         buildNotification(ble.state.value, null),
                         locationActive = true,
@@ -648,6 +652,23 @@ class WhoopConnectionService : Service() {
                         )
                         return@collect
                     }
+                    if (
+                        ManagedSafetyLocationAuthorizationWatchdog.shouldStop(
+                            locationAuthorized =
+                                ManagedSafetyLocationAuthorization.isAuthorized(
+                                    this@WhoopConnectionService,
+                                    shareLocation = true,
+                                ),
+                            activeLocalSession = true,
+                        )
+                    ) {
+                        (application as NoopApplication).managedCloud
+                            .stopSafetyLocationForRuntime(
+                                incidentId,
+                                "authorization_revoked",
+                            )
+                        return@collect
+                    }
 
                     startForegroundCompat(
                         buildNotification(ble.state.value, null),
@@ -667,6 +688,39 @@ class WhoopConnectionService : Service() {
                                     incidentId,
                                     "expired",
                                 )
+                        }
+                        val authorizationWatchdog = launch {
+                            while (true) {
+                                delay(
+                                    ManagedSafetyLocationAuthorizationWatchdog
+                                        .INTERVAL_MILLIS,
+                                )
+                                val active =
+                                    ManagedSafetyLiveLocationSession.state.value
+                                        .isActiveAt(
+                                            System.currentTimeMillis() / 1_000L,
+                                        )
+                                if (!active) return@launch
+                                if (
+                                    ManagedSafetyLocationAuthorizationWatchdog
+                                        .shouldStop(
+                                            locationAuthorized =
+                                                ManagedSafetyLocationAuthorization
+                                                    .isAuthorized(
+                                                        this@WhoopConnectionService,
+                                                        shareLocation = true,
+                                                    ),
+                                            activeLocalSession = true,
+                                        )
+                                ) {
+                                    (application as NoopApplication).managedCloud
+                                        .stopSafetyLocationForRuntime(
+                                            incidentId,
+                                            "authorization_revoked",
+                                        )
+                                    return@launch
+                                }
+                            }
                         }
                         try {
                             safetyLocationUpdates
@@ -709,6 +763,7 @@ class WhoopConnectionService : Service() {
                                 }
                         } finally {
                             expiry.cancel()
+                            authorizationWatchdog.cancel()
                         }
                     }
                 }
@@ -756,12 +811,15 @@ class WhoopConnectionService : Service() {
         nowUnix: Long = System.currentTimeMillis() / 1_000L,
     ): Boolean =
         SafetyLiveLocationSession.state.value.isActiveAt(nowUnix) ||
-            ManagedSafetyLiveLocationSession.state.value.isActiveAt(nowUnix)
+            managedSafetyLocationActive(nowUnix)
 
     private fun managedSafetyLocationActive(
         nowUnix: Long = System.currentTimeMillis() / 1_000L,
     ): Boolean =
-        ManagedSafetyLiveLocationSession.state.value.isActiveAt(nowUnix)
+        ManagedSafetyLocationAuthorization.isAuthorized(
+            this,
+            shareLocation = true,
+        ) && ManagedSafetyLiveLocationSession.state.value.isActiveAt(nowUnix)
 
     private fun locationForegroundActive(): Boolean =
         GpsSession.state.value.active || safetyLocationActive()
@@ -874,7 +932,7 @@ class WhoopConnectionService : Service() {
         val title = when {
             safetyLocationActive -> "Safety location sharing active"
             !state.connected   -> "Reconnecting to Noop Band…"
-            state.backfilling  -> "Syncing strap history…"
+            state.backfilling  -> "Syncing Noop Band history…"
             else               -> "Connected to Noop Band"
         }
         val detail =
@@ -911,7 +969,7 @@ class WhoopConnectionService : Service() {
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .protectPrivateContent(this, CHANNEL_ID)
         if (!safetyLocationActive || state.connected) {
             builder.addAction(0, "Disconnect", stopAction)
         }

@@ -179,6 +179,7 @@ public struct ManagedSnapshotRestoreState: Equatable, Sendable {
     public let accountScopeHash: String
     public let requestID: String
     public let dataClasses: [String]
+    public let changeFeedCapabilityVersion: Int
     public let restoreJobID: String?
     public let snapshotAt: String?
     public let changeSequence: Int64?
@@ -199,6 +200,7 @@ public struct ManagedSnapshotRestoreState: Equatable, Sendable {
         accountScopeHash: String,
         requestID: String,
         dataClasses: [String],
+        changeFeedCapabilityVersion: Int = 0,
         restoreJobID: String?,
         snapshotAt: String?,
         changeSequence: Int64?,
@@ -218,6 +220,7 @@ public struct ManagedSnapshotRestoreState: Equatable, Sendable {
         self.accountScopeHash = accountScopeHash
         self.requestID = requestID
         self.dataClasses = dataClasses
+        self.changeFeedCapabilityVersion = changeFeedCapabilityVersion
         self.restoreJobID = restoreJobID
         self.snapshotAt = snapshotAt
         self.changeSequence = changeSequence
@@ -807,7 +810,8 @@ extension WhoopStore {
             try Row.fetchOne(
                 db,
                 sql: """
-                    SELECT accountScopeHash, requestId, dataClassesJSON, restoreJobId,
+                    SELECT accountScopeHash, requestId, dataClassesJSON,
+                           changeFeedCapabilityVersion, restoreJobId,
                            snapshotAt, changeSequence, selectedObjects, selectedBytes,
                            dataClassIndex, afterEventStart, afterChunkId,
                            afterDocumentUpdatedAt, afterDocumentKind, afterDocumentId,
@@ -827,6 +831,7 @@ extension WhoopStore {
                     accountScopeHash: row["accountScopeHash"],
                     requestID: row["requestId"],
                     dataClasses: classes,
+                    changeFeedCapabilityVersion: row["changeFeedCapabilityVersion"],
                     restoreJobID: row["restoreJobId"],
                     snapshotAt: row["snapshotAt"],
                     changeSequence: row["changeSequence"],
@@ -861,16 +866,19 @@ extension WhoopStore {
             try db.execute(
                 sql: """
                     INSERT INTO managedSnapshotRestore (
-                        accountScopeHash, requestId, dataClassesJSON, restoreJobId,
+                        accountScopeHash, requestId, dataClassesJSON,
+                        changeFeedCapabilityVersion, restoreJobId,
                         snapshotAt, changeSequence, selectedObjects, selectedBytes,
                         dataClassIndex, afterEventStart, afterChunkId,
                         afterDocumentUpdatedAt, afterDocumentKind, afterDocumentId,
                         documentsComplete,
                         deliveredObjects, deliveredBytes, updatedAtMs
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(accountScopeHash) DO UPDATE SET
                         requestId = excluded.requestId,
                         dataClassesJSON = excluded.dataClassesJSON,
+                        changeFeedCapabilityVersion =
+                            excluded.changeFeedCapabilityVersion,
                         restoreJobId = excluded.restoreJobId,
                         snapshotAt = excluded.snapshotAt,
                         changeSequence = excluded.changeSequence,
@@ -889,6 +897,7 @@ extension WhoopStore {
                     """,
                 arguments: [
                     checkpoint.accountScopeHash, checkpoint.requestID, classes,
+                    checkpoint.changeFeedCapabilityVersion,
                     checkpoint.restoreJobID, checkpoint.snapshotAt,
                     checkpoint.changeSequence, checkpoint.selectedObjects,
                     checkpoint.selectedBytes, checkpoint.dataClassIndex,
@@ -916,21 +925,30 @@ extension WhoopStore {
     public func finishManagedSnapshotRestore(
         accountScopeHash: String,
         changeSequence: Int64,
+        changeFeedCapabilityVersion: Int,
         updatedAtMs: Int64
     ) async throws {
         try syncWrite { db in
             try db.execute(sql: """
-                INSERT INTO managedChangeCursor (accountScopeHash, sequence, updatedAtMs)
-                VALUES (?, ?, ?)
+                INSERT INTO managedChangeCursor (
+                    accountScopeHash, sequence, changeFeedCapabilityVersion, updatedAtMs
+                )
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(accountScopeHash) DO UPDATE SET
                     sequence = MAX(managedChangeCursor.sequence, excluded.sequence),
+                    changeFeedCapabilityVersion = CASE
+                        WHEN excluded.sequence >= managedChangeCursor.sequence
+                        THEN excluded.changeFeedCapabilityVersion
+                        ELSE managedChangeCursor.changeFeedCapabilityVersion
+                    END,
                     updatedAtMs = CASE
                         WHEN excluded.sequence >= managedChangeCursor.sequence
                         THEN excluded.updatedAtMs
                         ELSE managedChangeCursor.updatedAtMs
                     END
                 """, arguments: [
-                    accountScopeHash, max(0, changeSequence), updatedAtMs,
+                    accountScopeHash, max(0, changeSequence),
+                    max(0, changeFeedCapabilityVersion), updatedAtMs,
                 ])
             try db.execute(
                 sql: "DELETE FROM managedSnapshotRestore WHERE accountScopeHash = ?",
@@ -944,6 +962,22 @@ extension WhoopStore {
             try Int64.fetchOne(
                 db,
                 sql: "SELECT sequence FROM managedChangeCursor WHERE accountScopeHash = ?",
+                arguments: [accountScopeHash]
+            ) ?? 0
+        }
+    }
+
+    public func managedChangeFeedCapabilityVersion(
+        accountScopeHash: String
+    ) async throws -> Int {
+        try syncRead { db in
+            try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT changeFeedCapabilityVersion
+                    FROM managedChangeCursor
+                    WHERE accountScopeHash = ?
+                    """,
                 arguments: [accountScopeHash]
             ) ?? 0
         }

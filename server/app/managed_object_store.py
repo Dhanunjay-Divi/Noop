@@ -49,6 +49,7 @@ class ManagedObjectStoring(Protocol):
         content_sha256: str,
         content_length: int,
         expires_in_seconds: int,
+        not_after: datetime | None = None,
     ) -> ManagedObjectCapability: ...
 
     async def download_capability(
@@ -64,6 +65,12 @@ class ManagedObjectStoring(Protocol):
         *,
         object_key: str,
         generation: int,
+    ) -> ManagedObjectMetadata: ...
+
+    async def latest_metadata(
+        self,
+        *,
+        object_key: str,
     ) -> ManagedObjectMetadata: ...
 
     async def read(
@@ -256,6 +263,7 @@ class GCSV4ObjectStore:
         content_sha256: str,
         content_length: int,
         expires_in_seconds: int,
+        not_after: datetime | None = None,
     ) -> ManagedObjectCapability:
         if not 60 <= expires_in_seconds <= 3600:
             raise ValueError("upload capability expiry must be 60 through 3600")
@@ -274,6 +282,7 @@ class GCSV4ObjectStore:
             payload_sha256=content_sha256,
             expires_in_seconds=expires_in_seconds,
             extra_query={},
+            not_after=not_after,
         )
 
     async def download_capability(
@@ -296,6 +305,7 @@ class GCSV4ObjectStore:
             payload_sha256="UNSIGNED-PAYLOAD",
             expires_in_seconds=expires_in_seconds,
             extra_query={"generation": str(generation)},
+            not_after=None,
         )
 
     async def metadata(
@@ -308,6 +318,17 @@ class GCSV4ObjectStore:
             self._metadata,
             object_key,
             generation,
+        )
+
+    async def latest_metadata(
+        self,
+        *,
+        object_key: str,
+    ) -> ManagedObjectMetadata:
+        return await asyncio.to_thread(
+            self._metadata,
+            object_key,
+            None,
         )
 
     async def read(
@@ -347,8 +368,22 @@ class GCSV4ObjectStore:
         payload_sha256: str,
         expires_in_seconds: int,
         extra_query: dict[str, str],
+        not_after: datetime | None,
     ) -> ManagedObjectCapability:
         now = self.clock().astimezone(UTC).replace(microsecond=0)
+        effective_expires_in_seconds = expires_in_seconds
+        if not_after is not None:
+            if not_after.tzinfo is None:
+                raise ValueError(
+                    "upload capability retention cap must be timezone-aware"
+                )
+            retention_seconds = int((not_after.astimezone(UTC) - now).total_seconds())
+            effective_expires_in_seconds = min(
+                effective_expires_in_seconds,
+                retention_seconds,
+            )
+        if not 60 <= effective_expires_in_seconds <= 3600:
+            raise ValueError("upload capability has no retention-safe validity window")
         date = now.strftime("%Y%m%d")
         timestamp = now.strftime("%Y%m%dT%H%M%SZ")
         credential_scope = f"{date}/auto/storage/goog4_request"
@@ -358,7 +393,7 @@ class GCSV4ObjectStore:
             "X-Goog-Algorithm": "GOOG4-RSA-SHA256",
             "X-Goog-Credential": credential,
             "X-Goog-Date": timestamp,
-            "X-Goog-Expires": str(expires_in_seconds),
+            "X-Goog-Expires": str(effective_expires_in_seconds),
             "X-Goog-SignedHeaders": signed_headers,
             **extra_query,
         }
@@ -395,13 +430,13 @@ class GCSV4ObjectStore:
             method=method,
             url=url,
             headers={name: value for name, value in headers.items() if name != "host"},
-            expires_at=now + timedelta(seconds=expires_in_seconds),
+            expires_at=now + timedelta(seconds=effective_expires_in_seconds),
         )
 
     def _metadata(
         self,
         object_key: str,
-        generation: int,
+        generation: int | None,
     ) -> ManagedObjectMetadata:
         # Metadata reads use a short-lived access token. Reuse IAMBlobSigner's
         # metadata credential path when available without exposing that token.
@@ -412,14 +447,16 @@ class GCSV4ObjectStore:
         token = self.signer._access_token()
         bucket = urllib.parse.quote(self.bucket, safe="")
         name = urllib.parse.quote(object_key, safe="")
-        query = urllib.parse.urlencode(
-            {
-                "generation": str(generation),
-                "fields": (
-                    "name,generation,metageneration,crc32c,size,contentType,metadata"
-                ),
-            }
-        )
+        query_values = {
+            "fields": (
+                "name,generation,metageneration,crc32c,size,contentType,metadata"
+            ),
+        }
+        if generation is not None:
+            if generation <= 0:
+                raise ValueError("generation must be positive")
+            query_values["generation"] = str(generation)
+        query = urllib.parse.urlencode(query_values)
         request = urllib.request.Request(
             (f"https://storage.googleapis.com/storage/v1/b/{bucket}/o/{name}?{query}"),
             headers={

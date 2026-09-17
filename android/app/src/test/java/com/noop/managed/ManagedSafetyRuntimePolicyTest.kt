@@ -1,5 +1,7 @@
 package com.noop.managed
 
+import com.noop.safety.SafetyLocation
+import com.noop.ui.shouldDisableBandSosPreference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -9,6 +11,172 @@ import org.junit.Test
 import java.util.UUID
 
 class ManagedSafetyRuntimePolicyTest {
+    @Test
+    fun bandSosPreferenceWaitsForAConfirmedContactSnapshotBeforeDisabling() {
+        val acceptedContact = ManagedSafetyContact(
+            profileId = UUID.fromString("00000000-0000-0000-0000-000000000111"),
+            displayName = "Contact",
+            role = "contact",
+            acceptedAt = "2026-09-12T00:00:00Z",
+        )
+
+        assertFalse(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.SIGNED_OUT,
+                contacts = null,
+            ),
+        )
+        assertFalse(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.ENROLLED,
+                contacts = null,
+            ),
+        )
+        assertTrue(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.ENROLLED,
+                contacts = ManagedSafetyContacts(
+                    contacts = emptyList(),
+                    deliveryCapableCount = 0,
+                    minimumRequired = 1,
+                    maximumAllowed = 5,
+                ),
+            ),
+        )
+        assertFalse(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.ENROLLED,
+                contacts = ManagedSafetyContacts(
+                    contacts = listOf(acceptedContact),
+                    deliveryCapableCount = 1,
+                    minimumRequired = 1,
+                    maximumAllowed = 5,
+                ),
+            ),
+        )
+        assertTrue(
+            shouldDisableBandSosPreference(
+                enabled = true,
+                phase = ManagedCloudPhase.ENROLLED,
+                contacts = ManagedSafetyContacts(
+                    contacts = listOf(acceptedContact),
+                    deliveryCapableCount = 0,
+                    minimumRequired = 1,
+                    maximumAllowed = 5,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun locationSharingRequiresForegroundAuthorizationOnly() {
+        assertTrue(
+            ManagedSafetyLocationAuthorization.canStartIncident(
+                shareLocation = false,
+                foregroundGranted = false,
+            ),
+        )
+        assertFalse(
+            ManagedSafetyLocationAuthorization.canStartIncident(
+                shareLocation = true,
+                foregroundGranted = false,
+            ),
+        )
+        assertTrue(
+            ManagedSafetyLocationAuthorization.canStartIncident(
+                shareLocation = true,
+                foregroundGranted = true,
+            ),
+        )
+    }
+
+    @Test
+    fun safetyLocationUploadRequiresReadyFreshValidFixWithBoundedAccuracy() {
+        val nowUnix = 1_800_000_000L
+
+        fun location(
+            latitude: Double = 40.7128,
+            longitude: Double = -74.0060,
+            accuracy: Double? = 12.0,
+            capturedAtUnix: Long = nowUnix,
+        ) = SafetyLocation(
+            latitude = latitude,
+            longitude = longitude,
+            horizontalAccuracyMeters = accuracy,
+            capturedAtUnix = capturedAtUnix,
+        )
+
+        assertTrue(
+            managedSafetyLocationCanUpload(
+                location = location(),
+                locationReady = true,
+                nowUnix = nowUnix,
+            ),
+        )
+        assertTrue(
+            managedSafetyLocationCanUpload(
+                location = location(
+                    accuracy = SafetyLocation.MAXIMUM_HORIZONTAL_ACCURACY_METERS,
+                ),
+                locationReady = true,
+                nowUnix = nowUnix,
+            ),
+        )
+        assertFalse(
+            managedSafetyLocationCanUpload(
+                location = location(),
+                locationReady = false,
+                nowUnix = nowUnix,
+            ),
+        )
+        assertFalse(
+            managedSafetyLocationCanUpload(
+                location = null,
+                locationReady = true,
+                nowUnix = nowUnix,
+            ),
+        )
+        for (invalidAccuracy in listOf(null, Double.NaN, Double.POSITIVE_INFINITY, -0.1, 10_000.1)) {
+            assertFalse(
+                managedSafetyLocationCanUpload(
+                    location = location(accuracy = invalidAccuracy),
+                    locationReady = true,
+                    nowUnix = nowUnix,
+                ),
+            )
+        }
+        assertFalse(
+            managedSafetyLocationCanUpload(
+                location = location(latitude = Double.NaN),
+                locationReady = true,
+                nowUnix = nowUnix,
+            ),
+        )
+        assertFalse(
+            managedSafetyLocationCanUpload(
+                location = location(
+                    capturedAtUnix = nowUnix - SafetyLocation.MAXIMUM_AGE_SECONDS - 1L,
+                ),
+                locationReady = true,
+                nowUnix = nowUnix,
+            ),
+        )
+        assertFalse(
+            managedSafetyLocationCanUpload(
+                location = location(
+                    capturedAtUnix =
+                        nowUnix + SafetyLocation.MAXIMUM_FUTURE_CLOCK_SKEW_SECONDS + 1L,
+                ),
+                locationReady = true,
+                nowUnix = nowUnix,
+            ),
+        )
+    }
+
     @Test
     fun notificationRegistrationRequiresUsableAppAndChannelDelivery() {
         assertTrue(
@@ -62,7 +230,7 @@ class ManagedSafetyRuntimePolicyTest {
     }
 
     @Test
-    fun incidentRequestReplaysOnlyForTheSameAccountAndOptions() {
+    fun incidentRequestReplaysSameIntentAndRotatesAfterIntentOrAccountChanges() {
         val firstId = UUID.fromString("00000000-0000-0000-0000-000000000201")
         val secondId = UUID.fromString("00000000-0000-0000-0000-000000000202")
         val firstScope = "a".repeat(64)
@@ -70,6 +238,7 @@ class ManagedSafetyRuntimePolicyTest {
         val created = ManagedSafetyIncidentRequestPolicy.resolve(
             existing = null,
             accountScopeHash = firstScope,
+            trigger = "manual_sos",
             durationHours = 8,
             shareLocation = true,
             createRequestId = { firstId },
@@ -80,29 +249,45 @@ class ManagedSafetyRuntimePolicyTest {
             ManagedSafetyIncidentRequestPolicy.resolve(
                 existing = created,
                 accountScopeHash = firstScope,
+                trigger = "manual_sos",
                 durationHours = 8,
                 shareLocation = true,
                 createRequestId = { secondId },
             ),
         )
-        assertThrows(ManagedStorageException.Conflict::class.java) {
-            ManagedSafetyIncidentRequestPolicy.resolve(
-                existing = created,
-                accountScopeHash = firstScope,
-                durationHours = 12,
-                shareLocation = true,
-                createRequestId = { secondId },
-            )
-        }
+        val changedDuration = ManagedSafetyIncidentRequestPolicy.resolve(
+            existing = created,
+            accountScopeHash = firstScope,
+            trigger = "manual_sos",
+            durationHours = 12,
+            shareLocation = true,
+            createRequestId = { secondId },
+        )
+        assertEquals(secondId, changedDuration.requestId)
+        assertEquals(12, changedDuration.durationHours)
+
+        val changedTrigger = ManagedSafetyIncidentRequestPolicy.resolve(
+            existing = created,
+            accountScopeHash = firstScope,
+            trigger = "band_sos",
+            durationHours = 8,
+            shareLocation = false,
+            createRequestId = { secondId },
+        )
+        assertEquals(secondId, changedTrigger.requestId)
+        assertEquals("band_sos", changedTrigger.trigger)
+        assertFalse(changedTrigger.shareLocation)
         val otherAccount = ManagedSafetyIncidentRequestPolicy.resolve(
             existing = created,
             accountScopeHash = secondScope,
+            trigger = "band_sos",
             durationHours = 8,
             shareLocation = true,
             createRequestId = { secondId },
         )
         assertNotEquals(created.requestId, otherAccount.requestId)
         assertEquals(secondScope, otherAccount.accountScopeHash)
+        assertEquals("band_sos", otherAccount.trigger)
     }
 
     @Test

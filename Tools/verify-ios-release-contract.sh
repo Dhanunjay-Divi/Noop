@@ -46,7 +46,8 @@ validate_group_contract() {
   configured_group=$(plist_value "$info" AppGroupIdentifier)
   [ -n "$configured_group" ] || { echo "$label has no AppGroupIdentifier" >&2; exit 1; }
 
-  local entitlement_file="$WORK_DIR/$(echo "$label" | tr '/ ' '__').entitlements.plist"
+  local entitlement_file
+  entitlement_file="$WORK_DIR/$(echo "$label" | tr '/ ' '__').entitlements.plist"
   entitlements_for "$bundle" "$entitlement_file"
   local signed_group
   signed_group=$(plist_value "$entitlement_file" 'com.apple.security.application-groups:0')

@@ -959,7 +959,7 @@ private fun ManagedSummary(summary: ManagedSocialSummary) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ManagedScore(
-                stringResource(R.string.managed_friends_charge),
+                stringResource(R.string.appwide_day_overview_recovery),
                 summary.charge,
                 Palette.chargeColor,
                 Modifier.weight(1f),
@@ -1013,7 +1013,7 @@ private fun ManagedScore(
         Column(modifier = Modifier.padding(10.dp)) {
             Text(label, style = NoopType.overline, color = Palette.textTertiary)
             Text(
-                value?.roundToInt()?.toString() ?: "-",
+                value?.roundToInt()?.toString() ?: NoopDisplayFormat.MISSING,
                 style = NoopType.title2,
                 color = if (value == null) Palette.textTertiary else color,
             )
@@ -1087,7 +1087,7 @@ private fun ManagedFriendsSettings(
             )
             HorizontalDivider(color = Palette.hairline)
             Text(
-                stringResource(R.string.managed_friends_data_boundary),
+                stringResource(R.string.appwide_friends_data_boundary),
                 style = NoopType.footnote,
                 color = Palette.textSecondary,
             )
@@ -1294,7 +1294,7 @@ private fun ManagedSharingToggles(
     onChange: (ManagedSocialVisibility) -> Unit,
 ) {
     listOf(
-        R.string.managed_friends_charge to value.charge,
+        R.string.appwide_day_overview_recovery to value.charge,
         R.string.managed_friends_effort to value.effort,
         R.string.managed_friends_rest to value.rest,
         R.string.managed_friends_sleep_duration to value.sleepDuration,
@@ -1506,7 +1506,7 @@ private fun parseMinute(value: String): Int? {
 @Composable
 private fun sharingLabels(value: ManagedSocialVisibility): String {
     val labels = buildList {
-        if (value.charge) add(stringResource(R.string.managed_friends_charge))
+        if (value.charge) add(stringResource(R.string.appwide_day_overview_recovery))
         if (value.effort) add(stringResource(R.string.managed_friends_effort))
         if (value.rest) add(stringResource(R.string.managed_friends_rest))
         if (value.sleepDuration) {
@@ -1528,7 +1528,7 @@ private fun compactSummaryLabels(summary: ManagedSocialSummary): String {
     val labels = buildList {
         summary.charge?.let {
             add(
-                "${stringResource(R.string.managed_friends_charge)} " +
+                "${stringResource(R.string.appwide_day_overview_recovery)} " +
                     it.roundToInt(),
             )
         }

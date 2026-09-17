@@ -173,7 +173,7 @@ struct WorkoutDetailView: View {
                             recoveryStat(String(localized: "5 min"), value: recovery.after5Minutes)
                         }
                         Divider().overlay(StrandPalette.hairline)
-                        Text("The change from your heart rate at the end of exercise. Positive values mean your heart rate fell; a dash means the strap did not record enough data around that minute.")
+                        Text("The change from your heart rate at the end of exercise. Positive values mean your heart rate fell; a dash means the wearable did not record enough data around that minute.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -186,7 +186,7 @@ struct WorkoutDetailView: View {
     private func recoveryStat(_ label: String, value: Int?) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label).strandOverline()
-            Text(value.map { "\($0)" } ?? "–")
+            Text(value.map { "\($0)" } ?? StrandFormat.missing)
                 .font(StrandFont.number(24))
                 .foregroundStyle(value.map { $0 >= 0 ? StrandPalette.statusPositive
                                                      : StrandPalette.statusWarning }
@@ -238,15 +238,15 @@ struct WorkoutDetailView: View {
                      caption: String(localized: "active"),
                      accent: StrandPalette.effortColor)
             StatTile(label: "Avg HR",
-                     value: row.avgHr.map { "\($0)" } ?? "–",
+                     value: row.avgHr.map { "\($0)" } ?? StrandFormat.missing,
                      caption: row.avgHr != nil ? "bpm" : nil,
                      accent: row.avgHr != nil ? StrandPalette.metricRose : StrandPalette.textTertiary)
             StatTile(label: "Max HR",
-                     value: row.maxHr.map { "\($0)" } ?? "–",
+                     value: row.maxHr.map { "\($0)" } ?? StrandFormat.missing,
                      caption: row.maxHr != nil ? "bpm" : nil,
                      accent: row.maxHr != nil ? StrandPalette.metricRose : StrandPalette.textTertiary)
             StatTile(label: "Calories",
-                     value: row.energyKcal.map { grouped($0) } ?? "–",
+                     value: row.energyKcal.map { grouped($0) } ?? StrandFormat.missing,
                      caption: row.energyKcal != nil ? "kcal" : nil,
                      accent: row.energyKcal != nil ? StrandPalette.metricAmber : StrandPalette.textTertiary)
             if row.distanceM != nil {
@@ -259,8 +259,8 @@ struct WorkoutDetailView: View {
             // the tile doesn't pop in; "–" until a source has data. Caption is honest about the source.
             if WorkoutCatalog.isOnFoot(row.sport) {
                 StatTile(label: "Steps",
-                         value: steps.map { grouped(Double($0.count)) } ?? "–",
-                         caption: steps.map { $0.fromStrap ? String(localized: "strap")
+                         value: steps.map { grouped(Double($0.count)) } ?? StrandFormat.missing,
+                         caption: steps.map { $0.fromStrap ? String(localized: "Band")
                                                           : String(localized: "phone") },
                          accent: steps != nil ? StrandPalette.metricCyan : StrandPalette.textTertiary)
             }
@@ -357,7 +357,7 @@ struct WorkoutDetailView: View {
                     )
                 } footer: {
                     ChartFooter([
-                        ("Avg", row.avgHr.map { String(localized: "\($0) bpm") } ?? "–"),
+                        ("Avg", row.avgHr.map { String(localized: "\($0) bpm") } ?? StrandFormat.missing),
                         ("Peak", row.maxHr.map { String(localized: "\($0) bpm") } ?? String(localized: "\(Int((values.max() ?? 0).rounded())) bpm")),
                         ("Low", String(localized: "\(Int((values.min() ?? 0).rounded())) bpm")),
                     ])
@@ -397,7 +397,9 @@ struct WorkoutDetailView: View {
             let busiest = z.indices.max(by: { z[$0] < z[$1] }) ?? 0
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                 SectionHeader("HR Zones",
-                              overline: zonesFromImport ? "Imported zones" : "From strap HR",
+                              overline: zonesFromImport
+                                  ? LocalizedStringKey("Imported zones")
+                                  : LocalizedStringKey("appwide.workouts.band_hr"),
                               trailing: String(localized: "\(Int(total.rounded()))m in zone"))
                 NoopCard(tint: StrandPalette.effortColor) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -426,11 +428,15 @@ struct WorkoutDetailView: View {
                                 zoneStat(i + 1, minutes: z[i], total: total)
                             }
                         }
-                        Text(zonesFromImport
-                             ? String(localized: "appwide.workouts.imported_zone_split")
-                             : "Time in each %HRmax zone, derived from the strap's heart rate over this window (approximate).")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textTertiary)
+                        Group {
+                            if zonesFromImport {
+                                Text("appwide.workouts.imported_zone_split")
+                            } else {
+                                Text("Time in each %HRmax zone, derived from the wearable's heart rate over this window (approximate).")
+                            }
+                        }
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
                     }
                 }
             }

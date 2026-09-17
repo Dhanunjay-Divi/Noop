@@ -16,6 +16,12 @@ class AndroidLocalizationPolicyTest {
         File(root(), "android/app/src/main/res/$folder/strings.xml"),
     ).firstOrNull(File::isFile)
 
+    private fun appWideResourceFile(folder: String): File? = listOf(
+        File(root(), "src/main/res/$folder/appwide.xml"),
+        File(root(), "app/src/main/res/$folder/appwide.xml"),
+        File(root(), "android/app/src/main/res/$folder/appwide.xml"),
+    ).firstOrNull(File::isFile)
+
     private fun resourceRoot(): File? = listOf(
         File(root(), "src/main/res"),
         File(root(), "app/src/main/res"),
@@ -91,7 +97,8 @@ class AndroidLocalizationPolicyTest {
             """string:(wind_down_|sleep_planner_|strength_|key_metrics_(selection_|show_)|hydration_(adaptive_timing_|base_interval_label)).*|""" +
                 """string:(profile_(bmi_|target_weight_)|vital_range_summary_).*|""" +
                 """string:(widget_hrv|trends_effort|l10n_today_screen_(recovery_ea924f72|sleep_3cac34e6|resting_hr_26677094|blood_oxygen_a8ad9ff5|respiratory_1cd8c175|steps_cdde4f20|weight_69c0b815|calories_3e62ecfe))|""" +
-                """string:(nav_alarms|today_calibration_valid_hrv_progress|sleep_stage_detail_withheld|stale_sync_.*|changelog_.*|whats_new_.*|managed_friends_delete_body|managed_cloud_error_forbidden)""",
+                """string:(l10n_devices_screen_(the_whoop_4_0_reboot_frame_690a8ff2|waiting_for_the_straps_reply_5a06e7ac)|l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff|l10n_test_centre_screen_(heads_up_this_test_mode_is_8b82ed69|share_strap_log_for_bug_reports_b9802500)|l10n_settings_screen_share_strap_log_for_bug_reports_b9802500|l10n_workouts_screen_hrr_explanation_516)|""" +
+                """string:(nav_alarms|today_calibration_valid_hrv_progress|sleep_stage_detail_withheld|stale_sync_.*|health_live_hr_.*|changelog_.*|whats_new_.*|app_report_.*|managed_friends_delete_body|managed_cloud_error_forbidden)""",
         )
         val unscopedKeys = expectedKeys.filterNot(allowed::matches)
 
@@ -139,6 +146,78 @@ class AndroidLocalizationPolicyTest {
         assertTrue(
             "User-visible Android resources contain em dashes: $offenders",
             offenders.isEmpty(),
+        )
+    }
+
+    @Test
+    fun uiAuditAppWideResourcesHaveExactLocaleAndPlaceholderParity() {
+        val folders = listOf(
+            "values",
+            "values-de",
+            "values-es",
+            "values-fr",
+            "values-it",
+            "values-pt-rPT",
+            "values-ru",
+            "values-zh",
+            "values-zh-rTW",
+        )
+        val files = folders.associateWith(::appWideResourceFile)
+        assumeTrue(
+            "App-wide locale resources unavailable",
+            files.values.all { it != null },
+        )
+        val localized = files.mapValues { resources(it.value!!) }
+        val base = localized.getValue("values")
+        val auditKeys = base.keys.filter {
+            it.startsWith("string:appwide_ui_audit_")
+        }.toSet()
+        assertEquals(50, auditKeys.size)
+
+        val forbidden = listOf(
+            "whoop",
+            "5/mg",
+            "safe to leave on",
+            "newer band only",
+        )
+        for ((folder, values) in localized) {
+            assertEquals(
+                "$folder UI-audit key parity",
+                auditKeys,
+                values.keys.filter { it.startsWith("string:appwide_ui_audit_") }.toSet(),
+            )
+            for (key in auditKeys) {
+                val english = base.getValue(key)
+                val translated = values.getValue(key)
+                assertTrue("$folder has blank $key", translated.value.isNotBlank())
+                assertEquals(
+                    "$folder placeholder parity for $key",
+                    english.placeholders,
+                    translated.placeholders,
+                )
+                if (folder != "values") {
+                    assertTrue(
+                        "$folder retained English for $key",
+                        translated.value != english.value,
+                    )
+                }
+                val normalized = translated.value.lowercase()
+                forbidden.forEach { term ->
+                    assertTrue(
+                        "$folder $key contains prohibited copy: $term",
+                        term !in normalized,
+                    )
+                }
+            }
+        }
+
+        assertTrue(
+            base.getValue("string:appwide_ui_audit_settings_raw_capture_help")
+                .value.contains("raw biometric data"),
+        )
+        assertTrue(
+            base.getValue("string:appwide_ui_audit_test_centre_ppg_description")
+                .value.contains("compatible v26 firmware"),
         )
     }
 }

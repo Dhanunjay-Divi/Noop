@@ -219,6 +219,49 @@ final class SleepStagerTests: XCTestCase {
         XCTAssertTrue(shifted.isEmpty, "a +10h offset pushes the window into the daytime band → rejected")
     }
 
+    func testNamedZoneUsesHistoricalOffsetAcrossSpringTransition() throws {
+        let timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let instant = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-03-08T00:30:00Z")
+        )
+        let center = Int(instant.timeIntervalSince1970)
+        let period = SleepStager.Period(
+            stage: "sleep",
+            start: center - 30,
+            end: center + 30
+        )
+        let historicalOffset: (Int) -> Int = {
+            timeZone.secondsFromGMT(
+                for: Date(timeIntervalSince1970: TimeInterval($0))
+            )
+        }
+
+        XCTAssertFalse(
+            SleepStager.isDaytimeCenter(
+                period,
+                tzOffsetSeconds: -4 * 3_600
+            )
+        )
+        XCTAssertTrue(
+            SleepStager.isDaytimeCenter(
+                period,
+                offsetAtEpochSec: historicalOffset
+            )
+        )
+        XCTAssertTrue(
+            SleepStager.isOvernightOnset(
+                center,
+                tzOffsetSeconds: -4 * 3_600
+            )
+        )
+        XCTAssertFalse(
+            SleepStager.isOvernightOnset(
+                center,
+                offsetAtEpochSec: historicalOffset
+            )
+        )
+    }
+
     /// Guards against the index-out-of-range crash class from the prior attempt: no candidate
     /// at all (single still day, no HR) must return [] cleanly, not trap on empty median /
     /// first/last accesses inside the daytime path.

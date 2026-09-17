@@ -48,6 +48,35 @@ REPLAY_SECRET = "test-managed-safety-replay-secret-at-least-32-bytes"
 PUSH_SECRET = "test-managed-safety-push-secret-at-least-32-bytes"
 
 
+def test_incident_location_requires_explicit_opt_in() -> None:
+    request = ManagedSafetyIncidentCreate(request_id=uuid4())
+
+    assert request.share_location is False
+    with pytest.raises(ValueError):
+        ManagedSafetyIncidentCreate(
+            request_id=uuid4(),
+            initial_location=ManagedSafetyLocationUpdate(
+                sequence=1,
+                latitude=17.385,
+                longitude=78.4867,
+                horizontal_accuracy_m=12.5,
+                captured_at=datetime.now(UTC),
+            ),
+        )
+    with pytest.raises(ValueError):
+        ManagedSafetyIncidentCreate(
+            request_id=uuid4(),
+            share_location=True,
+            initial_location=ManagedSafetyLocationUpdate(
+                sequence=2,
+                latitude=17.385,
+                longitude=78.4867,
+                horizontal_accuracy_m=12.5,
+                captured_at=datetime.now(UTC),
+            ),
+        )
+
+
 async def _wait_for_database_waiter(pool) -> None:
     for _ in range(200):
         if int(
@@ -1234,6 +1263,7 @@ async def test_safety_incident_creation_has_durable_owner_quota() -> None:
                 principal=owner,
                 request=ManagedSafetyIncidentCreate(
                     request_id=request_id,
+                    trigger="band_sos" if index == 0 else "manual_sos",
                     duration_hours=8,
                     share_location=False,
                 ),
@@ -1279,6 +1309,21 @@ async def test_safety_incident_creation_has_durable_owner_quota() -> None:
                 owner.account_id,
             )
             == 4
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_page_quota_events quota
+                JOIN managed_safety_incidents incident
+                  ON incident.incident_id = quota.incident_id
+                WHERE quota.owner_account_id = $1
+                  AND quota.trigger = incident.trigger
+                  AND quota.trigger = 'band_sos'
+                """,
+                owner.account_id,
+            )
+            == 1
         )
 
         await pool.execute(
@@ -1781,15 +1826,38 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
         }
 
         request_id = uuid4()
+        initial_capture = datetime.now(UTC)
+        initial_location = ManagedSafetyLocationUpdate(
+            sequence=1,
+            latitude=17.384,
+            longitude=78.485,
+            horizontal_accuracy_m=15.0,
+            captured_at=initial_capture,
+        )
         incident = await safety.create_incident(
             principal=owner,
             request=ManagedSafetyIncidentCreate(
                 request_id=request_id,
                 duration_hours=8,
                 share_location=True,
+                initial_location=initial_location,
             ),
         )
+        assert incident["location"] is not None
+        assert incident["location"]["sequence"] == 1
+        assert incident["location"]["captured_at"] == initial_capture
         replay = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=request_id,
+                duration_hours=8,
+                share_location=True,
+                initial_location=initial_location,
+            ),
+        )
+        assert replay["incident_id"] == incident["incident_id"]
+        assert replay["duplicate"] is True
+        locationless_replay = await safety.create_incident(
             principal=owner,
             request=ManagedSafetyIncidentCreate(
                 request_id=request_id,
@@ -1797,8 +1865,27 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
                 share_location=True,
             ),
         )
-        assert replay["incident_id"] == incident["incident_id"]
-        assert replay["duplicate"] is True
+        assert locationless_replay["incident_id"] == incident["incident_id"]
+        assert locationless_replay["duplicate"] is True
+        assert locationless_replay["location"] == incident["location"]
+        changed_location_replay = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=request_id,
+                duration_hours=8,
+                share_location=True,
+                initial_location=ManagedSafetyLocationUpdate(
+                    sequence=1,
+                    latitude=17.3841,
+                    longitude=78.485,
+                    horizontal_accuracy_m=15.0,
+                    captured_at=initial_capture,
+                ),
+            ),
+        )
+        assert changed_location_replay["incident_id"] == incident["incident_id"]
+        assert changed_location_replay["duplicate"] is True
+        assert changed_location_replay["location"] == incident["location"]
         with pytest.raises(ManagedConflictError):
             await safety.create_incident(
                 principal=owner,
@@ -1814,7 +1901,36 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
                 incident_id=UUID(incident["incident_id"]),
             )
 
-        captured = datetime.now(UTC)
+        pool = primary._require_pool()
+        database_now = await pool.fetchval("SELECT clock_timestamp()")
+        await pool.execute(
+            """
+            UPDATE managed_safety_incidents
+            SET created_at = created_at - INTERVAL '2 hours',
+                expires_at = expires_at - INTERVAL '2 hours',
+                purge_after = purge_after - INTERVAL '2 hours'
+            WHERE incident_id = $1
+            """,
+            UUID(incident["incident_id"]),
+        )
+        for rejected_capture in (
+            database_now - timedelta(minutes=6),
+            database_now + timedelta(minutes=2),
+        ):
+            with pytest.raises(ManagedConflictError):
+                await safety.update_location(
+                    principal=owner,
+                    incident_id=UUID(incident["incident_id"]),
+                    update=ManagedSafetyLocationUpdate(
+                        sequence=1,
+                        latitude=17.385,
+                        longitude=78.4867,
+                        horizontal_accuracy_m=12.5,
+                        captured_at=rejected_capture,
+                    ),
+                )
+
+        captured = database_now
         location = await safety.update_location(
             principal=owner,
             incident_id=UUID(incident["incident_id"]),
@@ -1840,6 +1956,28 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
                 ),
             )
         )["duplicate"] is True
+        delayed_capture = database_now - timedelta(minutes=6)
+        await pool.execute(
+            """
+            UPDATE managed_safety_locations
+            SET captured_at = $2
+            WHERE incident_id = $1
+            """,
+            UUID(incident["incident_id"]),
+            delayed_capture,
+        )
+        delayed_duplicate = await safety.update_location(
+            principal=owner,
+            incident_id=UUID(incident["incident_id"]),
+            update=ManagedSafetyLocationUpdate(
+                sequence=1,
+                latitude=17.385,
+                longitude=78.4867,
+                horizontal_accuracy_m=12.5,
+                captured_at=delayed_capture,
+            ),
+        )
+        assert delayed_duplicate["duplicate"] is True
         newer = await safety.update_location(
             principal=owner,
             incident_id=UUID(incident["incident_id"]),
@@ -1851,7 +1989,7 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
                 captured_at=captured + timedelta(seconds=10),
             ),
         )
-        assert newer["sequence"] == 2
+        assert newer["sequence"] == 3
         cross_installation = await safety.update_location(
             principal=owner,
             incident_id=UUID(incident["incident_id"]),
@@ -1863,7 +2001,7 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
                 captured_at=captured + timedelta(seconds=20),
             ),
         )
-        assert cross_installation["sequence"] == 3
+        assert cross_installation["sequence"] == 4
         bounded_jump = await safety.update_location(
             principal=owner,
             incident_id=UUID(incident["incident_id"]),
@@ -1875,7 +2013,7 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
                 captured_at=captured + timedelta(seconds=30),
             ),
         )
-        assert bounded_jump["sequence"] == 4
+        assert bounded_jump["sequence"] == 5
         assert (
             await safety.update_location(
                 principal=owner,
@@ -1969,6 +2107,215 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
             == 0
         )
         assert owner_profile["profile_id"] == ended["owner_profile_id"]
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_initial_location_create_is_atomic_and_replay_stable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=8,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"atomic-owner-{uuid4()}")
+        first = await _principal(primary, label=f"atomic-first-{uuid4()}")
+        second = await _principal(primary, label=f"atomic-second-{uuid4()}")
+        owner_profile = await _profile(managed, owner, display_name="Owner")
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=first,
+            contact_name="First",
+        )
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=second,
+            contact_name="Second",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="atomic-first",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="atomic-second",
+        )
+
+        pool = primary._require_pool()
+        owner_profile_id = UUID(owner_profile["profile_id"])
+
+        async def owner_row_counts() -> dict[str, int]:
+            row = await pool.fetchrow(
+                """
+                SELECT
+                    (
+                        SELECT count(*)
+                        FROM managed_safety_incidents
+                        WHERE owner_profile_id = $1
+                    ) AS incidents,
+                    (
+                        SELECT count(*)
+                        FROM managed_safety_locations location
+                        JOIN managed_safety_incidents incident
+                          ON incident.incident_id = location.incident_id
+                        WHERE incident.owner_profile_id = $1
+                    ) AS locations,
+                    (
+                        SELECT count(*)
+                        FROM managed_safety_page_quota_events
+                        WHERE owner_account_id = $2
+                    ) AS quota_events,
+                    (
+                        SELECT count(*)
+                        FROM managed_safety_participants participant
+                        JOIN managed_safety_incidents incident
+                          ON incident.incident_id = participant.incident_id
+                        WHERE incident.owner_profile_id = $1
+                    ) AS participants,
+                    (
+                        SELECT count(*)
+                        FROM managed_safety_push_deliveries delivery
+                        JOIN managed_safety_incidents incident
+                          ON incident.incident_id = delivery.incident_id
+                        WHERE incident.owner_profile_id = $1
+                    ) AS push_deliveries
+                """,
+                owner_profile_id,
+                owner.account_id,
+            )
+            return {
+                key: int(row[key])
+                for key in (
+                    "incidents",
+                    "locations",
+                    "quota_events",
+                    "participants",
+                    "push_deliveries",
+                )
+            }
+
+        baseline = await owner_row_counts()
+        database_now = await pool.fetchval("SELECT clock_timestamp()")
+        for rejected_capture in (
+            database_now - timedelta(minutes=6),
+            database_now + timedelta(minutes=2),
+        ):
+            with pytest.raises(ManagedConflictError):
+                await safety.create_incident(
+                    principal=owner,
+                    request=ManagedSafetyIncidentCreate(
+                        request_id=uuid4(),
+                        duration_hours=8,
+                        share_location=True,
+                        initial_location=ManagedSafetyLocationUpdate(
+                            sequence=1,
+                            latitude=17.385,
+                            longitude=78.4867,
+                            horizontal_accuracy_m=12.5,
+                            captured_at=rejected_capture,
+                        ),
+                    ),
+                )
+            assert await owner_row_counts() == baseline
+
+        no_location_request_id = uuid4()
+        no_location_incident = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=no_location_request_id,
+                duration_hours=8,
+                share_location=True,
+            ),
+        )
+        assert no_location_incident["location"] is None
+        no_location_replay = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=no_location_request_id,
+                duration_hours=8,
+                share_location=True,
+                initial_location=ManagedSafetyLocationUpdate(
+                    sequence=1,
+                    latitude=17.385,
+                    longitude=78.4867,
+                    horizontal_accuracy_m=12.5,
+                    captured_at=database_now,
+                ),
+            ),
+        )
+        assert no_location_replay["incident_id"] == no_location_incident["incident_id"]
+        assert no_location_replay["duplicate"] is True
+        assert no_location_replay["location"] is None
+        await safety.end_incident(
+            principal=owner,
+            incident_id=UUID(no_location_incident["incident_id"]),
+            outcome="canceled",
+        )
+
+        location_request_id = uuid4()
+        initial_location = ManagedSafetyLocationUpdate(
+            sequence=1,
+            latitude=17.385,
+            longitude=78.4867,
+            horizontal_accuracy_m=12.5,
+            captured_at=database_now,
+        )
+        location_incident = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=location_request_id,
+                duration_hours=8,
+                share_location=True,
+                initial_location=initial_location,
+            ),
+        )
+        assert location_incident["location"] is not None
+        monkeypatch.setattr(
+            managed_safety_repository,
+            "SAFETY_LOCATION_MAXIMUM_AGE",
+            timedelta(seconds=-1),
+        )
+        delayed_replay = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=location_request_id,
+                duration_hours=8,
+                share_location=True,
+                initial_location=ManagedSafetyLocationUpdate(
+                    sequence=1,
+                    latitude=17.3851,
+                    longitude=78.4868,
+                    horizontal_accuracy_m=10.0,
+                    captured_at=database_now,
+                ),
+            ),
+        )
+        assert delayed_replay["incident_id"] == location_incident["incident_id"]
+        assert delayed_replay["duplicate"] is True
+        assert delayed_replay["location"] == location_incident["location"]
     finally:
         await primary.shutdown()
 
@@ -4133,10 +4480,32 @@ async def test_targeted_expiry_preserves_request_and_incident_uniqueness() -> No
             request=ManagedSafetyIncidentCreate(
                 request_id=uuid4(),
                 duration_hours=8,
-                share_location=False,
+                share_location=True,
             ),
         )
         stale_incident_id = UUID(stale_incident["incident_id"])
+        await safety.update_location(
+            principal=owner,
+            incident_id=stale_incident_id,
+            update=ManagedSafetyLocationUpdate(
+                sequence=1,
+                latitude=17.385,
+                longitude=78.4867,
+                horizontal_accuracy_m=12.5,
+                captured_at=now,
+            ),
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_locations
+                WHERE incident_id = $1
+                """,
+                stale_incident_id,
+            )
+            == 1
+        )
         await pool.execute(
             """
             UPDATE managed_safety_incidents
@@ -4167,6 +4536,17 @@ async def test_targeted_expiry_preserves_request_and_incident_uniqueness() -> No
                 stale_incident_id,
             )
             == "expired"
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_locations
+                WHERE incident_id = $1
+                """,
+                stale_incident_id,
+            )
+            == 0
         )
     finally:
         await primary.shutdown()
@@ -4209,7 +4589,7 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
             contact=first,
             contact_name="First",
         )
-        await _accept_contact(
+        second_profile, _ = await _accept_contact(
             managed,
             safety,
             owner=owner,
@@ -4230,7 +4610,11 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
             """,
             second.account_id,
         )
-        assert len(await safety.list_contacts(principal=owner)) == 1
+        contacts, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert len(contacts) == 1
+        assert delivery_capable_count == 1
         with pytest.raises(ManagedConflictError):
             await safety.create_incident(
                 principal=owner,
@@ -4249,6 +4633,32 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
             """,
             second.account_id,
         )
+        contacts, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert len(contacts) == 2
+        assert delivery_capable_count == 1
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_social_profiles
+            SET status = 'disabled', updated_at = clock_timestamp()
+            WHERE profile_id = $1
+            """,
+            UUID(second_profile["profile_id"]),
+        )
+        contacts, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert len(contacts) == 1
+        assert delivery_capable_count == 1
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_social_profiles
+            SET status = 'active', updated_at = clock_timestamp()
+            WHERE profile_id = $1
+            """,
+            UUID(second_profile["profile_id"]),
+        )
         installation_id = f"android-inactive-{uuid4().hex}"
         await _installation(
             primary,
@@ -4265,6 +4675,42 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
                 target_kind="token",
                 token=f"fcm-token:inactive_{uuid4().hex}",
             ),
+        )
+        contacts, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert len(contacts) == 2
+        assert delivery_capable_count == 2
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_account_installations
+            SET status = 'limited'
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            second.account_id,
+            installation_id,
+        )
+        _, delivery_capable_count = await safety.contact_snapshot(
+            principal=owner,
+        )
+        assert delivery_capable_count == 1
+        with pytest.raises(ManagedConflictError):
+            await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=uuid4(),
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_account_installations
+            SET status = 'active'
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            second.account_id,
+            installation_id,
         )
         incident = await safety.create_incident(
             principal=owner,

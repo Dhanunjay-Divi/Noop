@@ -1,14 +1,15 @@
 package com.noop.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * Custom-amount parse tests (#798) - the gate behind the Hydration "Custom amount" dialog's Log button.
- * The field accepts any whole ml in 1..3000; anything else (blank, zero, negative, non-numeric, over the
- * cap) either rejects (null → Log disabled) or clamps to the cap. Pure, so the dialog's confirm logic is
- * covered without composing UI.
+ * The field accepts any whole ml in 1..3000. Invalid or out-of-range input remains visible for correction,
+ * shows validation, and keeps confirmation disabled instead of silently changing the recorded amount.
  */
 class HydrationCustomAmountTest {
 
@@ -33,9 +34,22 @@ class HydrationCustomAmountTest {
         assertNull(parseCustomHydrationMl("-100"))
     }
 
-    @Test fun clampsToTheCap() {
-        // The 3000 ml cap: anything above lands exactly on it rather than banking an absurd day.
+    @Test fun rejectsInputAboveTheCapWithoutChangingIt() {
         assertEquals(3000, parseCustomHydrationMl("3000"))
-        assertEquals(3000, parseCustomHydrationMl("9999"))
+        assertNull(parseCustomHydrationMl("3001"))
+        assertNull(parseCustomHydrationMl("9999"))
+
+        val state = customHydrationInputState("9999")
+        assertNull(state.amountMl)
+        assertTrue(state.showValidation)
+        assertFalse(state.canConfirm)
+    }
+
+    @Test fun validInputClearsValidationAndEnablesConfirmation() {
+        val state = customHydrationInputState("2750")
+
+        assertEquals(2750, state.amountMl)
+        assertFalse(state.showValidation)
+        assertTrue(state.canConfirm)
     }
 }

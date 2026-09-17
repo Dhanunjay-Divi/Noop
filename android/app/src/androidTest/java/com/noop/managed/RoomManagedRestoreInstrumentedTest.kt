@@ -113,6 +113,54 @@ class RoomManagedRestoreInstrumentedTest {
     }
 
     @Test
+    fun restoresSparseAndUnknownSleepMotionEvidenceWithoutCollapsingThem() = runBlocking {
+        val result = restore.applyChunk(
+            chunk(
+                "derived_summaries",
+                listOf(
+                    stream(
+                        "sleep_summary",
+                        SLEEP_SUMMARY_COLUMNS,
+                        row(
+                            i(TS),
+                            s("sleep-sparse"),
+                            i(TS + 3_600_000),
+                            s("""{"user_edited":false,"gravity_sparse":true}"""),
+                            i(TS),
+                            b(false),
+                        ),
+                        row(
+                            i(TS + 1_000),
+                            s("sleep-unknown"),
+                            i(TS + 3_601_000),
+                            s("""{"user_edited":false}"""),
+                            i(TS + 1_000),
+                            b(false),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(
+            1,
+            long(
+                "SELECT gravitySparse FROM sleepSession WHERE deviceId = ? AND startTs = ?",
+                result.localSourceId,
+                TS / 1_000,
+            ),
+        )
+        assertEquals(
+            1,
+            long(
+                "SELECT gravitySparse IS NULL FROM sleepSession WHERE deviceId = ? AND startTs = ?",
+                result.localSourceId,
+                TS / 1_000 + 1,
+            ),
+        )
+    }
+
+    @Test
     fun ownCloudEchoCannotOverwriteFresherLocalStrapData() = runBlocking {
         val sourceId = UUID.randomUUID()
         val localSource = "strap"
@@ -390,6 +438,14 @@ class RoomManagedRestoreInstrumentedTest {
             "metric_key",
             "value",
             "source_id",
+            "updated_at_ms",
+            "deleted",
+        )
+        private val SLEEP_SUMMARY_COLUMNS = listOf(
+            "event_at_ms",
+            "record_id",
+            "end_at_ms",
+            "payload_json",
             "updated_at_ms",
             "deleted",
         )

@@ -403,7 +403,7 @@ class RoomManagedChunkExtractor(
                         "start_ts_adjusted" to it.startTsAdjusted,
                         "motion_json" to it.motionJSON,
                         "sleep_state_json" to it.sleepStateJSON,
-                        "gravity_sparse" to null,
+                        "gravity_sparse" to it.gravitySparse,
                         "rr_eligible_window_count" to it.rrEligibleWindowCount,
                         "rr_valid_window_count" to it.rrValidWindowCount,
                     ),

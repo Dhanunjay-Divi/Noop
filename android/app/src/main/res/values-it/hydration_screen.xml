@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hydration_screen_sip">Sorso</string>
+    <string name="hydration_screen_cup">Bicchiere</string>
+    <string name="hydration_screen_bottle">Bottiglia</string>
+    <string name="hydration_screen_quick_amounts_format">%1$s %2$s · %3$s %4$s · %5$s %6$s</string>
+    <string name="hydration_screen_custom_amount">Quantità personalizzata</string>
+    <string name="hydration_screen_log">Registra</string>
+    <string name="hydration_screen_cancel">Annulla</string>
+    <string name="hydration_screen_edit_entry">Modifica registrazione acqua</string>
+    <string name="hydration_screen_save">Salva</string>
+    <string name="hydration_screen_amount_label">Millilitri (ml)</string>
+    <string name="hydration_screen_amount_range_format">Inserisci una quantità da 1 a %1$d ml.</string>
+    <string name="hydration_screen_guidance">Un obiettivo semplice che si adatta al tuo sforzo. Indicazioni generali di benessere, non consigli medici.</string>
+    <string name="hydration_screen_last_seven_days">Ultimi 7 giorni</string>
+    <string name="hydration_screen_litres_short_format">%1$s L</string>
+    <string name="hydration_screen_litres_accessibility_format">%1$s litri</string>
+    <string name="hydration_screen_goal_visible_format">su %1$s</string>
+    <string name="hydration_screen_log_accessibility_format">Registra %1$s</string>
+    <string name="hydration_screen_hero_status_accessibility_format">%1$s. %2$s. %3$s</string>
+    <string name="hydration_screen_hero_missing_with_goal_accessibility_format">%1$s. %2$s. Obiettivo: %3$s.</string>
+    <string name="hydration_screen_hero_progress_accessibility_format">%1$s. Registrato: %2$s. Obiettivo: %3$s. %4$d per cento dell’obiettivo.</string>
+    <string name="hydration_screen_history_accessibility_format">%1$s. %2$s.</string>
+    <string name="hydration_screen_history_day_accessibility_format">%1$s: %2$s</string>
+</resources>

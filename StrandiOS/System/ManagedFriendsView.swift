@@ -764,7 +764,7 @@ struct ManagedFriendsView: View {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "lock.shield.fill")
                         .foregroundStyle(StrandPalette.statusPositive)
-                    Text("Only Charge, Effort, Rest, sleep duration, HRV, and resting heart rate can be shared. Raw streams, locations, journals, routes, workouts, and sleep stages are excluded.")
+                    Text("appwide.friends.data_boundary")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -897,7 +897,7 @@ private struct ManagedFriendCard: View {
                 if let summary = friend.latest?.summary {
                     HStack(spacing: 8) {
                         ManagedSocialScore(
-                            label: "Charge",
+                            label: "Recovery",
                             value: summary.charge,
                             color: StrandPalette.chargeColor
                         )
@@ -907,7 +907,7 @@ private struct ManagedFriendCard: View {
                             color: StrandPalette.effortColor
                         )
                         ManagedSocialScore(
-                            label: "Rest",
+                            label: "Sleep Score",
                             value: summary.rest,
                             color: StrandPalette.restColor
                         )
@@ -955,7 +955,7 @@ private struct ManagedSocialScore: View {
                 .font(StrandFont.overlineScaled(9))
                 .foregroundStyle(StrandPalette.textTertiary)
                 .lineLimit(1)
-            Text(value.map { String(Int($0.rounded())) } ?? "-")
+            Text(value.map { String(Int($0.rounded())) } ?? StrandFormat.missing)
                 .font(StrandFont.number(24))
                 .foregroundStyle(
                     value == nil ? StrandPalette.textTertiary : color
@@ -1143,7 +1143,7 @@ private struct ManagedFriendDetailSheet: View {
                         VStack(alignment: .leading, spacing: 14) {
                             SectionHeader("I share with \(friend.displayName)")
                             ManagedSharingToggle(
-                                "Charge",
+                                "Recovery",
                                 isOn: $charge
                             )
                             ManagedSharingToggle(
@@ -1151,7 +1151,7 @@ private struct ManagedFriendDetailSheet: View {
                                 isOn: $effort
                             )
                             ManagedSharingToggle(
-                                "Rest",
+                                "Sleep Score",
                                 isOn: $rest
                             )
                             ManagedSharingToggle(
@@ -1200,7 +1200,7 @@ private struct ManagedFriendDetailSheet: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SectionHeader("\(friend.displayName) shares with me")
                             ManagedReadOnlySharing(
-                                "Charge",
+                                "Recovery",
                                 shared: friend.sharedWithMe.charge
                             )
                             ManagedReadOnlySharing(
@@ -1208,7 +1208,7 @@ private struct ManagedFriendDetailSheet: View {
                                 shared: friend.sharedWithMe.effort
                             )
                             ManagedReadOnlySharing(
-                                "Rest",
+                                "Sleep Score",
                                 shared: friend.sharedWithMe.rest
                             )
                             ManagedReadOnlySharing(
@@ -1362,13 +1362,15 @@ private enum ManagedSocialFormat {
     static func compactDetails(_ summary: ManagedSocialSummary) -> [String] {
         var result: [String] = []
         if let charge = summary.charge {
-            result.append("Charge \(Int(charge.rounded()))")
+            result.append("Recovery \(Int(charge.rounded()))")
         }
         if let effort = summary.effort {
             result.append("Effort \(Int(effort.rounded()))")
         }
         if let rest = summary.rest {
-            result.append("Rest \(Int(rest.rounded()))")
+            result.append(
+                "\(String(localized: "Sleep Score")) \(Int(rest.rounded()))"
+            )
         }
         result.append(contentsOf: details(summary))
         return result

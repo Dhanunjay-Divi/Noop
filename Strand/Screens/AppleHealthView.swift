@@ -1,5 +1,6 @@
 import SwiftUI
 import StrandDesign
+import StrandAnalytics
 import WhoopStore
 import Foundation
 
@@ -40,6 +41,7 @@ struct AppleHealthLoadKey: Equatable {
 
 struct AppleHealthView: View {
     @EnvironmentObject var repo: Repository
+    @EnvironmentObject private var profile: ProfileStore
 
     // iOS-only: the live two-way HealthKit bridge, injected at StrandiOSApp. macOS has no HealthKit
     // (HealthKitBridge is `#if os(iOS)` in its own file and isn't in the macOS environment), so this
@@ -110,6 +112,21 @@ struct AppleHealthView: View {
         "resting_hr", "hrv", "spo2", "resp_rate", "asleep_min",
         "weight", "body_fat", "lean_mass", "bmi", "body_temp", "wrist_temp"
     ]
+
+    private var canPresentBMI: Bool {
+        BodyProfilePolicy.canPresentAdultBMI(
+            age: profile.age,
+            currentWeightKg: profile.weightKg,
+            heightCm: profile.heightCm,
+            ageConfirmed: profile.ageInputConfirmed,
+            heightConfirmed: profile.heightInputConfirmed,
+            currentWeightConfirmed: profile.weightInputConfirmed
+        )
+    }
+
+    private var visibleSeriesKeys: [String] {
+        Self.seriesKeys.filter { canPresentBMI || $0 != "bmi" }
+    }
 
     // yyyy-MM-dd → Date (en_US_POSIX / UTC), per the project's date contract.
     private static let dayParser: DateFormatter = {
@@ -220,9 +237,11 @@ struct AppleHealthView: View {
                     // #348 - when the build can't carry the HealthKit entitlement there's no "Enable"
                     // button to tap, so the empty-state copy must point at the file/Shortcuts path
                     // instead of telling the user to tap a control that isn't shown.
-                    ComingSoon(what: health.auth == .entitlementMissing
-                               ? "Nothing here yet. This sideloaded install can't read Apple Health directly. Import a Health export .zip in Data Sources, or turn on Shortcuts Export to bring your strap data into Health."
-                               : "Nothing here yet. Tap Enable Apple Health above to read your data live, or import a Health export .zip in Data Sources.")
+                    if health.auth == .entitlementMissing {
+                        ComingSoon(what: "appwide.ui_audit.apple_health.empty_sideload")
+                    } else {
+                        ComingSoon(what: "appwide.ui_audit.apple_health.empty_live")
+                    }
                 }
                 #else
                 ComingSoon(what: "Nothing imported yet. On an iPhone: Health app, tap your photo, Export All Health Data, then import the .zip here in Data Sources.")
@@ -314,7 +333,9 @@ struct AppleHealthView: View {
     /// the selected range, plus a flag if any tracked series had to auto-widen.
     private var rangeSummaryCaption: String {
         let n = windowedRows.count
-        let anyWidened = Self.seriesKeys.contains { !raw($0).isEmpty && effectiveRange($0) != range }
+        let anyWidened = visibleSeriesKeys.contains {
+            !raw($0).isEmpty && effectiveRange($0) != range
+        }
         // Whole-phrase variants per count so translators see complete sentences (never a stitched plural).
         if anyWidened {
             return n == 1
@@ -420,7 +441,7 @@ struct AppleHealthView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("To get your Apple Health data in anyway: import a Health export .zip in Data Sources, or turn on Shortcuts Export to feed your strap data into Health without the entitlement. (A build installed from the App Store or signed with a paid Apple Developer account connects directly.)")
+                    Text("To get your Apple Health data in anyway: import a Health export .zip in Data Sources, or turn on Shortcuts Export to feed your band data into Health without the entitlement. (A build installed from the App Store or signed with a paid Apple Developer account connects directly.)")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -544,7 +565,7 @@ struct AppleHealthView: View {
                         .disabled(health.syncing)
                     }
 
-                    Text("HRV is read-only. NOOP will not label strap RMSSD as Apple Health SDNN; they are different HRV statistics.")
+                    Text("HRV is read-only. NOOP will not label band RMSSD as Apple Health SDNN; they are different HRV statistics.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -708,9 +729,11 @@ struct AppleHealthView: View {
             chartCard(title: "Lean body mass", key: "lean_mass",
                       gradient: accentGradient, fallback: 40...80,
                       fmt: { massLabel($0) })
-            chartCard(title: "BMI", key: "bmi",
-                      gradient: purpleGradient, fallback: 16...35,
-                      fmt: { String(format: "%.1f", $0) })
+            if canPresentBMI {
+                chartCard(title: "BMI", key: "bmi",
+                          gradient: purpleGradient, fallback: 16...35,
+                          fmt: { String(format: "%.1f", $0) })
+            }
         }
     }
 
@@ -994,6 +1017,7 @@ private func appleHealthPreviewData() -> AppleHealthView.PreviewData {
 #Preview("Apple Health - seeded") {
     AppleHealthView(previewData: appleHealthPreviewData())
         .environmentObject(Repository(deviceId: "preview"))
+        .environmentObject(ProfileStore())
         .frame(width: 920, height: 980)
         .preferredColorScheme(.dark)
 }
@@ -1001,6 +1025,7 @@ private func appleHealthPreviewData() -> AppleHealthView.PreviewData {
 #Preview("Apple Health - empty") {
     AppleHealthView(previewData: .init(rows: [], workoutCount: 0, series: [:]))
         .environmentObject(Repository(deviceId: "preview"))
+        .environmentObject(ProfileStore())
         .frame(width: 920, height: 600)
         .preferredColorScheme(.dark)
 }

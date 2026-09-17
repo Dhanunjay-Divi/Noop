@@ -56,8 +56,12 @@ struct NotificationSettingsView: View {
                     }
                     .buttonStyle(NoopButtonStyle(.secondary))
                     .disabled(!live.bonded)
-                    .help(live.bonded ? "Fire a test buzz now" : "Connect your strap to test")
-                    .accessibilityHint(live.bonded ? "Fires a test buzz on your strap" : "Connect your strap to enable")
+                    .help(live.bonded
+                          ? String(localized: "appwide.ui_audit.notifications.test_buzz")
+                          : String(localized: "appwide.ui_audit.notifications.connect_to_test"))
+                    .accessibilityHint(live.bonded
+                                       ? String(localized: "appwide.ui_audit.notifications.test_buzz_hint")
+                                       : String(localized: "appwide.ui_audit.notifications.connect_to_enable"))
                 }
 
                 deliveryNote
@@ -213,9 +217,13 @@ struct NotificationSettingsView: View {
         .buttonStyle(.bordered)
         .tint(StrandPalette.accent)
         .disabled(!live.bonded)
-        .help(live.bonded ? "Test \(app.name) buzz" : "Connect your strap to test")
+        .help(live.bonded
+              ? String(format: String(localized: "appwide.ui_audit.notifications.test_app_buzz_format"), app.name)
+              : String(localized: "appwide.ui_audit.notifications.connect_to_test"))
         .accessibilityLabel("Test \(app.name) buzz")
-        .accessibilityHint(live.bonded ? "Fires a test buzz on your strap" : "Connect your strap to enable")
+        .accessibilityHint(live.bonded
+                           ? String(localized: "appwide.ui_audit.notifications.test_buzz_hint")
+                           : String(localized: "appwide.ui_audit.notifications.connect_to_enable"))
     }
 
     // MARK: - Behaviour
@@ -229,8 +237,8 @@ struct NotificationSettingsView: View {
                               isOn: $store.onlyWhenWorn)
                 rowDivider
                 FormToggleRow(label: String(localized: "Quiet hours"),
-                              help: String(localized: "Mute wrist alerts overnight."),
-                              isOn: $store.quietHoursEnabled)
+                              help: String(localized: "appwide.notifications.quiet_hours.help"),
+                              isOn: quietHoursEnabledBinding)
                 if store.quietHoursEnabled {
                     rowDivider
                     HStack(spacing: 12) {
@@ -259,13 +267,33 @@ struct NotificationSettingsView: View {
 
     // MARK: - Quiet-hours bindings
 
+    private var quietHoursEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { store.quietHoursEnabled },
+            set: {
+                store.quietHoursEnabled = $0
+                DailyReviewNotifications.quietHoursDidChange()
+            }
+        )
+    }
+
     private var quietStartBinding: Binding<Date> {
-        Binding(get: { Self.date(fromMinutes: store.quietStartMinutes) },
-                set: { store.quietStartMinutes = Self.minutes(from: $0) })
+        Binding(
+            get: { Self.date(fromMinutes: store.quietStartMinutes) },
+            set: {
+                store.quietStartMinutes = Self.minutes(from: $0)
+                DailyReviewNotifications.quietHoursDidChange()
+            }
+        )
     }
     private var quietEndBinding: Binding<Date> {
-        Binding(get: { Self.date(fromMinutes: store.quietEndMinutes) },
-                set: { store.quietEndMinutes = Self.minutes(from: $0) })
+        Binding(
+            get: { Self.date(fromMinutes: store.quietEndMinutes) },
+            set: {
+                store.quietEndMinutes = Self.minutes(from: $0)
+                DailyReviewNotifications.quietHoursDidChange()
+            }
+        )
     }
     private static func date(fromMinutes m: Int) -> Date {
         Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()

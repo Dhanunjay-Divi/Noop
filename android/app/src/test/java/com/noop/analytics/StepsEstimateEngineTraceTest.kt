@@ -26,6 +26,52 @@ class StepsEstimateEngineTraceTest {
 
     // MARK: 5/MG raw-counter trace
 
+    @Test fun civilDayBoundsRejectPartialAndEmptyRanges() {
+        assertEquals(
+            AnalyticsEngine.CivilDayBoundsValidation.Absent,
+            AnalyticsEngine.validateCivilDayBounds(null, null),
+        )
+        assertEquals(
+            AnalyticsEngine.CivilDayBoundsValidation.Valid(100L, 200L),
+            AnalyticsEngine.validateCivilDayBounds(100L, 200L),
+        )
+        assertEquals(
+            AnalyticsEngine.CivilDayBoundsValidation.Invalid,
+            AnalyticsEngine.validateCivilDayBounds(100L, null),
+        )
+        assertEquals(
+            AnalyticsEngine.CivilDayBoundsValidation.Invalid,
+            AnalyticsEngine.validateCivilDayBounds(null, 200L),
+        )
+        assertEquals(
+            AnalyticsEngine.CivilDayBoundsValidation.Invalid,
+            AnalyticsEngine.validateCivilDayBounds(200L, 200L),
+        )
+        val rejected = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = listOf(step(0, 100), step(60, 120)),
+            profile = profile,
+            civilDayStartTs = noonUtc,
+        )
+        assertEquals(
+            DayResult.Status.REJECTED_INVALID_CIVIL_DAY_BOUNDS,
+            rejected.status,
+        )
+        assertNull(rejected.daily.steps)
+        assertNull(rejected.daily.strain)
+        assertTrue(rejected.sleepSessions.isEmpty())
+        assertTrue(rejected.workouts.isEmpty())
+        assertTrue(
+            StepsEstimateEngineTrace.rawCounterTrace(
+                daySteps = listOf(step(0, 100), step(60, 120)),
+                dayKey = dayUtc,
+                tzOffsetSeconds = 0L,
+                ticksPerStep = 1.0,
+                civilDayEndTsExclusive = noonUtc + 3_600L,
+            ).isEmpty(),
+        )
+    }
+
     @Test fun rawTotalEqualsAnalyzeDaySteps() {
         val samples = listOf(step(0, 100), step(60, 150), step(120, 220)) // 50 + 70 = 120
         val production = AnalyticsEngine.analyzeDay(day = dayUtc, steps = samples, profile = profile).daily.steps

@@ -213,6 +213,7 @@ internal class ManagedCloudPreferences(context: Context) {
 
     fun safetyIncidentRequest(
         accountScopeHash: String,
+        trigger: String,
         durationHours: Int,
         shareLocation: Boolean,
     ): ManagedSafetyIncidentRequestRecord = synchronized(this) {
@@ -222,6 +223,7 @@ internal class ManagedCloudPreferences(context: Context) {
         val resolved = ManagedSafetyIncidentRequestPolicy.resolve(
             existing = existing,
             accountScopeHash = accountScopeHash,
+            trigger = trigger,
             durationHours = durationHours,
             shareLocation = shareLocation,
         )
@@ -522,11 +524,13 @@ internal class ManagedCloudPreferences(context: Context) {
         ManagedSafetyIncidentRequestRecord(
             requestId = UUID.fromString(value.getString("request_id")),
             accountScopeHash = value.getString("account_scope_hash"),
+            trigger = value.optString("trigger", "manual_sos"),
             durationHours = value.getInt("duration_hours"),
             shareLocation = value.getBoolean("share_location"),
         )
     }.getOrNull()?.takeIf {
         it.accountScopeHash.matches(SHA256) &&
+            it.trigger in setOf("manual_sos", "band_sos") &&
             it.durationHours in setOf(8, 12)
     }
 
@@ -557,6 +561,7 @@ internal class ManagedCloudPreferences(context: Context) {
     ): String = JSONObject()
         .put("request_id", value.requestId.toString().lowercase())
         .put("account_scope_hash", value.accountScopeHash)
+        .put("trigger", value.trigger)
         .put("duration_hours", value.durationHours)
         .put("share_location", value.shareLocation)
         .toString()
@@ -708,6 +713,7 @@ internal object ManagedSafetyContactRequestPolicy {
 internal data class ManagedSafetyIncidentRequestRecord(
     val requestId: UUID,
     val accountScopeHash: String,
+    val trigger: String,
     val durationHours: Int,
     val shareLocation: Boolean,
 )
@@ -716,24 +722,26 @@ internal object ManagedSafetyIncidentRequestPolicy {
     fun resolve(
         existing: ManagedSafetyIncidentRequestRecord?,
         accountScopeHash: String,
+        trigger: String,
         durationHours: Int,
         shareLocation: Boolean,
         createRequestId: () -> UUID = UUID::randomUUID,
     ): ManagedSafetyIncidentRequestRecord {
         require(accountScopeHash.matches(Regex("^[0-9a-f]{64}$")))
+        require(trigger in setOf("manual_sos", "band_sos"))
         require(durationHours in setOf(8, 12))
-        if (existing?.accountScopeHash == accountScopeHash) {
-            if (
-                existing.durationHours != durationHours ||
-                existing.shareLocation != shareLocation
-            ) {
-                throw ManagedStorageException.Conflict()
-            }
+        if (
+            existing?.accountScopeHash == accountScopeHash &&
+            existing.trigger == trigger &&
+            existing.durationHours == durationHours &&
+            existing.shareLocation == shareLocation
+        ) {
             return existing
         }
         return ManagedSafetyIncidentRequestRecord(
             requestId = createRequestId(),
             accountScopeHash = accountScopeHash,
+            trigger = trigger,
             durationHours = durationHours,
             shareLocation = shareLocation,
         )

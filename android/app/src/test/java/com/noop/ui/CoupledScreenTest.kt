@@ -33,7 +33,7 @@ class CoupledScreenTest {
 
     @Test fun optimalRange_noRecovery_isNoData() {
         assertNull(optimalStrainRange(null))
-        assertEquals("No Data", optimalStrainRangeText(null))
+        assertEquals(NoopDisplayFormat.MISSING, optimalStrainRangeText(null))
     }
 
     @Test fun optimalRange_bands_matchTheStruct() {

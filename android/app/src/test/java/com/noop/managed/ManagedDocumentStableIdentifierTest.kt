@@ -6,6 +6,16 @@ import org.junit.Test
 
 class ManagedDocumentStableIdentifierTest {
     @Test
+    fun onlyDayOwnershipUsesTheServerReadableAdapter() {
+        assertEquals(
+            listOf(ManagedDocumentKind.DAY_OWNERSHIP),
+            ManagedDocumentKind.entries.filter {
+                RoomManagedDocumentAdapter.isServerReadableKind(it)
+            },
+        )
+    }
+
+    @Test
     fun journalIdentifierMatchesTheSharedSwiftFixture() {
         val key = ManagedCanonicalJson.encode(
             org.json.JSONObject()

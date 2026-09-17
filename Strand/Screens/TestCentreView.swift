@@ -53,8 +53,15 @@ struct TestCentreView: View {
         capture: .toggle, includesScreenshot: false, requires5MG: false)
 
     var body: some View {
-        ScreenScaffold(title: "Test Centre",
-                       subtitle: "Turn on a test for the thing that's wrong, wear the strap, then tap Report. All on \(Platform.deviceNounPhrase).") {
+        ScreenScaffold(
+            title: "Test Centre",
+            subtitle: LocalizedStringKey(
+                String(
+                    format: String(localized: "appwide.ui_audit.test_centre.subtitle_device_format"),
+                    Platform.deviceNounPhrase
+                )
+            )
+        ) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
                 domainModesCard.staggeredAppear(index: 0)
                 diagnosticToolsCard.staggeredAppear(index: 1)
@@ -92,7 +99,7 @@ struct TestCentreView: View {
                 Text("TEST MODES")
                     .font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.textSecondary)
-                Text("Each test logs extra detail for one part of the app while you wear the strap, then bundles it for a bug report.")
+                Text("appwide.ui_audit.test_centre.mode_blurb")
                     .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 let modes = TestCentreLayout.visibleModes(is5MG: is5MG)
@@ -104,7 +111,7 @@ struct TestCentreView: View {
         }
     }
 
-    // MARK: - Section 2: Diagnostic tools (strap log + recalibrate + env dump)
+    // MARK: - Section 2: Diagnostic tools (band log + recalibrate + env dump)
 
     @ViewBuilder private var diagnosticToolsCard: some View {
         NoopCard {
@@ -113,9 +120,9 @@ struct TestCentreView: View {
                     .font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.textSecondary)
 
-                // Strap log, the same exportableLogText the Settings + Live strap-log cards share.
+                // Band log, the same exportableLogText the Settings + Live diagnostic cards share.
                 HStack(spacing: 12) {
-                    Text("STRAP LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
+                    Text("BAND LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer()
                     Button("Copy") { FileExport.copyDiagnosticText(live.exportableLogText()) }
@@ -199,7 +206,7 @@ struct TestCentreView: View {
                 // Scheduled daily auto-export, the same ScheduledDebugExport reads/writes as the Settings
                 // Diagnostics card. iOS BGAppRefresh is best-effort, the honest caption is kept.
                 Toggle(isOn: $debugExportOn) {
-                    Text("Daily auto-export of the strap log")
+                    Text("Daily auto-export of the band log")
                         .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
                 }
                 .toggleStyle(.noopSwitch)
@@ -245,7 +252,7 @@ struct TestCentreView: View {
                         .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
                 }
                 .toggleStyle(.noopSwitch)
-                Text("When NOOP reconstructs heart rate from the WHOOP 5/MG v26 optical waveform (the seconds the strap stored no HR), refine the autocorrelation peak with a parabolic sub-lag fit so the estimate is not quantized to roughly 16 bpm steps near a high HR. It only fills seconds the strap never reported; it never overrides a stored HR. 5/MG only, off by default.")
+                Text("appwide.ui_audit.test_centre.ppg_description")
                     .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -352,7 +359,7 @@ struct TestCentreView: View {
         model.ble.flushPuffinCaptures()
         let url = ScheduledDebugExport.runNow(captureURL: live.puffinCaptureURL)
         if let url {
-            infoTitle = String(localized: "Strap log exported")
+            infoTitle = String(localized: "appwide.ui_audit.test_centre.band_log_exported")
             #if os(iOS)
             infoMessage = String(localized: "Saved \(url.lastPathComponent) to NOOP's folder in the Files app.")
             #else
@@ -360,7 +367,7 @@ struct TestCentreView: View {
             #endif
         } else {
             infoTitle = String(localized: "Export failed")
-            infoMessage = String(localized: "Couldn't write the strap log right now.")
+            infoMessage = String(localized: "appwide.ui_audit.test_centre.band_log_export_failed")
         }
         showInfo = true
     }
@@ -720,7 +727,7 @@ private struct ReportReviewSheet: View {
                     // for the very thing being reported (the #812 capture_check only grades ACTIVE modes,
                     // so without this the report just looked thin with no explanation). Warn plainly, with
                     // the fix, BEFORE the user ships a report a maintainer can't act on.
-                    Text("Heads up: this test mode is off, so the report has no capture for it. For a useful report, turn the mode on, reproduce the problem while wearing the strap, then report again.")
+                    Text("Heads up: this test mode is off, so the report has no capture for it. For a useful report, turn the mode on, reproduce the problem while wearing Noop Band, then report again.")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.statusWarning)
                         .fixedSize(horizontal: false, vertical: true)

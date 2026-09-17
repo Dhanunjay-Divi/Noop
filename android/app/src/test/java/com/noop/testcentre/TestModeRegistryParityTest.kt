@@ -81,6 +81,54 @@ class TestModeRegistryParityTest {
         )
     }
 
+    @Test fun mountedRegistryCopyUsesNoopBandAndKeepsStableQuestionIds() {
+        val sleep = TestModeRegistry.mode(TestDomain.SLEEP)!!
+        val connection = TestModeRegistry.mode(TestDomain.CONNECTION)!!
+        val battery = TestModeRegistry.mode(TestDomain.BATTERY)!!
+
+        assertEquals(
+            "Wear Noop Band for a few nights so we can see which gate kept or dropped each sleep run.",
+            sleep.blurb,
+        )
+        assertEquals(
+            "When did you charge Noop Band?",
+            sleep.questionnaire.single { it.id == "chargeTiming" }.prompt,
+        )
+        assertEquals(
+            "Turn this on if Noop Band keeps disconnecting or cannot finish a sync.",
+            connection.blurb,
+        )
+        assertEquals(
+            "Is another phone or the other band app paired to Noop Band right now?",
+            connection.questionnaire.single { it.id == "otherDevicePaired" }.prompt,
+        )
+        assertEquals(
+            "Wear Noop Band for a few days so we can fit your real discharge slope.",
+            battery.blurb,
+        )
+        assertEquals(
+            "Is another phone paired to Noop Band?",
+            battery.questionnaire.single { it.id == "otherPhonePaired" }.prompt,
+        )
+
+        assertEquals(
+            listOf("sleepTimes", "awakeStill", "naps", "shiftWork", "chargeTiming", "healthSleep"),
+            sleep.questionnaire.map { it.id },
+        )
+        assertEquals(listOf("otherDevicePaired"), connection.questionnaire.map { it.id })
+        assertEquals(
+            listOf("whoopAppInstalled", "otherPhonePaired", "chargedInWindow", "batterySaverApps"),
+            battery.questionnaire.map { it.id },
+        )
+
+        val mountedCopy = TestModeRegistry.all.flatMap { mode ->
+            listOf(mode.blurb) + mode.questionnaire.map { it.prompt }
+        }
+        mountedCopy.forEach { copy ->
+            assertFalse("Mounted registry copy uses stale strap terminology: $copy", Regex("""\bstrap\b""", RegexOption.IGNORE_CASE).containsMatchIn(copy))
+        }
+    }
+
     @Test fun screenshotAndRequires5MGFlags() {
         // Only Display & Performance carries a screenshot; nothing registered yet requires 5/MG.
         for (m in TestModeRegistry.all) {

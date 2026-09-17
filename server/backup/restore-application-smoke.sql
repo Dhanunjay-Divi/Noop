@@ -40,6 +40,425 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'required Safety escalation migration is missing';
     END IF;
+    IF (
+        SELECT count(*)
+        FROM noop_schema_migrations
+        WHERE version = ANY(
+            ARRAY[
+                '034_managed_document_contract_v2_add.sql',
+                '035_managed_document_plaintext_quarantine.sql',
+                '036_managed_document_contract_v2_validate.sql',
+                '037_managed_document_contract_v2_activate.sql',
+                '038_managed_safety_band_sos.sql',
+                '041_managed_safety_writer_compatibility.sql'
+            ]
+        )
+    ) <> 6 THEN
+        RAISE EXCEPTION 'required managed contract migration is missing';
+    END IF;
+    IF to_regclass('public.feedback_reports') IS NULL THEN
+        RAISE EXCEPTION 'feedback reports table is missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                ('report_id', 'uuid', TRUE),
+                ('client_app_id', 'text', TRUE),
+                ('subject_hash', 'character(64)', TRUE),
+                ('principal_hash_version', 'smallint', TRUE),
+                ('principal_hash', 'character(64)', TRUE),
+                ('idempotency_hash', 'character(64)', TRUE),
+                ('request_hash', 'character(64)', TRUE),
+                ('platform', 'text', TRUE),
+                ('app_version', 'text', TRUE),
+                ('archive_bytes', 'integer', TRUE),
+                ('archive_sha256', 'character(64)', TRUE),
+                ('includes_user_note', 'boolean', TRUE),
+                ('includes_screenshot', 'boolean', TRUE),
+                ('receipt', 'character varying(19)', TRUE),
+                ('object_key', 'text', TRUE),
+                ('status', 'text', TRUE),
+                ('object_generation', 'bigint', FALSE),
+                ('created_at', 'timestamp with time zone', TRUE),
+                ('upload_expires_at', 'timestamp with time zone', TRUE),
+                ('completed_at', 'timestamp with time zone', FALSE),
+                ('retained_until', 'timestamp with time zone', TRUE),
+                ('deleted_at', 'timestamp with time zone', FALSE),
+                ('cleanup_after', 'timestamp with time zone', FALSE),
+                ('cleanup_phase', 'text', FALSE),
+                ('cleanup_claimed_at', 'timestamp with time zone', FALSE),
+                ('object_absence_confirmed_at', 'timestamp with time zone', FALSE)
+        ) AS required(column_name, expected_type, expected_not_null)
+        LEFT JOIN pg_attribute column_state
+          ON column_state.attrelid = to_regclass('public.feedback_reports')
+         AND column_state.attname = required.column_name
+         AND column_state.attnum > 0
+         AND NOT column_state.attisdropped
+        WHERE column_state.attname IS NULL
+           OR format_type(
+                column_state.atttypid,
+                column_state.atttypmod
+              ) <> required.expected_type
+           OR column_state.attnotnull IS DISTINCT FROM
+                required.expected_not_null
+    ) THEN
+        RAISE EXCEPTION 'feedback reports runtime column contract is missing or invalid';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                (
+                    'feedback_completion_consistent',
+                    'c',
+                    $definition$CHECK (status = 'sent'::text AND completed_at IS NOT NULL AND object_generation IS NOT NULL OR status <> 'sent'::text)$definition$
+                ),
+                (
+                    'feedback_cleanup_phase_valid',
+                    'c',
+                    $definition$CHECK (cleanup_phase IS NULL OR (cleanup_phase = ANY (ARRAY['delete_pending'::text, 'confirm_absent'::text])))$definition$
+                ),
+                (
+                    'feedback_time_order',
+                    'c',
+                    $definition$CHECK (upload_expires_at > created_at AND upload_expires_at <= retained_until AND retained_until > created_at AND (completed_at IS NULL OR completed_at >= created_at) AND (deleted_at IS NULL OR deleted_at >= created_at) AND (object_absence_confirmed_at IS NULL OR object_absence_confirmed_at >= created_at) AND (cleanup_after IS NULL OR cleanup_after >= created_at) AND (cleanup_claimed_at IS NULL OR cleanup_claimed_at >= created_at))$definition$
+                ),
+                (
+                    'feedback_cleanup_consistent',
+                    'c',
+                    $definition$CHECK ((status = ANY (ARRAY['reserved'::text, 'deleting'::text])) AND cleanup_after IS NOT NULL AND cleanup_phase IS NOT NULL AND cleanup_after >= upload_expires_at OR status = 'rejected'::text AND (cleanup_after IS NOT NULL AND cleanup_phase IS NOT NULL AND cleanup_after >= upload_expires_at OR cleanup_after IS NULL AND cleanup_phase IS NULL) OR (status = ANY (ARRAY['sent'::text, 'deleted'::text])) AND cleanup_after IS NULL AND cleanup_phase IS NULL)$definition$
+                ),
+                (
+                    'feedback_cleanup_claim_consistent',
+                    'c',
+                    $definition$CHECK (cleanup_claimed_at IS NULL OR cleanup_phase IS NOT NULL OR retained_until <= cleanup_claimed_at)$definition$
+                ),
+                (
+                    'feedback_absence_confirmation_consistent',
+                    'c',
+                    $definition$CHECK (object_absence_confirmed_at IS NULL OR cleanup_after IS NULL AND cleanup_phase IS NULL AND (cleanup_claimed_at IS NULL OR retained_until <= cleanup_claimed_at))$definition$
+                ),
+                (
+                    'feedback_reports_client_app_id_subject_hash_idempotency_has_key',
+                    'u',
+                    $definition$UNIQUE (client_app_id, subject_hash, idempotency_hash)$definition$
+                ),
+                (
+                    'feedback_reports_principal_idempotency_unique',
+                    'u',
+                    $definition$UNIQUE (client_app_id, principal_hash_version, principal_hash, idempotency_hash)$definition$
+                ),
+                (
+                    'feedback_reports_receipt_key',
+                    'u',
+                    $definition$UNIQUE (receipt)$definition$
+                ),
+                (
+                    'feedback_reports_object_key_key',
+                    'u',
+                    $definition$UNIQUE (object_key)$definition$
+                )
+        ) AS required(
+            constraint_name,
+            constraint_type,
+            expected_definition
+        )
+        LEFT JOIN pg_constraint constraint_row
+          ON constraint_row.conrelid = 'feedback_reports'::regclass
+         AND constraint_row.conname = required.constraint_name
+         AND constraint_row.contype =
+                required.constraint_type::"char"
+        WHERE constraint_row.oid IS NULL
+           OR NOT constraint_row.convalidated
+           OR btrim(
+                regexp_replace(
+                    pg_get_constraintdef(constraint_row.oid, true),
+                    '\s+',
+                    ' ',
+                    'g'
+                )
+              ) <> required.expected_definition
+    ) THEN
+        RAISE EXCEPTION 'feedback report runtime constraint is missing, unvalidated, or invalid';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                ('feedback_report_compatibility'),
+                ('feedback_report_retire_idempotency')
+        ) AS required(trigger_name)
+        LEFT JOIN pg_trigger trigger_row
+          ON trigger_row.tgrelid = 'feedback_reports'::regclass
+         AND trigger_row.tgname = required.trigger_name
+         AND NOT trigger_row.tgisinternal
+        WHERE trigger_row.oid IS NULL
+           OR trigger_row.tgenabled NOT IN ('O', 'A')
+    ) THEN
+        RAISE EXCEPTION 'feedback report runtime trigger is missing or disabled';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                ('feedback_reports_retention_idx'),
+                ('feedback_reports_status_idx'),
+                ('feedback_reports_subject_quota_idx'),
+                ('feedback_reports_cleanup_v2_idx'),
+                ('feedback_reports_principal_quota_idx'),
+                ('feedback_reports_app_quota_idx')
+        ) AS required(index_name)
+        LEFT JOIN pg_class index_row
+          ON index_row.relname = required.index_name
+         AND index_row.relnamespace = 'public'::regnamespace
+        LEFT JOIN pg_index index_state
+          ON index_state.indexrelid = index_row.oid
+         AND index_state.indrelid = 'feedback_reports'::regclass
+        LEFT JOIN pg_am access_method
+          ON access_method.oid = index_row.relam
+        WHERE index_state.indexrelid IS NULL
+           OR NOT index_state.indisvalid
+           OR NOT index_state.indisready
+           OR access_method.amname <> 'btree'
+    ) THEN
+        RAISE EXCEPTION 'feedback report runtime index is missing or invalid';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM noop_schema_migrations
+        WHERE version = '042_feedback_idempotency_tombstones.sql'
+    ) THEN
+        RAISE EXCEPTION 'required feedback tombstone migration is missing';
+    END IF;
+    IF to_regclass('public.feedback_idempotency_tombstones') IS NULL THEN
+        RAISE EXCEPTION 'feedback idempotency tombstone table is missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                ('reserved_at', 'timestamp with time zone'),
+                ('expires_at', 'timestamp with time zone')
+        ) AS required(column_name, expected_type)
+        LEFT JOIN pg_attribute column_state
+          ON column_state.attrelid =
+                'feedback_idempotency_tombstones'::regclass
+         AND column_state.attname = required.column_name
+         AND column_state.attnum > 0
+         AND NOT column_state.attisdropped
+        WHERE column_state.attname IS NULL
+           OR NOT column_state.attnotnull
+           OR format_type(
+                column_state.atttypid,
+                column_state.atttypmod
+              ) <> required.expected_type
+    ) THEN
+        RAISE EXCEPTION 'feedback tombstone lifecycle timestamp is missing, nullable, or not timestamptz';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                (
+                    'feedback_tombstone_client_app_id_bounded',
+                    $definition$CHECK (char_length(client_app_id) >= 8 AND char_length(client_app_id) <= 256)$definition$
+                ),
+                (
+                    'feedback_tombstone_principal_version_supported',
+                    $definition$CHECK (principal_hash_version = ANY (ARRAY[0, 1]))$definition$
+                ),
+                (
+                    'feedback_tombstone_principal_hash_format',
+                    $definition$CHECK (principal_hash ~ '^[0-9a-f]{64}$'::text)$definition$
+                ),
+                (
+                    'feedback_tombstone_idempotency_hash_format',
+                    $definition$CHECK (idempotency_hash ~ '^[0-9a-f]{64}$'::text)$definition$
+                ),
+                (
+                    'feedback_tombstone_time_order',
+                    $definition$CHECK (expires_at = (reserved_at + '45 days'::interval) AND expires_at > reserved_at)$definition$
+                )
+        ) AS required(constraint_name, expected_definition)
+        LEFT JOIN pg_constraint constraint_row
+          ON constraint_row.conrelid =
+                'feedback_idempotency_tombstones'::regclass
+         AND constraint_row.conname = required.constraint_name
+         AND constraint_row.contype = 'c'
+        WHERE constraint_row.oid IS NULL
+           OR NOT constraint_row.convalidated
+           OR btrim(
+                regexp_replace(
+                    pg_get_constraintdef(constraint_row.oid, true),
+                    '\s+',
+                    ' ',
+                    'g'
+                )
+              ) <> required.expected_definition
+    ) THEN
+        RAISE EXCEPTION 'feedback tombstone check constraint is missing, unvalidated, or invalid';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint constraint_row
+        WHERE constraint_row.conrelid =
+                'feedback_idempotency_tombstones'::regclass
+          AND constraint_row.conname =
+                'feedback_idempotency_tombstones_pkey'
+          AND constraint_row.contype = 'p'
+          AND constraint_row.convalidated
+          AND pg_get_constraintdef(constraint_row.oid) =
+                'PRIMARY KEY (client_app_id, principal_hash_version, principal_hash, idempotency_hash)'
+    ) THEN
+        RAISE EXCEPTION 'feedback tombstone primary key is missing or invalid';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_class index_row
+        JOIN pg_index index_state
+          ON index_state.indexrelid = index_row.oid
+        JOIN pg_am access_method
+          ON access_method.oid = index_row.relam
+        WHERE index_state.indrelid =
+                'feedback_idempotency_tombstones'::regclass
+          AND index_row.relname =
+                'feedback_idempotency_tombstones_expiry_idx'
+          AND access_method.amname = 'btree'
+          AND index_state.indisvalid
+          AND index_state.indisready
+          AND NOT index_state.indisunique
+          AND index_state.indpred IS NULL
+          AND index_state.indexprs IS NULL
+          AND index_state.indnkeyatts = 4
+          AND index_state.indnatts = 4
+          AND position(
+                '(expires_at, client_app_id, principal_hash, idempotency_hash)'
+                IN pg_get_indexdef(index_row.oid)
+              ) > 0
+    ) THEN
+        RAISE EXCEPTION 'feedback tombstone expiry index is missing or invalid';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                (
+                    'managed_documents'::regclass,
+                    'managed_document_kind'
+                ),
+                (
+                    'managed_safety_incidents'::regclass,
+                    'managed_safety_incident_trigger'
+                ),
+                (
+                    'managed_safety_page_quota_events'::regclass,
+                    'managed_safety_page_quota_trigger'
+                )
+        ) AS required(table_oid, constraint_name)
+        LEFT JOIN pg_constraint constraint_row
+          ON constraint_row.conrelid = required.table_oid
+         AND constraint_row.conname = required.constraint_name
+        WHERE constraint_row.oid IS NULL
+           OR NOT constraint_row.convalidated
+    ) THEN
+        RAISE EXCEPTION 'managed document or Safety constraint is missing or unvalidated';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_attribute
+        WHERE attrelid = 'managed_safety_page_quota_events'::regclass
+          AND attname = 'trigger'
+          AND NOT attnotnull
+          AND NOT attisdropped
+    ) THEN
+        RAISE EXCEPTION 'managed Safety quota writer compatibility is missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                (
+                    'managed_social_profiles'::regclass,
+                    'managed_social_profile_account_immutability'
+                ),
+                (
+                    'managed_safety_incidents'::regclass,
+                    'managed_safety_incident_quota_immutability'
+                ),
+                (
+                    'managed_safety_page_quota_events'::regclass,
+                    'managed_safety_page_quota_incident_consistency'
+                )
+        ) AS required(table_oid, trigger_name)
+        LEFT JOIN pg_trigger trigger_row
+          ON trigger_row.tgrelid = required.table_oid
+         AND trigger_row.tgname = required.trigger_name
+         AND NOT trigger_row.tgisinternal
+        WHERE trigger_row.oid IS NULL
+           OR trigger_row.tgenabled NOT IN ('O', 'A')
+    ) THEN
+        RAISE EXCEPTION 'managed Safety provenance trigger is missing or disabled';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'managed_documents'::regclass
+          AND conname IN (
+              'managed_document_content_contract',
+              'managed_document_content_contract_v2'
+          )
+    ) THEN
+        RAISE EXCEPTION 'managed document content contract activated before client readiness';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM managed_document_contract_v2_readiness
+        WHERE readiness_key = 'managed_document_content_v2'
+          AND legacy_plaintext_revisions >= 0
+          AND legacy_plaintext_heads >= 0
+          AND invalid_day_ownership_revisions >= 0
+          AND invalid_day_ownership_heads >= 0
+          AND encrypted_non_day_revisions >= 0
+          AND encrypted_non_day_heads >= 0
+    ) THEN
+        RAISE EXCEPTION 'managed document readiness inventory is missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM managed_document_heads head
+        LEFT JOIN managed_documents document
+          ON document.account_id = head.account_id
+         AND document.document_kind = head.document_kind
+         AND document.document_id = head.document_id
+         AND document.document_revision = head.current_revision
+        WHERE document.account_id IS NULL
+           OR document.content_sha256 IS DISTINCT FROM head.content_sha256
+           OR document.deleted_at IS DISTINCT FROM head.deleted_at
+    ) THEN
+        RAISE EXCEPTION 'managed document head does not match its current revision';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM managed_safety_page_quota_events quota
+        JOIN managed_safety_incidents incident
+          ON incident.incident_id = quota.incident_id
+        JOIN managed_social_profiles owner
+          ON owner.profile_id = incident.owner_profile_id
+        WHERE quota.owner_account_id IS DISTINCT FROM owner.account_id
+           OR quota.trigger IS DISTINCT FROM incident.trigger
+    ) THEN
+        RAISE EXCEPTION 'managed Safety quota provenance is inconsistent';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM managed_safety_locations location
+        JOIN managed_safety_incidents incident
+          ON incident.incident_id = location.incident_id
+        WHERE incident.status NOT IN ('open', 'acknowledged')
+    ) THEN
+        RAISE EXCEPTION 'terminal managed Safety incident retained precise location';
+    END IF;
     IF EXISTS (
         SELECT 1
         FROM installation_devices device

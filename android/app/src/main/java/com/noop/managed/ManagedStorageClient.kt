@@ -1,5 +1,6 @@
 package com.noop.managed
 
+import com.noop.safety.SafetyLocation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -13,6 +14,7 @@ import java.io.IOException
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -319,18 +321,27 @@ class ManagedStorageClient(
                 .build(),
         )
         val rows = response.requireArray("contacts")
+        val deliveryCapableCount = if (response.has("delivery_capable_count")) {
+            response.requiredNonnegativeInt("delivery_capable_count")
+        } else {
+            0
+        }
+        val contacts = buildList {
+            for (index in 0 until rows.length()) {
+                add(parseSafetyContact(rows.requireObject(index)))
+            }
+        }
         if (rows.length() > 25 ||
+            deliveryCapableCount > contacts.count { it.role == "contact" } ||
+            deliveryCapableCount > 5 ||
             response.requiredNonnegativeInt("minimum_required") != 2 ||
             response.requiredNonnegativeInt("maximum_allowed") != 5
         ) {
             throw ManagedStorageException.InvalidResponse()
         }
         ManagedSafetyContacts(
-            contacts = buildList {
-                for (index in 0 until rows.length()) {
-                    add(parseSafetyContact(rows.requireObject(index)))
-                }
-            },
+            contacts = contacts,
+            deliveryCapableCount = deliveryCapableCount,
             minimumRequired = 2,
             maximumAllowed = 5,
         )
@@ -351,19 +362,46 @@ class ManagedStorageClient(
     suspend fun createSafetyIncident(
         authorization: ManagedAuthorization,
         requestId: UUID,
+        trigger: String = "manual_sos",
         durationHours: Int,
         shareLocation: Boolean,
+        initialLocation: SafetyLocation? = null,
     ): ManagedSafetyIncidentCreation = withContext(Dispatchers.IO) {
-        if (durationHours !in setOf(8, 12)) {
+        if (trigger !in setOf("manual_sos", "band_sos") ||
+            durationHours !in setOf(8, 12) ||
+            (initialLocation != null && !shareLocation) ||
+            (initialLocation != null &&
+                (!initialLocation.isValid ||
+                    !initialLocation.hasUsableHorizontalAccuracy))
+        ) {
             throw IllegalArgumentException("Invalid managed Safety duration")
+        }
+        val body = JSONObject()
+            .put("request_id", requestId.toString())
+            .put("trigger", trigger)
+            .put("duration_hours", durationHours)
+            .put("share_location", shareLocation)
+        initialLocation?.let { location ->
+            body.put(
+                "initial_location",
+                JSONObject()
+                    .put("sequence", 1)
+                    .put("latitude", location.latitude)
+                    .put("longitude", location.longitude)
+                    .put(
+                        "horizontal_accuracy_m",
+                        location.horizontalAccuracyMeters,
+                    )
+                    .put(
+                        "captured_at",
+                        Instant.ofEpochSecond(location.capturedAtUnix).toString(),
+                    ),
+            )
         }
         val response = executeJson(
             apiRequest("v1/managed/safety/incidents", authorization)
                 .post(
-                    JSONObject()
-                        .put("request_id", requestId.toString())
-                        .put("duration_hours", durationHours)
-                        .put("share_location", shareLocation)
+                    body
                         .toString()
                         .toRequestBody(JSON),
                 )
@@ -373,10 +411,18 @@ class ManagedStorageClient(
         if (pushOutcome !in PUSH_OUTCOMES) {
             throw ManagedStorageException.InvalidResponse()
         }
-        ManagedSafetyIncidentCreation(
+        val creation = ManagedSafetyIncidentCreation(
             incident = parseSafetyIncident(response.requireObject("incident")),
             pushOutcome = pushOutcome,
         )
+        if (
+            initialLocation != null &&
+            creation.incident.location == null &&
+            !creation.incident.duplicate
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        creation
     }
 
     suspend fun safetyIncidents(
@@ -1177,7 +1223,8 @@ class ManagedStorageClient(
         require(afterSequence >= 0L && limit in 1..500)
         val response = executeJson(
             apiRequest(
-                "v1/managed/changes?after_sequence=$afterSequence&limit=$limit",
+                "v1/managed/changes?after_sequence=$afterSequence&limit=$limit" +
+                    "&document_kind=${ManagedDocumentKind.DAY_OWNERSHIP.wireValue}",
                 authorization,
             ).get().build(),
         )
@@ -1187,7 +1234,13 @@ class ManagedStorageClient(
             for (index in 0 until rows.length()) {
                 val row = rows.optJSONObject(index)
                     ?: throw ManagedStorageException.InvalidResponse()
-                add(parseChange(row))
+                val change = parseChange(row)
+                if (change.resourceKind == "document" &&
+                    change.document?.documentKind != ManagedDocumentKind.DAY_OWNERSHIP
+                ) {
+                    throw ManagedStorageException.InvalidResponse()
+                }
+                add(change)
             }
         }
         ManagedChangeFeed(
@@ -1203,6 +1256,7 @@ class ManagedStorageClient(
         authorization: ManagedAuthorization,
         requestId: UUID,
         dataClasses: List<String>,
+        includeDeletedDocuments: Boolean,
     ): ManagedRestoreJob = withContext(Dispatchers.IO) {
         val classes = dataClasses.distinct().sorted()
         if (classes.isEmpty() ||
@@ -1214,8 +1268,12 @@ class ManagedStorageClient(
         val body = JSONObject()
             .put("request_id", requestId.toString())
             .put("data_classes", JSONArray(classes))
-            .put("document_kinds", JSONArray())
+            .put(
+                "document_kinds",
+                JSONArray(listOf(ManagedDocumentKind.DAY_OWNERSHIP.wireValue)),
+            )
             .put("include_documents", true)
+            .put("include_deleted_documents", includeDeletedDocuments)
         parseRestore(
             executeJson(
                 apiRequest("v1/managed/restores", authorization)
@@ -1339,7 +1397,7 @@ class ManagedStorageClient(
             throw IllegalArgumentException("Invalid managed document revision")
         }
         val query = revision?.let { "?revision=$it" }.orEmpty()
-        parseDocument(
+        val document = parseDocument(
             executeJson(
                 apiRequest(
                     "v1/managed/documents/${kind.wireValue}/$id$query",
@@ -1348,6 +1406,13 @@ class ManagedStorageClient(
             ).optJSONObject("document")
                 ?: throw ManagedStorageException.InvalidResponse(),
         )
+        if (document.documentKind != kind ||
+            document.documentId != id ||
+            revision != null && document.revision != revision
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        document
     }
 
     override suspend fun documents(
@@ -1355,12 +1420,14 @@ class ManagedStorageClient(
         snapshotAt: String,
         after: ManagedDocumentCursor?,
         limit: Int,
+        includeDeleted: Boolean,
     ): ManagedDocumentPage = withContext(Dispatchers.IO) {
         if (runCatching { Instant.parse(snapshotAt) }.isFailure || limit !in 1..200) {
             throw IllegalArgumentException("Invalid managed document snapshot request")
         }
         val query = buildList {
-            add("include_deleted=false")
+            add("document_kind=${ManagedDocumentKind.DAY_OWNERSHIP.wireValue}")
+            add("include_deleted=$includeDeleted")
             add("snapshot_at=${queryValue(snapshotAt)}")
             add("limit=$limit")
             after?.let { cursor ->
@@ -1383,12 +1450,10 @@ class ManagedStorageClient(
                     rows.optJSONObject(index)
                         ?: throw ManagedStorageException.InvalidResponse(),
                 )
-                if (document.contentMode != "server_readable" ||
-                    document.clientKeyId != null ||
-                    document.payloadJson == null ||
-                    document.payloadCiphertextBase64 != null ||
-                    document.deletedAt != null
-                ) {
+                if (!includeDeleted && document.deletedAt != null) {
+                    throw ManagedStorageException.InvalidResponse()
+                }
+                if (document.documentKind != ManagedDocumentKind.DAY_OWNERSHIP) {
                     throw ManagedStorageException.InvalidResponse()
                 }
                 add(document)
@@ -1579,14 +1644,24 @@ class ManagedStorageClient(
                 updatedAt = it.optString("updated_at").requiredInstant(),
                 deletedAt = it.optionalText("deleted_at")?.requiredInstant(),
             ).also { parsed ->
+                val expectedContentMode =
+                    expectedDocumentContentMode(parsed.documentKind)
+                val deleted = parsed.deletedAt != null
+                val validClientKey = when {
+                    deleted -> parsed.clientKeyId == null
+                    expectedContentMode == "server_readable" ->
+                        parsed.clientKeyId == null
+                    else -> parsed.clientKeyId != null
+                }
                 if (parsed.revision <= 0L ||
-                    parsed.contentMode !in setOf("server_readable", "client_encrypted")
+                    parsed.contentMode != expectedContentMode ||
+                    !validClientKey
                 ) {
                     throw ManagedStorageException.InvalidResponse()
                 }
             }
         }
-        return ManagedChange(
+        val change = ManagedChange(
             sequence = row.requiredLong("sequence"),
             resourceKind = row.optString("resource_kind"),
             resourceId = uuidOrThrow(row.optString("resource_id")),
@@ -1598,6 +1673,33 @@ class ManagedStorageClient(
             chunk = chunk,
             document = document,
         )
+        if ((change.resourceKind == "document") != (document != null)) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        if (document != null) {
+            val deleted = document.deletedAt != null
+            val validDigest = if (deleted) {
+                change.contentSha256 == ManagedDigest.sha256(
+                    (
+                        "deleted:${document.documentKind.wireValue}:" +
+                            "${document.documentId.toString().lowercase()}:" +
+                            document.revision
+                        ).toByteArray(StandardCharsets.UTF_8),
+                )
+            } else {
+                change.contentSha256?.matches(SHA256) == true
+            }
+            if (change.resourceKind != "document" ||
+                change.resourceId != document.documentId ||
+                change.chunk != null ||
+                !validDigest ||
+                (!deleted && change.operation != "upsert") ||
+                (deleted && change.operation != "tombstone")
+            ) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+        }
+        return change
     }
 
     private fun parseDocument(value: JSONObject): ManagedDocument {
@@ -1621,29 +1723,61 @@ class ManagedStorageClient(
             deletedAt = deletedAt,
             duplicate = value.optBoolean("duplicate", false),
         )
-        val validPayload = if (deletedAt != null) {
-            document.clientKeyId == null &&
-                document.payloadJson == null &&
-                document.payloadCiphertextBase64 == null
-        } else if (document.contentMode == "server_readable") {
-            document.clientKeyId == null &&
-                document.payloadJson != null &&
-                document.payloadCiphertextBase64 == null
-        } else {
-            document.clientKeyId != null &&
-                document.payloadJson == null &&
-                document.payloadCiphertextBase64 != null
-        }
+        val expectedContentMode =
+            expectedDocumentContentMode(document.documentKind)
         if (document.revision <= 0L ||
             !document.originInstallationId.matches(INSTALLATION_ID) ||
-            document.contentMode !in setOf("server_readable", "client_encrypted") ||
+            document.contentMode != expectedContentMode ||
             !document.contentSha256.matches(SHA256) ||
-            !validPayload
+            !validDocumentPayload(document)
         ) {
             throw ManagedStorageException.InvalidResponse()
         }
         return document
     }
+
+    private fun validDocumentPayload(document: ManagedDocument): Boolean {
+        if (document.deletedAt != null) {
+            return document.clientKeyId == null &&
+                document.payloadJson == null &&
+                document.payloadCiphertextBase64 == null &&
+                document.contentSha256 == deletionDigest(document)
+        }
+        if (document.contentMode == "server_readable") {
+            val payload = document.payloadJson ?: return false
+            if (document.clientKeyId != null || document.payloadCiphertextBase64 != null) {
+                return false
+            }
+            val canonical = ManagedCanonicalJson.encode(payload)
+                .toByteArray(StandardCharsets.UTF_8)
+            return canonical.size <= MAX_DOCUMENT_BYTES &&
+                ManagedDigest.sha256(canonical) == document.contentSha256
+        }
+
+        val encoded = document.payloadCiphertextBase64 ?: return false
+        val ciphertext = runCatching { Base64.getDecoder().decode(encoded) }
+            .getOrNull() ?: return false
+        return document.clientKeyId != null &&
+            document.payloadJson == null &&
+            Base64.getEncoder().encodeToString(ciphertext) == encoded &&
+            ciphertext.size in MIN_ENCRYPTED_DOCUMENT_BYTES..MAX_ENCRYPTED_DOCUMENT_BYTES &&
+            ManagedDigest.sha256(ciphertext) == document.contentSha256
+    }
+
+    private fun deletionDigest(document: ManagedDocument): String =
+        ManagedDigest.sha256(
+            (
+                "deleted:${document.documentKind.wireValue}:" +
+                    "${document.documentId.toString().lowercase()}:${document.revision}"
+                ).toByteArray(StandardCharsets.UTF_8),
+        )
+
+    private fun expectedDocumentContentMode(kind: ManagedDocumentKind): String =
+        if (kind == ManagedDocumentKind.DAY_OWNERSHIP) {
+            "server_readable"
+        } else {
+            "client_encrypted"
+        }
 
     private fun parseRestore(
         value: JSONObject,
@@ -1943,7 +2077,7 @@ class ManagedStorageClient(
         }
         if (incident.role !in setOf("owner", "contact") ||
             incident.ownerDisplayName.length > 64 ||
-            incident.trigger != "manual_sos" ||
+            incident.trigger !in setOf("manual_sos", "band_sos") ||
             (!active && !terminal) ||
             incident.durationHours !in setOf(8, 12) ||
             !countIsValid ||
@@ -2406,6 +2540,9 @@ class ManagedStorageClient(
             setOf("scheduled", "not_authorized", "failed")
         private val HAPTIC_OUTCOMES =
             setOf("requested", "band_unavailable", "not_eligible", "failed")
+        private const val MAX_DOCUMENT_BYTES = 1_000_000
+        private const val MIN_ENCRYPTED_DOCUMENT_BYTES = 17
+        private const val MAX_ENCRYPTED_DOCUMENT_BYTES = 1_048_576
 
         internal fun defaultHttp(timeoutSeconds: Long): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(minOf(timeoutSeconds, 20), TimeUnit.SECONDS)

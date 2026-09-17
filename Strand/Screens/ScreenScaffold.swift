@@ -140,6 +140,10 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
     /// `liquidScaffoldSky()` is dark obsidian in Dark mode but a pearl relief in Light mode. Only a
     /// genuinely fixed-dark backdrop (for example Live's console field) should pass `true`.
     var topBackgroundUsesDarkHeader: Bool? = nil
+    /// Optional stable identifier for the scaffold's actual vertical ScrollView. UI verification that
+    /// injects gestures must target this surface rather than the application root, which can contain
+    /// horizontal charts and persistent controls that legitimately own their own gestures.
+    var scrollAccessibilityIdentifier: String? = nil
     /// Optional element pinned to the header's trailing edge (e.g. the strap-battery badge on Today).
     /// Defaults to `EmptyView` via the convenience init below, so other screens are unaffected.
     @ViewBuilder var trailing: () -> Trailing
@@ -151,6 +155,11 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
     // by `#if os(iOS)` — a runtime size-class check alone would also narrow the Mac detail pane.
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
+    /// The iPhone tab shell overlays persistent navigation outside this ScrollView. Its viewport-level
+    /// safe-area inset keeps rows readable while scrolling, while this matching content-tail reservation
+    /// lets the real final control settle fully above both floating controls on pushed destinations too.
+    /// Sheets and macOS retain the zero default.
+    @Environment(\.persistentBottomChromeInset) private var persistentBottomChromeInset
     #endif
 
     /// Bumped (via the environment) when the iOS tab shell wants THIS screen scrolled to the top — an
@@ -179,7 +188,7 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
                 // to the same edges (2026-07-02); macOS keeps the classic 28 in the #else branch.
                 .padding(.horizontal, NoopMetrics.screenHPadding)
                 .padding(.top, 24)
-                .padding(.bottom, NoopMetrics.space4)
+                .padding(.bottom, NoopMetrics.space4 + persistentBottomChromeInset)
                 // A vertical ScrollView accepts a child's ideal horizontal size. Several full-width cards
                 // can therefore claim the whole viewport BEFORE this 16pt padding is added, making the
                 // padded column viewport+32pt wide; SwiftUI centres that overflow and crops the page's
@@ -203,6 +212,11 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
             .modifier(LegacyScreenScrollOffsetProbe())
             #endif
         }
+        .modifier(
+            OptionalScrollAccessibilityIdentifier(
+                identifier: scrollAccessibilityIdentifier
+            )
+        )
         #if os(iOS)
         .modifier(DemoBottomScrollAnchor())
         .modifier(ScreenScrollPositionReporter { offset in
@@ -351,11 +365,26 @@ extension ScreenScaffold where Trailing == EmptyView {
     init(title: LocalizedStringKey?, subtitle: LocalizedStringKey? = nil,
          onRefresh: (() async -> Void)? = nil, lazy: Bool = false, topBackground: AnyView? = nil,
          topBackgroundUsesDarkHeader: Bool? = nil,
+         scrollAccessibilityIdentifier: String? = nil,
          @ViewBuilder content: @escaping () -> Content) {
         self.init(title: title, subtitle: subtitle, onRefresh: onRefresh, lazy: lazy,
                   topBackground: topBackground,
                   topBackgroundUsesDarkHeader: topBackgroundUsesDarkHeader,
+                  scrollAccessibilityIdentifier: scrollAccessibilityIdentifier,
                   trailing: { EmptyView() }, content: content)
+    }
+}
+
+private struct OptionalScrollAccessibilityIdentifier: ViewModifier {
+    let identifier: String?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let identifier {
+            content.accessibilityIdentifier(identifier)
+        } else {
+            content
+        }
     }
 }
 
@@ -722,7 +751,16 @@ private struct ScrollToTopSignalKey: EnvironmentKey {
     static let defaultValue: Int = 0
 }
 
+private struct PersistentBottomChromeInsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
 extension EnvironmentValues {
+    var persistentBottomChromeInset: CGFloat {
+        get { self[PersistentBottomChromeInsetKey.self] }
+        set { self[PersistentBottomChromeInsetKey.self] = max(0, newValue) }
+    }
+
     var scrollToTopSignal: Int {
         get { self[ScrollToTopSignalKey.self] }
         set { self[ScrollToTopSignalKey.self] = newValue }

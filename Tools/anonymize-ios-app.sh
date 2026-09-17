@@ -61,4 +61,9 @@ PY
 # Verify: no residual home-path bytes anywhere in the bundle.
 residual=$(grep -rac "$HOME" "$APP" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
 echo "residual home-path hits: ${residual:-0}"
-[ "${residual:-0}" -eq 0 ] && echo "✓ clean" || { echo "✗ residual paths remain" >&2; exit 1; }
+if [ "${residual:-0}" -eq 0 ]; then
+  echo "✓ clean"
+else
+  echo "✗ residual paths remain" >&2
+  exit 1
+fi

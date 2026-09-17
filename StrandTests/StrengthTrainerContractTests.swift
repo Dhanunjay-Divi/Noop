@@ -218,6 +218,12 @@ final class StrengthTrainerContractTests: XCTestCase {
         XCTAssertTrue(source.contains("@State private var didOfferProgramBuilder"))
         XCTAssertTrue(source.contains("if exerciseGuide == nil,"))
         XCTAssertTrue(source.contains("loaded.routines.isEmpty,"))
+        XCTAssertTrue(
+            source.contains(
+                "!ProcessInfo.processInfo.arguments.contains(\"--demo-strength-body-map-controls\")"
+            )
+        )
+        XCTAssertTrue(source.contains("Self.permitsAutomaticProgramBuilderPresentation,"))
         XCTAssertTrue(source.contains("let draft = StrengthSessionSnapshot(session: session, sets: sets)"))
         XCTAssertTrue(source.contains("muscleCoachSection(snapshot)"))
         XCTAssertTrue(source.contains("StrengthBodyMapView("))
