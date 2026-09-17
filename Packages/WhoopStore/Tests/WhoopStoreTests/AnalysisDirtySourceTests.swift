@@ -117,6 +117,34 @@ final class AnalysisDirtySourceTests: XCTestCase {
         ),
     ]
 
+    func testOwnershipDayRangeCoversTheCivilDayAcrossEverySupportedOffset() throws {
+        let day = "2026-06-15"
+        let utcDayStart = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "\(day)T00:00:00Z")
+        )
+        let start = Int64(utcDayStart.timeIntervalSince1970)
+        let maximumOffset =
+            AnalysisOwnershipInvalidation.maximumSupportedTimeZoneOffsetSeconds
+        let range = try XCTUnwrap(
+            AnalysisOwnershipInvalidation.dayRange(day)
+        )
+
+        XCTAssertEqual(range.lowerBound, start - maximumOffset)
+        XCTAssertEqual(range.upperBound, start + 86_400 + maximumOffset - 1)
+        for offset in stride(
+            from: -maximumOffset,
+            through: maximumOffset,
+            by: 30 * 60
+        ) {
+            let civilDayStart = start - offset
+            XCTAssertTrue(range.contains(civilDayStart), "offset \(offset)")
+            XCTAssertTrue(
+                range.contains(civilDayStart + 86_399),
+                "offset \(offset)"
+            )
+        }
+    }
+
     func testV57SeedsExistingScoreBearingSourcesButNotTransportOnlySources() async throws {
         let queue = try DatabaseQueue()
         let migrator = WhoopStore.makeMigrator()

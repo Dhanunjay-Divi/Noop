@@ -421,7 +421,7 @@ private fun BodyCompositionSection(
         profile.targetWeightAvailability(
             currentWeightKg = it.value,
             targetWeightKg = profile.targetWeightKg,
-            currentWeightConfirmed = true,
+            currentWeightConfirmed = profile.weightInputConfirmed,
         )
     } ?: BodyWeightTargetAvailability.MEASUREMENTS_UNCONFIRMED
     val latestDay = listOfNotNull(

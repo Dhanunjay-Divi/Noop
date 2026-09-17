@@ -240,9 +240,18 @@ final class DeviceRegistryStoreTests: XCTestCase {
     func testDayOwnerChangeInvalidatesOnlyOnceAndCarriesItsCalendarDay() throws {
         let dbq = try makeDB()
         let store = DeviceRegistryStore(dbQueue: dbq)
+        let day = "2026-06-15"
+        let utcDayStart = Int64(try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "\(day)T00:00:00Z")
+        ).timeIntervalSince1970)
+        let maximumOffset =
+            AnalysisOwnershipInvalidation.maximumSupportedTimeZoneOffsetSeconds
+        let expectedRange = (utcDayStart - maximumOffset)...(
+            utcDayStart + 86_400 + maximumOffset - 1
+        )
 
         try store.setDayOwner(
-            day: "2026-06-15",
+            day: day,
             deviceId: "my-whoop",
             locked: true
         )
@@ -256,11 +265,11 @@ final class DeviceRegistryStoreTests: XCTestCase {
         let earliest: Int64? = first?["earliestAffectedTs"]
         let latest: Int64? = first?["latestAffectedTs"]
         XCTAssertEqual(first?["generation"] as Int64?, 1)
-        XCTAssertNotNil(earliest)
-        XCTAssertEqual(earliest, latest)
+        XCTAssertEqual(earliest, expectedRange.lowerBound)
+        XCTAssertEqual(latest, expectedRange.upperBound)
 
         try store.setDayOwner(
-            day: "2026-06-15",
+            day: day,
             deviceId: "my-whoop",
             locked: true
         )
@@ -274,7 +283,7 @@ final class DeviceRegistryStoreTests: XCTestCase {
         XCTAssertEqual(repeated, 1)
 
         try store.setDayOwner(
-            day: "2026-06-15",
+            day: day,
             deviceId: "my-whoop",
             locked: false
         )

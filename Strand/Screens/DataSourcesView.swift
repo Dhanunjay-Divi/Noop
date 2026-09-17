@@ -982,6 +982,31 @@ struct DataSourcesView: View {
     }
 }
 
+enum WeightScaleDataSourcePresentation {
+    static func displayedBMI(
+        measurement: WeightScaleMeasurement,
+        mayUpdateProfile: Bool,
+        age: Int,
+        heightCm: Double,
+        ageConfirmed: Bool,
+        heightConfirmed: Bool
+    ) -> Double? {
+        guard mayUpdateProfile,
+              let bmi = measurement.bmi,
+              BodyProfilePolicy.canPresentAdultBMI(
+                  age: age,
+                  currentWeightKg: measurement.weightKg,
+                  heightCm: heightCm,
+                  ageConfirmed: ageConfirmed,
+                  heightConfirmed: heightConfirmed,
+                  currentWeightConfirmed: true
+              ) else {
+            return nil
+        }
+        return bmi
+    }
+}
+
 /// Explicit pairing surface for standards-compliant Bluetooth weight scales. This is intentionally a
 /// Data Source rather than an "active wearable": it contributes timestamped body measurements and can
 /// never take over the live HR/WHOOP source coordinator.
@@ -1098,15 +1123,14 @@ private struct WeightScaleDataSourceCard: View {
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
                         }
-                        if let bmi = capture.measurement.bmi,
-                           BodyProfilePolicy.canPresentAdultBMI(
-                               age: profile.age,
-                               currentWeightKg: capture.measurement.weightKg,
-                               heightCm: profile.heightCm,
-                               ageConfirmed: profile.ageInputConfirmed,
-                               heightConfirmed: profile.heightInputConfirmed,
-                               currentWeightConfirmed: true
-                           ) {
+                        if let bmi = WeightScaleDataSourcePresentation.displayedBMI(
+                            measurement: capture.measurement,
+                            mayUpdateProfile: source.mayUpdateProfile(for: capture.measurement),
+                            age: profile.age,
+                            heightCm: profile.heightCm,
+                            ageConfirmed: profile.ageInputConfirmed,
+                            heightConfirmed: profile.heightInputConfirmed
+                        ) {
                             Text(String(format: "BMI %.1f", bmi))
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textSecondary)

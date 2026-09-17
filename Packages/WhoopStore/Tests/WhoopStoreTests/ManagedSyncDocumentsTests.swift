@@ -2597,8 +2597,13 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         let store = try await managedStore()
         let documentID = "77777777-8888-5999-8aaa-bbbbbbbbbbbb"
         let day = "2026-09-11"
-        let expectedRange = try XCTUnwrap(
-            AnalysisOwnershipInvalidation.dayRange(day)
+        let utcDayStart = Int64(try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "\(day)T00:00:00Z")
+        ).timeIntervalSince1970)
+        let maximumOffset =
+            AnalysisOwnershipInvalidation.maximumSupportedTimeZoneOffsetSeconds
+        let expectedRange = (utcDayStart - maximumOffset)...(
+            utcDayStart + 86_400 + maximumOffset - 1
         )
         let originalPayload = dayOwnershipPayload(day: day, locked: "0")
 

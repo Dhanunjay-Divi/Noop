@@ -23,6 +23,21 @@ class UiAuditPresentationContractTest {
         )
     }
 
+    @Test
+    fun healthBodyCompositionRequiresConfirmedWeightBeforeTargetGuidance() {
+        val health = source("src/main/java/com/noop/ui/HealthScreen.kt")
+        val targetGate = health
+            .substringAfter("val targetAvailability")
+            .substringBefore("val latestDay")
+
+        assertTrue(
+            targetGate.contains(
+                "currentWeightConfirmed = profile.weightInputConfirmed",
+            ),
+        )
+        assertFalse(targetGate.contains("currentWeightConfirmed = true"))
+    }
+
     private fun root(): File = File(System.getProperty("user.dir") ?: ".")
 
     private fun source(relativePath: String): String {

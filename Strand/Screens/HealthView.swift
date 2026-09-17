@@ -2356,7 +2356,7 @@ private struct BodyCompositionSection: View {
             profile.targetWeightAvailability(
                 currentWeightKg: $0.value,
                 targetWeightKg: profile.targetWeightKg,
-                currentWeightConfirmed: true
+                currentWeightConfirmed: profile.weightInputConfirmed
             )
         } ?? .measurementsUnconfirmed
         HStack(spacing: 12) {

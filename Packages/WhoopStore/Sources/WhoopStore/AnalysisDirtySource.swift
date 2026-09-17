@@ -11,6 +11,9 @@ public enum AnalysisInputSource {
 }
 
 enum AnalysisOwnershipInvalidation {
+    static let maximumSupportedTimeZoneOffsetSeconds: Int64 = 18 * 3_600
+    private static let secondsPerDay: Int64 = 86_400
+
     static func mark(
         _ db: Database,
         affectedRange explicitRange: ClosedRange<Int64>? = nil
@@ -65,14 +68,14 @@ enum AnalysisOwnershipInvalidation {
             return nil
         }
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .autoupdatingCurrent
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let components = DateComponents(
             calendar: calendar,
             timeZone: calendar.timeZone,
             year: year,
             month: month,
             day: dayOfMonth,
-            hour: 12
+            hour: 0
         )
         guard let date = calendar.date(from: components),
               calendar.component(.year, from: date) == year,
@@ -80,8 +83,14 @@ enum AnalysisOwnershipInvalidation {
               calendar.component(.day, from: date) == dayOfMonth else {
             return nil
         }
-        let timestamp = Int64(date.timeIntervalSince1970.rounded(.down))
-        return timestamp...timestamp
+        let utcDayStart = Int64(date.timeIntervalSince1970.rounded(.down))
+        let earliest = utcDayStart - maximumSupportedTimeZoneOffsetSeconds
+        let latest = utcDayStart
+            + secondsPerDay
+            + maximumSupportedTimeZoneOffsetSeconds
+            - 1
+        guard earliest >= 0, latest >= earliest else { return nil }
+        return earliest...latest
     }
 
     private static func inputRange(_ db: Database) -> ClosedRange<Int64>? {

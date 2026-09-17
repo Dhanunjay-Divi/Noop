@@ -563,11 +563,11 @@ enum AnalysisTimeZoneHistory {
 
         if let last = payload.observations.last {
             if observation.observedAtSec < last.observedAtSec {
-                return AnalysisTimeZoneTimeline(
-                    observations: payload.observations,
-                    unresolvableBeforeTs:
-                        payload.unresolvableBeforeTs
-                )
+                // A wall-clock rollback leaves no trustworthy ordering between
+                // the durable tail and this observation. Fail closed instead
+                // of extending the previous zone's provenance past its last
+                // observation; Android rejects the same transition.
+                return nil
             }
             if observation.observedAtSec == last.observedAtSec {
                 if observation.timeZoneIdentifier

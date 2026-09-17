@@ -946,6 +946,23 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         )
     }
 
+    func testImportedBodyCompositionTargetUsesConfirmedWeight() throws {
+        let health = try text("Strand/Screens/HealthView.swift")
+        let targetStart = try XCTUnwrap(
+            health.range(of: "@ViewBuilder private var targetRow: some View")
+        )
+        let targetTail = health[targetStart.lowerBound...]
+        let targetEnd = try XCTUnwrap(
+            targetTail.range(of: "\n    private var bmiUnavailableText")
+        )
+        let targetRow = String(targetTail[..<targetEnd.lowerBound])
+
+        XCTAssertTrue(targetRow.contains(
+            "currentWeightConfirmed: profile.weightInputConfirmed"
+        ))
+        XCTAssertFalse(targetRow.contains("currentWeightConfirmed: true"))
+    }
+
     func testFitnessCalendarAndReferenceDestinationsStayDiscoverable() throws {
         let fitness = try text("Strand/Screens/WorkoutsView.swift")
         let calendar = try text("Strand/Screens/CalendarMonthView.swift")

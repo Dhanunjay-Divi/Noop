@@ -7,12 +7,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.noop.data.AnalysisInvalidationSource
 import com.noop.data.BackupSettingsBridge
 import com.noop.data.BackupSettingsCodec
+import com.noop.data.OwnershipDayInvalidationRange
 import com.noop.data.WhoopDatabase
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
 import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -993,12 +992,8 @@ class RoomManagedDocumentAdapter(
         db: SupportSQLiteDatabase,
         day: String,
     ) {
-        val timestamp = runCatching {
-            LocalDate.parse(day)
-                .atTime(LocalTime.NOON)
-                .atZone(ZoneId.systemDefault())
-                .toEpochSecond()
-        }.getOrElse { throw ManagedStorageException.InvalidResponse() }
+        val range = OwnershipDayInvalidationRange.fromCivilDay(day)
+            ?: throw ManagedStorageException.InvalidResponse()
         db.execSQL(
             """
                 INSERT INTO analysisDirtySource (
@@ -1026,8 +1021,8 @@ class RoomManagedDocumentAdapter(
             """.trimIndent(),
             arrayOf<Any?>(
                 AnalysisInvalidationSource.OWNERSHIP,
-                timestamp,
-                timestamp,
+                range.first,
+                range.last,
             ),
         )
     }

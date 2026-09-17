@@ -871,6 +871,78 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         )
     }
 
+    func testTimeZoneHistoryRejectsClockRollbackAcrossZones() throws {
+        let persistence = TimeZoneMemoryPersistence()
+        let newYork = try XCTUnwrap(
+            TimeZone(identifier: "America/New_York")
+        )
+        let losAngeles = try XCTUnwrap(
+            TimeZone(identifier: "America/Los_Angeles")
+        )
+        let first = 1_800_000_000
+        let durableTail = first + 3_600
+        let beforeRollback = try XCTUnwrap(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: first,
+                timeZone: newYork,
+                persistence: persistence
+            )
+        )
+        let durable = try XCTUnwrap(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: durableTail,
+                timeZone: newYork,
+                persistence: persistence
+            )
+        )
+        let storedData = try XCTUnwrap(persistence.data)
+        let writeCount = persistence.writeCount
+
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: first + 1_800,
+                timeZone: losAngeles,
+                persistence: persistence
+            )
+        )
+        XCTAssertNotEqual(beforeRollback, durable)
+        XCTAssertEqual(persistence.writeCount, writeCount)
+        XCTAssertEqual(persistence.data, storedData)
+        XCTAssertEqual(
+            AnalysisTimeZoneHistory.load(persistence: persistence),
+            durable
+        )
+    }
+
+    func testTimeZoneHistoryRejectsClockRollbackWithinSameZone() throws {
+        let persistence = TimeZoneMemoryPersistence()
+        let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let first = 1_800_000_000
+        let durable = try XCTUnwrap(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: first + 60,
+                timeZone: utc,
+                persistence: persistence
+            )
+        )
+        let storedData = try XCTUnwrap(persistence.data)
+        let writeCount = persistence.writeCount
+
+        XCTAssertNil(
+            AnalysisTimeZoneHistory.observe(
+                nowSec: first,
+                timeZone: utc,
+                persistence: persistence
+            )
+        )
+        XCTAssertEqual(persistence.writeCount, writeCount)
+        XCTAssertEqual(persistence.data, storedData)
+        XCTAssertEqual(
+            AnalysisTimeZoneHistory.load(persistence: persistence),
+            durable
+        )
+    }
+
     func testTimeZoneHistoryRetentionMakesDiscardedHistoryUnresolvable() throws {
         let persistence = TimeZoneMemoryPersistence()
         let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))

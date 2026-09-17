@@ -2,8 +2,25 @@ package com.noop.data
 
 import androidx.room.withTransaction
 import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
+import java.time.ZoneOffset
+
+internal object OwnershipDayInvalidationRange {
+    const val MAXIMUM_SUPPORTED_TIME_ZONE_OFFSET_SECONDS = 18 * 3_600L
+    private const val SECONDS_PER_DAY = 86_400L
+
+    fun fromCivilDay(day: String): LongRange? {
+        val parsed = runCatching { LocalDate.parse(day) }.getOrNull()
+            ?.takeIf { it.toString() == day }
+            ?: return null
+        val utcDayStart = parsed.atStartOfDay(ZoneOffset.UTC).toEpochSecond()
+        val earliest = utcDayStart - MAXIMUM_SUPPORTED_TIME_ZONE_OFFSET_SECONDS
+        val latest = utcDayStart +
+            SECONDS_PER_DAY +
+            MAXIMUM_SUPPORTED_TIME_ZONE_OFFSET_SECONDS -
+            1L
+        return if (earliest >= 0L && latest >= earliest) earliest..latest else null
+    }
+}
 
 /**
  * Device-registry façade over [WhoopDao] + [WhoopDatabase] — the Android port of the Swift
@@ -61,13 +78,7 @@ class DeviceRegistry(
     }
 
     private fun ownershipDayRange(day: String): LongRange? {
-        val timestamp = runCatching {
-            LocalDate.parse(day)
-                .atTime(LocalTime.NOON)
-                .atZone(ZoneId.systemDefault())
-                .toEpochSecond()
-        }.getOrNull() ?: return null
-        return timestamp..timestamp
+        return OwnershipDayInvalidationRange.fromCivilDay(day)
     }
 
     /** All paired devices, oldest first. */

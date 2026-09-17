@@ -5,11 +5,11 @@ import androidx.room.Room
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.noop.data.OwnershipDayInvalidationRange
 import com.noop.data.WhoopDatabase
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -323,10 +323,13 @@ class RoomManagedDocumentAdapterInstrumentedTest {
     @Test
     fun remoteDayOwnershipInvalidatesExactDayOnlyWhenValueChanges() = runBlocking {
         val day = "2026-09-08"
-        val expectedTimestamp = LocalDate.parse(day)
-            .atTime(LocalTime.NOON)
-            .atZone(ZoneId.systemDefault())
+        val utcDayStart = LocalDate.parse(day)
+            .atStartOfDay(ZoneOffset.UTC)
             .toEpochSecond()
+        val maximumOffset =
+            OwnershipDayInvalidationRange.MAXIMUM_SUPPORTED_TIME_ZONE_OFFSET_SECONDS
+        val earliest = utcDayStart - maximumOffset
+        val latest = utcDayStart + 86_400L + maximumOffset - 1L
         val initial = dayOwnershipUpsert(
             keyDay = day,
             deviceId = "band-a",
@@ -335,7 +338,7 @@ class RoomManagedDocumentAdapterInstrumentedTest {
 
         adapter.apply(initial, initial.asChange())
         assertEquals(
-            Triple(1L, expectedTimestamp, expectedTimestamp),
+            Triple(1L, earliest, latest),
             ownershipInvalidation(),
         )
 
@@ -345,7 +348,7 @@ class RoomManagedDocumentAdapterInstrumentedTest {
         )
         adapter.apply(replay, replay.asChange())
         assertEquals(
-            Triple(1L, expectedTimestamp, expectedTimestamp),
+            Triple(1L, earliest, latest),
             ownershipInvalidation(),
         )
 
@@ -357,21 +360,21 @@ class RoomManagedDocumentAdapterInstrumentedTest {
         )
         adapter.apply(changed, changed.asChange())
         assertEquals(
-            Triple(2L, expectedTimestamp, expectedTimestamp),
+            Triple(2L, earliest, latest),
             ownershipInvalidation(),
         )
 
         val removed = tombstone(initial, revision = 4)
         adapter.apply(removed, removed.asChange())
         assertEquals(
-            Triple(3L, expectedTimestamp, expectedTimestamp),
+            Triple(3L, earliest, latest),
             ownershipInvalidation(),
         )
 
         val replayedRemoval = tombstone(initial, revision = 5)
         adapter.apply(replayedRemoval, replayedRemoval.asChange())
         assertEquals(
-            Triple(3L, expectedTimestamp, expectedTimestamp),
+            Triple(3L, earliest, latest),
             ownershipInvalidation(),
         )
     }

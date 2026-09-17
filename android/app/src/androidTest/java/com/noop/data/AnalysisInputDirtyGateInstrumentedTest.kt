@@ -16,8 +16,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
+import java.time.ZoneOffset
 
 @RunWith(AndroidJUnit4::class)
 class AnalysisInputDirtyGateInstrumentedTest {
@@ -185,14 +184,18 @@ class AnalysisInputDirtyGateInstrumentedTest {
                 val row = firstDatabase.whoopDao().analysisDirtySource(
                     AnalysisInvalidationSource.OWNERSHIP,
                 )
-                val expectedDayTs = LocalDate.parse("2026-09-10")
-                    .atTime(LocalTime.NOON)
-                    .atZone(ZoneId.systemDefault())
+                val utcDayStart = LocalDate.parse("2026-09-10")
+                    .atStartOfDay(ZoneOffset.UTC)
                     .toEpochSecond()
+                val maximumOffset =
+                    OwnershipDayInvalidationRange.MAXIMUM_SUPPORTED_TIME_ZONE_OFFSET_SECONDS
                 assertEquals(1L, row?.generation)
                 assertEquals(0L, row?.acknowledgedGeneration)
-                assertEquals(expectedDayTs, row?.earliestAffectedTs)
-                assertEquals(expectedDayTs, row?.latestAffectedTs)
+                assertEquals(utcDayStart - maximumOffset, row?.earliestAffectedTs)
+                assertEquals(
+                    utcDayStart + 86_400L + maximumOffset - 1L,
+                    row?.latestAffectedTs,
+                )
             } finally {
                 firstDatabase.close()
             }

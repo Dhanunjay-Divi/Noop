@@ -6,8 +6,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
+import java.time.ZoneOffset
 
 /**
  * [DeviceRegistry] contract tests — mirror the Swift DeviceRegistryStoreTests in
@@ -440,12 +439,16 @@ class DeviceRegistryTest {
         assertEquals("my-whoop", reg.dayOwner("2026-06-15")!!.deviceId)
         assertEquals(true, reg.dayOwner("2026-06-15")!!.locked)
         assertEquals(1L, dao.analysisGenerations[AnalysisInvalidationSource.OWNERSHIP])
-        val expectedDayTs = LocalDate.parse("2026-06-15")
-            .atTime(LocalTime.NOON)
-            .atZone(ZoneId.systemDefault())
+        val utcDayStart = LocalDate.parse("2026-06-15")
+            .atStartOfDay(ZoneOffset.UTC)
             .toEpochSecond()
+        val maximumOffset =
+            OwnershipDayInvalidationRange.MAXIMUM_SUPPORTED_TIME_ZONE_OFFSET_SECONDS
+        val expectedRange = (utcDayStart - maximumOffset) to (
+            utcDayStart + 86_400L + maximumOffset - 1L
+        )
         assertEquals(
-            expectedDayTs to expectedDayTs,
+            expectedRange,
             dao.analysisBounds[AnalysisInvalidationSource.OWNERSHIP],
         )
 
@@ -462,7 +465,7 @@ class DeviceRegistryTest {
         assertEquals(false, reg.dayOwner("2026-06-15")!!.locked)
         assertEquals(2L, dao.analysisGenerations[AnalysisInvalidationSource.OWNERSHIP])
         assertEquals(
-            expectedDayTs to expectedDayTs,
+            expectedRange,
             dao.analysisBounds[AnalysisInvalidationSource.OWNERSHIP],
         )
     }
