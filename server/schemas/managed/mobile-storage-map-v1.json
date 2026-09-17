@@ -175,6 +175,11 @@
       "platforms": ["android", "ios"],
       "target": "hydration"
     },
+    "hydrationLegacyResolution": {
+      "classification": "local_operational",
+      "platforms": ["ios"],
+      "target": null
+    },
     "metricSeries": {
       "classification": "chunk_stream",
       "platforms": ["android", "ios"],

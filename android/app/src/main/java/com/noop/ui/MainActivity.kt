@@ -29,7 +29,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.noop.BuildConfig
 import com.noop.NoopApplication
@@ -135,8 +137,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             }
         }
         lifecycleScope.launch {
-            AppDiagnosticReportRequestBridge.requests.collect {
-                appReport.requestManually()
+            lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                AppDiagnosticReportRequestBridge.requests.collect {
+                    appReport.requestManually()
+                }
             }
         }
         requestDemoReportIfNeeded()

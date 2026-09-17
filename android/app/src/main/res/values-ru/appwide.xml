@@ -410,6 +410,16 @@
     <string name="appwide_hydration_edit_entry_accessibility_format">Изменить запись о воде: %1$s</string>
     <string name="appwide_hydration_goal_progress_format">%1$d %% от цели на %2$s</string>
     <string name="appwide_hydration_history_through_format">7 дней по %1$s</string>
+    <string name="appwide_hydration_legacy_conflict_detail">Если сохранить суточный итог, список напитков будет заменён одной более ранней суточной суммой. Если использовать список напитков, итог дня изменится до указанного количества. До выбора ничего не изменится.</string>
+    <string name="appwide_hydration_legacy_conflict_title">Выберите сохранённый итог воды за этот день</string>
+    <string name="appwide_hydration_legacy_keep_total">Сохранить записанный итог</string>
+    <string name="appwide_hydration_legacy_keep_total_a11y_format">Сохранить записанный суточный итог, %1$s</string>
+    <string name="appwide_hydration_legacy_keep_total_hint">Заменяет список напитков одной более ранней суточной суммой.</string>
+    <string name="appwide_hydration_legacy_listed_total">Итог списка напитков</string>
+    <string name="appwide_hydration_legacy_saved_total">Сохранённый суточный итог</string>
+    <string name="appwide_hydration_legacy_use_list">Использовать список напитков</string>
+    <string name="appwide_hydration_legacy_use_list_a11y_format">Использовать итог списка напитков, %1$s</string>
+    <string name="appwide_hydration_legacy_use_list_hint">Изменяет итог дня до суммы напитков в списке.</string>
     <string name="appwide_hydration_load_failed">Не удалось загрузить данные о воде. Повторите попытку.</string>
     <string name="appwide_hydration_logged_day">Записано: %1$s</string>
     <string name="appwide_hydration_logged_on_format">Записано: %1$s</string>

@@ -73,8 +73,9 @@ final class MigrationTests: XCTestCase {
             let cols = try await store.columnNamesForTest(table: table)
             XCTAssertTrue(cols.contains("synced"), "\(table) missing synced column")
         }
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 62)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 63)
         let tableNames = try await store.tableNames()
+        XCTAssertTrue(tableNames.contains("hydrationLegacyResolution"))
         XCTAssertTrue(tableNames.contains("healthKitSyncState"))
         XCTAssertTrue(tableNames.contains("nutritionEntry"))
         XCTAssertTrue(tableNames.contains("strengthExercise"))
@@ -215,6 +216,159 @@ final class MigrationTests: XCTestCase {
                     """
             )
             XCTAssertNil(method)
+        }
+    }
+
+    func testV63UpgradePreservesV62HydrationAndManagedDocumentState() async throws {
+        let path =
+            NSTemporaryDirectory()
+            + "whoopstore-v63-\(UUID().uuidString).sqlite"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let entryID = "11111111-2222-4333-8444-555555555555"
+        let localKey = "hydration-entry-local-key"
+        let accountScope = String(repeating: "a", count: 64)
+        let remoteDigest = String(repeating: "b", count: 64)
+
+        do {
+            let queue = try DatabaseQueue(path: path)
+            let migrator = WhoopStore.makeMigrator()
+            try migrator.migrate(
+                queue,
+                upTo: "v62-managed-document-deletion-state"
+            )
+            try await queue.write { db in
+                try db.execute(
+                    sql: """
+                        INSERT INTO metricSeries (deviceId, day, key, value)
+                        VALUES ('hydration', '2026-09-15', 'hydration', 650)
+                        """
+                )
+                try db.execute(
+                    sql: """
+                        INSERT INTO hydrationEntry
+                            (id, deviceId, day, amountML, loggedAt)
+                        VALUES (?, 'hydration', '2026-09-15', 650, 1)
+                        """,
+                    arguments: [entryID]
+                )
+                try db.execute(
+                    sql: """
+                        INSERT INTO managedDocumentState (
+                            accountScopeHash, tableName, localKey,
+                            documentKind, documentId, keyJSON,
+                            acknowledgedGeneration, remoteRevision,
+                            remoteContentSHA256, updatedAtMs, isDeleted
+                        ) VALUES (
+                            ?, 'hydrationEntry', ?, 'hydration', ?,
+                            ?, 3, 7, ?, 11, 0
+                        )
+                        """,
+                    arguments: [
+                        accountScope,
+                        localKey,
+                        "99999999-8888-5777-8666-555555555555",
+                        #"{"id":"11111111-2222-4333-8444-555555555555"}"#,
+                        remoteDigest,
+                    ]
+                )
+            }
+        }
+
+        do {
+            let queue = try DatabaseQueue(path: path)
+            let migrator = WhoopStore.makeMigrator()
+            try migrator.migrate(queue)
+            try migrator.migrate(queue)
+            try await queue.read { db in
+                XCTAssertEqual(
+                    try Int.fetchOne(
+                        db,
+                        sql: """
+                            SELECT amountML FROM hydrationEntry
+                            WHERE id = ?
+                            """,
+                        arguments: [entryID]
+                    ),
+                    650
+                )
+                XCTAssertEqual(
+                    try Double.fetchOne(
+                        db,
+                        sql: """
+                            SELECT value FROM metricSeries
+                            WHERE deviceId = 'hydration'
+                              AND day = '2026-09-15'
+                              AND key = 'hydration'
+                            """
+                    ),
+                    650
+                )
+                let state = try XCTUnwrap(
+                    Row.fetchOne(
+                        db,
+                        sql: """
+                            SELECT acknowledgedGeneration, remoteRevision,
+                                   remoteContentSHA256, isDeleted
+                            FROM managedDocumentState
+                            WHERE accountScopeHash = ?
+                              AND tableName = 'hydrationEntry'
+                              AND localKey = ?
+                            """,
+                        arguments: [accountScope, localKey]
+                    )
+                )
+                XCTAssertEqual(state["acknowledgedGeneration"] as Int?, 3)
+                XCTAssertEqual(state["remoteRevision"] as Int?, 7)
+                XCTAssertEqual(
+                    state["remoteContentSHA256"] as String?,
+                    remoteDigest
+                )
+                XCTAssertEqual(state["isDeleted"] as Bool?, false)
+                XCTAssertEqual(
+                    try Int.fetchOne(
+                        db,
+                        sql: "SELECT COUNT(*) FROM hydrationLegacyResolution"
+                    ),
+                    0
+                )
+            }
+            try await queue.write { db in
+                try db.execute(
+                    sql: """
+                        INSERT INTO hydrationLegacyResolution (
+                            scope, day, legacyDigest, replacementDigest,
+                            expectedScalarML
+                        ) VALUES (?, '2026-09-15', ?, ?, 650)
+                        """,
+                    arguments: [
+                        accountScope,
+                        String(repeating: "c", count: 64),
+                        String(repeating: "d", count: 64),
+                    ]
+                )
+            }
+        }
+
+        let reopened = try DatabaseQueue(path: path)
+        try WhoopStore.makeMigrator().migrate(reopened)
+        try await reopened.read { db in
+            XCTAssertEqual(
+                try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM hydrationLegacyResolution"
+                ),
+                1
+            )
+            XCTAssertEqual(
+                try Int.fetchOne(
+                    db,
+                    sql: """
+                        SELECT amountML FROM hydrationEntry WHERE id = ?
+                        """,
+                    arguments: [entryID]
+                ),
+                650
+            )
         }
     }
 

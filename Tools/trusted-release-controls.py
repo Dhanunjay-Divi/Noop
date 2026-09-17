@@ -53,6 +53,7 @@ PROTECTED_PATHS = {
     "Tools/release-version-gate.py",
     "Tools/release.sh",
     "Tools/required-ci-gate.py",
+    "Tools/run-bounded-command.py",
     "Tools/terminology-audit.py",
     "Tools/trusted-release-controls.py",
     "Tools/update-homebrew-cask.sh",

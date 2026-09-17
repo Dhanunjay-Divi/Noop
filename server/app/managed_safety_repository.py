@@ -54,6 +54,8 @@ SAFETY_PUSH_RECEIPT_MARGIN_SECONDS = 30
 SAFETY_PUSH_RETRY_DELAY_SECONDS = 60
 SAFETY_MAX_INCIDENTS_PER_HOUR = 4
 SAFETY_MAX_INCIDENTS_PER_DAY = 12
+SAFETY_LOCATION_MAXIMUM_AGE = timedelta(minutes=5)
+SAFETY_LOCATION_MAXIMUM_FUTURE_SKEW = timedelta(minutes=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1616,6 +1618,11 @@ class PostgresManagedSafetyRepository:
                         raise ManagedConflictError(
                             "Safety incident request id was reused"
                         )
+                    # An ambiguous transport failure can outlive the phone's
+                    # initial fix. A replay returns the accepted incident
+                    # without mutating its location, so a newer retry fix is
+                    # safe to ignore and never needs a long-lived commitment in
+                    # the account quota ledger.
                     if replay["incident_owner_profile_id"] != owner["profile_id"]:
                         raise ManagedConflictError(
                             "Safety incident request id was already consumed"
@@ -1793,6 +1800,15 @@ class PostgresManagedSafetyRepository:
                     )
                 incident_id = uuid4()
                 expires_at = now + timedelta(hours=request.duration_hours)
+                if request.initial_location is not None and (
+                    request.initial_location.captured_at
+                    < now - SAFETY_LOCATION_MAXIMUM_AGE
+                    or request.initial_location.captured_at
+                    > now + SAFETY_LOCATION_MAXIMUM_FUTURE_SKEW
+                ):
+                    raise ManagedConflictError(
+                        "Safety location timestamp is outside the freshness window"
+                    )
                 await connection.execute(
                     """
                     INSERT INTO managed_safety_incidents (
@@ -1820,6 +1836,26 @@ class PostgresManagedSafetyRepository:
                     now,
                     expires_at,
                 )
+                if request.initial_location is not None:
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_safety_locations (
+                            incident_id,
+                            sequence,
+                            latitude,
+                            longitude,
+                            horizontal_accuracy_m,
+                            captured_at,
+                            received_at
+                        ) VALUES ($1, 1, $2, $3, $4, $5, $6)
+                        """,
+                        incident_id,
+                        request.initial_location.latitude,
+                        request.initial_location.longitude,
+                        request.initial_location.horizontal_accuracy_m,
+                        request.initial_location.captured_at,
+                        now,
+                    )
                 await connection.execute(
                     """
                     INSERT INTO managed_safety_page_quota_events (
@@ -2201,12 +2237,6 @@ class PostgresManagedSafetyRepository:
                     raise ManagedConflictError(
                         "location sharing is off for this incident"
                     )
-                if update.captured_at < incident["created_at"] - timedelta(
-                    minutes=5
-                ) or update.captured_at > now + timedelta(minutes=5):
-                    raise ManagedConflictError(
-                        "Safety location timestamp is outside the active window"
-                    )
                 existing = await connection.fetchrow(
                     """
                     SELECT *
@@ -2237,6 +2267,16 @@ class PostgresManagedSafetyRepository:
                             "received_at": existing["received_at"],
                             "duplicate": True,
                         }
+                if (
+                    update.captured_at
+                    < incident["created_at"] - SAFETY_LOCATION_MAXIMUM_AGE
+                    or update.captured_at < now - SAFETY_LOCATION_MAXIMUM_AGE
+                    or update.captured_at > now + SAFETY_LOCATION_MAXIMUM_FUTURE_SKEW
+                ):
+                    raise ManagedConflictError(
+                        "Safety location timestamp is outside the freshness window"
+                    )
+                if existing is not None:
                     if update.captured_at <= existing["captured_at"]:
                         raise ManagedConflictError(
                             "Safety location is not newer than the current fix"

@@ -281,6 +281,28 @@ public struct ManagedSafetyLocation: Codable, Equatable, Sendable {
     }
 }
 
+public struct ManagedSafetyLocationCreate: Encodable, Equatable, Sendable {
+    public let sequence: Int64
+    public let latitude: Double
+    public let longitude: Double
+    public let horizontalAccuracyM: Double
+    public let capturedAt: String
+
+    public init(
+        sequence: Int64 = 1,
+        latitude: Double,
+        longitude: Double,
+        horizontalAccuracyM: Double,
+        capturedAt: String
+    ) {
+        self.sequence = sequence
+        self.latitude = latitude
+        self.longitude = longitude
+        self.horizontalAccuracyM = horizontalAccuracyM
+        self.capturedAt = capturedAt
+    }
+}
+
 public struct ManagedSafetyDelivery: Codable, Equatable, Sendable {
     public let contactsTargeted: Int
     public let contactsReached: Int

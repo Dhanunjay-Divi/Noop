@@ -1,11 +1,11 @@
 {
   "categoryCounts": {
-    "compatibility": 1709,
+    "compatibility": 1712,
     "core": 4989,
     "customer": 815,
-    "fixture": 5525,
+    "fixture": 5547,
     "generated": 21,
-    "historical": 3080,
+    "historical": 3081,
     "import": 870,
     "persisted": 667
   },
@@ -7031,8 +7031,8 @@
         662,
         662,
         667,
-        1446,
-        1463
+        1460,
+        1477
       ],
       "occurrenceCount": 28,
       "path": "Packages/WhoopStore/Sources/WhoopStore/Database.swift",
@@ -7175,16 +7175,17 @@
       "lineNumbers": [
         0,
         0,
-        25,
-        47,
-        66,
-        176
+        34,
+        56,
+        77,
+        102,
+        258
       ],
-      "occurrenceCount": 6,
+      "occurrenceCount": 7,
       "path": "Packages/WhoopStore/Sources/WhoopStore/HydrationEntryStore.swift",
-      "sha256": "fe88030df59f5cb374efa7e810325c402e2d8afa9313bf5dc6cd2aa4a55272ae",
+      "sha256": "2bb727a35da24ff732f252478924278b534513ea9517530dcab275b5d18aad77",
       "tokenCounts": {
-        "whoopstore": 6
+        "whoopstore": 7
       }
     },
     {
@@ -7256,7 +7257,7 @@
       "lineNumbers": [
         0,
         0,
-        100
+        101
       ],
       "occurrenceCount": 3,
       "path": "Packages/WhoopStore/Sources/WhoopStore/ManagedSyncDocuments.swift",
@@ -8291,28 +8292,42 @@
       "lineNumbers": [
         0,
         0,
-        2,
-        6,
-        38,
-        87,
+        3,
+        18,
+        19,
         113,
-        146,
-        182,
-        226,
-        282,
-        287,
-        298,
-        302,
-        308,
-        315,
-        348,
-        377
+        145,
+        194,
+        220,
+        253,
+        289,
+        333,
+        389,
+        394,
+        405,
+        409,
+        415,
+        422,
+        455,
+        484,
+        523,
+        566,
+        604,
+        606,
+        651,
+        716,
+        762,
+        824,
+        867,
+        900,
+        942
       ],
-      "occurrenceCount": 18,
+      "occurrenceCount": 31,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/HydrationEntryStoreTests.swift",
-      "sha256": "32ffba16e3f0ec43d355e4147f1e52645ae9c1179c6c4f6a94aac21765ea0c34",
+      "sha256": "a707db5f4bed8e28a0663fb8c88cb59a84c815751ac9b1e86a74be17a31ae5ff",
       "tokenCounts": {
-        "whoopstore": 17,
+        "whoop": 1,
+        "whoopstore": 29,
         "whoopstoretests": 1
       }
     },
@@ -8430,7 +8445,7 @@
       ],
       "occurrenceCount": 24,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/LabMarkerStoreTests.swift",
-      "sha256": "3a17c84976b31545458664bab053ef3f0bd1f539982c0d252912ade2ec5bad9d",
+      "sha256": "f02754832d9a803c62142d647c16239f57de3ef2ce18c731263ff4fffa9796f1",
       "tokenCounts": {
         "my-whoop": 6,
         "whoopstore": 16,
@@ -8521,25 +8536,30 @@
         972,
         974,
         1036,
-        1203,
-        1249,
-        2431,
-        2432,
-        2441,
-        2459,
-        2475,
-        2611,
-        2630,
-        2687,
-        2699,
-        2711,
-        2741
+        1217,
+        1261,
+        1382,
+        1522,
+        1729,
+        1775,
+        2957,
+        2958,
+        2967,
+        2985,
+        3001,
+        3137,
+        3156,
+        3213,
+        3226,
+        3260,
+        3272,
+        3302
       ],
-      "occurrenceCount": 25,
+      "occurrenceCount": 30,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/ManagedSyncDocumentsTests.swift",
-      "sha256": "ac9bf25ec16c66ab12fccc980d2ba6e7d81004a47962ebbda82d43768d68b388",
+      "sha256": "085e7dec8b1af24935e3cae873a38fc2171cda8f7a0788b02a8b7a2efecf0db8",
       "tokenCounts": {
-        "whoopstore": 24,
+        "whoopstore": 29,
         "whoopstoretests": 1
       }
     },
@@ -8589,7 +8609,7 @@
       ],
       "occurrenceCount": 14,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/ManagedSyncStateTests.swift",
-      "sha256": "de7bb93ad1aaad76e751c6bd8d8a1c7cc1aa3dc22f9d5ca0db0b8ed6cd54cf74",
+      "sha256": "2fef136d3986c9606e60d1c4a4a2d31ec2f46a8d3e5cea630ccd6788d6970275",
       "tokenCounts": {
         "my-whoop": 2,
         "whoopstore": 10,
@@ -8696,7 +8716,7 @@
       ],
       "occurrenceCount": 54,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/MetricsCacheTests.swift",
-      "sha256": "b2ce6f3b71756589e504cf8d90aac280eff83fae3ef49dc07356179e27676124",
+      "sha256": "e844dfcdc62f23f0fb7ad3642904cf415614bb4d4981128146f06c4d9c882762",
       "tokenCounts": {
         "my-whoop": 4,
         "my-whoop-noop": 9,
@@ -8722,37 +8742,42 @@
         58,
         70,
         76,
-        91,
-        123,
-        129,
-        138,
-        145,
-        152,
-        191,
-        221,
-        223,
-        229,
+        92,
+        124,
+        130,
+        139,
+        146,
+        153,
+        192,
+        225,
         234,
-        250,
-        251,
-        253,
-        257,
-        262,
-        278,
-        288,
-        289
+        279,
+        353,
+        375,
+        377,
+        383,
+        388,
+        404,
+        405,
+        407,
+        411,
+        416,
+        432,
+        442,
+        443
       ],
-      "occurrenceCount": 33,
+      "occurrenceCount": 37,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/MigrationTests.swift",
-      "sha256": "fe8e5d81b0540861eae09421a7db39150be32a7a0744215b4b58fa185754dac7",
+      "sha256": "6056e8df3e3f179099e977d51e6e6c12c8c5997fa9f2aaaa9787aa8fa9a5dfb6",
       "tokenCounts": {
         "my-whoop": 2,
         "whoop": 2,
         "whoop-csv-imported": 1,
         "whoopimporter": 1,
         "whoopprotocol": 1,
-        "whoopstore": 23,
+        "whoopstore": 26,
         "whoopstore-": 1,
+        "whoopstore-v63-": 1,
         "whoopstoreinfo": 1,
         "whoopstoretests": 1
       }
@@ -9183,7 +9208,7 @@
       ],
       "occurrenceCount": 4,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/ScaffoldTests.swift",
-      "sha256": "0d5bfa00083735c2d4deed877bcc2bd999ac4be16bc01612d23d1b6954487a32",
+      "sha256": "dae67be64691db4f68980602fc570067ce81ed36b967d6837ec91fe61c17f53d",
       "tokenCounts": {
         "whoopstore": 2,
         "whoopstoreinfo": 1,
@@ -9271,7 +9296,7 @@
       ],
       "occurrenceCount": 13,
       "path": "Packages/WhoopStore/Tests/WhoopStoreTests/SleepMotionStateTests.swift",
-      "sha256": "7e6b989a2314c60ca86e10196f1ca77441c8524a4b61d00c65beb38fb8ee27f8",
+      "sha256": "0746dca09c5e924eb08316f6ee4077eaab04ab081b3940eae9f9084208699bee",
       "tokenCounts": {
         "my-whoop": 1,
         "whoopprotocol": 1,
@@ -11296,20 +11321,20 @@
       "category": "core",
       "lineNumbers": [
         3,
-        84,
-        474,
-        487,
-        722,
-        899,
-        904,
-        919,
-        921,
-        945,
-        948
+        129,
+        514,
+        527,
+        947,
+        1247,
+        1252,
+        1272,
+        1274,
+        1298,
+        1301
       ],
       "occurrenceCount": 11,
       "path": "Strand/Data/HydrationStore.swift",
-      "sha256": "0e2e95e8fc5150213454040ac96b82e5f76a000ee4d7e1e2448c074889742b2f",
+      "sha256": "0af00e6fca6adb41d0713a4f6648cf12d2687b819d6b332961efb288a070b543",
       "tokenCounts": {
         "whoop": 1,
         "whoopstore": 10
@@ -15268,13 +15293,13 @@
       "category": "historical",
       "lineNumbers": [
         2,
-        793,
-        794,
-        995,
-        997,
-        1002,
-        1665,
-        1666
+        1763,
+        1764,
+        2074,
+        2076,
+        2083,
+        2748,
+        2749
       ],
       "occurrenceCount": 8,
       "path": "StrandTests/HydrationEntriesTests.swift",
@@ -15892,11 +15917,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        1550,
-        1612,
-        1612,
-        1612,
-        1613
+        1793,
+        1855,
+        1855,
+        1855,
+        1856
       ],
       "occurrenceCount": 5,
       "path": "StrandTests/SafetyPagingAndShellContractTests.swift",
@@ -17000,14 +17025,14 @@
       "category": "core",
       "lineNumbers": [
         14,
-        2596,
-        3297,
-        3302,
-        3320,
-        3327,
-        3329,
-        3405,
-        3411
+        2693,
+        3397,
+        3402,
+        3420,
+        3427,
+        3429,
+        3505,
+        3511
       ],
       "occurrenceCount": 9,
       "path": "StrandiOS/System/ManagedCloudService.swift",
@@ -17732,22 +17757,22 @@
     {
       "category": "core",
       "lineNumbers": [
-        192,
-        203,
-        206,
-        214,
-        221,
-        227,
+        193,
+        204,
+        207,
+        215,
+        222,
         228,
-        236,
-        248,
-        257,
-        265,
-        273,
-        281,
-        289,
-        297,
-        302
+        229,
+        237,
+        249,
+        258,
+        266,
+        274,
+        282,
+        290,
+        298,
+        303
       ],
       "occurrenceCount": 16,
       "path": "Tools/test_i18n_audit.py",
@@ -17762,8 +17787,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        265,
-        297
+        266,
+        298
       ],
       "occurrenceCount": 2,
       "path": "Tools/test_i18n_audit.py",
@@ -20039,8 +20064,8 @@
     {
       "category": "core",
       "lineNumbers": [
-        50,
-        70
+        51,
+        92
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ble/BackgroundReconnectPolicy.kt",
@@ -21158,52 +21183,54 @@
       "category": "compatibility",
       "lineNumbers": [
         0,
-        84,
-        90,
-        128,
-        197,
-        350,
-        356,
-        377,
-        386,
-        392,
-        411,
-        428,
-        431,
-        443,
-        445,
-        455,
-        539,
-        559,
-        576,
-        585,
-        590,
-        599,
-        637,
-        648,
-        727,
-        742,
-        901,
-        971,
-        981,
-        998,
-        1025
+        87,
+        93,
+        131,
+        200,
+        354,
+        360,
+        381,
+        390,
+        396,
+        415,
+        432,
+        435,
+        447,
+        449,
+        459,
+        543,
+        562,
+        579,
+        588,
+        593,
+        602,
+        640,
+        651,
+        659,
+        710,
+        781,
+        796,
+        958,
+        1028,
+        1038,
+        1055,
+        1082
       ],
-      "occurrenceCount": 31,
+      "occurrenceCount": 33,
       "path": "android/app/src/main/java/com/noop/ble/WhoopConnectionService.kt",
-      "sha256": "3074e443e291fd0ca12819b157df689b4057a88db0aa0de31eabd6d04bf5cd65",
+      "sha256": "1d6a1affcdd0753410c0eafc46f9f68ccbd673297b16bc77790f8cc14d144eda",
       "tokenCounts": {
         "whoop": 2,
         "whoop5detected": 1,
         "whoopbleclient": 2,
-        "whoopconnectionservice": 26
+        "whoopconnectionservice": 28
       }
     },
     {
       "category": "persisted",
       "lineNumbers": [
-        321,
-        426
+        325,
+        430
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ble/WhoopConnectionService.kt",
@@ -22571,20 +22598,20 @@
     {
       "category": "core",
       "lineNumbers": [
-        26,
-        28,
+        27,
         29,
-        122,
-        2069,
-        2785,
-        2785,
-        2794,
-        2794,
-        2807,
-        2808,
-        2809,
-        3087,
-        3089
+        30,
+        123,
+        2149,
+        2892,
+        2892,
+        2901,
+        2901,
+        2914,
+        2915,
+        2916,
+        3194,
+        3196
       ],
       "occurrenceCount": 14,
       "path": "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
@@ -25203,26 +25230,26 @@
     {
       "category": "core",
       "lineNumbers": [
-        36,
         38,
-        98,
-        103,
-        387,
-        393,
-        400,
-        418,
-        424,
-        432,
-        440,
-        472,
-        573,
+        40,
+        100,
+        105,
+        391,
+        397,
+        404,
+        422,
+        428,
+        436,
+        444,
+        476,
         577,
-        580,
-        1324,
-        1332,
-        1335,
+        581,
+        584,
+        1328,
         1336,
-        1336
+        1339,
+        1340,
+        1340
       ],
       "occurrenceCount": 20,
       "path": "android/app/src/main/java/com/noop/ui/MainActivity.kt",
@@ -25240,7 +25267,7 @@
     {
       "category": "customer",
       "lineNumbers": [
-        575
+        579
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/ui/MainActivity.kt",
@@ -25379,8 +25406,8 @@
       "category": "core",
       "lineNumbers": [
         68,
-        331,
-        1061
+        333,
+        1063
       ],
       "occurrenceCount": 3,
       "path": "android/app/src/main/java/com/noop/ui/SafetyCenterScreen.kt",
@@ -33494,10 +33521,10 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        342,
-        343,
-        344,
-        360
+        339,
+        340,
+        341,
+        357
       ],
       "occurrenceCount": 4,
       "path": "android/app/src/test/java/com/noop/ui/SafetyCenterLocalizationContractTest.kt",
@@ -35688,13 +35715,14 @@
     {
       "category": "historical",
       "lineNumbers": [
-        136
+        178,
+        257
       ],
-      "occurrenceCount": 1,
+      "occurrenceCount": 2,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "a6907e54553f977a8bd336d8b706d860dfe3db45a9941c0f214628de5ceb701d",
+      "sha256": "8fa433059523b14f67733b1abe3ba6501fa80294bd82afc96a14355108671a9c",
       "tokenCounts": {
-        "whoopstore": 1
+        "whoopstore": 2
       }
     },
     {
@@ -35952,12 +35980,12 @@
     {
       "category": "historical",
       "lineNumbers": [
-        112,
-        253
+        141,
+        336
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-14-pr15-late-review-closeout.md",
-      "sha256": "42fac015135e293c2dbc3b1f46e045c7121fefd0bcbbd92e2dd26399d7e96d9e",
+      "sha256": "358c92e663cc9049b43baa455082c1701bbf63d746baeb0a0d885ddb8d7ff1a9",
       "tokenCounts": {
         "openwhoop": 1,
         "whoopstore": 1
@@ -35973,7 +36001,7 @@
       ],
       "occurrenceCount": 4,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "8ed2dc6ea1d047d51f0e392329e0b3635b86d2da1bb27194609495bf2f6d21fc",
+      "sha256": "09c8fb7631d7117ace2b105bb582ef506432949e32e7afd3fecfec3b957c050b",
       "tokenCounts": {
         "whoop": 2,
         "whoopstore": 2
@@ -38192,7 +38220,7 @@
       }
     }
   ],
-  "occurrenceCount": 17676,
+  "occurrenceCount": 17702,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

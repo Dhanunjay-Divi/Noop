@@ -70,10 +70,10 @@ RELEASE_SOURCE_DIGESTS = {
         "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
-        "c179066f9aa8ee2902e08935d5b21a2e1b0a2eeab4c68cc513288abbbf59725b"
+        "49123ea0b0c8a67c4c3eb950d3b8761f85108d08fefda54dd79baa3611a7193d"
     ),
     "release/terminology/legacy-inventory.json": (
-        "e8ee2c86be05b2a43657322e327b8921e084b6192e8628d1c3d9b4f6c8d8face"
+        "9c54122142f0bb63dda46cedb5d24cc29582e5ae889b2933b0a122ab090770a4"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -135,11 +135,14 @@ RELEASE_SOURCE_DIGESTS = {
     "Tools/release.sh": (
         "76d015c094ef603515d70cd56ead7501be52ad68b8286c4d04a0ee84dff81b95"
     ),
+    "Tools/run-bounded-command.py": (
+        "60b4472f3187543609c5bf8f59a2d596aaf9005e8d5ef2fc617fe4c7667101c8"
+    ),
     "Tools/terminology-audit.py": (
         "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"
     ),
     "Tools/trusted-release-controls.py": (
-        "979d6870507e2bc50d46d4300b74814f58679a93a1351792a9bfad0a23e4ef2d"
+        "b8471dbafd2260e630f6a676c6b42ddd72b8f827c838a97e1ce039f33f0da37a"
     ),
     "Tools/update-homebrew-cask.sh": (
         "1733e7b43266ac7f16ed3043cef4bea51f8353ebe533fb9aa3d260fa76639989"

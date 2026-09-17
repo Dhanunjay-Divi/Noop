@@ -439,6 +439,22 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ))
         XCTAssertTrue(manual.contains("try Task.checkCancellation()"))
         XCTAssertTrue(manual.contains("safetyIncidentGate.release()"))
+        XCTAssertTrue(manual.contains("initialLocation: SafetyLocation? = nil"))
+        XCTAssertTrue(manual.contains("initialLocation.isUsable("))
+        XCTAssertTrue(manual.contains(
+            "initialLocation.hasUsableHorizontalAccuracy"
+        ))
+        XCTAssertTrue(manual.contains(
+            #""failure_kind": "invalid_location""#
+        ))
+        XCTAssertTrue(manual.contains("initialLocation: initialLocation"))
+        let freshnessCheck = try XCTUnwrap(
+            manual.range(of: "initialLocation.isUsable(")
+        )
+        let requestCall = try XCTUnwrap(
+            manual.range(of: "createdIncident = try await createSafetyIncidentRequest(")
+        )
+        XCTAssertLessThan(freshnessCheck.lowerBound, requestCall.lowerBound)
 
         XCTAssertTrue(service.contains(
             "private let safetyIncidentGate = ManagedSafetyIncidentGate()"
@@ -791,6 +807,18 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             "ManagedCloudService.shared.bootstrap()"
         ))
         XCTAssertTrue(project.contains("- location"))
+        XCTAssertTrue(service.contains(
+            "location.hasUsableHorizontalAccuracy"
+        ))
+        XCTAssertTrue(view.contains(
+            "safety.location.accuracy_format"
+        ))
+        XCTAssertFalse(service.contains(
+            "location.horizontalAccuracyMeters ?? 10_000"
+        ))
+        XCTAssertTrue(service.contains(
+            #""failure_kind": "invalid_location""#
+        ))
         XCTAssertFalse(service.contains(
             #""latitude": String"#
         ))
@@ -836,7 +864,14 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             "shareLocation: shareLocation"
         ))
         XCTAssertTrue(view.contains(
-            "if shareLocation {"
+            "let initialLocation = shareLocation"
+        ))
+        XCTAssertTrue(view.contains(
+            "initialLocation: initialLocation"
+        ))
+        XCTAssertTrue(view.contains("if initialLocation != nil {"))
+        XCTAssertFalse(view.contains(
+            "replaceLocation(initialLocation, for: incident)"
         ))
 
         XCTAssertEqual(Set(noLocation.keys), Set(withLocation.keys))
@@ -860,6 +895,214 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
                 "Location access ends when the page ends or expires."
             ) == true
         )
+    }
+
+    func testManagedSafetyIncidentRejectsRevokedLocationAuthorizationBeforeRequestCreation() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let requestStart = try XCTUnwrap(
+            service.range(of: "private func createSafetyIncidentRequest(")
+        )
+        let refreshStart = try XCTUnwrap(
+            service.range(
+                of: "private func scheduleBandSOSRefresh()",
+                range: requestStart.upperBound..<service.endIndex
+            )
+        )
+        let request = String(
+            service[requestStart.lowerBound..<refreshStart.lowerBound]
+        )
+        let authorizationCheck = try XCTUnwrap(
+            request.range(of: "!Self.locationSharingAuthorized(requested: true)")
+        )
+        let requestCreation = try XCTUnwrap(
+            request.range(of: "let request = try safetyIncidentRequest(")
+        )
+        let serverCreation = try XCTUnwrap(
+            request.range(
+                of: "creation = try await client().createSafetyIncident("
+            )
+        )
+
+        XCTAssertTrue(request.contains("if shareLocation,"))
+        XCTAssertLessThan(
+            authorizationCheck.lowerBound,
+            requestCreation.lowerBound
+        )
+        XCTAssertLessThan(
+            authorizationCheck.lowerBound,
+            serverCreation.lowerBound
+        )
+        XCTAssertTrue(request.contains(
+            "throw ManagedCloudError.locationAuthorizationRequired"
+        ))
+        XCTAssertTrue(request.contains("ManagedSafetyLocationCreate("))
+        XCTAssertTrue(request.contains(
+            "initialLocation: managedInitialLocation"
+        ))
+        XCTAssertEqual(
+            request.components(
+                separatedBy: "shareLocation: shareLocation"
+            ).count - 1,
+            2
+        )
+        XCTAssertFalse(request.contains("effectiveShareLocation"))
+        XCTAssertTrue(service.contains(
+            #"return "location_not_authorized""#
+        ))
+        XCTAssertTrue(service.contains(
+            #"String(localized: "managed.safety.location.needed")"#
+        ))
+        XCTAssertTrue(service.contains(
+            #""location_not_authorized":"#
+        ))
+    }
+
+    func testManagedSafetyTerminalCreateReplayRetiresRequestWithoutStartedStatus() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let requestStart = try XCTUnwrap(
+            service.range(of: "private func createSafetyIncidentRequest(")
+        )
+        let requestEnd = try XCTUnwrap(
+            service.range(
+                of: "private func scheduleBandSOSRefresh()",
+                range: requestStart.upperBound..<service.endIndex
+            )
+        )
+        let request = String(
+            service[requestStart.lowerBound..<requestEnd.lowerBound]
+        )
+        let clear = try XCTUnwrap(
+            request.range(of: "clearSafetyIncidentRequest(request.requestID)")
+        )
+        let terminal = try XCTUnwrap(
+            request.range(of: "let terminalReplay =")
+        )
+        let state = try XCTUnwrap(
+            request.range(of: "safetyIncidents = Self.replacing(")
+        )
+        let refresh = try XCTUnwrap(
+            request.range(of: "try? await self?.refreshSafetyData()")
+        )
+        let compactRequest = request.filter { !$0.isWhitespace }
+
+        XCTAssertLessThan(clear.lowerBound, terminal.lowerBound)
+        XCTAssertLessThan(terminal.lowerBound, state.lowerBound)
+        XCTAssertLessThan(state.lowerBound, refresh.lowerBound)
+        XCTAssertTrue(request.contains(
+            #"String(localized: "Managed Safety is up to date.")"#
+        ))
+        XCTAssertTrue(request.contains("Safety page started."))
+        XCTAssertTrue(compactRequest.contains(
+            "Self.isTerminalSafetyIncidentReplay(creation.incident)"
+        ))
+        XCTAssertTrue(request.contains(
+            #"["resolved", "canceled", "expired"].contains(incident.status)"#
+        ))
+        XCTAssertTrue(request.contains("incident.duplicate"))
+    }
+
+    func testManagedSafetyIncidentIdempotencyRecordExcludesPreciseLocationMaterial() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let recordStart = try XCTUnwrap(
+            service.range(
+                of: "private struct ManagedCloudSafetyIncidentRequest:"
+            )
+        )
+        let recordEnd = try XCTUnwrap(
+            service.range(
+                of: "private enum ManagedCloudError:",
+                range: recordStart.upperBound..<service.endIndex
+            )
+        )
+        let record = service[
+            recordStart.lowerBound..<recordEnd.lowerBound
+        ].lowercased()
+
+        for sensitiveField in [
+            "latitude",
+            "longitude",
+            "horizontalaccuracy",
+            "capturedat",
+            "initial_location_digest",
+            "initiallocationdigest",
+        ] {
+            XCTAssertFalse(record.contains(sensitiveField))
+        }
+    }
+
+    func testManagedSafetyLocationRetriesRecheckAuthorizationBeforeTransport() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let submitStart = try XCTUnwrap(
+            service.range(of: "private func submitManagedSafetyLocation(")
+        )
+        let submitEnd = try XCTUnwrap(
+            service.range(
+                of: "private static func isTerminalManagedSafetyLocationError(",
+                range: submitStart.upperBound..<service.endIndex
+            )
+        )
+        let submit = String(
+            service[submitStart.lowerBound..<submitEnd.lowerBound]
+        )
+        let permissionCheck = try XCTUnwrap(
+            submit.range(
+                of: "guard Self.locationSharingAuthorized(requested: true)"
+            )
+        )
+        let transport = try XCTUnwrap(
+            submit.range(of: "try await client().updateSafetyLocation(")
+        )
+
+        XCTAssertLessThan(permissionCheck.lowerBound, transport.lowerBound)
+        XCTAssertTrue(submit.contains(
+            #""failure_kind": "location_not_authorized""#
+        ))
+        XCTAssertTrue(submit.contains(
+            #"reason: "authorization_revoked""#
+        ))
+        XCTAssertTrue(submit.contains("return .stop"))
+        XCTAssertTrue(service.contains(
+            #"source: "manual","#
+        ))
+        XCTAssertTrue(service.contains(
+            "requireActiveSession: false"
+        ))
+        XCTAssertTrue(service.contains(
+            #"source: "stream","#
+        ))
+        XCTAssertTrue(service.contains(
+            "requireActiveSession: true"
+        ))
+        XCTAssertTrue(submit.contains(
+            "if requireActiveSession,"
+        ))
+    }
+
+    func testManagedSafetyLocationShowsCapturedTimeWithAccuracy() throws {
+        let view = try source(
+            "StrandiOS/System/ManagedSafetyView.swift"
+        )
+
+        XCTAssertTrue(view.contains(
+            "managedSafetyLocationDate("
+        ))
+        XCTAssertTrue(view.contains(
+            #""safety.location.accuracy_format""#
+        ))
+        XCTAssertTrue(view.contains(
+            "date: .abbreviated"
+        ))
+        XCTAssertFalse(view.contains(
+            "private func locationAccuracyLabel("
+        ))
     }
 
     func testManagedSafetyKeepsUrgentPageActionAheadOfContactAdministration() throws {

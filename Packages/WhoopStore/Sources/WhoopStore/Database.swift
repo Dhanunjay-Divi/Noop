@@ -1415,6 +1415,20 @@ extension WhoopStore {
                 t.add(column: "isDeleted", .boolean)
             }
         }
+        // v63: an explicit retired hydration conflict resolution needs durable linkage to the exact
+        // legacy list it replaced. Without this evidence, a later unrelated UserDefaults list could be
+        // mistaken for interrupted cleanup merely because the canonical row is the deterministic daily
+        // aggregate. This local-only marker is written in the same transaction as the chosen rows.
+        migrator.registerMigration("v63-hydration-legacy-resolution") { db in
+            try db.create(table: "hydrationLegacyResolution") { t in
+                t.column("scope", .text).notNull()
+                t.column("day", .text).notNull()
+                t.column("legacyDigest", .text).notNull()
+                t.column("replacementDigest", .text).notNull()
+                t.column("expectedScalarML", .integer).notNull()
+                t.primaryKey(["scope", "day"])
+            }
+        }
         return migrator
     }
 

@@ -21,7 +21,7 @@ final class ManagedSyncStateTests: XCTestCase {
         ] {
             XCTAssertTrue(tables.contains(table), "missing \(table)")
         }
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 62)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 63)
     }
 
     func testSourceAndCheckpointRoundTripWithoutSampleOutbox() async throws {

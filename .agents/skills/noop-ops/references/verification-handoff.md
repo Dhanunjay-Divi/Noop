@@ -90,6 +90,45 @@ release controls.
 - Do not avoid, weaken, or bypass required protected checks. Record exact SHA
   and hosted result after the final push.
 
+## Resource Pressure And Cleanup
+
+Apply this procedure during an active agent run before heavy local verification
+and whenever live evidence shows application-memory pressure, sustained swap
+growth, or free disk approaching the bounded runner's floor. An old screenshot
+or previous alert is historical evidence only; inspect the current process,
+memory, swap, disk, mount, and open-file state before acting.
+
+- Run large builds and tests through `Tools/run-bounded-command.py` when the
+  repository provides it. Use a normal disk-backed worktree and temporary
+  directory; do not place a large worktree, DerivedData, Gradle home, database,
+  or simulator image on a RAM disk while memory is constrained.
+- At a pressure stop, identify the exact owning process group and exact
+  round-owned paths. Stop only known round-owned work and let the bounded runner
+  perform its cleanup. Do not kill unrelated terminals, agents, applications,
+  databases, or shared services.
+- Before deleting anything, preserve dirty source and untracked required files,
+  enumerate candidates, classify them as source/private input/durable evidence
+  versus regeneratable output, and check active worktrees, processes, mounts,
+  and open file handles.
+- Never use a blanket age- or date-based deletion over Codex sessions. Preserve
+  the current goal, the source session needed for requested context, every open
+  session, and any completed session whose result is not captured durably.
+  Closed completed subagent logs may be removed only from an exact list after
+  their final result is captured; write a local checksummed manifest when the
+  cleanup is material.
+- Prefer removing round-owned DerivedData, Gradle/build caches, disposable
+  databases, emulators, RAM disks, test dependency targets, temporary logs, and
+  completed captured subagent logs. Never delete source, credentials, user
+  health data, private reference inputs, rescue bundles, or unidentified cloud
+  resources to recover space.
+- After cleanup, recheck free disk, memory pressure, swap, surviving processes,
+  open session files, mounts, and `git status`. Record what was removed, what
+  was deliberately retained, and whether the resource gate is healthy before
+  restarting heavy work.
+
+This is an in-session safety gate, not a background daemon. When no agent is
+running, Codex cannot monitor or clean the machine.
+
 ## Handoff Contract
 
 Before stopping, update:

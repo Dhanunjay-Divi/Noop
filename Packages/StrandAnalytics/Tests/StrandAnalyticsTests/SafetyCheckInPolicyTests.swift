@@ -131,6 +131,47 @@ final class SafetyShareMessageTests: XCTestCase {
         ).isUsable(atUnix: 0))
     }
 
+    func testLocationAccuracyRejectsMalformedValuesAndKeepsBoundsInclusive() {
+        let withoutAccuracy = SafetyLocation(
+            latitude: 40.7128,
+            longitude: -74.0060,
+            capturedAtUnix: captured
+        )
+        XCTAssertTrue(withoutAccuracy.isValid)
+        XCTAssertFalse(withoutAccuracy.hasUsableHorizontalAccuracy)
+
+        for accuracy in [
+            0.0,
+            SafetyLocation.maximumHorizontalAccuracyMeters,
+        ] {
+            let location = SafetyLocation(
+                latitude: 40.7128,
+                longitude: -74.0060,
+                horizontalAccuracyMeters: accuracy,
+                capturedAtUnix: captured
+            )
+            XCTAssertTrue(location.isValid)
+            XCTAssertTrue(location.hasUsableHorizontalAccuracy)
+        }
+
+        for accuracy in [
+            -1.0,
+            SafetyLocation.maximumHorizontalAccuracyMeters + 1,
+            .infinity,
+            .nan,
+        ] {
+            let location = SafetyLocation(
+                latitude: 40.7128,
+                longitude: -74.0060,
+                horizontalAccuracyMeters: accuracy,
+                capturedAtUnix: captured
+            )
+            XCTAssertFalse(location.isValid)
+            XCTAssertFalse(location.hasUsableHorizontalAccuracy)
+            XCTAssertFalse(location.isUsable(atUnix: captured))
+        }
+    }
+
     func testBlankNameAndNoteAreOmitted() {
         let message = SafetyShareMessage.build(
             intent: .missedCheckIn,

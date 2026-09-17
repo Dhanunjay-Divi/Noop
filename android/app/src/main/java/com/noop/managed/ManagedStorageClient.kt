@@ -1,5 +1,6 @@
 package com.noop.managed
 
+import com.noop.safety.SafetyLocation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -364,20 +365,43 @@ class ManagedStorageClient(
         trigger: String = "manual_sos",
         durationHours: Int,
         shareLocation: Boolean,
+        initialLocation: SafetyLocation? = null,
     ): ManagedSafetyIncidentCreation = withContext(Dispatchers.IO) {
         if (trigger !in setOf("manual_sos", "band_sos") ||
-            durationHours !in setOf(8, 12)
+            durationHours !in setOf(8, 12) ||
+            (initialLocation != null && !shareLocation) ||
+            (initialLocation != null &&
+                (!initialLocation.isValid ||
+                    !initialLocation.hasUsableHorizontalAccuracy))
         ) {
             throw IllegalArgumentException("Invalid managed Safety duration")
+        }
+        val body = JSONObject()
+            .put("request_id", requestId.toString())
+            .put("trigger", trigger)
+            .put("duration_hours", durationHours)
+            .put("share_location", shareLocation)
+        initialLocation?.let { location ->
+            body.put(
+                "initial_location",
+                JSONObject()
+                    .put("sequence", 1)
+                    .put("latitude", location.latitude)
+                    .put("longitude", location.longitude)
+                    .put(
+                        "horizontal_accuracy_m",
+                        location.horizontalAccuracyMeters,
+                    )
+                    .put(
+                        "captured_at",
+                        Instant.ofEpochSecond(location.capturedAtUnix).toString(),
+                    ),
+            )
         }
         val response = executeJson(
             apiRequest("v1/managed/safety/incidents", authorization)
                 .post(
-                    JSONObject()
-                        .put("request_id", requestId.toString())
-                        .put("trigger", trigger)
-                        .put("duration_hours", durationHours)
-                        .put("share_location", shareLocation)
+                    body
                         .toString()
                         .toRequestBody(JSON),
                 )
@@ -387,10 +411,18 @@ class ManagedStorageClient(
         if (pushOutcome !in PUSH_OUTCOMES) {
             throw ManagedStorageException.InvalidResponse()
         }
-        ManagedSafetyIncidentCreation(
+        val creation = ManagedSafetyIncidentCreation(
             incident = parseSafetyIncident(response.requireObject("incident")),
             pushOutcome = pushOutcome,
         )
+        if (
+            initialLocation != null &&
+            creation.incident.location == null &&
+            !creation.incident.duplicate
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        creation
     }
 
     suspend fun safetyIncidents(

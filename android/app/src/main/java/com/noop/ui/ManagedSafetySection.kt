@@ -63,10 +63,15 @@ import com.noop.managed.ManagedSafetyIncident
 import com.noop.managed.ManagedSafetyLocationAuthorization
 import com.noop.managed.ManagedSafetyRequest
 import com.noop.managed.ManagedSocialIdentifier
+import com.noop.managed.managedSafetyLocationCanUpload
 import com.noop.safety.SafetyLocation
 import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 internal fun ManagedSafetySection(
@@ -90,16 +95,15 @@ internal fun ManagedSafetySection(
     var shareLocation by rememberSaveable { mutableStateOf(false) }
     var confirmPage by rememberSaveable { mutableStateOf(false) }
     var contactToRemove by remember { mutableStateOf<ManagedSafetyContact?>(null) }
-    val managedLocationReady = locationReady &&
-        currentLocation?.horizontalAccuracyMeters?.let {
-            it.isFinite() && it in 0.0..10_000.0
-        } == true
+    val managedLocationReady = managedSafetyLocationCanUpload(
+        location = currentLocation,
+        locationReady = locationReady,
+        nowUnix = System.currentTimeMillis() / 1_000L,
+    )
     val locationIncidentReady =
         ManagedSafetyLocationAuthorization.canStartIncident(
             shareLocation = shareLocation,
-            sdkInt = Build.VERSION.SDK_INT,
             foregroundGranted = foregroundLocationReady,
-            backgroundGranted = backgroundLocationReady,
         ) && (!shareLocation || managedLocationReady)
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -185,21 +189,12 @@ internal fun ManagedSafetySection(
                         confirmPage = false
                         val fix = currentLocation
                         scope.launch {
-                            val incident = service.createSafetyIncident(
+                            service.createSafetyIncident(
                                 durationHours = durationHours,
                                 shareLocation = shareLocation,
+                                initialLocation =
+                                    if (shareLocation) fix else null,
                             )
-                            if (shareLocation && incident != null && fix != null) {
-                                service.updateSafetyLocation(
-                                    incidentId = incident.incidentId,
-                                    latitude = fix.latitude,
-                                    longitude = fix.longitude,
-                                    horizontalAccuracyM =
-                                        fix.horizontalAccuracyMeters ?: return@launch,
-                                    capturedAt = Instant.ofEpochSecond(fix.capturedAtUnix),
-                                )
-                                service.refreshSafety()
-                            }
                         }
                     },
                 ) {
@@ -445,7 +440,15 @@ internal fun ManagedSafetySection(
                 onUpdateLocation = { incident ->
                     val fix = currentLocation
                     val accuracy = fix?.horizontalAccuracyMeters
-                    if (fix != null && accuracy != null) {
+                    if (
+                        fix != null &&
+                        accuracy != null &&
+                        managedSafetyLocationCanUpload(
+                            location = fix,
+                            locationReady = locationReady,
+                            nowUnix = System.currentTimeMillis() / 1_000L,
+                        )
+                    ) {
                         scope.launch {
                             service.updateSafetyLocation(
                                 incidentId = incident.incidentId,
@@ -839,6 +842,11 @@ private fun ManagedSafetyIncidents(
     onOpenMap: (ManagedSafetyIncident) -> Unit,
 ) {
     val active = incidents.filter { it.status == "open" || it.status == "acknowledged" }
+    val currentLocationCanUpload = managedSafetyLocationCanUpload(
+        location = currentLocation,
+        locationReady = locationReady,
+        nowUnix = System.currentTimeMillis() / 1_000L,
+    )
     if (active.isEmpty()) {
         incidents.firstOrNull()?.let {
             HorizontalDivider(color = Palette.hairline)
@@ -917,7 +925,7 @@ private fun ManagedSafetyIncidents(
                     color = Palette.textSecondary,
                 )
             }
-            if (incident.location != null) {
+            incident.location?.let { location ->
                 NoopButton(
                     text = stringResource(R.string.managed_safety_open_maps),
                     leadingIcon = Icons.Filled.LocationOn,
@@ -925,9 +933,16 @@ private fun ManagedSafetyIncidents(
                     fullWidth = true,
                     onClick = { onOpenMap(incident) },
                 )
+                managedSafetyLocationDetail(location)?.let { detail ->
+                    Text(
+                        detail,
+                        style = NoopType.caption,
+                        color = Palette.textTertiary,
+                    )
+                }
             }
             if (incident.role == "owner") {
-                if (incident.shareLocation && currentLocation != null && locationReady) {
+                if (incident.shareLocation && currentLocationCanUpload) {
                     NoopButton(
                         text = stringResource(R.string.managed_safety_location_update),
                         leadingIcon = Icons.Filled.LocationOn,
@@ -983,6 +998,33 @@ private fun ManagedSafetyIncidents(
             }
         }
     }
+}
+
+@Composable
+private fun managedSafetyLocationDetail(
+    location: com.noop.managed.ManagedSafetyLocation,
+): String? {
+    if (
+        !location.horizontalAccuracyM.isFinite() ||
+        location.horizontalAccuracyM !in
+        0.0..SafetyLocation.MAXIMUM_HORIZONTAL_ACCURACY_METERS
+    ) {
+        return null
+    }
+    val capturedAt = runCatching { Instant.parse(location.capturedAt) }
+        .getOrNull()
+        ?: return null
+    val captured = DateTimeFormatter.ofLocalizedDateTime(
+        FormatStyle.MEDIUM,
+        FormatStyle.SHORT,
+    )
+        .withZone(ZoneId.systemDefault())
+        .format(capturedAt)
+    return stringResource(
+        R.string.safety_location_accuracy_format,
+        captured,
+        location.horizontalAccuracyM.roundToInt(),
+    )
 }
 
 internal fun managedSafetyIncidentStatusResource(status: String): Int =

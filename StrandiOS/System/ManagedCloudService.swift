@@ -766,6 +766,7 @@ final class ManagedCloudService: ObservableObject {
                 trigger: "band_sos",
                 durationHours: durationHours,
                 shareLocation: shareLocation,
+                initialLocation: nil,
                 refreshAfterCreation: false
             )
             AppDiagnosticsRecorder.shared.endOperation(
@@ -989,7 +990,8 @@ final class ManagedCloudService: ObservableObject {
     func createSafetyIncident(
         trigger: String = "manual_sos",
         durationHours: Int,
-        shareLocation: Bool
+        shareLocation: Bool,
+        initialLocation: SafetyLocation? = nil
     ) async -> ManagedSafetyIncident? {
         guard beginSafetyAction() else { return nil }
         defer { endSafetyAction() }
@@ -1021,11 +1023,31 @@ final class ManagedCloudService: ObservableObject {
                 safetyStatus = String(localized: "A Safety page is already active.")
                 return
             }
+            if shareLocation {
+                guard let initialLocation,
+                      initialLocation.isUsable(
+                        atUnix: Int(Date().timeIntervalSince1970)
+                      ),
+                      initialLocation.hasUsableHorizontalAccuracy else {
+                    AppDiagnosticsRecorder.shared.record(
+                        "managed_safety.location_validation",
+                        fields: [
+                            "outcome": "incident_rejected",
+                            "failure_kind": "invalid_location",
+                        ]
+                    )
+                    safetyStatus = String(
+                        localized: "managed.safety.location.needed"
+                    )
+                    return
+                }
+            }
             try Task.checkCancellation()
             createdIncident = try await createSafetyIncidentRequest(
                 trigger: trigger,
                 durationHours: durationHours,
                 shareLocation: shareLocation,
+                initialLocation: initialLocation,
                 refreshAfterCreation: true
             )
         }
@@ -1036,16 +1058,37 @@ final class ManagedCloudService: ObservableObject {
         trigger: String,
         durationHours: Int,
         shareLocation: Bool,
+        initialLocation: SafetyLocation?,
         refreshAfterCreation: Bool
     ) async throws -> ManagedSafetyIncident {
-        let effectiveShareLocation = Self.locationSharingAuthorized(
-            requested: shareLocation
-        )
+        if shareLocation,
+           !Self.locationSharingAuthorized(requested: true) {
+            throw ManagedCloudError.locationAuthorizationRequired
+        }
         let request = try safetyIncidentRequest(
             trigger: trigger,
             durationHours: durationHours,
-            shareLocation: effectiveShareLocation
+            shareLocation: shareLocation
         )
+        let managedInitialLocation: ManagedSafetyLocationCreate?
+        if let initialLocation {
+            guard let horizontalAccuracyM =
+                    initialLocation.horizontalAccuracyMeters,
+                  initialLocation.hasUsableHorizontalAccuracy else {
+                throw ManagedStorageError.invalidResponse
+            }
+            managedInitialLocation = ManagedSafetyLocationCreate(
+                latitude: initialLocation.latitude,
+                longitude: initialLocation.longitude,
+                horizontalAccuracyM: horizontalAccuracyM,
+                capturedAt: ManagedTimestamp.iso8601(
+                    milliseconds:
+                        Int64(initialLocation.capturedAtUnix) * 1_000
+                )
+            )
+        } else {
+            managedInitialLocation = nil
+        }
         try Task.checkCancellation()
         let creation: ManagedSafetyIncidentCreation
         do {
@@ -1054,7 +1097,8 @@ final class ManagedCloudService: ObservableObject {
             creation = try await client().createSafetyIncident(
                 trigger: trigger,
                 durationHours: durationHours,
-                shareLocation: effectiveShareLocation,
+                shareLocation: shareLocation,
+                initialLocation: managedInitialLocation,
                 requestID: request.requestID,
                 authorization: auth
             )
@@ -1066,20 +1110,32 @@ final class ManagedCloudService: ObservableObject {
         }
         clearSafetyIncidentRequest(request.requestID)
         defaults.set(true, forKey: Key.safetyEnabled)
+        let terminalReplay = Self.isTerminalSafetyIncidentReplay(
+            creation.incident
+        )
         safetyIncidents = Self.replacing(
             creation.incident,
             in: safetyIncidents
         )
         reconcileManagedSafetyLocationSharing()
-        safetyStatus = String(
-            localized: "Safety page started. Push delivery is best effort; call emergency services for immediate danger."
-        )
+        safetyStatus = terminalReplay
+            ? String(localized: "Managed Safety is up to date.")
+            : String(
+                localized: "Safety page started. Push delivery is best effort; call emergency services for immediate danger."
+            )
         if refreshAfterCreation {
             Task { @MainActor [weak self] in
                 try? await self?.refreshSafetyData()
             }
         }
         return creation.incident
+    }
+
+    private static func isTerminalSafetyIncidentReplay(
+        _ incident: ManagedSafetyIncident
+    ) -> Bool {
+        incident.duplicate
+            && ["resolved", "canceled", "expired"].contains(incident.status)
     }
 
     private func scheduleBandSOSRefresh() {
@@ -1121,12 +1177,23 @@ final class ManagedCloudService: ObservableObject {
         )
         guard location.isUsable(
             atUnix: Int(Date().timeIntervalSince1970)
-        ) else { return }
+        ), location.hasUsableHorizontalAccuracy else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_replace",
+                fields: [
+                    "outcome": "rejected",
+                    "source": "manual",
+                    "failure_kind": "invalid_location",
+                ]
+            )
+            return
+        }
         _ = await submitManagedSafetyLocation(
             incidentID: incidentID,
             sequence: proposedSafetyLocationSequence(for: incidentID),
             location: location,
-            source: "manual"
+            source: "manual",
+            requireActiveSession: false
         )
     }
 
@@ -2206,7 +2273,8 @@ final class ManagedCloudService: ObservableObject {
                 incidentID: incidentID,
                 sequence: sequence,
                 location: location,
-                source: "stream"
+                source: "stream",
+                requireActiveSession: true
             )
         }
         if isNewSession {
@@ -2263,11 +2331,41 @@ final class ManagedCloudService: ObservableObject {
         incidentID: UUID,
         sequence: Int64,
         location: SafetyLocation,
-        source: String
+        source: String,
+        requireActiveSession: Bool
     ) async -> SafetyIncidentLocationStreamer.SubmissionDisposition {
-        guard phase == .enrolled,
-              managedSafetyLocationIncidentID == incidentID else {
+        guard phase == .enrolled else {
             return .stop
+        }
+        if requireActiveSession,
+           managedSafetyLocationIncidentID != incidentID {
+            return .stop
+        }
+        guard Self.locationSharingAuthorized(requested: true) else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_replace",
+                fields: [
+                    "outcome": "rejected",
+                    "source": source,
+                    "failure_kind": "location_not_authorized",
+                ]
+            )
+            stopManagedSafetyLocationSharing(
+                reason: "authorization_revoked"
+            )
+            return .stop
+        }
+        guard let horizontalAccuracyM = location.horizontalAccuracyMeters,
+              location.hasUsableHorizontalAccuracy else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_replace",
+                fields: [
+                    "outcome": "rejected",
+                    "source": source,
+                    "failure_kind": "invalid_location",
+                ]
+            )
+            return .retry
         }
         guard !managedSafetyLocationUpdateInFlight else {
             AppDiagnosticsRecorder.shared.record(
@@ -2291,8 +2389,7 @@ final class ManagedCloudService: ObservableObject {
                 sequence: sequence,
                 latitude: location.latitude,
                 longitude: location.longitude,
-                horizontalAccuracyM:
-                    location.horizontalAccuracyMeters ?? 10_000,
+                horizontalAccuracyM: horizontalAccuracyM,
                 capturedAt: ManagedTimestamp.iso8601(
                     milliseconds: Int64(location.capturedAtUnix) * 1_000
                 ),
@@ -3269,6 +3366,8 @@ final class ManagedCloudService: ObservableObject {
                 return "configuration"
             case .exportPreparationIncomplete:
                 return "continuation_required"
+            case .locationAuthorizationRequired:
+                return "location_not_authorized"
             case .invalidPhone, .invalidCode:
                 return "input"
             }
@@ -3283,7 +3382,8 @@ final class ManagedCloudService: ObservableObject {
         case "input", "authentication", "forbidden", "consent",
              "identity_input", "app_verification", "identity_provider_disabled",
              "verification_expired", "rate_limited", "policy_changed",
-             "quota_exceeded", "conflict", "server_rejected":
+             "quota_exceeded", "conflict", "server_rejected",
+             "location_not_authorized":
             return "rejected"
         case "canceled":
             return "canceled"
@@ -4250,6 +4350,7 @@ private enum ManagedCloudError: LocalizedError {
     case storeUnavailable
     case firebaseProjectConflict
     case exportPreparationIncomplete
+    case locationAuthorizationRequired
 
     var errorDescription: String? {
         switch self {
@@ -4273,6 +4374,8 @@ private enum ManagedCloudError: LocalizedError {
             return String(
                 localized: "NOOP safely paused after a large backup catch-up. Keep the app open, sync again, then retry the complete cloud-history export."
             )
+        case .locationAuthorizationRequired:
+            return String(localized: "managed.safety.location.needed")
         }
     }
 }

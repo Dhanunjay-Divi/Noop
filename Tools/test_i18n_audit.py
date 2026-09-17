@@ -4,7 +4,8 @@ Text(/title=/etc — without also sweeping unrelated nested composable subtrees
 (the bug in the first draft of this fix, which produced 489 findings instead
 of a few dozen).
 
-Run: python3 -m unittest Tools.test_i18n_audit -v   (from the repo root)
+Run: PYTHONPATH=Tools python3 -m unittest Tools.test_i18n_audit -v
+     (from the repo root)
      or: cd Tools && python3 -m unittest test_i18n_audit -v
 """
 

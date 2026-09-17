@@ -150,6 +150,7 @@ public actor ManagedStorageClient {
         let trigger: String
         let durationHours: Int
         let shareLocation: Bool
+        let initialLocation: ManagedSafetyLocationCreate?
     }
     private struct SafetyLocationUpdateRequest: Encodable {
         let sequence: Int64
@@ -567,12 +568,30 @@ public actor ManagedStorageClient {
         trigger: String = "manual_sos",
         durationHours: Int,
         shareLocation: Bool,
+        initialLocation: ManagedSafetyLocationCreate? = nil,
         requestID: UUID,
         authorization: ManagedAuthorization
     ) async throws -> ManagedSafetyIncidentCreation {
         guard ["manual_sos", "band_sos"].contains(trigger),
-              [8, 12].contains(durationHours) else {
+              [8, 12].contains(durationHours),
+              initialLocation == nil || shareLocation else {
             throw ManagedStorageError.invalidResponse
+        }
+        if let initialLocation {
+            guard initialLocation.sequence == 1,
+                  initialLocation.latitude.isFinite,
+                  (-90.0...90.0).contains(initialLocation.latitude),
+                  initialLocation.longitude.isFinite,
+                  (-180.0...180.0).contains(initialLocation.longitude),
+                  initialLocation.horizontalAccuracyM.isFinite,
+                  (0.0...10_000.0).contains(
+                    initialLocation.horizontalAccuracyM
+                  ),
+                  ManagedTimestamp.milliseconds(
+                    iso8601: initialLocation.capturedAt
+                  ) != nil else {
+                throw ManagedStorageError.invalidResponse
+            }
         }
         let response: SafetyIncidentCreationResponse = try await send(
             path: "v1/managed/safety/incidents",
@@ -581,14 +600,18 @@ public actor ManagedStorageClient {
                 requestID: requestID,
                 trigger: trigger,
                 durationHours: durationHours,
-                shareLocation: shareLocation
+                shareLocation: shareLocation,
+                initialLocation: initialLocation
             ),
             authorization: authorization
         )
         try Self.validate(response.incident)
         guard ["attempted", "deferred", "not_configured"].contains(
             response.pushOutcome
-        ) else {
+        ),
+        initialLocation == nil
+            || response.incident.location != nil
+            || response.incident.duplicate else {
             throw ManagedStorageError.invalidResponse
         }
         return ManagedSafetyIncidentCreation(
@@ -2058,7 +2081,8 @@ public actor ManagedStorageClient {
               incident.location.map({
                   (try? validate($0)) != nil
               }) ?? true,
-              !incident.shareLocation || active || incident.location == nil,
+              incident.shareLocation || incident.location == nil,
+              active || incident.location == nil,
               incident.status != "open" || incident.acknowledgedAt == nil,
               incident.status != "acknowledged"
                 || incident.acknowledgedAt != nil,

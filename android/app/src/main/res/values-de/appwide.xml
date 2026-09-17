@@ -410,6 +410,16 @@
     <string name="appwide_hydration_edit_entry_accessibility_format">%1$s-Wassereintrag bearbeiten</string>
     <string name="appwide_hydration_goal_progress_format">%1$d %% des Ziels für %2$s</string>
     <string name="appwide_hydration_history_through_format">7 Tage bis %1$s</string>
+    <string name="appwide_hydration_legacy_conflict_detail">Wenn du die gespeicherte Summe behältst, werden die aufgeführten Getränke durch eine ältere Tagessumme ersetzt. Mit der Getränkeliste wird der Tag auf die aufgeführte Menge geändert. Bis zu deiner Auswahl wird nichts geändert.</string>
+    <string name="appwide_hydration_legacy_conflict_title">Gespeicherte Wassermenge für diesen Tag wählen</string>
+    <string name="appwide_hydration_legacy_keep_total">Gespeicherte Summe behalten</string>
+    <string name="appwide_hydration_legacy_keep_total_a11y_format">Gespeicherte Tagessumme behalten, %1$s</string>
+    <string name="appwide_hydration_legacy_keep_total_hint">Ersetzt die aufgeführten Getränke durch eine ältere Tagessumme.</string>
+    <string name="appwide_hydration_legacy_listed_total">Summe der Getränkeliste</string>
+    <string name="appwide_hydration_legacy_saved_total">Gespeicherte Tagessumme</string>
+    <string name="appwide_hydration_legacy_use_list">Aufgeführte Getränke verwenden</string>
+    <string name="appwide_hydration_legacy_use_list_a11y_format">Summe der aufgeführten Getränke verwenden, %1$s</string>
+    <string name="appwide_hydration_legacy_use_list_hint">Ändert die Tagessumme auf die aufgeführten Getränke.</string>
     <string name="appwide_hydration_load_failed">Hydration konnte nicht geladen werden. Versuche es erneut.</string>
     <string name="appwide_hydration_logged_day">%1$s erfasst</string>
     <string name="appwide_hydration_logged_on_format">Erfasst am %1$s</string>

@@ -2,6 +2,7 @@ package com.noop.managed
 
 import android.Manifest
 import android.app.Activity
+import android.app.AppOpsManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -794,6 +795,7 @@ class ManagedCloudService private constructor(context: Context) {
                     trigger = "band_sos",
                     durationHours = if (durationHours == 12) 12 else 8,
                     shareLocation = shareLocation,
+                    initialLocation = null,
                 )
             } catch (error: CancellationException) {
                 throw error
@@ -983,6 +985,7 @@ class ManagedCloudService private constructor(context: Context) {
         trigger: String = "manual_sos",
         durationHours: Int,
         shareLocation: Boolean,
+        initialLocation: SafetyLocation? = null,
     ): ManagedSafetyIncident? {
         var created: ManagedSafetyIncident? = null
         safetyAction("incident_create") {
@@ -996,10 +999,30 @@ class ManagedCloudService private constructor(context: Context) {
                     setSafetyStatus(text(R.string.managed_safety_active_page_exists))
                     return@withLock
                 }
+                if (shareLocation &&
+                    !managedSafetyLocationCanUpload(
+                        location = initialLocation,
+                        locationReady = true,
+                        nowUnix = System.currentTimeMillis() / 1_000L,
+                    )
+                ) {
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "managed_safety.location_validation",
+                        fields = mapOf(
+                            "outcome" to "incident_rejected",
+                            "failure_kind" to "invalid_location",
+                        ),
+                    )
+                    setSafetyStatus(text(R.string.managed_safety_location_needed))
+                    return@withLock
+                }
+                val effectiveInitialLocation =
+                    if (shareLocation) initialLocation else null
                 created = createSafetyIncidentRequest(
                     trigger = trigger,
                     durationHours = durationHours,
                     shareLocation = shareLocation,
+                    initialLocation = effectiveInitialLocation,
                 )
             }
         }
@@ -1010,13 +1033,14 @@ class ManagedCloudService private constructor(context: Context) {
         trigger: String,
         durationHours: Int,
         shareLocation: Boolean,
+        initialLocation: SafetyLocation?,
     ): ManagedSafetyIncident? {
         if (!ManagedSafetyLocationAuthorization.isAuthorized(appContext, shareLocation)) {
             com.noop.AppDiagnosticsRecorder.record(
                 "managed_safety.location_authorization",
                 fields = mapOf("outcome" to "incident_rejected"),
             )
-            setSafetyStatus(text(R.string.managed_safety_location_background_body))
+            setSafetyStatus(text(R.string.managed_safety_location_needed))
             return null
         }
         val request = preferences.safetyIncidentRequest(
@@ -1032,6 +1056,7 @@ class ManagedCloudService private constructor(context: Context) {
                 trigger = trigger,
                 durationHours = durationHours,
                 shareLocation = shareLocation,
+                initialLocation = initialLocation,
             )
         } catch (error: Throwable) {
             if (shouldRetireSafetyIncidentRequest(error)) {
@@ -1042,13 +1067,22 @@ class ManagedCloudService private constructor(context: Context) {
         preferences.clearSafetyIncidentRequest(request.requestId)
         preferences.safetyEnabled = true
         ManagedCloudScheduler.reconcile(appContext)
+        val terminalReplay =
+            creation.incident.duplicate &&
+                creation.incident.status in setOf("resolved", "canceled", "expired")
         replaceState {
             it.copy(
                 safetyIncidents = replaceSafetyIncident(
                     creation.incident,
                     it.safetyIncidents,
                 ),
-                safetyStatus = text(R.string.managed_safety_status_page_started),
+                safetyStatus = text(
+                    if (terminalReplay) {
+                        R.string.managed_safety_status_up_to_date
+                    } else {
+                        R.string.managed_safety_status_page_started
+                    },
+                ),
             )
         }
         reconcileManagedSafetyLocationSession()
@@ -1955,7 +1989,42 @@ class ManagedCloudService private constructor(context: Context) {
         if (state.value.phase != ManagedCloudPhase.ENROLLED) {
             return@withLock SafetyLocationUploadOutcome.RETRY
         }
-        if (!location.isUsable(nowUnix)) {
+        val locationAuthorized = ManagedSafetyLocationAuthorization.isAuthorized(
+            appContext,
+            shareLocation = true,
+        )
+        if (!locationAuthorized) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_safety.location_replace",
+                fields = mapOf(
+                    "outcome" to "rejected",
+                    "source" to source,
+                    "failure_kind" to "location_not_authorized",
+                ),
+            )
+            stopManagedSafetyLocationSession(
+                "authorization_revoked",
+                incidentId,
+            )
+            return@withLock SafetyLocationUploadOutcome.STOP
+        }
+        val horizontalAccuracyM = location.horizontalAccuracyMeters
+        if (
+            horizontalAccuracyM == null ||
+            !managedSafetyLocationCanUpload(
+                location,
+                locationReady = locationAuthorized,
+                nowUnix,
+            )
+        ) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_safety.location_replace",
+                fields = mapOf(
+                    "outcome" to "rejected",
+                    "source" to source,
+                    "failure_kind" to "invalid_location",
+                ),
+            )
             return@withLock SafetyLocationUploadOutcome.RETRY
         }
         if (requireActiveSession) {
@@ -1979,8 +2048,7 @@ class ManagedCloudService private constructor(context: Context) {
                 sequence = preferences.proposedSafetyLocationSequence(incidentId),
                 latitude = location.latitude,
                 longitude = location.longitude,
-                horizontalAccuracyM =
-                    location.horizontalAccuracyMeters ?: 10_000.0,
+                horizontalAccuracyM = horizontalAccuracyM,
                 capturedAt = Instant.ofEpochSecond(
                     location.capturedAtUnix,
                 ).toString(),
@@ -2035,6 +2103,18 @@ class ManagedCloudService private constructor(context: Context) {
             stopManagedSafetyLocationSession("inactive")
             return
         }
+        if (
+            !ManagedSafetyLocationAuthorization.isAuthorized(
+                appContext,
+                shareLocation = true,
+            )
+        ) {
+            stopManagedSafetyLocationSession(
+                "authorization_revoked",
+                incident.incidentId,
+            )
+            return
+        }
         val expiresAt = runCatching { Instant.parse(incident.expiresAt) }
             .getOrNull()
             ?: run {
@@ -2074,6 +2154,33 @@ class ManagedCloudService private constructor(context: Context) {
         reason: String,
     ) {
         stopManagedSafetyLocationSession(reason, incidentId)
+    }
+
+    internal fun reconcileSafetyLocationAuthorizationForRuntime(
+        now: Instant = Instant.now(),
+    ) {
+        ManagedSafetyLiveLocationSession.initialize(appContext)
+        val activeIncident = ManagedSafetyLiveLocationSession.activeOwnerIncident(
+            state.value.safetyIncidents,
+            now,
+        )
+        val decision = ManagedSafetyLocationRuntimePolicy.decide(
+            locationAuthorized = ManagedSafetyLocationAuthorization.isAuthorized(
+                appContext,
+                shareLocation = true,
+            ),
+            enrolled = state.value.phase == ManagedCloudPhase.ENROLLED,
+            activeCloudIncident = activeIncident != null,
+            activeLocalSession = ManagedSafetyLiveLocationSession.state.value
+                .isActiveAt(now.epochSecond),
+        )
+        when (decision) {
+            ManagedSafetyLocationRuntimeAction.STOP ->
+                stopManagedSafetyLocationSession("authorization_revoked")
+            ManagedSafetyLocationRuntimeAction.START ->
+                reconcileManagedSafetyLocationSession(now)
+            ManagedSafetyLocationRuntimeAction.NONE -> Unit
+        }
     }
 
     private fun stopManagedSafetyLocationSession(
@@ -3524,38 +3631,69 @@ internal object ManagedSafetyLocationAuthorization {
         shareLocation: Boolean,
     ): Boolean = canStartIncident(
         shareLocation = shareLocation,
-        sdkInt = Build.VERSION.SDK_INT,
         foregroundGranted =
-            ContextCompat.checkSelfPermission(
+            isPermissionAuthorized(
                 context,
                 Manifest.permission.ACCESS_FINE_LOCATION,
-            ) == PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(
+            ) ||
+                isPermissionAuthorized(
                     context,
                     Manifest.permission.ACCESS_COARSE_LOCATION,
-                ) == PackageManager.PERMISSION_GRANTED,
-        backgroundGranted =
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_BACKGROUND_LOCATION,
-            ) == PackageManager.PERMISSION_GRANTED,
+                ),
     )
 
     fun canStartIncident(
         shareLocation: Boolean,
-        sdkInt: Int,
         foregroundGranted: Boolean,
-        backgroundGranted: Boolean,
-    ): Boolean =
-        !shareLocation ||
-            (
-                foregroundGranted &&
-                    (
-                        sdkInt < Build.VERSION_CODES.Q ||
-                            backgroundGranted
-                        )
-                )
+    ): Boolean = !shareLocation || foregroundGranted
+
+    private fun isPermissionAuthorized(
+        context: Context,
+        permission: String,
+    ): Boolean {
+        if (
+            context.packageManager.checkPermission(
+                permission,
+                context.packageName,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        val operation = AppOpsManager.permissionToOp(permission) ?: return true
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+            ?: return false
+        return runCatching {
+            val mode =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    appOps.unsafeCheckOpRawNoThrow(
+                        operation,
+                        context.applicationInfo.uid,
+                        context.packageName,
+                    )
+                } else {
+                    appOps.checkOpNoThrow(
+                        operation,
+                        context.applicationInfo.uid,
+                        context.packageName,
+                    )
+                }
+            mode in setOf(
+                AppOpsManager.MODE_ALLOWED,
+                AppOpsManager.MODE_FOREGROUND,
+                AppOpsManager.MODE_DEFAULT,
+            )
+        }.getOrDefault(false)
+    }
 }
+
+internal fun managedSafetyLocationCanUpload(
+    location: SafetyLocation?,
+    locationReady: Boolean,
+    nowUnix: Long,
+): Boolean =
+    locationReady &&
+        location?.isUsable(nowUnix) == true &&
+        location.hasUsableHorizontalAccuracy
 
 internal fun managedDeletionDeadlinePassed(
     value: String?,

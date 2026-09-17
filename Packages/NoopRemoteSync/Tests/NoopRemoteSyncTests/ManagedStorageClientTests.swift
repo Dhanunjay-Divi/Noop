@@ -1540,6 +1540,17 @@ final class ManagedStorageClientTests: XCTestCase {
                 XCTAssertEqual(body["trigger"] as? String, "band_sos")
                 XCTAssertEqual(body["duration_hours"] as? Int, 8)
                 XCTAssertEqual(body["share_location"] as? Bool, true)
+                let initialLocation = try XCTUnwrap(
+                    body["initial_location"] as? [String: Any]
+                )
+                XCTAssertEqual(
+                    (initialLocation["sequence"] as? NSNumber)?.int64Value,
+                    1
+                )
+                XCTAssertEqual(
+                    initialLocation["captured_at"] as? String,
+                    "2026-09-08T10:00:00Z"
+                )
                 json = """
                 {
                   "incident":\(safetyIncidentJSON(
@@ -1548,7 +1559,7 @@ final class ManagedStorageClientTests: XCTestCase {
                     firstID: firstID,
                     secondID: secondID,
                     trigger: "band_sos",
-                    includeLocation: false
+                    includeLocation: true
                   )),
                   "push_outcome":"attempted"
                 }
@@ -1608,6 +1619,12 @@ final class ManagedStorageClientTests: XCTestCase {
             trigger: "band_sos",
             durationHours: 8,
             shareLocation: true,
+            initialLocation: ManagedSafetyLocationCreate(
+                latitude: 17.385,
+                longitude: 78.4867,
+                horizontalAccuracyM: 12.5,
+                capturedAt: "2026-09-08T10:00:00Z"
+            ),
             requestID: UUID(),
             authorization: authorization
         )
@@ -1659,6 +1676,168 @@ final class ManagedStorageClientTests: XCTestCase {
         )
         XCTAssertEqual(contacts.contacts.count, 1)
         XCTAssertEqual(contacts.deliveryCapableCount, 0)
+    }
+
+    func testManagedSafetyCreateAllowsMissingLocationForDuplicateReplay() async throws {
+        let (client, authorization) = try makeClient()
+        let incidentID = UUID()
+        let ownerID = UUID()
+        let firstID = UUID()
+        let secondID = UUID()
+        let initialLocation = ManagedSafetyLocationCreate(
+            latitude: 17.385,
+            longitude: 78.4867,
+            horizontalAccuracyM: 12.5,
+            capturedAt: "2026-09-08T10:00:00Z"
+        )
+
+        ManagedURLProtocolStub.handler = { request in
+            let json = """
+            {
+              "incident":\(safetyIncidentJSON(
+                incidentID: incidentID,
+                ownerID: ownerID,
+                firstID: firstID,
+                secondID: secondID,
+                includeLocation: false,
+                status: "expired",
+                duplicate: true
+              )),
+              "push_outcome":"deferred"
+            }
+            """
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        let replay = try await client.createSafetyIncident(
+            durationHours: 8,
+            shareLocation: true,
+            initialLocation: initialLocation,
+            requestID: UUID(),
+            authorization: authorization
+        )
+        XCTAssertTrue(replay.incident.duplicate)
+        XCTAssertEqual(replay.incident.status, "expired")
+        XCTAssertNil(replay.incident.location)
+
+        ManagedURLProtocolStub.handler = { request in
+            let json = """
+            {
+              "incident":\(safetyIncidentJSON(
+                incidentID: incidentID,
+                ownerID: ownerID,
+                firstID: firstID,
+                secondID: secondID,
+                includeLocation: false,
+                duplicate: true
+              )),
+              "push_outcome":"deferred"
+            }
+            """
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        let activeReplay = try await client.createSafetyIncident(
+            durationHours: 8,
+            shareLocation: true,
+            initialLocation: initialLocation,
+            requestID: UUID(),
+            authorization: authorization
+        )
+        XCTAssertTrue(activeReplay.incident.duplicate)
+        XCTAssertEqual(activeReplay.incident.status, "open")
+        XCTAssertNil(activeReplay.incident.location)
+
+        ManagedURLProtocolStub.handler = { request in
+            let json = """
+            {
+              "incident":\(safetyIncidentJSON(
+                incidentID: incidentID,
+                ownerID: ownerID,
+                firstID: firstID,
+                secondID: secondID,
+                includeLocation: false
+              )),
+              "push_outcome":"deferred"
+            }
+            """
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        do {
+            _ = try await client.createSafetyIncident(
+                durationHours: 8,
+                shareLocation: true,
+                initialLocation: initialLocation,
+                requestID: UUID(),
+                authorization: authorization
+            )
+            XCTFail("New incident without its accepted initial location was accepted")
+        } catch ManagedStorageError.invalidResponse {
+            // Expected.
+        }
+    }
+
+    func testManagedSafetyRejectsLocationWhenSharingIsOff() async throws {
+        let (client, authorization) = try makeClient()
+        let incidentID = UUID()
+        let ownerID = UUID()
+        let firstID = UUID()
+        let secondID = UUID()
+        ManagedURLProtocolStub.handler = { request in
+            let json = """
+            {"incidents":[\(safetyIncidentJSON(
+              incidentID: incidentID,
+              ownerID: ownerID,
+              firstID: firstID,
+              secondID: secondID,
+              includeLocation: true,
+              shareLocation: false
+            ))]}
+            """
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        do {
+            _ = try await client.safetyIncidents(
+                authorization: authorization
+            )
+            XCTFail("Location was accepted while sharing was off")
+        } catch ManagedStorageError.invalidResponse {
+            // Expected.
+        }
     }
 
     func testManagedSafetyRetainedOwnerIncidentAllowsErasedParticipants() async throws {
@@ -1772,12 +1951,16 @@ private func safetyIncidentJSON(
     firstID: UUID,
     secondID: UUID,
     trigger: String = "manual_sos",
-    includeLocation: Bool
+    includeLocation: Bool,
+    status: String = "open",
+    shareLocation: Bool = true,
+    duplicate: Bool = false
 ) -> String {
+    let active = ["open", "acknowledged"].contains(status)
     let location = includeLocation
         ? """
         {
-          "sequence":2,
+          "sequence":1,
           "latitude":17.385,
           "longitude":78.4867,
           "horizontal_accuracy_m":12.5,
@@ -1786,6 +1969,10 @@ private func safetyIncidentJSON(
         }
         """
         : "null"
+    let acknowledgedAt = status == "acknowledged"
+        ? #""2026-09-08T10:05:00Z""#
+        : "null"
+    let endedAt = active ? "null" : #""2026-09-08T18:00:00Z""#
     return """
     {
       "incident_id":"\(incidentID)",
@@ -1793,13 +1980,13 @@ private func safetyIncidentJSON(
       "owner_profile_id":"\(ownerID)",
       "owner_display_name":"Owner",
       "trigger":"\(trigger)",
-      "status":"open",
+      "status":"\(status)",
       "duration_hours":8,
-      "share_location":true,
+      "share_location":\(shareLocation),
       "created_at":"2026-09-08T10:00:00Z",
       "expires_at":"2026-09-08T18:00:00Z",
-      "acknowledged_at":null,
-      "ended_at":null,
+      "acknowledged_at":\(acknowledgedAt),
+      "ended_at":\(endedAt),
       "participants":[
         {
           "profile_id":"\(firstID)",
@@ -1827,7 +2014,7 @@ private func safetyIncidentJSON(
         "installations_retryable":1,
         "installations_terminal":0
       },
-      "duplicate":false
+      "duplicate":\(duplicate)
     }
     """
 }

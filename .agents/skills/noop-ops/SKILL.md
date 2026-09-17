@@ -18,7 +18,9 @@ old chat, a passing build, or a UI state.
   operations ownership.
 - Read [verification and handoff](references/verification-handoff.md) before
   running full gates, simulator review, committing, pushing, deploying, or
-  handing the round to another agent.
+  handing the round to another agent. Also read its resource-pressure procedure
+  before heavy local builds or whenever macOS reports low application memory,
+  swap growth, or low disk.
 - Run `scripts/context_snapshot.sh [repo-root]` when resuming a stale,
   interrupted, compacted, or transferred session. The snapshot is
   privacy-safe scaffolding, not proof that any feature works.
@@ -144,17 +146,21 @@ the evidence in the round record.
 3. Run focused tests first, then every relevant full gate. App-target Swift
    requires an explicit Xcode build; Android app changes require Gradle compile,
    unit, and applicable lint/instrumentation gates.
-4. For backend or infrastructure work, use synthetic identities/data, verify
+4. Run long or resource-heavy commands through the repository's bounded runner
+   when available. If live memory or disk pressure crosses its floor, stop and
+   follow the exact-owner cleanup procedure in verification and handoff before
+   continuing.
+5. For backend or infrastructure work, use synthetic identities/data, verify
    tenant isolation and IAM, pin deploys by digest, inspect drift, and remove
    temporary credentials, debug tokens, proxies, and test data.
-5. Record exact commands/results and distinguish unit, integration, simulator,
+6. Record exact commands/results and distinguish unit, integration, simulator,
    physical-device, and external-service evidence. Failed and skipped checks
    remain visible.
-6. Review information hierarchy and accessibility on both platforms for
+7. Review information hierarchy and accessibility on both platforms for
    customer-facing changes. Metric parity does not require identical native
    implementation, but meaning, missing states, actions, consent, and safety
    boundaries must agree.
-7. Evaluate supplied visual or exercise media before import. Require clear
+8. Evaluate supplied visual or exercise media before import. Require clear
    rights, redistribution permission, correct exercise mapping, instructional
    review, captions, reduced-motion behavior, and acceptable rendering quality.
 

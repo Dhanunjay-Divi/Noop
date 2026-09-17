@@ -65,12 +65,19 @@ data class SafetyLocation(
     companion object {
         const val MAXIMUM_AGE_SECONDS = 5 * 60L
         const val MAXIMUM_FUTURE_CLOCK_SKEW_SECONDS = 60L
+        const val MAXIMUM_HORIZONTAL_ACCURACY_METERS = 10_000.0
     }
 
     val isValid: Boolean
         get() = latitude.isFinite() && longitude.isFinite() &&
             latitude in -90.0..90.0 && longitude in -180.0..180.0 &&
-            capturedAtUnix > 0L
+            capturedAtUnix > 0L &&
+            (horizontalAccuracyMeters == null || hasUsableHorizontalAccuracy)
+
+    val hasUsableHorizontalAccuracy: Boolean
+        get() = horizontalAccuracyMeters?.let {
+            it.isFinite() && it in 0.0..MAXIMUM_HORIZONTAL_ACCURACY_METERS
+        } == true
 
     fun isUsable(atUnix: Long): Boolean {
         if (!isValid || atUnix <= 0L) return false

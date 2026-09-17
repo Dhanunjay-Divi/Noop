@@ -370,12 +370,15 @@ def test_restore_smoke_selects_postgresql_overlay_manifest(tmp_path: Path) -> No
     binary_directory.mkdir()
     calls = tmp_path / "psql-calls"
     fake_psql = binary_directory / "psql"
+    expected_migration_count = len(
+        _manifest_entries(BACKUP_ROOT / "migration-manifest-postgresql.sha256")
+    )
     fake_psql.write_text(
         f"""#!/bin/sh
 printf '%s\\n' "$*" >>"{calls}"
 case "$*" in
   *"SELECT count(*) FROM noop_schema_migrations;"*)
-    printf '42\\n'
+    printf '{expected_migration_count}\\n'
     ;;
   *"--file=-"*)
     cat >/dev/null

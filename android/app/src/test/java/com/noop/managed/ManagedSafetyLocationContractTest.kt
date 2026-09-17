@@ -38,7 +38,18 @@ class ManagedSafetyLocationContractTest {
             "app/src/main/java/com/noop/ui/ManagedSafetySection.kt",
             "android/app/src/main/java/com/noop/ui/ManagedSafetySection.kt",
         )
-        assumeTrue(service != null && cloud != null && application != null && screen != null)
+        val boot = source(
+            "src/main/java/com/noop/ble/BackgroundReconnectPolicy.kt",
+            "app/src/main/java/com/noop/ble/BackgroundReconnectPolicy.kt",
+            "android/app/src/main/java/com/noop/ble/BackgroundReconnectPolicy.kt",
+        )
+        assumeTrue(
+            service != null &&
+                cloud != null &&
+                application != null &&
+                screen != null &&
+                boot != null,
+        )
 
         assertTrue(service!!.contains("ManagedSafetyLiveLocationSession.state"))
         assertTrue(service.contains("updateSafetyLocationForStream("))
@@ -61,6 +72,73 @@ class ManagedSafetyLocationContractTest {
         assertTrue(screen.contains("ManagedSafetyLocationAuthorization.canStartIncident("))
         assertTrue(screen.contains("enabled = !state.busy && locationIncidentReady"))
         assertTrue(screen.contains("managed_safety_location_background_body"))
+        assertTrue(cloud.contains("hasUsableHorizontalAccuracy"))
+        assertTrue(screen.contains("managedSafetyLocationDetail(location)"))
+        assertTrue(screen.contains("R.string.safety_location_accuracy_format"))
+        assertTrue(screen.contains("Instant.parse(location.capturedAt)"))
+        assertTrue(screen.contains("FormatStyle.MEDIUM"))
+        assertTrue(screen.contains("managedSafetyLocationCanUpload("))
+        assertFalse(cloud.contains("horizontalAccuracyMeters ?: 10_000.0"))
+        assertTrue(cloud.contains("\"failure_kind\" to \"invalid_location\""))
+        val replaceLocation = cloud
+            .substringAfter("private suspend fun replaceManagedSafetyLocation(")
+            .substringBefore("private fun reconcileManagedSafetyLocationSession(")
+        val permissionCheck = replaceLocation.indexOf(
+            "ManagedSafetyLocationAuthorization.isAuthorized(",
+        )
+        val transport = replaceLocation.indexOf(
+            "client().updateSafetyLocation(",
+        )
+        assertTrue(permissionCheck >= 0)
+        assertTrue(permissionCheck < transport)
+        assertTrue(replaceLocation.contains("\"failure_kind\" to \"location_not_authorized\""))
+        assertTrue(replaceLocation.contains("\"authorization_revoked\""))
+        assertTrue(replaceLocation.contains("SafetyLocationUploadOutcome.STOP"))
+        assertTrue(service.contains("ManagedSafetyLocationAuthorizationWatchdog"))
+        assertTrue(service.contains(".INTERVAL_MILLIS"))
+        assertTrue(service.contains(".shouldStop("))
+        assertTrue(service.contains(
+            ".reconcileSafetyLocationAuthorizationForRuntime()",
+        ))
+        assertTrue(service.contains("ManagedSafetyLocationAuthorization.isAuthorized("))
+        val authorization = cloud
+            .substringAfter("internal object ManagedSafetyLocationAuthorization")
+            .substringBefore("internal fun managedSafetyLocationCanUpload(")
+        assertTrue(authorization.contains("context.packageManager.checkPermission("))
+        assertTrue(authorization.contains("AppOpsManager.permissionToOp("))
+        assertTrue(authorization.contains("appOps.unsafeCheckOpRawNoThrow("))
+        assertTrue(authorization.contains("appOps.checkOpNoThrow("))
+        assertTrue(authorization.contains("Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q"))
+        assertTrue(authorization.contains("AppOpsManager.MODE_ALLOWED"))
+        assertTrue(authorization.contains("AppOpsManager.MODE_FOREGROUND"))
+        assertTrue(authorization.contains("AppOpsManager.MODE_DEFAULT"))
+        assertTrue(authorization.contains("getOrDefault(false)"))
+        val authorizationLifecycle = cloud
+            .substringAfter("internal fun reconcileSafetyLocationAuthorizationForRuntime(")
+            .substringBefore("private fun stopManagedSafetyLocationSession(")
+        assertTrue(authorizationLifecycle.contains(
+            "ManagedSafetyLocationRuntimePolicy.decide(",
+        ))
+        assertTrue(authorizationLifecycle.contains(
+            "ManagedSafetyLocationRuntimeAction.STOP",
+        ))
+        assertTrue(authorizationLifecycle.contains(
+            "ManagedSafetyLocationRuntimeAction.START",
+        ))
+        val sessionReconciliation = cloud
+            .substringAfter("private fun reconcileManagedSafetyLocationSession(")
+            .substringBefore("internal fun stopSafetyLocationForRuntime(")
+        val authorizationBeforeStart = sessionReconciliation.indexOf(
+            "ManagedSafetyLocationAuthorization.isAuthorized(",
+        )
+        val sessionStart = sessionReconciliation.indexOf(
+            "ManagedSafetyLiveLocationSession.start(",
+        )
+        assertTrue(authorizationBeforeStart >= 0)
+        assertTrue(authorizationBeforeStart < sessionStart)
+        assertTrue(boot!!.contains("managedLocationAuthorized"))
+        assertTrue(boot.contains("ManagedSafetyLiveLocationSession.stop(context)"))
+        assertTrue(boot.contains("\"authorization_revoked\""))
         assertFalse(service.contains("\"latitude\" to"))
         assertFalse(service.contains("\"longitude\" to"))
     }
@@ -92,16 +170,77 @@ class ManagedSafetyLocationContractTest {
                 "ManagedSafetyLocationAuthorization.isAuthorized(appContext, shareLocation)",
             ),
         )
+        assertTrue(createIncident.contains("initialLocation: SafetyLocation? = null"))
+        assertTrue(createIncident.contains("managedSafetyLocationCanUpload("))
+        assertTrue(createIncident.contains("location = initialLocation"))
+        assertTrue(createIncident.contains(
+            "if (shareLocation) initialLocation else null",
+        ))
+        assertTrue(createIncident.contains(
+            "initialLocation = effectiveInitialLocation",
+        ))
+        assertTrue(createIncident.contains("\"failure_kind\" to \"invalid_location\""))
         assertTrue(
             createIncident.indexOf("ManagedSafetyLocationAuthorization.isAuthorized") <
                 createIncident.indexOf("preferences.safetyIncidentRequest("),
         )
         assertTrue(
-            screen!!.contains(
+            createIncident.indexOf("managedSafetyLocationCanUpload(") <
+                createIncident.indexOf("preferences.safetyIncidentRequest("),
+        )
+        assertTrue(createIncident.contains("managed_safety_location_needed"))
+        assertFalse(createIncident.contains("managed_safety_location_background_body"))
+        val initialCreate = screen!!
+            .substringAfter("service.createSafetyIncident(")
+            .substringBefore("contactToRemove?.let")
+        assertFalse(initialCreate.contains("service.updateSafetyLocation("))
+        assertTrue(
+            screen.contains(
                 "ManagedSafetyLocationAuthorization.canStartIncident(",
             ),
         )
+        val updateLocation = screen
+            .substringAfter("onUpdateLocation = { incident ->")
+            .substringBefore("onOpenMap =")
+        val updateGuard = updateLocation.indexOf("managedSafetyLocationCanUpload(")
+        val updateLaunch = updateLocation.indexOf("scope.launch")
+        val updateCall = updateLocation.indexOf("service.updateSafetyLocation(")
+        assertTrue(updateGuard >= 0)
+        assertTrue(updateGuard < updateLaunch)
+        assertTrue(updateLaunch < updateCall)
+        val incidents = screen
+            .substringAfter("private fun ManagedSafetyIncidents(")
+            .substringBefore("private fun managedSafetyIncidentStatusResource(")
+        val buttonGuard = incidents.indexOf(
+            "if (incident.shareLocation && currentLocationCanUpload)",
+        )
+        val buttonCallback = incidents.indexOf("onClick = { onUpdateLocation(incident) }")
+        assertTrue(incidents.contains("currentLocationCanUpload"))
+        assertTrue(buttonGuard >= 0)
+        assertTrue(buttonGuard < buttonCallback)
         assertTrue(screen.contains("if (!locationIncidentReady)"))
+        assertTrue(screen.contains(
+            "if (shareLocation) fix else null",
+        ))
+        val clearRequest = createIncident.lastIndexOf(
+            "preferences.clearSafetyIncidentRequest(request.requestId)",
+        )
+        val terminalReplay = createIncident.indexOf("val terminalReplay =")
+        val stateReplacement = createIncident.indexOf("replaceState {")
+        val refresh = createIncident.indexOf(
+            "refreshSafetyData()",
+            startIndex = stateReplacement,
+        )
+        assertTrue(clearRequest >= 0)
+        assertTrue(clearRequest < terminalReplay)
+        assertTrue(terminalReplay < stateReplacement)
+        assertTrue(stateReplacement < refresh)
+        assertTrue(createIncident.contains("creation.incident.duplicate"))
+        assertTrue(createIncident.contains(
+            "creation.incident.status in setOf(\"resolved\", \"canceled\", \"expired\")",
+        ))
+        assertTrue(createIncident.contains("R.string.managed_safety_status_up_to_date"))
+        assertTrue(createIncident.contains("R.string.managed_safety_status_page_started"))
         assertTrue(
             safetyCenter!!.contains(
                 "foregroundLocationReady = hasForegroundLocation",
@@ -112,6 +251,37 @@ class ManagedSafetyLocationContractTest {
                 "backgroundLocationReady = hasBackgroundLocation",
             ),
         )
+    }
+
+    @Test
+    fun incidentIdempotencyRecordDoesNotPersistPreciseLocationMaterial() {
+        val preferences = source(
+            "src/main/java/com/noop/managed/ManagedCloudPreferences.kt",
+            "app/src/main/java/com/noop/managed/ManagedCloudPreferences.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedCloudPreferences.kt",
+        )
+        assumeTrue(preferences != null)
+
+        val record = preferences!!
+            .substringAfter("internal data class ManagedSafetyIncidentRequestRecord(")
+            .substringBefore("internal object ManagedSafetyIncidentRequestPolicy")
+            .lowercase()
+        val encoder = preferences
+            .substringAfter("private fun encodeSafetyIncidentRequest(")
+            .substringBefore("private fun socialDeliveryReceipts(")
+            .lowercase()
+
+        for (sensitiveField in listOf(
+            "latitude",
+            "longitude",
+            "horizontalaccuracy",
+            "capturedat",
+            "initial_location_digest",
+            "initiallocationdigest",
+        )) {
+            assertFalse(record.contains(sensitiveField))
+            assertFalse(encoder.contains(sensitiveField))
+        }
     }
 
     @Test

@@ -1042,6 +1042,532 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         XCTAssertEqual(disposition, .migrate)
     }
 
+    func testLegacyHydrationAdoptionRetiresEitherOwnedRepresentation() async throws {
+        let day = "2026-09-13"
+        let legacyID = "11111111-2222-4333-8444-555555555555"
+        let aggregateID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        let legacy = HydrationLogEntry(
+            id: legacyID,
+            day: day,
+            amountML: 500,
+            loggedAt: 1_789_315_200
+        )
+
+        let legacyDeletedStore = try await managedStore()
+        try await seedLocalHydrationDeleteEvidence(
+            entryID: legacyID,
+            in: legacyDeletedStore
+        )
+        let legacyDeletedDisposition =
+            try await legacyDeletedStore.adoptLegacyHydrationLogEntries(
+                [legacy],
+                alternativeRetirementEntryIDs: [aggregateID],
+                deviceId: "hydration",
+                day: day,
+                metricKey: "hydration"
+            )
+        XCTAssertEqual(legacyDeletedDisposition, .retire)
+
+        let aggregateDeletedStore = try await managedStore()
+        try await seedLocalHydrationDeleteEvidence(
+            entryID: aggregateID,
+            in: aggregateDeletedStore
+        )
+        let aggregateDeletedDisposition =
+            try await aggregateDeletedStore.adoptLegacyHydrationLogEntries(
+                [legacy],
+                alternativeRetirementEntryIDs: [aggregateID],
+                deviceId: "hydration",
+                day: day,
+                metricKey: "hydration"
+            )
+        XCTAssertEqual(aggregateDeletedDisposition, .retire)
+    }
+
+    func testLegacyHydrationAlternativeRetirementDefersAcrossProfiles() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-13"
+        let legacyID = "11111111-2222-4333-8444-555555555555"
+        let aggregateID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        try await seedLocalHydrationDeleteEvidence(
+            entryID: legacyID,
+            in: store
+        )
+        try await store.activateManagedDocumentProfile(
+            accountScopeHash: String(repeating: "b", count: 64),
+            updatedAtMs: 2
+        )
+
+        let disposition = try await store.adoptLegacyHydrationLogEntries(
+            [
+                HydrationLogEntry(
+                    id: legacyID,
+                    day: day,
+                    amountML: 500,
+                    loggedAt: 1_789_315_200
+                ),
+            ],
+            alternativeRetirementEntryIDs: [aggregateID],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .deferForProfileConflict)
+    }
+
+    func testLegacyHydrationResolutionDefersForBoundProfileWithoutWriting() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-12"
+        let legacy = HydrationLogEntry(
+            id: "11111111-2222-4333-8444-555555555555",
+            day: day,
+            amountML: 500,
+            loggedAt: 1_789_228_800
+        )
+        try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "hydration", value: 737)],
+            deviceId: "hydration"
+        )
+
+        let disposition = try await store.resolveLegacyHydrationLogEntries(
+            legacyEntries: [legacy],
+            replacementEntries: [legacy],
+            expectedScalarML: 737,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .deferForProfileConflict)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertTrue(persisted.isEmpty)
+        XCTAssertEqual(metric, 737)
+    }
+
+    func testLegacyHydrationResolutionHonorsLegacyTombstoneWithoutWriting() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-12"
+        let entryID = "11111111-2222-4333-8444-555555555555"
+        let documentID = "99999999-8888-5777-8666-555555555555"
+        let legacy = HydrationLogEntry(
+            id: entryID,
+            day: day,
+            amountML: 500,
+            loggedAt: 1_789_228_800
+        )
+        _ = try await store.replaceHydrationLogEntries(
+            [legacy],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+        let pendingUpsert = try await hydrationCandidate(in: store)
+        let upsertCandidate = try XCTUnwrap(pendingUpsert)
+        try await acknowledge(
+            upsertCandidate,
+            revision: 1,
+            documentID: documentID,
+            store: store
+        )
+        _ = try await store.replaceHydrationLogEntries(
+            [],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+        let pendingDelete = try await hydrationCandidate(in: store)
+        let deleteCandidate = try XCTUnwrap(pendingDelete)
+        XCTAssertTrue(deleteCandidate.deleted)
+        try await acknowledge(
+            deleteCandidate,
+            revision: 2,
+            documentID: documentID,
+            store: store
+        )
+        try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "hydration", value: 737)],
+            deviceId: "hydration"
+        )
+
+        let disposition = try await store.resolveLegacyHydrationLogEntries(
+            legacyEntries: [legacy],
+            replacementEntries: [legacy],
+            expectedScalarML: 737,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .retire)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertTrue(persisted.isEmpty)
+        XCTAssertEqual(metric, 737)
+    }
+
+    func testLegacyHydrationResolutionHonorsReplacementOnlyTombstone() async throws {
+        let store = try await WhoopStore.inMemory()
+        let day = "2026-09-12"
+        let replacementID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        try await seedLocalHydrationDeleteEvidence(
+            entryID: replacementID,
+            in: store
+        )
+        try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "hydration", value: 737)],
+            deviceId: "hydration"
+        )
+        let legacy = HydrationLogEntry(
+            id: "11111111-2222-4333-8444-555555555555",
+            day: day,
+            amountML: 500,
+            loggedAt: 1_789_228_800
+        )
+        let aggregate = HydrationLogEntry(
+            id: replacementID,
+            day: day,
+            amountML: 737,
+            loggedAt: 1_789_228_800
+        )
+
+        let disposition = try await store.resolveLegacyHydrationLogEntries(
+            legacyEntries: [legacy],
+            replacementEntries: [aggregate],
+            expectedScalarML: 737,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .retire)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertTrue(persisted.isEmpty)
+        XCTAssertEqual(metric, 737)
+    }
+
+    func testLegacyHydrationResolutionDefersMixedDeletionStateWithoutWriting() async throws {
+        let store = try await WhoopStore.inMemory()
+        let day = "2026-09-12"
+        let deletedID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        try await seedLocalHydrationDeleteEvidence(
+            entryID: deletedID,
+            in: store
+        )
+        try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "hydration", value: 737)],
+            deviceId: "hydration"
+        )
+        let legacy = [
+            HydrationLogEntry(
+                id: deletedID,
+                day: day,
+                amountML: 250,
+                loggedAt: 1_789_228_800
+            ),
+            HydrationLogEntry(
+                id: "11111111-2222-4333-8444-555555555555",
+                day: day,
+                amountML: 250,
+                loggedAt: 1_789_228_860
+            ),
+        ]
+
+        let disposition = try await store.resolveLegacyHydrationLogEntries(
+            legacyEntries: legacy,
+            replacementEntries: legacy,
+            expectedScalarML: 737,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .deferForMixedDeletionState)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertTrue(persisted.isEmpty)
+        XCTAssertEqual(metric, 737)
+    }
+
+    func testLegacyHydrationAdoptionRetryRechecksBoundProfile() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-14"
+        let legacy = HydrationLogEntry(
+            id: "11111111-2222-4333-8444-555555555555",
+            day: day,
+            amountML: 500,
+            loggedAt: 1_789_401_600
+        )
+        try await store.seedHydrationPersistenceForTesting(
+            [legacy],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration",
+            totalML: 500,
+            suppressManagedDocumentDirtyForTesting: true
+        )
+
+        let disposition = try await store.adoptLegacyHydrationLogEntries(
+            [legacy],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .deferForProfileConflict)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertEqual(persisted, [legacy])
+        XCTAssertEqual(metric, 500)
+    }
+
+    func testLegacyHydrationAdoptionRetryHonorsTombstone() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-14"
+        let entryID = "11111111-2222-4333-8444-555555555555"
+        let legacy = HydrationLogEntry(
+            id: entryID,
+            day: day,
+            amountML: 500,
+            loggedAt: 1_789_401_600
+        )
+        try await seedLocalHydrationDeleteEvidence(
+            entryID: entryID,
+            in: store
+        )
+        try await store.seedHydrationPersistenceForTesting(
+            [legacy],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration",
+            totalML: 500,
+            suppressManagedDocumentDirtyForTesting: true
+        )
+
+        let disposition = try await store.adoptLegacyHydrationLogEntries(
+            [legacy],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .retire)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertEqual(persisted, [legacy])
+        XCTAssertEqual(metric, 500)
+    }
+
+    func testLegacyHydrationAdoptionRetryDefersMixedDeletionState() async throws {
+        let store = try await WhoopStore.inMemory()
+        let day = "2026-09-14"
+        let deletedID = "11111111-2222-4333-8444-555555555555"
+        let legacy = [
+            HydrationLogEntry(
+                id: deletedID,
+                day: day,
+                amountML: 250,
+                loggedAt: 1_789_401_600
+            ),
+            HydrationLogEntry(
+                id: "22222222-3333-4444-8555-666666666666",
+                day: day,
+                amountML: 250,
+                loggedAt: 1_789_401_660
+            ),
+        ]
+        try await seedLocalHydrationDeleteEvidence(
+            entryID: deletedID,
+            in: store
+        )
+        try await store.seedHydrationPersistenceForTesting(
+            legacy,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration",
+            totalML: 500,
+            suppressManagedDocumentDirtyForTesting: true
+        )
+
+        let disposition = try await store.adoptLegacyHydrationLogEntries(
+            legacy,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .deferForMixedDeletionState)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertEqual(persisted, legacy)
+        XCTAssertEqual(metric, 500)
+    }
+
+    func testLegacyHydrationResolutionRetryRechecksBoundProfile() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-15"
+        let legacy = HydrationLogEntry(
+            id: "11111111-2222-4333-8444-555555555555",
+            day: day,
+            amountML: 500,
+            loggedAt: 1_789_488_000
+        )
+        let replacement = HydrationLogEntry(
+            id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            day: day,
+            amountML: 737,
+            loggedAt: 1_789_488_000
+        )
+        try await store.seedHydrationPersistenceForTesting(
+            [replacement],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration",
+            totalML: 737,
+            suppressManagedDocumentDirtyForTesting: true
+        )
+
+        let disposition = try await store.resolveLegacyHydrationLogEntries(
+            legacyEntries: [legacy],
+            replacementEntries: [replacement],
+            expectedScalarML: 737,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .deferForProfileConflict)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertEqual(persisted, [replacement])
+        XCTAssertEqual(metric, 737)
+    }
+
+    func testLegacyHydrationResolutionRetryHonorsTombstone() async throws {
+        let store = try await managedStore()
+        let day = "2026-09-15"
+        let legacyID = "11111111-2222-4333-8444-555555555555"
+        let replacementID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        let legacy = HydrationLogEntry(
+            id: legacyID,
+            day: day,
+            amountML: 500,
+            loggedAt: 1_789_488_000
+        )
+        let replacement = HydrationLogEntry(
+            id: replacementID,
+            day: day,
+            amountML: 737,
+            loggedAt: 1_789_488_000
+        )
+        try await seedLocalHydrationDeleteEvidence(
+            entryID: legacyID,
+            in: store
+        )
+        try await store.seedHydrationPersistenceForTesting(
+            [replacement],
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration",
+            totalML: 737,
+            suppressManagedDocumentDirtyForTesting: true
+        )
+
+        let disposition = try await store.resolveLegacyHydrationLogEntries(
+            legacyEntries: [legacy],
+            replacementEntries: [replacement],
+            expectedScalarML: 737,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .retire)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertEqual(persisted, [replacement])
+        XCTAssertEqual(metric, 737)
+    }
+
+    func testLegacyHydrationResolutionRetryDefersMixedDeletionState() async throws {
+        let store = try await WhoopStore.inMemory()
+        let day = "2026-09-15"
+        let deletedID = "11111111-2222-4333-8444-555555555555"
+        let legacy = [
+            HydrationLogEntry(
+                id: deletedID,
+                day: day,
+                amountML: 250,
+                loggedAt: 1_789_488_000
+            ),
+            HydrationLogEntry(
+                id: "22222222-3333-4444-8555-666666666666",
+                day: day,
+                amountML: 250,
+                loggedAt: 1_789_488_060
+            ),
+        ]
+        try await seedLocalHydrationDeleteEvidence(
+            entryID: deletedID,
+            in: store
+        )
+        try await store.seedHydrationPersistenceForTesting(
+            legacy,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration",
+            totalML: 500,
+            suppressManagedDocumentDirtyForTesting: true
+        )
+
+        let disposition = try await store.resolveLegacyHydrationLogEntries(
+            legacyEntries: legacy,
+            replacementEntries: legacy,
+            expectedScalarML: 737,
+            deviceId: "hydration",
+            day: day,
+            metricKey: "hydration"
+        )
+
+        XCTAssertEqual(disposition, .deferForMixedDeletionState)
+        let persisted = try await store.hydrationLogEntries(
+            deviceId: "hydration",
+            day: day
+        )
+        let metric = try await hydrationMetric(in: store, day: day)
+        XCTAssertEqual(persisted, legacy)
+        XCTAssertEqual(metric, 500)
+    }
+
     func testUppercaseHydrationTombstoneStillRetiresCanonicalLegacyID() async throws {
         let store = try await managedStore()
         let day = "2026-09-11"
@@ -2692,6 +3218,41 @@ final class ManagedSyncDocumentsTests: XCTestCase {
             limit: 10
         ).first {
             $0.tableName == "hydrationEntry"
+        }
+    }
+
+    private func seedLocalHydrationDeleteEvidence(
+        entryID: String,
+        in store: WhoopStore
+    ) async throws {
+        try await store.registryWriter.write { db in
+            let localProfileID = try XCTUnwrap(
+                String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT localProfileId
+                        FROM managedLocalProfile
+                        WHERE bindingId = 1
+                        """
+                )
+            )
+            let localKey = try XCTUnwrap(
+                String.fetchOne(
+                    db,
+                    sql: "SELECT lower(hex(CAST(? AS BLOB)))",
+                    arguments: [entryID]
+                )
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO managedDocumentDirty (
+                        localProfileId, tableName, localKey, documentKind,
+                        generation, operation, updatedAtMs, payloadJSON
+                    ) VALUES (?, 'hydrationEntry', ?, 'hydration',
+                              1, 'delete', 1, NULL)
+                    """,
+                arguments: [localProfileID, localKey]
+            )
         }
     }
 

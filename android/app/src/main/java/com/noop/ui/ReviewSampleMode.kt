@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -344,7 +345,11 @@ internal fun ReviewSampleRoot(onExit: () -> Unit) {
         containerColor = Palette.surfaceBase,
         topBar = { ReviewSampleBanner(onExit) },
         bottomBar = {
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
+            ) {
                 val tabLabels = ReviewSampleTab.entries.map { stringResource(it.title) }
                 val labelLayout = rememberBottomBarLabelLayout(
                     labels = tabLabels,
@@ -354,9 +359,8 @@ internal fun ReviewSampleRoot(onExit: () -> Unit) {
                 )
                 NavigationBar(
                     containerColor = Palette.surfaceRaised,
-                    modifier = Modifier
-                        .height(maxOf(80, labelLayout.barHeightDp).dp)
-                        .navigationBarsPadding(),
+                    modifier = Modifier.height(maxOf(80, labelLayout.barHeightDp).dp),
+                    windowInsets = WindowInsets(0, 0, 0, 0),
                 ) {
                     ReviewSampleTab.entries.forEachIndexed { index, tab ->
                         val tabLabel = tabLabels[index]

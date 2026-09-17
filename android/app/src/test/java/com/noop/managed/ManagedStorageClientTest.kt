@@ -1,5 +1,6 @@
 package com.noop.managed
 
+import com.noop.safety.SafetyLocation
 import kotlinx.coroutines.test.runTest
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -10,10 +11,12 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.time.Instant
 import java.util.UUID
 
 class ManagedStorageClientTest {
@@ -1145,11 +1148,137 @@ class ManagedStorageClientTest {
     }
 
     @Test
+    fun managedSafetyCreateAllowsMissingLocationForDuplicateReplay() = runTest {
+        val incidentId = UUID.randomUUID()
+        val ownerId = UUID.randomUUID()
+        val firstId = UUID.randomUUID()
+        val secondId = UUID.randomUUID()
+        val initialLocation = SafetyLocation(
+            latitude = 17.385,
+            longitude = 78.4867,
+            horizontalAccuracyMeters = 12.5,
+            capturedAtUnix = Instant.parse("2026-09-08T10:00:00Z").epochSecond,
+        )
+
+        fun createClient(
+            status: String,
+            duplicate: Boolean = true,
+        ): ManagedStorageClient =
+            ManagedStorageClient(
+                config,
+                client { request ->
+                    val incident = safetyIncident(
+                        incidentId,
+                        ownerId,
+                        firstId,
+                        secondId,
+                    )
+                        .put("status", status)
+                        .put(
+                            "ended_at",
+                            if (status == "open") JSONObject.NULL
+                            else "2026-09-08T18:00:00Z",
+                        )
+                        .put("duplicate", duplicate)
+                        .put("location", JSONObject.NULL)
+                    response(
+                        request,
+                        200,
+                        JSONObject()
+                            .put("incident", incident)
+                            .put("push_outcome", "deferred")
+                            .toString(),
+                    )
+                },
+            )
+
+        val replay = createClient("expired").createSafetyIncident(
+            authorization = authorization,
+            requestId = UUID.randomUUID(),
+            durationHours = 8,
+            shareLocation = true,
+            initialLocation = initialLocation,
+        )
+        assertTrue(replay.incident.duplicate)
+        assertEquals("expired", replay.incident.status)
+        assertNull(replay.incident.location)
+
+        val activeReplay = createClient("open").createSafetyIncident(
+            authorization = authorization,
+            requestId = UUID.randomUUID(),
+            durationHours = 8,
+            shareLocation = true,
+            initialLocation = initialLocation,
+        )
+        assertTrue(activeReplay.incident.duplicate)
+        assertEquals("open", activeReplay.incident.status)
+        assertNull(activeReplay.incident.location)
+
+        try {
+            createClient(status = "open", duplicate = false).createSafetyIncident(
+                authorization = authorization,
+                requestId = UUID.randomUUID(),
+                durationHours = 8,
+                shareLocation = true,
+                initialLocation = initialLocation,
+            )
+            fail("New incident without its accepted initial location was accepted")
+        } catch (_: ManagedStorageException.InvalidResponse) {
+            // Expected.
+        }
+    }
+
+    @Test
+    fun managedSafetyRejectsLocationWhenSharingIsOff() = runTest {
+        val incident = safetyIncident(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+        )
+            .put("share_location", false)
+            .put(
+                "location",
+                JSONObject()
+                    .put("sequence", 1)
+                    .put("latitude", 17.385)
+                    .put("longitude", 78.4867)
+                    .put("horizontal_accuracy_m", 12.5)
+                    .put("captured_at", "2026-09-08T10:00:00Z")
+                    .put("received_at", "2026-09-08T10:00:01Z"),
+            )
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "incidents",
+                            org.json.JSONArray().put(incident),
+                        )
+                        .toString(),
+                )
+            },
+        )
+
+        try {
+            client.safetyIncidents(authorization)
+            fail("Location was accepted while sharing was off")
+        } catch (_: ManagedStorageException.InvalidResponse) {
+            // Expected.
+        }
+    }
+
+    @Test
     fun managedSafetyContractIsBoundedAndLocationIsLatestOnly() = runTest {
         val ownerId = UUID.fromString("00000000-0000-0000-0000-000000000101")
         val firstId = UUID.fromString("00000000-0000-0000-0000-000000000102")
         val secondId = UUID.fromString("00000000-0000-0000-0000-000000000103")
         val incidentId = UUID.fromString("00000000-0000-0000-0000-000000000104")
+        val noLocationIncidentId =
+            UUID.fromString("00000000-0000-0000-0000-000000000105")
         val token = "fcm-token:ABC_def-1234567890"
         val client = ManagedStorageClient(
             config,
@@ -1191,21 +1320,65 @@ class ManagedStorageClientTest {
                         .put("maximum_allowed", 5)
                     "/v1/managed/safety/incidents" -> {
                         val requestBody = request.jsonBody()
-                        assertEquals("band_sos", requestBody.getString("trigger"))
                         assertEquals(8, requestBody.getInt("duration_hours"))
-                        assertTrue(requestBody.getBoolean("share_location"))
-                        JSONObject()
-                            .put(
-                                "incident",
-                                safetyIncident(
-                                    incidentId,
-                                    ownerId,
-                                    firstId,
-                                    secondId,
-                                    trigger = "band_sos",
-                                ),
+                        if (requestBody.getBoolean("share_location")) {
+                            assertEquals(
+                                "band_sos",
+                                requestBody.getString("trigger"),
                             )
-                            .put("push_outcome", "attempted")
+                            val initialLocation =
+                                requestBody.getJSONObject("initial_location")
+                            assertEquals(1L, initialLocation.getLong("sequence"))
+                            assertEquals(
+                                "2026-09-08T10:00:00Z",
+                                initialLocation.getString("captured_at"),
+                            )
+                            JSONObject()
+                                .put(
+                                    "incident",
+                                    safetyIncident(
+                                        incidentId,
+                                        ownerId,
+                                        firstId,
+                                        secondId,
+                                        trigger = "band_sos",
+                                    ).put(
+                                        "location",
+                                        JSONObject()
+                                            .put("sequence", 1)
+                                            .put("latitude", 17.385)
+                                            .put("longitude", 78.4867)
+                                            .put("horizontal_accuracy_m", 12.5)
+                                            .put(
+                                                "captured_at",
+                                                "2026-09-08T10:00:00Z",
+                                            )
+                                            .put(
+                                                "received_at",
+                                                "2026-09-08T10:00:01Z",
+                                            ),
+                                    ),
+                                )
+                                .put("push_outcome", "attempted")
+                        } else {
+                            assertEquals(
+                                "manual_sos",
+                                requestBody.getString("trigger"),
+                            )
+                            assertFalse(requestBody.has("initial_location"))
+                            JSONObject()
+                                .put(
+                                    "incident",
+                                    safetyIncident(
+                                        noLocationIncidentId,
+                                        ownerId,
+                                        firstId,
+                                        secondId,
+                                        trigger = "manual_sos",
+                                    ).put("share_location", false),
+                                )
+                                .put("push_outcome", "attempted")
+                        }
                     }
                     "/v1/managed/safety/incidents/" +
                         "${incidentId.toString().lowercase()}/location" -> {
@@ -1245,9 +1418,30 @@ class ManagedStorageClientTest {
             trigger = "band_sos",
             durationHours = 8,
             shareLocation = true,
+            initialLocation = SafetyLocation(
+                latitude = 17.385,
+                longitude = 78.4867,
+                horizontalAccuracyMeters = 12.5,
+                capturedAtUnix =
+                    Instant.parse("2026-09-08T10:00:00Z").epochSecond,
+            ),
         )
         assertEquals(incidentId, creation.incident.incidentId)
         assertEquals("attempted", creation.pushOutcome)
+        val noLocationCreation = client.createSafetyIncident(
+            authorization = authorization,
+            requestId = UUID.randomUUID(),
+            trigger = "manual_sos",
+            durationHours = 8,
+            shareLocation = false,
+            initialLocation = null,
+        )
+        assertEquals(
+            noLocationIncidentId,
+            noLocationCreation.incident.incidentId,
+        )
+        assertFalse(noLocationCreation.incident.shareLocation)
+        assertNull(noLocationCreation.incident.location)
         val location = client.updateSafetyLocation(
             authorization = authorization,
             incidentId = incidentId,

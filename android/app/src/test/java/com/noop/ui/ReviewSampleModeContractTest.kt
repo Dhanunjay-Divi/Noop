@@ -54,6 +54,14 @@ class ReviewSampleModeContractTest {
         assertTrue(block.contains("maxLines = labelLayout.maxLines"))
         assertTrue(block.contains("alwaysShowLabel = true"))
         assertTrue(block.contains(".semantics { contentDescription = tabLabel }"))
+        assertTrue(block.contains(".fillMaxWidth()\n                    .navigationBarsPadding()"))
+        assertTrue(block.contains("windowInsets = WindowInsets(0, 0, 0, 0)"))
+        assertFalse(
+            block.contains(
+                ".height(maxOf(80, labelLayout.barHeightDp).dp)\n" +
+                    "                        .navigationBarsPadding()",
+            ),
+        )
         assertFalse(block.contains("TextOverflow.Ellipsis"))
         assertFalse(block.contains("showVisualLabels"))
     }

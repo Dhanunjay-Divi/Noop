@@ -65,6 +65,7 @@ public struct ManagedDocumentApplyResult: Equatable, Sendable {
 public enum ManagedHydrationLegacyDisposition: Equatable, Sendable {
     case migrate
     case retire
+    case reconcileHigherScalar(totalML: Int)
     case deferForProfileConflict
     case deferForMixedDeletionState
 }
@@ -730,16 +731,43 @@ extension WhoopStore {
         _ db: Database,
         entryIDs: [String]
     ) throws -> ManagedHydrationLegacyDisposition {
-        guard !entryIDs.isEmpty,
-              entryIDs.count <= Self.hydrationLegacyMaximumEntryCount else {
+        try managedHydrationLegacyDisposition(
+            db,
+            entryIDGroups: [entryIDs]
+        )
+    }
+
+    /// Classifies equivalent legacy representations together. Each group is one complete historical
+    /// representation of the same day, such as the retired drink list or its deterministic daily-total
+    /// replacement. A complete tombstone for either representation retires the global preference, but
+    /// evidence owned by another profile still wins and defers the decision.
+    static func managedHydrationLegacyDisposition(
+        _ db: Database,
+        entryIDGroups: [[String]]
+    ) throws -> ManagedHydrationLegacyDisposition {
+        guard !entryIDGroups.isEmpty,
+              entryIDGroups.count <= 2 else {
             throw ManagedDocumentStoreError.invalidState
         }
+        var canonicalGroups: [Set<String>] = []
         var canonicalIDs = Set<String>()
-        for rawID in entryIDs {
-            guard let id = UUID(uuidString: rawID) else {
+        for entryIDs in entryIDGroups {
+            guard !entryIDs.isEmpty,
+                  entryIDs.count <= Self.hydrationLegacyMaximumEntryCount else {
                 throw ManagedDocumentStoreError.invalidState
             }
-            canonicalIDs.insert(id.uuidString.lowercased())
+            var canonicalGroup = Set<String>()
+            for rawID in entryIDs {
+                guard let id = UUID(uuidString: rawID) else {
+                    throw ManagedDocumentStoreError.invalidState
+                }
+                canonicalGroup.insert(id.uuidString.lowercased())
+            }
+            guard !canonicalGroup.isEmpty else {
+                throw ManagedDocumentStoreError.invalidState
+            }
+            canonicalGroups.append(canonicalGroup)
+            canonicalIDs.formUnion(canonicalGroup)
         }
         guard !canonicalIDs.isEmpty else {
             throw ManagedDocumentStoreError.invalidState
@@ -794,25 +822,6 @@ extension WhoopStore {
                 """,
             arguments: [Self.managedHydrationTable]
         )
-        let sortedCanonicalIDs = canonicalIDs.sorted()
-        let idPlaceholders = Array(
-            repeating: "?",
-            count: sortedCanonicalIDs.count
-        ).joined(separator: ", ")
-        let liveIDs = Set(
-            try String.fetchAll(
-                db,
-                sql: """
-                    SELECT id
-                    FROM hydrationEntry
-                    WHERE LOWER(id) IN (\(idPlaceholders))
-                    """,
-                arguments: StatementArguments(sortedCanonicalIDs)
-            ).compactMap {
-                UUID(uuidString: $0)?.uuidString.lowercased()
-            }
-        )
-
         var activeStates: [String: [String: Row]] = [:]
         var activeDirtyRows: [String: [String: Row]] = [:]
         var hasForeignProfileEvidence = false
@@ -848,13 +857,9 @@ extension WhoopStore {
             return .deferForProfileConflict
         }
 
-        var deletedCount = 0
-        var hasUnknownManagedState = false
+        var deletedIDs = Set<String>()
+        var indeterminateIDs = Set<String>()
         for canonicalID in canonicalIDs {
-            if liveIDs.contains(canonicalID) {
-                continue
-            }
-
             let states = activeStates[canonicalID] ?? [:]
             let dirty = activeDirtyRows[canonicalID] ?? [:]
             let localKeys = Set(states.keys).union(dirty.keys)
@@ -894,15 +899,18 @@ extension WhoopStore {
             }
             if hasUnknownEvidence
                 || (hasDeletedEvidence && hasNonDeletedEvidence) {
-                hasUnknownManagedState = true
+                indeterminateIDs.insert(canonicalID)
             } else if hasDeletedEvidence {
-                deletedCount += 1
+                deletedIDs.insert(canonicalID)
             }
         }
-        if deletedCount == canonicalIDs.count {
+        if canonicalGroups.contains(where: { $0.isSubset(of: deletedIDs) }) {
             return .retire
         }
-        if deletedCount > 0 || hasUnknownManagedState {
+        if !indeterminateIDs.isEmpty
+            || canonicalGroups.contains(where: {
+                !$0.isDisjoint(with: deletedIDs)
+            }) {
             return .deferForMixedDeletionState
         }
         // A retired global preference has no account provenance. It may be adopted only while the

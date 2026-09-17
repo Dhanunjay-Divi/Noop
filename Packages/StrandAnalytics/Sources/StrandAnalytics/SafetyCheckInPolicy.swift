@@ -84,6 +84,7 @@ public struct SafetyLocation: Equatable, Sendable {
     /// platforms can return cached locations, so structural coordinate validation is not sufficient.
     public static let maximumAgeSeconds = 5 * 60
     public static let maximumFutureClockSkewSeconds = 60
+    public static let maximumHorizontalAccuracyMeters = 10_000.0
 
     public let latitude: Double
     public let longitude: Double
@@ -105,6 +106,14 @@ public struct SafetyLocation: Equatable, Sendable {
             && (-90.0...90.0).contains(latitude)
             && (-180.0...180.0).contains(longitude)
             && capturedAtUnix > 0
+            && (horizontalAccuracyMeters == nil || hasUsableHorizontalAccuracy)
+    }
+
+    public var hasUsableHorizontalAccuracy: Bool {
+        guard let horizontalAccuracyMeters else { return false }
+        return horizontalAccuracyMeters.isFinite
+            && (0.0...Self.maximumHorizontalAccuracyMeters)
+                .contains(horizontalAccuracyMeters)
     }
 
     public func isUsable(atUnix nowUnix: Int) -> Bool {

@@ -410,6 +410,16 @@
     <string name="appwide_hydration_edit_entry_accessibility_format">Editar registo de água de %1$s</string>
     <string name="appwide_hydration_goal_progress_format">%1$d%% do objetivo para %2$s</string>
     <string name="appwide_hydration_history_through_format">7 dias até %1$s</string>
+    <string name="appwide_hydration_legacy_conflict_detail">Manter o total guardado substitui as bebidas listadas por um único total diário anterior. Usar a lista de bebidas altera o dia para a quantidade indicada. Nada muda até escolher.</string>
+    <string name="appwide_hydration_legacy_conflict_title">Escolha a hidratação guardada deste dia</string>
+    <string name="appwide_hydration_legacy_keep_total">Manter total guardado</string>
+    <string name="appwide_hydration_legacy_keep_total_a11y_format">Manter total diário guardado, %1$s</string>
+    <string name="appwide_hydration_legacy_keep_total_hint">Substitui as bebidas listadas por um único total diário anterior.</string>
+    <string name="appwide_hydration_legacy_listed_total">Total da lista de bebidas</string>
+    <string name="appwide_hydration_legacy_saved_total">Total diário guardado</string>
+    <string name="appwide_hydration_legacy_use_list">Usar bebidas listadas</string>
+    <string name="appwide_hydration_legacy_use_list_a11y_format">Usar total das bebidas listadas, %1$s</string>
+    <string name="appwide_hydration_legacy_use_list_hint">Altera o total do dia para as bebidas listadas.</string>
     <string name="appwide_hydration_load_failed">Não foi possível carregar a hidratação. Tente novamente.</string>
     <string name="appwide_hydration_logged_day">Registado %1$s</string>
     <string name="appwide_hydration_logged_on_format">Registado em %1$s</string>

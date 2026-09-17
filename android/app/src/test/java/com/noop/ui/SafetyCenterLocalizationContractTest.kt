@@ -206,11 +206,8 @@ class SafetyCenterLocalizationContractTest {
         assertTrue(source.contains("R.string.managed_safety_confirm_body"))
         assertTrue(source.contains("durationHours,"))
         assertTrue(source.contains("shareLocation = shareLocation"))
-        assertTrue(
-            source.contains(
-                "if (shareLocation && incident != null && fix != null)",
-            ),
-        )
+        assertTrue(source.contains("initialLocation ="))
+        assertTrue(source.contains("if (shareLocation) fix else null"))
         assertTrue(source.contains("items = listOf(8, 12)"))
 
         val folders = listOf(

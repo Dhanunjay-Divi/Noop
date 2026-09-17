@@ -178,6 +178,7 @@ fun SafetyCenterScreen() {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 locationPermissionRevision += 1
+                managedService.reconcileSafetyLocationAuthorizationForRuntime()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -259,6 +260,7 @@ fun SafetyCenterScreen() {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
         locationPermissionRevision += 1
+        managedService.reconcileSafetyLocationAuthorizationForRuntime()
     }
 
     fun requestLocation() {

@@ -175,6 +175,116 @@
     "zh-Hans": "需要更正",
     "zh-Hant": "需要更正"
   },
+  "appwide.hydration.legacy_conflict_detail": {
+    "de": "Wenn du die gespeicherte Summe behältst, werden die aufgeführten Getränke durch eine ältere Tagessumme ersetzt. Mit der Getränkeliste wird der Tag auf die aufgeführte Menge geändert. Bis zu deiner Auswahl wird nichts geändert.",
+    "en": "Keeping the saved total replaces the listed drinks with one older daily total. Using the drink list changes the day to the listed amount. Nothing changes until you choose.",
+    "es": "Conservar el total guardado sustituye las bebidas de la lista por un único total diario anterior. Usar la lista de bebidas cambia el día a la cantidad indicada. Nada cambiará hasta que elijas.",
+    "fr": "Conserver le total enregistré remplace les boissons de la liste par un ancien total quotidien unique. Utiliser la liste des boissons ramène la journée au montant indiqué. Rien ne change tant que vous n’avez pas choisi.",
+    "it": "Mantenere il totale salvato sostituisce le bevande elencate con un unico totale giornaliero precedente. Usare l’elenco delle bevande cambia il giorno alla quantità indicata. Non cambierà nulla finché non scegli.",
+    "pt-PT": "Manter o total guardado substitui as bebidas listadas por um único total diário anterior. Usar a lista de bebidas altera o dia para a quantidade indicada. Nada muda até escolher.",
+    "ru": "Если сохранить суточный итог, список напитков будет заменён одной более ранней суточной суммой. Если использовать список напитков, итог дня изменится до указанного количества. До выбора ничего не изменится.",
+    "zh-Hans": "保留已保存的总量会用一条较早的每日总量替换所列饮水记录。使用饮水记录会把当天总量改为列表中的数值。在您选择之前，不会更改任何数据。",
+    "zh-Hant": "保留已儲存的總量會用一筆較早的每日總量取代所列飲水記錄。使用飲水記錄會把當天總量改為清單中的數值。在您選擇之前，不會變更任何資料。"
+  },
+  "appwide.hydration.legacy_conflict_title": {
+    "de": "Gespeicherte Wassermenge für diesen Tag wählen",
+    "en": "Choose this day’s saved hydration",
+    "es": "Elige la hidratación guardada de este día",
+    "fr": "Choisissez l’hydratation enregistrée pour cette journée",
+    "it": "Scegli l’idratazione salvata per questo giorno",
+    "pt-PT": "Escolha a hidratação guardada deste dia",
+    "ru": "Выберите сохранённый итог воды за этот день",
+    "zh-Hans": "选择这一天保存的饮水量",
+    "zh-Hant": "選擇這一天儲存的飲水量"
+  },
+  "appwide.hydration.legacy_keep_total": {
+    "de": "Gespeicherte Summe behalten",
+    "en": "Keep saved total",
+    "es": "Conservar total guardado",
+    "fr": "Conserver le total enregistré",
+    "it": "Mantieni il totale salvato",
+    "pt-PT": "Manter total guardado",
+    "ru": "Сохранить записанный итог",
+    "zh-Hans": "保留已保存的总量",
+    "zh-Hant": "保留已儲存的總量"
+  },
+  "appwide.hydration.legacy_keep_total_a11y_format": {
+    "de": "Gespeicherte Tagessumme behalten, %1$s",
+    "en": "Keep saved daily total, %1$s",
+    "es": "Conservar total diario guardado, %1$s",
+    "fr": "Conserver le total quotidien enregistré, %1$s",
+    "it": "Mantieni il totale giornaliero salvato, %1$s",
+    "pt-PT": "Manter total diário guardado, %1$s",
+    "ru": "Сохранить записанный суточный итог, %1$s",
+    "zh-Hans": "保留已保存的每日总量，%1$s",
+    "zh-Hant": "保留已儲存的每日總量，%1$s"
+  },
+  "appwide.hydration.legacy_keep_total_hint": {
+    "de": "Ersetzt die aufgeführten Getränke durch eine ältere Tagessumme.",
+    "en": "Replaces the listed drinks with one older daily total.",
+    "es": "Sustituye las bebidas de la lista por un único total diario anterior.",
+    "fr": "Remplace les boissons de la liste par un ancien total quotidien unique.",
+    "it": "Sostituisce le bevande elencate con un unico totale giornaliero precedente.",
+    "pt-PT": "Substitui as bebidas listadas por um único total diário anterior.",
+    "ru": "Заменяет список напитков одной более ранней суточной суммой.",
+    "zh-Hans": "用一条较早的每日总量替换所列饮水记录。",
+    "zh-Hant": "用一筆較早的每日總量取代所列飲水記錄。"
+  },
+  "appwide.hydration.legacy_listed_total": {
+    "de": "Summe der Getränkeliste",
+    "en": "Drink list total",
+    "es": "Total de la lista de bebidas",
+    "fr": "Total de la liste des boissons",
+    "it": "Totale dell’elenco delle bevande",
+    "pt-PT": "Total da lista de bebidas",
+    "ru": "Итог списка напитков",
+    "zh-Hans": "饮水记录总量",
+    "zh-Hant": "飲水記錄總量"
+  },
+  "appwide.hydration.legacy_saved_total": {
+    "de": "Gespeicherte Tagessumme",
+    "en": "Saved daily total",
+    "es": "Total diario guardado",
+    "fr": "Total quotidien enregistré",
+    "it": "Totale giornaliero salvato",
+    "pt-PT": "Total diário guardado",
+    "ru": "Сохранённый суточный итог",
+    "zh-Hans": "已保存的每日总量",
+    "zh-Hant": "已儲存的每日總量"
+  },
+  "appwide.hydration.legacy_use_list": {
+    "de": "Aufgeführte Getränke verwenden",
+    "en": "Use listed drinks",
+    "es": "Usar bebidas de la lista",
+    "fr": "Utiliser les boissons de la liste",
+    "it": "Usa le bevande elencate",
+    "pt-PT": "Usar bebidas listadas",
+    "ru": "Использовать список напитков",
+    "zh-Hans": "使用所列饮水记录",
+    "zh-Hant": "使用所列飲水記錄"
+  },
+  "appwide.hydration.legacy_use_list_a11y_format": {
+    "de": "Summe der aufgeführten Getränke verwenden, %1$s",
+    "en": "Use listed drinks total, %1$s",
+    "es": "Usar total de las bebidas de la lista, %1$s",
+    "fr": "Utiliser le total des boissons de la liste, %1$s",
+    "it": "Usa il totale delle bevande elencate, %1$s",
+    "pt-PT": "Usar total das bebidas listadas, %1$s",
+    "ru": "Использовать итог списка напитков, %1$s",
+    "zh-Hans": "使用所列饮水记录总量，%1$s",
+    "zh-Hant": "使用所列飲水記錄總量，%1$s"
+  },
+  "appwide.hydration.legacy_use_list_hint": {
+    "de": "Ändert die Tagessumme auf die aufgeführten Getränke.",
+    "en": "Changes the day total to the listed drinks.",
+    "es": "Cambia el total del día a las bebidas de la lista.",
+    "fr": "Ramène le total de la journée aux boissons de la liste.",
+    "it": "Cambia il totale del giorno alle bevande elencate.",
+    "pt-PT": "Altera o total do dia para as bebidas listadas.",
+    "ru": "Изменяет итог дня до суммы напитков в списке.",
+    "zh-Hans": "把当天总量改为所列饮水记录的总量。",
+    "zh-Hant": "把當天總量改為所列飲水記錄的總量。"
+  },
   "appwide.hydration.logged_day": {
     "de": "%1$s erfasst",
     "en": "Logged %1$s",

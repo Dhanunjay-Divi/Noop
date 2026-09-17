@@ -101,13 +101,6 @@ class ManagedSafetyRequestDecision(StrictModel):
     decision: Literal["accept", "decline"]
 
 
-class ManagedSafetyIncidentCreate(StrictModel):
-    request_id: UUID
-    trigger: Literal["manual_sos", "band_sos"] = "manual_sos"
-    duration_hours: Literal[8, 12] = 8
-    share_location: bool = True
-
-
 class ManagedSafetyLocationUpdate(StrictModel):
     sequence: int = Field(ge=1, le=9_223_372_036_854_775_807)
     latitude: float = Field(ge=-90.0, le=90.0)
@@ -119,6 +112,23 @@ class ManagedSafetyLocationUpdate(StrictModel):
     @classmethod
     def normalized_captured_at(cls, value: datetime) -> datetime:
         return _utc(value)
+
+
+class ManagedSafetyIncidentCreate(StrictModel):
+    request_id: UUID
+    trigger: Literal["manual_sos", "band_sos"] = "manual_sos"
+    duration_hours: Literal[8, 12] = 8
+    share_location: bool = False
+    initial_location: ManagedSafetyLocationUpdate | None = None
+
+    @model_validator(mode="after")
+    def valid_initial_location(self) -> ManagedSafetyIncidentCreate:
+        if self.initial_location is not None:
+            if not self.share_location:
+                raise ValueError("initial Safety location requires location sharing")
+            if self.initial_location.sequence != 1:
+                raise ValueError("initial Safety location sequence must be one")
+        return self
 
 
 class ManagedSafetyResponse(StrictModel):

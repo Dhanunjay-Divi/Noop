@@ -540,6 +540,12 @@ struct ManagedSafetyView: View {
                         .buttonStyle(
                             NoopButtonStyle(.secondary, fullWidth: true)
                         )
+                        if let detail = locationDetail(location) {
+                            Text(verbatim: detail)
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     if incident.role == "owner" {
                         if incident.shareLocation && locationReady {
@@ -549,7 +555,16 @@ struct ManagedSafetyView: View {
                                 kind: .secondary,
                                 fullWidth: true
                             ) {
-                                Task { await replaceLocation(for: incident) }
+                                Task {
+                                    guard let location =
+                                            locationProvider.location else {
+                                        return
+                                    }
+                                    await replaceLocation(
+                                        location,
+                                        for: incident
+                                    )
+                                }
                             }
                             .disabled(service.isBusy)
                         }
@@ -658,10 +673,13 @@ struct ManagedSafetyView: View {
     }
 
     private var locationReady: Bool {
-        locationProvider.state == .ready
-            && locationProvider.location?.isUsable(
-                atUnix: Int(Date().timeIntervalSince1970)
-            ) == true
+        guard locationProvider.state == .ready,
+              let location = locationProvider.location else {
+            return false
+        }
+        return location.isUsable(
+            atUnix: Int(Date().timeIntervalSince1970)
+        ) && location.hasUsableHorizontalAccuracy
     }
 
     private var canStartPage: Bool {
@@ -788,27 +806,31 @@ struct ManagedSafetyView: View {
     }
 
     private func startPage() async {
+        let initialLocation = shareLocation
+            ? locationProvider.location
+            : nil
         guard let incident = await service.createSafetyIncident(
             durationHours: durationHours == 12 ? 12 : 8,
-            shareLocation: shareLocation
+            shareLocation: shareLocation,
+            initialLocation: initialLocation
         ) else {
             return
         }
-        if shareLocation {
-            await replaceLocation(for: incident)
+        if initialLocation != nil {
             locationProvider.requestBackgroundAuthorization()
         }
         await service.refreshSafety()
     }
 
     private func replaceLocation(
+        _ location: SafetyLocation,
         for incident: ManagedSafetyIncident
     ) async {
-        guard let location = locationProvider.location,
-              let horizontalAccuracy = location.horizontalAccuracyMeters,
+        guard let horizontalAccuracy = location.horizontalAccuracyMeters,
               location.isUsable(
                 atUnix: Int(Date().timeIntervalSince1970)
-              ) else {
+              ),
+              location.hasUsableHorizontalAccuracy else {
             return
         }
         await service.updateSafetyLocation(
@@ -823,6 +845,37 @@ struct ManagedSafetyView: View {
             )
         )
         await service.refreshSafety()
+    }
+
+    private func locationDetail(
+        _ location: ManagedSafetyLocation
+    ) -> String? {
+        guard location.horizontalAccuracyM.isFinite,
+              (0.0...SafetyLocation.maximumHorizontalAccuracyMeters)
+                .contains(location.horizontalAccuracyM),
+              let capturedAt = managedSafetyLocationDate(
+                location.capturedAt
+              ) else {
+            return nil
+        }
+        return localizedFormat(
+            "safety.location.accuracy_format",
+            capturedAt.formatted(
+                date: .abbreviated,
+                time: .shortened
+            ),
+            Int64(location.horizontalAccuracyM.rounded())
+        )
+    }
+
+    private func managedSafetyLocationDate(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [
+            .withInternetDateTime,
+            .withFractionalSeconds,
+        ]
+        return fractional.date(from: value)
+            ?? ISO8601DateFormatter().date(from: value)
     }
 
     private func mapURL(_ location: ManagedSafetyLocation) -> URL? {

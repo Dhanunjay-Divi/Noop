@@ -63,7 +63,8 @@
     "v59-managed-document-account-isolation",
     "v60-managed-change-feed-capability",
     "v61-managed-document-generation-floor",
-    "v62-managed-document-deletion-state"
+    "v62-managed-document-deletion-state",
+    "v63-hydration-legacy-resolution"
   ],
   "divergenceReasons": {
     "battery-alter-append-order": "REAL COLUMN-ORDER DRIFT (CLAUDE.md: 'column order in a Room CREATE TABLE must match the entity field order'). GRDB appended `synced` (v5) then `charging` (v6) with ALTER TABLE, which can only append; the Room entity declares `charging` before `synced`. Same columns, same types, different positions — so any positional copy (INSERT INTO battery SELECT * FROM …) swaps them. Fixing it means reordering the Room entity's fields, which changes Room's identity hash and therefore needs a version bump plus a no-op migration.",
@@ -934,6 +935,47 @@
           ]
         }
       ]
+    },
+    "hydrationLegacyResolution": {
+      "platform": "ios_only",
+      "reason": "This table proves idempotent resolution of retired Apple UserDefaults hydration payloads. Android never stored hydration in that legacy preference/list representation, so adding unused Room state would require a schema migration without a compatibility case. Current hydration rows and managed-document wire semantics remain cross-platform.",
+      "columns": [
+        {
+          "name": "scope",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "day",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "legacyDigest",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "replacementDigest",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "expectedScalarML",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "scope",
+        "day"
+      ],
+      "indices": []
     },
     "hrSample": {
       "platform": "both",

@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.noop.managed.ManagedSafetyLiveLocationSession
+import com.noop.managed.ManagedSafetyLocationAuthorization
 import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
 import com.noop.ui.NoopPrefs
@@ -55,11 +56,32 @@ class WhoopReconnectBootReceiver : BroadcastReceiver() {
         SafetyLiveLocationSession.initialize(context)
         ManagedSafetyLiveLocationSession.initialize(context)
         SafetyIncidentStatusMonitor.reconcile(context)
-        val safetyLocationActive = SafetyLiveLocationSession.state.value.isActiveAt(
-            System.currentTimeMillis() / 1_000L,
-        ) || ManagedSafetyLiveLocationSession.state.value.isActiveAt(
-            System.currentTimeMillis() / 1_000L,
-        )
+        val nowUnix = System.currentTimeMillis() / 1_000L
+        val managedLocationAuthorized =
+            ManagedSafetyLocationAuthorization.isAuthorized(
+                context,
+                shareLocation = true,
+            )
+        if (
+            !managedLocationAuthorized &&
+            ManagedSafetyLiveLocationSession.state.value.isActiveAt(nowUnix) &&
+            ManagedSafetyLiveLocationSession.stop(context)
+        ) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_safety.location_session",
+                fields = mapOf(
+                    "outcome" to "stopped",
+                    "reason" to "authorization_revoked",
+                ),
+            )
+        }
+        val safetyLocationActive =
+            SafetyLiveLocationSession.state.value.isActiveAt(nowUnix) ||
+                (
+                    managedLocationAuthorized &&
+                        ManagedSafetyLiveLocationSession.state.value
+                            .isActiveAt(nowUnix)
+                    )
         if (
             shouldStartConnectionServiceAfterBoot(
                 backgroundReconnectAllowed =

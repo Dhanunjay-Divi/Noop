@@ -36,6 +36,8 @@ enum HydrationMutationResult: Equatable, Sendable {
 private enum HydrationPersistenceError: Error {
     case invalidDayKey
     case invalidStoredEntry
+    case deferredLegacyState
+    case reconciliationRequired
     case storeUnavailable
     case writeRejected
 }
@@ -48,6 +50,41 @@ private enum HydrationEntryWriteIntent {
 private enum LegacyHydrationEntrySnapshot {
     case absent
     case present([HydrationEntry])
+}
+
+struct HydrationLegacyReconciliation: Equatable, Sendable {
+    let explicitEntries: [HydrationEntry]
+    let scalarTotalML: Int
+
+    var listedTotalML: Int {
+        explicitEntries.reduce(0) { $0 + $1.amountMl }
+    }
+}
+
+enum HydrationEntryState: Equatable, Sendable {
+    case ready([HydrationEntry])
+    case needsReconciliation(HydrationLegacyReconciliation)
+
+    var entries: [HydrationEntry] {
+        switch self {
+        case .ready(let entries):
+            return entries
+        case .needsReconciliation(let reconciliation):
+            return reconciliation.explicitEntries
+        }
+    }
+
+    var reconciliation: HydrationLegacyReconciliation? {
+        guard case .needsReconciliation(let reconciliation) = self else {
+            return nil
+        }
+        return reconciliation
+    }
+}
+
+enum HydrationLegacyReconciliationChoice: Equatable, Sendable {
+    case keepDailyTotal
+    case useDrinkList
 }
 
 enum HydrationStore {
@@ -81,21 +118,26 @@ enum HydrationStore {
     }
 
     static func legacyScalarAmountML(_ value: Double) throws -> Int {
-        let maximum = Double(WhoopStore.hydrationLegacyMaximumML)
-        guard value.isFinite,
-              value > 0,
-              value <= maximum else {
-            throw HydrationPersistenceError.invalidStoredEntry
-        }
-        let rounded = max(1, value.rounded())
-        guard rounded <= maximum,
-              let amountML = Int(exactly: rounded) else {
+        let amountML = try legacyScalarProjectionAmountML(value)
+        guard amountML > 0 else {
             throw HydrationPersistenceError.invalidStoredEntry
         }
         return amountML
     }
 
-    fileprivate static func legacyScalarEntryID(
+    static func legacyScalarProjectionAmountML(_ value: Double) throws -> Int {
+        let maximum = Double(WhoopStore.hydrationLegacyMaximumML)
+        guard value.isFinite,
+              value >= 0,
+              value <= maximum,
+              value.rounded(.towardZero) == value,
+              let amountML = Int(exactly: value) else {
+            throw HydrationPersistenceError.invalidStoredEntry
+        }
+        return amountML
+    }
+
+    static func legacyScalarEntryID(
         day: String
     ) -> UUID {
         deterministicLegacyEntryID(
@@ -109,9 +151,7 @@ enum HydrationStore {
         _ entry: HydrationEntry,
         day dayKey: String
     ) -> Bool {
-        entry.id == legacyScalarEntryID(
-            day: dayKey
-        )
+        entry.id == legacyScalarEntryID(day: dayKey)
     }
 
     /// Presentation compatibility for scalar-only rows created before their identifier became
@@ -518,7 +558,7 @@ extension Repository {
             }
             do {
                 let entries = HydrationEntries.adding(
-                    try await hydrationEntriesUnserialized(day: dayKey),
+                    try await resolvedHydrationEntriesUnserialized(day: dayKey),
                     amountMl: amountMl,
                     at: loggedAt
                 )
@@ -553,20 +593,42 @@ extension Repository {
 
     // MARK: - Per-entry edit/delete (#798)
 
-    /// Today (or `day`)'s individual logged drinks, oldest first. Legacy UserDefaults rows are migrated
-    /// once into SQLite before being removed, so an update cannot split the editable list from its total.
-    func hydrationEntries(day: String? = nil) async throws -> [HydrationEntry] {
+    /// Today (or `day`)'s editable hydration state. A retired scalar/list mismatch remains untouched until
+    /// the detail screen records one explicit resolution; all ordinary callers require `.ready`.
+    func hydrationEntryState(day: String? = nil) async throws -> HydrationEntryState {
         let dayKey = day ?? Repository.localDayKey(Date())
         return try await performSerializedHydrationRead { [self] in
-            try await hydrationEntriesUnserialized(day: dayKey)
+            try await hydrationEntryStateUnserialized(day: dayKey)
+        }
+    }
+
+    /// Today (or `day`)'s individual logged drinks, oldest first. Mutations fail closed while a retired
+    /// scalar/list conflict is unresolved so a tap cannot silently choose one historical representation.
+    func hydrationEntries(day: String? = nil) async throws -> [HydrationEntry] {
+        switch try await hydrationEntryState(day: day) {
+        case .ready(let entries):
+            return entries
+        case .needsReconciliation:
+            throw HydrationPersistenceError.reconciliationRequired
         }
     }
 
     /// Must run inside the repository hydration-operation queue. Mutations call this form directly so
     /// their read-modify-write remains one serialized operation instead of re-entering the same queue.
-    private func hydrationEntriesUnserialized(
+    private func resolvedHydrationEntriesUnserialized(
         day dayKey: String
     ) async throws -> [HydrationEntry] {
+        switch try await hydrationEntryStateUnserialized(day: dayKey) {
+        case .ready(let entries):
+            return entries
+        case .needsReconciliation:
+            throw HydrationPersistenceError.reconciliationRequired
+        }
+    }
+
+    private func hydrationEntryStateUnserialized(
+        day dayKey: String
+    ) async throws -> HydrationEntryState {
         #if DEBUG
         if hydrationReadFailureForTesting {
             throw HydrationPersistenceError.writeRejected
@@ -575,44 +637,171 @@ extension Repository {
         guard let store = await storeHandle() else {
             throw HydrationPersistenceError.storeUnavailable
         }
-        let stored = try await store.hydrationLogEntries(
+        let storageSnapshot = try await store.hydrationLogSnapshot(
             deviceId: HydrationStore.sourceId,
-            day: dayKey
+            day: dayKey,
+            metricKey: HydrationStore.key
         )
+        let stored = storageSnapshot.entries
+        let existingScalar = storageSnapshot.scalarValue
+        let legacy = try Self.legacyHydrationEntrySnapshot(day: dayKey)
         if !stored.isEmpty {
             let canonical = try Self.hydrationEntries(stored)
-            // A process can terminate after the atomic SQLite migration commits but before the retired
-            // UserDefaults payload is removed. Canonical rows prove the migration completed, so retire
-            // that stale payload before returning; otherwise deleting the canonical rows could resurrect it.
-            UserDefaults.standard.removeObject(
-                forKey: HydrationStore.entriesKey(forDay: dayKey)
-            )
-            return canonical
+            let canonicalTotalML = try Self.storedHydrationTotalML(stored)
+            guard let scalar = existingScalar,
+            try HydrationStore.legacyScalarAmountML(scalar)
+                == canonicalTotalML else {
+                throw HydrationPersistenceError.invalidStoredEntry
+            }
+            switch legacy {
+            case .absent:
+                return .ready(canonical)
+            case .present(let entries):
+                guard !entries.isEmpty else {
+                    recordHydrationPersistence(
+                        operation: "legacy_migration",
+                        outcome: "deferred",
+                        failureKind: "mixed_state"
+                    )
+                    throw HydrationPersistenceError.deferredLegacyState
+                }
+                // A process can terminate after the atomic SQLite migration commits but before the
+                // retired preference is removed. Re-run the transactional adoption check so only the
+                // identical ownerless payload, or the deterministic aggregate produced by an explicit
+                // "Keep daily total" resolution, can be retired under the original profile/tombstone
+                // rules. Any other divergent canonical state still fails closed.
+                let legacyStored = try Self.storedHydrationEntries(
+                    entries,
+                    day: dayKey
+                )
+                let legacyTotalML = try Self.storedHydrationTotalML(
+                    legacyStored
+                )
+                let representedDay = HydrationStore.legacyEntryDate(
+                    forDayKey: dayKey
+                )
+                let committedScalarResolution =
+                    canonical.count == 1
+                    && HydrationStore.isLegacyScalarEntry(
+                        canonical[0],
+                        day: dayKey
+                    )
+                    && canonical[0].loggedAt == representedDay
+                    && canonicalTotalML > legacyTotalML
+                let disposition: ManagedHydrationLegacyDisposition
+                if committedScalarResolution {
+                    do {
+                        disposition =
+                            try await store.resolveLegacyHydrationLogEntries(
+                                legacyEntries: legacyStored,
+                                replacementEntries: stored,
+                                expectedScalarML: canonicalTotalML,
+                                deviceId: HydrationStore.sourceId,
+                                day: dayKey,
+                                metricKey: HydrationStore.key
+                            )
+                        if disposition == .migrate {
+                            recordHydrationPersistence(
+                                operation: "legacy_migration",
+                                outcome: "saved"
+                            )
+                        }
+                    } catch {
+                        recordHydrationPersistence(
+                            operation: "legacy_migration",
+                            outcome: "failed",
+                            failureKind:
+                                AppDiagnosticsRecorder.failureKind(error)
+                        )
+                        throw error
+                    }
+                } else {
+                    disposition = try await migrateLegacyHydrationEntries(
+                        entries,
+                        day: dayKey,
+                        store: store
+                    )
+                }
+                switch disposition {
+                case .migrate:
+                    UserDefaults.standard.removeObject(
+                        forKey: HydrationStore.entriesKey(forDay: dayKey)
+                    )
+                    return .ready(canonical)
+                case .reconcileHigherScalar(let scalarTotalML):
+                    recordHydrationPersistence(
+                        operation: "legacy_migration",
+                        outcome: "deferred",
+                        failureKind: "scalar_conflict"
+                    )
+                    return .needsReconciliation(
+                        HydrationLegacyReconciliation(
+                            explicitEntries: entries,
+                            scalarTotalML: scalarTotalML
+                        )
+                    )
+                case .retire, .deferForMixedDeletionState:
+                    recordHydrationPersistence(
+                        operation: "legacy_migration",
+                        outcome: "deferred",
+                        failureKind: "mixed_state"
+                    )
+                    throw HydrationPersistenceError.deferredLegacyState
+                case .deferForProfileConflict:
+                    recordHydrationPersistence(
+                        operation: "legacy_migration",
+                        outcome: "deferred",
+                        failureKind: "profile_conflict"
+                    )
+                    throw HydrationPersistenceError.deferredLegacyState
+                }
+            }
         }
         #if DEBUG
         await runHydrationMigrationBarrierForTesting()
         #endif
 
-        let existingScalar = try await noopHydrationScalar(
-            day: dayKey,
-            store: store
-        )
         if let existingScalar,
            (!existingScalar.isFinite || existingScalar < 0) {
             throw HydrationPersistenceError.invalidStoredEntry
         }
-        let legacy = try Self.legacyHydrationEntrySnapshot(day: dayKey)
+        if let existingScalar, existingScalar > 0 {
+            _ = try HydrationStore.legacyScalarAmountML(existingScalar)
+        }
         if case .present(let entries) = legacy {
             if !entries.isEmpty {
+                let alternativeRetirementEntryIDs = existingScalar == 0
+                    ? [
+                        HydrationStore.legacyScalarEntryID(day: dayKey)
+                            .uuidString.lowercased(),
+                    ]
+                    : []
                 let disposition =
                     try await migrateLegacyHydrationEntries(
                         entries,
                         day: dayKey,
-                        store: store
+                        store: store,
+                        alternativeRetirementEntryIDs:
+                            alternativeRetirementEntryIDs
                     )
                 switch disposition {
                 case .migrate:
-                    break
+                    UserDefaults.standard.removeObject(
+                        forKey: HydrationStore.entriesKey(forDay: dayKey)
+                    )
+                    return .ready(entries)
+                case .reconcileHigherScalar(let scalarTotalML):
+                    recordHydrationPersistence(
+                        operation: "legacy_migration",
+                        outcome: "deferred",
+                        failureKind: "scalar_conflict"
+                    )
+                    return .needsReconciliation(
+                        HydrationLegacyReconciliation(
+                            explicitEntries: entries,
+                            scalarTotalML: scalarTotalML
+                        )
+                    )
                 case .retire where existingScalar == 0:
                     UserDefaults.standard.removeObject(
                         forKey: HydrationStore.entriesKey(forDay: dayKey)
@@ -621,48 +810,82 @@ extension Repository {
                         operation: "legacy_migration",
                         outcome: "retired"
                     )
-                    return []
+                    return .ready([])
                 case .retire, .deferForMixedDeletionState:
                     recordHydrationPersistence(
                         operation: "legacy_migration",
                         outcome: "deferred",
                         failureKind: "mixed_state"
                     )
-                    return []
+                    throw HydrationPersistenceError.deferredLegacyState
                 case .deferForProfileConflict:
                     recordHydrationPersistence(
                         operation: "legacy_migration",
                         outcome: "deferred",
                         failureKind: "profile_conflict"
                     )
-                    return []
+                    throw HydrationPersistenceError.deferredLegacyState
                 }
             }
             if entries.isEmpty {
-                _ = try await store.replaceHydrationLogEntries(
-                    [],
+                let expectedScalarML = try existingScalar.map {
+                    try HydrationStore.legacyScalarProjectionAmountML($0)
+                }
+                let disposition = try await store.clearLegacyHydrationLogEntries(
+                    retirementEntryID:
+                        HydrationStore.legacyScalarEntryID(day: dayKey)
+                            .uuidString.lowercased(),
+                    expectedScalarML: expectedScalarML,
                     deviceId: HydrationStore.sourceId,
                     day: dayKey,
                     metricKey: HydrationStore.key
                 )
+                switch disposition {
+                case .migrate:
+                    recordHydrationPersistence(
+                        operation: "legacy_migration",
+                        outcome: "saved"
+                    )
+                case .retire:
+                    recordHydrationPersistence(
+                        operation: "legacy_migration",
+                        outcome: "retired"
+                    )
+                case .deferForMixedDeletionState:
+                    recordHydrationPersistence(
+                        operation: "legacy_migration",
+                        outcome: "deferred",
+                        failureKind: "mixed_state"
+                    )
+                    throw HydrationPersistenceError.deferredLegacyState
+                case .deferForProfileConflict:
+                    recordHydrationPersistence(
+                        operation: "legacy_migration",
+                        outcome: "deferred",
+                        failureKind: "profile_conflict"
+                    )
+                    throw HydrationPersistenceError.deferredLegacyState
+                case .reconcileHigherScalar:
+                    throw HydrationPersistenceError.invalidStoredEntry
+                }
             }
             UserDefaults.standard.removeObject(
                 forKey: HydrationStore.entriesKey(forDay: dayKey)
             )
-            return entries
+            return .ready(entries)
         }
 
         // A pre-entry build may have only the scalar row. There is no timestamp-level evidence to split
         // that aggregate into drinks, so materialize one visibly identifiable imported daily total.
         // Its represented-day noon is a stable placeholder, not a claimed drink time.
         let existingTotal = existingScalar ?? 0
-        guard existingTotal > 0 else { return [] }
+        guard existingTotal > 0 else { return .ready([]) }
         let migratedDuringRead = try await store.hydrationLogEntries(
             deviceId: HydrationStore.sourceId,
             day: dayKey
         )
         if !migratedDuringRead.isEmpty {
-            return try Self.hydrationEntries(migratedDuringRead)
+            return .ready(try Self.hydrationEntries(migratedDuringRead))
         }
         guard let representedDay = HydrationStore.legacyEntryDate(
             forDayKey: dayKey
@@ -686,7 +909,9 @@ extension Repository {
         )
         switch disposition {
         case .migrate:
-            return migrated
+            return .ready(migrated)
+        case .reconcileHigherScalar:
+            throw HydrationPersistenceError.invalidStoredEntry
         case .retire:
             _ = try await store.replaceHydrationLogEntries(
                 [],
@@ -698,32 +923,35 @@ extension Repository {
                 operation: "legacy_migration",
                 outcome: "retired"
             )
-            return []
+            return .ready([])
         case .deferForMixedDeletionState:
             recordHydrationPersistence(
                 operation: "legacy_migration",
                 outcome: "deferred",
                 failureKind: "mixed_state"
             )
-            return []
+            throw HydrationPersistenceError.deferredLegacyState
         case .deferForProfileConflict:
             recordHydrationPersistence(
                 operation: "legacy_migration",
                 outcome: "deferred",
                 failureKind: "profile_conflict"
             )
-            return []
+            throw HydrationPersistenceError.deferredLegacyState
         }
     }
 
     private func migrateLegacyHydrationEntries(
         _ entries: [HydrationEntry],
         day dayKey: String,
-        store: WhoopStore
+        store: WhoopStore,
+        alternativeRetirementEntryIDs: [String] = []
     ) async throws -> ManagedHydrationLegacyDisposition {
         do {
             let disposition = try await store.adoptLegacyHydrationLogEntries(
                 try Self.storedHydrationEntries(entries, day: dayKey),
+                alternativeRetirementEntryIDs:
+                    alternativeRetirementEntryIDs,
                 deviceId: HydrationStore.sourceId,
                 day: dayKey,
                 metricKey: HydrationStore.key
@@ -745,6 +973,126 @@ extension Repository {
         }
     }
 
+    @discardableResult
+    func resolveHydrationLegacyReconciliation(
+        _ choice: HydrationLegacyReconciliationChoice,
+        expected: HydrationLegacyReconciliation,
+        day: String
+    ) async -> HydrationMutationResult {
+        await performSerializedHydrationMutation { [self] in
+            let operation = choice == .keepDailyTotal
+                ? "legacy_keep_total"
+                : "legacy_use_drink_list"
+            guard HydrationStore.isValidDayKey(day) else {
+                recordHydrationPersistence(
+                    operation: operation,
+                    outcome: "failed",
+                    failureKind: "invalid_day"
+                )
+                return .failed
+            }
+            guard let store = await storeHandle() else {
+                recordHydrationPersistence(
+                    operation: operation,
+                    outcome: "failed",
+                    failureKind: "store_unavailable"
+                )
+                return .failed
+            }
+            do {
+                let expectedLegacyEntries = try Self.storedHydrationEntries(
+                    expected.explicitEntries,
+                    day: day
+                )
+                let expectedListedTotalML = try Self.storedHydrationTotalML(
+                    expectedLegacyEntries
+                )
+                guard !expectedLegacyEntries.isEmpty,
+                      expected.scalarTotalML > expectedListedTotalML,
+                      case .present(let currentEntries) =
+                        try Self.legacyHydrationEntrySnapshot(day: day),
+                      currentEntries == expected.explicitEntries,
+                      let currentScalar = try await noopHydrationScalar(
+                        day: day,
+                        store: store
+                      ),
+                      try HydrationStore.legacyScalarAmountML(currentScalar)
+                        == expected.scalarTotalML else {
+                    throw HydrationPersistenceError.invalidStoredEntry
+                }
+                let replacement: [HydrationEntry]
+                switch choice {
+                case .keepDailyTotal:
+                    guard let representedDay =
+                            HydrationStore.legacyEntryDate(forDayKey: day) else {
+                        throw HydrationPersistenceError.invalidDayKey
+                    }
+                    replacement = [
+                        HydrationEntry(
+                            id: HydrationStore.legacyScalarEntryID(day: day),
+                            amountMl: expected.scalarTotalML,
+                            loggedAt: representedDay
+                        ),
+                    ]
+                case .useDrinkList:
+                    replacement = expected.explicitEntries
+                }
+                let storedReplacement = try Self.storedHydrationEntries(
+                    replacement,
+                    day: day
+                )
+                let replacementTotalML = try Self.storedHydrationTotalML(
+                    storedReplacement
+                )
+                let disposition = try await store.resolveLegacyHydrationLogEntries(
+                    legacyEntries: expectedLegacyEntries,
+                    replacementEntries: storedReplacement,
+                    expectedScalarML: expected.scalarTotalML,
+                    deviceId: HydrationStore.sourceId,
+                    day: day,
+                    metricKey: HydrationStore.key
+                )
+                guard disposition == .migrate else {
+                    recordHydrationPersistence(
+                        operation: operation,
+                        outcome: "deferred",
+                        failureKind: {
+                            switch disposition {
+                            case .retire, .deferForMixedDeletionState:
+                                return "mixed_state"
+                            case .deferForProfileConflict:
+                                return "profile_conflict"
+                            case .reconcileHigherScalar:
+                                return "scalar_conflict"
+                            case .migrate:
+                                return "unknown"
+                            }
+                        }()
+                    )
+                    return .failed
+                }
+                UserDefaults.standard.removeObject(
+                    forKey: HydrationStore.entriesKey(forDay: day)
+                )
+                noteHydrationChanged()
+                recordHydrationPersistence(
+                    operation: operation,
+                    outcome: "saved"
+                )
+                return .saved(
+                    totalML: Double(replacementTotalML)
+                )
+            } catch {
+                recordHydrationPersistence(
+                    operation: operation,
+                    outcome: "failed",
+                    failureKind: AppDiagnosticsRecorder.failureKind(error)
+                )
+                return .failed
+            }
+        }
+    }
+
     /// Delete one logged entry by id, then re-derive the day total from the surviving entries and re-bank it
     /// into `metricSeries` so the ring, Today card and 7-day history all reflect the deletion. Returns the
     /// new day total (ml).
@@ -757,7 +1105,7 @@ extension Repository {
         return await performSerializedHydrationMutation { [self] in
             do {
                 let next = HydrationEntries.removing(
-                    try await hydrationEntriesUnserialized(day: dayKey),
+                    try await resolvedHydrationEntriesUnserialized(day: dayKey),
                     id: id
                 )
                 return await persistHydrationEntries(
@@ -789,7 +1137,7 @@ extension Repository {
         return await performSerializedHydrationMutation { [self] in
             do {
                 let next = HydrationEntries.updating(
-                    try await hydrationEntriesUnserialized(day: dayKey),
+                    try await resolvedHydrationEntriesUnserialized(day: dayKey),
                     id: id,
                     amountMl: amountMl
                 )
@@ -904,7 +1252,12 @@ extension Repository {
               decoded.count <= WhoopStore.hydrationLegacyMaximumEntryCount else {
             throw HydrationPersistenceError.invalidStoredEntry
         }
-        return .present(decoded.sorted { $0.loggedAt < $1.loggedAt })
+        return .present(
+            decoded.sorted {
+                ($0.loggedAt, $0.id.uuidString)
+                    < ($1.loggedAt, $1.id.uuidString)
+            }
+        )
     }
 
     fileprivate static func hydrationEntries(
@@ -955,6 +1308,22 @@ extension Repository {
                 loggedAt: loggedAt
             )
         }
+    }
+
+    private static func storedHydrationTotalML(
+        _ entries: [HydrationLogEntry]
+    ) throws -> Int {
+        var totalML = 0
+        for entry in entries {
+            let (nextTotalML, overflow) =
+                totalML.addingReportingOverflow(entry.amountML)
+            guard !overflow else {
+                throw HydrationPersistenceError.invalidStoredEntry
+            }
+            _ = try HydrationStore.legacyScalarAmountML(Double(nextTotalML))
+            totalML = nextTotalML
+        }
+        return totalML
     }
 
     /// The last `days` local-day totals up to and including `now`, oldest first. Existing callers retain

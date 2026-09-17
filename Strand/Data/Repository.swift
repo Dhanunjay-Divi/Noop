@@ -646,9 +646,9 @@ final class Repository: ObservableObject {
         }
     }
 
-    func performSerializedHydrationRead(
-        _ operation: @escaping @MainActor @Sendable () async throws -> [HydrationEntry]
-    ) async throws -> [HydrationEntry] {
+    func performSerializedHydrationRead<Value: Sendable>(
+        _ operation: @escaping @MainActor @Sendable () async throws -> Value
+    ) async throws -> Value {
         try await performSerializedHydrationOperation(
             cancellationPolicy: .cancelWithCaller,
             operation

@@ -410,6 +410,16 @@
     <string name="appwide_hydration_edit_entry_accessibility_format">Modifier l’entrée d’eau de %1$s</string>
     <string name="appwide_hydration_goal_progress_format">%1$d %% de l’objectif pour %2$s</string>
     <string name="appwide_hydration_history_through_format">7 jours jusqu’au %1$s</string>
+    <string name="appwide_hydration_legacy_conflict_detail">Conserver le total enregistré remplace les boissons de la liste par un ancien total quotidien unique. Utiliser la liste des boissons ramène la journée au montant indiqué. Rien ne change tant que vous n’avez pas choisi.</string>
+    <string name="appwide_hydration_legacy_conflict_title">Choisissez l’hydratation enregistrée pour cette journée</string>
+    <string name="appwide_hydration_legacy_keep_total">Conserver le total enregistré</string>
+    <string name="appwide_hydration_legacy_keep_total_a11y_format">Conserver le total quotidien enregistré, %1$s</string>
+    <string name="appwide_hydration_legacy_keep_total_hint">Remplace les boissons de la liste par un ancien total quotidien unique.</string>
+    <string name="appwide_hydration_legacy_listed_total">Total de la liste des boissons</string>
+    <string name="appwide_hydration_legacy_saved_total">Total quotidien enregistré</string>
+    <string name="appwide_hydration_legacy_use_list">Utiliser les boissons de la liste</string>
+    <string name="appwide_hydration_legacy_use_list_a11y_format">Utiliser le total des boissons de la liste, %1$s</string>
+    <string name="appwide_hydration_legacy_use_list_hint">Ramène le total de la journée aux boissons de la liste.</string>
     <string name="appwide_hydration_load_failed">Impossible de charger l’hydratation. Réessayez.</string>
     <string name="appwide_hydration_logged_day">Enregistré %1$s</string>
     <string name="appwide_hydration_logged_on_format">Enregistré le %1$s</string>

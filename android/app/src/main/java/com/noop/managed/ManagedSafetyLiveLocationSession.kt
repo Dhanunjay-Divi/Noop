@@ -121,10 +121,43 @@ object ManagedSafetyLiveLocationSession {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 }
 
+internal enum class ManagedSafetyLocationRuntimeAction {
+    NONE,
+    STOP,
+    START,
+}
+
+internal object ManagedSafetyLocationRuntimePolicy {
+    fun decide(
+        locationAuthorized: Boolean,
+        enrolled: Boolean,
+        activeCloudIncident: Boolean,
+        activeLocalSession: Boolean,
+    ): ManagedSafetyLocationRuntimeAction = when {
+        !locationAuthorized && activeLocalSession ->
+            ManagedSafetyLocationRuntimeAction.STOP
+        locationAuthorized &&
+            enrolled &&
+            activeCloudIncident &&
+            !activeLocalSession ->
+            ManagedSafetyLocationRuntimeAction.START
+        else -> ManagedSafetyLocationRuntimeAction.NONE
+    }
+}
+
 internal object ManagedSafetyLocationRetryPolicy {
     fun delayMillis(afterFailedAttempt: Int): Long? = when (afterFailedAttempt) {
         1 -> 2_000L
         2 -> 5_000L
         else -> null
     }
+}
+
+internal object ManagedSafetyLocationAuthorizationWatchdog {
+    const val INTERVAL_MILLIS = 5_000L
+
+    fun shouldStop(
+        locationAuthorized: Boolean,
+        activeLocalSession: Boolean,
+    ): Boolean = activeLocalSession && !locationAuthorized
 }

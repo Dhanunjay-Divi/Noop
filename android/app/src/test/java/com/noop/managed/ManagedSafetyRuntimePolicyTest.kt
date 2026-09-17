@@ -1,5 +1,6 @@
 package com.noop.managed
 
+import com.noop.safety.SafetyLocation
 import com.noop.ui.shouldDisableBandSosPreference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -72,45 +73,106 @@ class ManagedSafetyRuntimePolicyTest {
     }
 
     @Test
-    fun locationSharingRequiresForegroundAndBackgroundAuthorization() {
+    fun locationSharingRequiresForegroundAuthorizationOnly() {
         assertTrue(
             ManagedSafetyLocationAuthorization.canStartIncident(
                 shareLocation = false,
-                sdkInt = 35,
                 foregroundGranted = false,
-                backgroundGranted = false,
             ),
         )
         assertFalse(
             ManagedSafetyLocationAuthorization.canStartIncident(
                 shareLocation = true,
-                sdkInt = 35,
                 foregroundGranted = false,
-                backgroundGranted = true,
+            ),
+        )
+        assertTrue(
+            ManagedSafetyLocationAuthorization.canStartIncident(
+                shareLocation = true,
+                foregroundGranted = true,
+            ),
+        )
+    }
+
+    @Test
+    fun safetyLocationUploadRequiresReadyFreshValidFixWithBoundedAccuracy() {
+        val nowUnix = 1_800_000_000L
+
+        fun location(
+            latitude: Double = 40.7128,
+            longitude: Double = -74.0060,
+            accuracy: Double? = 12.0,
+            capturedAtUnix: Long = nowUnix,
+        ) = SafetyLocation(
+            latitude = latitude,
+            longitude = longitude,
+            horizontalAccuracyMeters = accuracy,
+            capturedAtUnix = capturedAtUnix,
+        )
+
+        assertTrue(
+            managedSafetyLocationCanUpload(
+                location = location(),
+                locationReady = true,
+                nowUnix = nowUnix,
+            ),
+        )
+        assertTrue(
+            managedSafetyLocationCanUpload(
+                location = location(
+                    accuracy = SafetyLocation.MAXIMUM_HORIZONTAL_ACCURACY_METERS,
+                ),
+                locationReady = true,
+                nowUnix = nowUnix,
             ),
         )
         assertFalse(
-            ManagedSafetyLocationAuthorization.canStartIncident(
-                shareLocation = true,
-                sdkInt = 35,
-                foregroundGranted = true,
-                backgroundGranted = false,
+            managedSafetyLocationCanUpload(
+                location = location(),
+                locationReady = false,
+                nowUnix = nowUnix,
             ),
         )
-        assertTrue(
-            ManagedSafetyLocationAuthorization.canStartIncident(
-                shareLocation = true,
-                sdkInt = 35,
-                foregroundGranted = true,
-                backgroundGranted = true,
+        assertFalse(
+            managedSafetyLocationCanUpload(
+                location = null,
+                locationReady = true,
+                nowUnix = nowUnix,
             ),
         )
-        assertTrue(
-            ManagedSafetyLocationAuthorization.canStartIncident(
-                shareLocation = true,
-                sdkInt = 28,
-                foregroundGranted = true,
-                backgroundGranted = false,
+        for (invalidAccuracy in listOf(null, Double.NaN, Double.POSITIVE_INFINITY, -0.1, 10_000.1)) {
+            assertFalse(
+                managedSafetyLocationCanUpload(
+                    location = location(accuracy = invalidAccuracy),
+                    locationReady = true,
+                    nowUnix = nowUnix,
+                ),
+            )
+        }
+        assertFalse(
+            managedSafetyLocationCanUpload(
+                location = location(latitude = Double.NaN),
+                locationReady = true,
+                nowUnix = nowUnix,
+            ),
+        )
+        assertFalse(
+            managedSafetyLocationCanUpload(
+                location = location(
+                    capturedAtUnix = nowUnix - SafetyLocation.MAXIMUM_AGE_SECONDS - 1L,
+                ),
+                locationReady = true,
+                nowUnix = nowUnix,
+            ),
+        )
+        assertFalse(
+            managedSafetyLocationCanUpload(
+                location = location(
+                    capturedAtUnix =
+                        nowUnix + SafetyLocation.MAXIMUM_FUTURE_CLOCK_SKEW_SECONDS + 1L,
+                ),
+                locationReady = true,
+                nowUnix = nowUnix,
             ),
         )
     }

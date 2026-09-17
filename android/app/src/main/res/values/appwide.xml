@@ -410,6 +410,16 @@
     <string name="appwide_hydration_edit_entry_accessibility_format">Edit %1$s water entry</string>
     <string name="appwide_hydration_goal_progress_format">%1$d%% of the goal for %2$s</string>
     <string name="appwide_hydration_history_through_format">7 days through %1$s</string>
+    <string name="appwide_hydration_legacy_conflict_detail">Keeping the saved total replaces the listed drinks with one older daily total. Using the drink list changes the day to the listed amount. Nothing changes until you choose.</string>
+    <string name="appwide_hydration_legacy_conflict_title">Choose this day’s saved hydration</string>
+    <string name="appwide_hydration_legacy_keep_total">Keep saved total</string>
+    <string name="appwide_hydration_legacy_keep_total_a11y_format">Keep saved daily total, %1$s</string>
+    <string name="appwide_hydration_legacy_keep_total_hint">Replaces the listed drinks with one older daily total.</string>
+    <string name="appwide_hydration_legacy_listed_total">Drink list total</string>
+    <string name="appwide_hydration_legacy_saved_total">Saved daily total</string>
+    <string name="appwide_hydration_legacy_use_list">Use listed drinks</string>
+    <string name="appwide_hydration_legacy_use_list_a11y_format">Use listed drinks total, %1$s</string>
+    <string name="appwide_hydration_legacy_use_list_hint">Changes the day total to the listed drinks.</string>
     <string name="appwide_hydration_load_failed">Hydration couldn’t be loaded. Try again.</string>
     <string name="appwide_hydration_logged_day">Logged %1$s</string>
     <string name="appwide_hydration_logged_on_format">Logged on %1$s</string>

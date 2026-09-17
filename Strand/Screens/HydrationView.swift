@@ -19,6 +19,7 @@ struct HydrationDetailSnapshot {
     let reading: HydrationReading?
     let history: [(day: String, value: Double?)]
     let entries: [HydrationEntry]
+    let legacyReconciliation: HydrationLegacyReconciliation?
 
     var totalML: Double? { reading?.valueML }
 }
@@ -42,19 +43,31 @@ struct HydrationDetailModel {
 
     func load(from repo: Repository) async throws -> HydrationDetailSnapshot {
         guard hasValidDay else { throw HydrationDetailModelError.invalidDayKey }
-        // Entry loading owns the one-time legacy migration. Finish it before reading the scalar/history
-        // projections so one published snapshot cannot mix pre-migration totals with post-migration rows.
-        let loadedEntries = try await repo.hydrationEntries(day: selectedDayKey)
+        // Entry loading owns one-time migration and conflict detection. Later metric reads may race an
+        // independent sync, so an unresolved conflict pins the reviewed NOOP scalar into the visible ring
+        // and selected history day instead of mixing it with a newer unseen value.
+        let entryState = try await repo.hydrationEntryState(day: selectedDayKey)
         async let reading = repo.hydrationReading(day: selectedDayKey)
         async let history = repo.hydrationHistory(days: 7, throughDay: selectedDayKey)
         let (loadedReading, loadedHistory) = try await (
             reading,
             history
         )
+        let pinnedReading = Self.pinnedReading(
+            loadedReading,
+            for: entryState
+        )
+        let pinnedHistory = Self.pinnedHistory(
+            loadedHistory,
+            selectedDayKey: selectedDayKey,
+            reading: pinnedReading,
+            for: entryState
+        )
         return HydrationDetailSnapshot(
-            reading: loadedReading,
-            history: loadedHistory,
-            entries: loadedEntries
+            reading: pinnedReading,
+            history: pinnedHistory,
+            entries: entryState.entries,
+            legacyReconciliation: entryState.reconciliation
         )
     }
 
@@ -79,6 +92,55 @@ struct HydrationDetailModel {
             amountMl: amountML,
             day: selectedDayKey
         )
+    }
+
+    func resolve(
+        _ choice: HydrationLegacyReconciliationChoice,
+        expected: HydrationLegacyReconciliation,
+        in repo: Repository
+    ) async -> HydrationMutationResult {
+        guard hasValidDay else { return .failed }
+        return await repo.resolveHydrationLegacyReconciliation(
+            choice,
+            expected: expected,
+            day: selectedDayKey
+        )
+    }
+
+    static func pinnedReading(
+        _ reading: HydrationReading?,
+        for entryState: HydrationEntryState
+    ) -> HydrationReading? {
+        guard case .needsReconciliation(let reconciliation) = entryState else {
+            return reading
+        }
+        let noopML = Double(reconciliation.scalarTotalML)
+        let appleHealthML = HydrationStore.confirmedTotal(
+            reading?.appleHealthML
+        )
+        return HydrationReading(
+            valueML: HydrationStore.observedTotal(
+                noopML,
+                appleHealthML
+            ) ?? noopML,
+            source: appleHealthML == nil ? .noop : .both,
+            noopML: noopML,
+            appleHealthML: appleHealthML ?? 0
+        )
+    }
+
+    static func pinnedHistory(
+        _ history: [(day: String, value: Double?)],
+        selectedDayKey: String,
+        reading: HydrationReading?,
+        for entryState: HydrationEntryState
+    ) -> [(day: String, value: Double?)] {
+        guard case .needsReconciliation = entryState else { return history }
+        return history.map { point in
+            point.day == selectedDayKey
+                ? (day: point.day, value: reading?.valueML)
+                : point
+        }
     }
 }
 
@@ -343,6 +405,7 @@ struct HydrationView: View {
     @State private var editingEntry: HydrationEntry?
     @State private var hasLoadedHydration = false
     @State private var hydrationFailure: HydrationUIFailure?
+    @State private var resolvingLegacyReconciliation = false
     /// #798 - the user's custom container size (ml), editable from the custom-size sheet. Persisted local-only.
     @AppStorage(HydrationStore.customSizeKey) private var customSizeML = HydrationGoal.cupML
     @State private var showCustomSizeSheet = false
@@ -375,6 +438,9 @@ struct HydrationView: View {
         hydrationSnapshot?.history ?? []
     }
     private var entries: [HydrationEntry] { hydrationSnapshot?.entries ?? [] }
+    private var legacyReconciliation: HydrationLegacyReconciliation? {
+        hydrationSnapshot?.legacyReconciliation
+    }
     private var isToday: Bool {
         selectedDayKey == Repository.localDayKey(Date())
     }
@@ -453,7 +519,11 @@ struct HydrationView: View {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 hydrationFailureSection
                 ringSection
-                logSection
+                if legacyReconciliation == nil {
+                    logSection
+                } else {
+                    legacyReconciliationSection
+                }
                 if isToday {
                     reminderSection
                 }
@@ -563,6 +633,148 @@ struct HydrationView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var legacyReconciliationSection: some View {
+        if let reconciliation = legacyReconciliation {
+            card(padding: 18) {
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .frame(width: 24)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(
+                                String(
+                                    localized:
+                                        "appwide.hydration.legacy_conflict_title"
+                                )
+                            )
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text(
+                                String(
+                                    localized:
+                                        "appwide.hydration.legacy_conflict_detail"
+                                )
+                            )
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    Divider().overlay(StrandPalette.hairline)
+                    reconciliationTotalRow(
+                        label: String(
+                            localized:
+                                "appwide.hydration.legacy_saved_total"
+                        ),
+                        amountML: reconciliation.scalarTotalML
+                    )
+                    reconciliationTotalRow(
+                        label: String(
+                            localized:
+                                "appwide.hydration.legacy_listed_total"
+                        ),
+                        amountML: reconciliation.listedTotalML
+                    )
+
+                    NoopButton(
+                        LocalizedStringKey(
+                            "appwide.hydration.legacy_keep_total"
+                        ),
+                        systemImage: "checkmark.circle",
+                        kind: .primary,
+                        fullWidth: true
+                    ) {
+                        Task {
+                            await resolveLegacyReconciliation(
+                                .keepDailyTotal
+                            )
+                        }
+                    }
+                    .disabled(resolvingLegacyReconciliation)
+                    .accessibilityLabel(
+                        reconciliationChoiceAccessibilityLabel(
+                            key:
+                                "appwide.hydration.legacy_keep_total_a11y_format",
+                            amountML: reconciliation.scalarTotalML
+                        )
+                    )
+                    .accessibilityHint(
+                        Text(
+                            "appwide.hydration.legacy_keep_total_hint"
+                        )
+                    )
+
+                    NoopButton(
+                        LocalizedStringKey(
+                            "appwide.hydration.legacy_use_list"
+                        ),
+                        systemImage: "list.bullet",
+                        kind: .secondary,
+                        fullWidth: true
+                    ) {
+                        Task {
+                            await resolveLegacyReconciliation(.useDrinkList)
+                        }
+                    }
+                    .disabled(resolvingLegacyReconciliation)
+                    .accessibilityLabel(
+                        reconciliationChoiceAccessibilityLabel(
+                            key:
+                                "appwide.hydration.legacy_use_list_a11y_format",
+                            amountML: reconciliation.listedTotalML
+                        )
+                    )
+                    .accessibilityHint(
+                        Text(
+                            "appwide.hydration.legacy_use_list_hint"
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private func reconciliationTotalRow(
+        label: String,
+        amountML: Int
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+            Spacer(minLength: 8)
+            Text(
+                HydrationDisplayFormatting.visibleMillilitres(
+                    amountML,
+                    locale: locale
+                )
+            )
+                .font(StrandFont.subhead.weight(.semibold))
+                .foregroundStyle(StrandPalette.textPrimary)
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func reconciliationChoiceAccessibilityLabel(
+        key: String,
+        amountML: Int
+    ) -> String {
+        String(
+            format: String(localized: String.LocalizationValue(key)),
+            locale: locale,
+            HydrationDisplayFormatting.visibleMillilitres(
+                amountML,
+                locale: locale
+            )
+        )
     }
 
     private var ringSection: some View {
@@ -1072,19 +1284,62 @@ struct HydrationView: View {
                     // edit; the trailing trash deletes (a VStack row can't host native swipe-to-delete).
                     VStack(spacing: 0) {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
-                            entryRow(entry)
-                                .padding(.vertical, 6)
+                            Group {
+                                if legacyReconciliation == nil {
+                                    entryRow(entry)
+                                } else {
+                                    readOnlyEntryRow(entry)
+                                }
+                            }
+                            .padding(.vertical, 6)
                             if idx < entries.count - 1 {
                                 Divider().opacity(0.4)
                             }
                         }
                     }
-                    Text("Tap a drink to edit it, or use the trash to delete.")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
+                    if legacyReconciliation == nil {
+                        Text("Tap a drink to edit it, or use the trash to delete.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
                 }
             }
         }
+    }
+
+    private func readOnlyEntryRow(_ entry: HydrationEntry) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "drop.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(StrandPalette.accent)
+                .accessibilityHidden(true)
+            Text(
+                HydrationDisplayFormatting.entryTime(
+                    entry.loggedAt,
+                    locale: locale
+                )
+            )
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+            Spacer(minLength: 8)
+            Text(
+                HydrationDisplayFormatting.visibleMillilitres(
+                    entry.amountMl,
+                    locale: locale
+                )
+            )
+                .font(StrandFont.subhead.weight(.semibold))
+                .foregroundStyle(StrandPalette.textPrimary)
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            HydrationDisplayFormatting.entryAccessibilityLabel(
+                amountML: entry.amountMl,
+                loggedAt: entry.loggedAt,
+                locale: locale
+            )
+        )
     }
 
     /// One logged-drink row: the time it was logged + its amount (tap to edit) with a trailing trash.
@@ -1389,6 +1644,21 @@ struct HydrationView: View {
         finishMutation(
             await detailModel.update(entryID: entry.id, amountML: ml, in: repo)
         )
+    }
+
+    private func resolveLegacyReconciliation(
+        _ choice: HydrationLegacyReconciliationChoice
+    ) async {
+        guard !resolvingLegacyReconciliation,
+              let expected = legacyReconciliation else { return }
+        resolvingLegacyReconciliation = true
+        let result = await detailModel.resolve(
+            choice,
+            expected: expected,
+            in: repo
+        )
+        resolvingLegacyReconciliation = false
+        finishMutation(result)
     }
 
     private func finishMutation(_ result: HydrationMutationResult) {

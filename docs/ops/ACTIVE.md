@@ -1,15 +1,15 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-15**
+Last updated: **2026-09-17**
 
 ## Authoritative context
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`
-- Active worktree: `/private/tmp/noop-product-audit-20260911`
+- Active worktree: this dedicated audit checkout
 - Active branch: `codex/product-safety-quality-audit-20260911`
-- Remote pull-request head before the final local corrections:
-  `f7350d6eb9cee1dd9a903e5ab73d16f049607bc6`
+- Current remote pull-request head before the final uncommitted corrections:
+  `0ff1bf4657c45f836aaec32f920a8b528f6b552b`
 - Local state at this update: the final uncommitted slice gives Apple and
   Android scoring bounded local-only timezone provenance, exact 23-hour and
   25-hour civil days, an unresolved interval across a recorded travel-zone
@@ -19,12 +19,25 @@ Last updated: **2026-09-15**
   The first observed named zone supports complete civil windows only from that
   observation forward; earlier history and the first partial day are withheld
   rather than being silently rebucketed.
-  Explicit legacy hydration rows remain authoritative over their retired scalar
-  projection; a scalar-only historical total becomes one deterministic,
-  visibly labelled aggregate row whose provenance survives later edits.
-  Canonical hydration rows retire any interrupted legacy payload before return,
-  and the detail screen finishes migration before it publishes scalar/history
-  projections. Habitual midsleep uses the scoring window's historical timezone,
+  Legacy hydration rows converge automatically only when their retired scalar
+  projection is equal or lower. A higher scalar is ambiguous because retired
+  add and edit/delete paths committed in opposite orders, so both
+  representations remain untouched until Hydration presents one explicit
+  `Keep daily total` or `Use drink list` choice. A scalar-only historical total
+  becomes one deterministic, visibly labelled aggregate row whose provenance
+  survives later edits. Canonical hydration rows must agree with their scalar,
+  retire an interrupted legacy payload only after a committed migration, and
+  recover idempotently if the process stops between those steps. A local v63
+  evidence table binds an explicit higher-scalar resolution to SHA-256 digests
+  of the exact legacy and replacement rows, so an unrelated later payload
+  cannot reuse interrupted-cleanup state. The shared schema oracle records this
+  table as iOS-only because Android never held the retired Apple
+  `UserDefaults` representation. The detail
+  screen detects this state before it publishes editable controls. Empty
+  ownerless legacy lists now use the same managed ownership/deletion
+  classification inside the write transaction; a signed-in profile defers
+  without clearing its scalar or deleting the ownerless preference.
+  Habitual midsleep uses the scoring window's historical timezone,
   reminder restoration has a behavioral suspended-authorization opt-out race
   regression, Android feedback scheduling retains its reviewed continuity
   protections, and one pre-collector diagnostic-report request is retained
@@ -35,9 +48,16 @@ Last updated: **2026-09-15**
   dismissible, added equivalent macOS presentation, made civil-day bound
   validation explicit on both platforms, and completed the Apple
   hydration-warning translations.
-  Exact-current affected Apple, Swift-package, Android, API 35, and locally
-  available server matrices pass. Finalized Apple result bundles and Android
-  API 35 reports are preserved privately. A final Android hydration
+  Exact-current Swift-package, macOS app, Android Full/Demo, API 35, local
+  PostgreSQL server, and localization walls are green after the September 17
+  Safety replay, diagnostics-lifecycle, navigation-layout, and operations-skill
+  corrections. The final post-localization iPhone 17 Pro simulator shell is
+  green: 39 UI tests executed, 38 passed, one private-pilot case was
+  intentionally skipped, and none failed. Repository static-policy and
+  release-control gates remain intentionally last, after documentation and
+  generated terminology are stable.
+  Finalized result bundles and reports are preserved privately until the final
+  immutable commit and release evidence are recorded. A final Android hydration
   reboot/time-change regression was found and corrected: its receiver,
   scheduler, chained scheduling, and worker now reject absent or stale Terms
   before WorkManager access. Completed NOOP Xcode/SwiftPM caches, old
@@ -47,10 +67,21 @@ Last updated: **2026-09-15**
   localization-sensitive iOS Release refresh also passed on a temporary RAM
   volume, which was ejected afterward. Its resolved graph retains reviewed App
   Check 11.3.2 for the token-TTL suspension fix with unchanged Apache-2.0
-  licensing and regenerated notices. The final exact-source repository-policy
-  wall passed. The bounded final commit containing this handoff is the sole
-  replacement candidate; its push, hosted checks, protected integration,
-  immediate privacy restoration, and final worktree cleanup remain.
+  licensing and regenerated notices. Final review also made precise Safety
+  location an explicit current-authorization opt-in, rejects stale or unusable
+  fixes across both clients and the server, and hardens the local bounded
+  command runner against atomic-status, probe, deadline, and interruption
+  races. Its fork-free `posix_spawn` supervisor now uses a parent release gate,
+  dynamic descriptor mapping, target process-group tracking, deadline-bound
+  creation, and final-state cleanup before any terminal result. Its reviewed
+  digest and the regenerated terminology inventory are pinned by the required
+  CI trust root, and terminology, required-CI, and protected-control
+  self-checks pass. The complete product walls, exact-current phone simulator
+  runtimes, 281-case repository-tool wall, static checks, privacy and claims
+  gates, and 12 mocked infrastructure plans are green. The fresh diff review,
+  bounded commit, immutable release evidence, one consolidated push, hosted
+  checks, protected integration, immediate privacy restoration, and cleanup
+  remain ordered closeout work.
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration
@@ -97,16 +128,25 @@ broader supplier-independent PR:
 - a hydration reboot/time-change receiver could initialize WorkManager before
   current Terms acceptance; and
 - managed-document restore could mutate before consistently rejecting stale or
-  equal-revision divergent remote state.
+  equal-revision divergent remote state; and
+- managed Safety location sharing could be silently downgraded without current
+  authorization, accept unusable accuracy, or retain a fix that was no longer
+  fresh at server receipt; and
+- the local bounded command guard could write a torn status, accumulate
+  timed-out probes, or lose a completion/interruption cleanup race.
 
 The local correction records only bounded first/latest observations in each
 same-zone run, opens support only for complete civil windows contained after
 the first observation, uses the named zone's exact civil-day rules, refuses to
 assign the gap between the last old-zone observation and first new-zone
 observation, and fails closed for history discarded by retention. Explicit
-legacy hydration rows migrate exactly and atomically replace their scalar
-projection; an explicit empty row list clears it, a scalar-only zero remains
-cleared, and a positive scalar-only day becomes one deterministic
+legacy hydration rows atomically replace an equal or lower scalar projection;
+a higher scalar/list mismatch remains unchanged behind an explicit one-time
+choice, and ordinary add/edit/delete actions fail closed until it is resolved.
+An explicit empty row list clears its projection only after transactional
+managed ownership classification and scalar revalidation. A signed-in profile
+does not claim or apply an ownerless clear. A scalar-only zero remains cleared,
+and a positive scalar-only day becomes one deterministic
 `Older daily total`. Generation-bound reminder restoration and terminalized
 feedback scheduling retain mounted-toggle consistency and bounded categorical
 diagnostics. The hydration permission warning preserves a separately focusable
@@ -122,58 +162,121 @@ opt-in, evidence-gated, private, explainable guidance. It must not copy
 third-party branding, assets, categorical health judgments, performance
 promises, or silently change a workout.
 
-## Exact-current verification
+## Verification state
 
-Completed on the exact current product source:
+The evidence below is exact-current unless an item explicitly identifies the
+intentionally last repository-control wall.
 
-- The exact-current post-managed-sync Apple slice executed 62 focused app tests
-  with zero failures or skips, and the arm64 iOS Simulator Release graph was
-  refreshed successfully after canonical localization generation. The
-  immediately preceding complete macOS app suite executed
-  2,057 tests with 2,056 passes, one intentional external-fixture skip, and zero
-  failures. The unchanged iPhone Simulator shell executed 39 tests with 38
-  passes, one intentional private-pilot skip, and zero failures.
-- Exact-current WhoopStore passed 512/512 tests. Exact-current StrandAnalytics
-  executed 1,486 tests with seven documented fixture skips and zero failures.
-  The preceding complete nine-package wall executed 2,978 tests with ten
-  documented skips for the unchanged package surface; Backfill and StudyHarness
-  executed 14 tests with zero failures.
-- Android Full and Demo each executed 4,811 tests with 4,804 passes, seven
-  intentional skips, and zero failures; lint, APK assembly, and
-  instrumentation-source compilation passed for both.
-- The exact-current API 35 connected production shell executed 112 tests with
-  110 passes, two intentional private-pilot skips, and zero failures. The
-  separately isolated fresh-process Review Sample executed one test with zero
-  failures and proved WorkManager remains uninitialized before Activity launch
-  and current Terms acceptance.
-- The pinned Python 3.11 server environment passed Ruff over 81 files and
-  collected 598 pytest cases: 463 passed, 135 were documented
-  dependency/configuration skips, and none failed or errored.
-- App-wide generation produced 803 strings and 45 Android-only resources across
-  nine locales and was byte-for-byte idempotent. Feedback localization and the
-  strict differential localization audit passed.
-- The final policy wall passed all 230 Tools tests, 12 OpenTofu tests, the
-  1,253-file health-claims scan, calibration across 12 metrics, three revisions,
-  13 thresholds, and 16 guards, terminology with 17,676 classified occurrences
-  and zero forbidden mappings, five conditional plus five universal required-CI
-  contexts, release-control, trusted-self, legal inventory over 230 runtime
-  components and three container inputs, distribution-provenance, private-data,
-  73 operations records, 27 shell syntax checks, ShellCheck over 25 scripts, two
-  zsh checks, actionlint, 111 tracked JSON files, bounded added-line secret
-  scanning, and `git diff --check`.
+- The exact worktree passed all 75 hydration app tests and a separate 181-case
+  Safety, wind-down, notification-lifecycle, hydration-reminder, and
+  accessibility matrix with zero failures or skips. The complete macOS app
+  suite executed 2,083 tests with 2,082 passes, one intentional Xiaomi-fixture
+  skip, and zero failures. After deterministic localization regenerated the
+  Apple catalog, the final iPhone 17 Pro shell executed 39 tests with 38
+  passes, one intentional private-pilot skip, and zero failures. Its scroll
+  case measured a 68,913.360 kB application peak.
+- WhoopStore executed 536 tests with zero failures. NoopRemoteSync executed 131
+  tests with zero failures. StrandAnalytics executed 1,487 tests with 1,480
+  passes, seven documented fixture skips, and zero failures.
+- Exact-current serialized Android Full and Demo each executed 4,819 tests with
+  4,812 passes, seven intentional skips, and zero failures or errors. Compile,
+  lint, APK assembly, and instrumentation-source compilation passed for both;
+  each lint XML contained 77 hints and 1,171 warnings with no Error or Fatal
+  entry.
+- A clean native-arm API 35 emulator installed the retained exact-current Full
+  app and test APKs and executed 115 instrumentation tests: 113 passed, two
+  intentional private-pilot cases were skipped, and none failed or errored. A
+  direct visual/bounds check confirmed the Review Sample bottom labels end at
+  y=2230 before the navigation frame begins at y=2274. Cold launch was 1,368 ms;
+  active-screen memory was 142,440 kB PSS, 266,528 kB RSS, and zero swap. The
+  disposable AVD and data image were removed afterward.
+- The exact-current pinned Python 3.12 server environment with PostgreSQL 16.15
+  executed 600 pytest cases after the final Safety freshness correction: 599
+  passed, the explicit real Twilio staging case was skipped, and none failed or
+  errored. Ruff check/format passed over 81 files, runtime and development
+  dependency audits found no known vulnerabilities, `pip check` passed, and
+  all six backup scripts passed syntax checks. The disposable virtual
+  environment and both fresh databases were removed; a fresh-shell check
+  confirmed the paths absent, PostgreSQL port 55437 free, and no retained
+  process.
+- App-wide generation produced 813 shared strings and 45 Android-only resources
+  across nine locales and was byte-for-byte idempotent. Feedback generation
+  covered 86 strings across nine locales; strict localization and all 52
+  top-level i18n tests passed.
+- The exact-current repository-tool suite executed 281 tests with zero
+  failures. The generated terminology inventory records 17,702 classified
+  occurrences across 1,563 path/category groups. Standalone release-control,
+  required-CI, trusted-release, calibration-parity, terminology, legal,
+  distribution-provenance, private-data, health-claim, and strict localization
+  gates passed.
+- Static verification passed interpreter-matched syntax for all 27 tracked
+  shell scripts, ShellCheck for the 25 supported Bash/POSIX scripts, Actionlint
+  for every workflow, parsing for all 111 tracked JSON files, launch-gate
+  configuration validation, 12 mocked plan-only OpenTofu tests, the
+  high-confidence tracked-source secret-pattern scan, `git diff --check`, and
+  validation of all 73 operations records. The two Zsh visual-QA scripts were
+  checked by `zsh -n` because ShellCheck does not parse Zsh.
+- The exact-current fork-free bounded-command runner executes 57 tests with
+  zero failures on Python 3.14 and the system Python 3.9. It now gives
+  verification targets `/dev/null` stdin after a real failing Gradle command
+  demonstrated that inherited interactive input could stop the target process
+  group. It also invalidates stale terminal evidence when an atomic status write
+  fails and signals an owned process group before reaping its supervisor, so a
+  recycled PID or PGID is not targeted after ownership is released. The
+  corrected focused and complete Android runs exited with no retained runner,
+  Gradle wrapper, or daemon. Its reviewed digest is pinned and the combined
+  terminology, trusted-release, and required-CI checks pass.
 
-The exact-source repository-policy wall must be rerun only if a subsequent
-product, test, localization, migration, workflow, policy, or operations-record
-edit changes its covered source.
+Current September 17 continuation evidence:
 
-Do not describe prior matrices as exact-current evidence after any product,
-test, localization, migration, workflow, or policy edit.
+- Independent final review found that the server intentionally returns the
+  original accepted incident for every matching request-id replay without
+  mutating its initial location, while both clients accepted a missing location
+  only for terminal duplicates. Apple and Android now accept a missing
+  retry-supplied location for any server-marked duplicate and continue to reject
+  a new non-duplicate response that omits the accepted initial location.
+  Focused Apple and Android replay tests pass.
+- The final post-localization iOS production shell ran on an iPhone 17 Pro
+  simulator:
+  39 UI tests executed, 38 passed, one private-pilot test was intentionally
+  skipped, and none failed. The Today scroll performance case reported a
+  68,913.360 kB peak application-memory metric. The first launch failed before
+  build because the SwiftPM user cache was a broken symlink to a removed
+  round-owned RAM volume; that exact symlink was replaced with a normal cache
+  directory and the same bounded command then passed.
+- The exact-current Android Full app and instrumentation APKs built in 73
+  actionable tasks. After the final navigation and report-request lifecycle
+  corrections, a disposable native-arm API 35 AVD executed 115 instrumentation
+  tests with 113 passes, two intentional skips, and zero failures or errors.
+  The exact APK cold-launched in 1,368 ms, rendered the Review Sample labels
+  fully above the navigation frame, and reported 142,440 kB PSS, 266,528 kB
+  RSS, and zero swap. The emulator and AVD were deleted after capture, leaving
+  no connected device or retained virtual device.
+- The complete exact-current Android Full and Demo walls each executed 4,819
+  tests with 4,812 passes, seven intentional skips, and zero failures or
+  errors. WhoopStore, NoopRemoteSync, StrandAnalytics, the macOS app, the local
+  PostgreSQL server, deterministic localization, and the final
+  post-localization iPhone simulator walls also passed with the counts above.
+- The repository-owned and installed `noop-ops` skills now require live
+  memory/disk/process evidence, bounded heavy commands, normal-disk worktrees,
+  exact-owner cleanup, preservation of dirty/open sessions, and post-cleanup
+  verification. Both skill copies pass the Python 3.11 skill validator and are
+  byte-identical.
+- Resource cleanup removed 276 closed historical Codex logs totaling
+  121.75 GiB and eight completed, captured NOOP subagent logs totaling
+  6.35 GiB. The current goal, original crash-context session, active reviewer,
+  other open sessions, source, and rescue bundle were retained. Checksummed
+  local manifests record the exact deletion sets. Live preflight after cleanup
+  reported 57% system memory free and 129 GiB disk free; the old application
+  memory screenshot remains historical evidence only.
 
 ## Pull request and integration
 
 Pull request `#15` is the protected integration record. Its current remote head
-is `f7350d6e`. Earlier hosted results remain historical evidence because the
-final local corrections are not yet on that SHA. Known review
+is `0ff1bf46`. Earlier hosted results remain historical evidence because the
+final local corrections are not yet on that SHA. The Apple Simulator and
+aggregate Apple required checks failed on this remote head; the other reported
+hosted checks passed. Known review
 conversations remain unresolved until the replacement head proves their fixes,
 including hydration migration, reminder lifecycle, feedback continuity,
 managed-sync deletion behavior, pre-Terms Review Sample isolation, split
@@ -181,12 +284,15 @@ daily-review backup parity, and sleep-minute rounding parity.
 
 Closeout order:
 
-1. Push the bounded final commit as one consolidated replacement.
-2. Wait for all required checks on that exact SHA.
-3. Resolve only review threads proven by that SHA.
-4. Integrate through normal branch protection.
-5. Immediately restore private repository visibility.
-6. Synchronize canonical `main` and remove only round-owned temporary
+1. Finish the fresh final diff and secret review on the stable generated tree.
+2. Commit the bounded final source and records locally.
+3. Generate and verify release evidence for that immutable commit.
+4. Push that commit once as one consolidated replacement.
+5. Wait for all required checks on that exact SHA.
+6. Resolve only review threads proven by that SHA.
+7. Integrate through normal branch protection.
+8. Immediately restore private repository visibility.
+9. Synchronize canonical `main` and remove only round-owned temporary
    resources.
 
 ## Runtime and launch boundaries
@@ -205,6 +311,10 @@ Genuine external release gates remain:
 - signing identities, store records, review, and distribution;
 - participant validation and media redistribution rights;
 - elapsed soak and operational evidence.
+
+The owner explicitly deferred supplier hardware, firmware, SDK loading,
+pairing, physical calibration, and representative-device work until the
+weekend. No supplier or band readiness is claimed by this closeout.
 
 Deferred engineering gates remain disabled until implemented and verified:
 public ingress, client encryption/key recovery, production monitoring and

@@ -410,6 +410,16 @@
     <string name="appwide_hydration_edit_entry_accessibility_format">編輯 %1$s 飲水記錄</string>
     <string name="appwide_hydration_goal_progress_format">%2$s 目標的 %1$d%%</string>
     <string name="appwide_hydration_history_through_format">截至 %1$s 的 7 天</string>
+    <string name="appwide_hydration_legacy_conflict_detail">保留已儲存的總量會用一筆較早的每日總量取代所列飲水記錄。使用飲水記錄會把當天總量改為清單中的數值。在您選擇之前，不會變更任何資料。</string>
+    <string name="appwide_hydration_legacy_conflict_title">選擇這一天儲存的飲水量</string>
+    <string name="appwide_hydration_legacy_keep_total">保留已儲存的總量</string>
+    <string name="appwide_hydration_legacy_keep_total_a11y_format">保留已儲存的每日總量，%1$s</string>
+    <string name="appwide_hydration_legacy_keep_total_hint">用一筆較早的每日總量取代所列飲水記錄。</string>
+    <string name="appwide_hydration_legacy_listed_total">飲水記錄總量</string>
+    <string name="appwide_hydration_legacy_saved_total">已儲存的每日總量</string>
+    <string name="appwide_hydration_legacy_use_list">使用所列飲水記錄</string>
+    <string name="appwide_hydration_legacy_use_list_a11y_format">使用所列飲水記錄總量，%1$s</string>
+    <string name="appwide_hydration_legacy_use_list_hint">把當天總量改為所列飲水記錄的總量。</string>
     <string name="appwide_hydration_load_failed">無法載入飲水資料。請再試一次。</string>
     <string name="appwide_hydration_logged_day">已記錄%1$s</string>
     <string name="appwide_hydration_logged_on_format">已記錄 %1$s</string>
