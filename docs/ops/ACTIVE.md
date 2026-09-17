@@ -8,9 +8,11 @@ Last updated: **2026-09-17**
 - Protected branch: `main`
 - Active worktree: this dedicated audit checkout
 - Active branch: `codex/product-safety-quality-audit-20260911`
-- Current remote pull-request head before the final uncommitted corrections:
+- Current remote pull-request head before the final local corrections:
   `0ff1bf4657c45f836aaec32f920a8b528f6b552b`
-- Local state at this update: the final uncommitted slice gives Apple and
+- Final implementation commit:
+  `6e09acd0dd4cc364a10a5eee856ede7a97e28632`
+- Local state at this update: the final committed slice gives Apple and
   Android scoring bounded local-only timezone provenance, exact 23-hour and
   25-hour civil days, an unresolved interval across a recorded travel-zone
   change, and a fail-closed boundary after retained history is truncated.
@@ -54,10 +56,12 @@ Last updated: **2026-09-17**
   corrections. The final post-localization iPhone 17 Pro simulator shell is
   green: 39 UI tests executed, 38 passed, one private-pilot case was
   intentionally skipped, and none failed. Repository static-policy and
-  release-control gates remain intentionally last, after documentation and
-  generated terminology are stable.
-  Finalized result bundles and reports are preserved privately until the final
-  immutable commit and release evidence are recorded. A final Android hydration
+  release-control gates pass after documentation and generated terminology
+  stabilized.
+  Finalized result bundles and reports are preserved privately. Commit-bound
+  release evidence for the implementation commit passed all nine release
+  controls, generated a deterministic 233-component SBOM, and verified its
+  manifest. A final Android hydration
   reboot/time-change regression was found and corrected: its receiver,
   scheduler, chained scheduling, and worker now reject absent or stale Terms
   before WorkManager access. Completed NOOP Xcode/SwiftPM caches, old
@@ -79,9 +83,10 @@ Last updated: **2026-09-17**
   self-checks pass. The complete product walls, exact-current phone simulator
   runtimes, 281-case repository-tool wall, static checks, privacy and claims
   gates, and 12 mocked infrastructure plans are green. The fresh diff review,
-  bounded commit, immutable release evidence, one consolidated push, hosted
-  checks, protected integration, immediate privacy restoration, and cleanup
-  remain ordered closeout work.
+  bounded implementation commit, and preliminary immutable release evidence
+  are complete. A final documentation commit, regenerated exact-HEAD evidence,
+  one consolidated push, hosted checks, protected integration, immediate
+  privacy restoration, and cleanup remain ordered closeout work.
 - Protected integration record: pull request `#15`
 - Repository visibility: public during this audit; it must return to private
   immediately after protected integration
@@ -273,10 +278,10 @@ Current September 17 continuation evidence:
 ## Pull request and integration
 
 Pull request `#15` is the protected integration record. Its current remote head
-is `0ff1bf46`. Earlier hosted results remain historical evidence because the
-final local corrections are not yet on that SHA. The Apple Simulator and
-aggregate Apple required checks failed on this remote head; the other reported
-hosted checks passed. Known review
+is `0ff1bf46`; local implementation head is `6e09acd0`. Earlier hosted results
+remain historical evidence because the final local corrections are not yet on
+the remote SHA. The Apple Simulator and aggregate Apple required checks failed
+on the remote head; the other reported hosted checks passed. Known review
 conversations remain unresolved until the replacement head proves their fixes,
 including hydration migration, reminder lifecycle, feedback continuity,
 managed-sync deletion behavior, pre-Terms Review Sample isolation, split
@@ -284,15 +289,14 @@ daily-review backup parity, and sleep-minute rounding parity.
 
 Closeout order:
 
-1. Finish the fresh final diff and secret review on the stable generated tree.
-2. Commit the bounded final source and records locally.
-3. Generate and verify release evidence for that immutable commit.
-4. Push that commit once as one consolidated replacement.
-5. Wait for all required checks on that exact SHA.
-6. Resolve only review threads proven by that SHA.
-7. Integrate through normal branch protection.
-8. Immediately restore private repository visibility.
-9. Synchronize canonical `main` and remove only round-owned temporary
+1. Commit this final release-state record.
+2. Regenerate and verify release evidence for the resulting exact HEAD.
+3. Push that HEAD once as one consolidated replacement.
+4. Wait for all required checks on that exact SHA.
+5. Resolve only review threads proven by that SHA.
+6. Integrate through normal branch protection.
+7. Immediately restore private repository visibility.
+8. Synchronize canonical `main` and remove only round-owned temporary
    resources.
 
 ## Runtime and launch boundaries

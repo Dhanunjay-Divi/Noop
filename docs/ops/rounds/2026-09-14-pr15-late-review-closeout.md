@@ -2,12 +2,16 @@
 
 ## Status
 
-- State: `supplier-independent product, simulator, and generated-tree policy verification complete; final diff review, immutable commit, hosted checks, protected integration, privacy restoration, and final cleanup remain`
+- State: `supplier-independent product, simulator, generated-tree policy, final diff, and implementation commit complete; final record commit, exact-HEAD evidence, hosted checks, protected integration, privacy restoration, and cleanup remain`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `f7350d6eb9cee1dd9a903e5ab73d16f049607bc6`
-- Current committed head: `0ff1bf4657c45f836aaec32f920a8b528f6b552b`
-- End implementation commit: pending final verified commit
+- Current local implementation head:
+  `6e09acd0dd4cc364a10a5eee856ede7a97e28632`
+- Current remote pull-request head:
+  `0ff1bf4657c45f836aaec32f920a8b528f6b552b`
+- End implementation commit:
+  `6e09acd0dd4cc364a10a5eee856ede7a97e28632`
 - Record commit or PR: pull request `#15`
 - Local verification finalized: supplier-independent product, simulator, and
   generated-tree policy walls complete on `2026-09-17`
@@ -367,7 +371,9 @@ Close the final source-verifiable review findings before protected integration:
   Android feedback scheduling/diagnostics and tests, managed-document ordering,
   the reviewed App Check patch pin and regenerated legal notices, terminology
   and required CI inventories, and operations records.
-- Commits: the final verified commit has not been created.
+- Commits: final implementation commit `6e09acd0` is created locally; this
+  release-state record will be the final documentation-only commit before the
+  consolidated push.
 - Local product verification: complete Swift-package, macOS app, Android
   Full/Demo, API 35, local PostgreSQL server, localization, and final
   post-catalog iPhone 17 Pro simulator walls are green.
@@ -375,6 +381,10 @@ Close the final source-verifiable review findings before protected integration:
   All exact-current static, localization, privacy, claims, legal, calibration,
   terminology, required-CI, trusted-release, launch-gate, mocked-infrastructure,
   operations-record, and diff gates pass.
+- Preliminary immutable evidence for `6e09acd0`: all nine release controls
+  passed, a deterministic 233-component CycloneDX SBOM was generated, and the
+  two-artifact manifest verified. Evidence will be regenerated after the final
+  documentation-only commit so hosted and local evidence bind the same SHA.
 - Hosted exact-SHA checks: the current remote head is `0ff1bf46`; its Apple
   Simulator and aggregate Apple required checks failed. Replacement-head checks
   remain pending.
@@ -429,10 +439,9 @@ Close the final source-verifiable review findings before protected integration:
 
 ## Next round
 
-1. Complete the fresh final diff and secret review, then create the bounded
-   local commit.
-2. Generate and verify release evidence for that immutable commit, then push it
-   once as one replacement head.
+1. Commit this final release-state record.
+2. Regenerate and verify release evidence for the exact resulting HEAD, then
+   push it once as one replacement head.
 3. Wait for hosted exact-SHA checks, resolve only the proven review threads,
    integrate through protection, restore repository privacy, verify protected
    `main`, synchronize the canonical checkout, and clean only round-owned
