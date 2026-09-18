@@ -653,10 +653,6 @@
       "When Noop Band does not send a measured step count, NOOP estimates steps from motion "
     ],
     [
-      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
-      "✓ Noop Band accepted all 15 R22 flags"
-    ],
-    [
       "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
       "Clear this day"
     ],
@@ -967,10 +963,6 @@
       "\\(DateFormatterCache.day.string(from: day.date)) · recovery \\(Int(score.rounded()))"
     ],
     [
-      "Strand/App/RootView.swift",
-      "Noop Band not connected"
-    ],
-    [
       "Strand/Liquid/LiquidPrimitives.swift",
       "%.\\(decimals)f"
     ],
@@ -980,19 +972,7 @@
     ],
     [
       "Strand/Liquid/LiquidTodayView.swift",
-      "Connect Noop Band to see live heart rate"
-    ],
-    [
-      "Strand/Liquid/LiquidTodayView.swift",
       "Noop Band battery"
-    ],
-    [
-      "Strand/MenuBar/MenuBarContent.swift",
-      "Noop Band not connected"
-    ],
-    [
-      "Strand/Onboarding/OnboardingWizard.swift",
-      "When the system prompt appears, choose Allow so NOOP can find Noop Band."
     ],
     [
       "Strand/Screens/AddDeviceWizard.swift",
@@ -1013,10 +993,6 @@
     [
       "Strand/Screens/BreathingView.swift",
       "%.1f br/min"
-    ],
-    [
-      "Strand/Screens/BreathingView.swift",
-      "Connect Noop Band for haptic guidance. You'll feel one pulse on the inhale and two on the exhale, so you can breathe with your eyes closed."
     ],
     [
       "Strand/Screens/BreathingView.swift",
@@ -1041,10 +1017,6 @@
     [
       "Strand/Screens/DataSourcesView.swift",
       "Import your Oura history"
-    ],
-    [
-      "Strand/Screens/DataSourcesView.swift",
-      "No live heart rate yet. Open Live to pair Noop Band."
     ],
     [
       "Strand/Screens/DevicesView.swift",
@@ -1099,14 +1071,6 @@
       "Zoomed in. Drag to pan · hold to read"
     ],
     [
-      "Strand/Screens/HRVSnapshotView.swift",
-      "A 60-second snapshot of beat-to-beat (R-R) intervals from Noop Band, cleaned with range and ectopic-beat filtering before computing RMSSD the same way your overnight HRV is computed."
-    ],
-    [
-      "Strand/Screens/HRVSnapshotView.swift",
-      "An HRV reading needs the live R-R stream. Open the Live screen and connect Noop Band, then come back."
-    ],
-    [
       "Strand/Screens/HealthView.swift",
       "Refresh Fitness Age now"
     ],
@@ -1123,10 +1087,6 @@
       "Vitality \\(Int(v.rounded())) out of 100"
     ],
     [
-      "Strand/Screens/HowNoopWorksView.swift",
-      "NOOP never shows you a number it had to make up. If a score isn't ready, it tells you why and what to do next. Everything here runs on your device, from Noop Band."
-    ],
-    [
       "Strand/Screens/InsightsHubView.swift",
       "d = %.2f"
     ],
@@ -1141,10 +1101,6 @@
     [
       "Strand/Screens/IntelligenceView.swift",
       "Recovery weighs your HRV against your personal baseline (~55%), resting heart rate (~20%), sleep quality (~15%), respiration (~5%) and skin-temperature deviation (~5%). Effort is a 0-\\(UnitFormatter.effortScaleMax(effortScale)) cardiovascular load from time in heart-rate zones. Sleep is staged from movement and heart rate. Everything is computed here from Noop Band's raw data. It works for any day NOOP collected raw streams."
-    ],
-    [
-      "Strand/Screens/IntervalTimerView.swift",
-      "Pair Noop Band on the Live screen to feel the transitions hands-free."
     ],
     [
       "Strand/Screens/JournalLogCard.swift",
@@ -1197,10 +1153,6 @@
     [
       "Strand/Screens/LabBookView.swift",
       "the signal"
-    ],
-    [
-      "Strand/Screens/LiveView.swift",
-      "Can't connect: Noop Band pairing was reset"
     ],
     [
       "Strand/Screens/LiveView.swift",
@@ -1268,10 +1220,6 @@
     ],
     [
       "Strand/Screens/SettingsView.swift",
-      "Keeps the detailed beat-to-beat heart-rate stream running all day and night, not just while a live screen is open, so NOOP captures much more for overnight HRV, recovery and sleep. Uses more battery because Noop Band streams heart rate continuously while connected."
-    ],
-    [
-      "Strand/Screens/SettingsView.swift",
       "Kick in at (Noop Band battery)"
     ],
     [
@@ -1292,19 +1240,11 @@
     ],
     [
       "Strand/Screens/SettingsView.swift",
-      "No days yet where both NOOP and your phone counted steps. Once your phone logs a few days alongside Noop Band, they'll appear here so you can see how close the estimate is."
-    ],
-    [
-      "Strand/Screens/SettingsView.swift",
       "Noop Band ECG spot recording (experimental)"
     ],
     [
       "Strand/Screens/SettingsView.swift",
       "Noop Band accepted \\(live.r22FlagsAccepted)/15 R22 flags…"
-    ],
-    [
-      "Strand/Screens/SettingsView.swift",
-      "Noop Band accepted all 15 R22 flags"
     ],
     [
       "Strand/Screens/SettingsView.swift",
@@ -1437,14 +1377,6 @@
     [
       "Strand/Screens/SmartAlarmView.swift",
       "Once NOOP has a fresh detected sleep session, it arms Noop Band for the projected target and revises that time as awake minutes accumulate. The band can still vibrate with NOOP closed after it has been armed; detecting and revising the target remains best-effort in the background."
-    ],
-    [
-      "Strand/Screens/SmartAlarmView.swift",
-      "The Noop Band alarm is a silent vibration, not a sound"
-    ],
-    [
-      "Strand/Screens/SmartAlarmView.swift",
-      "Use Noop Band alarm time"
     ],
     [
       "Strand/Screens/StressView.swift",

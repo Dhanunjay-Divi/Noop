@@ -5665,7 +5665,11 @@ private struct LiquidLiveHR: View {
                     stat(String(localized: "Max"), series.max())
                 }
             } else {
-                Text(live.connected ? "Waiting for a live heartbeat…" : "Connect Noop Band to see live heart rate")
+                Text(
+                    live.connected
+                        ? String(localized: "Waiting for a live heartbeat…")
+                        : String(localized: "Connect Noop Band to see live heart rate")
+                )
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -2462,8 +2462,11 @@ fun SettingsScreen(
                     // Live R22 telemetry (#174): proof of what the strap is doing right now.
                     if (live.r22FlagsAccepted > 0) {
                         Text(
-                            if (live.r22FlagsAccepted >= 15) "✓ Noop Band accepted all 15 R22 flags"
-                            else "Noop Band accepted ${live.r22FlagsAccepted}/15 R22 flags…",
+                            if (live.r22FlagsAccepted >= 15) {
+                                stringResource(R.string.brand_band_accepted_all_r22_flags)
+                            } else {
+                                "Noop Band accepted ${live.r22FlagsAccepted}/15 R22 flags…"
+                            },
                             style = NoopType.caption,
                             color = if (live.r22FlagsAccepted >= 15) Palette.statusPositive else Palette.textSecondary,
                         )
