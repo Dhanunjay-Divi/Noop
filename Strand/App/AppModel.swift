@@ -26,24 +26,6 @@ private enum ManualWorkoutSaveError: LocalizedError {
     }
 }
 
-/// Upgrade boundary for formula changes that do not alter raw-input fingerprints.
-///
-/// A revision string, rather than a one-shot boolean, makes every future Charge revision fail open into
-/// a full-history rescore. Completion is persisted only after `analyzeRecent` returns a receipt.
-enum ChargeFormulaUpgradeGate {
-    static let completedRevisionKey = "noop.analysis.completedChargeFormulaRevision"
-    static let historyDays = 4_000
-    static var currentRevision: String { NoopScoreAlgorithmRevision.charge }
-
-    static func needsRescore(completedRevision: String?) -> Bool {
-        completedRevision != currentRevision
-    }
-
-    static func revisionToPersist(passCompleted: Bool, wasRequired: Bool) -> String? {
-        passCompleted && wasRequired ? currentRevision : nil
-    }
-}
-
 /// Upgrade boundary for the persisted Active Minutes series.
 ///
 /// Existing installs may already have an unchanged raw-input watermark from a build that did not write
@@ -817,41 +799,132 @@ final class AppModel: ObservableObject {
                 // #836: the steady-state tick is a BACKSTOP, not a data-driven refresh. A formula-only app
                 // upgrade does not move the raw-input fingerprint, though, so its explicit revision marker
                 // overrides that skip exactly once. Use the full history before labeling any local/remote row
-                // Charge v2; a failed or overlapping pass returns nil and leaves the marker stale for retry.
+                // with a new Charge or Rest revision; a failed or overlapping pass returns nil and leaves
+                // the marker stale for retry.
                 let completedChargeRevision = UserDefaults.standard.string(
                     forKey: ChargeFormulaUpgradeGate.completedRevisionKey)
                 let chargeUpgradePending = ChargeFormulaUpgradeGate.needsRescore(
                     completedRevision: completedChargeRevision)
+                let completedRestRevision = UserDefaults.standard.string(
+                    forKey: RestFormulaUpgradeGate.completedRevisionKey)
+                let restUpgradePending = RestFormulaUpgradeGate.needsRescore(
+                    completedRevision: completedRestRevision)
                 let completedActiveZoneRevision = UserDefaults.standard.string(
                     forKey: ActiveZoneUpgradeGate.completedRevisionKey)
                 let activeZoneUpgradePending = ActiveZoneUpgradeGate.needsRescore(
                     completedRevision: completedActiveZoneRevision)
+                let formulaTraversalSelected =
+                    restUpgradePending || chargeUpgradePending
+                let storedRestAnchor: Int? =
+                    UserDefaults.standard.object(
+                        forKey: RestFormulaUpgradeGate.nextAnchorKey
+                    ) == nil
+                    ? nil
+                    : UserDefaults.standard.integer(
+                        forKey: RestFormulaUpgradeGate.nextAnchorKey
+                    )
+                let restTraversalAnchor =
+                    RestFormulaUpgradeGate.traversalAnchor(
+                        migrationRequired: formulaTraversalSelected,
+                        anchorRevision:
+                            UserDefaults.standard.string(
+                                forKey:
+                                    RestFormulaUpgradeGate
+                                        .anchorRevisionKey
+                            ),
+                        storedAnchor: storedRestAnchor
+                    )
                 operation = AppDiagnosticsRecorder.shared.beginOperation(
                     "analysis.recent",
                     fields: [
                         "charge_upgrade": chargeUpgradePending ? "true" : "false",
+                        "rest_upgrade": restUpgradePending ? "true" : "false",
+                        "rest_traversal":
+                            formulaTraversalSelected ? "true" : "false",
                         "active_zone_upgrade": activeZoneUpgradePending ? "true" : "false",
                     ]
                 )
                 let receipt = await self.intelligence.analyzeRecent(
-                    maxDays: chargeUpgradePending
-                        ? ChargeFormulaUpgradeGate.historyDays
+                    maxDays: chargeUpgradePending || restUpgradePending
+                        ? max(
+                            ChargeFormulaUpgradeGate.historyDays,
+                            RestFormulaUpgradeGate.historyDays
+                        )
                         : ActiveZoneUpgradeGate.historyDays,
-                    force: chargeUpgradePending || activeZoneUpgradePending)
+                    force: chargeUpgradePending || restUpgradePending
+                        || activeZoneUpgradePending,
+                    traverseResolvableHistory:
+                        formulaTraversalSelected,
+                    resolvableHistoryAnchor:
+                        restTraversalAnchor)
+                let restProgress =
+                    RestFormulaUpgradeGate.progress(
+                        receipt: receipt,
+                        wasRequired:
+                            restUpgradePending || chargeUpgradePending,
+                        traversalWasSelected:
+                            formulaTraversalSelected
+                    )
                 AppDiagnosticsRecorder.shared.endOperation(
                     operation,
                     outcome: receipt == nil ? "skipped_or_busy" : "completed",
+                    fields: [
+                        "rest_history_complete":
+                            receipt?.completedResolvableHistory == true
+                                ? "true"
+                                : "false",
+                        "rest_history_progress": {
+                            switch restProgress {
+                            case .retry:
+                                return "retry"
+                            case .advance:
+                                return "advance"
+                            case .complete:
+                                return "complete"
+                            }
+                        }(),
+                    ],
                     includeResourceSnapshot: true
                 )
-                if let revision = ChargeFormulaUpgradeGate.revisionToPersist(
-                    passCompleted: receipt != nil,
-                    wasRequired: chargeUpgradePending) {
+                switch restProgress {
+                case .retry:
+                    break
+                case .advance(let nextAnchor):
                     UserDefaults.standard.set(
-                        revision,
-                        forKey: ChargeFormulaUpgradeGate.completedRevisionKey)
+                        nextAnchor,
+                        forKey: RestFormulaUpgradeGate.nextAnchorKey
+                    )
+                    UserDefaults.standard.set(
+                        RestFormulaUpgradeGate.traversalRevision,
+                        forKey:
+                            RestFormulaUpgradeGate.anchorRevisionKey
+                    )
+                case .complete(let revision):
+                    if restUpgradePending {
+                        UserDefaults.standard.set(
+                            revision,
+                            forKey:
+                                RestFormulaUpgradeGate.completedRevisionKey
+                        )
+                    }
+                    if chargeUpgradePending {
+                        UserDefaults.standard.set(
+                            ChargeFormulaUpgradeGate.currentRevision,
+                            forKey:
+                                ChargeFormulaUpgradeGate.completedRevisionKey
+                        )
+                    }
+                    UserDefaults.standard.removeObject(
+                        forKey: RestFormulaUpgradeGate.nextAnchorKey
+                    )
+                    UserDefaults.standard.removeObject(
+                        forKey:
+                            RestFormulaUpgradeGate.anchorRevisionKey
+                    )
                 }
                 if let revision = ActiveZoneUpgradeGate.revisionToPersist(
-                    passCompleted: receipt != nil,
+                    passCompleted:
+                        receipt != nil && !formulaTraversalSelected,
                     wasRequired: activeZoneUpgradePending) {
                     UserDefaults.standard.set(
                         revision,

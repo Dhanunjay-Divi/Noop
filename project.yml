@@ -189,6 +189,9 @@ targets:
     sources:
       - StrandTests
       - StrandiOSShared/WidgetSnapshot.swift
+      # Compile the pure retry-state store into the macOS test bundle. The
+      # iOS scheduler and wake/diagnostic side effects remain os(iOS)-guarded.
+      - StrandiOS/System/ManagedCloudRetry.swift
     # Same wrapper as the app target, so the OURA_CLOUD_IMPORT-gated Oura tests compile exactly
     # when the app's Oura lane does (flag + creds both come from the untracked OuraSecrets.xcconfig).
     configFiles:
@@ -478,6 +481,8 @@ targets:
     platform: iOS
     deploymentTarget: "17.0"
     sources:
+      # Widget extensions are separate bundles and cannot consume the phone app's
+      # String Catalog. Keep their compiler-extracted keys in this target-owned catalog.
       - path: StrandiOSWidgets
         excludes:
           - "Info.plist"

@@ -17,7 +17,8 @@ points rather than listing every file, because an exhaustive list goes stale the
 
 1. [`handoff/RELEASE-BLOCKERS.md`](handoff/RELEASE-BLOCKERS.md) — the P0 launch gates.
 2. [`handoff/INDIA-FIRST-LAUNCH-PATH.md`](handoff/INDIA-FIRST-LAUNCH-PATH.md) — India-then-USA
-   sequencing. DPDP, TRAI DLT for SMS, BIS and WPC/ETA for the band, and the case for a local-only v1.
+   sequencing, the local-first core, narrow ownership and app-to-app Safety services, DPDP,
+   conditional TRAI DLT for SMS/voice fallback, and BIS/WPC-ETA for the band.
 3. [`handoff/HARDWARE-AND-PREMIUM-STRATEGY.md`](handoff/HARDWARE-AND-PREMIUM-STRATEGY.md) — what paid
    hardware plus a paid tier actually requires, and where the free/premium line must sit.
 4. [`handoff/PRODUCTIONISING-ALERTS-AND-COMPETITIVE-GAP.md`](handoff/PRODUCTIONISING-ALERTS-AND-COMPETITIVE-GAP.md)

@@ -734,16 +734,44 @@ final class IntelligenceEngine: ObservableObject {
     /// precedence and is not evidence that a local raw-stream computation happened.
     struct ScoreRunReceipt: Equatable, Sendable {
         let whoopStrapDays: Set<String>
+        /// True only when the selected scoring plan contained every civil-day window requested by
+        /// the caller. A bounded or provenance-truncated pass can still publish useful rows, but it
+        /// must not complete a formula migration that promised a larger historical window.
+        let requestedWindowSatisfied: Bool
+        /// True when this pass covered either the complete requested window or every fully
+        /// provenance-backed civil day down to the retained lower boundary. This is intentionally
+        /// separate from `requestedWindowSatisfied`: a new install can have ten resolvable days,
+        /// not 4,000, without leaving a formula migration pending forever.
+        let resolvableHistorySatisfied: Bool
+        /// The next exact historical civil-day anchor for a segmented formula migration.
+        /// Persist this only after every required boundary in this receipt completed.
+        let nextResolvableHistoryAnchor: Int?
         /// False when valid partial results were published but a required read, persistence, repair, or
         /// input-generation finalization boundary failed. Callers that merely consume published metrics
         /// may still use the receipt; one-shot migrations must require this stronger completion signal.
         let allRequiredBoundariesCompleted: Bool
 
+        var completedRequestedWindow: Bool {
+            requestedWindowSatisfied && allRequiredBoundariesCompleted
+        }
+
+        var completedResolvableHistory: Bool {
+            resolvableHistorySatisfied && allRequiredBoundariesCompleted
+        }
+
         init(
             whoopStrapDays: Set<String>,
+            requestedWindowSatisfied: Bool = true,
+            resolvableHistorySatisfied: Bool? = nil,
+            nextResolvableHistoryAnchor: Int? = nil,
             allRequiredBoundariesCompleted: Bool = true
         ) {
             self.whoopStrapDays = whoopStrapDays
+            self.requestedWindowSatisfied = requestedWindowSatisfied
+            self.resolvableHistorySatisfied =
+                resolvableHistorySatisfied ?? requestedWindowSatisfied
+            self.nextResolvableHistoryAnchor =
+                nextResolvableHistoryAnchor
             self.allRequiredBoundariesCompleted =
                 allRequiredBoundariesCompleted
         }
@@ -808,6 +836,9 @@ final class IntelligenceEngine: ObservableObject {
         let maxDays: Int
         let passKind: AnalysisPassKind
         let defersHistoricalBacklog: Bool
+        let requestedWindowSatisfied: Bool
+        let resolvableHistorySatisfied: Bool
+        let nextResolvableHistoryAnchor: Int?
         let timezoneOffsetSeconds: Int?
         let civilDayWindow: AnalysisCivilDayWindow?
         let timeZoneIdentifier: String?
@@ -821,6 +852,9 @@ final class IntelligenceEngine: ObservableObject {
             maxDays: Int,
             passKind: AnalysisPassKind,
             defersHistoricalBacklog: Bool = false,
+            requestedWindowSatisfied: Bool = false,
+            resolvableHistorySatisfied: Bool? = nil,
+            nextResolvableHistoryAnchor: Int? = nil,
             timezoneOffsetSeconds: Int? = nil,
             civilDayWindow: AnalysisCivilDayWindow? = nil,
             timeZoneIdentifier: String? = nil,
@@ -834,6 +868,11 @@ final class IntelligenceEngine: ObservableObject {
             self.maxDays = maxDays
             self.passKind = passKind
             self.defersHistoricalBacklog = defersHistoricalBacklog
+            self.requestedWindowSatisfied = requestedWindowSatisfied
+            self.resolvableHistorySatisfied =
+                resolvableHistorySatisfied ?? requestedWindowSatisfied
+            self.nextResolvableHistoryAnchor =
+                nextResolvableHistoryAnchor
             self.timezoneOffsetSeconds = timezoneOffsetSeconds
             self.civilDayWindow = civilDayWindow
             self.timeZoneIdentifier = timeZoneIdentifier
@@ -858,6 +897,23 @@ final class IntelligenceEngine: ObservableObject {
         let provenance: AnalysisTimeZoneProvenance
         let lowerTravelBoundaryTs: Int?
         let upperTravelBoundaryTs: Int?
+    }
+
+    private struct ResolvableTimeZoneSegment: Equatable, Sendable {
+        let startTs: Int
+        let endTs: Int?
+        let timeZoneIdentifier: String
+
+        var isOpenEnded: Bool {
+            endTs == nil
+        }
+    }
+
+    private struct ResolvableHistorySelection: Sendable {
+        let referenceNow: Int
+        let context: AnalysisTimeZoneContext
+        let windows: [AnalysisCivilDayWindow]
+        let isHistorical: Bool
     }
 
     enum AnalysisReadFailurePoint: Hashable, Sendable {
@@ -1104,10 +1160,8 @@ final class IntelligenceEngine: ObservableObject {
 
     /// Optional sink for the per-day scoring diagnostic, fed line-by-line into the SAME shareable strap
     /// log the user already exports (PII-scrubbed by `LiveState.append(log:)`). Defaults to nil so the
-    /// engine stays testable with no UI. Each line is a concise, counts-only summary ("sleep day=…
-    /// totalSleepMin=… matched=… source=…") so the next bug report ships proof of what was computed per
-    /// day, addressing the project's log-failures-not-successes blind spot and the data needed to settle
-    /// "Rest repeats across days". (Sleep overhaul §2.5.)
+    /// engine stays testable with no UI. Always-on lines contain bounded counts and categorical
+    /// presence/provenance only; dates and health-derived values remain behind explicit test captures.
     /// `AppModel` wires it to `live.append(log:domain:)`. Each line is a concise, counts-only summary,
     /// optionally tagged with the TestDomain so the Sleep/Battery emitters land under their profile tag.
     var diagnosticSink: ((String, TestDomain?) -> Void)?
@@ -1739,7 +1793,12 @@ final class IntelligenceEngine: ObservableObject {
     /// Personal baselines (HRV / resting HR) are folded from the imported history, so even the first
     /// live night can be scored against your norm.
     @discardableResult
-    func analyzeRecent(maxDays: Int = 21, force: Bool = true) async -> ScoreRunReceipt? {
+    func analyzeRecent(
+        maxDays: Int = 21,
+        force: Bool = true,
+        traverseResolvableHistory: Bool = false,
+        resolvableHistoryAnchor: Int? = nil
+    ) async -> ScoreRunReceipt? {
         // #899-A: a concurrent pass already holds the lock. A NON-forced idle tick is safe to drop (the
         // in-flight pass already covers the same window). But a FORCED call is a real update path (a
         // post-backfill rescore after a sync) , dropping it would leave a freshly-synced night unscored
@@ -1754,10 +1813,28 @@ final class IntelligenceEngine: ObservableObject {
                 pendingForcedRescore = false
                 // Carry THIS pass's window into the re-pass. The new Task starts after this defer releases
                 // the gate; another force arriving during that pass can arm one further bounded re-pass.
-                Task { await self.analyzeRecent(maxDays: maxDays, force: true) }
+                Task {
+                    await self.analyzeRecent(
+                        maxDays: maxDays,
+                        force: true,
+                        traverseResolvableHistory:
+                            traverseResolvableHistory,
+                        resolvableHistoryAnchor:
+                            resolvableHistoryAnchor
+                    )
+                }
             } else if pendingClaimRescore {
                 pendingClaimRescore = false
-                Task { await self.analyzeRecent(maxDays: maxDays, force: false) }
+                Task {
+                    await self.analyzeRecent(
+                        maxDays: maxDays,
+                        force: false,
+                        traverseResolvableHistory:
+                            traverseResolvableHistory,
+                        resolvableHistoryAnchor:
+                            resolvableHistoryAnchor
+                    )
+                }
             }
         }
         guard let store = await repo.storeHandle() else {
@@ -1873,7 +1950,9 @@ final class IntelligenceEngine: ObservableObject {
             now: actualNow,
             timezoneOffsetSeconds: currentTimezoneOffset,
             timeZoneTimeline: analysisTimeZoneTimeline,
-            preferHistoricalCatchUp: historicalCatchUpDue
+            preferHistoricalCatchUp: historicalCatchUpDue,
+            traverseResolvableHistory: traverseResolvableHistory,
+            resolvableHistoryAnchor: resolvableHistoryAnchor
         )
         let tzOffset =
             scoringPlan.timezoneOffsetSeconds ?? currentTimezoneOffset
@@ -2231,7 +2310,7 @@ final class IntelligenceEngine: ObservableObject {
                     activeZoneByDay[day] = minutes
                 }
                 guard hr.count >= 200 else {
-                    skippedDayLines.append("sleep day=\(day) SKIPPED hrSamples=\(hr.count) (need ≥200)")
+                    skippedDayLines.append("insufficient_hr")
                     continue
                 }
                 try Task.checkCancellation()
@@ -2492,7 +2571,7 @@ final class IntelligenceEngine: ObservableObject {
                                                      deepHrvWindow: deepHrvWindow)
                 guard res.status == .completed else {
                     skippedDayLines.append(
-                        "analysis day=\(day) SKIPPED reason=invalid_civil_day_bounds"
+                        "invalid_civil_day_bounds"
                     )
                     continue
                 }
@@ -2632,7 +2711,13 @@ final class IntelligenceEngine: ObservableObject {
 
         // #714: replay each skipped day's diagnostic now that we're back on the main actor (diagnosticSink
         // is MainActor-bound). Always-on , not gated behind a test mode, mirroring the Kotlin `diag` sink.
-        for line in skippedDayLines { diagnosticSink?(line, nil) }
+        for (reason, lines) in Dictionary(grouping: skippedDayLines, by: { $0 })
+            .sorted(by: { $0.key < $1.key }) {
+            diagnosticSink?(
+                "analysis.sleep_skipped reason=\(reason) count=\(min(lines.count, 4_000))",
+                nil
+            )
+        }
 
         // CAPTURE-B (#814/#799): per-day resolved READ owner + that owner's HR-row count, keyed by day, so
         // the second pass (which has the provenance sets) can emit the universal `dayOwner …` line. The
@@ -2814,7 +2899,44 @@ final class IntelligenceEngine: ObservableObject {
         // the auto path produced NO trace at all (the "mode was on but produced NO trace" report), so an
         // "auto workout appeared then vanished" could not be explained from an export. Diagnostic only.
         let workoutsTraceActive = TestCentre.active(.workouts)
-        for night in scoredNights.sorted(by: { $0.daily.day < $1.daily.day }) {
+        let orderedScoredNights = scoredNights.sorted { $0.daily.day < $1.daily.day }
+        for night in orderedScoredNights where !importedWhoopDays.contains(night.daily.day) {
+            let dayEditedRows = Self.editedRowsForDay(
+                editedRows,
+                day: night.daily.day,
+                tzOffsetSeconds: night.timezoneOffsetSeconds,
+                civilDayStartTs: night.civilDayWindow?.startTs,
+                civilDayEndTsExclusive: night.civilDayWindow.map { $0.endTs + 1 },
+                sourceTimeline: editSourceTimeline
+            )
+            let editsByStart = Dictionary(
+                dayEditedRows.map { ($0.startTs, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            let editedSleep = Self.sleepEditedDaily(
+                night.daily,
+                detected: night.cachedSleep,
+                editsByStart: editsByStart,
+                tzOffsetSeconds: night.timezoneOffsetSeconds,
+                habitualMidsleepSec: habitualMidsleepSec,
+                fallbackMainSessionStarts: night.restRawEvidence.mainSessionStarts
+            )
+            histRestByDay[night.daily.day] = .some(
+                AnalyticsEngine.Rest.composite(daily: editedSleep.daily).map { $0 / 100.0 }
+            )
+        }
+        let scoringDays = orderedScoredNights.map(\.daily.day)
+        let hrvFolds = Baselines.causalFoldHistory(
+            histHrvByDay, before: scoringDays, cfg: hrvCfg, baselineEpoch: hrvEpoch)
+        let rhrFolds = Baselines.causalFoldHistory(
+            histRhrByDay, before: scoringDays, cfg: rhrCfg, baselineEpoch: recoveryEpoch)
+        let respFolds = Baselines.causalFoldHistory(
+            histRespByDay, before: scoringDays, cfg: respCfg, baselineEpoch: recoveryEpoch)
+        let skinFolds = Baselines.causalFoldHistory(
+            nightlySkinByDay, before: scoringDays, cfg: skinCfg, baselineEpoch: recoveryEpoch)
+        let restFolds = Baselines.causalFoldHistory(
+            histRestByDay, before: scoringDays, cfg: restCfg, baselineEpoch: recoveryEpoch)
+        for night in orderedScoredNights {
             // #299: scope the edits to THIS day before folding. A userEdited row / hand-logged nap belongs
             // to exactly ONE day — the day its night ENDS on, matching the daily's end-day bucket. `endTs`
             // is stable under a bedtime edit (only the onset/`startTsAdjusted` moves), so end-day is the
@@ -2861,16 +2983,11 @@ final class IntelligenceEngine: ObservableObject {
                     .some(AnalyticsEngine.Rest.composite(daily: daily).map { $0 / 100.0 })
             }
 
-            let hrvFold = Baselines.foldHistory(
-                histHrvByDay, before: daily.day, cfg: hrvCfg, baselineEpoch: hrvEpoch)
-            let rhrFold = Baselines.foldHistory(
-                histRhrByDay, before: daily.day, cfg: rhrCfg, baselineEpoch: recoveryEpoch)
-            let respFold = Baselines.foldHistory(
-                histRespByDay, before: daily.day, cfg: respCfg, baselineEpoch: recoveryEpoch)
-            let skinFold = Baselines.foldHistory(
-                nightlySkinByDay, before: daily.day, cfg: skinCfg, baselineEpoch: recoveryEpoch)
-            let restFold = Baselines.foldHistory(
-                histRestByDay, before: daily.day, cfg: restCfg, baselineEpoch: recoveryEpoch)
+            let hrvFold = hrvFolds[daily.day]!
+            let rhrFold = rhrFolds[daily.day]!
+            let respFold = respFolds[daily.day]!
+            let skinFold = skinFolds[daily.day]!
+            let restFold = restFolds[daily.day]!
             let dayBaselines = AnalyticsEngine.ProfileBaselines(
                 hrv: hrvFold,
                 restingHR: rhrFold.usable ? rhrFold : nil,
@@ -2921,24 +3038,15 @@ final class IntelligenceEngine: ObservableObject {
             // minute only , no HR/HRV/timestamps , so the next report ships PROOF of what was computed per
             // day (the project's log-failures-not-successes blind spot) and lets us settle the "Rest repeats
             // across days" question with data rather than a guess. Gated by the existing strap-log export.
-            let tsmLog = daily.totalSleepMin.map { String(Int($0.rounded())) } ?? "nil"
-            // #386: the banked stage split + efficiency ride beside the rollup, so a "homepage disagrees
-            // with the Sleep tab" report is self-diagnosing from the export alone - totalSleepMin vs the
-            // deep+rem+light sum is the identity both screens must agree on, now verifiable per pass, per
-            // day, without screenshots. Rounded minutes only (same privacy class as the rest of the line);
-            // stages=nil when the day has no banked stage split (an unstaged or imported-total-only day).
-            let effLog = daily.efficiency.map { String(format: "%.2f", $0) } ?? "nil"
-            diagnosticSink?("sleep day=\(daily.day) totalSleepMin=\(tsmLog) "
-                            + "stages=\(Self.sleepStagesLogToken(deep: daily.deepMin, rem: daily.remMin, light: daily.lightMin)) "
-                            + "eff=\(effLog) "
-                            + "matched=\(night.cachedSleep.count) source=\(source.logToken)", nil)
-            // #195: one always-on line per scored night with the computed HRV value + the window it used,
-            // so an "HRV reads high / deep-sleep window not changing" report is self-diagnosing straight
-            // from the strap log — the whole-night vs deep-sleep value, and `avgHrv=nil window=deep` when a
-            // deep-window night has no detected deep sleep — without needing the HRV & Autonomic test mode.
-            // Counts-only (a rounded ms + the window), PII-free; byte-identical to the Kotlin line.
-            let hrvLog = daily.avgHrv.map { String(format: "%.1f", $0) } ?? "nil"
-            diagnosticSink?("hrv day=\(daily.day) window=\(deepHrvWindow ? "deep" : "whole") avgHrv=\(hrvLog)", nil)
+            diagnosticSink?(
+                "analysis.sleep_scored source=\(source.logToken) "
+                    + "sessions=\(min(night.cachedSleep.count, 16)) "
+                    + "stages=\(daily.deepMin != nil && daily.remMin != nil && daily.lightMin != nil ? "present" : "missing") "
+                    + "efficiency=\(daily.efficiency == nil ? "missing" : "present") "
+                    + "hrv=\(daily.avgHrv == nil ? "missing" : "present") "
+                    + "hrv_window=\(deepHrvWindow ? "deep" : "whole")",
+                nil
+            )
             // #195: the whole-night HRV cleaning summary built in loop 1 (rmssd vs sdnn / cleaning counts).
             if let hrvDiagLine = night.hrvDiag { diagnosticSink?(hrvDiagLine, nil) }
             // ── CAPTURE-B: universal dayOwner self-diagnostic (#814/#799) ────────────────────────────────
@@ -3857,6 +3965,11 @@ final class IntelligenceEngine: ObservableObject {
         }
         return ScoreRunReceipt(
             whoopStrapDays: persistedWhoopStrapDays,
+            requestedWindowSatisfied: scoringPlan.requestedWindowSatisfied,
+            resolvableHistorySatisfied:
+                scoringPlan.resolvableHistorySatisfied,
+            nextResolvableHistoryAnchor:
+                scoringPlan.nextResolvableHistoryAnchor,
             allRequiredBoundariesCompleted:
                 passIntegrity.canAcknowledgeInputs
                     && generationFinalizationSucceeded
@@ -4021,6 +4134,9 @@ final class IntelligenceEngine: ObservableObject {
         passKind: AnalysisPassKind,
         context: AnalysisTimeZoneContext,
         defersHistoricalBacklog: Bool = false,
+        requestedWindowSatisfied: Bool = false,
+        resolvableHistorySatisfied: Bool? = nil,
+        nextResolvableHistoryAnchor: Int? = nil,
         civilDayWindow: AnalysisCivilDayWindow? = nil
     ) -> AnalysisScoringPlan {
         AnalysisScoringPlan(
@@ -4028,6 +4144,11 @@ final class IntelligenceEngine: ObservableObject {
             maxDays: maxDays,
             passKind: passKind,
             defersHistoricalBacklog: defersHistoricalBacklog,
+            requestedWindowSatisfied: requestedWindowSatisfied,
+            resolvableHistorySatisfied:
+                resolvableHistorySatisfied,
+            nextResolvableHistoryAnchor:
+                nextResolvableHistoryAnchor,
             timezoneOffsetSeconds:
                 context.timezoneOffsetSeconds,
             civilDayWindow: civilDayWindow,
@@ -4037,6 +4158,181 @@ final class IntelligenceEngine: ObservableObject {
                 context.lowerTravelBoundaryTs,
             upperTravelBoundaryTs:
                 context.upperTravelBoundaryTs
+        )
+    }
+
+    nonisolated private static func resolvableTimeZoneSegments(
+        timeline: AnalysisTimeZoneTimeline
+    ) -> [ResolvableTimeZoneSegment] {
+        guard let lastObservation = timeline.observations.last,
+              case .resolved =
+                timeline.resolution(
+                    containing: lastObservation.observedAtSec
+                ) else {
+            return []
+        }
+
+        var segments: [ResolvableTimeZoneSegment] = []
+        var runStart = timeline.observations[0]
+        var runEnd = runStart
+        for observation in timeline.observations.dropFirst() {
+            if observation.timeZoneIdentifier
+                == runEnd.timeZoneIdentifier {
+                runEnd = observation
+                continue
+            }
+            segments.append(
+                ResolvableTimeZoneSegment(
+                    startTs: runStart.observedAtSec,
+                    endTs: runEnd.observedAtSec,
+                    timeZoneIdentifier:
+                        runStart.timeZoneIdentifier
+                )
+            )
+            runStart = observation
+            runEnd = observation
+        }
+        segments.append(
+            ResolvableTimeZoneSegment(
+                startTs: runStart.observedAtSec,
+                endTs: nil,
+                timeZoneIdentifier: runStart.timeZoneIdentifier
+            )
+        )
+        return segments
+    }
+
+    nonisolated private static func newestResolvableDayAnchor(
+        in segment: ResolvableTimeZoneSegment,
+        atOrBefore upperBound: Int,
+        allowOpenEndedPartialDay: Bool
+    ) -> Int? {
+        guard upperBound >= segment.startTs,
+              let timeZone = TimeZone(
+                  identifier: segment.timeZoneIdentifier
+              ) else {
+            return nil
+        }
+        var candidate = min(upperBound, segment.endTs ?? upperBound)
+        while candidate >= segment.startTs {
+            guard let window = historicalCivilDayWindow(
+                containing: candidate,
+                timeZone: timeZone
+            ) else {
+                return nil
+            }
+            let mayUsePartialNewestDay =
+                allowOpenEndedPartialDay && segment.isOpenEnded
+            let segmentEndFits =
+                segment.endTs.map {
+                    window.endTs <= $0
+                } ?? true
+            let fitsUpperBoundary =
+                mayUsePartialNewestDay
+                || (
+                    window.endTs <= candidate
+                    && segmentEndFits
+                )
+            if window.startTs >= segment.startTs
+                && fitsUpperBoundary {
+                return window.startTs
+                    + window.durationSeconds / 2
+            }
+            guard window.startTs > 0,
+                  window.startTs - 1 < candidate else {
+                return nil
+            }
+            candidate = window.startTs - 1
+        }
+        return nil
+    }
+
+    nonisolated private static func resolvableHistorySelection(
+        requestedDays: Int,
+        onOrBefore requestedAnchor: Int,
+        timeline: AnalysisTimeZoneTimeline,
+        allowOpenEndedPartialDay: Bool
+    ) -> ResolvableHistorySelection? {
+        let segments = resolvableTimeZoneSegments(
+            timeline: timeline
+        )
+        for segment in segments.reversed()
+        where segment.startTs <= requestedAnchor {
+            guard let anchor = newestResolvableDayAnchor(
+                in: segment,
+                atOrBefore: requestedAnchor,
+                allowOpenEndedPartialDay:
+                    allowOpenEndedPartialDay
+                        && segment.isOpenEnded
+            ),
+            let context = analysisTimeZoneContext(
+                containing: anchor,
+                timezoneOffsetSeconds: 0,
+                timeZone: nil,
+                timeZoneTimeline: timeline
+            ) else {
+                continue
+            }
+            let isHistorical =
+                !allowOpenEndedPartialDay
+                || !segment.isOpenEnded
+            let template = makeAnalysisScoringPlan(
+                referenceNow: anchor,
+                maxDays: requestedDays,
+                passKind:
+                    isHistorical ? .historical : .recent,
+                context: context
+            )
+            let windows = analysisCivilDayWindows(
+                plan: template,
+                timezoneOffsetSeconds:
+                    context.timezoneOffsetSeconds
+            )
+            guard !windows.isEmpty else { continue }
+            return ResolvableHistorySelection(
+                referenceNow: anchor,
+                context: context,
+                windows: windows,
+                isHistorical: isHistorical
+            )
+        }
+        return nil
+    }
+
+    nonisolated private static func resolvableHistoryScoringPlan(
+        requestedDays: Int,
+        now: Int,
+        anchor: Int?,
+        timeline: AnalysisTimeZoneTimeline
+    ) -> AnalysisScoringPlan? {
+        let requested = max(1, requestedDays)
+        guard let selection = resolvableHistorySelection(
+            requestedDays: requested,
+            onOrBefore: anchor ?? now,
+            timeline: timeline,
+            allowOpenEndedPartialDay: anchor == nil
+        ),
+        let oldestWindow = selection.windows.last else {
+            return nil
+        }
+        let nextAnchor = oldestWindow.startTs > 0
+            ? resolvableHistorySelection(
+                requestedDays: requested,
+                onOrBefore: oldestWindow.startTs - 1,
+                timeline: timeline,
+                allowOpenEndedPartialDay: false
+            )?.windows.first?.endTs
+            : nil
+        return makeAnalysisScoringPlan(
+            referenceNow: selection.referenceNow,
+            maxDays: requested,
+            passKind:
+                selection.isHistorical ? .historical : .recent,
+            context: selection.context,
+            requestedWindowSatisfied:
+                selection.windows.count == requested,
+            resolvableHistorySatisfied: nextAnchor == nil,
+            nextResolvableHistoryAnchor: nextAnchor
         )
     }
 
@@ -4064,6 +4360,11 @@ final class IntelligenceEngine: ObservableObject {
             maxDays: plan.maxDays,
             passKind: plan.passKind,
             defersHistoricalBacklog: plan.defersHistoricalBacklog,
+            requestedWindowSatisfied: plan.requestedWindowSatisfied,
+            resolvableHistorySatisfied:
+                plan.resolvableHistorySatisfied,
+            nextResolvableHistoryAnchor:
+                plan.nextResolvableHistoryAnchor,
             timezoneOffsetSeconds: plan.timezoneOffsetSeconds,
             civilDayWindow: plan.civilDayWindow,
             timeZoneIdentifier: plan.timeZoneIdentifier,
@@ -4082,7 +4383,9 @@ final class IntelligenceEngine: ObservableObject {
         timezoneOffsetSeconds: Int,
         timeZone: TimeZone? = nil,
         timeZoneTimeline: AnalysisTimeZoneTimeline? = nil,
-        preferHistoricalCatchUp: Bool = false
+        preferHistoricalCatchUp: Bool = false,
+        traverseResolvableHistory: Bool = false,
+        resolvableHistoryAnchor: Int? = nil
     ) -> AnalysisScoringPlan {
         let requested = max(1, requestedMaxDays)
         let validRanges = claims.compactMap(\.affectedTimeRange)
@@ -4098,6 +4401,22 @@ final class IntelligenceEngine: ObservableObject {
                 terminalUnknownRange: terminalUnknownRange
             )
         }
+        if traverseResolvableHistory {
+            guard let timeZoneTimeline,
+                  let migrationPlan =
+                    resolvableHistoryScoringPlan(
+                        requestedDays: requested,
+                        now: now,
+                        anchor: resolvableHistoryAnchor,
+                        timeline: timeZoneTimeline
+                    ) else {
+                return deferredAnalysisScoringPlan(
+                    referenceNow:
+                        resolvableHistoryAnchor ?? now
+                )
+            }
+            return migrationPlan
+        }
         guard let currentContext = analysisTimeZoneContext(
             containing: now,
             timezoneOffsetSeconds: timezoneOffsetSeconds,
@@ -4108,16 +4427,24 @@ final class IntelligenceEngine: ObservableObject {
                 referenceNow: now
             )
         }
-        let current = makeAnalysisScoringPlan(
+        let currentTemplate = makeAnalysisScoringPlan(
             referenceNow: now,
             maxDays: requested,
             passKind: .recent,
             context: currentContext
         )
         let currentWindows = analysisCivilDayWindows(
-            plan: current,
+            plan: currentTemplate,
             timezoneOffsetSeconds: timezoneOffsetSeconds,
             timeZone: timeZone
+        )
+        let current = makeAnalysisScoringPlan(
+            referenceNow: now,
+            maxDays: requested,
+            passKind: .recent,
+            context: currentContext,
+            requestedWindowSatisfied:
+                currentWindows.count == requested
         )
         let hasCurrentWindows = !currentWindows.isEmpty
         guard !force else {
@@ -4168,7 +4495,11 @@ final class IntelligenceEngine: ObservableObject {
                 maxDays: requested,
                 passKind: .recent,
                 context: currentContext,
-                defersHistoricalBacklog: newestOldTimestamp != nil
+                defersHistoricalBacklog: newestOldTimestamp != nil,
+                requestedWindowSatisfied:
+                    current.requestedWindowSatisfied,
+                resolvableHistorySatisfied:
+                    current.resolvableHistorySatisfied
             )
         }
         guard let newestOldTimestamp,

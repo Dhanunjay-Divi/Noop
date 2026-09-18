@@ -149,6 +149,25 @@ data class OwnershipAccountOverview(
     val noopPlusEntitled: Boolean,
 )
 
+internal fun ownershipPhaseForOverview(
+    accountState: String,
+    bandState: String,
+    checkpointStage: OwnershipCheckpointStage,
+    possessionAvailable: Boolean,
+): OwnershipPhase = when {
+    accountState != "active" -> OwnershipPhase.UNAVAILABLE
+    checkpointStage == OwnershipCheckpointStage.REPLACEMENT_REQUIRED ->
+        OwnershipPhase.REPLACEMENT_REQUIRED
+    checkpointStage == OwnershipCheckpointStage.REPLACEMENT_PENDING ->
+        OwnershipPhase.AUTHORIZING_REPLACEMENT
+    bandState != "claimed" && possessionAvailable ->
+        OwnershipPhase.ACCOUNT_READY
+    bandState != "claimed" -> OwnershipPhase.POSSESSION_UNAVAILABLE
+    checkpointStage == OwnershipCheckpointStage.COMPLETE ->
+        OwnershipPhase.COMPLETE
+    else -> OwnershipPhase.CLAIMED
+}
+
 internal fun OwnershipCheckpoint.completeRegistration(
     overview: OwnershipAccountOverview,
 ): OwnershipCheckpoint {

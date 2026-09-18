@@ -47,8 +47,9 @@ you tap **Check for updates**: it reads public release metadata from GitHub and 
 biometric content or app identifier. Separate user-initiated operating-system handoffs—Apple
 Health export (§1.3) and the Safety share sheet (§1.4)—can move data to a destination the user
 explicitly chooses, but NOOP itself does not open that destination's network connection or press
-Send. A confirmed Safety page instead goes to the configured self-hosted server, whose operator
-must separately configure and govern the SMS/voice provider described in §1.1e.
+Send. A confirmed first-release Safety page instead uses the managed app-to-app path described in
+§1.1e. SMS/voice is a disabled fallback until its separate carrier or DLT, legal, physical-delivery,
+monitoring, failover, and staffed-operations gates pass.
 
 Data enters NOOP three ways. It leaves only when **you** deliberately configure or initiate
 one of the explicit outputs:
@@ -59,7 +60,7 @@ one of the explicit outputs:
 | File import (Apple Health, WHOOP CSV, nutrition CSV) | User-selected files on disk | Read-only from disk |
 | Oura history import (opt-in build flag, §1.1b) | HTTPS OAuth + REST, `api.ouraring.com` → device | Read-only from your own Oura account |
 | Self-hosted Sync + Friends (§1.1c–d) | HTTPS, or HTTP only on loopback/private LAN | Selected records and optional friend summaries ↔ the server you configure |
-| Safety Network (§1.1e, §1.4) | HTTPS to the configured server; server-to-provider HTTPS; carrier SMS/voice | Contact enrollment and an explicit app/band SOS, or a separately approved possible-fall event → the server and its configured provider; delivery/response state → NOOP |
+| Safety Network (§1.1e, §1.4) | HTTPS plus opaque APNs/FCM wake delivery for the managed app-to-app path; optional self-hosted/server-to-provider HTTPS only when separately enabled | Accepted-contact enrollment and an explicit app SOS → the server; authenticated page/response state → NOOP. Location requires separate incident-scoped consent. Band and possible-fall origins, plus SMS/voice fallback, remain unavailable until their own gates pass. |
 | NOOP+ managed backup and Friends (§1.1f) | HTTPS with phone identity, App Check, and per-installation authorization | Selected server-readable sensor chunks/control records, the strict `day_ownership` operational document, and explicitly consented six-field Friends projections ↔ NOOP's managed service; personal managed documents require client encryption and remain local until encryption and key recovery are available |
 | Check for updates | HTTPS GET to GitHub's public releases API, only when tapped | Public version metadata → device; no biometric payload |
 | Apple Health export, incl. iOS "Export for Shortcuts" | On-device, user-initiated | NOOP → your Apple Health, on your device only (§1.3) |
@@ -308,31 +309,41 @@ one-time capability. Share both only with the intended recipient, use HTTPS
 outside a trusted private network, and revoke an unused invite if it may have
 leaked. The complete API and operator contract is in `server/FRIENDS.md`.
 
-### 1.1e Safety Network (optional, self-hosted, explicit SOS)
+### 1.1e Safety Network (optional, explicit SOS)
 
-Safety Network uses the same server origin configured for Self-hosted Sync, but
-has a separate device-bound credential and data boundary:
+The first-release target is manual app-to-app paging of accepted NOOP Safety
+contacts.
+APNs/FCM carries only a fixed event kind, opaque incident reference, and expiry;
+the authenticated recipient fetches page details and can respond or decline.
+Precise location is off by default, requires separate incident-scoped consent,
+replaces the prior fix during the selected 8- or 12-hour window, and is deleted
+when the incident ends. The self-hosted SMS/voice implementation remains an
+optional fallback that is disabled until its separate release gates pass.
 
 - **Enrollment and consent.** The owner activates a private Safety profile and
-  invites two to five contacts by name and E.164 phone number. An invitation
-  expires after seven days, and the recipient must explicitly accept before
-  counting toward the two-contact paging threshold or receiving a page.
-- **Bounded origins.** A page can start after the owner confirms in the app or
-  completes the configured repeated Noop Band SOS gesture. The API models a
-  future possible-fall origin, but this release always refuses new incidents of
-  that origin because detector evidence is not cryptographically attested.
-  Its preparatory flag and allowlist cannot activate transport. Wellness,
-  rhythm, SpO2, temperature, sleep, stress, delayed history, location, and
-  check-in timers cannot create an incident.
-- **What leaves the device.** Enrollment sends the owner's display name,
-  installation-scoped identifiers, and a one-way authenticated request. Contact
-  setup sends contact names and phone numbers. A page sends a random idempotency
-  key, its fixed origin, the selected 8- or 12-hour duration, and, only for a
-  validated possible-fall event, bounded detector/timestamp evidence. While the
-  page is active, the newest location fix replaces the prior fix. It sends no
-  biometric streams, scores, ECG/rhythm output, notes, or route history.
-- **Provider boundary.** The server operator configures Twilio credentials and
-  a sending number. Twilio and downstream carriers receive the recipient phone
+  invites two to five NOOP accounts. An invitation expires after seven days,
+  and the recipient must explicitly accept before counting toward the
+  two-contact paging threshold or receiving a page. Phone numbers are used only
+  by the separately enabled SMS/voice fallback.
+- **Bounded origins.** The first-release origin is an owner-confirmed app
+  action. The source also models a repeated-band gesture and a future
+  possible-fall origin, but neither is enabled for release: the gesture still
+  needs authenticated supplier firmware plus physical validation, and the API
+  refuses new possible-fall incidents because detector evidence is not
+  cryptographically attested. Preparatory flags and allowlists cannot activate
+  either transport. Wellness, rhythm, SpO2, temperature, sleep, stress, delayed
+  history, location, and check-in timers cannot create an incident.
+- **What leaves the device.** App-to-app enrollment sends the minimum account
+  and installation-scoped authorization needed to invite and accept a NOOP
+  Safety contact. Phone numbers leave the device only if the separately gated
+  SMS/voice fallback is enabled. A manual page sends a random idempotency key,
+  its fixed origin, and the selected 8- or 12-hour duration. Location is omitted
+  unless the owner separately consents for that incident; while active, the
+  newest eligible fix replaces the prior fix. No biometric stream, score,
+  ECG/rhythm output, note, or route history is sent.
+- **Optional provider boundary.** If SMS/voice fallback is separately enabled,
+  the server operator configures provider credentials and a sending number.
+  The provider and downstream carriers receive the recipient phone
   number, generic Safety copy, non-diagnostic origin summary, owner display
   name, signed response URL, and provider delivery metadata. Voice fallback
   receives equivalent call content. The signed web page can show the latest
@@ -340,13 +351,14 @@ has a separate device-bound credential and data boundary:
   coordinates or health values.
   Their retention, geographic routing, carrier registration, and legal terms
   apply; this is not a NOOP-operated carrier.
-- **Durability and acknowledgement.** PostgreSQL stores profiles, contacts,
-  incidents, delivery attempts, provider references, and responder decisions.
-  Delivery jobs use leases, bounded exponential retries, independent bounded
-  SMS/voice rounds, provider status callbacks, and an expiry. A recipient can
-  choose **responding** or **cannot respond** by signed web action or voice
-  DTMF; the first responding contact stops every unsent round. The owner can
-  resolve or cancel the incident and inspect per-contact delivery state.
+- **Durability and acknowledgement.** The source persists profiles, accepted
+  contacts, incidents, delivery attempts, and responder decisions in
+  PostgreSQL. App-to-app delivery code uses bounded retries, expiry,
+  authenticated fetches, and responder decisions. If separately enabled,
+  SMS/voice jobs add leases, independent bounded rounds, provider callbacks,
+  signed web actions, and voice DTMF. These source contracts do not establish
+  production push, carrier delivery, or human response. The owner can resolve
+  or cancel the incident and inspect the available per-contact delivery state.
 - **Secrets and capabilities.** Clients store the random Safety credential in
   Keychain or encrypted preferences; the server stores its digest. Invitation
   tokens are stored only as digests. Responder links use an expiring HMAC
@@ -444,11 +456,14 @@ does not participate in BLE collection or local scoring:
   registered `noop://` custom scheme. A production HTTPS universal/app link,
   fallback page, association files, and domain-abuse controls remain required
   before public enrollment.
-- **Current release boundary.** Firebase identity, App Check, Cloud SQL, and the
-  IAM-only managed workloads are deployed in synthetic Mumbai staging. Public
-  invocation, signed-device attestation, physical mobile validation, and
-  privacy/security launch review are not complete. No released client is
-  configured to send real health data to synthetic staging.
+- **Current release boundary.** Prior operations rounds recorded Firebase
+  identity, App Check, Cloud SQL, and IAM-only managed workloads in private
+  synthetic Mumbai staging. That evidence is historical and was not reverified
+  for the active September 17 branch. It is not production deployment evidence.
+  Public invocation, signed-device attestation, physical mobile validation,
+  production credentials, load/recovery operations, and privacy/security launch
+  review remain incomplete. No released client is configured to send real
+  health data to synthetic staging.
 
 ### 1.2 The macOS sandbox (and what it means for optional network features)
 
@@ -524,13 +539,15 @@ NOOP's own store — but it never leaves your **device**, and never touches the 
 Safety contains three explicit tools, none of which is medical monitoring or
 emergency dispatch:
 
-- **Acknowledged contact paging.** App SOS requires confirmation. A configured
-  repeated band SOS gesture pages without another phone action. Automatic
+- **Acknowledged contact paging.** App SOS requires confirmation and pages
+  accepted NOOP Safety contacts through the app-to-app path. A configured
+  repeated band SOS gesture remains unavailable until its hardware path is
+  validated. Automatic
   possible-fall transport is unavailable in this release; a future workflow
   would require authenticated detector evidence before evaluating a confirmed
-  haptic safety check and unanswered window. SMS and voice continue for a
-  bounded number of rounds until acknowledgement. The durable and privacy
-  boundaries are in §1.1e. No wellness score, biometric threshold, anomaly
+  haptic safety check and unanswered window. SMS and voice remain disabled
+  fallback channels until their separate release gates pass. The durable and
+  privacy boundaries are in §1.1e. No wellness score, biometric threshold, anomaly
   estimate, overdue timer, or delayed history can open an incident.
 - **Optional share-sheet message.** NOOP can also prepare visible text for one
   of the user's selected intents. The user reviews it, opens the operating-system
@@ -613,8 +630,12 @@ future reads; revoking the operating-system permission does the same.
 
 ### 2.1 Where the data lives
 
-All durable data is stored in a single GRDB/SQLite database. The Swift apps (macOS and
-iOS, which share the `WhoopStore` package) open it at (`Strand/Collect/StorePaths.swift`):
+Core Apple health history and most feature records are stored in one
+GRDB/SQLite database. This is not the app's only durable state: Keychain,
+preferences, bounded no-backup files, notification state, and platform-owned
+stores hold narrowly scoped credentials, settings, checkpoints, and lifecycle
+metadata. The Swift apps (macOS and iOS, which share the `WhoopStore` package)
+open the core database at (`Strand/Collect/StorePaths.swift`):
 
 ```
 <Application Support>/OpenWhoop/whoop.sqlite
@@ -627,8 +648,8 @@ is a Room/SQLite database in the app's private storage; the rest of this section
 describes the GRDB/SQLite store shared by the macOS and iOS apps.)
 
 The schema is defined by a versioned `DatabaseMigrator` in
-`Packages/WhoopStore/Sources/WhoopStore/Database.swift` (currently through migration
-`v30-remote-sync-pending-indexes`).
+`Packages/WhoopStore/Sources/WhoopStore/Database.swift` (currently through
+migration `v63-hydration-legacy-resolution`).
 It holds exactly the kinds of data you would expect from the features:
 
 - **Decoded biometric streams** (durable): `hrSample`, `rrInterval`, `spo2Sample`,
@@ -1036,7 +1057,7 @@ visibility alone.
 |---------|------|------------|-------|
 | Process | Data exfiltration / network egress | Four explicit optional destinations: AI Coach (your provider/key and text summary, §1.1a), Oura import (your OAuth app, inbound-only, §1.1b), your self-hosted server (Sync plus optional Friends/Safety, §1.1c-e), and separately consented NOOP+ managed backup (§1.1f). No telemetry; default builds have no NOOP+ endpoint configuration. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, `Strand/Data/FriendsService.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `infra/gcp/` |
 | First-party band ownership | Identity enumeration, duplicate claim, stolen installation credential, weak database principal, terms substitution, cross-account access | Separate default-off control plane; App Check plus verified email/password identity plus random Keychain/Keystore-backed installation credential; hashed provider subject and band identity; digest- and host-pinned no-cache terms; idempotent advisory-locked claim; append-only acceptance/claim/event rows; column-level runtime grants; readiness rejects privilege escalation. The production possession provider always returns unavailable until an approved supplier challenge-bound proof exists. No health payload, email, phone, password, OTP, printed number, raw possession response, or plaintext provider subject is stored. | `server/migrations/026_band_ownership.sql`, `server/app/ownership_*`, `Strand/System/OwnershipFlowState.swift`, `StrandiOS/System/Ownership*`, `android/app/src/main/java/com/noop/ownership/`, `infra/gcp/scripts/configure-ownership-database.py` |
-| NOOP+ managed backup | Identity abuse, cross-tenant access, token leak, oversized/decompression payload, ambiguous upload, over-retention | Separate phone verification and versioned health-data consent; App Check plus ID token plus per-installation credential plus tenant/resource authorization; secret credentials in Keychain/Keystore-backed encrypted storage; one-object generation-safe upload capabilities; compressed and uncompressed bounds plus digests; idempotent manifests/change feed; seven-day raw and 30-day essential local pruning only after exact server validation; revoke and erasure state machines. Apple and Android assemble a restore-snapshot-bound ZIP of every retained managed chunk and current personal record, verify digest/size/object/byte totals, and fail closed before publishing an incomplete archive. The readable sensitive ZIP is user-initiated and is separate from the server `/exports` route, which only verifies a client-produced encrypted archive. Synthetic end-to-end, large-account interruption/resume, import, and physical-device evidence remain blocked. | `Packages/NoopRemoteSync`, `Packages/WhoopStore`, `Strand/System/ManagedHistoryArchiveWriter.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `server/app/managed_*`, `server/migrations/014_*` through `025_*`, `infra/gcp/` |
+| NOOP+ managed backup | Identity abuse, cross-tenant access, token leak, oversized/decompression payload, ambiguous upload, over-retention | Separate phone verification and versioned health-data consent; App Check plus ID token plus per-installation credential plus tenant/resource authorization; secret credentials in Keychain/Keystore-backed encrypted storage; one-object generation-safe upload capabilities; compressed and uncompressed bounds plus digests; idempotent manifests/change feed; seven-day raw and 30-day essential local pruning only after exact server validation; revoke and erasure state machines. Apple and Android can assemble a non-resumable restore-snapshot-bound ZIP for selected retained managed chunk classes plus `day_ownership`, the only managed document included by the current exporter, verify digest/size/object/byte totals, and fail closed before publishing an incomplete archive. This is not every personal record. There is no managed-history archive importer or interrupted-export continuation. The readable sensitive ZIP is user-initiated and is separate from the server `/exports` route, which only verifies a client-produced encrypted archive. Live large-account, effective-expiry, corruption, cancellation/auth-refresh, cross-tenant, importer, and physical-device evidence remain open. | `Packages/NoopRemoteSync`, `Packages/WhoopStore`, `Strand/System/ManagedHistoryArchiveWriter.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `server/app/managed_*`, `server/migrations/014_*` through `025_*`, `infra/gcp/` |
 | NOOP+ managed Friends | Alias/invite enumeration, over-sharing, harassment, link interception, stale poke delivery | Random rotatable exact-match aliases; no directory/contact upload; hashed expiring revocable invite capabilities; mutual acceptance; directional six-field allowlists; field clearing; blocks/removal/profile deletion; non-competitive badges; receiver global and per-friend poke controls; quiet hours, cooldowns, daily limits, expiry, leased claims, and idempotent acknowledgement. Received capabilities stay in Keychain/encrypted preferences and diagnostics omit links, aliases, names, IDs, values, and payloads. Current custom links and catch-up-only local notification/haptics are disclosed as pre-launch limitations. | `server/migrations/025_managed_social.sql`, `server/app/managed_repository.py`, `Packages/NoopRemoteSync/.../ManagedSocialModels.swift`, `StrandiOS/System/ManagedFriendsView.swift`, `android/app/src/main/java/com/noop/managed/`, `android/app/src/main/java/com/noop/ui/ManagedFriendsScreen.kt` |
 | Self-hosted sync | Token leak, cleartext egress, redirect exfiltration, lost backfill | Token in Keychain/encrypted preferences; HTTPS required except validated local/private literals; URL credentials/query/fragment rejected; redirects cannot cross origin or downgrade transport; error reflection redacted; per-row acknowledgement only after a matching accepted response; resumable, bounded replay on destination change. Local deletions require a separate authenticated server delete. | `Packages/NoopRemoteSync`, `Packages/WhoopStore/.../RemoteSyncStore.swift`, `server/` |
 | Private Friends | Invite theft, retry races, over-broad access, operator visibility, unwanted continued sharing | Plain-text server address + one-time code with manual review and no custom capability URL; hashed codes/tokens; client-generated Keychain/Keystore token plus idempotent enrollment UUID; explicit interrupted-join recovery and server-confirmed pending cleanup; no biometric summary values before acceptance; empty replacement maps clear stale shares; accepted-friend field union limited to six range-checked keys; dedicated `*-noop-friends` producer; per-friend projection only from acceptance date; explicit not-E2E/operator-trust disclosure; remove/block/token rotation and Leave & delete controls; foreground/WorkManager catch-up is best effort, not guaranteed delivery. | `Strand/Data/FriendsService.swift`, `Strand/Screens/FriendsView.swift`, `android/app/src/main/java/com/noop/social/`, `android/app/src/main/java/com/noop/ui/FriendsScreen.kt`, `server/FRIENDS.md`, `server/migrations/003_friends.sql` |

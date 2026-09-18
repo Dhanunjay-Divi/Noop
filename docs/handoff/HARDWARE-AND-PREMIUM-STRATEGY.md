@@ -31,12 +31,12 @@ case whoop5mg = "WHOOP 5.0 / MG"           // the only two device types that exi
 - No NOOP-native device type, transport, or protocol.
 - No StoreKit, no server billing, no entitlement model.
 
-**So today NOOP is an excellent WHOOP companion app with 97 validated analytics engines, wearing the
-name of a product that does not exist yet.** That is not a criticism of the work: the analytics, the
-validation against PSG and three real wearers, the provenance discipline are all genuinely strong, and
-they are the part that transfers. But the hardware program is close to entirely net-new, and it is a
-different kind of undertaking from the app: certification and manufacturing have calendars that no amount
-of engineering speed compresses.
+NOOP already contains a broad companion-app, storage, analytics, and provenance
+foundation, but that source breadth is not physiological or population
+validation. Claim-specific sensor, sleep, workout, and score evidence remains
+open. The hardware program is close to entirely net-new, and it is a different
+kind of undertaking from the app: certification and manufacturing have
+calendars that no amount of engineering speed compresses.
 
 I am telling you this bluntly because every plan below depends on the distinction between "we have an app
 that reads WHOOP straps" and "we have a product that replaces WHOOP."
@@ -47,8 +47,10 @@ that reads WHOOP straps" and "we have a product that replaces WHOOP."
 
 You have two commitments that pull against each other:
 
-- **"Local-first, account-free, no cloud"** is your only differentiator that no competitor can copy
-  without abandoning their business model.
+- **Local-first core use without a continuous cloud or subscription
+  dependency** is the durable differentiator. App exploration remains
+  account-free; a first-party band has only the narrow ownership-claim
+  exception documented in the release plan.
 - **"Premium services"** implies accounts, servers, billing, and recurring revenue.
 
 Resolved carelessly, you become a worse WHOOP: same cloud, same subscription, less brand. Resolved well,
@@ -58,29 +60,31 @@ you get a story stronger than anything in the market.
 
 | Tier | Contents | Requires server? |
 |---|---|---|
-| **Free, forever, no account** | All core metrics: Recovery, Sleep, Effort, HRV, RHR, temp, cycle, stress, all 97 engines. Works offline, works if you vanish. | No |
-| **Premium** | Friends and social, SOS paging escalation, encrypted cloud backup and multi-device sync, AI coach at scale, lab/CGM integrations | **Yes, unavoidably** |
+| **Core NOOP** | Available local metrics, records, coaching, and export, subject to source availability, missing-data rules, and claim-specific validation. App exploration is account-free; a first-party band has a narrow one-time ownership claim. | No continuous server dependency |
+| **Managed capabilities** | Separately consented NOOP+ backup/sync and social features; separately authorized app-to-app Safety paging of accepted contacts. Safety is contact paging, not emergency dispatch, and is not made available merely by buying NOOP+. | Yes, where the feature requires rendezvous or relay |
 
 Two reasons this specific split is the right one:
 
-1. **It is honest.** Every premium feature genuinely cannot work on-device. Paging cannot send an SMS from
-   a dead phone. Friends cannot compare without a rendezvous. You are charging for server cost and
-   liability you actually incur, not for withholding a number the band already computed.
-2. **It inverts the industry's insult.** WHOOP's hardware is inert without a subscription; Oura paywalls
-   the score your ring already calculated. **Your band keeps working forever.** That is the marketing, and
-   it is true, which is why it will survive contact with reviewers.
+1. **It is honest.** Managed backup, cross-device social features, and
+   app-to-app Safety relay require a server boundary. That does not guarantee
+   delivery from a suspended or offline phone, and SMS/voice remains disabled
+   behind separate release gates. Pricing should cover a real managed service,
+   not withhold a number already computed locally.
+2. **It preserves the product boundary.** After supported activation, core
+   local capability does not depend on a NOOP+ subscription or continuous
+   network access. That is an architecture commitment, not a claim about
+   hardware lifetime, compatibility duration, or future support.
 
 **The line to never cross:** no core metric ever moves behind the paywall, and no core metric ever requires
 the network. The moment Recovery needs a subscription, you are WHOOP with worse distribution.
 
 ### One hard consequence for Friends
 
-My three-wearer validation found NOOP's Recovery **compresses between people**: per-wearer means landed in
-a 1.9-point range against WHOOP's 7.6, because every driver except sleep is z-scored against the wearer's
-own baseline. **Raw Recovery is therefore not comparable between people**, which is exactly what a Friends
-leaderboard would imply. Ship Friends on comparable quantities (streaks, consistency, adherence, relative
-change) rather than on raw score, or you will ship a number that means something different for each person
-looking at it.
+Recovery is personalized against each wearer's own baseline, so a raw score
+must not be treated as a validated between-person ranking. Friends should use
+non-competitive quantities such as streaks, consistency, adherence, or
+within-person change unless a separately designed population study establishes
+comparability.
 
 ---
 
@@ -142,8 +146,9 @@ product is an ongoing operational cost with no software equivalent.
   `RELEASE-BLOCKERS.md` gate 4 already demands this.
 - **Paging worker on redundant infrastructure.** `server/app/safety_worker.py` exists; if the SOS path has
   a single point of failure you have a safety feature that fails silently.
-- **Two SMS providers.** Single-provider paging is a single point of failure for the one feature where
-  failure is unacceptable.
+- **Provider redundancy only if SMS/voice is later enabled.** Do not enable that
+  fallback until carrier or DLT, legal, physical-delivery, monitoring, failover,
+  and staffed-operations gates pass.
 - **Secrets in a real manager**, not env files on a box.
 - **Monitoring with actual on-call**, at minimum for the paging worker.
 
@@ -189,17 +194,20 @@ to protect is the data you never receive.
 2. Open BIS, WPC/ETA, FCC and Bluetooth SIG processes. Longest lead, start first.
 3. Decide the free/premium line and write it down as a product invariant.
 
-**Then: v1 app, local-only**
-Ship the descoped v1 from `INDIA-FIRST-LAUNCH-PATH.md`: no server, no Friends, no paging. It builds
-audience and trust while hardware is in certification, and it removes gates 4 and 5 from the critical path.
+**Then: v1 app, local-first**
+Ship the bounded first-release scope from `INDIA-FIRST-LAUNCH-PATH.md`: core collection, scoring,
+history, and export stay local-first; the narrow ownership account and manual app-to-app paging of
+accepted Safety contacts remain gated network services. NOOP+ health-data storage and SMS/voice
+fallback stay disabled until their separate production gates pass.
 
 **Then: hardware bring-up**
 Firmware, own protocol, R-R and respiration capture done properly, OTA, provisioning, manufacturing test.
 Use this to retire the WHOOP protocol dependency and the licensing residue at the same time.
 
 **Then: premium, one feature at a time**
-Friends first, because it is the lowest-stakes server feature. Paging last, because it is the highest-stakes
-and needs DLT registration, dual providers, on-call, and the full real-phone matrix.
+Enable NOOP+ features only after their consent, encryption, restore, deletion, and operations gates
+pass. SMS/voice Safety fallback remains last because it needs DLT or carrier registration, legal
+review, provider failover, staffed operations, and the full physical-phone matrix.
 
 ---
 

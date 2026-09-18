@@ -58,6 +58,34 @@ final class ManagedStorageClientTests: XCTestCase {
         }
     }
 
+    func testRetryableServerResponsePreservesBoundedRetryAfter() async throws {
+        let (client, authorization) = try makeClient()
+        ManagedURLProtocolStub.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 429,
+                    httpVersion: nil,
+                    headerFields: [
+                        "Content-Type": "application/json",
+                        "Retry-After": "300",
+                    ]
+                )!,
+                Data(#"{"detail":"rate limited"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await client.overview(authorization: authorization)
+            XCTFail("Expected rate limiting")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedStorageError,
+                .server(status: 429, retryAfter: 300)
+            )
+        }
+    }
+
     func testEnrollmentCarriesAppCheckIdentityAndExplicitPolicy() async throws {
         let (client, authorization) = try makeClient()
         let requestID = UUID(uuidString: "397f4624-1c42-49ea-8af7-ced2ca439a36")!

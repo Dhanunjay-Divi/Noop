@@ -444,6 +444,7 @@
     <string name="appwide_hydration_target_unavailable">Confirmez les informations de votre profil adulte pour voir un objectif personnalisé.</string>
     <string name="appwide_hydration_unavailable">Indisponible</string>
     <string name="appwide_insights_behaviour_history_help">Enregistrez des comportements ci-dessus. Après quelques jours, NOOP classe leur relation avec la Récupération, la VFC et le Score de sommeil. Un export de l’appareil peut compléter l’historique.</string>
+    <string name="appwide_intelligence_explainer_format">La Récupération pondère la VFC par rapport à votre référence personnelle (environ 55 pour cent), la fréquence cardiaque au repos (environ 20 pour cent), le Score de sommeil (environ 15 pour cent), la fréquence respiratoire (environ 5 pour cent) et l’écart de température cutanée (environ 5 pour cent) lorsque ces données sont disponibles. L’Effort est un score de charge cardiovasculaire de 0 à %1$s fondé sur le temps passé dans les zones de fréquence cardiaque. Le Score de sommeil combine la durée, l’efficacité, les phases et la régularité disponibles. Certains jours affichés peuvent provenir d’importations locales. Les scores dérivés par NOOP sont calculés localement à partir des données disponibles indiquées ; ce ne sont pas des mesures cliniques et les données manquantes restent manquantes.</string>
     <string name="appwide_intelligence_no_scored_nights">Aucune nuit notée pour l’instant. Portez votre bracelet la nuit avec NOOP connecté. L’Effort et le Score de sommeil peuvent apparaître après une nuit ; la Récupération nécessite environ quatre nuits valides pour apprendre votre référence.</string>
     <string name="appwide_intelligence_subtitle">NOOP calcule la Récupération, l’Effort et le Score de sommeil sur votre appareil, sans calcul dans le cloud.</string>
     <string name="appwide_journal_editing_help">Renommez, regroupez ou supprimez un élément pour organiser votre liste. Le renommage conserve la question d’origine en interne afin que les références importées restent alignées. Les éléments personnalisés sont supprimés; les éléments intégrés sont masqués et peuvent être restaurés ci-dessous.</string>
@@ -522,7 +523,7 @@
     <string name="appwide_metric_education_overline">Mesure expliquée</string>
     <string name="appwide_metric_education_recovery_action">Utilisez le score avec votre ressenti. Privilégiez le sommeil, l’alimentation et l’hydratation, et allégez la charge lorsque plusieurs signaux de récupération évoluent ensemble.</string>
     <string name="appwide_metric_education_recovery_limits">Recovery est une estimation de bien-être, pas une mesure de santé ni une autorisation à s’entraîner.</string>
-    <string name="appwide_metric_education_recovery_method">Calculé sur l’appareil à partir de la VFC par rapport à votre référence, de la fréquence cardiaque au repos, du sommeil, de la fréquence respiratoire, de l’écart de température cutanée et de la charge récente lorsqu’ils sont disponibles.</string>
+    <string name="appwide_metric_education_recovery_method">Calculé sur l’appareil à partir de la VFC par rapport à votre référence, de la fréquence cardiaque au repos, du sommeil, de la fréquence respiratoire et de l’écart de température cutanée lorsqu’ils sont disponibles.</string>
     <string name="appwide_metric_education_recovery_what">Recovery est l’estimation de NOOP, de 0 à 100, de la capacité apparente de votre corps à supporter une charge aujourd’hui.</string>
     <string name="appwide_metric_education_recovery_why">Il regroupe plusieurs tendances de récupération nocturne en un seul signal de planification.</string>
     <string name="appwide_metric_education_resp_action">Vérifiez de nouveau une autre nuit lorsque vous vous sentez bien. Recherchez des changements concordants de VFC, de fréquence cardiaque au repos ou de température et demandez un avis médical en cas de changements persistants ou de symptômes respiratoires.</string>
@@ -596,8 +597,11 @@
     <string name="appwide_sleep_stress_percent_format">%1$d %%</string>
     <string name="appwide_sleep_stress_timeline_a11y_format">Chronologie du stress pendant le sommeil, %1$d pour cent élevé</string>
     <string name="appwide_sleep_stress_title">Stress pendant le sommeil</string>
+    <string name="appwide_source_apple_health">Apple Health</string>
+    <string name="appwide_source_health_connect">Health Connect</string>
     <string name="appwide_source_imported">Importé</string>
     <string name="appwide_source_on_device">Sur l’appareil</string>
+    <string name="appwide_source_oura_ring">Oura Ring</string>
     <string name="appwide_strength_close_exercise_records">Fermer les records par exercice</string>
     <string name="appwide_strength_completed_sets">Séries terminées</string>
     <string name="appwide_strength_decrease_goal">Réduire l’objectif</string>
@@ -700,7 +704,7 @@
     <string name="appwide_trends_report_explainer">Comment lire ceci : la VFC, la fréquence cardiaque au repos, la durée du sommeil, la fréquence respiratoire et la température cutanée sont mesurées par le bracelet. La température cutanée est affichée comme un écart par rapport à votre propre référence. Les entraînements correspondent au nombre d’activités enregistrées ou détectées. Recovery, Effort et Stress sont des scores calculés sur l’appareil par NOOP, et non des mesures cliniques. Recovery combine chaque jour la VFC, la fréquence cardiaque au repos, le sommeil et la tendance de température cutanée. Effort représente la charge cardiovasculaire dérivée de la fréquence cardiaque. Stress est un indice de charge autonome de 0 à 3 fondé sur la fréquence cardiaque au repos et la VFC.</string>
     <string name="appwide_trends_report_no_data_format">Aucune lecture d’entraînement, de stress, de récupération, de sommeil, de VFC, de fréquence cardiaque au repos, d’effort, de fréquence respiratoire ou de température cutanée ne se situe dans %1$s. Portez votre bracelet quelques jours de plus ou choisissez une plage plus large, puis exportez à nouveau.</string>
     <string name="appwide_trends_retry">Réessayer</string>
-    <string name="appwide_trends_sleep_descriptor">Qualité du sommeil selon la durée, l’efficacité, les phases et la régularité disponibles. De 0 à 100 ; plus le score est élevé, mieux c’est.</string>
+    <string name="appwide_trends_sleep_descriptor">Le score de sommeil combine la durée, l’efficacité, les phases et la régularité disponibles. De 0 à 100 ; plus le score est élevé, mieux c’est.</string>
     <string name="appwide_trends_updating_body">La dernière vue disponible reste affichée pendant l’actualisation de l’historique local.</string>
     <string name="appwide_trends_updating_title">Mise à jour des tendances</string>
     <string name="appwide_trends_weekly_digest_failed_body">Le reste des tendances est disponible. Réessayez ce résumé.</string>
@@ -780,6 +784,7 @@
     <string name="appwide_wake_events_needs_evidence">Nécessite des données de phases vérifiées</string>
     <string name="appwide_wake_events_title">Éveils</string>
     <string name="appwide_wake_events_unavailable_a11y">Éveils indisponibles</string>
+    <string name="appwide_watch_sleep_efficiency_format">Efficacité du sommeil : %1$d%%</string>
     <string name="appwide_weekly_digest_history_help">Un résumé hebdomadaire nécessite quelques jours d’historique. Portez votre bracelet ou importez un export de votre appareil dans Sources de données.</string>
     <string name="appwide_weekly_digest_imported_sleep_not_included">Sommeil importé non inclus</string>
     <string name="appwide_workout_guidance_channel_description">Invites facultatives après un effort élevé prolongé pendant un entraînement suivi.</string>
@@ -827,9 +832,9 @@
     <string name="ui_audit_recovery_driver_verdict_below_supporting">en dessous de la référence, favorable à la récupération</string>
     <string name="ui_audit_recovery_driver_verdict_cooler_limiting">plus froide que la référence, limitant la récupération</string>
     <string name="ui_audit_recovery_driver_verdict_near_baseline">près de la référence</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_limited">la qualité du sommeil a limité la récupération</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_neutral">la qualité du sommeil était neutre</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_supported">la qualité du sommeil a favorisé la récupération</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_limited">le score de sommeil a limité la récupération</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_neutral">le score de sommeil était neutre</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_supported">le score de sommeil a favorisé la récupération</string>
     <string name="ui_audit_recovery_driver_verdict_typical_night">une nuit habituelle</string>
     <string name="ui_audit_recovery_driver_verdict_warmer_limiting">plus chaude que la référence, limitant la récupération</string>
     <string name="ui_audit_stress_at_baseline">au niveau de référence</string>

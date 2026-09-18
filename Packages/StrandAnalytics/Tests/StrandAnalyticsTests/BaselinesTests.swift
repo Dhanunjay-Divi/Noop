@@ -304,6 +304,53 @@ final class BaselinesTests: XCTestCase {
         XCTAssertEqual(after.status, .calibrating)
     }
 
+    func testCausalFoldHistoryMatchesIndependentStrictlyPriorFolds() {
+        let values: [String: Double?] = [
+            "2026-06-01": 60,
+            "2026-06-02": nil,
+            "2026-06-03": 58,
+            "2026-06-05": 63,
+        ]
+        let days = ["2026-06-01", "2026-06-03", "2026-06-04", "2026-06-06"]
+        let causal = Baselines.causalFoldHistory(
+            values, before: days, cfg: Baselines.hrvCfg, baselineEpoch: 0)
+
+        for day in days {
+            XCTAssertEqual(
+                causal[day],
+                Baselines.foldHistory(
+                    values, before: day, cfg: Baselines.hrvCfg, baselineEpoch: 0)
+            )
+        }
+    }
+
+    func testCausalFoldHistoryMatchesRecalibratedStrictlyPriorFolds() {
+        let values: [String: Double?] = [
+            "2026-06-01": 90,
+            "2026-06-02": 91,
+            "2026-06-03": 54,
+            "2026-06-04": 55,
+        ]
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 6
+        components.day = 3
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let epoch = calendar.date(from: components)!.timeIntervalSince1970
+        let days = ["2026-06-03", "2026-06-04", "2026-06-05"]
+        let causal = Baselines.causalFoldHistory(
+            values, before: days, cfg: Baselines.hrvCfg, baselineEpoch: epoch)
+
+        for day in days {
+            XCTAssertEqual(
+                causal[day],
+                Baselines.foldHistory(
+                    values, before: day, cfg: Baselines.hrvCfg, baselineEpoch: epoch)
+            )
+        }
+    }
+
     // MARK: - "strain" MetricCfg (RecoveryScorer Activity-Balance / previous-day-Effort term)
 
     func testStrainCfgRegisteredWithEffortScaleBounds() {

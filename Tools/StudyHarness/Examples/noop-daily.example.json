@@ -4,9 +4,9 @@
   "source": "noop-on-device",
   "measurementPipelineRevision": "noop-device-pipeline-v1",
   "metricRevisions": {
-    "recoveryScore": "noop-charge-v1",
-    "effortScore": "noop-effort-v1",
-    "restScore": "noop-rest-v1"
+    "recoveryScore": "noop-charge-v2",
+    "effortScore": "noop-effort-v2",
+    "restScore": "noop-rest-v2"
   },
   "days": [
     {

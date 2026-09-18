@@ -903,7 +903,7 @@ public enum ManagedStorageError: Error, Equatable, LocalizedError {
     case cursorExpired(minimumSequence: Int64?)
     case quotaExceeded
     case conflict
-    case server(status: Int)
+    case server(status: Int, retryAfter: TimeInterval? = nil)
     case digestMismatch
 
     public var errorDescription: String? {

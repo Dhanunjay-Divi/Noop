@@ -16,7 +16,7 @@ import kotlin.math.sqrt
 object NoopScoreAlgorithmRevision {
     const val CHARGE = "noop-charge-v2"
     const val EFFORT = "noop-effort-v2"
-    const val REST = "noop-rest-v1"
+    const val REST = "noop-rest-v2"
 }
 
 /**

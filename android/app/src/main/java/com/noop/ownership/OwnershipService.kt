@@ -1392,19 +1392,12 @@ class OwnershipService private constructor(
     private fun phaseForOverview(
         overview: OwnershipAccountOverview,
         checkpoint: OwnershipCheckpoint,
-    ): OwnershipPhase = when {
-        checkpoint.stage == OwnershipCheckpointStage.REPLACEMENT_REQUIRED ->
-            OwnershipPhase.REPLACEMENT_REQUIRED
-        checkpoint.stage == OwnershipCheckpointStage.REPLACEMENT_PENDING ->
-            OwnershipPhase.AUTHORIZING_REPLACEMENT
-        overview.bandState != "claimed" && possessionProvider.isAvailable ->
-            OwnershipPhase.ACCOUNT_READY
-        overview.bandState != "claimed" ->
-            OwnershipPhase.POSSESSION_UNAVAILABLE
-        checkpoint.stage == OwnershipCheckpointStage.COMPLETE ->
-            OwnershipPhase.COMPLETE
-        else -> OwnershipPhase.CLAIMED
-    }
+    ): OwnershipPhase = ownershipPhaseForOverview(
+        accountState = overview.accountState,
+        bandState = overview.bandState,
+        checkpointStage = checkpoint.stage,
+        possessionAvailable = possessionProvider.isAvailable,
+    )
 
     private fun checkpoint(user: FirebaseUser): OwnershipCheckpoint {
         val scope = accountScope(user)

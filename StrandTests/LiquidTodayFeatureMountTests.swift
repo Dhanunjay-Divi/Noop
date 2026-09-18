@@ -277,6 +277,102 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             "noop-charge-v2")
     }
 
+    func testRestV2UpgradeForcesFullHistoryUntilPassCompletes() {
+        XCTAssertEqual(RestFormulaUpgradeGate.currentRevision, "noop-rest-v2")
+        XCTAssertEqual(RestFormulaUpgradeGate.historyDays, 4_000)
+        XCTAssertTrue(RestFormulaUpgradeGate.needsRescore(completedRevision: nil))
+        XCTAssertTrue(RestFormulaUpgradeGate.needsRescore(
+            completedRevision: "noop-rest-v1"))
+        XCTAssertFalse(RestFormulaUpgradeGate.needsRescore(
+            completedRevision: "noop-rest-v2"))
+        XCTAssertEqual(
+            RestFormulaUpgradeGate.traversalAnchor(
+                migrationRequired: true,
+                anchorRevision: "noop-charge-v2|noop-rest-v2",
+                storedAnchor: 123
+            ),
+            123
+        )
+        XCTAssertNil(
+            RestFormulaUpgradeGate.traversalAnchor(
+                migrationRequired: true,
+                anchorRevision: "noop-rest-v1",
+                storedAnchor: 123
+            )
+        )
+        XCTAssertEqual(
+            RestFormulaUpgradeGate.traversalAnchor(
+                migrationRequired: true,
+                anchorRevision: "noop-rest-v2",
+                storedAnchor: 456
+            ),
+            456,
+            "An in-flight cursor from the pre-composite build remains resumable."
+        )
+        XCTAssertNil(
+            RestFormulaUpgradeGate.traversalAnchor(
+                migrationRequired: false,
+                anchorRevision: "noop-charge-v2|noop-rest-v2",
+                storedAnchor: 123
+            )
+        )
+
+        let completeReceipt = IntelligenceEngine.ScoreRunReceipt(
+            whoopStrapDays: [],
+            requestedWindowSatisfied: false,
+            resolvableHistorySatisfied: true,
+            nextResolvableHistoryAnchor: nil,
+            allRequiredBoundariesCompleted: true
+        )
+        let advanceReceipt = IntelligenceEngine.ScoreRunReceipt(
+            whoopStrapDays: [],
+            requestedWindowSatisfied: false,
+            resolvableHistorySatisfied: false,
+            nextResolvableHistoryAnchor: 456,
+            allRequiredBoundariesCompleted: true
+        )
+        let incompleteBoundaryReceipt = IntelligenceEngine.ScoreRunReceipt(
+            whoopStrapDays: [],
+            requestedWindowSatisfied: false,
+            resolvableHistorySatisfied: false,
+            nextResolvableHistoryAnchor: 456,
+            allRequiredBoundariesCompleted: false
+        )
+
+        XCTAssertEqual(
+            RestFormulaUpgradeGate.progress(
+                receipt: advanceReceipt,
+                wasRequired: true,
+                traversalWasSelected: true
+            ),
+            .advance(nextAnchor: 456)
+        )
+        XCTAssertEqual(
+            RestFormulaUpgradeGate.progress(
+                receipt: completeReceipt,
+                wasRequired: true,
+                traversalWasSelected: true
+            ),
+            .complete(revision: "noop-rest-v2")
+        )
+        XCTAssertEqual(
+            RestFormulaUpgradeGate.progress(
+                receipt: incompleteBoundaryReceipt,
+                wasRequired: true,
+                traversalWasSelected: true
+            ),
+            .retry
+        )
+        XCTAssertEqual(
+            RestFormulaUpgradeGate.progress(
+                receipt: completeReceipt,
+                wasRequired: true,
+                traversalWasSelected: false
+            ),
+            .retry
+        )
+    }
+
     func testMacRestorePickerHasNonCollapsingFrame() throws {
         let source = try sourceText("Strand/Screens/BackupSyncView.swift")
         let picker = try slice(source, from: "private struct RestorePickerSheet", to: "private func primaryLabel")

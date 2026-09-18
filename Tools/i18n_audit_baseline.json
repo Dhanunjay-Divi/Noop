@@ -1099,10 +1099,6 @@
       "r = %+.2f"
     ],
     [
-      "Strand/Screens/IntelligenceView.swift",
-      "Recovery weighs your HRV against your personal baseline (~55%), resting heart rate (~20%), sleep quality (~15%), respiration (~5%) and skin-temperature deviation (~5%). Effort is a 0-\\(UnitFormatter.effortScaleMax(effortScale)) cardiovascular load from time in heart-rate zones. Sleep is staged from movement and heart rate. Everything is computed here from Noop Band's raw data. It works for any day NOOP collected raw streams."
-    ],
-    [
       "Strand/Screens/JournalLogCard.swift",
       "Clear \\(item.display)"
     ],

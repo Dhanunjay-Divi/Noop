@@ -444,6 +444,7 @@
     <string name="appwide_hydration_target_unavailable">Подтвердите данные профиля взрослого, чтобы увидеть персональную цель.</string>
     <string name="appwide_hydration_unavailable">Недоступно</string>
     <string name="appwide_insights_behaviour_history_help">Записывайте привычки выше. Через несколько дней NOOP покажет, как каждая из них связана с восстановлением, ВСР и оценкой сна. Экспорт носимого устройства может дополнить историю.</string>
+    <string name="appwide_intelligence_explainer_format">Восстановление учитывает ВСР относительно вашей личной нормы (примерно 55 процентов), пульс в покое (примерно 20 процентов), оценку сна (примерно 15 процентов), частоту дыхания (примерно 5 процентов) и отклонение температуры кожи (примерно 5 процентов), когда эти данные доступны. Нагрузка представляет собой оценку сердечно-сосудистой нагрузки от 0 до %1$s на основе времени в пульсовых зонах. Оценка сна объединяет доступные данные о длительности, эффективности, фазах и регулярности. Некоторые отображаемые дни могут быть взяты из локально импортированных данных. Оценки NOOP рассчитываются локально на основе перечисленных доступных входных данных; они не являются клиническими показателями, а отсутствующие входные данные остаются отсутствующими.</string>
     <string name="appwide_intelligence_no_scored_nights">Пока нет оценённых ночей. Носите браслет ночью при подключённом NOOP. Нагрузка и оценка сна могут появиться после одной ночи; восстановлению нужно около четырёх корректных ночей для изучения вашей нормы.</string>
     <string name="appwide_intelligence_subtitle">NOOP рассчитывает восстановление, нагрузку и оценку сна на вашем устройстве, без облачных вычислений.</string>
     <string name="appwide_journal_editing_help">Переименуйте, перегруппируйте или удалите пункт, чтобы упорядочить список. Исходный вопрос сохраняется внутри, поэтому импортированные данные продолжают сопоставляться. Пользовательские пункты удаляются, а встроенные скрываются и могут быть восстановлены ниже.</string>
@@ -522,7 +523,7 @@
     <string name="appwide_metric_education_overline">О показателе</string>
     <string name="appwide_metric_education_recovery_action">Сопоставляйте оценку со своим самочувствием. Уделите внимание сну, питанию и жидкости и снизьте нагрузку, если несколько сигналов восстановления изменились одновременно.</string>
     <string name="appwide_metric_education_recovery_limits">Recovery: это оценка самочувствия, а не показатель здоровья и не разрешение на тренировку.</string>
-    <string name="appwide_metric_education_recovery_method">Рассчитывается на устройстве по ВСР относительно вашей базы, пульсу в покое, сну, частоте дыхания, отклонению температуры кожи и недавней нагрузке, если эти данные доступны.</string>
+    <string name="appwide_metric_education_recovery_method">Рассчитывается на устройстве по ВСР относительно вашей базы, пульсу в покое, сну, частоте дыхания и отклонению температуры кожи, если эти данные доступны.</string>
     <string name="appwide_metric_education_recovery_what">Recovery: это оценка NOOP от 0 до 100, показывающая, насколько организм выглядит готовым к сегодняшней нагрузке.</string>
     <string name="appwide_metric_education_recovery_why">Показатель объединяет несколько ночных тенденций восстановления в один ориентир для планирования.</string>
     <string name="appwide_metric_education_resp_action">Перепроверьте показатель в другую ночь, когда чувствуете себя хорошо. Обратите внимание на одновременные изменения ВСР, пульса в покое или температуры и обратитесь к врачу при устойчивых изменениях или симптомах со стороны дыхания.</string>
@@ -596,8 +597,11 @@
     <string name="appwide_sleep_stress_percent_format">%1$d%%</string>
     <string name="appwide_sleep_stress_timeline_a11y_format">График стресса во сне, высокий уровень %1$d процентов</string>
     <string name="appwide_sleep_stress_title">Стресс во сне</string>
+    <string name="appwide_source_apple_health">Apple Health</string>
+    <string name="appwide_source_health_connect">Health Connect</string>
     <string name="appwide_source_imported">Импортировано</string>
     <string name="appwide_source_on_device">На устройстве</string>
+    <string name="appwide_source_oura_ring">Oura Ring</string>
     <string name="appwide_strength_close_exercise_records">Закрыть рекорды по упражнениям</string>
     <string name="appwide_strength_completed_sets">Выполненные подходы</string>
     <string name="appwide_strength_decrease_goal">Уменьшить цель</string>
@@ -700,7 +704,7 @@
     <string name="appwide_trends_report_explainer">Как читать отчёт: ВСР, пульс в покое, продолжительность сна, частота дыхания и температура кожи измеряются браслетом. Температура кожи показана как отклонение от вашего исходного уровня. Тренировки: количество записанных или распознанных активностей. Recovery, Effort и Stress: собственные оценки NOOP на устройстве, а не клинические показатели. Recovery объединяет ВСР, пульс в покое, сон и тенденцию температуры кожи. Effort показывает сердечно-сосудистую нагрузку, рассчитанную по пульсу. Stress показывает индекс автономной нагрузки от 0 до 3 на основе пульса в покое и ВСР.</string>
     <string name="appwide_trends_report_no_data_format">В диапазоне %1$s нет данных о тренировках, стрессе, восстановлении, сне, ВСР, пульсе в покое, нагрузке, частоте дыхания или температуре кожи. Поносите браслет ещё несколько дней или выберите более широкий диапазон и экспортируйте снова.</string>
     <string name="appwide_trends_retry">Повторить</string>
-    <string name="appwide_trends_sleep_descriptor">Качество сна по доступным данным о длительности, эффективности, фазах и регулярности. От 0 до 100; чем выше, тем лучше.</string>
+    <string name="appwide_trends_sleep_descriptor">Оценка сна объединяет доступные данные о длительности, эффективности, фазах и регулярности. От 0 до 100; чем выше, тем лучше.</string>
     <string name="appwide_trends_updating_body">Последний доступный вид остаётся на экране, пока обновляется локальная история.</string>
     <string name="appwide_trends_updating_title">Обновление трендов</string>
     <string name="appwide_trends_weekly_digest_failed_body">Остальные тренды доступны. Попробуйте снова создать этот обзор.</string>
@@ -780,6 +784,7 @@
     <string name="appwide_wake_events_needs_evidence">Нужны подтверждённые данные о стадиях</string>
     <string name="appwide_wake_events_title">Пробуждения</string>
     <string name="appwide_wake_events_unavailable_a11y">Данные о пробуждениях недоступны</string>
+    <string name="appwide_watch_sleep_efficiency_format">Эффективность сна: %1$d%%</string>
     <string name="appwide_weekly_digest_history_help">Для еженедельной сводки нужно несколько дней истории. Носите браслет или импортируйте данные носимого устройства в разделе «Источники данных».</string>
     <string name="appwide_weekly_digest_imported_sleep_not_included">Импортированный сон не включён</string>
     <string name="appwide_workout_guidance_channel_description">Необязательные подсказки после устойчиво высокой нагрузки во время отслеживаемой тренировки.</string>
@@ -827,9 +832,9 @@
     <string name="ui_audit_recovery_driver_verdict_below_supporting">ниже исходного уровня, способствует восстановлению</string>
     <string name="ui_audit_recovery_driver_verdict_cooler_limiting">холоднее исходного уровня, ограничивает восстановление</string>
     <string name="ui_audit_recovery_driver_verdict_near_baseline">близко к исходному уровню</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_limited">качество сна ограничило восстановление</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_neutral">качество сна было нейтральным</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_supported">качество сна поддержало восстановление</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_limited">оценка сна ограничила восстановление</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_neutral">оценка сна была нейтральной</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_supported">оценка сна поддержала восстановление</string>
     <string name="ui_audit_recovery_driver_verdict_typical_night">обычная ночь</string>
     <string name="ui_audit_recovery_driver_verdict_warmer_limiting">теплее исходного уровня, ограничивает восстановление</string>
     <string name="ui_audit_stress_at_baseline">на исходном уровне</string>

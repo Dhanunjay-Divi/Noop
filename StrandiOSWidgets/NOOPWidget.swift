@@ -1,6 +1,7 @@
 import WidgetKit
 import SwiftUI
 import StrandDesign
+import Foundation
 
 /// Timeline entry backed by the latest tiny snapshot the app publishes into its private App Group.
 struct NOOPEntry: TimelineEntry {
@@ -90,7 +91,7 @@ struct NOOPDailyWidgetView: View {
             case .accessoryCircular:
                 WidgetScoreGauge(value: snapshot.recovery, symbol: "bolt.heart.fill", tint: chargeTint)
             case .accessoryInline:
-                Text(dailyInlineText)
+                Text(verbatim: dailyInlineText)
             case .accessoryRectangular:
                 DailyAccessoryRectangular(snapshot: snapshot)
             case .systemSmall:
@@ -116,7 +117,12 @@ struct NOOPDailyWidgetView: View {
 
     private var dailyInlineText: String {
         guard snapshot.hasDailySignal else { return String(localized: "NOOP · Open for your Daily Signal") }
-        return "R \(value(snapshot.recovery)) · E \(value(snapshot.effort)) · S \(value(snapshot.rest))"
+        return String(
+            format: String(localized: "R %@ · E %@ · S %@"),
+            value(snapshot.recovery),
+            value(snapshot.effort),
+            value(snapshot.rest)
+        )
     }
 
     private var small: some View {
@@ -237,8 +243,11 @@ struct NOOPVitalsWidgetView: View {
                 Text(value(snapshot.bpm))
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .foregroundStyle(snapshot.bpm == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
-                Text(snapshot.bpm == nil ? "" : "bpm")
-                    .font(.caption).foregroundStyle(StrandPalette.textTertiary)
+                if snapshot.bpm != nil {
+                    Text("bpm")
+                        .font(.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
             }
             Text(isLive(snapshot, at: entry.date) ? "Live heart rate" : "Last heart rate")
                 .font(.caption2.weight(.medium)).foregroundStyle(StrandPalette.textSecondary)
@@ -912,9 +921,23 @@ private func sleepDuration(_ minutes: Int?) -> String {
     guard let minutes, minutes > 0 else { return "–" }
     let hours = minutes / 60
     let remainder = minutes % 60
-    if hours == 0 { return "\(remainder)m" }
-    if remainder == 0 { return "\(hours)h" }
-    return "\(hours)h \(remainder)m"
+    if hours == 0 {
+        return String(
+            format: String(localized: "appwide.day_overview.duration_minutes_format"),
+            Int64(remainder)
+        )
+    }
+    if remainder == 0 {
+        return String(
+            format: String(localized: "widget.duration_hours_format"),
+            Int64(hours)
+        )
+    }
+    return String(
+        format: String(localized: "appwide.day_overview.duration_hours_minutes_format"),
+        Int64(hours),
+        Int64(remainder)
+    )
 }
 
 private func supportingMetricLabel(_ metric: WidgetMetric) -> LocalizedStringKey {

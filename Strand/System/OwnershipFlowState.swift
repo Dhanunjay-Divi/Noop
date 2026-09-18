@@ -91,6 +91,30 @@ func ownershipCanAccessPostClaimOnboarding(
     !isAvailable || phase == .claimed || phase == .complete
 }
 
+func ownershipPhaseForOverview(
+    accountState: String,
+    bandState: String,
+    checkpointStage: OwnershipAccountStage,
+    possessionAvailable: Bool
+) -> OwnershipServicePhase {
+    guard accountState == "active" else {
+        return .unavailable
+    }
+    switch checkpointStage {
+    case .replacementRequired:
+        return .replacementRequired
+    case .replacementPending:
+        return .authorizingReplacement
+    default:
+        guard bandState == "claimed" else {
+            return possessionAvailable
+                ? .accountReady
+                : .possessionUnavailable
+        }
+        return checkpointStage == .complete ? .complete : .claimed
+    }
+}
+
 enum NoopProductPlan: String, CaseIterable, Codable, Sendable {
     case noop
     case noopPlus = "noop_plus"

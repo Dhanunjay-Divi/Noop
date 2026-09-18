@@ -444,6 +444,7 @@
     <string name="appwide_hydration_target_unavailable">Confirm your adult profile details to see a personalized goal.</string>
     <string name="appwide_hydration_unavailable">Unavailable</string>
     <string name="appwide_insights_behaviour_history_help">Log behaviors above. After a few days, NOOP ranks how each one relates to Recovery, HRV, and Sleep Score. A wearable export can backfill history.</string>
+    <string name="appwide_intelligence_explainer_format">Recovery weighs HRV against your personal baseline (about 55 percent), resting heart rate (about 20 percent), Sleep Score (about 15 percent), breathing rate (about 5 percent), and skin-temperature deviation (about 5 percent) when those inputs are available. Effort is a 0–%1$s cardiovascular-load score from time in heart-rate zones. Sleep Score combines available duration, efficiency, stages, and consistency. Some displayed days may come from local imports. NOOP-derived scores are calculated locally from the listed available inputs; they are not clinical measures, and missing inputs stay missing.</string>
     <string name="appwide_intelligence_no_scored_nights">No scored nights yet. Wear your band overnight with NOOP connected. Effort and Sleep Score can appear after one night; Recovery needs about four valid nights to learn your baseline.</string>
     <string name="appwide_intelligence_subtitle">NOOP calculates Recovery, Effort, and Sleep Score on your device, without a cloud calculation.</string>
     <string name="appwide_journal_editing_help">Rename, regroup, or remove an item to tidy your list. Renaming keeps the original question behind the scenes, so imported references still line up. Custom items are deleted; built-in ones are hidden and can be restored below.</string>
@@ -522,7 +523,7 @@
     <string name="appwide_metric_education_overline">Metric explained</string>
     <string name="appwide_metric_education_recovery_action">Use the score with how you feel. Prioritize sleep, food and fluids, and ease load when several recovery signals shift together.</string>
     <string name="appwide_metric_education_recovery_limits">Recovery is a wellness estimate, not a health measurement or permission to train.</string>
-    <string name="appwide_metric_education_recovery_method">Computed on device from HRV against your baseline, resting heart rate, sleep, breathing rate, skin temperature deviation and recent load when available.</string>
+    <string name="appwide_metric_education_recovery_method">Computed on device from HRV against your baseline, resting heart rate, Sleep Score, breathing rate and skin temperature deviation when available.</string>
     <string name="appwide_metric_education_recovery_what">Recovery is NOOP\'s 0 to 100 estimate of how ready your body appears for load today.</string>
     <string name="appwide_metric_education_recovery_why">It combines several overnight recovery trends into one planning signal.</string>
     <string name="appwide_metric_education_resp_action">Recheck across another night when you feel well. Look for matching HRV, resting-heart-rate or temperature shifts and seek medical advice for persistent changes or breathing symptoms.</string>
@@ -596,8 +597,11 @@
     <string name="appwide_sleep_stress_percent_format">%1$d%%</string>
     <string name="appwide_sleep_stress_timeline_a11y_format">Sleep Stress timeline, %1$d percent high</string>
     <string name="appwide_sleep_stress_title">Sleep Stress</string>
+    <string name="appwide_source_apple_health">Apple Health</string>
+    <string name="appwide_source_health_connect">Health Connect</string>
     <string name="appwide_source_imported">Imported</string>
     <string name="appwide_source_on_device">On-device</string>
+    <string name="appwide_source_oura_ring">Oura Ring</string>
     <string name="appwide_strength_close_exercise_records">Close exercise records</string>
     <string name="appwide_strength_completed_sets">Completed sets</string>
     <string name="appwide_strength_decrease_goal">Decrease goal</string>
@@ -700,7 +704,7 @@
     <string name="appwide_trends_report_explainer">How to read this: HRV, Resting HR, Sleep duration, Respiratory rate and Skin temperature are measured from the band. Skin temperature is shown as the deviation from your own baseline. Workouts is the count of activities you logged or that were detected. Recovery, Effort and Stress are NOOP\'s own on-device scores, not clinical measures. Recovery is a daily readiness composite of HRV, resting HR, sleep and skin-temperature trend. Effort is cardiovascular load derived from heart rate. Stress is a 0 to 3 autonomic-load index from resting HR and HRV.</string>
     <string name="appwide_trends_report_no_data_format">No workout, stress, recovery, sleep, HRV, resting-HR, strain, respiratory-rate or skin-temperature readings fell inside %1$s. Wear your band a few more days, or pick a wider range, then export again.</string>
     <string name="appwide_trends_retry">Try again</string>
-    <string name="appwide_trends_sleep_descriptor">Sleep quality from available duration, efficiency, stages and consistency. 0 to 100; higher is better.</string>
+    <string name="appwide_trends_sleep_descriptor">Sleep Score combines available duration, efficiency, stages and consistency. 0 to 100; higher is better.</string>
     <string name="appwide_trends_updating_body">The last available view stays visible while local history refreshes.</string>
     <string name="appwide_trends_updating_title">Updating trends</string>
     <string name="appwide_trends_weekly_digest_failed_body">The rest of Trends is available. Try this summary again.</string>
@@ -780,6 +784,7 @@
     <string name="appwide_wake_events_needs_evidence">Needs verified stage evidence</string>
     <string name="appwide_wake_events_title">Wake Events</string>
     <string name="appwide_wake_events_unavailable_a11y">Wake events unavailable</string>
+    <string name="appwide_watch_sleep_efficiency_format">%1$d%% sleep efficiency</string>
     <string name="appwide_weekly_digest_history_help">A weekly digest needs a few days of history. Wear your band or import a wearable export in Data Sources.</string>
     <string name="appwide_weekly_digest_imported_sleep_not_included">Imported sleep not included</string>
     <string name="appwide_workout_guidance_channel_description">Optional prompts after sustained high exertion in a tracked workout.</string>
@@ -827,9 +832,9 @@
     <string name="ui_audit_recovery_driver_verdict_below_supporting">below baseline, supporting recovery</string>
     <string name="ui_audit_recovery_driver_verdict_cooler_limiting">cooler than baseline, limiting recovery</string>
     <string name="ui_audit_recovery_driver_verdict_near_baseline">near baseline</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_limited">sleep quality limited recovery</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_neutral">sleep quality was neutral</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_supported">sleep quality supported recovery</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_limited">Sleep Score limited recovery</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_neutral">Sleep Score was neutral</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_supported">Sleep Score supported recovery</string>
     <string name="ui_audit_recovery_driver_verdict_typical_night">a typical night</string>
     <string name="ui_audit_recovery_driver_verdict_warmer_limiting">warmer than baseline, limiting recovery</string>
     <string name="ui_audit_stress_at_baseline">at baseline</string>

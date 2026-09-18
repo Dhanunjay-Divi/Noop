@@ -226,6 +226,82 @@ class OwnershipFoundationTest {
     }
 
     @Test
+    fun inactiveOwnershipAccountsFailClosedBeforeBandStateResolution() {
+        listOf("deletion_pending", "retired", "unknown").forEach { accountState ->
+            OwnershipCheckpointStage.entries.forEach { stage ->
+                assertEquals(
+                    "$accountState $stage",
+                    OwnershipPhase.UNAVAILABLE,
+                    ownershipPhaseForOverview(
+                        accountState = accountState,
+                        bandState = "claimed",
+                        checkpointStage = stage,
+                        possessionAvailable = true,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun activeOwnershipAccountsPreserveExpectedPhaseResolution() {
+        assertEquals(
+            OwnershipPhase.ACCOUNT_READY,
+            ownershipPhaseForOverview(
+                accountState = "active",
+                bandState = "unclaimed",
+                checkpointStage = OwnershipCheckpointStage.ACCOUNT_READY,
+                possessionAvailable = true,
+            ),
+        )
+        assertEquals(
+            OwnershipPhase.POSSESSION_UNAVAILABLE,
+            ownershipPhaseForOverview(
+                accountState = "active",
+                bandState = "unclaimed",
+                checkpointStage = OwnershipCheckpointStage.ACCOUNT_READY,
+                possessionAvailable = false,
+            ),
+        )
+        assertEquals(
+            OwnershipPhase.CLAIMED,
+            ownershipPhaseForOverview(
+                accountState = "active",
+                bandState = "claimed",
+                checkpointStage = OwnershipCheckpointStage.CLAIMED,
+                possessionAvailable = true,
+            ),
+        )
+        assertEquals(
+            OwnershipPhase.COMPLETE,
+            ownershipPhaseForOverview(
+                accountState = "active",
+                bandState = "claimed",
+                checkpointStage = OwnershipCheckpointStage.COMPLETE,
+                possessionAvailable = true,
+            ),
+        )
+        assertEquals(
+            OwnershipPhase.REPLACEMENT_REQUIRED,
+            ownershipPhaseForOverview(
+                accountState = "active",
+                bandState = "claimed",
+                checkpointStage = OwnershipCheckpointStage.REPLACEMENT_REQUIRED,
+                possessionAvailable = true,
+            ),
+        )
+        assertEquals(
+            OwnershipPhase.AUTHORIZING_REPLACEMENT,
+            ownershipPhaseForOverview(
+                accountState = "active",
+                bandState = "claimed",
+                checkpointStage = OwnershipCheckpointStage.REPLACEMENT_PENDING,
+                possessionAvailable = true,
+            ),
+        )
+    }
+
+    @Test
     fun ownershipAccountScopeSeparatesFirebaseProjectsAndSubjects() {
         val baseline = ownershipAccountScope(
             projectId = "noop-staging",

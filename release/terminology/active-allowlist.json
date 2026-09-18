@@ -1550,12 +1550,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 3,
+      "occurrenceCount": 1,
       "owner": "project team",
       "path": "Strand/Screens/IntelligenceView.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "3039bdf99d6edb6ffc02b7d3273d6e715d45d75420c735a45142ba943903b477"
+      "sha256": "a29d2c03e47b7842cc10f466181e41af14b920513d4f145e72fc045532400ee8"
     },
     {
       "category": "core",
@@ -3899,21 +3899,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 5,
+      "occurrenceCount": 2,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/IntelligenceScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "d021e3bf4b3aea80314256e242cdfec04198e3a95dc7e72b744416aca65a6a40"
-    },
-    {
-      "category": "customer",
-      "occurrenceCount": 1,
-      "owner": "project team",
-      "path": "android/app/src/main/java/com/noop/ui/IntelligenceScreen.kt",
-      "reason": "Existing customer wording pending reviewed provenance/localization migration.",
-      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "d254a7e44c08bb74a4d00c608f335b8230ac4d43391ea44ef57b843f42a93940"
+      "sha256": "bc2a1e963f0bdbcc7137f929da32fb2e670e89ec96ff48d9a1a8bbebc97b9f79"
     },
     {
       "category": "core",

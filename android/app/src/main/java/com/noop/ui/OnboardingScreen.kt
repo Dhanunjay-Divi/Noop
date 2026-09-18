@@ -117,6 +117,7 @@ import com.noop.ingest.WhoopCsvImporter
 import com.noop.notif.DailyReviewReminders
 import com.noop.NoopApplication
 import com.noop.ownership.NoopProductPlan
+import com.noop.ownership.OwnershipConfiguration
 import com.noop.ownership.OwnershipPhase
 import com.noop.ownership.OwnershipService
 import com.noop.ownership.ownershipCanAccessPostClaimOnboarding
@@ -143,19 +144,18 @@ import kotlin.math.roundToInt
 fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember(context) { NoopPrefs.of(context) }
+    val ownershipConfigured = remember { OwnershipConfiguration.load() != null }
     val ownership = remember(context) {
         (context.applicationContext as? NoopApplication)?.ownership
             ?: OwnershipService.get(context)
     }
     val ownershipState by ownership.state.collectAsState()
     val postClaimOwnershipReady = ownershipCanAccessPostClaimOnboarding(
-        isAvailable = ownership.isAvailable,
+        isAvailable = ownershipConfigured,
         phase = ownershipState.phase,
     )
-    val pages = remember(ownership.isAvailable) {
-        OnboardingPage.entries.filter {
-            it != OnboardingPage.Ownership || ownership.isAvailable
-        }
+    val pages = remember(ownershipConfigured) {
+        onboardingPages(ownershipConfigured)
     }
     // rememberSaveable so a config change (rotation, dark-mode, font-scale, locale,
     // multi-window) doesn't recreate the Activity and throw the user back to page 1.
@@ -163,9 +163,10 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     var pageIndex by rememberSaveable {
         val restored = prefs.getString(ONBOARDING_PROGRESS_KEY, null)
         mutableIntStateOf(
-            pages.indexOfFirst { it.storageValue == restored }
-                .takeIf { it >= 0 }
-                ?: 0,
+            restoredOnboardingPageIndex(
+                storedPage = restored,
+                pages = pages,
+            ),
         )
     }
     val page = pages[pageIndex]
@@ -186,14 +187,12 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     fun moveTo(target: Int, direction: String) {
         if (!pages.indices.contains(target)) return
         val requested = pages[target]
-        val next = if (
-            requested.requiresCurrentOwnershipClaim &&
-            !postClaimOwnershipReady
-        ) {
-            OnboardingPage.Ownership
-        } else {
-            requested
-        }
+        val next = resolvedOnboardingOwnershipDestination(
+            requested = requested,
+            ownershipConfigured = ownershipConfigured,
+            reconciliationComplete = !ownershipState.busy,
+            phase = ownershipState.phase,
+        ) ?: return
         val destination = pages.indexOf(next)
         if (destination < 0) return
         val effectiveDirection = if (next == requested) {
@@ -224,7 +223,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     }
     LaunchedEffect(
         page,
-        ownership.isAvailable,
+        ownershipConfigured,
         ownershipState.phase,
         ownershipState.busy,
     ) {
@@ -291,7 +290,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
             OnboardingPage.Plan -> {
                 if (
                     !ownershipCanAccessPostClaimOnboarding(
-                        isAvailable = ownership.isAvailable,
+                        isAvailable = ownershipConfigured,
                         phase = ownership.state.value.phase,
                     )
                 ) {
@@ -308,7 +307,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     if (
                         saved &&
                         ownershipCanAccessPostClaimOnboarding(
-                            isAvailable = ownership.isAvailable,
+                            isAvailable = ownershipConfigured,
                             phase = ownership.state.value.phase,
                         ) &&
                         pageIndex == submittedPage &&
@@ -319,7 +318,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                         pageIndex == submittedPage &&
                         pages.getOrNull(pageIndex) == OnboardingPage.Plan &&
                         !ownershipCanAccessPostClaimOnboarding(
-                            isAvailable = ownership.isAvailable,
+                            isAvailable = ownershipConfigured,
                             phase = ownership.state.value.phase,
                         )
                     ) {
@@ -340,7 +339,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
             OnboardingPage.Connect -> {
                 // No strap bonded → skip the celebration and go straight to Profile.
                 if (!live.bonded) {
-                    if (ownership.isAvailable) return
+                    if (ownershipConfigured) return
                     moveTo(pages.indexOf(OnboardingPage.Profile), "forward")
                     return
                 }
@@ -466,13 +465,18 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                         ownershipState.phase == OwnershipPhase.COMPLETE
                 val primaryEnabled = when (page) {
                     OnboardingPage.Connect ->
-                        !ownership.isAvailable || live.bonded
-                    OnboardingPage.Ownership -> ownershipClaimed
+                        !ownershipConfigured || live.bonded
+                    OnboardingPage.Ownership ->
+                        ownershipClaimed && !ownershipState.busy
                     OnboardingPage.Plan ->
                         !ownershipState.busy && postClaimOwnershipReady
                     else ->
-                        !page.requiresCurrentOwnershipClaim ||
-                            postClaimOwnershipReady
+                        resolvedOnboardingOwnershipDestination(
+                            requested = page,
+                            ownershipConfigured = ownershipConfigured,
+                            reconciliationComplete = !ownershipState.busy,
+                            phase = ownershipState.phase,
+                        ) == page
                 }
                 OnboardingFooter(
                     progress = if (pages.size <= 1) 1f else pageIndex.toFloat() / pages.lastIndex.toFloat(),
@@ -500,7 +504,51 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     }
 }
 
-private enum class OnboardingPage(val cta: String) {
+internal fun onboardingPages(
+    ownershipConfigured: Boolean,
+): List<OnboardingPage> =
+    OnboardingPage.entries.filter {
+        it != OnboardingPage.Ownership || ownershipConfigured
+    }
+
+internal fun resolvedOnboardingOwnershipDestination(
+    requested: OnboardingPage,
+    ownershipConfigured: Boolean,
+    reconciliationComplete: Boolean,
+    phase: OwnershipPhase,
+): OnboardingPage? {
+    if (!ownershipConfigured || !requested.requiresCurrentOwnershipClaim) {
+        return requested
+    }
+    if (!reconciliationComplete) {
+        return null
+    }
+    return if (
+        ownershipCanAccessPostClaimOnboarding(
+            isAvailable = true,
+            phase = phase,
+        )
+    ) {
+        requested
+    } else {
+        OnboardingPage.Ownership
+    }
+}
+
+internal fun restoredOnboardingPageIndex(
+    storedPage: String?,
+    pages: List<OnboardingPage>,
+): Int {
+    val restoredPage = OnboardingPage.entries.firstOrNull {
+        it.storageValue == storedPage
+    } ?: return pages.indexOf(OnboardingPage.Welcome).coerceAtLeast(0)
+    val restoredIndex = pages.indexOf(restoredPage)
+    if (restoredIndex >= 0) return restoredIndex
+    return pages.indexOf(OnboardingPage.Profile).takeIf { it >= 0 }
+        ?: pages.indexOf(OnboardingPage.Welcome).coerceAtLeast(0)
+}
+
+internal enum class OnboardingPage(val cta: String) {
     Welcome("Get Started"),
     WhatItDoes("Continue"),
     Expectations("I understand"),

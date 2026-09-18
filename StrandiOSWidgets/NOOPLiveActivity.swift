@@ -15,11 +15,22 @@ struct NOOPLiveActivity: Widget {
                             .font(.title2)
                             .foregroundStyle(StrandPalette.statusCritical)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(context.attributes.title)
+                            Text(verbatim: context.attributes.title)
                                 .font(.caption).foregroundStyle(StrandPalette.textSecondary)
-                            Text(context.isStale ? "Update paused" : "\(context.state.bpm.map(String.init) ?? "–") bpm")
+                            if context.isStale {
+                                Text("Update paused")
+                                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                            } else {
+                                Text(
+                                    verbatim: String(
+                                        format: String(localized: "%@ bpm"),
+                                        context.state.bpm.map(String.init) ?? "–"
+                                    )
+                                )
                                 .font(.system(size: 26, weight: .bold, design: .rounded))
-                                .foregroundStyle(context.isStale ? StrandPalette.textSecondary : StrandPalette.textPrimary)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            }
                         }
                         Spacer()
                         // Keep the same at-a-glance daily and strap state as Android's ongoing notification.
@@ -49,9 +60,17 @@ struct NOOPLiveActivity: Widget {
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     if authorized {
-                        Label(context.isStale ? "Paused" : "\(context.state.bpm.map(String.init) ?? "–")",
-                              systemImage: context.isStale ? "pause.fill" : "heart.fill")
-                            .foregroundStyle(context.isStale ? .secondary : StrandPalette.statusCritical)
+                        if context.isStale {
+                            Label("Paused", systemImage: "pause.fill")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Label {
+                                Text(verbatim: context.state.bpm.map(String.init) ?? "–")
+                            } icon: {
+                                Image(systemName: "heart.fill")
+                            }
+                            .foregroundStyle(StrandPalette.statusCritical)
+                        }
                     } else {
                         Label("Locked", systemImage: "lock.fill")
                             .foregroundStyle(.secondary)
@@ -69,13 +88,13 @@ struct NOOPLiveActivity: Widget {
                             }
                         }
                     } else {
-                        Text("NOOP").foregroundStyle(.secondary)
+                        Text(verbatim: "NOOP").foregroundStyle(.secondary)
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if authorized {
                         HStack {
-                            Text(context.attributes.title)
+                            Text(verbatim: context.attributes.title)
                             Spacer(minLength: 8)
                             if let battery = context.state.batteryPct {
                                 Label("\(battery)%", systemImage: "battery.100percent")
@@ -93,7 +112,13 @@ struct NOOPLiveActivity: Widget {
                 Image(systemName: authorized ? (context.isStale ? "pause.fill" : "heart.fill") : "lock.fill")
                     .foregroundStyle(authorized && !context.isStale ? StrandPalette.statusCritical : .secondary)
             } compactTrailing: {
-                Text(authorized ? (context.isStale ? "—" : "\(context.state.bpm.map(String.init) ?? "–")") : "NOOP")
+                if !authorized {
+                    Text(verbatim: "NOOP")
+                } else if context.isStale {
+                    Text(verbatim: "–")
+                } else {
+                    Text(verbatim: context.state.bpm.map(String.init) ?? "–")
+                }
             } minimal: {
                 Image(systemName: authorized ? (context.isStale ? "pause.fill" : "heart.fill") : "lock.fill")
                     .foregroundStyle(authorized && !context.isStale ? StrandPalette.statusCritical : .secondary)

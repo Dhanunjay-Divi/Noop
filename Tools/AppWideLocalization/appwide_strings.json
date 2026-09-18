@@ -3234,15 +3234,15 @@
     "zh-Hant": "Recovery 是健康生活參考估算，並非健康測量，也不代表可以訓練。"
   },
   "appwide.metric_education.recovery.method": {
-    "de": "Wird auf dem Gerät aus HRV im Vergleich zu deinem Ausgangswert, Ruhepuls, Schlaf, Atemfrequenz, Hauttemperaturabweichung und jüngster Belastung berechnet, sofern diese Daten vorliegen.",
-    "en": "Computed on device from HRV against your baseline, resting heart rate, sleep, breathing rate, skin temperature deviation and recent load when available.",
-    "es": "Se calcula en el dispositivo a partir de la HRV frente a tu referencia, la frecuencia cardiaca en reposo, el sueño, la frecuencia respiratoria, la desviación de la temperatura cutánea y la carga reciente cuando están disponibles.",
-    "fr": "Calculé sur l’appareil à partir de la VFC par rapport à votre référence, de la fréquence cardiaque au repos, du sommeil, de la fréquence respiratoire, de l’écart de température cutanée et de la charge récente lorsqu’ils sont disponibles.",
-    "it": "Calcolato sul dispositivo usando HRV rispetto al tuo valore di riferimento, frequenza cardiaca a riposo, sonno, frequenza respiratoria, deviazione della temperatura cutanea e carico recente, quando disponibili.",
-    "pt-PT": "Calculado no dispositivo a partir da VFC face à sua referência, frequência cardíaca em repouso, sono, frequência respiratória, desvio da temperatura da pele e carga recente, quando disponíveis.",
-    "ru": "Рассчитывается на устройстве по ВСР относительно вашей базы, пульсу в покое, сну, частоте дыхания, отклонению температуры кожи и недавней нагрузке, если эти данные доступны.",
-    "zh-Hans": "在设备上根据 HRV 相对个人基线的变化、静息心率、睡眠、呼吸频率、皮肤温度偏差和近期负荷计算，具体取决于数据是否可用。",
-    "zh-Hant": "在裝置上根據 HRV 相對個人基準線的變化、靜息心率、睡眠、呼吸頻率、皮膚溫度偏差和近期負荷計算，視資料是否可用而定。"
+    "de": "Wird auf dem Gerät aus HRV im Vergleich zu deinem Ausgangswert, Ruhepuls, Schlaf, Atemfrequenz und Hauttemperaturabweichung berechnet, sofern diese Daten vorliegen.",
+    "en": "Computed on device from HRV against your baseline, resting heart rate, Sleep Score, breathing rate and skin temperature deviation when available.",
+    "es": "Se calcula en el dispositivo a partir de la HRV frente a tu referencia, la frecuencia cardiaca en reposo, el sueño, la frecuencia respiratoria y la desviación de la temperatura cutánea cuando están disponibles.",
+    "fr": "Calculé sur l’appareil à partir de la VFC par rapport à votre référence, de la fréquence cardiaque au repos, du sommeil, de la fréquence respiratoire et de l’écart de température cutanée lorsqu’ils sont disponibles.",
+    "it": "Calcolato sul dispositivo usando HRV rispetto al tuo valore di riferimento, frequenza cardiaca a riposo, sonno, frequenza respiratoria e deviazione della temperatura cutanea, quando disponibili.",
+    "pt-PT": "Calculado no dispositivo a partir da VFC face à sua referência, frequência cardíaca em repouso, sono, frequência respiratória e desvio da temperatura da pele, quando disponíveis.",
+    "ru": "Рассчитывается на устройстве по ВСР относительно вашей базы, пульсу в покое, сну, частоте дыхания и отклонению температуры кожи, если эти данные доступны.",
+    "zh-Hans": "在设备上根据 HRV 相对个人基线的变化、静息心率、睡眠、呼吸频率和皮肤温度偏差计算，具体取决于数据是否可用。",
+    "zh-Hant": "在裝置上根據 HRV 相對個人基準線的變化、靜息心率、睡眠、呼吸頻率和皮膚溫度偏差計算，視資料是否可用而定。"
   },
   "appwide.metric_education.recovery.what": {
     "de": "Recovery ist NOOPs Schätzung von 0 bis 100 dafür, wie bereit dein Körper heute für Belastung wirkt.",
@@ -3640,6 +3640,28 @@
     "zh-Hans": "今晚目标",
     "zh-Hant": "今晚目標"
   },
+  "appwide.source.apple_health": {
+    "de": "Apple Health",
+    "en": "Apple Health",
+    "es": "Apple Health",
+    "fr": "Apple Health",
+    "it": "Apple Health",
+    "pt-PT": "Apple Health",
+    "ru": "Apple Health",
+    "zh-Hans": "Apple Health",
+    "zh-Hant": "Apple Health"
+  },
+  "appwide.source.health_connect": {
+    "de": "Health Connect",
+    "en": "Health Connect",
+    "es": "Health Connect",
+    "fr": "Health Connect",
+    "it": "Health Connect",
+    "pt-PT": "Health Connect",
+    "ru": "Health Connect",
+    "zh-Hans": "Health Connect",
+    "zh-Hant": "Health Connect"
+  },
   "appwide.source.imported": {
     "de": "Importiert",
     "en": "Imported",
@@ -3661,6 +3683,17 @@
     "ru": "На устройстве",
     "zh-Hans": "设备本地",
     "zh-Hant": "裝置本地"
+  },
+  "appwide.source.oura_ring": {
+    "de": "Oura Ring",
+    "en": "Oura Ring",
+    "es": "Oura Ring",
+    "fr": "Oura Ring",
+    "it": "Oura Ring",
+    "pt-PT": "Oura Ring",
+    "ru": "Oura Ring",
+    "zh-Hans": "Oura Ring",
+    "zh-Hant": "Oura Ring"
   },
   "appwide.strength.close_exercise_records": {
     "de": "Übungsrekorde schließen",
@@ -4477,15 +4510,15 @@
     "zh-Hant": "所選範圍內沒有恢復評分。正在顯示更早的 %1$d 個有評分日期。"
   },
   "appwide.trends.sleep_descriptor": {
-    "de": "Schlafqualität aus verfügbarer Dauer, Effizienz, Schlafphasen und Regelmäßigkeit. 0 bis 100; höher ist besser.",
-    "en": "Sleep quality from available duration, efficiency, stages and consistency. 0 to 100; higher is better.",
-    "es": "Calidad del sueño según la duración, la eficiencia, las fases y la regularidad disponibles. De 0 a 100; cuanto más alto, mejor.",
-    "fr": "Qualité du sommeil selon la durée, l’efficacité, les phases et la régularité disponibles. De 0 à 100 ; plus le score est élevé, mieux c’est.",
-    "it": "Qualità del sonno in base a durata, efficienza, fasi e regolarità disponibili. Da 0 a 100; più alto è, meglio è.",
-    "pt-PT": "Qualidade do sono com base na duração, eficiência, fases e consistência disponíveis. De 0 a 100; quanto mais elevado, melhor.",
-    "ru": "Качество сна по доступным данным о длительности, эффективности, фазах и регулярности. От 0 до 100; чем выше, тем лучше.",
-    "zh-Hans": "根据可用的睡眠时长、效率、阶段和规律性评估睡眠质量。0 到 100 分，越高越好。",
-    "zh-Hant": "根據可用的睡眠時長、效率、階段和規律性評估睡眠品質。0 到 100 分，越高越好。"
+    "de": "Der Schlafwert kombiniert verfügbare Dauer, Effizienz, Schlafphasen und Regelmäßigkeit. 0 bis 100; höher ist besser.",
+    "en": "Sleep Score combines available duration, efficiency, stages and consistency. 0 to 100; higher is better.",
+    "es": "La puntuación de sueño combina la duración, la eficiencia, las fases y la regularidad disponibles. De 0 a 100; cuanto más alto, mejor.",
+    "fr": "Le score de sommeil combine la durée, l’efficacité, les phases et la régularité disponibles. De 0 à 100 ; plus le score est élevé, mieux c’est.",
+    "it": "Il punteggio del sonno combina durata, efficienza, fasi e regolarità disponibili. Da 0 a 100; più alto è, meglio è.",
+    "pt-PT": "A pontuação do sono combina a duração, eficiência, fases e consistência disponíveis. De 0 a 100; quanto mais elevada, melhor.",
+    "ru": "Оценка сна объединяет доступные данные о длительности, эффективности, фазах и регулярности. От 0 до 100; чем выше, тем лучше.",
+    "zh-Hans": "睡眠评分结合可用的睡眠时长、效率、阶段和规律性。0 到 100 分，越高越好。",
+    "zh-Hant": "睡眠評分結合可用的睡眠時長、效率、階段和規律性。0 到 100 分，越高越好。"
   },
   "appwide.unit.grams_format": {
     "de": "%1$s g",
@@ -8359,6 +8392,17 @@
     "zh-Hans": "还没有已评分的夜晚。请在 NOOP 保持连接时整晚佩戴手环。消耗和睡眠评分可在一晚后出现；恢复大约需要四个有效夜晚来学习你的基线。",
     "zh-Hant": "還沒有已評分的夜晚。請在 NOOP 保持連線時整晚佩戴手環。消耗和睡眠評分可在一晚後出現；恢復大約需要四個有效夜晚來學習你的基準。"
   },
+  "appwide.intelligence.explainer_format": {
+    "de": "Erholung gewichtet die HRV gegenüber deiner persönlichen Basislinie (etwa 55 Prozent), den Ruhepuls (etwa 20 Prozent), den Schlafwert (etwa 15 Prozent), die Atemfrequenz (etwa 5 Prozent) und die Abweichung der Hauttemperatur (etwa 5 Prozent), sofern diese Eingaben verfügbar sind. Anstrengung ist ein kardiovaskulärer Belastungswert von 0 bis %1$s aus der Zeit in Herzfrequenzzonen. Der Schlafwert kombiniert verfügbare Dauer, Effizienz, Schlafphasen und Regelmäßigkeit. Einige angezeigte Tage können aus lokalen Importen stammen. Von NOOP abgeleitete Werte werden lokal aus den aufgeführten verfügbaren Eingaben berechnet; sie sind keine klinischen Messwerte, und fehlende Eingaben bleiben fehlend.",
+    "en": "Recovery weighs HRV against your personal baseline (about 55 percent), resting heart rate (about 20 percent), Sleep Score (about 15 percent), breathing rate (about 5 percent), and skin-temperature deviation (about 5 percent) when those inputs are available. Effort is a 0–%1$s cardiovascular-load score from time in heart-rate zones. Sleep Score combines available duration, efficiency, stages, and consistency. Some displayed days may come from local imports. NOOP-derived scores are calculated locally from the listed available inputs; they are not clinical measures, and missing inputs stay missing.",
+    "es": "Recuperación pondera la VFC frente a tu referencia personal (cerca del 55 por ciento), la frecuencia cardiaca en reposo (cerca del 20 por ciento), la Puntuación de sueño (cerca del 15 por ciento), la frecuencia respiratoria (cerca del 5 por ciento) y la desviación de la temperatura cutánea (cerca del 5 por ciento) cuando esas entradas están disponibles. Esfuerzo es una puntuación de carga cardiovascular de 0 a %1$s basada en el tiempo en zonas de frecuencia cardiaca. La Puntuación de sueño combina la duración, la eficiencia, las fases y la regularidad disponibles. Algunos días mostrados pueden proceder de importaciones locales. Las puntuaciones derivadas por NOOP se calculan localmente a partir de las entradas disponibles indicadas; no son medidas clínicas y las entradas ausentes siguen ausentes.",
+    "fr": "La Récupération pondère la VFC par rapport à votre référence personnelle (environ 55 pour cent), la fréquence cardiaque au repos (environ 20 pour cent), le Score de sommeil (environ 15 pour cent), la fréquence respiratoire (environ 5 pour cent) et l’écart de température cutanée (environ 5 pour cent) lorsque ces données sont disponibles. L’Effort est un score de charge cardiovasculaire de 0 à %1$s fondé sur le temps passé dans les zones de fréquence cardiaque. Le Score de sommeil combine la durée, l’efficacité, les phases et la régularité disponibles. Certains jours affichés peuvent provenir d’importations locales. Les scores dérivés par NOOP sont calculés localement à partir des données disponibles indiquées ; ce ne sont pas des mesures cliniques et les données manquantes restent manquantes.",
+    "it": "Il Recupero pondera l’HRV rispetto al tuo valore di riferimento personale (circa 55 per cento), la frequenza cardiaca a riposo (circa 20 per cento), il Punteggio del sonno (circa 15 per cento), la frequenza respiratoria (circa 5 per cento) e la deviazione della temperatura cutanea (circa 5 per cento) quando questi dati sono disponibili. Lo Sforzo è un punteggio di carico cardiovascolare da 0 a %1$s basato sul tempo trascorso nelle zone di frequenza cardiaca. Il Punteggio del sonno combina durata, efficienza, fasi e regolarità disponibili. Alcuni giorni visualizzati possono provenire da importazioni locali. I punteggi derivati da NOOP vengono calcolati localmente dagli input disponibili elencati; non sono misure cliniche e gli input mancanti restano mancanti.",
+    "pt-PT": "A Recuperação pondera a VFC face à tua referência pessoal (cerca de 55 por cento), a frequência cardíaca em repouso (cerca de 20 por cento), a Pontuação do sono (cerca de 15 por cento), a frequência respiratória (cerca de 5 por cento) e o desvio da temperatura da pele (cerca de 5 por cento) quando esses dados estão disponíveis. O Esforço é uma pontuação de carga cardiovascular de 0 a %1$s baseada no tempo em zonas de frequência cardíaca. A Pontuação do sono combina a duração, eficiência, fases e consistência disponíveis. Alguns dias apresentados podem vir de importações locais. As pontuações derivadas pelo NOOP são calculadas localmente a partir dos dados disponíveis indicados; não são medidas clínicas e os dados em falta continuam em falta.",
+    "ru": "Восстановление учитывает ВСР относительно вашей личной нормы (примерно 55 процентов), пульс в покое (примерно 20 процентов), оценку сна (примерно 15 процентов), частоту дыхания (примерно 5 процентов) и отклонение температуры кожи (примерно 5 процентов), когда эти данные доступны. Нагрузка представляет собой оценку сердечно-сосудистой нагрузки от 0 до %1$s на основе времени в пульсовых зонах. Оценка сна объединяет доступные данные о длительности, эффективности, фазах и регулярности. Некоторые отображаемые дни могут быть взяты из локально импортированных данных. Оценки NOOP рассчитываются локально на основе перечисленных доступных входных данных; они не являются клиническими показателями, а отсутствующие входные данные остаются отсутствующими.",
+    "zh-Hans": "当相关输入可用时，恢复会综合 HRV 相对个人基线的变化（约百分之 55）、静息心率（约百分之 20）、睡眠评分（约百分之 15）、呼吸频率（约百分之 5）和皮肤温度偏差（约百分之 5）。消耗是根据各心率区间内的时间计算出的 0–%1$s 心血管负荷评分。睡眠评分结合可用的时长、效率、阶段和规律性。部分显示日期可能来自本地导入。NOOP 衍生评分仅根据上述可用输入在本地计算；这些评分并非临床测量，缺失输入仍保持缺失。",
+    "zh-Hant": "當相關輸入可用時，復原會綜合 HRV 相對個人基準線的變化（約百分之 55）、靜息心率（約百分之 20）、睡眠評分（約百分之 15）、呼吸頻率（約百分之 5）和皮膚溫度偏差（約百分之 5）。消耗是根據各心率區間內的時間計算出的 0–%1$s 心血管負荷評分。睡眠評分結合可用的時長、效率、階段和規律性。部分顯示日期可能來自本機匯入。NOOP 衍生評分只會根據上述可用輸入在本機計算；這些評分並非臨床測量，缺少的輸入仍保持缺少。"
+  },
   "appwide.intelligence.subtitle": {
     "de": "NOOP berechnet Erholung, Anstrengung und Schlafwert direkt auf deinem Gerät, ohne Cloud-Berechnung.",
     "en": "NOOP calculates Recovery, Effort, and Sleep Score on your device, without a cloud calculation.",
@@ -8941,5 +8985,16 @@
     "ru": "Журнал браслета отправляется.",
     "zh-Hans": "正在分享手环日志。",
     "zh-Hant": "正在分享手環記錄。"
+  },
+  "appwide.watch.sleep_efficiency_format": {
+    "en": "%1$d%% sleep efficiency",
+    "de": "Schlafeffizienz: %1$d%%",
+    "es": "%1$d%% de eficiencia del sueño",
+    "fr": "Efficacité du sommeil : %1$d%%",
+    "it": "Efficienza del sonno: %1$d%%",
+    "pt-PT": "Eficiência do sono: %1$d%%",
+    "ru": "Эффективность сна: %1$d%%",
+    "zh-Hans": "睡眠效率 %1$d%%",
+    "zh-Hant": "睡眠效率 %1$d%%"
   }
 }

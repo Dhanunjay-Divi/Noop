@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -135,6 +136,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -1379,30 +1381,105 @@ private val barTrailingTabs = listOf(
 internal data class BottomBarLabelLayout(
     val maxLines: Int,
     val barHeightDp: Int,
+    val labelScaleMultiplier: Float,
 )
 
+internal const val BottomBarLabelFontScaleCap = 1.30f
+internal const val BottomBarLabelEffectiveScaleFloor = 0.68f
+private const val BottomBarSingleLineHeightDp = 56
+private const val CompactBottomBarWidthDp = 360
+
 internal fun bottomBarLabelLayout(
+    labels: List<String>,
     fontScale: Float,
+    availableWidthPx: Int,
+    horizontalContentPaddingPx: Int,
+    interItemSpacingPx: Int,
+    labelHorizontalSafetyPaddingPx: Int,
+    measureLabelWidthPx: (String, Float) -> Int,
 ): BottomBarLabelLayout {
-    val scaledLineHeightDp = kotlin.math.ceil(12f * fontScale.coerceAtLeast(1f))
-        .toInt()
-    val contentHeightDp = 6 + 18 + 3 + scaledLineHeightDp + 6
+    val normalizedScale = fontScale.coerceAtLeast(1f)
+    val cappedScaleMultiplier = minOf(
+        1f,
+        BottomBarLabelFontScaleCap / normalizedScale,
+    )
+    val minimumScaleMultiplier = minOf(
+        cappedScaleMultiplier,
+        BottomBarLabelEffectiveScaleFloor / normalizedScale,
+    )
+    val gapCount = (labels.size - 1).coerceAtLeast(0)
+    val fixedWidthPx =
+        (horizontalContentPaddingPx.coerceAtLeast(0) * 2) +
+            (interItemSpacingPx.coerceAtLeast(0) * gapCount)
+    val slotWidthPx = if (labels.isEmpty()) {
+        availableWidthPx.coerceAtLeast(0).toFloat()
+    } else {
+        (availableWidthPx - fixedWidthPx)
+            .coerceAtLeast(0)
+            .toFloat() / labels.size
+    }
+    val singleLineLabelWidthPx = (
+        slotWidthPx - (labelHorizontalSafetyPaddingPx.coerceAtLeast(0) * 2)
+    ).coerceAtLeast(0f)
+    val widestLabelPx = labels.maxOfOrNull { label ->
+        measureLabelWidthPx(label, cappedScaleMultiplier)
+    }?.toFloat() ?: 0f
+    val fitMultiplier = if (
+        widestLabelPx > singleLineLabelWidthPx &&
+        widestLabelPx > 0f
+    ) {
+        cappedScaleMultiplier *
+            (singleLineLabelWidthPx / widestLabelPx) *
+            0.98f
+    } else {
+        cappedScaleMultiplier
+    }
     return BottomBarLabelLayout(
         maxLines = 1,
-        barHeightDp = maxOf(56, contentHeightDp),
+        barHeightDp = BottomBarSingleLineHeightDp,
+        labelScaleMultiplier = fitMultiplier.coerceIn(
+            minimumScaleMultiplier,
+            cappedScaleMultiplier,
+        ),
     )
 }
 
 @Composable
 internal fun rememberBottomBarLabelLayout(
-    @Suppress("UNUSED_PARAMETER") labels: List<String> = emptyList(),
-    @Suppress("UNUSED_PARAMETER") availableWidth: Dp = 0.dp,
-    @Suppress("UNUSED_PARAMETER") horizontalContentPadding: Dp = 0.dp,
-    @Suppress("UNUSED_PARAMETER") interItemSpacing: Dp = 0.dp,
-    @Suppress("UNUSED_PARAMETER") labelHorizontalSafetyPadding: Dp = 6.dp,
-    @Suppress("UNUSED_PARAMETER") labelFontSize: TextUnit = 10.sp,
-): BottomBarLabelLayout =
-    bottomBarLabelLayout(fontScale = LocalDensity.current.fontScale)
+    labels: List<String>,
+    availableWidth: Dp,
+    horizontalContentPadding: Dp = 0.dp,
+    interItemSpacing: Dp = 0.dp,
+    labelHorizontalSafetyPadding: Dp = 6.dp,
+    labelFontSize: TextUnit = 10.sp,
+): BottomBarLabelLayout {
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer(cacheSize = labels.size.coerceAtLeast(1))
+    return bottomBarLabelLayout(
+        labels = labels,
+        fontScale = density.fontScale,
+        availableWidthPx = with(density) { availableWidth.roundToPx() },
+        horizontalContentPaddingPx = with(density) {
+            horizontalContentPadding.roundToPx()
+        },
+        interItemSpacingPx = with(density) { interItemSpacing.roundToPx() },
+        labelHorizontalSafetyPaddingPx = with(density) {
+            labelHorizontalSafetyPadding.roundToPx()
+        },
+        measureLabelWidthPx = { label, scaleMultiplier ->
+            textMeasurer.measure(
+                text = label,
+                style = NoopType.footnote.copy(
+                    fontSize = (labelFontSize.value * scaleMultiplier).sp,
+                    lineHeight = (12f * scaleMultiplier).sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                softWrap = false,
+                maxLines = 1,
+            ).size.width
+        },
+    )
+}
 
 @Composable
 private fun GlassBottomBar(
@@ -1411,32 +1488,49 @@ private fun GlassBottomBar(
     onQuickActions: () -> Unit,
 ) {
     val barShape = RoundedCornerShape(50)
-    Box(
+    val barLabels = listOf(
+        stringResource(R.string.nav_today),
+        stringResource(R.string.nav_trends),
+        stringResource(R.string.nav_workouts),
+        stringResource(R.string.nav_sleep),
+        stringResource(R.string.nav_more),
+    )
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 12.dp)
-            .padding(top = 4.dp, bottom = 8.dp),
+            .navigationBarsPadding(),
         contentAlignment = Alignment.Center,
     ) {
+        val compactNavigation = maxWidth < CompactBottomBarWidthDp.dp
+        val outerHorizontalPadding = if (compactNavigation) 8.dp else 12.dp
+        val quickActionSpacing = if (compactNavigation) 4.dp else 8.dp
+        val barContentPadding = if (compactNavigation) 4.dp else 6.dp
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 548.dp),
+                .widthIn(max = 548.dp)
+                .padding(horizontal = outerHorizontalPadding)
+                .padding(top = 4.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(quickActionSpacing),
         ) {
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f),
             ) {
-                val labelLayout = rememberBottomBarLabelLayout()
+                val labelLayout = rememberBottomBarLabelLayout(
+                    labels = barLabels,
+                    availableWidth = maxWidth,
+                    horizontalContentPadding = barContentPadding,
+                    interItemSpacing = 1.dp,
+                    labelHorizontalSafetyPadding = 1.dp,
+                )
                 Row(
                     modifier = Modifier
                         .height(labelLayout.barHeightDp.dp)
-                        .fillMaxSize()
+                        .fillMaxWidth()
                         .navigationGlassSurface(barShape)
-                        .padding(horizontal = 6.dp)
+                        .padding(horizontal = barContentPadding)
                         .selectableGroup(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(1.dp),
@@ -1448,6 +1542,7 @@ private fun GlassBottomBar(
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
                             labelMaxLines = labelLayout.maxLines,
+                            labelScaleMultiplier = labelLayout.labelScaleMultiplier,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1459,6 +1554,7 @@ private fun GlassBottomBar(
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
                             labelMaxLines = labelLayout.maxLines,
+                            labelScaleMultiplier = labelLayout.labelScaleMultiplier,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1469,6 +1565,7 @@ private fun GlassBottomBar(
                         active = selected == Destination.More,
                         testTag = "noop.tab.more",
                         labelMaxLines = labelLayout.maxLines,
+                        labelScaleMultiplier = labelLayout.labelScaleMultiplier,
                         modifier = Modifier.weight(1f),
                         onClick = { onTabSelected(Destination.More) },
                     )
@@ -1615,6 +1712,7 @@ private fun BarSlot(
     active: Boolean,
     testTag: String,
     labelMaxLines: Int,
+    labelScaleMultiplier: Float,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -1675,11 +1773,12 @@ private fun BarSlot(
         Text(
             label,
             style = NoopType.footnote.copy(
-                fontSize = 10.sp,
-                lineHeight = 12.sp,
+                fontSize = (10f * labelScaleMultiplier).sp,
+                lineHeight = (12f * labelScaleMultiplier).sp,
                 fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
             ),
             color = tint,
+            minLines = labelMaxLines,
             maxLines = labelMaxLines,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,

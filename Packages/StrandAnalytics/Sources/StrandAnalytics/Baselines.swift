@@ -400,6 +400,51 @@ public enum Baselines {
         return foldHistory(values, dayKeys: dayKeys, cfg: cfg, baselineEpoch: baselineEpoch)
     }
 
+    /// Builds the same strictly-prior causal state as `foldHistory(_:before:cfg:)` for many target
+    /// days in one ordered pass. This avoids repeatedly filtering and sorting a long history while
+    /// preserving nil handling, recalibration boundaries, and byte-identical `update` semantics.
+    public static func causalFoldHistory(
+        _ valuesByDay: [String: Double?],
+        before days: [String],
+        cfg: MetricCfg,
+        baselineEpoch: Double? = nil
+    ) -> [String: BaselineState] {
+        let epoch = baselineEpoch ?? hrvBaselineEpoch()
+        let valueDays = valuesByDay.keys.sorted()
+        let targetDays = Array(Set(days)).sorted()
+        let formatter: DateFormatter? = epoch > 0 ? {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter
+        }() : nil
+        let seed = BaselineState(
+            baseline: (cfg.minVal + cfg.maxVal) / 2.0,
+            spread: cfg.floorSpread,
+            nValid: 0,
+            nightsSinceUpdate: 0,
+            status: .calibrating
+        )
+        var result: [String: BaselineState] = [:]
+        var state: BaselineState?
+        var valueIndex = 0
+        for targetDay in targetDays {
+            while valueIndex < valueDays.count, valueDays[valueIndex] < targetDay {
+                let valueDay = valueDays[valueIndex]
+                valueIndex += 1
+                if let formatter,
+                   let date = formatter.date(from: valueDay),
+                   date.timeIntervalSince1970 < epoch {
+                    continue
+                }
+                state = update(state, value: valuesByDay[valueDay]!, cfg: cfg)
+            }
+            result[targetDay] = state ?? seed
+        }
+        return result
+    }
+
     // MARK: - Device-era boundary (#459)
 
     /// The recalibration epoch (seconds, UTC start-of-day) at the LATEST device-era boundary in a

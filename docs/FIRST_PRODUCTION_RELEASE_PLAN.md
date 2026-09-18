@@ -1,7 +1,7 @@
 # NOOP first production release master plan
 
 - **Plan date:** 2026-09-05
-- **Last evidence update:** 2026-09-07
+- **Last evidence update:** 2026-09-18
 - **Target:** first public production release of the NOOP mobile apps and the
   first-party NOOP Band
 - **Launch sequence:** India first, then the USA
@@ -68,11 +68,13 @@ remains manual until the final go/no-go review.
 - Automatic medical, anomaly, Rhythm, SpO2, temperature, stress, or fall
   paging remains unavailable without its separate validated and regulatory
   program.
-- The first release targets explicit, user-confirmed app SOS paging to accepted
-  trusted contacts. The app initiates the incident; the server performs
-  acknowledged SMS/voice delivery. Responder links expose only the latest
-  location during the selected 8- or 12-hour incident window and no route
-  history.
+- The first Safety transport is explicit, user-confirmed app-to-app SOS paging
+  to accepted NOOP Safety contacts. Precise location is off by default and may
+  be shared only with separate incident-scoped consent; the service retains
+  only the latest location during the selected 8- or 12-hour window, never
+  route history. SMS and voice remain disabled fallback channels until their
+  carrier or DLT registration, legal review, physical delivery, monitoring,
+  failover, and staffed-operations gates pass.
 - Mobile diagnostics remain bounded, local, and user-reviewed. Backend events
   remain payload-free. Neither may contain health values, user text,
   credentials, dynamic identifiers, raw frames, or arbitrary errors.
@@ -87,8 +89,9 @@ remains manual until the final go/no-go review.
 - Apple and Android already have pluggable live-source abstractions and
   additive database migrations.
 - NOOP+ phone identity, explicit consent, immutable chunk sync, restore,
-  erasure, seven-day raw plus 30-day essential hot retention, Friends, and
-  private synthetic staging exist.
+  erasure, seven-day raw plus 30-day essential hot retention, and Friends exist
+  in source. Prior rounds recorded private synthetic staging; that retained
+  runtime and drift must be reverified before it is used as current evidence.
 - Local app reports already cover bounded lifecycle, responsiveness, storage,
   navigation, database, analysis, device connection, history, and managed sync
   evidence.
@@ -121,36 +124,50 @@ remains manual until the final go/no-go review.
 - Production signed physical-device collection, background execution, history,
   battery, haptics, storage pressure, firmware update, and upgrade preservation
   remain unverified.
-- NOOP+ is private synthetic staging. Public mobile ingress, physical
-  attestation, carrier delivery, production links and push, production
-  monitoring, load, restore, and support operations remain open.
+- Prior NOOP+ runtime evidence is limited to private synthetic staging and was
+  not reverified for this active review. Public mobile ingress, physical
+  attestation, production app-to-app Safety push and location-consent journeys,
+  production links, monitoring, load, restore, and support operations remain
+  open. SMS/voice fallback additionally requires carrier or DLT evidence.
 - App Store and Play signing, final store records, current release media,
   reviewer sample mode, and public-release approval remain open.
 - External sensor and metric accuracy evidence remains incomplete.
 
 ### Current mainline health
 
-At commit `1443acb1` on 2026-09-06:
+The protected integrated baseline for the September 17-18 review is `main` at
+`b688b3b725cd497e96a31b28540a219bf50446e1`. Live GitHub settings and the exact
+commit's checks were reverified on 2026-09-18:
 
-- The exact-main Apple matrix passes the universal macOS app build and tests,
-  the complete iOS simulator build, launch-gate isolation, and the iOS
-  production-shell tests.
-- Android build, unit, lint, instrumentation compilation, and the API 35
-  managed-emulator production-shell matrix pass with retained diagnostics.
-- Server legal lock, lint, dependency audits, extension-free PostgreSQL
-  overlay, complete database/API suite, Compose validation, production and
-  backup container builds, encrypted backup, and disposable restore pass.
-- Swift packages and the study harness, localization, health claims, runtime
-  license inventory, private-data rejection, and operations-record workflows
-  pass.
-- Phase-R1 source/workflow defects are closed without waivers. `main` remains
-  unprotected and reviewed environments, production credentials, signed
-  artifacts, and external launch evidence remain open.
-- Exact-main commit `b5caec52` passes the new `Release Controls` workflow.
-  Its retained evidence artifact contains a deterministic 216-component
-  CycloneDX SBOM and a commit/tree-bound manifest that was independently
-  reverified after download. Branch protection, reviewed environments,
-  credential rotation, signing, and production release approval remain open.
+- `main` uses strict up-to-date status checks, administrator enforcement, and
+  linear history; force pushes and branch deletion are disabled. Release work
+  is proposed from a branch and integrated through a protected pull request,
+  never by pushing directly to `main`.
+- The ten required GitHub Actions contexts are `android-ci-required`,
+  `apple-ci-required`, `health-claims`, `i18n-coverage`, `operations-record`,
+  `release-controls`, `runtime-license-required`, `server-ci-required`,
+  `swift-packages-required`, and `trusted-release-controls`.
+- All ten contexts completed successfully on the protected baseline, and each
+  was published by GitHub Actions application `15368`.
+- `trusted-release-controls` is an exact-head trust-root check. For a pull
+  request it executes protected-base code, treats the candidate checkout as
+  isolated untrusted data, restricts release-authority changes to an
+  owner-authored in-repository head, and publishes the result on that exact
+  pull-request commit. The independent `release-controls` context still checks
+  candidate semantics. After merge, the trusted workflow verifies protected
+  `main` again and publishes a separate `protected-main` result; only that
+  scope can authorize release publication.
+- Historical exact-main evidence at `1443acb1` and `b5caec52` remains valid for
+  those exact trees, including the retained commit/tree-bound SBOM manifest.
+  It is not evidence for the active September 17-18 branch.
+- The active `codex/ui-cloud-readiness-20260917` branch is still dirty,
+  uncommitted, unpushed, and has not run the ten hosted contexts on an exact
+  head. Complete current local and hosted walls remain required before its PR
+  can merge.
+- Reviewed deployment environments, production credentials and rotation,
+  signed artifacts, physical-device evidence, supplier inputs, legal and
+  certification approvals, store records, production operations, and final
+  go-live approval remain open.
 - Source versions are iOS `9.2.1 (231)` and Android `9.2.1 (304)`. The owner
   must choose and validate the first storefront version. `1.0.0` is the
   recommended public product version, but existing installed-build upgrade
@@ -158,10 +175,12 @@ At commit `1443acb1` on 2026-09-06:
 
 ### Terminology footprint
 
-The frozen terminology inventory currently classifies 17,368 legacy-name
+The protected-baseline terminology inventory classifies 17,368 legacy-name
 occurrences across 1,356 tracked paths (1,508 path/category groups) for
 `WHOOP`, `Whoop`, `whoop`, `OpenWhoop`, or `my-whoop`. The largest areas are
 Android, Swift packages, Apple application source, tests, and documentation.
+The active branch's final inventory and reviewed digest remain
+`<pending final terminology gate>`.
 The footprint includes:
 
 - active third-party protocol and transport implementation;
@@ -192,11 +211,11 @@ blockers:
 | Terms delivery | **Confirmed:** canonical terms load from NOOP-controlled remote storage and the full document is not persisted in the app | Claim must bind to one immutable verified version while remaining auditable and publicly accessible. |
 | Pre-home plan choice | **Confirmed:** show NOOP and an accessible gold NOOP+ option before Home | Both platforms need one honest, non-coercive product boundary. |
 | Payment | **Pending:** show no working checkout until India gateway, store billing, tax, refund, and receipt behavior are approved | A placeholder cannot charge, grant entitlement, or imply production billing. |
-| First release network scope | Band ownership claim and manual app SOS trusted-contact paging are targeted; enable NOOP+ data services only after every production gate passes | Ownership identity must not silently become managed health-data consent, and provider credentials cannot live in a mobile client. |
+| First release network scope | Band ownership claim and manual app-to-app SOS paging of accepted NOOP Safety contacts are targeted; precise location requires separate incident-scoped consent, and NOOP+ data services remain disabled until every applicable production gate passes | Ownership identity must not silently become managed health-data consent, and provider credentials cannot live in a mobile client. |
 | Legacy direct-band support | Keep during bring-up; remove from the public first-party release after NOOP Band physical parity, while preserving old data and import provenance | Removing it earlier destroys the only hardware development path; retaining it as `Noop Band` is false. |
 | Public version | Validate `1.0.0` with monotonic platform build numbers | Current source version is an internal development sequence, not necessarily the correct first storefront identity. |
 | Launch languages | English plus professionally reviewed launch-market locales | Machine completeness does not establish native-speaker quality. |
-| Safety paging at launch | **Confirmed target:** manual, user-confirmed app SOS with latest-only location; provider delivery remains unavailable until carrier, operations, legal, and physical evidence all pass | App initiation does not remove the need for reliable server delivery, acknowledgement, and an honest failure path. |
+| Safety paging at launch | **Confirmed target:** manual, user-confirmed app-to-app SOS to accepted NOOP Safety contacts; location is optional, requires explicit incident-scoped consent, and is latest-only. SMS/voice remain disabled unless carrier or DLT, legal, physical delivery, monitoring, failover, and staffed-operations evidence pass | App initiation does not remove the need for reliable push delivery, acknowledgement, bounded location lifecycle, and an honest failure path. |
 | Medical posture | General wellness only | Clinical claims trigger separate evidence, quality-system, and regulatory work. |
 
 ## 5. First-party NOOP Band input dossier
@@ -601,7 +620,7 @@ Statuses:
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
-| R0.1 | PARTIAL | India-first, USA-second, and manual app SOS trusted-contact paging are recorded; territories, languages, pricing, and NOOP+ enablement remain open. | Signed product scope in the release record |
+| R0.1 | PARTIAL | India-first, USA-second, and manual app-to-app SOS paging of accepted NOOP Safety contacts are recorded; territories, languages, pricing, and NOOP+ enablement remain open. | Signed product scope in the release record |
 | R0.2 | OPEN | Name accountable owners for firmware, hardware, mobile, backend, security, privacy, metric validation, manufacturing, support, and release. | Owner/RACI table with backups |
 | R0.3 | OPEN | Decide the legacy direct-band compatibility end state. | Written migration and support policy |
 | R0.4 | OPEN | Select public marketing version and monotonic Apple/Android build numbers. | Upgrade-tested version map |
@@ -619,7 +638,7 @@ contract, certification plan, or store disclosure.
 | R1.1 | DONE | The iOS production-shell defect is fixed without suppressing the test. | Exact-main Apple run `34080116658` |
 | R1.2 | DONE | Android production-shell instrumentation is deterministic in hosted CI and retains managed-device diagnostics. | Exact-main Android run `34079190997` |
 | R1.3 | DONE | PostgreSQL fixtures are isolated; the plain lane starts from `template0` and rejects inherited extensions. | Exact-main server run `34078811154` |
-| R1.4 | PARTIAL | Apple, Android, Swift, server, localization, claims, legal, dependency, privacy, and operations gates pass on current main; protected-main required-check policy remains open. | Protected main or equivalent reviewed release control |
+| R1.4 | DONE | Protected `main` enforces the exact ten-context GitHub Actions contract, strict up-to-date checks, administrator enforcement, and linear history; force pushes and deletion are disabled. Baseline `b688b3b7` passes all ten contexts, and changes follow a protected-PR merge path rather than a direct push. | Live protection query plus exact-SHA `10/10` successful check runs on 2026-09-18 |
 | R1.5 | OPEN | Create staging and production environments with least-privilege secrets and approvals. Rotate any credential previously pasted into chat or logs. | Secret inventory and rotation evidence |
 | R1.6 | OPEN | Establish clean build reproducibility, dependency lock review, SBOM, artifact provenance, and vulnerability policy. | Signed/checksummed artifacts tied to commit |
 | R1.7 | OPEN | Measure cold launch, scrolling, database work, sync, memory, storage, and battery on representative release devices. | Versioned performance budgets and baselines |
@@ -663,19 +682,26 @@ logic, and both clients agree with firmware on every supported protocol version.
 
 ### Phase 3A - ownership account, claim, and onboarding
 
+The supplier-independent ownership/account foundation is **PARTIAL**. It
+provides default-off identity, control-schema, terms, claim-transaction,
+installation, and resumable-onboarding primitives, but it is not a production
+ownership system. Supplier-backed possession, ownership-account deletion,
+billing, recovery/release, legal approval, physical evidence, and production
+operation remain `OPEN`.
+
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
-| A3A.1 | OPEN | Implement managed email/password identity, verified email, optional phone OTP, recovery, reauthentication, session rotation, and abuse controls. | Signed-client identity and recovery matrix |
-| A3A.2 | OPEN | Add isolated account, band, claim, installation, challenge, release, and ownership-event schemas with no health payloads. | Migration, tenant-isolation, backup, restore, and erasure tests |
-| A3A.3 | OPEN | Implement an attested, fresh, band-proven, atomic, idempotent single-owner claim transaction. | Two-phone/two-account race and replay matrix |
-| A3A.4 | OPEN | Make account, claim, band provisioning, local persistence, and final acknowledgement recover from every partial-success boundary. | Fault-injection state-machine evidence |
+| A3A.1 | PARTIAL | Verified email/password mechanics and optional phone linking exist in the default-off foundation; production recovery, reauthentication, session rotation, abuse controls, and signed-client evidence remain open. | Signed-client identity and recovery matrix |
+| A3A.2 | PARTIAL | Isolated account/control, band, claim, installation, challenge, release, and ownership-event schema primitives exist without health payloads; production backup, restore, deletion, and retention evidence remain open. | Migration, tenant-isolation, backup, restore, and erasure tests |
+| A3A.3 | PARTIAL | An atomic, idempotent single-owner claim transaction exists behind a deliberately unavailable production possession provider; supplier-backed possession, attestation, owner-key provisioning, replay, and race evidence remain open. | Two-phone/two-account race and replay matrix |
+| A3A.4 | PARTIAL | Claim and onboarding checkpoints provide resumable source-level foundations; production band provisioning and every partial-success recovery boundary remain open. | Fault-injection state-machine evidence |
 | A3A.5 | OPEN | Keep post-activation collection, metrics, export, and local controls working through identity-service and network outages. | Physical offline and outage matrix |
-| A3A.6 | OPEN | Implement same-account replacement-phone authorization and old-installation revocation without changing ownership or losing data. | Signed physical replacement-phone journey |
+| A3A.6 | PARTIAL | Same-account replacement-installation authorization and installation revocation primitives exist; signed physical possession, old-device loss, data continuity, and production recovery evidence remain open. | Signed physical replacement-phone journey |
 | A3A.7 | OPEN | Implement support-controlled return, RMA, recovery, deletion, dispute, and eligible-upgrade release with owner-key revocation and band wipe. | Legal approval, operator exercise, and physical reclaim |
-| A3A.8 | OPEN | Build matched Apple/Android disclosure, `I agree`, account, remaining onboarding, NOOP/NOOP+ choice, and resumable progress. | Accessibility trees, visual states, and end-to-end tests |
+| A3A.8 | PARTIAL | Matched Apple/Android account visibility, resumable onboarding, and the pre-Home NOOP/NOOP+ preference exist; supplier-linked possession, production terms, accessibility acceptance, physical journeys, and end-to-end launch evidence remain open. | Accessibility trees, visual states, and end-to-end tests |
 | A3A.9 | OPEN | Keep billing and NOOP+ consent separate from band ownership; leave checkout unavailable until gateway and store billing pass. | Entitlement, cancellation, downgrade, and no-charge tests |
 | A3A.10 | OPEN | Add bounded local/backend claim evidence without band, account, contact, challenge, credential, or health identifiers. | Redaction, retention, and outcome tests |
-| A3A.11 | OPEN | Serve immutable signed remote terms, record exact acceptance metadata, retain historical versions, and persist no full terms document in the app. | Tamper, outage, version-race, accessibility, privacy, and publication tests |
+| A3A.11 | PARTIAL | Immutable remote-terms verification and exact acceptance-metadata primitives exist without persisting the full document in the app; approved production documents, publication, accessibility, legal review, and outage/version-race evidence remain open. | Tamper, outage, version-race, accessibility, privacy, and publication tests |
 | A3A.12 | OPEN | Implement the approved 14- or 30-day return policy, condition inspection, lawful refund deduction, appeal, and operator-only wipe/release. | India/USA approval and end-to-end returns exercise |
 
 **Exit:** a legitimate owner can identify, prove possession of, claim, recover,
@@ -726,7 +752,7 @@ export without understanding BLE or waiting on an unexplained blocking screen.
 | D6.4 | OPEN | Add compaction/index/query work only from measured profiles and preserve write throughput under backfill. | Before/after traces and regression tests |
 | D6.5 | OPEN | Prove low-storage, full-disk, WAL growth, corrupt DB, failed migration, restore, process death, and concurrent read/write recovery. | Fault matrix with no silent loss |
 | D6.6 | PARTIAL | Complete same-platform and portable backup/import coverage for the final schema and NOOP Band provenance. | Old/new/cross-platform restore fixtures |
-| D6.7 | PARTIAL | Prove complete managed-history export, interruption/resume, corruption rejection, snapshot expiry, and documented import. | Large live synthetic account evidence |
+| D6.7 | PARTIAL | The current managed-history exporter is non-resumable and has no importer. Implement interrupted continuation and a documented archive importer, then prove selected-scope export, corruption rejection, effective snapshot expiry, large accounts, cancellation/auth refresh, and cross-tenant isolation. | Large live synthetic account evidence plus importer round trip |
 
 **Exit:** storage remains bounded and responsive, and every destructive or
 space-reclaiming action has a verified backup, exact eligibility, and rollback.
@@ -746,7 +772,7 @@ space-reclaiming action has a verified backup, exact eligibility, and rollback.
 **Exit:** each release claim maps to a frozen implementation, known inputs,
 reference protocol, confidence/coverage rule, and honest failure state.
 
-### Phase 8 - NOOP+ and production cloud, if enabled
+### Phase 8 - managed production services and optional NOOP+
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
@@ -756,10 +782,10 @@ reference protocol, confidence/coverage rule, and honest failure state.
 | C8.4 | OPEN | Define data region, consent, privacy notice, retention, support access, audit, breach, and cross-border policy for each market. | Legal/privacy approval and operator runbooks |
 | C8.5 | OPEN | Add dashboards, SLOs, alerts, bounded log retention/access, cost budgets, on-call, incident response, and status/support procedures. | Alert and incident game-day evidence |
 | C8.6 | OPEN | Load-test enrollment, reconnect bursts, chunk upload, processing, restore, export, Friends, and mixed workloads to the launch and 10,000-user targets. | Capacity limits and scaling/rollback plan |
-| C8.7 | OPEN | Add production HTTPS universal/app links and opaque minimal APNs/FCM wake delivery with token lifecycle and abuse controls. | Closed-app physical delivery matrix |
+| C8.7 | OPEN | Add production HTTPS universal/app links and opaque minimal APNs/FCM wake delivery for app-to-app Safety paging, with accepted-contact authorization, explicit incident-scoped location consent, latest-only replacement and terminal deletion, token lifecycle, and abuse controls. | Closed-app physical delivery and location-consent matrix |
 | C8.8 | PARTIAL | Migrate the current phone-OTP-only staging identity to the approved release account: verified email/password plus optional linked phone, without embedding provider credentials. | Email, optional controlled-number, rate-limit, recovery, and support evidence |
 | C8.9 | PARTIAL | Complete Friends invite, consent, removal, block, badge, poke, haptic, deletion, and abuse/support operations. | Two-user physical and backend matrix |
-| C8.10 | OPEN | Complete country-specific sender registration, dual-provider strategy, SMS/voice/DTMF/callback/retry/cancel evidence, and 24/7 operations for manual app SOS paging. | Carrier IDs, latency, failover, and on-call evidence |
+| C8.10 | OPEN | Keep SMS/voice disabled until country-specific carrier or DLT sender/template registration, legal review, dual-provider strategy, SMS/voice/DTMF/callback/retry/cancel evidence, physical-phone delivery, monitoring, failover, and staffed operations pass. | Carrier or DLT approvals, latency, failover, physical delivery, and on-call evidence |
 
 **Exit:** every enabled managed feature is production-operated and disclosed.
 Otherwise its enrollment and store claims stay disabled.
@@ -873,7 +899,7 @@ Do not record a participant's raw health values in the release ledger.
 | Mobile product | Signed Apple/Android feature, parity, accessibility, localization, performance, and physical matrices pass |
 | Sensor and metrics | Claim-specific reference evidence, frozen revisions, missing-data behavior, and known limitations |
 | Cloud, if enabled | Production identity, ingress, attestation, isolation, retention, restore, load, SLO, on-call, privacy, support, and deletion pass |
-| Safety, if enabled | Country/provider registration, dual-path delivery, acknowledgment, cancellation, failover, physical haptic, legal, and on-call pass |
+| Safety, if enabled | App-to-app accepted-contact authorization, opaque push delivery, acknowledgement/decline, explicit incident-scoped location consent, latest-only retention and terminal deletion, cancellation, physical-phone/background behavior, legal review, monitoring, and on-call pass. SMS/voice additionally requires carrier or DLT registration, physical delivery, failover, and provider operations before it is enabled |
 | Security and privacy | Threat models, independent assessment, remediations, SBOM, secrets/keys, policies, consent, rights, breach and support controls |
 | Hardware compliance | Production-design certifications, labeling, battery shipping, manufacturing traceability, warranty/RMA |
 | Stores | Distribution signing, store disclosures/media/review mode, exact artifact validation, manual release |
@@ -902,9 +928,11 @@ Provide these through the appropriate secure or account-owned channel:
 5. Production domain/DNS, GCP organization/billing/production-project control,
    Firebase production apps, messaging provider accounts, and on-call owners if
    NOOP+ or paging ships.
-6. Controlled test phone numbers and country/carrier coverage for OTP or
-   Safety. India paging additionally needs DLT entity, header, and approved
-   templates.
+6. Controlled Apple/Android devices and accounts for app-to-app Safety push,
+   permission, explicit location-consent, acknowledgement, expiry, and deletion
+   journeys. Controlled phone numbers and country/carrier coverage are needed
+   only if OTP or SMS/voice fallback is enabled; India SMS/voice additionally
+   needs a DLT entity, header, and approved templates.
 7. Reference instruments, study protocol, participant recruitment/consent,
    statistical owner, and budget for sensor and metric validation.
 8. Final support contact, privacy/support website ownership, storefront

@@ -102,6 +102,13 @@ memory, swap, disk, mount, and open-file state before acting.
   repository provides it. Use a normal disk-backed worktree and temporary
   directory; do not place a large worktree, DerivedData, Gradle home, database,
   or simulator image on a RAM disk while memory is constrained.
+- Pass `--log-file <round-owned-path>` and `--status-file <round-owned-path>` for
+  verbose builds. The runner keeps the complete child stdout/stderr in a private
+  `0600` file while the terminal receives only bounded lifecycle heartbeats.
+  Inspect a short tail or filtered failure summary, record the result, then
+  exact-delete obsolete logs. Never stream raw `xcodebuild`, Gradle, Docker, or
+  full test-wall output into iTerm; sustained terminal scrollback was a proven
+  application-memory failure mode.
 - At a pressure stop, identify the exact owning process group and exact
   round-owned paths. Stop only known round-owned work and let the bounded runner
   perform its cleanup. Do not kill unrelated terminals, agents, applications,

@@ -2,7 +2,7 @@
   "algorithmRevisions": {
     "charge": "noop-charge-v2",
     "effort": "noop-effort-v2",
-    "rest": "noop-rest-v1"
+    "rest": "noop-rest-v2"
   },
   "configuration": {
     "holdoutFraction": 0.25,

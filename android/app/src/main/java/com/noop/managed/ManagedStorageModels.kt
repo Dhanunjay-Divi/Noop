@@ -363,7 +363,10 @@ sealed class ManagedStorageException(message: String, cause: Throwable? = null) 
     class NotFound : ManagedStorageException("The requested NOOP+ resource no longer exists.")
     class QuotaExceeded : ManagedStorageException("This NOOP+ storage allowance is full.")
     class Conflict : ManagedStorageException("NOOP+ rejected conflicting sync state.")
-    class Server(val statusCode: Int) :
+    class Server(
+        val statusCode: Int,
+        val retryAfterMillis: Long? = null,
+    ) :
         ManagedStorageException("NOOP+ is temporarily unavailable.")
     class DigestMismatch : ManagedStorageException("A cloud object failed its integrity check.")
 }

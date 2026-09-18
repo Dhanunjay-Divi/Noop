@@ -4722,6 +4722,73 @@ private struct HeroScoreCell: View {
 /// The Daily Signal header uses the same audited readiness and illness results as the rest of Today.
 /// It deliberately lives in a small AppModel-observing leaf so the live ~1 Hz heart-rate stream does not
 /// invalidate the score vessels or the rest of the dashboard.
+enum DailySignalPillLabel: Equatable {
+    case building
+    case aligned
+    case withinRange
+    case oneShift
+    case multipleShifts
+    case watch
+    case checkIn
+
+    var localizedValue: String {
+        switch self {
+        case .building: return String(localized: "appwide.daily_signal.status.building")
+        case .aligned: return String(localized: "appwide.readiness.primed.headline")
+        case .withinRange: return String(localized: "appwide.readiness.balanced.headline")
+        case .oneShift: return String(localized: "appwide.readiness.strained.headline")
+        case .multipleShifts: return String(localized: "appwide.readiness.rundown.headline")
+        case .watch: return String(localized: "appwide.daily_signal.status.recheck")
+        case .checkIn: return String(localized: "appwide.daily_signal.status.check_in")
+        }
+    }
+}
+
+enum DailySignalPillPolarity: Equatable {
+    case positive
+    case neutral
+    case warning
+    case critical
+}
+
+struct DailySignalPillPresentation: Equatable {
+    let label: DailySignalPillLabel
+    let polarity: DailySignalPillPolarity
+}
+
+/// Preserve the readiness level's exact vocabulary instead of collapsing balanced/primed into one
+/// positive word or strained/rundown into one warning word. A wellness-only override keeps the bounded
+/// Daily Signal language; a building state never becomes reassuring.
+func dailySignalPillPresentation(
+    status: DailySignalStatus,
+    readinessLevel: ReadinessEngine.Level
+) -> DailySignalPillPresentation {
+    switch status {
+    case .building:
+        return DailySignalPillPresentation(label: .building, polarity: .neutral)
+    case .alert:
+        return DailySignalPillPresentation(label: .checkIn, polarity: .critical)
+    case .steady:
+        switch readinessLevel {
+        case .primed:
+            return DailySignalPillPresentation(label: .aligned, polarity: .positive)
+        case .balanced:
+            return DailySignalPillPresentation(label: .withinRange, polarity: .positive)
+        case .strained, .rundown, .insufficient:
+            return DailySignalPillPresentation(label: .building, polarity: .neutral)
+        }
+    case .watch:
+        switch readinessLevel {
+        case .strained:
+            return DailySignalPillPresentation(label: .oneShift, polarity: .warning)
+        case .rundown:
+            return DailySignalPillPresentation(label: .multipleShifts, polarity: .critical)
+        case .primed, .balanced, .insufficient:
+            return DailySignalPillPresentation(label: .watch, polarity: .warning)
+        }
+    }
+}
+
 private struct DailySignalHeader: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -4742,6 +4809,10 @@ private struct DailySignalHeader: View {
         return DailySignalStatus.resolve(readiness: readiness, illness: illness)
     }
 
+    private var pillPresentation: DailySignalPillPresentation {
+        dailySignalPillPresentation(status: status, readinessLevel: readiness.level)
+    }
+
     #if DEBUG
     /// Deterministic visual-QA state. This changes presentation only and is not compiled into release builds.
     private static var demoStatus: DailySignalStatus? {
@@ -4753,21 +4824,16 @@ private struct DailySignalHeader: View {
     #endif
 
     private var tint: Color {
-        switch status {
-        case .steady: return StrandPalette.statusPositive
-        case .watch: return StrandPalette.statusWarning
-        case .alert: return DailySignalAppearance.alertTint
-        case .building: return StrandPalette.onDarkTertiary
+        switch pillPresentation.polarity {
+        case .positive: return StrandPalette.statusPositive
+        case .neutral: return StrandPalette.onDarkTertiary
+        case .warning: return StrandPalette.statusWarning
+        case .critical: return DailySignalAppearance.alertTint
         }
     }
 
     private var label: String {
-        switch status {
-        case .steady: return String(localized: "appwide.daily_signal.status.aligned")
-        case .watch: return String(localized: "appwide.daily_signal.status.recheck")
-        case .alert: return String(localized: "appwide.daily_signal.status.check_in")
-        case .building: return String(localized: "appwide.daily_signal.status.building")
-        }
+        pillPresentation.label.localizedValue
     }
 
     private var summary: String {

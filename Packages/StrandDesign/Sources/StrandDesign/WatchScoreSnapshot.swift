@@ -1,5 +1,30 @@
 import Foundation
 
+/// Pure sleep-summary composition shared by the phone bridge and macOS package
+/// tests. The caller supplies localized fragments so the iPhone app remains
+/// the owner of the language sent to the Watch.
+public enum WatchSleepSummaryFormatter {
+    public static func format(
+        totalSleepMinutes: Double?,
+        efficiency: Double?,
+        durationText: (Int, Int) -> String,
+        efficiencyText: (Int) -> String
+    ) -> String {
+        var parts: [String] = []
+        if let totalSleepMinutes, totalSleepMinutes > 0 {
+            let wholeMinutes = Int(totalSleepMinutes)
+            parts.append(
+                durationText(wholeMinutes / 60, wholeMinutes % 60)
+            )
+        }
+        if let efficiency, efficiency > 0 {
+            let percent = efficiency <= 1 ? efficiency * 100 : efficiency
+            parts.append(efficiencyText(Int(percent.rounded())))
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
 /// The phone to watch payload. The iPhone is the brain (M1 computes Charge / Effort / Rest with
 /// confidence + provenance); this is the small, honest snapshot it pushes over WatchConnectivity for
 /// the watch app + its complication to DISPLAY. The watch never recomputes a score, it only renders
@@ -26,9 +51,9 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
     /// True when Effort is still calibrating. `effort` is `nil` while this is true.
     public var effortCalibrating: Bool
 
-    /// Rest (sleep) composite, 0 to 100. `nil` when there is no matched in-bed session for the day.
+    /// NOOP Sleep Score composite, 0 to 100. `nil` when there is no matched in-bed session for the day.
     public var rest: Double?
-    /// True when Rest is still calibrating. `rest` is `nil` while this is true.
+    /// True when Sleep Score is still calibrating. `rest` is `nil` while this is true.
     public var restCalibrating: Bool
 
     /// Most recent heart rate the phone knows about (bpm). The watch shows its OWN live HR off its

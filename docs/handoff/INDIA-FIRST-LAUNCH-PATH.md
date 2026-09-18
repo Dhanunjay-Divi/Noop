@@ -1,29 +1,30 @@
 # India-first launch path
 
-**Assessed:** 2026-08-26 · **Sequence:** India, then USA
-**Current India coverage in this repository: none.** Zero references to DPDP, TRAI/DLT, BIS, WPC/ETA,
-CDSCO, or India in any doc or server file. No Indian locale ships. Every compliance artefact built so far
-(A2P 10DLC, 11 references) targets the **second** market.
+**Original assessment:** 2026-08-26 · **Guidance reconciled:** 2026-09-18 ·
+**Sequence:** India, then USA
 
-> **2026-09-05 update:** India-first and USA-second are now owner-confirmed in
-> [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
-> The earlier local-only launch recommendation is superseded for one narrow
-> purpose: a first-party band requires a NOOP ownership account and one-time
-> network claim. Ongoing collection, scoring, export, and local controls remain
-> subscription-independent, and NOOP+ health-data consent remains separate.
-> V1 has no user-facing unpair; remote terms and a still-undecided 14- or
-> 30-day return policy now require India-specific consumer and operations
-> review.
+The 2026-08-26 inventory found no India-specific release coverage. That is
+historical context, not the current plan: later release documents now identify
+India-first hardware, privacy, store, ownership, and communications gates.
+Documentation does not establish approved legal artifacts, carrier
+registration, certification, locale quality, or launch evidence.
+
+> **Current release direction:** the active local-only-v1 recommendation is
+> superseded. Core collection, scoring, local history, export, and supported
+> local controls remain local-first. A first-party band uses a narrow ownership
+> account and one-time network claim; its supplier-independent foundation is
+> only `PARTIAL`, while possession, ownership-account deletion, billing,
+> recovery/release, legal approval, physical evidence, and production
+> operation remain open. NOOP+ health-data services remain a separate explicit
+> opt-in.
 >
-> **2026-09-07 update:** the owner has placed manual, user-confirmed app
-> SOS trusted-contact paging in the first-release target, including
-> latest-location-only sharing for the selected 8- or 12-hour incident
-> window. That supersedes the older local-only recommendation for this one
-> feature and makes DLT registration, provider delivery, physical-phone,
-> legal, monitoring, and on-call evidence launch gates. Band-triggered and
-> automatic paging remain separate later gates.
-> The original assessment below is retained as historical rationale; its
-> statement that the repository has no India coverage is no longer current.
+> The first Safety transport is manual app-to-app paging of accepted NOOP
+> Safety contacts. Precise location is off by default and requires explicit
+> incident-scoped consent; only the latest location may be retained during the
+> selected 8- or 12-hour window. SMS/voice remains disabled unless carrier or
+> DLT registration, legal review, physical delivery, monitoring, failover, and
+> staffed operations pass. Band-triggered and automatic paging remain separate
+> later gates.
 
 ---
 
@@ -34,10 +35,11 @@ entity that determines the purpose and means of processing digital personal data
 Data Principal rights (access, correction, erasure), grievance redressal, breach notification, and
 penalties up to Rs 250 crore all follow from that status.
 
-**If health data never leaves the device, NOOP is not processing it as a fiduciary.** That is not a
-loophole; it is the architecture doing real work. NOOP's account-free, local-first design is the single
-most defensible privacy position of any wearable app in this market, and it should be stated plainly in
-store copy because it is a genuine differentiator, not marketing.
+Keeping core health data on device reduces the server-side data surface and
+preserves useful offline behavior. It does not erase NOOP's obligations for the
+ownership records, accepted Safety contacts, incident state, consented
+location, or any NOOP+ data the service actually processes. Public claims must
+match the enabled production data flows and approved India privacy analysis.
 
 **The moment a server holds another person's data, that changes.** Friends profiles and paging contacts on
 a hosted droplet make NOOP a Data Fiduciary for those records, with the full obligation set attached. That
@@ -55,7 +57,7 @@ English-only is arguably viable for the initial urban early-adopter segment, and
 scoping decision. But it should be a decision, not an oversight. Note the existing 8 `needs_review` cycle
 translations remain open regardless.
 
-### 2. TRAI DLT registration, if paging ships (long lead, blocks nothing else)
+### 2. TRAI DLT registration, only if SMS/voice fallback ships
 India does **not** use A2P 10DLC. Commercial SMS requires registration on a telecom operator's
 **Distributed Ledger Technology** platform, and it is a three-part process, each part a separate approval:
 
@@ -74,8 +76,10 @@ Two consequences specific to NOOP:
   wrong means safety messages are silently dropped at night, which is precisely when they matter. This
   must be verified with the operator, not assumed.
 
-`NOOP_RUN_TWILIO_STAGING` has still never been run, so **paging delivery has never been proven on any
-carrier in any country.**
+The 2026-08-26 assessment had no controlled carrier-delivery evidence. Current
+release status must come from the production-readiness record; source
+automation alone cannot close DLT, carrier, legal, physical-phone, monitoring,
+failover, or operations gates.
 
 ### 3. CDSCO: stay out of it deliberately
 Software as a Medical Device is regulated under India's Medical Devices Rules 2017 via **CDSCO**. NOOP's
@@ -101,49 +105,47 @@ charges anything, Apple and Google IAP handle Indian payment rails, which avoids
 
 ---
 
-## Recommended sequencing: descope v1 to remove the two longest gates
+## Current sequencing: local-first core with narrow network services
 
-The current `RELEASE-BLOCKERS.md` has eight P0 gates. **Two of them, server operations (4) and paging
-delivery (5), account for most of the calendar time**, and both are avoidable in a first release.
+The earlier recommendation to ship v1 with no account, server, or paging is no
+longer active. The current release scope is narrower than a cloud-authoritative
+product but is not local-only:
 
-**Ship v1 as local-only: no server, no Friends, no paging.**
-
-| Gate | v1 local-only | Full scope |
+| Capability | India first-release direction | Gate |
 |---|---|---|
-| 0. Source rights | **required** | required |
-| 1. Stabilise and publish | required | required |
-| 2. Release identity | required | required |
-| 3. Store records | required | required |
-| 4. Server operations | **removed** | Postgres/Timescale, TLS/DNS, backups, restore drills, RPO/RTO, 10k load |
-| 5. Paging delivery | **removed** | DLT entity + header + templates, controlled real-phone matrix |
-| 6. Physical devices | required | required |
-| 7. Measurement evidence | required | required |
-| 8. Automatic inference stays off | required (free) | required |
+| Core health experience | Keep collection, scoring, local history, export, and supported local controls on device and useful without NOOP+ or continuous network access | Physical band, data-integrity, performance, privacy, signing, and store evidence |
+| Band ownership | Use the narrow ownership account and one-time claim; do not treat it as NOOP+ or health-data consent | Foundation is `PARTIAL`; supplier possession, deletion, billing, recovery/release, legal, physical, and production gates stay open |
+| Safety primary transport | Manual app-to-app paging of accepted NOOP Safety contacts | Production APNs/FCM relay, accepted-contact authorization, explicit location-consent journey, latest-only retention/deletion, physical-phone/background delivery, monitoring, legal, and staffed operations |
+| SMS/voice fallback | Keep disabled for the app-to-app launch path | Enable only after DLT entity/header/templates, carrier delivery, legal review, physical-phone tests, monitoring, failover, and staffed operations |
+| NOOP+ | Keep a separate explicit opt-in; do not make it a prerequisite for core band use | Enable each managed-data feature only after its consent, identity, privacy, security, portability, deletion, load, recovery, and production gates pass |
 
-That removes DLT registration, droplet operations, and the entire safety-delivery evidence matrix from the
-critical path, and it removes NOOP's exposure as a DPDP Data Fiduciary at launch. What remains is a
-coherent, honest product: local-first biometrics with cited metrics and no cloud.
-
-Then Friends in v1.1 and paging in v1.2, with DLT registration running in parallel from now, since it
-takes longer than the code will.
+App-to-app Safety and the ownership claim still require managed production
+services. DLT does not gate an app-only push path, but it becomes mandatory
+before enabling SMS/voice fallback in India.
 
 ---
 
-## Architecture recommendation: keep computation local, permanently
+## Architecture recommendation: preserve local-first core
 
-The server should stay what it already is: **optional, off by default, self-hosted, no telemetry.** Do not
-move scoring to a droplet. Reasons, in order of weight:
+Do not move core scoring or current local history behind a network dependency.
+The production architecture may use managed services only for bounded,
+explicit purposes:
 
-1. **It is the product.** "No cloud, no account, no subscription" is the only claim no competitor can copy
-   without abandoning their business model.
-2. **DPDP.** Local computation keeps NOOP out of Data Fiduciary status for the health data itself.
-3. **Offline is a feature.** Scores currently work on a plane, in a tunnel, with no signal. Server-side
-   scoring trades that away for nothing the user asked for.
-4. **Cost and blast radius.** A solo founder running health data for others inherits uptime, backup,
-   breach-notification and incident duties permanently.
+1. **Ownership:** retain identity and control state needed to claim and recover
+   a first-party band, with no health payload and no implication of NOOP+
+   consent.
+2. **Safety:** relay manual app-to-app pages only to accepted contacts. Keep
+   push payloads opaque; require explicit incident-scoped consent before
+   location sharing; retain only the latest location for the bounded incident;
+   delete incident data at its terminal lifecycle point.
+3. **NOOP+:** upload only the data classes selected through a separate opt-in
+   disclosure and consent flow. Cancellation cannot deactivate a claimed band
+   or remove core local capability.
+4. **SMS/voice:** treat these as disabled fallback transports until India DLT,
+   carrier, legal, physical-phone, monitoring, failover, and staffed-operations
+   evidence exists.
 
-**The one genuine exception is paging**, and it is unavoidable: you cannot send an SMS from a phone whose
-battery is dead, which is exactly the scenario the feature exists for. So paging needs a server-side
-escalation worker, which `server/app/paging.py` and `safety_worker.py` already implement. Keep that
-component **as thin a relay as possible** and store nothing on it that is not strictly required to
-escalate.
+This preserves offline usefulness and limits server data while acknowledging
+that ownership, app-to-app Safety, and any enabled NOOP+ feature create real
+privacy, security, availability, deletion, support, and incident-response
+obligations.

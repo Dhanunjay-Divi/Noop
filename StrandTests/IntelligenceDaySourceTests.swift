@@ -320,37 +320,36 @@ final class IntelligenceDaySourceTests: XCTestCase {
 
     // MARK: - diagnostic line shape (the strap-log proof the next report ships)
 
-    /// The exact line the engine emits per scored day; assembled here from the same parts so the format
-    /// — "sleep day=… totalSleepMin=… matched=… source=…" — is pinned and stays parsable. Counts + a
-    /// rounded minute only; no HR/HRV/timestamps, so it's safe to share.
-    private func diagLine(day: String, totalSleepMin: Double?, matched: Int, source: DaySource) -> String {
-        let tsm = totalSleepMin.map { String(Int($0.rounded())) } ?? "nil"
-        return "sleep day=\(day) totalSleepMin=\(tsm) matched=\(matched) source=\(source.logToken)"
+    private func diagLine(matched: Int, source: DaySource) -> String {
+        "analysis.sleep_scored source=\(source.logToken) sessions=\(min(matched, 16)) "
+            + "stages=present efficiency=present hrv=present hrv_window=deep"
     }
 
     func testDiagnosticLineFormatComputed() {
         XCTAssertEqual(
-            diagLine(day: "2026-06-12", totalSleepMin: 423.6, matched: 2, source: .computed),
-            "sleep day=2026-06-12 totalSleepMin=424 matched=2 source=computed")
+            diagLine(matched: 2, source: .computed),
+            "analysis.sleep_scored source=computed sessions=2 stages=present "
+                + "efficiency=present hrv=present hrv_window=deep")
     }
 
     func testDiagnosticLineFormatImportedWhoop() {
         XCTAssertEqual(
-            diagLine(day: "2026-06-12", totalSleepMin: 390, matched: 1, source: .whoopImport),
-            "sleep day=2026-06-12 totalSleepMin=390 matched=1 source=imported:whoop")
+            diagLine(matched: 1, source: .whoopImport),
+            "analysis.sleep_scored source=imported:whoop sessions=1 stages=present "
+                + "efficiency=present hrv=present hrv_window=deep")
     }
 
-    func testDiagnosticLineHandlesNilTotalAndZeroMatches() {
-        // A day with raw HR but no detected sleep block: total nil, zero matched — still a proof line,
-        // so an empty-sleep day is visible in the log (the log-failures-not-successes blind spot).
-        XCTAssertEqual(
-            diagLine(day: "2026-06-12", totalSleepMin: nil, matched: 0, source: .computed),
-            "sleep day=2026-06-12 totalSleepMin=nil matched=0 source=computed")
+    func testDiagnosticLineCapsCountsAndCarriesNoDateOrHealthValue() {
+        let line = diagLine(matched: 99, source: .computed)
+        XCTAssertTrue(line.contains("sessions=16"))
+        XCTAssertFalse(line.contains("2026-"))
+        XCTAssertFalse(line.contains("totalSleepMin"))
+        XCTAssertFalse(line.contains("avgHrv"))
     }
 
     func testDiagnosticLineCarriesNoEmDash() {
         // House style: never an em-dash in user-facing / shared text.
-        let line = diagLine(day: "2026-06-12", totalSleepMin: 100, matched: 1, source: .appleHealth)
+        let line = diagLine(matched: 1, source: .appleHealth)
         XCTAssertFalse(line.contains("—"))
     }
 }

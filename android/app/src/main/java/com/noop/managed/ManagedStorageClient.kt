@@ -1171,7 +1171,13 @@ class ManagedStorageClient(
         }
         val response = execute(builder.build())
         response.use {
-            if (!it.isSuccessful) throw serverError(it.code, "")
+            if (!it.isSuccessful) {
+                throw serverError(
+                    it.code,
+                    "",
+                    it.header("Retry-After"),
+                )
+            }
             val generation = it.header("x-goog-generation")?.toLongOrNull()
             val metageneration = it.header("x-goog-metageneration")?.toLongOrNull()
             val crc32c = it.header("x-goog-hash")
@@ -1524,7 +1530,13 @@ class ManagedStorageClient(
             }
             val response = execute(builder.build())
             response.use {
-                if (!it.isSuccessful) throw serverError(it.code, "")
+                if (!it.isSuccessful) {
+                    throw serverError(
+                        it.code,
+                        "",
+                        it.header("Retry-After"),
+                    )
+                }
                 val bytes = it.body?.bytes() ?: throw ManagedStorageException.InvalidResponse()
                 if (!ManagedDigest.sha256(bytes).equals(capability.expectedSha256, ignoreCase = true)) {
                     throw ManagedStorageException.DigestMismatch()
@@ -2309,7 +2321,13 @@ class ManagedStorageClient(
         val response = execute(request)
         response.use {
             val body = runCatching { it.body?.string().orEmpty() }.getOrDefault("")
-            if (!it.isSuccessful) throw serverError(it.code, body)
+            if (!it.isSuccessful) {
+                throw serverError(
+                    it.code,
+                    body,
+                    it.header("Retry-After"),
+                )
+            }
             return runCatching { JSONObject(body) }
                 .getOrElse { throw ManagedStorageException.InvalidResponse() }
         }
@@ -2319,7 +2337,13 @@ class ManagedStorageClient(
         val response = execute(request)
         response.use {
             val body = runCatching { it.body?.string().orEmpty() }.getOrDefault("")
-            if (!it.isSuccessful) throw serverError(it.code, body)
+            if (!it.isSuccessful) {
+                throw serverError(
+                    it.code,
+                    body,
+                    it.header("Retry-After"),
+                )
+            }
             if (it.code !in setOf(200, 202, 204) || body.isNotBlank()) {
                 throw ManagedStorageException.InvalidResponse()
             }
@@ -2386,7 +2410,11 @@ class ManagedStorageClient(
         }
     }
 
-    private fun serverError(statusCode: Int, body: String): ManagedStorageException = when (statusCode) {
+    private fun serverError(
+        statusCode: Int,
+        body: String,
+        retryAfterHeader: String?,
+    ): ManagedStorageException = when (statusCode) {
         401 -> ManagedStorageException.Authentication()
         403 -> ManagedStorageException.Forbidden()
         404 -> ManagedStorageException.NotFound()
@@ -2403,7 +2431,10 @@ class ManagedStorageClient(
             }.getOrNull()?.takeIf { it > 0 }
             ManagedStorageException.CursorExpired(minimum)
         }
-        else -> ManagedStorageException.Server(statusCode)
+        else -> ManagedStorageException.Server(
+            statusCode,
+            ManagedStorageRetryPolicy.retryAfterMillis(retryAfterHeader),
+        )
     }
 
     private fun JSONObject.requiredLong(name: String): Long {

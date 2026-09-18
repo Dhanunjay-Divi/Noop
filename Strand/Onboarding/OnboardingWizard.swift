@@ -39,15 +39,17 @@ public struct OnboardingWizard: View {
 
     public init(onFinished: @escaping () -> Void) {
         self.onFinished = onFinished
-        var initialStep = Step.welcome
-        if let stored = UserDefaults.standard.string(
-            forKey: Self.progressStorageKey
-        ),
-           let restored = Step.allCases.first(where: {
-               $0.storageValue == stored
-           }) {
-            initialStep = restored
-        }
+        let isOwnershipConfigured = Self.ownershipConfiguredForCurrentBuild
+        ownershipConfigured = isOwnershipConfigured
+        _ownershipBootstrapComplete = State(
+            initialValue: !isOwnershipConfigured
+        )
+        var initialStep = Self.restoredOnboardingStep(
+            storedValue: UserDefaults.standard.string(
+                forKey: Self.progressStorageKey
+            ),
+            ownershipConfigured: isOwnershipConfigured
+        )
         #if DEBUG
         let args = CommandLine.arguments
         if let index = args.firstIndex(of: "--demo-onboarding-page"),
@@ -63,6 +65,10 @@ public struct OnboardingWizard: View {
             initialStep = requestedStep
         }
         #endif
+        initialStep = Self.normalizedOnboardingStep(
+            initialStep,
+            ownershipConfigured: isOwnershipConfigured
+        )
         _step = State(initialValue: initialStep)
     }
 
@@ -71,7 +77,7 @@ public struct OnboardingWizard: View {
     // caused flicker. Child steps observe what they need; a hidden BondWatcher (below)
     // handles the bond→celebration transition without re-rendering the root.
 
-    private enum Step: Int, CaseIterable {
+    enum Step: Int, CaseIterable {
         case welcome, what, expectations, bluetooth, wear, scan, bonded,
              ownership, profile, importData, notifications, safetyContacts,
              appearance, dailyRhythm, plan, done
@@ -101,8 +107,69 @@ public struct OnboardingWizard: View {
         }
     }
 
+    static func onboardingSteps(ownershipConfigured: Bool) -> [Step] {
+        let ownershipRequired = ownershipConfigured
+        return Step.allCases.filter { $0 != .ownership || ownershipRequired }
+    }
+
+    static func restoredOnboardingStep(
+        storedValue: String?,
+        ownershipConfigured: Bool
+    ) -> Step {
+        let restored = Step.allCases.first {
+            $0.storageValue == storedValue
+        } ?? .welcome
+        return normalizedOnboardingStep(
+            restored,
+            ownershipConfigured: ownershipConfigured
+        )
+    }
+
+    static func normalizedOnboardingStep(
+        _ candidate: Step,
+        ownershipConfigured: Bool
+    ) -> Step {
+        let steps = onboardingSteps(
+            ownershipConfigured: ownershipConfigured
+        )
+        if steps.contains(candidate) {
+            return candidate
+        }
+        return steps.contains(.profile) ? .profile : .welcome
+    }
+
+    static func ownershipDestination(
+        for candidate: Step,
+        ownershipConfigured: Bool,
+        reconciliationComplete: Bool,
+        phase: OwnershipServicePhase
+    ) -> Step? {
+        guard ownershipConfigured,
+              candidate.rawValue > Step.ownership.rawValue else {
+            return candidate
+        }
+        guard reconciliationComplete else {
+            return nil
+        }
+        return ownershipCanAccessPostClaimOnboarding(
+            isAvailable: true,
+            phase: phase
+        ) ? candidate : .ownership
+    }
+
+    private static var ownershipConfiguredForCurrentBuild: Bool {
+        #if os(iOS)
+        return OwnershipConfiguration.load(bundle: .main) != nil
+        #else
+        return false
+        #endif
+    }
+
     private static let progressStorageKey = "noop.onboarding.progress.v1"
+    private let ownershipConfigured: Bool
     @State private var step: Step = .welcome
+    @State private var ownershipBootstrapRequested = false
+    @State private var ownershipBootstrapComplete: Bool
     @State private var glow = false
     @State private var profileEditing = false
     @State private var bandBonded = false
@@ -194,8 +261,14 @@ public struct OnboardingWizard: View {
         // without subscribing the whole wizard to per-tick updates.
         .background(BondWatcher(onBondState: handleBondState))
         #if os(iOS)
+        .task {
+            bootstrapOwnershipIfNeeded()
+        }
         .onChange(of: ownershipService.phase) { _, _ in
             reconcileOwnershipRequirement()
+        }
+        .onChange(of: ownershipService.isBusy) { _, _ in
+            completeOwnershipBootstrapIfSettled()
         }
         #endif
     }
@@ -325,7 +398,9 @@ public struct OnboardingWizard: View {
     }
 
     private var primaryActionEnabled: Bool {
-        if step == .ownership { return ownershipClaimed }
+        if step == .ownership {
+            return ownershipClaimed && ownershipReconciliationComplete
+        }
         if step == .scan && ownershipRequired { return bandBonded }
         if step == .plan {
             return !planSubmissionBusy && postClaimOwnershipReady
@@ -438,7 +513,7 @@ public struct OnboardingWizard: View {
     }
 
     private var activeSteps: [Step] {
-        Step.allCases.filter { $0 != .ownership || ownershipRequired }
+        Self.onboardingSteps(ownershipConfigured: ownershipConfigured)
     }
 
     private var currentStepIndex: Int {
@@ -446,11 +521,7 @@ public struct OnboardingWizard: View {
     }
 
     private var ownershipRequired: Bool {
-        #if os(iOS)
-        return ownershipService.isAvailable
-        #else
-        return false
-        #endif
+        ownershipConfigured
     }
 
     private var ownershipClaimed: Bool {
@@ -473,9 +544,17 @@ public struct OnboardingWizard: View {
     private var postClaimOwnershipReady: Bool {
         #if os(iOS)
         return ownershipCanAccessPostClaimOnboarding(
-            isAvailable: ownershipService.isAvailable,
+            isAvailable: ownershipConfigured,
             phase: ownershipService.phase
         )
+        #else
+        return true
+        #endif
+    }
+
+    private var ownershipReconciliationComplete: Bool {
+        #if os(iOS)
+        return ownershipBootstrapComplete && !ownershipService.isBusy
         #else
         return true
         #endif
@@ -501,36 +580,45 @@ public struct OnboardingWizard: View {
         move(to: .profile, direction: "reconciled")
     }
 
+    private func ownershipDestination(for candidate: Step) -> Step? {
+        #if os(iOS)
+        let phase = ownershipService.phase
+        #else
+        let phase = OwnershipServicePhase.unavailable
+        #endif
+        return Self.ownershipDestination(
+            for: candidate,
+            ownershipConfigured: ownershipConfigured,
+            reconciliationComplete: ownershipReconciliationComplete,
+            phase: phase
+        )
+    }
+
     private func ownershipAllows(_ candidate: Step) -> Bool {
-        guard candidate.rawValue > Step.ownership.rawValue else {
-            return true
+        guard let destination = ownershipDestination(for: candidate) else {
+            return false
         }
-        return postClaimOwnershipReady
+        return destination == candidate
     }
 
     private func reconcileOwnershipRequirement() {
         #if os(iOS)
-        guard !ownershipAllows(step),
-              ownershipService.isAvailable else {
+        guard let destination = ownershipDestination(for: step),
+              destination == .ownership,
+              destination != step else {
             return
         }
-        guard let ownershipIndex = activeSteps.firstIndex(of: .ownership) else {
-            return
-        }
-        move(to: activeSteps[ownershipIndex], direction: "reconciled")
+        move(to: destination, direction: "reconciled")
         #endif
     }
 
     private func move(to next: Step, direction: String) {
-        let destination: Step
-        let effectiveDirection: String
-        if ownershipAllows(next) {
-            destination = next
-            effectiveDirection = direction
-        } else {
-            destination = .ownership
-            effectiveDirection = "reconciled"
+        guard let destination = ownershipDestination(for: next) else {
+            return
         }
+        let effectiveDirection = destination == next
+            ? direction
+            : "reconciled"
         UserDefaults.standard.set(
             destination.storageValue,
             forKey: Self.progressStorageKey
@@ -549,6 +637,31 @@ public struct OnboardingWizard: View {
         ) {
             step = destination
         }
+    }
+
+    private func bootstrapOwnershipIfNeeded() {
+        #if os(iOS)
+        guard ownershipConfigured else { return }
+        guard !ownershipBootstrapRequested else {
+            completeOwnershipBootstrapIfSettled()
+            return
+        }
+        ownershipBootstrapRequested = true
+        ownershipService.bootstrap()
+        completeOwnershipBootstrapIfSettled()
+        #endif
+    }
+
+    private func completeOwnershipBootstrapIfSettled() {
+        #if os(iOS)
+        guard ownershipConfigured,
+              ownershipBootstrapRequested,
+              !ownershipService.isBusy else {
+            return
+        }
+        ownershipBootstrapComplete = true
+        reconcileOwnershipRequirement()
+        #endif
     }
 
     private var stepTransition: AnyTransition {

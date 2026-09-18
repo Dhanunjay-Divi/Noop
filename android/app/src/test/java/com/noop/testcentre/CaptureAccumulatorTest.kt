@@ -12,10 +12,9 @@ import org.junit.Test
 class CaptureAccumulatorTest {
 
     private val report = """
-        [sleep] gate run=0 spanS=1163 DROPPED gate=minSleepMin spanMin=19 minSleepMin=60
-        sleep day=2026-07-02 totalSleepMin=131 matched=3 source=computed
-        sleep day=2026-07-01 totalSleepMin=331 matched=1 source=computed
-        sleep day=2026-06-30 totalSleepMin=381 matched=1 source=computed
+        [sleep] gate run=0 day=2026-07-02 spanS=1163 DROPPED gate=minSleepMin
+        [sleep] gate run=1 day=2026-07-01 spanS=25000 KEPT gate=accepted
+        [sleep] gate run=2 day=2026-06-30 spanS=26000 KEPT gate=accepted
         [steps] stepsRaw day=2026-07-02 counterSamples=29248 firstCounter=65046 lastCounter=5336
         [steps] stepsRaw day=2026-07-01 counterSamples=1000
         [battery] bank soc=26.0 t=1782957600s
@@ -68,7 +67,7 @@ class CaptureAccumulatorTest {
     fun dayKeyDoesNotLeakAcrossModes() {
         val cross =
             "[workouts] autoDetect day=2026-07-05 windows=1\n" +
-                "sleep day=2026-07-02 totalSleepMin=100 matched=1 source=computed"
+                "[sleep] gate run=1 day=2026-07-02 KEPT"
         assertEquals(1, CaptureAccumulator.capturedDays(TestDomain.SLEEP, cross, 0L))
     }
 

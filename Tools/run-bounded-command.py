@@ -904,6 +904,7 @@ def _supervisor_file_actions(
     release_write_fd: int,
     supervisor_status_fd: int,
     supervisor_release_fd: int,
+    log_file: Path | None = None,
 ) -> list[tuple[int, ...]]:
     actions: list[tuple[int, ...]] = [
         (
@@ -917,6 +918,22 @@ def _supervisor_file_actions(
             supervisor_release_fd,
         ),
     ]
+    if log_file is not None:
+        log_flags = os.O_WRONLY | os.O_APPEND
+        if hasattr(os, "O_NOFOLLOW"):
+            log_flags |= os.O_NOFOLLOW
+        actions.extend(
+            [
+                (
+                    os.POSIX_SPAWN_OPEN,
+                    1,
+                    str(log_file),
+                    log_flags,
+                    0o600,
+                ),
+                (os.POSIX_SPAWN_DUP2, 1, 2),
+            ]
+        )
     for descriptor in {
         status_read_fd,
         status_write_fd,
@@ -931,7 +948,11 @@ def _supervisor_file_actions(
     return actions
 
 
-def _spawn_process_locked(command: list[str]) -> _SpawnedProcess:
+def _spawn_process_locked(
+    command: list[str],
+    *,
+    log_file: Path | None = None,
+) -> _SpawnedProcess:
     required_spawn_attributes = (
         "POSIX_SPAWN_CLOSE",
         "POSIX_SPAWN_DUP2",
@@ -988,6 +1009,7 @@ def _spawn_process_locked(command: list[str]) -> _SpawnedProcess:
                 release_write_fd=release_write_fd,
                 supervisor_status_fd=supervisor_status_fd,
                 supervisor_release_fd=supervisor_release_fd,
+                log_file=log_file,
             ),
             setpgroup=0,
             setsigdef=_default_child_signals(),
@@ -1057,9 +1079,13 @@ def _spawn_process_locked(command: list[str]) -> _SpawnedProcess:
     return process
 
 
-def _spawn_process(command: list[str]) -> _SpawnedProcess:
+def _spawn_process(
+    command: list[str],
+    *,
+    log_file: Path | None = None,
+) -> _SpawnedProcess:
     with _SPAWN_LOCK:
-        return _spawn_process_locked(command)
+        return _spawn_process_locked(command, log_file=log_file)
 
 
 @contextlib.contextmanager
@@ -1114,11 +1140,15 @@ def _spawn_process_before_deadline(
     command: list[str],
     *,
     deadline: float,
+    log_file: Path | None = None,
 ) -> _SpawnedProcess:
     process: _SpawnedProcess | None = None
     try:
         with _spawn_deadline_alarm(deadline):
-            process = _spawn_process(command)
+            if log_file is None:
+                process = _spawn_process(command)
+            else:
+                process = _spawn_process(command, log_file=log_file)
     except BaseException:
         if process is not None and not _terminate_process_group(
             process,
@@ -1618,6 +1648,20 @@ def _minimum_free_disk_bytes(value_gib: float) -> int:
     return math.ceil(value_bytes)
 
 
+def _prepare_log_file(path: Path) -> Path:
+    expanded = path.expanduser().absolute()
+    expanded.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(expanded, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+    finally:
+        os.close(descriptor)
+    return expanded
+
+
 def _run_command(
     command: list[str],
     *,
@@ -1630,6 +1674,7 @@ def _run_command(
     min_free_disk_bytes: int = 0,
     disk_path: Path | None = None,
     resource_check_seconds: float = DEFAULT_RESOURCE_CHECK_SECONDS,
+    log_file: Path | None = None,
 ) -> int:
     if not command:
         raise ValueError("command is required")
@@ -1653,10 +1698,34 @@ def _run_command(
         or not 0 < resource_check_seconds <= MAX_RESOURCE_CHECK_SECONDS
     ):
         raise ValueError("resource check interval is invalid")
+    if (
+        log_file is not None
+        and status_file is not None
+        and log_file.expanduser().absolute() == status_file.expanduser().absolute()
+    ):
+        raise ValueError("log file and status file must be different")
 
     wrapper_started_at = time.monotonic()
     wrapper_deadline = wrapper_started_at + timeout_seconds
     effective_disk_path = disk_path or Path.cwd()
+    prepared_log_file: Path | None = None
+    if log_file is not None:
+        try:
+            prepared_log_file = _prepare_log_file(log_file)
+        except OSError:
+            print(
+                f"bounded-command: label={label} status=log-file-error",
+                file=sys.stderr,
+                flush=True,
+            )
+            if not _write_status(
+                status_file,
+                label=label,
+                status="start-error",
+                exit_code=START_FAILURE_EXIT_CODE,
+            ):
+                return CLEANUP_EXIT_CODE
+            return START_FAILURE_EXIT_CODE
     resource_limits_enabled = (
         min_free_memory_percent > 0 or min_free_disk_bytes > 0
     )
@@ -1691,10 +1760,17 @@ def _run_command(
     process: subprocess.Popen[bytes] | _SpawnedProcess | None = None
     try:
         with _blocked_cleanup_signals():
-            process = _spawn_process_before_deadline(
-                command,
-                deadline=wrapper_deadline,
-            )
+            if prepared_log_file is None:
+                process = _spawn_process_before_deadline(
+                    command,
+                    deadline=wrapper_deadline,
+                )
+            else:
+                process = _spawn_process_before_deadline(
+                    command,
+                    deadline=wrapper_deadline,
+                    log_file=prepared_log_file,
+                )
     except _SpawnCleanupFailed:
         print(
             f"bounded-command: label={label} status=cleanup-failed",
@@ -1962,6 +2038,7 @@ def run_command(
     min_free_disk_bytes: int = 0,
     disk_path: Path | None = None,
     resource_check_seconds: float = DEFAULT_RESOURCE_CHECK_SECONDS,
+    log_file: Path | None = None,
 ) -> int:
     with _default_ignored_sigchld():
         return _run_command(
@@ -1975,6 +2052,7 @@ def run_command(
             min_free_disk_bytes=min_free_disk_bytes,
             disk_path=disk_path,
             resource_check_seconds=resource_check_seconds,
+            log_file=log_file,
         )
 
 
@@ -2002,6 +2080,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--label", required=True)
     parser.add_argument("--status-file", type=Path)
+    parser.add_argument("--log-file", type=Path)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args(argv)
 
@@ -2037,6 +2116,7 @@ def main(argv: list[str] | None = None) -> int:
                 min_free_disk_bytes=min_free_disk_bytes,
                 disk_path=arguments.disk_path,
                 resource_check_seconds=arguments.resource_check_seconds,
+                log_file=arguments.log_file,
             )
         except ValueError as error:
             parser.error(str(error))

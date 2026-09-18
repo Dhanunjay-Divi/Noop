@@ -1123,14 +1123,14 @@ object AnalyticsEngine {
  * Faithful Kotlin mirror of the Swift Rest composite (AnalyticsEngine / RestScorer). Keep every
  * constant and the weight set byte-identical to Swift — parity tests enforce it.
  *
- *   Rest = 0.50·duration + 0.20·efficiency + 0.20·restorative + 0.10·consistency
+ *   Rest = 0.50·duration + 0.10·efficiency + 0.20·restorative + 0.20·consistency
  *
  * Each sub-component is itself on 0–100:
  *   duration     — asleep hours / personal need, clamped at 100 (8 h default, refined by recent avg).
  *   efficiency   — asleep / in-bed (0..1) × 100.
  *   restorative  — (deep + REM) / asleep share, normalized by a healthy target share, clamped 100.
- *   consistency  — sleep/wake regularity (0..1) × 100; when the caller has no history it is null and
- *                  the term DROPS, renormalizing the remaining weights (same discipline as recovery).
+ *   consistency  — duration stability (0..1) × 100; when unavailable the scorer uses the shared
+ *                  neutral 0.5 value, matching Swift.
  *
  * Outputs APPROXIMATE — not WHOOP's proprietary Sleep Performance.
  */

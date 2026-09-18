@@ -5,6 +5,7 @@ import importlib.util
 import io
 import os
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,80 @@ def _wait_for_path(path: Path, timeout_seconds: float = 3) -> None:
 
 
 class RunBoundedCommandTests(unittest.TestCase):
+    def test_log_file_captures_child_output_without_terminal_flooding(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log_file = Path(temporary) / "nested" / "command.log"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            program = (
+                "import sys;"
+                "print('bounded stdout');"
+                "print('bounded stderr', file=sys.stderr)"
+            )
+
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                exit_code = RUNNER.run_command(
+                    [sys.executable, "-c", program],
+                    timeout_seconds=2,
+                    grace_seconds=1,
+                    label="logged-output",
+                    log_file=log_file,
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual(stderr.getvalue(), "")
+            self.assertEqual(
+                set(log_file.read_text(encoding="utf-8").splitlines()),
+                {"bounded stdout", "bounded stderr"},
+            )
+            self.assertEqual(stat.S_IMODE(log_file.stat().st_mode), 0o600)
+
+    def test_log_file_and_status_file_must_be_distinct(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            shared_path = Path(temporary) / "shared.txt"
+            with self.assertRaisesRegex(
+                ValueError,
+                "log file and status file must be different",
+            ):
+                RUNNER.run_command(
+                    [sys.executable, "-c", "pass"],
+                    timeout_seconds=2,
+                    grace_seconds=1,
+                    label="shared-output",
+                    status_file=shared_path,
+                    log_file=shared_path,
+                )
+
+    def test_log_file_refuses_a_symbolic_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target.log"
+            target.write_text("preserve", encoding="utf-8")
+            log_file = root / "command.log"
+            log_file.symlink_to(target)
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr):
+                exit_code = RUNNER.run_command(
+                    [sys.executable, "-c", "print('secret')"],
+                    timeout_seconds=2,
+                    grace_seconds=1,
+                    label="symlink-output",
+                    log_file=log_file,
+                )
+
+            self.assertEqual(exit_code, RUNNER.START_FAILURE_EXIT_CODE)
+            self.assertEqual(target.read_text(encoding="utf-8"), "preserve")
+            self.assertEqual(
+                stderr.getvalue(),
+                "bounded-command: label=symlink-output "
+                "status=log-file-error\n",
+            )
+
     def test_success_and_failure_codes_are_preserved(self) -> None:
         self.assertEqual(
             RUNNER.run_command(

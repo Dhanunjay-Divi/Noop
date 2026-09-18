@@ -1644,19 +1644,12 @@ final class OwnershipService: ObservableObject {
         for overview: OwnershipAccountOverview,
         checkpoint: OwnershipAccountCheckpoint
     ) -> OwnershipServicePhase {
-        switch checkpoint.stage {
-        case .replacementRequired:
-            return .replacementRequired
-        case .replacementPending:
-            return .authorizingReplacement
-        default:
-            guard overview.bandState == "claimed" else {
-                return possessionProvider.isAvailable
-                    ? .accountReady
-                    : .possessionUnavailable
-            }
-            return checkpoint.stage == .complete ? .complete : .claimed
-        }
+        ownershipPhaseForOverview(
+            accountState: overview.accountState,
+            bandState: overview.bandState,
+            checkpointStage: checkpoint.stage,
+            possessionAvailable: possessionProvider.isAvailable
+        )
     }
 
     private static func isTermsChanged(_ error: Error) -> Bool {

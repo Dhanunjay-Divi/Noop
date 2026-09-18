@@ -1,7 +1,9 @@
 package com.noop.sync
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.noop.BuildConfig
+import com.noop.analytics.FormulaPublicationGate
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
 import com.noop.ingest.WearableExportImporter
@@ -12,6 +14,64 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.Instant
+
+/**
+ * Durable revision bridge from formula migration to the existing self-hosted full replay.
+ *
+ * Persisting the requirement before requesting replay makes process death fail safe. Migration
+ * waiting never becomes WorkManager/network backlog, and an active replay keeps its immutable
+ * window and keyset cursors. Completion is recorded only after [RemoteSyncPrefs.finishReplay]
+ * succeeds; a crash between those commits causes a safe duplicate replay rather than skipped rows.
+ */
+internal object RemoteFormulaReplayState {
+    private const val REQUIRED_REVISION_KEY =
+        "remoteSync.formulaReplayRequiredRevision"
+    private const val COMPLETED_REVISION_KEY =
+        "remoteSync.formulaReplayCompletedRevision"
+
+    fun prepare(
+        preferences: SharedPreferences,
+        currentRevision: String,
+        computedDerivedReady: Boolean,
+        replayInProgress: Boolean,
+    ): Boolean {
+        if (preferences.getString(COMPLETED_REVISION_KEY, null) == currentRevision) {
+            if (preferences.contains(REQUIRED_REVISION_KEY)) {
+                check(preferences.edit().remove(REQUIRED_REVISION_KEY).commit()) {
+                    "Could not clear the completed formula replay requirement."
+                }
+            }
+            return false
+        }
+        if (preferences.getString(REQUIRED_REVISION_KEY, null) != currentRevision) {
+            check(
+                preferences.edit()
+                    .putString(REQUIRED_REVISION_KEY, currentRevision)
+                    .commit(),
+            ) { "Could not persist the formula replay requirement." }
+        }
+        return computedDerivedReady && !replayInProgress
+    }
+
+    fun requiredRevision(preferences: SharedPreferences): String? =
+        preferences.getString(REQUIRED_REVISION_KEY, null)
+
+    fun completedRevision(preferences: SharedPreferences): String? =
+        preferences.getString(COMPLETED_REVISION_KEY, null)
+
+    fun finishSuccessfulReplay(
+        preferences: SharedPreferences,
+        currentRevision: String,
+    ) {
+        if (requiredRevision(preferences) != currentRevision) return
+        check(
+            preferences.edit()
+                .putString(COMPLETED_REVISION_KEY, currentRevision)
+                .remove(REQUIRED_REVISION_KEY)
+                .commit(),
+        ) { "Could not persist formula replay completion." }
+    }
+}
 
 /** UI/worker-facing orchestration. One process performs at most one remote upload at a time. */
 object RemoteSyncService {
@@ -98,6 +158,31 @@ object RemoteSyncService {
                     installationId = RemoteSyncPrefs.installationId(),
                     firmwareVersion = NoopPrefs.lastFirmware(context),
                 )
+                val formulaPreferences = NoopPrefs.of(context)
+                val computedDerivedReady =
+                    FormulaPublicationGate.computedDerivedReady(formulaPreferences)
+                val formulaReplayRevision =
+                    "${RemoteNoopAlgorithmRevision.CHARGE}+" +
+                        RemoteNoopAlgorithmRevision.REST
+                val formulaReplayRequired = RemoteFormulaReplayState.prepare(
+                    preferences = formulaPreferences,
+                    currentRevision = formulaReplayRevision,
+                    computedDerivedReady = computedDerivedReady,
+                    replayInProgress = RemoteSyncPrefs.replayInProgress(),
+                )
+                if (formulaReplayRequired) {
+                    RemoteSyncPrefs.setNeedsFullReplay(true)
+                }
+                if (!computedDerivedReady &&
+                    namespaces.any {
+                        it.role == FormulaPublicationGate.COMPUTED_SOURCE_KIND
+                    }
+                ) {
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "formula_publication",
+                        fields = FormulaPublicationGate.DEFERRED_DIAGNOSTIC_FIELDS,
+                    )
+                }
                 val syncNow = Instant.now()
                 var replayWindow = RemoteSyncPrefs.replayWindow()
                 var replay = RemoteSyncPrefs.replayInProgress() && replayWindow != null
@@ -144,9 +229,18 @@ object RemoteSyncService {
                 var totalBatches = 0
                 var hasMoreRaw = false
                 var hasMoreDerived = false
+                var hasDeferredComputedDerived = false
                 var lastAck: RemoteSyncAck? = null
 
                 for (namespace in namespaces) {
+                    hasDeferredComputedDerived =
+                        hasDeferredComputedDerived ||
+                            (
+                                namespace.includeDerived &&
+                                    namespace.role ==
+                                    FormulaPublicationGate.COMPUTED_SOURCE_KIND &&
+                                    !computedDerivedReady
+                                )
                     val isRawStrap = namespace.includeRaw
                     val result = coordinator.sync(
                         namespace = namespace,
@@ -159,6 +253,7 @@ object RemoteSyncService {
                         } else {
                             if (replay) 50 else 2
                         },
+                        computedDerivedReady = computedDerivedReady,
                     )
                     totalRows += result.uploadedRawRows
                     totalBatches += result.uploadedBatches
@@ -167,7 +262,12 @@ object RemoteSyncService {
                     lastAck = result.lastAck ?: lastAck
                 }
 
-                if (replay && !hasMoreRaw && !hasMoreDerived) {
+                if (
+                    replay &&
+                    !hasMoreRaw &&
+                    !hasMoreDerived &&
+                    !hasDeferredComputedDerived
+                ) {
                     // Completion cursors stay in place until every raw outbox and every derived
                     // namespace is done. Clear them and the replay marker in one preference commit.
                     RemoteSyncPrefs.finishReplay(
@@ -176,6 +276,10 @@ object RemoteSyncService {
                             .filter(RemoteNamespace::includeDerived)
                             .map(RemoteNamespace::remoteDeviceId)
                             .toList(),
+                    )
+                    RemoteFormulaReplayState.finishSuccessfulReplay(
+                        preferences = formulaPreferences,
+                        currentRevision = formulaReplayRevision,
                     )
                 }
 
@@ -222,6 +326,14 @@ object RemoteSyncService {
                         "uploaded_batches" to totalBatches.toString(),
                         "continuation_pending" to
                             (hasMoreRaw || hasMoreDerived).toString(),
+                        "computed_derived_deferred" to
+                            hasDeferredComputedDerived.toString(),
+                        "formula_replay_required" to
+                            (
+                                RemoteFormulaReplayState.requiredRevision(
+                                    formulaPreferences,
+                                ) == formulaReplayRevision
+                                ).toString(),
                         "pruned_rows" to prunedRows.toString(),
                     ),
                     includeResourceSnapshot = true,

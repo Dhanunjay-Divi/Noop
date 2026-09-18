@@ -1218,9 +1218,11 @@ public actor ManagedStorageClient {
         for (name, value) in capability.headers where name.lowercased() != "host" {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        let (_, response) = try await data(for: request)
-        guard (200..<300).contains(response.statusCode),
-              let generation = response.value(forHTTPHeaderField: "x-goog-generation")
+        let (responseData, response) = try await data(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw Self.error(for: response, data: responseData)
+        }
+        guard let generation = response.value(forHTTPHeaderField: "x-goog-generation")
                 .flatMap(Int64.init),
               generation > 0,
               let metageneration = response.value(forHTTPHeaderField: "x-goog-metageneration")
@@ -1445,7 +1447,7 @@ public actor ManagedStorageClient {
         }
         let (data, response) = try await data(for: request)
         guard (200..<300).contains(response.statusCode) else {
-            throw ManagedStorageError.server(status: response.statusCode)
+            throw Self.error(for: response, data: data)
         }
         guard ManagedDigest.sha256(data).caseInsensitiveCompare(
             capability.chunk.expectedSHA256
@@ -1798,7 +1800,7 @@ public actor ManagedStorageClient {
         )
         let (data, response) = try await data(for: request)
         guard (200..<300).contains(response.statusCode) else {
-            throw Self.error(for: response.statusCode, data: data)
+            throw Self.error(for: response, data: data)
         }
         if acceptAnyJSONObject, Response.self == EmptyResponse.self {
             guard (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else {
@@ -1831,7 +1833,7 @@ public actor ManagedStorageClient {
         }
         let (data, response) = try await data(for: request)
         guard (200..<300).contains(response.statusCode) else {
-            throw Self.error(for: response.statusCode, data: data)
+            throw Self.error(for: response, data: data)
         }
     }
 
@@ -1918,7 +1920,11 @@ public actor ManagedStorageClient {
         )
     }
 
-    private static func error(for status: Int, data: Data) -> ManagedStorageError {
+    private static func error(
+        for response: HTTPURLResponse,
+        data: Data
+    ) -> ManagedStorageError {
+        let status = response.statusCode
         switch status {
         case 401:
             return .authentication
@@ -1938,7 +1944,12 @@ public actor ManagedStorageClient {
             let detail = object?["detail"] as? [String: Any]
             return .cursorExpired(minimumSequence: (detail?["minimum_sequence"] as? NSNumber)?.int64Value)
         default:
-            return .server(status: status)
+            return .server(
+                status: status,
+                retryAfter: ManagedStorageRetryPolicy.retryAfter(
+                    from: response.value(forHTTPHeaderField: "Retry-After")
+                )
+            )
         }
     }
 

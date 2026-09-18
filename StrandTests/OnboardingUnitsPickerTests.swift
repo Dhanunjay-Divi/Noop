@@ -131,8 +131,21 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
                 "forKey: Self.progressStorageKey"
             )
         )
-        XCTAssertTrue(onboarding.contains("var initialStep = Step.welcome"))
-        XCTAssertTrue(onboarding.contains("initialStep = restored"))
+        XCTAssertTrue(
+            onboarding.contains(
+                "let isOwnershipConfigured = Self.ownershipConfiguredForCurrentBuild"
+            )
+        )
+        XCTAssertTrue(
+            onboarding.contains(
+                "var initialStep = Self.restoredOnboardingStep("
+            )
+        )
+        XCTAssertTrue(
+            onboarding.contains(
+                "initialStep = Self.normalizedOnboardingStep("
+            )
+        )
         XCTAssertTrue(onboarding.contains("initialStep = requestedStep"))
         XCTAssertEqual(
             onboarding.components(

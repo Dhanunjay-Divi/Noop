@@ -55,16 +55,51 @@ class IntelligenceDaySourceTokenTest {
         // The exact line shape the engine builds, assembled from the same parts, so the format stays
         // pinned: counts + a rounded minute only (no HR/HRV/timestamps), no em-dash. `stages=`/`eff=`
         // (#386) sit between the rollup and the counts so the rollup-vs-stages identity reads in place.
-        val totalSleepMin = 423.6
-        val tsm = Math.round(totalSleepMin).toString()
-        val stages = IntelligenceEngine.sleepStagesLogToken(120.4, 77.2, 226.0)
-        val line = "sleep day=$day totalSleepMin=$tsm stages=$stages eff=0.91 matched=2 " +
-            "source=${IntelligenceEngine.daySourceToken(day, setOf(day), emptySet())}"
+        val line = "analysis.sleep_scored " +
+            "source=${IntelligenceEngine.daySourceToken(day, setOf(day), emptySet())} " +
+            "sessions=2 stages=present efficiency=present hrv=present hrv_window=deep"
         assertEquals(
-            "sleep day=2026-06-12 totalSleepMin=424 stages=120+77+226=424 eff=0.91 matched=2 source=imported:whoop",
+            "analysis.sleep_scored source=imported:whoop sessions=2 stages=present " +
+                "efficiency=present hrv=present hrv_window=deep",
             line,
         )
+        assertEquals(false, line.contains(day))
+        assertEquals(false, line.contains("totalSleepMin"))
         assertEquals(false, line.contains("—"))
+    }
+
+    @Test
+    fun skippedDayDiagnosticsAggregateByBoundedReasonAndCount() {
+        val lines = IntelligenceEngine.skippedDayDiagnosticLines(
+            mapOf(
+                IntelligenceEngine.AnalysisSkippedDayReason.INSUFFICIENT_HR to 37,
+                IntelligenceEngine.AnalysisSkippedDayReason.INVALID_CIVIL_DAY_BOUNDS to 2,
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                "analysis.sleep_skipped reason=insufficient_hr count=37",
+                "analysis.sleep_skipped reason=invalid_civil_day_bounds count=2",
+            ),
+            lines,
+        )
+        assertEquals(false, lines.any { it.contains(day) })
+    }
+
+    @Test
+    fun skippedDayDiagnosticCountIsCappedForHistoricalMigration() {
+        assertEquals(
+            listOf(
+                "analysis.sleep_skipped reason=insufficient_hr count=4000",
+            ),
+            IntelligenceEngine.skippedDayDiagnosticLines(
+                mapOf(
+                    IntelligenceEngine.AnalysisSkippedDayReason.INSUFFICIENT_HR to Int.MAX_VALUE,
+                    IntelligenceEngine.AnalysisSkippedDayReason.INVALID_CIVIL_DAY_BOUNDS to 0,
+                ),
+            ),
+        )
     }
 
     // ── stages= token (#386) ────────────────────────────────────────────────────

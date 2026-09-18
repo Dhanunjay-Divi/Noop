@@ -357,6 +357,9 @@ final class ManagedCloudService: ObservableObject {
             )
             let summary = try await sync(repo: repo, mode: .manual)
             scheduleContinuationIfNeeded(summary)
+            // A manual core pass cannot prove that an earlier Friends or
+            // Safety retry has recovered. The automatic pass attempts every
+            // enabled scope together and owns clearing the shared retry state.
             try await refreshOverviewData()
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -385,6 +388,9 @@ final class ManagedCloudService: ObservableObject {
         do {
             let summary = try await sync(repo: repo, mode: .manual)
             scheduleContinuationIfNeeded(summary)
+            // A manual core pass cannot prove that an earlier Friends or
+            // Safety retry has recovered. The automatic pass attempts every
+            // enabled scope together and owns clearing the shared retry state.
             try await refreshOverviewData()
         } catch {
             setStatus(Self.userMessage(for: error))
@@ -1655,62 +1661,145 @@ final class ManagedCloudService: ObservableObject {
         if !firebaseConfigured {
             bootstrap(repo: repo)
         }
-        guard phase == .enrolled,
-              !disconnecting,
+        guard phase == .enrolled else { return true }
+        guard !disconnecting,
               !isBusy,
               !running,
               !socialRunning,
-              !safetyRunning,
-              automatic
-                || defaults.bool(forKey: Key.socialEnabled)
-                || defaults.bool(forKey: Key.safetyEnabled)
-        else { return true }
+              !safetyRunning
+        else { return false }
+        guard !Task.isCancelled else { return false }
+        let socialEnabled = defaults.bool(forKey: Key.socialEnabled)
+        let safetyEnabled = defaults.bool(forKey: Key.safetyEnabled)
+        if !automatic {
+            ManagedCloudRetryScheduler.clear(.core)
+        }
+        if !socialEnabled {
+            ManagedCloudRetryScheduler.clear(.social)
+        }
+        if !safetyEnabled {
+            ManagedCloudRetryScheduler.clear(.safety)
+        }
+        guard automatic || socialEnabled || safetyEnabled else {
+            return true
+        }
         let continuationPending = defaults.bool(
             forKey: Key.continuationPending
         )
         let lastAttempt = defaults.double(forKey: Key.lastAttempt)
-        let now = Date().timeIntervalSince1970
+        let nowDate = Date()
+        let now = nowDate.timeIntervalSince1970
         var completed = true
+        let coreRetryPending =
+            ManagedCloudRetryScheduler.pendingRetry(for: .core) != nil
         if automatic
             && (
+                coreRetryPending
+                    ||
                 continuationPending
                     || now - lastAttempt >= Self.automaticInterval
+            )
+            && ManagedCloudRetryScheduler.shouldAttempt(
+                .core,
+                now: nowDate
             ) {
             do {
                 let summary = try await sync(repo: repo, mode: .automatic)
                 scheduleContinuationIfNeeded(summary)
+                ManagedCloudRetryScheduler.clear(.core)
                 completed = !summary.hasMore
             } catch {
+                if Self.isAutomaticCatchUpCancellation(error) { return false }
+                let failureKind = Self.diagnosticSyncFailureKind(error)
+                if Self.isAutomaticRetryable(error) {
+                    ManagedCloudRetryScheduler.recordFailure(
+                        scope: .core,
+                        retryAfter:
+                            (error as? ManagedStorageError)?.retryAfter,
+                        failureKind: failureKind,
+                        now: nowDate
+                    )
+                } else {
+                    ManagedCloudRetryScheduler.clear(.core)
+                }
                 setStatus(Self.userMessage(for: error))
                 completed = false
             }
         }
+        guard !Task.isCancelled else { return false }
         let socialLastAttempt = defaults.double(forKey: Key.socialLastAttempt)
-        if defaults.bool(forKey: Key.socialEnabled),
-           now - socialLastAttempt >= Self.socialAutomaticInterval {
+        let socialRetryPending =
+            ManagedCloudRetryScheduler.pendingRetry(for: .social) != nil
+        if socialEnabled,
+           (
+               socialRetryPending
+                   || now - socialLastAttempt >= Self.socialAutomaticInterval
+           ),
+           ManagedCloudRetryScheduler.shouldAttempt(
+               .social,
+               now: nowDate
+           ) {
             defaults.set(now, forKey: Key.socialLastAttempt)
             do {
                 try await refreshSocialData(repo: repo, deliverPokes: true)
+                ManagedCloudRetryScheduler.clear(.social)
             } catch {
+                if Self.isAutomaticCatchUpCancellation(error) { return false }
+                let failureKind = Self.diagnosticSyncFailureKind(error)
+                if Self.isAutomaticRetryable(error) {
+                    ManagedCloudRetryScheduler.recordFailure(
+                        scope: .social,
+                        retryAfter:
+                            (error as? ManagedStorageError)?.retryAfter,
+                        failureKind: failureKind,
+                        now: nowDate
+                    )
+                } else {
+                    ManagedCloudRetryScheduler.clear(.social)
+                }
                 AppDiagnosticsRecorder.shared.record(
                     "managed_social.catch_up",
                     fields: [
                         "outcome": "failed",
-                        "failure_kind": Self.diagnosticSyncFailureKind(error),
+                        "failure_kind": failureKind,
                     ]
                 )
                 completed = false
             }
         }
+        guard !Task.isCancelled else { return false }
         let safetyLastAttempt = defaults.double(
             forKey: Key.safetyLastAttempt
         )
-        if defaults.bool(forKey: Key.safetyEnabled),
-           now - safetyLastAttempt >= Self.safetyAutomaticInterval {
+        let safetyRetryPending =
+            ManagedCloudRetryScheduler.pendingRetry(for: .safety) != nil
+        if safetyEnabled,
+           (
+               safetyRetryPending
+                   || now - safetyLastAttempt >= Self.safetyAutomaticInterval
+           ),
+           ManagedCloudRetryScheduler.shouldAttempt(
+               .safety,
+               now: nowDate
+           ) {
             defaults.set(now, forKey: Key.safetyLastAttempt)
             do {
                 try await refreshSafetyData()
+                ManagedCloudRetryScheduler.clear(.safety)
             } catch {
+                if Self.isAutomaticCatchUpCancellation(error) { return false }
+                let failureKind = Self.diagnosticSyncFailureKind(error)
+                if Self.isAutomaticRetryable(error) {
+                    ManagedCloudRetryScheduler.recordFailure(
+                        scope: .safety,
+                        retryAfter:
+                            (error as? ManagedStorageError)?.retryAfter,
+                        failureKind: failureKind,
+                        now: nowDate
+                    )
+                } else {
+                    ManagedCloudRetryScheduler.clear(.safety)
+                }
                 if safetyLastAttempt > 0 {
                     defaults.set(
                         safetyLastAttempt,
@@ -1723,13 +1812,13 @@ final class ManagedCloudService: ObservableObject {
                     "managed_safety.catch_up",
                     fields: [
                         "outcome": "failed",
-                        "failure_kind":
-                            Self.diagnosticSyncFailureKind(error),
+                        "failure_kind": failureKind,
                     ]
                 )
                 completed = false
             }
         }
+        guard !Task.isCancelled else { return false }
         return completed
     }
 
@@ -1844,6 +1933,7 @@ final class ManagedCloudService: ObservableObject {
         installations = []
         clearSocialPresentation()
         clearSafetyPresentation()
+        ManagedCloudRetryScheduler.clearAll()
         phase = .signedOut
         setStatus(
             String(localized:
@@ -2435,7 +2525,7 @@ final class ManagedCloudService: ObservableObject {
              ManagedStorageError.policyChanged,
              ManagedStorageError.cursorExpired:
             return true
-        case ManagedStorageError.server(let status):
+        case ManagedStorageError.server(let status, _):
             return [401, 403, 404, 410].contains(status)
         default:
             return false
@@ -3070,7 +3160,7 @@ final class ManagedCloudService: ObservableObject {
              .policyChanged,
              .conflict:
             return true
-        case let .server(status):
+        case let .server(status, _):
             return (400..<500).contains(status)
                 && ![408, 429].contains(status)
         default:
@@ -3348,7 +3438,7 @@ final class ManagedCloudService: ObservableObject {
                 return "quota_exceeded"
             case .conflict:
                 return "conflict"
-            case .server(let status):
+            case .server(let status, _):
                 return status >= 500 ? "server_5xx" : "server_rejected"
             case .digestMismatch:
                 return "integrity"
@@ -3390,6 +3480,29 @@ final class ManagedCloudService: ObservableObject {
         default:
             return "failed"
         }
+    }
+
+    nonisolated private static func isAutomaticCatchUpCancellation(
+        _ error: Error
+    ) -> Bool {
+        if error is CancellationError { return true }
+        return (error as? URLError)?.code == .cancelled
+    }
+
+    nonisolated private static func isAutomaticRetryable(
+        _ error: Error
+    ) -> Bool {
+        if isAutomaticCatchUpCancellation(error) { return false }
+        if let storage = error as? ManagedStorageError {
+            return storage.isAutomaticRetryable
+        }
+        if error is URLError { return true }
+        let nsError = error as NSError
+        guard nsError.domain == AuthErrors.domain,
+              let auth = AuthErrorCode(rawValue: nsError.code) else {
+            return false
+        }
+        return auth == .networkError || auth == .webNetworkRequestFailed
     }
 
     private func syncPass(
@@ -3437,6 +3550,17 @@ final class ManagedCloudService: ObservableObject {
             store: store,
             installationID: authorization.installationID
         )
+        let computedDerivedReady =
+            FormulaPublicationGate.computedDerivedReady()
+        if !computedDerivedReady,
+           sources.contains(where: {
+               $0.sourceKind == FormulaPublicationGate.computedSourceKind
+           }) {
+            AppDiagnosticsRecorder.shared.record(
+                "formula_publication",
+                fields: FormulaPublicationGate.deferredDiagnosticFields
+            )
+        }
 
         var uploadedChunks = 0
         var uploadedBytes = 0
@@ -3467,10 +3591,15 @@ final class ManagedCloudService: ObservableObject {
         }
         for (index, source) in sources.enumerated() {
             try Task.checkCancellation()
+            let dataClasses = FormulaPublicationGate.managedDataClasses(
+                sourceKind: source.sourceKind,
+                available: Self.enrollmentDataClasses,
+                computedDerivedReady: computedDerivedReady
+            )
             let result = try await coordinator.sync(
                 source: source,
                 authorization: authorization,
-                dataClasses: Self.enrollmentDataClasses,
+                dataClasses: dataClasses,
                 maxForwardWindowsPerClass: limits.forward,
                 maxDirtyWindowsPerClass: limits.dirty,
                 maxChangePages: index == 0 ? limits.changes : 0,
@@ -3692,6 +3821,7 @@ final class ManagedCloudService: ObservableObject {
     private func reconcileAuthenticatedState() {
         guard Auth.auth().currentUser != nil else {
             stopManagedSafetyLocationSharing(reason: "signed_out")
+            ManagedCloudRetryScheduler.clearAll()
             phase = .signedOut
             scheduleManagedDocumentProfileBinding(accountScopeHash: nil)
             return
@@ -3731,6 +3861,7 @@ final class ManagedCloudService: ObservableObject {
         defaults.removeObject(forKey: Key.safetyContactRequest)
         defaults.removeObject(forKey: Key.safetyIncidentRequest)
         defaults.removeObject(forKey: Key.safetyLocationSequences)
+        ManagedCloudRetryScheduler.clearAll()
         ManagedCloudSocialInviteSecret.clearAll()
         ManagedCloudSafetyInviteSecret.clearAll()
         deletionNotBefore = nil

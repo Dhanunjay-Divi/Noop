@@ -2,8 +2,7 @@ import SwiftUI
 import StrandDesign
 import StrandAnalytics
 
-/// Intelligence — NOOP's own recovery/strain/sleep scores, computed on-device from raw strap data
-/// using the WHOOP model shape. Makes the app independent of WHOOP's cloud for live-collected days.
+/// Intelligence — NOOP's own Recovery, Effort, and Sleep Score history.
 ///
 /// i18n: the By-Day core labels (Effort/Charge/Rest/HRV/RHR) and the Charge-model "Effort" heading are
 /// looked up via `String(localized:)` so non-English locales (e.g. German, issue #1020) actually
@@ -205,7 +204,12 @@ struct IntelligenceView: View {
                         .accessibilityHidden(true)
                     Text("How this works").font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
                 }
-                Text("Recovery weighs your HRV against your personal baseline (~55%), resting heart rate (~20%), sleep quality (~15%), respiration (~5%) and skin-temperature deviation (~5%). Effort is a 0-\(UnitFormatter.effortScaleMax(effortScale)) cardiovascular load from time in heart-rate zones. Sleep is staged from movement and heart rate. Everything is computed here from Noop Band's raw data. It works for any day NOOP collected raw streams.")
+                Text(
+                    String(
+                        format: String(localized: "appwide.intelligence.explainer_format"),
+                        UnitFormatter.effortScaleMax(effortScale)
+                    )
+                )
                     .font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 // The Charge model made concrete — the five weighted inputs, each its own metric accent.
@@ -213,7 +217,7 @@ struct IntelligenceView: View {
                     Text("Recovery model").strandOverline()
                     weightRow(String(localized: "Heart-rate variability"), "~55%", fraction: 0.55, color: StrandPalette.metricPurple)
                     weightRow(String(localized: "Resting heart rate"), "~20%", fraction: 0.20, color: StrandPalette.metricRose)
-                    weightRow(String(localized: "Sleep quality"), "~15%", fraction: 0.15, color: StrandPalette.metricCyan)
+                    weightRow(String(localized: "Sleep Score"), "~15%", fraction: 0.15, color: StrandPalette.metricCyan)
                     weightRow(String(localized: "Respiration"), "~5%", fraction: 0.05, color: StrandPalette.accent)
                     weightRow(String(localized: "Skin-temperature deviation"), "~5%", fraction: 0.05, color: StrandPalette.metricAmber)
                     HStack {

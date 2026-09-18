@@ -2,6 +2,18 @@ import XCTest
 @testable import Strand
 
 final class MetricEducationTests: XCTestCase {
+    func testRecoveryEducationNamesOnlyInputsUsedByProductionScoring() throws {
+        let metric = try XCTUnwrap(MetricCatalog.all.first { $0.key == "recovery" })
+        let method = MetricKnowledge.education(for: metric).method
+
+        for expected in ["HRV", "resting heart rate", "Sleep Score", "breathing rate",
+                         "skin-temperature deviation"] {
+            XCTAssertTrue(method.localizedCaseInsensitiveContains(expected), expected)
+        }
+        XCTAssertFalse(method.localizedCaseInsensitiveContains("recent load"))
+        XCTAssertFalse(method.localizedCaseInsensitiveContains("previous-day effort"))
+    }
+
     func testBaselineNeedsEnoughPriorReadings() {
         let read = MetricBaselineRead.analyze([50, 51, 52, 53], minimumSamples: 7)
         XCTAssertEqual(read.position, .building)

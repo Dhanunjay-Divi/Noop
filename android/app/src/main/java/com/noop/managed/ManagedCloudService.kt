@@ -24,6 +24,7 @@ import com.google.firebase.auth.PhoneAuthProvider.ForceResendingToken
 import com.google.firebase.messaging.FirebaseMessaging
 import com.noop.NoopApplication
 import com.noop.R
+import com.noop.analytics.FormulaPublicationGate
 import com.noop.ble.WhoopConnectionService
 import com.noop.data.BackupSettingsBridge
 import com.noop.data.WhoopDatabase
@@ -31,6 +32,7 @@ import com.noop.data.WhoopRepository
 import com.noop.notif.ManagedSafetyNotifier
 import com.noop.notif.ManagedSocialPokeNotifier
 import com.noop.safety.SafetyLocation
+import com.noop.ui.NoopPrefs
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.ZoneId
@@ -423,6 +425,9 @@ class ManagedCloudService private constructor(context: Context) {
                     ),
                 )
             }
+            // A manual core pass cannot prove that an earlier Friends or
+            // Safety retry has recovered. The background pass attempts every
+            // enabled scope together and owns clearing the shared retry state.
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -508,13 +513,17 @@ class ManagedCloudService private constructor(context: Context) {
 
     internal suspend fun socialCatchUpForWorker(
         nowMs: Long = System.currentTimeMillis(),
+        force: Boolean = false,
     ): Boolean {
         if (state.value.phase != ManagedCloudPhase.ENROLLED ||
             !preferences.socialEnabled ||
-            !ManagedSocialRuntime.isCatchUpDue(
-                preferences.socialLastAttemptMs,
-                nowMs,
-            )
+            (
+                !force &&
+                    !ManagedSocialRuntime.isCatchUpDue(
+                        preferences.socialLastAttemptMs,
+                        nowMs,
+                    )
+                )
         ) {
             return false
         }
@@ -538,16 +547,23 @@ class ManagedCloudService private constructor(context: Context) {
 
     internal suspend fun safetyCatchUpForWorker(
         nowMs: Long = System.currentTimeMillis(),
+        force: Boolean = false,
     ): Boolean {
         if (state.value.phase != ManagedCloudPhase.ENROLLED ||
             !preferences.safetyEnabled
         ) {
             return false
         }
-        val previousAttempt = preferences.beginSafetyAttempt(
-            nowMs,
-            SAFETY_CATCH_UP_INTERVAL_MS,
-        ) ?: return false
+        val previousAttempt = if (force) {
+            preferences.safetyLastAttemptMs.also {
+                preferences.safetyLastAttemptMs = nowMs
+            }
+        } else {
+            preferences.beginSafetyAttempt(
+                nowMs,
+                SAFETY_CATCH_UP_INTERVAL_MS,
+            ) ?: return false
+        }
         return try {
             refreshSafetyData()
             true
@@ -2796,6 +2812,19 @@ class ManagedCloudService private constructor(context: Context) {
             documents = documentAdapter,
         )
         val sources = sourceDescriptors(authorization.installationId)
+        val computedDerivedReady = FormulaPublicationGate.computedDerivedReady(
+            NoopPrefs.of(appContext),
+        )
+        if (!computedDerivedReady &&
+            sources.any {
+                it.sourceKind == FormulaPublicationGate.COMPUTED_SOURCE_KIND
+            }
+        ) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "formula_publication",
+                fields = FormulaPublicationGate.DEFERRED_DIAGNOSTIC_FIELDS,
+            )
+        }
         var uploadedChunks = 0
         var uploadedBytes = 0L
         var uploadedDocuments = 0
@@ -2850,10 +2879,15 @@ class ManagedCloudService private constructor(context: Context) {
             )
         }
         sources.forEachIndexed { index, source ->
+            val dataClasses = FormulaPublicationGate.managedDataClasses(
+                sourceKind = source.sourceKind,
+                available = ManagedSyncCoordinator.DATA_CLASSES,
+                computedDerivedReady = computedDerivedReady,
+            )
             val result = coordinator.sync(
                 source = source,
                 authorization = authorization,
-                dataClasses = ManagedSyncCoordinator.DATA_CLASSES,
+                dataClasses = dataClasses,
                 maxForwardWindowsPerClass = limits.forward,
                 maxDirtyWindowsPerClass = limits.dirty,
                 maxChangePages = if (index == 0) limits.changes else 0,
@@ -2927,6 +2961,7 @@ class ManagedCloudService private constructor(context: Context) {
             scheduleManagedDocumentProfileBinding(null)
             clearSocialPresentation()
             clearSafetyPresentation()
+            ManagedCloudRetryStore(appContext).clearAll()
             setPhase(ManagedCloudPhase.SIGNED_OUT)
             return
         }

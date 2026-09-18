@@ -37,18 +37,7 @@ import java.time.LocalDate
 import java.util.Calendar
 import kotlin.math.roundToInt
 
-/**
- * Intelligence — NOOP's own Charge / Effort / Rest scores, presented with the
- * WHOOP-model explanation so the read-out is legible rather than a black box.
- *
- * Ports macOS Strand/Screens/IntelligenceView.swift. The macOS build runs an
- * on-device IntelligenceEngine that recomputes these scores from the strap's raw
- * streams (HR, R-R, accelerometer) using the WHOOP model shape. That raw-compute
- * port is later work on Android; until it lands this screen reads the cached
- * `DailyMetric` values the strap/store already provide and shows the same model
- * explainer + per-day breakdown — matching the macOS sparse-data contract of
- * surfacing real data with an honest note, never a fabricated score.
- */
+/** Intelligence — NOOP's own Recovery, Effort, and Sleep Score history. */
 @Composable
 fun IntelligenceScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
@@ -257,12 +246,10 @@ private fun ExplainerCard(effortScale: EffortScale) {
                 Text(uiString(R.string.l10n_intelligence_screen_how_this_works_b895a8c3), style = NoopType.headline, color = Palette.textPrimary)
             }
             Text(
-                uiString(R.string.l10n_intelligence_screen_charge_weighs_your_heart_rate_variability_026745e6) +
-                    "(~55%), resting heart rate (~20%), rest quality (~15%), respiration (~5%) " +
-                    "and skin-temperature deviation (~5%). Effort is a 0 - ${UnitFormatter.effortScaleMax(effortScale)} " +
-                    "cardiovascular load from time spent in each heart-rate zone. Sleep is staged " +
-                    "from movement and heart rate. The full on-device recompute from Noop Band's raw " +
-                    "streams is a later port; the scores below are read from each day's cached metrics.",
+                uiString(
+                    R.string.appwide_intelligence_explainer_format,
+                    UnitFormatter.effortScaleMax(effortScale),
+                ),
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
@@ -312,7 +299,7 @@ private fun ModelBreakdownCard(effortScale: EffortScale) {
             Overline("Recovery model")
             WeightRow("Heart-rate variability", "~55%", 0.55f, Palette.metricPurple)
             WeightRow("Resting heart rate", "~20%", 0.20f, Palette.metricRose)
-            WeightRow("Sleep quality", "~15%", 0.15f, Palette.metricCyan)
+            WeightRow("Sleep Score", "~15%", 0.15f, Palette.metricCyan)
             WeightRow("Respiration", "~5%", 0.05f, Palette.accent)
             WeightRow("Skin-temperature deviation", "~5%", 0.05f, Palette.metricAmber)
 
@@ -393,10 +380,10 @@ private fun DayCard(d: DailyMetric, effortScale: EffortScale) {
                 // The REAL source of this day's dashboard headline, not a hard-coded "NOOP-computed".
                 // The merged DailyMetric carries the WINNING row's deviceId (mergeDaily: an import wins
                 // over the computed "-noop" row), so a strap-scored night reads "On-device" while a day an
-                // import covers reads "Whoop" / "Apple Health". Computed rows keep the charge tint; imports
-                // use the accent tint to stand out. Mirrors macOS IntelligenceEngine.DaySource. (Sleep §2.6.)
+                // import covers reads its generated, localized source label. Computed rows keep the charge
+                // tint; imports use the accent tint to stand out. (Sleep overhaul §2.6.)
                 val src = daySourceBadge(d.deviceId)
-                SourceBadge(src.first, tint = src.second)
+                SourceBadge(stringResource(src.first), tint = src.second)
             }
 
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -476,15 +463,20 @@ private fun sleepValue(totalMin: Double?): String {
  * The By-Day numbers are always NOOP's on-device scores, but when an import covers the day it wins the
  * dashboard merge (mergeDaily), so the badge says so instead of the old hard-coded "NOOP-computed".
  * A computed row's id ends in "-noop"; imports keep their source id ("my-whoop" export, "apple-health" /
- * "health-connect"). Brand wording matches the rest of the app (macOS DaySource: "On-device"/"Whoop"/
- * "Apple Health"); imports use the accent tint, computed rows the charge tint. (Sleep overhaul §2.6.)
+ * "health-connect"). Every label comes from the generated app-wide localization resources; imports use
+ * the accent tint and computed rows use the charge tint. (Sleep overhaul §2.6.)
  */
-internal fun daySourceBadge(deviceId: String): Pair<String, Color> = when {
-    deviceId.endsWith("-noop") -> "On-device" to Palette.chargeColor
-    deviceId == com.noop.data.WhoopRepository.APPLE_HEALTH_SOURCE ||
-        deviceId == com.noop.data.WhoopRepository.HEALTH_CONNECT_SOURCE -> "Apple Health" to Palette.accent
-    deviceId == "oura-api" || deviceId.startsWith("oura-") -> "Oura Ring" to Palette.restColor
-    else -> "Imported" to Palette.accent
+internal fun daySourceBadge(deviceId: String): Pair<Int, Color> = when {
+    deviceId.endsWith("-noop") ->
+        R.string.appwide_source_on_device to Palette.chargeColor
+    deviceId == com.noop.data.WhoopRepository.APPLE_HEALTH_SOURCE ->
+        R.string.appwide_source_apple_health to Palette.accent
+    deviceId == com.noop.data.WhoopRepository.HEALTH_CONNECT_SOURCE ->
+        R.string.appwide_source_health_connect to Palette.accent
+    deviceId == "oura-api" || deviceId.startsWith("oura-") ->
+        R.string.appwide_source_oura_ring to Palette.restColor
+    else ->
+        R.string.appwide_source_imported to Palette.accent
 }
 
 /** Recent-window options for the By Day list. `days == null` means show everything. */

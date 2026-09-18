@@ -118,6 +118,15 @@ object IntelligenceEngine {
         TERMINAL_TIMEZONE_UNKNOWN,
     }
 
+    internal enum class AnalysisSkippedDayReason(
+        val token: String,
+    ) {
+        INSUFFICIENT_HR("insufficient_hr"),
+        INVALID_CIVIL_DAY_BOUNDS("invalid_civil_day_bounds"),
+    }
+
+    internal const val MAX_SKIPPED_DAY_DIAGNOSTIC_COUNT: Int = 4_000
+
     internal data class AnalysisScanCoverage(
         val startTs: Long,
         val endTs: Long,
@@ -152,6 +161,13 @@ object IntelligenceEngine {
         val scanCoverage: AnalysisScanCoverage,
         /** True only when this pass also fulfills the caller's explicit formula/repair window. */
         val requestedWindowSatisfied: Boolean,
+        /**
+         * True when this pass covers either the complete request or every fully provenance-backed
+         * civil day down to the retained lower boundary.
+         */
+        val resolvableHistorySatisfied: Boolean = requestedWindowSatisfied,
+        /** Next exact civil-day anchor for a segmented formula migration. */
+        val nextResolvableHistoryAnchor: Long? = null,
         /** Next local-day boundary when a late-evening range becomes fully evaluable. */
         val deferUntilSeconds: Long? = null,
         val deferralReason: AnalysisDeferralReason? = null,
@@ -188,6 +204,8 @@ object IntelligenceEngine {
         force: Boolean = false,
         timeZone: ZoneId? = null,
         timeZoneHistory: AnalysisTimeZoneHistory.Snapshot? = null,
+        traverseResolvableHistory: Boolean = false,
+        resolvableHistoryAnchor: Long? = null,
     ): AnalysisScoringPlan {
         val requested = requestedMaxDays.coerceAtLeast(1)
         val validRanges = claims.mapNotNull { it.affectedTimeRange() }
@@ -213,6 +231,7 @@ object IntelligenceEngine {
             val zone: ZoneId?,
             val offsetSeconds: Long,
             val windows: List<AnalysisCivilDayWindow>,
+            val exactSegment: AnalysisTimeZoneHistory.ExactSegment? = null,
             val unresolved:
                 AnalysisTimeZoneHistory.Uncertainty? = null,
         )
@@ -238,6 +257,7 @@ object IntelligenceEngine {
                                 snapshot = timeZoneHistory,
                                 historicalCatchUp = historicalCatchUp,
                             ),
+                            exactSegment = resolution.segment,
                         )
                     }
                     is AnalysisTimeZoneHistory.Resolution.Uncertain -> WindowSelection(
@@ -309,6 +329,139 @@ object IntelligenceEngine {
                 deferUntilSeconds = nextBoundary ?: (nowSeconds + SECONDS_PER_DAY),
                 deferralReason = AnalysisDeferralReason.TIMEZONE_PROVENANCE,
                 timeZone = selection.zone,
+            )
+        }
+
+        fun newestResolvableDayAnchor(
+            segment: AnalysisTimeZoneHistory.ExactSegment,
+            upperBound: Long,
+            allowOpenEndedPartialDay: Boolean,
+        ): Long? {
+            if (upperBound < segment.startTs) return null
+            var candidate = if (segment.openEnded) {
+                upperBound
+            } else {
+                minOf(upperBound, segment.endTs)
+            }
+            while (candidate >= segment.startTs) {
+                val window = historicalCivilDayWindow(
+                    containingEpochSecond = candidate,
+                    timeZone = segment.zoneId,
+                ) ?: return null
+                val mayUsePartialNewestDay =
+                    allowOpenEndedPartialDay && segment.openEnded
+                val fitsUpperBoundary =
+                    mayUsePartialNewestDay ||
+                        (
+                            window.endTs <= candidate &&
+                                (segment.openEnded || window.endTs <= segment.endTs)
+                            )
+                if (window.startTs >= segment.startTs && fitsUpperBoundary) {
+                    return if (mayUsePartialNewestDay) {
+                        candidate
+                    } else {
+                        window.startTs + window.durationSeconds / 2L
+                    }
+                }
+                if (window.startTs <= 0L || window.startTs - 1L >= candidate) {
+                    return null
+                }
+                candidate = window.startTs - 1L
+            }
+            return null
+        }
+
+        fun selectResolvableHistory(
+            requestedAnchor: Long,
+            allowOpenEndedPartialDay: Boolean,
+        ): WindowSelection? {
+            val snapshot = timeZoneHistory ?: return null
+            for (segment in snapshot.exactSegments().asReversed()) {
+                if (segment.startTs > requestedAnchor) continue
+                val anchor = newestResolvableDayAnchor(
+                    segment = segment,
+                    upperBound = requestedAnchor,
+                    allowOpenEndedPartialDay =
+                        allowOpenEndedPartialDay && segment.openEnded,
+                ) ?: continue
+                val selection = selectWindows(
+                    days = requested,
+                    referenceSeconds = anchor,
+                    historicalCatchUp =
+                        !allowOpenEndedPartialDay || !segment.openEnded,
+                )
+                if (selection.windows.isNotEmpty()) return selection
+            }
+            return null
+        }
+
+        if (traverseResolvableHistory) {
+            val initialTraversal = resolvableHistoryAnchor == null
+            val selection = selectResolvableHistory(
+                requestedAnchor = resolvableHistoryAnchor ?: nowSeconds,
+                allowOpenEndedPartialDay = initialTraversal,
+            ) ?: return timezoneDeferredPlan(
+                WindowSelection(
+                    zone = null,
+                    offsetSeconds = 0L,
+                    windows = emptyList(),
+                    unresolved =
+                        AnalysisTimeZoneHistory.Uncertainty.TRUNCATED_HISTORY,
+                ),
+            )
+            val windows = selection.windows
+            val oldestWindow = windows.last()
+            val nextSelection = if (oldestWindow.startTs > 0L) {
+                selectResolvableHistory(
+                    requestedAnchor = oldestWindow.startTs - 1L,
+                    allowOpenEndedPartialDay = false,
+                )
+            } else {
+                null
+            }
+            val historical =
+                !initialTraversal
+                    || selection.exactSegment?.openEnded != true
+            return AnalysisScoringPlan(
+                maxDays = windows.size,
+                anchorNowSeconds =
+                    if (historical) {
+                        windows.first().startTs
+                            + windows.first().durationSeconds / 2L
+                    } else {
+                        nowSeconds
+                    },
+                timezoneOffsetSeconds = selection.offsetSeconds,
+                passKind =
+                    if (historical) {
+                        AnalysisPassKind.HISTORICAL
+                    } else {
+                        AnalysisPassKind.RECENT
+                    },
+                scanCoverage = analysisScanCoverage(
+                    civilDayWindows = windows,
+                    actualNowSeconds = nowSeconds,
+                    historicalCatchUp = historical,
+                ),
+                requestedWindowSatisfied =
+                    windows.size == requested,
+                resolvableHistorySatisfied =
+                    nextSelection == null,
+                nextResolvableHistoryAnchor =
+                    nextSelection?.windows?.firstOrNull()?.endTs,
+                timeZone = selection.zone,
+                civilDayWindows = windows,
+                calibrationCivilDayWindows =
+                    calibrationWindows(
+                        selection,
+                        if (historical) {
+                            windows.first().startTs
+                                + windows.first().durationSeconds / 2L
+                        } else {
+                            nowSeconds
+                        },
+                        historicalCatchUp = historical,
+                    ),
             )
         }
 
@@ -917,10 +1070,9 @@ object IntelligenceEngine {
         // skin-temp the same way baselineEpoch re-anchors HRV, so a manual Recalibrate restarts all of
         // Charge. Read from SharedPreferences by the caller. Default 0.0 → no recalibration.
         recoveryEpoch: Double = 0.0,
-        // Per-day scoring diagnostic sink (Sleep overhaul §2.5). Each scored day emits ONE concise,
-        // privacy-safe line ("sleep day=… totalSleepMin=… matched=… source=…") so a shared strap log
-        // ships PROOF of what was computed per day , the project's log-failures-not-successes blind spot,
-        // and the data to settle "Rest repeats across days". Defaults to no-op so tests / other callers
+        // Scoring diagnostic sink. Always-on lines contain bounded counts and categorical
+        // presence/provenance only; dates and health-derived values stay behind explicit test captures.
+        // Defaults to no-op so tests / other callers
         // are unaffected; the AppViewModel wires it to the BLE client's strap log (ble.externalLog),
         // which PII-scrubs every line at the sink. Pure-JVM (a closure), matching persistStepsCalibration.
         diag: (String) -> Unit = {},
@@ -1241,6 +1393,13 @@ object IntelligenceEngine {
         // resp baseline the recovery composite's wResp=0.05 term scores against.
         val nightlyRespByDay = LinkedHashMap<String, Double?>()
         val nightlyRestByDay = LinkedHashMap<String, Double?>()
+        val skippedDayCounts = mutableMapOf<AnalysisSkippedDayReason, Int>()
+
+        fun recordSkippedDay(reason: AnalysisSkippedDayReason) {
+            skippedDayCounts[reason] = (
+                skippedDayCounts.getOrDefault(reason, 0) + 1
+            ).coerceAtMost(MAX_SKIPPED_DAY_DIAGNOSTIC_COUNT)
+        }
 
         // Floor `now` to LOCAL midnight (#277) so each `dayStart` lands on a local-day boundary and the
         // day keys are LOCAL calendar days, consistent with the dashboard's local "today" lookup. A
@@ -1359,7 +1518,7 @@ object IntelligenceEngine {
             // few rows is never scored, so it emits no line, byte-identical to the iOS behaviour.
             if (universalSink != null) readOwnerByDay[day] = OwnerRead(owner, hr.size)
             if (hr.size < MIN_HR_SAMPLES) {
-                diag("sleep day=$day SKIPPED hrSamples=${hr.size} (need ≥$MIN_HR_SAMPLES)")
+                recordSkippedDay(AnalysisSkippedDayReason.INSUFFICIENT_HR)
                 continue
             }
             val rr = repo.rrIntervals(owner, from, to, STREAM_LIMIT)
@@ -1485,7 +1644,9 @@ object IntelligenceEngine {
                 deepHrvWindow = deepHrvWindow,
             )
             if (res.status != DayResult.Status.COMPLETED) {
-                diag("analysis day=$day SKIPPED reason=invalid_civil_day_bounds")
+                recordSkippedDay(
+                    AnalysisSkippedDayReason.INVALID_CIVIL_DAY_BOUNDS,
+                )
                 continue
             }
             val restRawEvidence = ScoreConfidence.restRawEvidence(
@@ -1829,27 +1990,15 @@ object IntelligenceEngine {
             // minute only , no HR/HRV/timestamps , so the next report ships PROOF of what was computed per
             // day (the project's log-failures-not-successes blind spot) and lets us settle the "Rest repeats
             // across days" question with data. Gated by the existing strap-log export. Mirrors the Swift line.
-            val tsmLog = daily.totalSleepMin?.let { Math.round(it).toString() } ?: "nil"
-            // #386: the banked stage split + efficiency ride beside the rollup, so a "homepage disagrees
-            // with the Sleep tab" report is self-diagnosing from the export alone - totalSleepMin vs the
-            // deep+rem+light sum is the identity both screens must agree on, now verifiable per pass, per
-            // day, without screenshots. Rounded minutes only (same privacy class as the rest of the line);
-            // stages=nil when the day has no banked stage split (an unstaged or imported-total-only day).
-            val effLog = daily.efficiency?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "nil"
             diag(
-                "sleep day=${daily.day} totalSleepMin=$tsmLog " +
-                    "stages=${sleepStagesLogToken(daily.deepMin, daily.remMin, daily.lightMin)} " +
-                    "eff=$effLog " +
-                    "matched=${res.sleepSessions.size} " +
-                    "source=${daySourceToken(daily.day, importedWhoopDays, appleHealthDays)}",
+                "analysis.sleep_scored " +
+                    "source=${daySourceToken(daily.day, importedWhoopDays, appleHealthDays)} " +
+                    "sessions=${res.sleepSessions.size.coerceAtMost(16)} " +
+                    "stages=${if (daily.deepMin != null && daily.remMin != null && daily.lightMin != null) "present" else "missing"} " +
+                    "efficiency=${if (daily.efficiency == null) "missing" else "present"} " +
+                    "hrv=${if (daily.avgHrv == null) "missing" else "present"} " +
+                    "hrv_window=${if (deepHrvWindow) "deep" else "whole"}",
             )
-            // #195: one always-on line per scored night with the computed HRV value + the window it used,
-            // so an "HRV reads high / deep-sleep window not changing" report is self-diagnosing straight
-            // from the strap log — the whole-night vs deep-sleep value, and `avgHrv=nil window=deep` when a
-            // deep-window night has no detected deep sleep — without needing the HRV & Autonomic test mode.
-            // Counts-only (a rounded ms + the window), PII-free; byte-identical to the Swift line.
-            val hrvLog = daily.avgHrv?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "nil"
-            diag("hrv day=${daily.day} window=${if (deepHrvWindow) "deep" else "whole"} avgHrv=$hrvLog")
             // ── CAPTURE-B: universal dayOwner self-diagnostic (#814/#799) ────────────────────────────────
             // ONE line per SCORED day, tagged .universal so it rides EVERY Test Centre export regardless of
             // which mode is on. It pins the read/write split #814 is about: readId is the owner this day was
@@ -1906,6 +2055,8 @@ object IntelligenceEngine {
                 )
             }
         }
+
+        skippedDayDiagnosticLines(skippedDayCounts).forEach(diag)
 
         // #277 migration: the loop now keys days by the LOCAL calendar day. A prior run (before this
         // fix) wrote the SAME period under UTC-day keys, so without a cleanup an off-by-one UTC row and
@@ -3088,6 +3239,18 @@ object IntelligenceEngine {
         day in appleHealthDays -> "imported:apple"
         else -> "computed"
     }
+
+    internal fun skippedDayDiagnosticLines(
+        counts: Map<AnalysisSkippedDayReason, Int>,
+    ): List<String> = counts
+        .asSequence()
+        .filter { (_, count) -> count > 0 }
+        .sortedBy { (reason, _) -> reason.token }
+        .map { (reason, count) ->
+            "analysis.sleep_skipped reason=${reason.token} " +
+                "count=${count.coerceAtMost(MAX_SKIPPED_DAY_DIAGNOSTIC_COUNT)}"
+        }
+        .toList()
 
     /**
      * The `stages=` token of the per-day sleep diagnostic line (#386): `<deep>+<rem>+<light>=<sum>` in

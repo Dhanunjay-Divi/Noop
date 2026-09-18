@@ -416,7 +416,7 @@ extension TodayV4Model {
                   phrase: "Top of your usual range - a good sign", tone: .good),
             .init(glyph: "heart.fill", name: "Resting heart rate", value: "49", unit: "bpm",
                   phrase: "2 bpm below your average", tone: .good),
-            .init(glyph: "moon.fill", name: "Sleep quality", value: "88", unit: "/100",
+            .init(glyph: "moon.fill", name: "Sleep Score", value: "88", unit: "/100",
                   phrase: "Efficient night, slightly late bedtime", tone: .neutral),
         ]
         m.targetLow = 8; m.targetHigh = 14

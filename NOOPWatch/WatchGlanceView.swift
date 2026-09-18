@@ -3,7 +3,7 @@ import StrandDesign
 
 // MARK: - WatchGlanceView — the watch app's single primary screen
 //
-// The Apple-Fitness-x-WHOOP look scaled to the wrist: the three NOOP rings (Charge / Effort / Rest) with
+// The NOOP score hierarchy scaled to the wrist: the three rings (Recovery / Effort / Sleep) with
 // their numbers in SF-Rounded, each honouring confidence (a calibrating score shows a dash plus a small
 // "cal" marker, NEVER a fabricated number), a live heart-rate readout from the watch's own sensor, and a
 // one-line sleep summary. When nothing has synced yet we show a friendly "open NOOP on your iPhone" state,
@@ -58,7 +58,7 @@ struct WatchGlanceView: View {
                 ScoreRing(label: String(localized: "Effort"), value: snap.effort,
                           calibrating: snap.effortCalibrating || stale,
                           color: StrandPalette.effortColor)
-                ScoreRing(label: String(localized: "Rest"), value: snap.rest,
+                ScoreRing(label: String(localized: "Sleep"), value: snap.rest,
                           calibrating: snap.restCalibrating || stale,
                           color: StrandPalette.restColor)
             }
@@ -99,7 +99,8 @@ struct WatchGlanceView: View {
         .background(StrandPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    /// One-line sleep summary straight from the phone (e.g. "7h 12m · 81% Sleep Score"). Empty string = skip it.
+    /// One-line sleep summary straight from the phone (e.g. "7h 12m · 81% sleep efficiency").
+    /// The separate Sleep ring is the 0-100 Sleep Score. Empty string means skip the line.
     @ViewBuilder
     private func sleepLine(_ summary: String) -> some View {
         if !summary.isEmpty {

@@ -15,6 +15,10 @@ enum RemoteSyncPreferences {
     private static let replayKey = "remoteSync.needsFullReplay"
     private static let replayInProgressKey = "remoteSync.replayInProgress"
     private static let replayWindowKey = "remoteSync.replayWindow"
+    private static let formulaReplayRequiredRevisionKey =
+        "remoteSync.formulaReplayRequiredRevision"
+    private static let formulaReplayCompletedRevisionKey =
+        "remoteSync.formulaReplayCompletedRevision"
     private static let backlogKey = "remoteSync.hasPendingBacklog"
     private static let optimizeStorageKey = "remoteSync.optimizeStorage"
     private static let installIdKey = "remoteSync.installationId"
@@ -78,15 +82,71 @@ enum RemoteSyncPreferences {
         }
     }
 
-    static func beginReplay(_ window: RemoteDerivedWindow) {
+    /// Persist the current formula revision before requesting any replay work. A pending migration
+    /// records intent but does not create network backlog; the next ready sync promotes the intent to
+    /// the existing durable full-replay path. If a replay is already active, its fixed window and
+    /// keyset cursors remain authoritative.
+    @discardableResult
+    static func prepareFormulaReplay(
+        currentRevision: String,
+        computedDerivedReady: Bool,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        if defaults.string(forKey: formulaReplayCompletedRevisionKey) == currentRevision {
+            if defaults.string(forKey: formulaReplayRequiredRevisionKey) != nil {
+                defaults.removeObject(forKey: formulaReplayRequiredRevisionKey)
+            }
+            return false
+        }
+        if defaults.string(forKey: formulaReplayRequiredRevisionKey) != currentRevision {
+            defaults.set(currentRevision, forKey: formulaReplayRequiredRevisionKey)
+        }
+        if computedDerivedReady && !defaults.bool(forKey: replayInProgressKey) {
+            defaults.set(true, forKey: replayKey)
+        }
+        return true
+    }
+
+    static func requiredFormulaReplayRevision(
+        defaults: UserDefaults = .standard
+    ) -> String? {
+        defaults.string(forKey: formulaReplayRequiredRevisionKey)
+    }
+
+    static func completedFormulaReplayRevision(
+        defaults: UserDefaults = .standard
+    ) -> String? {
+        defaults.string(forKey: formulaReplayCompletedRevisionKey)
+    }
+
+    static func beginReplay(
+        _ window: RemoteDerivedWindow,
+        defaults: UserDefaults = .standard
+    ) {
         guard window.isValid, let data = try? JSONEncoder().encode(window) else { return }
         defaults.set(data, forKey: replayWindowKey)
         defaults.set(true, forKey: replayInProgressKey)
     }
 
-    static func finishReplay() {
+    /// The formula marker advances only from the globally successful replay branch. If termination
+    /// occurs after replay cleanup but before the marker is durable, the retained requirement safely
+    /// requests one duplicate idempotent replay instead of skipping history.
+    static func finishReplay(
+        completingFormulaRevision: String? = nil,
+        defaults: UserDefaults = .standard
+    ) {
         defaults.removeObject(forKey: replayWindowKey)
         defaults.set(false, forKey: replayInProgressKey)
+        guard let completingFormulaRevision,
+              defaults.string(forKey: formulaReplayRequiredRevisionKey)
+                == completingFormulaRevision else {
+            return
+        }
+        defaults.set(
+            completingFormulaRevision,
+            forKey: formulaReplayCompletedRevisionKey
+        )
+        defaults.removeObject(forKey: formulaReplayRequiredRevisionKey)
     }
 
     static func clearConfiguration() {
@@ -349,6 +409,7 @@ enum RemoteSyncService {
             var totalBatches = 0
             var hasMoreRaw = false
             var hasMoreDerived = false
+            var hasDeferredComputedDerived = false
             var lastResponse: RemoteSyncResponse?
             var prunedRows = 0
             var pruneHasMore = false
@@ -458,6 +519,26 @@ enum RemoteSyncService {
                     derived: true
                 )
             }
+            let computedDerivedReady =
+                FormulaPublicationGate.computedDerivedReady()
+            let formulaReplayRevision = [
+                ChargeFormulaUpgradeGate.currentRevision,
+                RestFormulaUpgradeGate.currentRevision,
+            ].joined(separator: "+")
+            let formulaReplayRequired =
+                RemoteSyncPreferences.prepareFormulaReplay(
+                    currentRevision: formulaReplayRevision,
+                    computedDerivedReady: computedDerivedReady
+                )
+            if !computedDerivedReady,
+               namespaces.contains(where: {
+                   $0.role == FormulaPublicationGate.computedSourceKind
+               }) {
+                AppDiagnosticsRecorder.shared.record(
+                    "formula_publication",
+                    fields: FormulaPublicationGate.deferredDiagnosticFields
+                )
+            }
 
             let replayStateIsIncomplete =
                 RemoteSyncPreferences.replayInProgress &&
@@ -488,6 +569,14 @@ enum RemoteSyncService {
                 RemoteSyncPreferences.replayInProgress && replayWindow != nil
 
             for namespace in namespaces {
+                let publishDerived =
+                    FormulaPublicationGate.shouldPublishDerived(
+                        sourceKind: namespace.role,
+                        computedDerivedReady: computedDerivedReady
+                    )
+                hasDeferredComputedDerived =
+                    hasDeferredComputedDerived
+                    || (namespace.derived && !publishDerived)
                 var metadata = [
                     "installation_id": installationId,
                     "logical_source_id": namespace.logicalId,
@@ -519,7 +608,7 @@ enum RemoteSyncService {
                     source: source,
                     storeDeviceId: namespace.localId,
                     includeRaw: namespace.raw,
-                    includeDerived: namespace.derived,
+                    includeDerived: namespace.derived && publishDerived,
                     derivedWorkoutSources: namespace.role == "official_reference"
                         ? Set(["whoop"])
                         : nil,
@@ -534,12 +623,14 @@ enum RemoteSyncService {
                 totalRows += result.uploadedRawRows
                 totalBatches += result.uploadedBatches
                 hasMoreRaw = hasMoreRaw || result.hasMoreRawRows
-                hasMoreDerived = hasMoreDerived || result.hasMoreDerivedRows
+                hasMoreDerived =
+                    hasMoreDerived
+                    || result.hasMoreDerivedRows
                 lastResponse = result.lastResponse ?? lastResponse
             }
 
             let hasMore = hasMoreRaw || hasMoreDerived
-            if replay && !hasMore {
+            if replay && !hasMore && !hasDeferredComputedDerived {
                 // Completed markers prevent page-one loops while any namespace is still draining. Once
                 // the global snapshot is complete, clear all of them so the next run is a fresh rolling
                 // 400-day refresh rather than a permanently completed replay.
@@ -548,7 +639,14 @@ enum RemoteSyncService {
                         for: namespace.remoteId
                     )
                 }
-                RemoteSyncPreferences.finishReplay()
+                let completedFormulaRevision =
+                    RemoteSyncPreferences.requiredFormulaReplayRevision()
+                        == formulaReplayRevision
+                    ? formulaReplayRevision
+                    : nil
+                RemoteSyncPreferences.finishReplay(
+                    completingFormulaRevision: completedFormulaRevision
+                )
             }
             if RemoteSyncPreferences.optimizeStorage {
                 let cutoff = Int(Date().timeIntervalSince1970) - 14 * 86_400
@@ -581,6 +679,10 @@ enum RemoteSyncService {
                     "uploaded_rows": String(totalRows),
                     "uploaded_batches": String(totalBatches),
                     "continuation_pending": hasMore ? "true" : "false",
+                    "computed_derived_deferred":
+                        hasDeferredComputedDerived ? "true" : "false",
+                    "formula_replay_required":
+                        formulaReplayRequired ? "true" : "false",
                     "pruned_rows": String(prunedRows),
                 ],
                 includeResourceSnapshot: true

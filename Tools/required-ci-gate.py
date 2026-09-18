@@ -61,7 +61,7 @@ RELEASE_SOURCE_DIGESTS = {
         "71a32e31caaf3005e7067d11a0616dc84ac972eac46fa32898d1a0a445034e35"
     ),
     "release/metrics/reference-calibration-v1.json": (
-        "bd9e093efb04c9e930fb45c6c3842dfe0b5a4483deac583ee647cdfb8dba92bc"
+        "10e8cab296ade39c42a3143ebd31595e37a4f7d9b5d90655ac1639cc3525bde8"
     ),
     "release/release-policy.json": (
         "57bc7fc96412a5703578f55ae6a0776430f3079ab313f6d1dc84c31d1d07ffb8"
@@ -109,7 +109,7 @@ RELEASE_SOURCE_DIGESTS = {
         "1b2b40a565de57f22f2ec84998abf4f37103c93dd49bf018c6c7db0f2f5ea3a8"
     ),
     "Tools/i18n_audit.py": (
-        "86e2040fd6ce9f7abc1126e0b16a056ba84a39fa878caa3367f7273d6306e8b4"
+        "76026e89932b920eec1ec61608fc3bcf9f8681600695b062f2b9bcdaddb0a785"
     ),
     "Tools/i18n_audit_baseline.json": (
         "3a1b7e134bdc8dc9cef09e11eea14ab4e0c1baa18822fbd9e65561e44cdc9c95"

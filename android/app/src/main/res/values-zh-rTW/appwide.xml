@@ -444,6 +444,7 @@
     <string name="appwide_hydration_target_unavailable">確認成人個人資料後即可查看個人化目標。</string>
     <string name="appwide_hydration_unavailable">暫不可用</string>
     <string name="appwide_insights_behaviour_history_help">在上方記錄行為。幾天後，NOOP 會排列每項行為與恢復、HRV 和睡眠評分的關聯。穿戴裝置匯出檔案可以回填歷史。</string>
+    <string name="appwide_intelligence_explainer_format">當相關輸入可用時，復原會綜合 HRV 相對個人基準線的變化（約百分之 55）、靜息心率（約百分之 20）、睡眠評分（約百分之 15）、呼吸頻率（約百分之 5）和皮膚溫度偏差（約百分之 5）。消耗是根據各心率區間內的時間計算出的 0–%1$s 心血管負荷評分。睡眠評分結合可用的時長、效率、階段和規律性。部分顯示日期可能來自本機匯入。NOOP 衍生評分只會根據上述可用輸入在本機計算；這些評分並非臨床測量，缺少的輸入仍保持缺少。</string>
     <string name="appwide_intelligence_no_scored_nights">還沒有已評分的夜晚。請在 NOOP 保持連線時整晚佩戴手環。消耗和睡眠評分可在一晚後出現；恢復大約需要四個有效夜晚來學習你的基準。</string>
     <string name="appwide_intelligence_subtitle">NOOP 在你的裝置上計算恢復、消耗和睡眠評分，無需雲端計算。</string>
     <string name="appwide_journal_editing_help">可重新命名、重新分組或移除項目來整理清單。重新命名後，原始問題仍會在內部保留，以便繼續比對匯入的參考資料。自訂項目會被刪除；內建項目會被隱藏，並可在下方還原。</string>
@@ -522,7 +523,7 @@
     <string name="appwide_metric_education_overline">指標說明</string>
     <string name="appwide_metric_education_recovery_action">將評分與自身感受結合使用。當多項恢復訊號同時變化時，優先確保睡眠、飲食和補水，並適度降低負荷。</string>
     <string name="appwide_metric_education_recovery_limits">Recovery 是健康生活參考估算，並非健康測量，也不代表可以訓練。</string>
-    <string name="appwide_metric_education_recovery_method">在裝置上根據 HRV 相對個人基準線的變化、靜息心率、睡眠、呼吸頻率、皮膚溫度偏差和近期負荷計算，視資料是否可用而定。</string>
+    <string name="appwide_metric_education_recovery_method">在裝置上根據 HRV 相對個人基準線的變化、靜息心率、睡眠、呼吸頻率和皮膚溫度偏差計算，視資料是否可用而定。</string>
     <string name="appwide_metric_education_recovery_what">Recovery 是 NOOP 提供的 0 到 100 分估算，表示你的身體今天看起來對負荷的準備程度。</string>
     <string name="appwide_metric_education_recovery_why">它將多項夜間恢復趨勢整合為一個規劃訊號。</string>
     <string name="appwide_metric_education_resp_action">在感覺良好時再觀察一晚。查看 HRV、靜息心率或溫度是否同步變化；如變化持續或出現呼吸症狀，請尋求醫療建議。</string>
@@ -596,8 +597,11 @@
     <string name="appwide_sleep_stress_percent_format">%1$d%%</string>
     <string name="appwide_sleep_stress_timeline_a11y_format">睡眠壓力時間軸，高壓力佔百分之 %1$d</string>
     <string name="appwide_sleep_stress_title">睡眠壓力</string>
+    <string name="appwide_source_apple_health">Apple Health</string>
+    <string name="appwide_source_health_connect">Health Connect</string>
     <string name="appwide_source_imported">已匯入</string>
     <string name="appwide_source_on_device">裝置本地</string>
+    <string name="appwide_source_oura_ring">Oura Ring</string>
     <string name="appwide_strength_close_exercise_records">關閉動作紀錄</string>
     <string name="appwide_strength_completed_sets">已完成組數</string>
     <string name="appwide_strength_decrease_goal">降低目標</string>
@@ -700,7 +704,7 @@
     <string name="appwide_trends_report_explainer">閱讀方式：HRV、靜息心率、睡眠時長、呼吸頻率和皮膚溫度由手環測量。皮膚溫度顯示為相對個人基準的偏差。鍛鍊次數是你記錄或系統偵測到的活動數量。Recovery、Effort 和 Stress 是 NOOP 在裝置端計算的評分，並非臨床測量。Recovery 綜合每日 HRV、靜息心率、睡眠和皮膚溫度趨勢。Effort 是根據心率計算的心血管負荷。Stress 是基於靜息心率和 HRV 的 0 到 3 自主負荷指數。</string>
     <string name="appwide_trends_report_no_data_format">%1$s 內沒有鍛鍊、壓力、恢復、睡眠、HRV、靜息心率、強度、呼吸頻率或皮膚溫度讀數。請再佩戴手環幾天，或選擇更寬的範圍，然後重新匯出。</string>
     <string name="appwide_trends_retry">重試</string>
-    <string name="appwide_trends_sleep_descriptor">根據可用的睡眠時長、效率、階段和規律性評估睡眠品質。0 到 100 分，越高越好。</string>
+    <string name="appwide_trends_sleep_descriptor">睡眠評分結合可用的睡眠時長、效率、階段和規律性。0 到 100 分，越高越好。</string>
     <string name="appwide_trends_updating_body">本機歷史記錄重新整理時，將繼續顯示上次可用的檢視。</string>
     <string name="appwide_trends_updating_title">正在更新趨勢</string>
     <string name="appwide_trends_weekly_digest_failed_body">其餘趨勢仍可使用。請重試此摘要。</string>
@@ -780,6 +784,7 @@
     <string name="appwide_wake_events_needs_evidence">需要經過驗證的睡眠階段證據</string>
     <string name="appwide_wake_events_title">清醒事件</string>
     <string name="appwide_wake_events_unavailable_a11y">清醒事件無法使用</string>
+    <string name="appwide_watch_sleep_efficiency_format">睡眠效率 %1$d%%</string>
     <string name="appwide_weekly_digest_history_help">每週摘要需要幾天的歷史資料。請佩戴手環，或在「資料來源」中匯入穿戴裝置匯出檔案。</string>
     <string name="appwide_weekly_digest_imported_sleep_not_included">未包含匯入的睡眠</string>
     <string name="appwide_workout_guidance_channel_description">在追蹤運動中持續高強度後傳送的可選提示。</string>
@@ -827,9 +832,9 @@
     <string name="ui_audit_recovery_driver_verdict_below_supporting">低於基準，有助於恢復</string>
     <string name="ui_audit_recovery_driver_verdict_cooler_limiting">低於基準溫度，限制恢復</string>
     <string name="ui_audit_recovery_driver_verdict_near_baseline">接近基準</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_limited">睡眠品質限制了恢復</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_neutral">睡眠品質對恢復影響中性</string>
-    <string name="ui_audit_recovery_driver_verdict_sleep_supported">睡眠品質有助於恢復</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_limited">睡眠評分限制了恢復</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_neutral">睡眠評分對恢復影響中性</string>
+    <string name="ui_audit_recovery_driver_verdict_sleep_supported">睡眠評分有助於恢復</string>
     <string name="ui_audit_recovery_driver_verdict_typical_night">典型的一晚</string>
     <string name="ui_audit_recovery_driver_verdict_warmer_limiting">高於基準溫度，限制恢復</string>
     <string name="ui_audit_stress_at_baseline">處於基準</string>

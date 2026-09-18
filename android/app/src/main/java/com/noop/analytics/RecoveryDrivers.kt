@@ -207,7 +207,7 @@ object RecoveryDrivers {
         if (sleepIdx >= 0 && validRest != null) {
             drivers.add(
                 ChargeDriver(
-                    label = "Sleep quality",
+                    label = "Sleep Score",
                     deltaPoints = delta(sleepIdx),
                     value = validRest * 100.0,
                     baseline = usableRestBaseline?.let { restCenter * 100.0 },
@@ -215,9 +215,9 @@ object RecoveryDrivers {
                     verdict = if (usableRestBaseline == null) {
                         directionVerdict(
                             terms[sleepIdx].z,
-                            good = "sleep quality supported recovery",
-                            flat = "sleep quality was neutral",
-                            bad = "sleep quality limited recovery",
+                            good = "Sleep Score supported recovery",
+                            flat = "Sleep Score was neutral",
+                            bad = "Sleep Score limited recovery",
                         )
                     } else {
                         directionVerdict(

@@ -55,6 +55,62 @@ final class BackgroundSyncSchedulerTests: XCTestCase {
         ))
     }
 
+    func testIncompleteConsumedWakeRetriesPromptlyWithoutReplacingEarlierWake() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let consumed = now.addingTimeInterval(-1)
+
+        XCTAssertEqual(
+            BackgroundSyncPolicy.requestedWakeAfterRun(
+                consumedWake: consumed,
+                currentWake: nil,
+                now: now,
+                succeeded: false
+            ),
+            now.addingTimeInterval(60)
+        )
+        XCTAssertEqual(
+            BackgroundSyncPolicy.requestedWakeAfterRun(
+                consumedWake: consumed,
+                currentWake: now.addingTimeInterval(30),
+                now: now,
+                succeeded: false
+            ),
+            now.addingTimeInterval(30)
+        )
+        XCTAssertEqual(
+            BackgroundSyncPolicy.requestedWakeAfterRun(
+                consumedWake: consumed,
+                currentWake: now.addingTimeInterval(15 * 60),
+                now: now,
+                succeeded: false
+            ),
+            now.addingTimeInterval(60)
+        )
+    }
+
+    func testSuccessfulRunPreservesOnlyWakeRequestedDuringOperation() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let newWake = now.addingTimeInterval(20 * 60)
+
+        XCTAssertNil(
+            BackgroundSyncPolicy.requestedWakeAfterRun(
+                consumedWake: now.addingTimeInterval(-1),
+                currentWake: nil,
+                now: now,
+                succeeded: true
+            )
+        )
+        XCTAssertEqual(
+            BackgroundSyncPolicy.requestedWakeAfterRun(
+                consumedWake: now.addingTimeInterval(-1),
+                currentWake: newWake,
+                now: now,
+                succeeded: true
+            ),
+            newWake
+        )
+    }
+
     func testCompletedMaintenanceDoesNotRequireOptionalBandWork() {
         XCTAssertTrue(BackgroundSyncPolicy.completedMaintenance(
             optionalBandWorkCompleted: true,

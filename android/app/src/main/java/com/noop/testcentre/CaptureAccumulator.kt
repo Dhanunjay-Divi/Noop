@@ -13,7 +13,7 @@ import com.noop.analytics.AnalyticsEngine
  *
  * This is the honest replacement: for a given domain, count the DISTINCT local calendar days that domain's
  * own tagged trace lines carry, so each active mode INDEPENDENTLY accumulates its own count off the
- * shareable strap log. Sleep counts nights (its `sleep day=` / `gate run=` lines), Battery counts days
+ * shareable strap log. Sleep counts nights from its explicit `gate run=` test trace, Battery counts days
  * (its `bank soc=... t=<unix>s` samples, folded to a local day), Steps counts days (`stepsRaw day=`), and
  * the universal `dayOwner day=` line accumulates once per scored day for the universal row.
  *
@@ -41,7 +41,7 @@ object CaptureAccumulator {
      * domain absent from the map accumulates 0 (no day-bearing trace).
      */
     val markers: Map<TestDomain, DayMarker> = linkedMapOf(
-        TestDomain.SLEEP to DayMarker.DayKey(listOf("sleep day=", "gate run=")),
+        TestDomain.SLEEP to DayMarker.DayKey(listOf("gate run=")),
         TestDomain.STEPS to DayMarker.DayKey(listOf("stepsRaw", "stepsEst day=")),
         TestDomain.RECOVERY to DayMarker.DayKey(listOf("charge ")),
         TestDomain.BATTERY to DayMarker.Epoch(listOf("bank soc=")),

@@ -107,6 +107,29 @@ class ManagedStorageClientTest {
     }
 
     @Test
+    fun retryableServerResponsePreservesBoundedRetryAfter() = runTest {
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                response(
+                    request,
+                    429,
+                    """{"detail":"rate limited"}""",
+                    mapOf("Retry-After" to "300"),
+                )
+            },
+        )
+
+        try {
+            client.overview(authorization)
+            fail("Expected rate limiting")
+        } catch (error: ManagedStorageException.Server) {
+            assertEquals(429, error.statusCode)
+            assertEquals(300_000L, error.retryAfterMillis)
+        }
+    }
+
+    @Test
     fun signedUploadProducesGenerationBoundReceiptWithoutBearer() = runTest {
         var captured: Request? = null
         val client = ManagedStorageClient(
