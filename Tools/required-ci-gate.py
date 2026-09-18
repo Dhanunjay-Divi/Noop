@@ -70,10 +70,10 @@ RELEASE_SOURCE_DIGESTS = {
         "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
-        "49123ea0b0c8a67c4c3eb950d3b8761f85108d08fefda54dd79baa3611a7193d"
+        "26b7f54c51937564e02225d45bd92222e9226310029b860b23b7aaf8bc67e614"
     ),
     "release/terminology/legacy-inventory.json": (
-        "44818ba2b1a23c187b02b2d7853f714988ddffae8e9daf67c00da38bdd751e29"
+        "2150a029ab7137cfb8c6e020b33b800354f03ae320b38b7cced3553a86adc990"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -112,7 +112,7 @@ RELEASE_SOURCE_DIGESTS = {
         "76026e89932b920eec1ec61608fc3bcf9f8681600695b062f2b9bcdaddb0a785"
     ),
     "Tools/i18n_audit_baseline.json": (
-        "3a1b7e134bdc8dc9cef09e11eea14ab4e0c1baa18822fbd9e65561e44cdc9c95"
+        "6967b5b1bda34c68d0d468ac570191d6a79f51ffbebce71809450e332cb2ad4d"
     ),
     "Tools/prepare-ios-sideload-app.sh": (
         "d81bf5b8086c21a648a1417afa58cbb5bb9781c1738f2ff9d1cae6950ab2f097"
@@ -136,7 +136,7 @@ RELEASE_SOURCE_DIGESTS = {
         "76d015c094ef603515d70cd56ead7501be52ad68b8286c4d04a0ee84dff81b95"
     ),
     "Tools/run-bounded-command.py": (
-        "60b4472f3187543609c5bf8f59a2d596aaf9005e8d5ef2fc617fe4c7667101c8"
+        "24471f32c3e70945d0ad6f927d3eaa29096a65566956eb589a0a472d87be1dd3"
     ),
     "Tools/terminology-audit.py": (
         "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"

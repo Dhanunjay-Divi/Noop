@@ -2063,12 +2063,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 9,
+      "occurrenceCount": 11,
       "owner": "project team",
       "path": "StrandiOS/System/ManagedCloudService.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "e9cba44f78c4013ac3d9874e142a9dcd859d5d1f0069786ed2efec80a27d57e1"
+      "sha256": "66bd1131c6caaaebc48abd87faccfad79ed19a70599723d07db931437916beb4"
     },
     {
       "category": "core",
