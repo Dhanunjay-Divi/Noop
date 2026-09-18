@@ -18,7 +18,10 @@ from app.managed_identity import (
     StaticManagedTokenVerifier,
 )
 from app.ownership_main import create_ownership_app
-from app.ownership_models import OwnershipTermsManifest
+from app.ownership_models import (
+    OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256,
+    OwnershipTermsManifest,
+)
 from app.ownership_possession import (
     OwnershipPossessionEvidence,
     OwnershipPossessionRejectedError,
@@ -30,7 +33,9 @@ from app.ownership_repository import (
     OwnershipChallengeWindow,
     OwnershipClaimResult,
     OwnershipConfigurationError,
+    OwnershipConflictError,
     OwnershipForbiddenError,
+    OwnershipNotFoundError,
     OwnershipPrincipal,
 )
 
@@ -42,6 +47,7 @@ CHALLENGE = "C" * 43
 CHALLENGE_ID = UUID("11111111-1111-4111-8111-111111111111")
 TERMS_SHA256 = "a" * 64
 BAND_IDENTITY_HASH = "b" * 64
+DELETION_REQUEST_ID = UUID("44444444-4444-4444-8444-444444444444")
 
 
 def _settings() -> Settings:
@@ -61,6 +67,7 @@ def _identity_claims(
     *,
     email_verified: bool = True,
     sign_in_provider: str = "password",
+    auth_age_seconds: int = 5,
 ) -> ManagedIdentityClaims:
     now = datetime.now(UTC)
     return ManagedIdentityClaims(
@@ -68,7 +75,7 @@ def _identity_claims(
         subject="firebase-subject",
         provider_tenant="",
         issued_at=now,
-        auth_time=now - timedelta(seconds=5),
+        auth_time=now - timedelta(seconds=auth_age_seconds),
         expires_at=now + timedelta(hours=1),
         email_verified=email_verified,
         phone_verified=False,
@@ -135,6 +142,45 @@ class FakeOwnershipRepository:
         self.revoked_installation: str | None = None
         self.installation_platform = "ios"
         self.challenge_active = True
+        self.account_deletion_request_calls = 0
+        self.account_deletion_cancel_calls = 0
+        self.account_deletion = {
+            "deletion_request_id": str(DELETION_REQUEST_ID),
+            "state": "cooling_off",
+            "account_state": "deletion_pending",
+            "requested_at": datetime.now(UTC),
+            "cancel_before": datetime.now(UTC) + timedelta(hours=24),
+            "canceled_at": None,
+            "cancellation_allowed": True,
+            "policy_version": "ownership-v1",
+            "export_acknowledged": True,
+            "retention_acknowledged": True,
+            "sessions_revoked": True,
+            "revoked_session_count": 1,
+            "reauthorization_required": True,
+            "cloud_data_deletion": {
+                "state": "scheduled",
+                "not_before": datetime.now(UTC) + timedelta(hours=24),
+            },
+            "identity_deletion": {
+                "state": "blocked",
+                "blocker": "provider_credentials_unavailable",
+            },
+            "band_retirement": {
+                "required": True,
+                "eligibility": "blocked_policy",
+                "work_state": "blocked",
+                "blocker": "policy_unapproved",
+                "policy_version": None,
+                "hardware_capability_version": None,
+            },
+            "control_plane_deletion": {
+                "state": "blocked",
+                "blocker": "band_retirement_pending",
+            },
+            "destructive_completion_claimed": False,
+            "duplicate": False,
+        }
 
     async def terms_manifest(self, *, locale: str) -> dict:
         return {
@@ -234,6 +280,13 @@ class FakeOwnershipRepository:
         assert claims.subject == "firebase-subject"
         return self.principal
 
+    async def principal_for_account_deletion(
+        self,
+        claims,
+    ) -> OwnershipPrincipal:
+        assert claims.subject == "firebase-subject"
+        return self.principal
+
     async def ensure_installation(
         self,
         *,
@@ -321,6 +374,62 @@ class FakeOwnershipRepository:
     ) -> None:
         self.revoked_installation = target_installation_id
 
+    async def request_account_deletion(
+        self,
+        *,
+        claims,
+        installation_id: str,
+        installation_token_hash: str,
+        expected_platform: str,
+        request,
+        cooling_off: timedelta,
+    ) -> dict:
+        self.account_deletion_request_calls += 1
+        assert claims.subject == "firebase-subject"
+        assert installation_id == INSTALLATION_ID
+        assert expected_platform == "ios"
+        assert cooling_off == timedelta(hours=24)
+        assert request.export_acknowledged
+        assert request.retention_acknowledged
+        assert (
+            installation_token_hash
+            == hashlib.sha256(INSTALLATION_TOKEN.encode("ascii")).hexdigest()
+        )
+        return dict(self.account_deletion)
+
+    async def get_account_deletion(
+        self,
+        *,
+        principal,
+        deletion_request_id,
+    ) -> dict:
+        assert principal == self.principal
+        if deletion_request_id != DELETION_REQUEST_ID:
+            raise OwnershipNotFoundError("not found")
+        return dict(self.account_deletion)
+
+    async def cancel_account_deletion(
+        self,
+        *,
+        principal,
+        deletion_request_id,
+    ) -> dict:
+        assert principal == self.principal
+        if deletion_request_id != DELETION_REQUEST_ID:
+            raise OwnershipNotFoundError("not found")
+        self.account_deletion_cancel_calls += 1
+        result = dict(self.account_deletion)
+        result.update(
+            {
+                "state": "canceled",
+                "account_state": "active",
+                "canceled_at": datetime.now(UTC),
+                "cancellation_allowed": False,
+                "duplicate": self.account_deletion_cancel_calls > 1,
+            }
+        )
+        return result
+
     async def select_plan(
         self,
         *,
@@ -344,6 +453,7 @@ def _client(
     possession_verifier: StaticPossessionVerifier | None = None,
     events: list[dict] | None = None,
     app_id: str = APPLE_APP_ID,
+    auth_age_seconds: int = 5,
 ) -> TestClient:
     repo = repository or FakeOwnershipRepository()
     token_verifier = StaticManagedTokenVerifier(
@@ -351,6 +461,7 @@ def _client(
             "identity-token": _identity_claims(
                 email_verified=email_verified,
                 sign_in_provider=sign_in_provider,
+                auth_age_seconds=auth_age_seconds,
             )
         }
     )
@@ -415,6 +526,20 @@ def _possession() -> dict:
         "challenge_id": str(CHALLENGE_ID),
         "challenge": CHALLENGE,
         "possession_response": "virtual-signed-response",
+    }
+
+
+def _account_deletion() -> dict:
+    return {
+        "request_id": str(uuid4()),
+        "confirmation_sha256": (
+            OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256
+        ),
+        "export_acknowledged": True,
+        "retention_acknowledged": True,
+        "policy_version": "ownership-v1",
+        "policy_sha256": TERMS_SHA256,
+        "locale": "en",
     }
 
 
@@ -917,3 +1042,153 @@ def test_ownership_validation_does_not_echo_credentials() -> None:
     serialized = response.text
     assert "plaintext-invalid-token" not in serialized
     assert "identity-token" not in serialized
+
+
+def test_account_deletion_requires_installation_and_acknowledgements() -> None:
+    repository = FakeOwnershipRepository()
+    with _client(repository=repository) as client:
+        missing_installation = client.post(
+            "/v1/ownership/account/deletion-requests",
+            headers=_identity_headers(),
+            json=_account_deletion(),
+        )
+        missing_acknowledgement = client.post(
+            "/v1/ownership/account/deletion-requests",
+            headers=_identity_headers(installation=True),
+            json={
+                **_account_deletion(),
+                "export_acknowledged": False,
+            },
+        )
+
+    assert missing_installation.status_code == 401
+    assert missing_acknowledgement.status_code == 422
+    assert repository.account_deletion_request_calls == 0
+
+
+def test_account_deletion_requires_recent_verified_password_identity() -> None:
+    repository = FakeOwnershipRepository()
+    with _client(
+        repository=repository,
+        auth_age_seconds=60 * 60,
+    ) as client:
+        stale = client.post(
+            "/v1/ownership/account/deletion-requests",
+            headers=_identity_headers(installation=True),
+            json=_account_deletion(),
+        )
+    with _client(
+        repository=repository,
+        email_verified=False,
+    ) as client:
+        unverified = client.post(
+            "/v1/ownership/account/deletion-requests",
+            headers=_identity_headers(installation=True),
+            json=_account_deletion(),
+        )
+
+    assert stale.status_code == 401
+    assert stale.json() == {"detail": "recent sign-in is required"}
+    assert unverified.status_code == 403
+    assert repository.account_deletion_request_calls == 0
+
+
+def test_account_deletion_request_status_and_cancel_are_no_store() -> None:
+    repository = FakeOwnershipRepository()
+    events: list[dict] = []
+    with _client(repository=repository, events=events) as client:
+        requested = client.post(
+            "/v1/ownership/account/deletion-requests",
+            headers=_identity_headers(installation=True),
+            json=_account_deletion(),
+        )
+        fetched = client.get(
+            f"/v1/ownership/account/deletion-requests/{DELETION_REQUEST_ID}",
+            headers=_identity_headers(),
+        )
+        canceled = client.post(
+            (
+                "/v1/ownership/account/deletion-requests/"
+                f"{DELETION_REQUEST_ID}/cancel"
+            ),
+            headers=_identity_headers(),
+        )
+
+    assert requested.status_code == 202
+    assert fetched.status_code == 200
+    assert canceled.status_code == 200
+    assert all(
+        response.headers["cache-control"] == "no-store"
+        for response in (requested, fetched, canceled)
+    )
+    deletion = requested.json()["deletion"]
+    assert deletion["state"] == "cooling_off"
+    assert deletion["sessions_revoked"] is True
+    assert deletion["destructive_completion_claimed"] is False
+    assert deletion["cloud_data_deletion"]["state"] == "scheduled"
+    assert deletion["identity_deletion"] == {
+        "state": "blocked",
+        "blocker": "provider_credentials_unavailable",
+    }
+    assert deletion["band_retirement"]["eligibility"] == "blocked_policy"
+    assert canceled.json()["deletion"]["state"] == "canceled"
+    assert repository.account_deletion_request_calls == 1
+    assert repository.account_deletion_cancel_calls == 1
+
+    serialized = repr(events)
+    assert INSTALLATION_ID not in serialized
+    assert INSTALLATION_TOKEN not in serialized
+    assert str(DELETION_REQUEST_ID) not in serialized
+    assert OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256 not in serialized
+    assert all(
+        set(event) == {"event", "service", "phase", "outcome"}
+        for event in events
+    )
+
+
+def test_account_deletion_conflict_and_cancellation_conflict_are_bounded() -> None:
+    class ConflictRepository(FakeOwnershipRepository):
+        async def request_account_deletion(self, **_: object) -> dict:
+            raise OwnershipConflictError("private conflict detail")
+
+        async def cancel_account_deletion(self, **_: object) -> dict:
+            raise OwnershipConflictError("private cancellation detail")
+
+    with _client(repository=ConflictRepository()) as client:
+        requested = client.post(
+            "/v1/ownership/account/deletion-requests",
+            headers=_identity_headers(installation=True),
+            json=_account_deletion(),
+        )
+        canceled = client.post(
+            (
+                "/v1/ownership/account/deletion-requests/"
+                f"{DELETION_REQUEST_ID}/cancel"
+            ),
+            headers=_identity_headers(),
+        )
+
+    assert requested.status_code == 409
+    assert requested.json() == {"detail": "account deletion request conflicts"}
+    assert canceled.status_code == 409
+    assert canceled.json() == {
+        "detail": "account deletion can no longer be canceled"
+    }
+    assert "private" not in requested.text
+    assert "private" not in canceled.text
+
+
+def test_account_deletion_validation_redacts_confirmation_input() -> None:
+    with _client() as client:
+        response = client.post(
+            "/v1/ownership/account/deletion-requests",
+            headers=_identity_headers(installation=True),
+            json={
+                **_account_deletion(),
+                "confirmation_sha256": "plain-confirmation-must-not-echo",
+            },
+        )
+
+    assert response.status_code == 422
+    assert "plain-confirmation-must-not-echo" not in response.text
+    assert INSTALLATION_TOKEN not in response.text

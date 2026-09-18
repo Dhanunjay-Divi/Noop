@@ -43,6 +43,14 @@ OWNERSHIP_TABLE_PRIVILEGES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "ownership_plan_selection_requests",
         ("SELECT", "INSERT"),
     ),
+    (
+        "ownership_account_deletion_requests",
+        ("SELECT", "INSERT"),
+    ),
+    (
+        "ownership_account_deletion_targets",
+        ("SELECT", "INSERT"),
+    ),
     ("ownership_events", ("INSERT",)),
 )
 
@@ -85,6 +93,21 @@ OWNERSHIP_COLUMN_PRIVILEGES: tuple[
         "ownership_plan_selections",
         "UPDATE",
         ("selection", "request_id", "updated_at"),
+    ),
+    (
+        "ownership_accounts",
+        "UPDATE",
+        (
+            "status",
+            "auth_valid_after",
+            "updated_at",
+            "deletion_requested_at",
+        ),
+    ),
+    (
+        "ownership_account_deletion_requests",
+        "UPDATE",
+        ("canceled_at",),
     ),
 )
 

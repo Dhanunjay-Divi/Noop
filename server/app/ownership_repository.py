@@ -11,7 +11,15 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from app.managed_identity import ManagedIdentityClaims
+from app.ownership_deletion import (
+    OwnershipBandRetirementCandidate,
+    OwnershipBandRetirementEligibility,
+    OwnershipBandRetirementEvaluating,
+    UnavailableOwnershipBandRetirementEvaluator,
+    safe_band_retirement_eligibility,
+)
 from app.ownership_models import (
+    OwnershipAccountDeletionRequest,
     OwnershipAccountRegistration,
     OwnershipInstallationAuthorization,
     OwnershipPlanSelection,
@@ -135,6 +143,11 @@ class OwnershipRepository(Protocol):
         claims: ManagedIdentityClaims,
     ) -> OwnershipPrincipal: ...
 
+    async def principal_for_account_deletion(
+        self,
+        claims: ManagedIdentityClaims,
+    ) -> OwnershipPrincipal: ...
+
     async def ensure_installation(
         self,
         *,
@@ -211,6 +224,31 @@ class OwnershipRepository(Protocol):
         target_installation_id: str,
     ) -> None: ...
 
+    async def request_account_deletion(
+        self,
+        *,
+        claims: ManagedIdentityClaims,
+        installation_id: str,
+        installation_token_hash: str,
+        expected_platform: str,
+        request: OwnershipAccountDeletionRequest,
+        cooling_off: timedelta,
+    ) -> dict[str, Any]: ...
+
+    async def get_account_deletion(
+        self,
+        *,
+        principal: OwnershipPrincipal,
+        deletion_request_id: UUID,
+    ) -> dict[str, Any]: ...
+
+    async def cancel_account_deletion(
+        self,
+        *,
+        principal: OwnershipPrincipal,
+        deletion_request_id: UUID,
+    ) -> dict[str, Any]: ...
+
     async def select_plan(
         self,
         *,
@@ -221,8 +259,16 @@ class OwnershipRepository(Protocol):
 
 
 class PostgresOwnershipRepository:
-    def __init__(self, primary: PostgresRepository) -> None:
+    def __init__(
+        self,
+        primary: PostgresRepository,
+        *,
+        retirement_evaluator: OwnershipBandRetirementEvaluating | None = None,
+    ) -> None:
         self.primary = primary
+        self.retirement_evaluator = (
+            retirement_evaluator or UnavailableOwnershipBandRetirementEvaluator()
+        )
 
     def _pool(self) -> Any:
         pool = self.primary._pool
@@ -256,6 +302,10 @@ class PostgresOwnershipRepository:
                     ('ownership_plan_selections', 'INSERT'),
                     ('ownership_plan_selection_requests', 'SELECT'),
                     ('ownership_plan_selection_requests', 'INSERT'),
+                    ('ownership_account_deletion_requests', 'SELECT'),
+                    ('ownership_account_deletion_requests', 'INSERT'),
+                    ('ownership_account_deletion_targets', 'SELECT'),
+                    ('ownership_account_deletion_targets', 'INSERT'),
                     ('ownership_events', 'INSERT')
             ),
             ownership_column_allowed (
@@ -331,6 +381,31 @@ class PostgresOwnershipRepository:
                     (
                         'ownership_plan_selections',
                         'updated_at',
+                        'UPDATE'
+                    ),
+                    (
+                        'ownership_accounts',
+                        'status',
+                        'UPDATE'
+                    ),
+                    (
+                        'ownership_accounts',
+                        'auth_valid_after',
+                        'UPDATE'
+                    ),
+                    (
+                        'ownership_accounts',
+                        'updated_at',
+                        'UPDATE'
+                    ),
+                    (
+                        'ownership_accounts',
+                        'deletion_requested_at',
+                        'UPDATE'
+                    ),
+                    (
+                        'ownership_account_deletion_requests',
+                        'canceled_at',
                         'UPDATE'
                     )
             ),
@@ -1235,6 +1310,55 @@ class PostgresOwnershipRepository:
         if (
             row["identity_status"] != "active"
             or row["account_status"] != "active"
+            or claims.auth_time < row["auth_valid_after"]
+        ):
+            raise OwnershipForbiddenError("ownership account is unavailable")
+        await self._pool().execute(
+            """
+            UPDATE ownership_external_identities
+            SET email_verified = $2,
+                phone_verified = $3,
+                last_seen_at = GREATEST(last_seen_at, $4)
+            WHERE identity_id = $1
+            """,
+            row["identity_id"],
+            claims.email_verified,
+            claims.phone_verified,
+            claims.issued_at,
+        )
+        return OwnershipPrincipal(
+            account_id=row["account_id"],
+            identity_id=row["identity_id"],
+            account_status=str(row["account_status"]),
+            auth_valid_after=row["auth_valid_after"],
+        )
+
+    async def principal_for_account_deletion(
+        self,
+        claims: ManagedIdentityClaims,
+    ) -> OwnershipPrincipal:
+        row = await self._pool().fetchrow(
+            """
+            SELECT identity.identity_id,
+                   identity.account_id,
+                   identity.status AS identity_status,
+                   account.status AS account_status,
+                   account.auth_valid_after
+            FROM ownership_external_identities identity
+            JOIN ownership_accounts account USING (account_id)
+            WHERE identity.issuer = $1
+              AND identity.provider_tenant = $2
+              AND identity.subject_hash = $3
+            """,
+            claims.issuer,
+            claims.provider_tenant,
+            claims.subject_hash,
+        )
+        if row is None:
+            raise OwnershipNotFoundError("ownership account is not registered")
+        if (
+            row["identity_status"] != "active"
+            or row["account_status"] not in {"active", "deletion_pending"}
             or claims.auth_time < row["auth_valid_after"]
         ):
             raise OwnershipForbiddenError("ownership account is unavailable")
@@ -2204,6 +2328,572 @@ class PostgresOwnershipRepository:
                     occurred_at=now,
                 )
 
+    async def request_account_deletion(
+        self,
+        *,
+        claims: ManagedIdentityClaims,
+        installation_id: str,
+        installation_token_hash: str,
+        expected_platform: str,
+        request: OwnershipAccountDeletionRequest,
+        cooling_off: timedelta,
+    ) -> dict[str, Any]:
+        if not request.export_acknowledged or not request.retention_acknowledged:
+            raise OwnershipForbiddenError(
+                "account deletion acknowledgements are required"
+            )
+        if not timedelta(hours=1) <= cooling_off <= timedelta(days=30):
+            raise OwnershipConfigurationError(
+                "account deletion cooling-off interval is invalid"
+            )
+        requester_installation_hash = _digest(installation_id)
+        request_digest = _request_digest(
+            {
+                "confirmation_sha256": request.confirmation_sha256,
+                "export_acknowledged": request.export_acknowledged,
+                "retention_acknowledged": request.retention_acknowledged,
+                "policy_version": request.policy_version,
+                "policy_sha256": request.policy_sha256,
+                "locale": request.locale,
+                "requester_installation_hash": requester_installation_hash,
+            }
+        )
+        deletion_request_id = uuid4()
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    (
+                        "noop-ownership-identity:"
+                        f"{claims.issuer}:{claims.provider_tenant}:"
+                        f"{claims.subject_hash}"
+                    ),
+                )
+                identity = await connection.fetchrow(
+                    """
+                    SELECT identity.identity_id,
+                           identity.account_id,
+                           identity.status AS identity_status,
+                           account.status AS account_status,
+                           account.auth_valid_after
+                    FROM ownership_external_identities identity
+                    JOIN ownership_accounts account USING (account_id)
+                    WHERE identity.issuer = $1
+                      AND identity.provider_tenant = $2
+                      AND identity.subject_hash = $3
+                    FOR UPDATE OF identity, account
+                    """,
+                    claims.issuer,
+                    claims.provider_tenant,
+                    claims.subject_hash,
+                )
+                if identity is None:
+                    raise OwnershipNotFoundError(
+                        "ownership account is not registered"
+                    )
+                if identity["identity_status"] != "active":
+                    raise OwnershipForbiddenError(
+                        "ownership account is unavailable"
+                    )
+                account_id = identity["account_id"]
+                requester_identity_hash = _digest(str(identity["identity_id"]))
+                await _lock_account(connection, account_id)
+                existing = await connection.fetchrow(
+                    """
+                    SELECT request.*,
+                           account.status AS account_status
+                    FROM ownership_account_deletion_requests request
+                    JOIN ownership_accounts account USING (account_id)
+                    WHERE request.account_id = $1
+                      AND request.request_id = $2
+                    FOR UPDATE OF request
+                    """,
+                    account_id,
+                    request.request_id,
+                )
+                if existing is not None:
+                    installation = await connection.fetchrow(
+                        """
+                        SELECT account_id, platform, token_hash
+                        FROM ownership_installations
+                        WHERE installation_id = $1
+                        """,
+                        installation_id,
+                    )
+                    if (
+                        not hmac.compare_digest(
+                            str(existing["request_digest"]).strip(),
+                            request_digest,
+                        )
+                        or not hmac.compare_digest(
+                            str(existing["requester_identity_hash"]).strip(),
+                            requester_identity_hash,
+                        )
+                        or not hmac.compare_digest(
+                            str(existing["requester_installation_hash"]).strip(),
+                            requester_installation_hash,
+                        )
+                        or installation is None
+                        or installation["account_id"] != account_id
+                        or installation["platform"] != expected_platform
+                        or not hmac.compare_digest(
+                            str(installation["token_hash"]).strip(),
+                            installation_token_hash,
+                        )
+                    ):
+                        raise OwnershipConflictError(
+                            "account deletion request conflicts"
+                        )
+                    targets = await _account_deletion_targets(
+                        connection,
+                        deletion_request_id=existing["deletion_request_id"],
+                    )
+                    now = await connection.fetchval("SELECT clock_timestamp()")
+                    return _public_account_deletion(
+                        existing,
+                        targets=targets,
+                        now=now,
+                        duplicate=True,
+                    )
+
+                if (
+                    identity["account_status"] != "active"
+                    or claims.auth_time < identity["auth_valid_after"]
+                ):
+                    raise OwnershipForbiddenError(
+                        "ownership account is unavailable"
+                    )
+                installation = await connection.fetchrow(
+                    """
+                    SELECT account_id,
+                           platform,
+                           token_hash,
+                           status,
+                           auth_valid_after
+                    FROM ownership_installations
+                    WHERE installation_id = $1
+                    FOR UPDATE
+                    """,
+                    installation_id,
+                )
+                if (
+                    installation is None
+                    or installation["account_id"] != account_id
+                    or installation["platform"] != expected_platform
+                    or installation["status"] != "active"
+                    or claims.auth_time < installation["auth_valid_after"]
+                    or not hmac.compare_digest(
+                        str(installation["token_hash"]).strip(),
+                        installation_token_hash,
+                    )
+                ):
+                    raise OwnershipForbiddenError(
+                        "ownership installation was rejected"
+                    )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                policy = await _current_terms_document(
+                    connection,
+                    locale=request.locale,
+                    at=now,
+                )
+                if (
+                    policy is None
+                    or policy["policy_version"] != request.policy_version
+                    or policy["locale"] != request.locale
+                    or not hmac.compare_digest(
+                        str(policy["document_sha256"]).strip(),
+                        request.policy_sha256,
+                    )
+                ):
+                    raise OwnershipConfigurationError(
+                        "ownership terms changed or are unavailable"
+                    )
+                await _require_current_terms_acceptance(
+                    connection,
+                    account_id=account_id,
+                )
+                live_request = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM ownership_account_deletion_requests
+                        WHERE account_id = $1 AND canceled_at IS NULL
+                    )
+                    """,
+                    account_id,
+                )
+                if live_request:
+                    raise OwnershipConflictError(
+                        "account deletion is already pending"
+                    )
+                band = await connection.fetchrow(
+                    """
+                    SELECT band_id,
+                           hardware_revision,
+                           protocol_version,
+                           firmware_version
+                    FROM ownership_bands
+                    WHERE current_account_id = $1
+                      AND status IN ('claimed', 'return_pending')
+                    FOR UPDATE
+                    """,
+                    account_id,
+                )
+                retirement = None
+                if band is not None:
+                    retirement = safe_band_retirement_eligibility(
+                        self.retirement_evaluator,
+                        candidate=OwnershipBandRetirementCandidate(
+                            hardware_revision=str(band["hardware_revision"]),
+                            protocol_version=str(band["protocol_version"]),
+                            firmware_version=str(band["firmware_version"]),
+                        ),
+                    )
+                expected_revoked_count = int(
+                    await connection.fetchval(
+                        """
+                        SELECT count(*)
+                        FROM ownership_installations
+                        WHERE account_id = $1 AND status = 'active'
+                        """,
+                        account_id,
+                    )
+                    or 0
+                )
+                if not 1 <= expected_revoked_count <= 10:
+                    raise OwnershipForbiddenError(
+                        "ownership installation was rejected"
+                    )
+                cancel_before = now + cooling_off
+                await connection.execute(
+                    """
+                    INSERT INTO ownership_account_deletion_requests (
+                        deletion_request_id,
+                        account_id,
+                        request_id,
+                        request_digest,
+                        requester_identity_hash,
+                        requester_installation_hash,
+                        policy_version,
+                        locale,
+                        document_sha256,
+                        export_acknowledged_at,
+                        retention_acknowledged_at,
+                        sessions_revoked_at,
+                        sessions_revoked_count,
+                        requested_at,
+                        cancel_before
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                        $10, $10, $10, $11, $10, $12
+                    )
+                    """,
+                    deletion_request_id,
+                    account_id,
+                    request.request_id,
+                    request_digest,
+                    requester_identity_hash,
+                    requester_installation_hash,
+                    request.policy_version,
+                    request.locale,
+                    request.policy_sha256,
+                    now,
+                    expected_revoked_count,
+                    cancel_before,
+                )
+                band_target = (
+                    ("not_required", None, None, None)
+                    if retirement is None
+                    else _band_retirement_target(retirement)
+                )
+                target_rows = (
+                    (
+                        "managed_cloud_data",
+                        "scheduled",
+                        None,
+                        None,
+                        None,
+                    ),
+                    (
+                        "identity_provider",
+                        "blocked",
+                        "provider_credentials_unavailable",
+                        None,
+                        None,
+                    ),
+                    (
+                        "band_retirement",
+                        band_target[0],
+                        band_target[1],
+                        band_target[2],
+                        band_target[3],
+                    ),
+                    (
+                        "ownership_control_plane",
+                        "blocked",
+                        (
+                            "band_retirement_pending"
+                            if retirement is not None
+                            else "identity_provider_pending"
+                        ),
+                        None,
+                        None,
+                    ),
+                )
+                for (
+                    target_kind,
+                    initial_state,
+                    blocker,
+                    policy_version,
+                    capability_version,
+                ) in target_rows:
+                    await connection.execute(
+                        """
+                        INSERT INTO ownership_account_deletion_targets (
+                            deletion_request_id,
+                            target_kind,
+                            initial_state,
+                            blocker,
+                            policy_version,
+                            hardware_capability_version,
+                            scheduled_at,
+                            not_before
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        """,
+                        deletion_request_id,
+                        target_kind,
+                        initial_state,
+                        blocker,
+                        policy_version,
+                        capability_version,
+                        now,
+                        cancel_before,
+                    )
+                sessions_revoked = await connection.fetchval(
+                    """
+                    WITH revoked AS (
+                        UPDATE ownership_installations
+                        SET status = 'revoked',
+                            revoked_at = $2,
+                            last_seen_at = GREATEST(last_seen_at, $2)
+                        WHERE account_id = $1 AND status = 'active'
+                        RETURNING 1
+                    )
+                    SELECT count(*) FROM revoked
+                    """,
+                    account_id,
+                    now,
+                )
+                revoked_count = int(sessions_revoked or 0)
+                if revoked_count != expected_revoked_count:
+                    raise OwnershipForbiddenError(
+                        "ownership installation was rejected"
+                    )
+                account_update = await connection.execute(
+                    """
+                    UPDATE ownership_accounts
+                    SET status = 'deletion_pending',
+                        auth_valid_after = $2,
+                        deletion_requested_at = $2,
+                        updated_at = $2
+                    WHERE account_id = $1 AND status = 'active'
+                    """,
+                    account_id,
+                    now,
+                )
+                if account_update != "UPDATE 1":
+                    raise OwnershipConflictError(
+                        "account deletion request conflicts"
+                    )
+                await self._record_event(
+                    connection,
+                    account_id=account_id,
+                    event_kind="account_deletion_requested",
+                    outcome="accepted",
+                    occurred_at=now,
+                )
+                await self._record_event(
+                    connection,
+                    account_id=account_id,
+                    event_kind="account_sessions_revoked",
+                    outcome="completed",
+                    occurred_at=now,
+                )
+                await self._record_event(
+                    connection,
+                    account_id=account_id,
+                    event_kind="cloud_deletion_scheduled",
+                    outcome="scheduled",
+                    occurred_at=now,
+                )
+                if retirement is not None:
+                    await self._record_event(
+                        connection,
+                        account_id=account_id,
+                        band_id=band["band_id"],
+                        event_kind="band_retirement_evaluated",
+                        outcome=(
+                            "eligible"
+                            if retirement.state == "eligible_pending_operator"
+                            else "blocked"
+                        ),
+                        occurred_at=now,
+                    )
+                row = await connection.fetchrow(
+                    """
+                    SELECT request.*,
+                           account.status AS account_status
+                    FROM ownership_account_deletion_requests request
+                    JOIN ownership_accounts account USING (account_id)
+                    WHERE deletion_request_id = $1
+                    """,
+                    deletion_request_id,
+                )
+                targets = await _account_deletion_targets(
+                    connection,
+                    deletion_request_id=deletion_request_id,
+                )
+        return _public_account_deletion(
+            row,
+            targets=targets,
+            now=now,
+            duplicate=False,
+        )
+
+    async def get_account_deletion(
+        self,
+        *,
+        principal: OwnershipPrincipal,
+        deletion_request_id: UUID,
+    ) -> dict[str, Any]:
+        async with self._pool().acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT request.*,
+                       account.status AS account_status
+                FROM ownership_account_deletion_requests request
+                JOIN ownership_accounts account USING (account_id)
+                WHERE request.account_id = $1
+                  AND request.deletion_request_id = $2
+                """,
+                principal.account_id,
+                deletion_request_id,
+            )
+            if row is None:
+                raise OwnershipNotFoundError(
+                    "account deletion request was not found"
+                )
+            targets = await _account_deletion_targets(
+                connection,
+                deletion_request_id=deletion_request_id,
+            )
+            now = await connection.fetchval("SELECT clock_timestamp()")
+        return _public_account_deletion(
+            row,
+            targets=targets,
+            now=now,
+            duplicate=False,
+        )
+
+    async def cancel_account_deletion(
+        self,
+        *,
+        principal: OwnershipPrincipal,
+        deletion_request_id: UUID,
+    ) -> dict[str, Any]:
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                await _lock_account(connection, principal.account_id)
+                row = await connection.fetchrow(
+                    """
+                    SELECT request.*,
+                           account.status AS account_status
+                    FROM ownership_account_deletion_requests request
+                    JOIN ownership_accounts account USING (account_id)
+                    WHERE request.account_id = $1
+                      AND request.deletion_request_id = $2
+                    FOR UPDATE OF request, account
+                    """,
+                    principal.account_id,
+                    deletion_request_id,
+                )
+                if row is None:
+                    raise OwnershipNotFoundError(
+                        "account deletion request was not found"
+                    )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                if row["canceled_at"] is not None:
+                    targets = await _account_deletion_targets(
+                        connection,
+                        deletion_request_id=deletion_request_id,
+                    )
+                    return _public_account_deletion(
+                        row,
+                        targets=targets,
+                        now=now,
+                        duplicate=True,
+                    )
+                if (
+                    row["account_status"] != "deletion_pending"
+                    or row["cancel_before"] <= now
+                ):
+                    raise OwnershipConflictError(
+                        "account deletion can no longer be canceled"
+                    )
+                row = await connection.fetchrow(
+                    """
+                    UPDATE ownership_account_deletion_requests
+                    SET canceled_at = $3
+                    WHERE account_id = $1
+                      AND deletion_request_id = $2
+                      AND canceled_at IS NULL
+                      AND cancel_before > $3
+                    RETURNING *
+                    """,
+                    principal.account_id,
+                    deletion_request_id,
+                    now,
+                )
+                if row is None:
+                    raise OwnershipConflictError(
+                        "account deletion can no longer be canceled"
+                    )
+                account_update = await connection.execute(
+                    """
+                    UPDATE ownership_accounts
+                    SET status = 'active',
+                        deletion_requested_at = NULL,
+                        updated_at = $2
+                    WHERE account_id = $1
+                      AND status = 'deletion_pending'
+                    """,
+                    principal.account_id,
+                    now,
+                )
+                if account_update != "UPDATE 1":
+                    raise OwnershipConflictError(
+                        "account deletion can no longer be canceled"
+                    )
+                await self._record_event(
+                    connection,
+                    account_id=principal.account_id,
+                    event_kind="account_deletion_canceled",
+                    outcome="canceled",
+                    occurred_at=now,
+                )
+                row = dict(row)
+                row["account_status"] = "active"
+                targets = await _account_deletion_targets(
+                    connection,
+                    deletion_request_id=deletion_request_id,
+                )
+        return _public_account_deletion(
+            row,
+            targets=targets,
+            now=now,
+            duplicate=False,
+        )
+
     async def select_plan(
         self,
         *,
@@ -2318,6 +3008,138 @@ class PostgresOwnershipRepository:
             outcome,
             occurred_at,
         )
+
+
+def _band_retirement_target(
+    eligibility: OwnershipBandRetirementEligibility,
+) -> tuple[str, str | None, str | None, str | None]:
+    if eligibility.state == "blocked_hardware":
+        return (
+            "blocked",
+            "hardware_capability_unavailable",
+            eligibility.policy_version,
+            None,
+        )
+    if eligibility.state == "eligible_pending_operator":
+        return (
+            "blocked",
+            "operator_approval_required",
+            eligibility.policy_version,
+            eligibility.hardware_capability_version,
+        )
+    return ("blocked", "policy_unapproved", None, None)
+
+
+async def _account_deletion_targets(
+    connection: Any,
+    *,
+    deletion_request_id: UUID,
+) -> list[Any]:
+    return await connection.fetch(
+        """
+        SELECT target_kind,
+               initial_state,
+               blocker,
+               policy_version,
+               hardware_capability_version,
+               scheduled_at,
+               not_before
+        FROM ownership_account_deletion_targets
+        WHERE deletion_request_id = $1
+        ORDER BY target_kind
+        """,
+        deletion_request_id,
+    )
+
+
+def _public_account_deletion(
+    row: Any,
+    *,
+    targets: list[Any],
+    now: datetime,
+    duplicate: bool,
+) -> dict[str, Any]:
+    target_map = {str(target["target_kind"]): target for target in targets}
+    required_targets = {
+        "managed_cloud_data",
+        "identity_provider",
+        "band_retirement",
+        "ownership_control_plane",
+    }
+    if set(target_map) != required_targets:
+        raise OwnershipConfigurationError(
+            "account deletion coordination is incomplete"
+        )
+    canceled = row["canceled_at"] is not None
+
+    def work_state(target_kind: str) -> str:
+        target = target_map[target_kind]
+        if canceled and target["initial_state"] != "not_required":
+            return "canceled"
+        return str(target["initial_state"])
+
+    band_target = target_map["band_retirement"]
+    if band_target["initial_state"] == "not_required":
+        band_eligibility = "not_required"
+    elif band_target["blocker"] == "hardware_capability_unavailable":
+        band_eligibility = "blocked_hardware"
+    elif band_target["blocker"] == "operator_approval_required":
+        band_eligibility = "eligible_pending_operator"
+    else:
+        band_eligibility = "blocked_policy"
+
+    if canceled:
+        phase = "canceled"
+    elif now < row["cancel_before"]:
+        phase = "cooling_off"
+    elif any(
+        target["initial_state"] == "blocked" for target in target_map.values()
+    ):
+        phase = "blocked"
+    else:
+        phase = "scheduled"
+
+    return {
+        "deletion_request_id": str(row["deletion_request_id"]),
+        "state": phase,
+        "account_state": str(row["account_status"]),
+        "requested_at": row["requested_at"],
+        "cancel_before": row["cancel_before"],
+        "canceled_at": row["canceled_at"],
+        "cancellation_allowed": (
+            not canceled and now < row["cancel_before"]
+        ),
+        "policy_version": str(row["policy_version"]),
+        "export_acknowledged": True,
+        "retention_acknowledged": True,
+        "sessions_revoked": True,
+        "revoked_session_count": int(row["sessions_revoked_count"]),
+        "reauthorization_required": True,
+        "cloud_data_deletion": {
+            "state": work_state("managed_cloud_data"),
+            "not_before": target_map["managed_cloud_data"]["not_before"],
+        },
+        "identity_deletion": {
+            "state": work_state("identity_provider"),
+            "blocker": target_map["identity_provider"]["blocker"],
+        },
+        "band_retirement": {
+            "required": band_target["initial_state"] != "not_required",
+            "eligibility": band_eligibility,
+            "work_state": work_state("band_retirement"),
+            "blocker": band_target["blocker"],
+            "policy_version": band_target["policy_version"],
+            "hardware_capability_version": (
+                band_target["hardware_capability_version"]
+            ),
+        },
+        "control_plane_deletion": {
+            "state": work_state("ownership_control_plane"),
+            "blocker": target_map["ownership_control_plane"]["blocker"],
+        },
+        "destructive_completion_claimed": False,
+        "duplicate": duplicate,
+    }
 
 
 def _validated_terms_manifest(row: Any) -> dict[str, Any]:

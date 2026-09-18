@@ -5,13 +5,16 @@ import hashlib
 import os
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote, urlsplit, urlunsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
 
 from app.managed_identity import ManagedIdentityClaims
+from app.ownership_deletion import OwnershipBandRetirementEligibility
 from app.ownership_models import (
+    OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256,
+    OwnershipAccountDeletionRequest,
     OwnershipAccountRegistration,
     OwnershipInstallationAuthorization,
     OwnershipPlanSelection,
@@ -52,6 +55,8 @@ async def ownership_repository():
         """
         TRUNCATE TABLE
             ownership_events,
+            ownership_account_deletion_targets,
+            ownership_account_deletion_requests,
             ownership_releases,
             ownership_entitlements,
             ownership_plan_selection_requests,
@@ -94,14 +99,18 @@ async def ownership_repository():
         await primary.shutdown()
 
 
-def _claims(subject: str) -> ManagedIdentityClaims:
+def _claims(
+    subject: str,
+    *,
+    auth_time: datetime | None = None,
+) -> ManagedIdentityClaims:
     now = datetime.now(UTC)
     return ManagedIdentityClaims(
         issuer="https://securetoken.google.com/noop-test-project",
         subject=subject,
         provider_tenant="",
         issued_at=now,
-        auth_time=now - timedelta(seconds=5),
+        auth_time=auth_time or now - timedelta(seconds=5),
         expires_at=now + timedelta(hours=1),
         email_verified=True,
         phone_verified=False,
@@ -126,6 +135,24 @@ def _registration(
         locale="en",
         plan_selection=plan_selection,
         device_key_fingerprint=device_key_fingerprint,
+    )
+
+
+def _account_deletion_request(
+    *,
+    request_id=None,
+    policy_sha256: str = TERMS_SHA256,
+) -> OwnershipAccountDeletionRequest:
+    return OwnershipAccountDeletionRequest(
+        request_id=request_id or uuid4(),
+        confirmation_sha256=(
+            OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256
+        ),
+        export_acknowledged=True,
+        retention_acknowledged=True,
+        policy_version="ownership-v1",
+        policy_sha256=policy_sha256,
+        locale="en",
     )
 
 
@@ -1911,6 +1938,271 @@ async def test_revoked_installation_cannot_claim_or_change_plan(
 
 
 @pytest.mark.asyncio
+async def test_account_deletion_revokes_sessions_schedules_work_and_cancels(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    subject = "account-deletion-owner"
+    claims, registration, principal = await _register(
+        repository,
+        subject=subject,
+        installation_id="ios-account-deletion-primary",
+        token_character="D",
+    )
+    await repository.register_account(
+        claims=claims,
+        registration=_registration(
+            installation_id="ios-account-deletion-secondary",
+            token_character="E",
+        ),
+    )
+    request = _account_deletion_request()
+    token_hash = hashlib.sha256(
+        registration.installation_token.get_secret_value().encode("ascii")
+    ).hexdigest()
+
+    created = await repository.request_account_deletion(
+        claims=claims,
+        installation_id=registration.installation_id,
+        installation_token_hash=token_hash,
+        expected_platform="ios",
+        request=request,
+        cooling_off=timedelta(hours=24),
+    )
+    replay = await repository.request_account_deletion(
+        claims=claims,
+        installation_id=registration.installation_id,
+        installation_token_hash=token_hash,
+        expected_platform="ios",
+        request=request,
+        cooling_off=timedelta(hours=24),
+    )
+
+    assert created["state"] == "cooling_off"
+    assert created["revoked_session_count"] == 2
+    assert created["cloud_data_deletion"]["state"] == "scheduled"
+    assert created["identity_deletion"] == {
+        "state": "blocked",
+        "blocker": "provider_credentials_unavailable",
+    }
+    assert created["band_retirement"]["eligibility"] == "not_required"
+    assert created["destructive_completion_claimed"] is False
+    assert replay["duplicate"] is True
+    assert replay["deletion_request_id"] == created["deletion_request_id"]
+    assert primary._pool is not None
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT count(*)
+            FROM ownership_installations
+            WHERE account_id = $1 AND status = 'active'
+            """,
+            principal.account_id,
+        )
+        == 0
+    )
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT count(*)
+            FROM ownership_events
+            WHERE account_id = $1
+              AND event_kind = 'account_deletion_requested'
+            """,
+            principal.account_id,
+        )
+        == 1
+    )
+
+    with pytest.raises(OwnershipConflictError):
+        await repository.request_account_deletion(
+            claims=claims,
+            installation_id=registration.installation_id,
+            installation_token_hash=token_hash,
+            expected_platform="ios",
+            request=_account_deletion_request(request_id=request.request_id),
+            cooling_off=timedelta(hours=24),
+        )
+
+    fresh_claims = _claims(
+        subject,
+        auth_time=datetime.now(UTC) + timedelta(seconds=1),
+    )
+    deletion_principal = await repository.principal_for_account_deletion(
+        fresh_claims
+    )
+    canceled = await repository.cancel_account_deletion(
+        principal=deletion_principal,
+        deletion_request_id=UUID(created["deletion_request_id"]),
+    )
+    canceled_replay = await repository.cancel_account_deletion(
+        principal=deletion_principal,
+        deletion_request_id=UUID(created["deletion_request_id"]),
+    )
+
+    assert canceled["state"] == "canceled"
+    assert canceled["account_state"] == "active"
+    assert canceled["cancellation_allowed"] is False
+    assert canceled_replay["duplicate"] is True
+    assert (
+        await primary._pool.fetchval(
+            "SELECT status FROM ownership_accounts WHERE account_id = $1",
+            principal.account_id,
+        )
+        == "active"
+    )
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT count(*)
+            FROM ownership_installations
+            WHERE account_id = $1 AND status = 'active'
+            """,
+            principal.account_id,
+        )
+        == 0
+    )
+
+
+@pytest.mark.asyncio
+async def test_account_deletion_band_retirement_is_fail_closed_and_tenant_scoped(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    await _provision_band(primary)
+    claims, registration, principal = await _register(
+        repository,
+        subject="account-deletion-band-owner",
+        installation_id="ios-account-deletion-band",
+        token_character="F",
+    )
+    _, submission, evidence = await _challenge_and_submission(repository)
+    await repository.claim_band(
+        principal=principal,
+        installation_id=registration.installation_id,
+        submission=submission,
+        evidence=evidence,
+        app_id=APPLE_APP_ID,
+        platform="ios",
+    )
+    request = _account_deletion_request()
+    created = await repository.request_account_deletion(
+        claims=claims,
+        installation_id=registration.installation_id,
+        installation_token_hash=hashlib.sha256(
+            registration.installation_token.get_secret_value().encode("ascii")
+        ).hexdigest(),
+        expected_platform="ios",
+        request=request,
+        cooling_off=timedelta(hours=24),
+    )
+
+    assert created["band_retirement"] == {
+        "required": True,
+        "eligibility": "blocked_policy",
+        "work_state": "blocked",
+        "blocker": "policy_unapproved",
+        "policy_version": None,
+        "hardware_capability_version": None,
+    }
+    assert primary._pool is not None
+    band = await primary._pool.fetchrow(
+        """
+        SELECT status, current_account_id, released_at
+        FROM ownership_bands
+        WHERE provisioned_identity_hash = $1
+        """,
+        BAND_IDENTITY_HASH,
+    )
+    assert band["status"] == "claimed"
+    assert band["current_account_id"] == principal.account_id
+    assert band["released_at"] is None
+    assert await primary._pool.fetchval(
+        "SELECT count(*) FROM ownership_releases"
+    ) == 0
+
+    _, _, other_principal = await _register(
+        repository,
+        subject="account-deletion-other-owner",
+        installation_id="ios-account-deletion-other",
+        token_character="G",
+    )
+    with pytest.raises(OwnershipNotFoundError):
+        await repository.get_account_deletion(
+            principal=other_principal,
+            deletion_request_id=UUID(created["deletion_request_id"]),
+        )
+
+
+@pytest.mark.asyncio
+async def test_retirement_eligibility_never_claims_hardware_completion(
+    ownership_repository,
+) -> None:
+    _, primary = ownership_repository
+
+    class EligibleRetirementEvaluator:
+        def evaluate(self, **_: object) -> OwnershipBandRetirementEligibility:
+            return OwnershipBandRetirementEligibility(
+                state="eligible_pending_operator",
+                policy_version="india-deletion-v1",
+                hardware_capability_version="band-wipe-v1",
+            )
+
+    repository = PostgresOwnershipRepository(
+        primary,
+        retirement_evaluator=EligibleRetirementEvaluator(),
+    )
+    await _provision_band(primary)
+    claims, registration, principal = await _register(
+        repository,
+        subject="eligible-retirement-owner",
+        installation_id="ios-eligible-retirement",
+        token_character="H",
+    )
+    _, submission, evidence = await _challenge_and_submission(repository)
+    await repository.claim_band(
+        principal=principal,
+        installation_id=registration.installation_id,
+        submission=submission,
+        evidence=evidence,
+        app_id=APPLE_APP_ID,
+        platform="ios",
+    )
+    created = await repository.request_account_deletion(
+        claims=claims,
+        installation_id=registration.installation_id,
+        installation_token_hash=hashlib.sha256(
+            registration.installation_token.get_secret_value().encode("ascii")
+        ).hexdigest(),
+        expected_platform="ios",
+        request=_account_deletion_request(),
+        cooling_off=timedelta(hours=24),
+    )
+
+    assert created["band_retirement"]["eligibility"] == (
+        "eligible_pending_operator"
+    )
+    assert created["band_retirement"]["work_state"] == "blocked"
+    assert created["band_retirement"]["blocker"] == "operator_approval_required"
+    assert created["destructive_completion_claimed"] is False
+    assert primary._pool is not None
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT status
+            FROM ownership_bands
+            WHERE current_account_id = $1
+            """,
+            principal.account_id,
+        )
+        == "claimed"
+    )
+    assert await primary._pool.fetchval(
+        "SELECT count(*) FROM ownership_releases"
+    ) == 0
+
+
+@pytest.mark.asyncio
 async def test_ownership_terms_metadata_is_immutable_and_retirement_is_one_way(
     ownership_repository,
 ) -> None:
@@ -2342,7 +2634,9 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
                 ownership_terms_acceptances,
                 ownership_claim_requests,
                 ownership_installation_authorizations,
-                ownership_plan_selection_requests
+                ownership_plan_selection_requests,
+                ownership_account_deletion_requests,
+                ownership_account_deletion_targets
             TO {quoted_role};
             GRANT SELECT ON TABLE
                 ownership_bands
@@ -2377,7 +2671,16 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
                 selection,
                 request_id,
                 updated_at
-            ) ON TABLE ownership_plan_selections TO {quoted_role}
+            ) ON TABLE ownership_plan_selections TO {quoted_role};
+            GRANT UPDATE (
+                status,
+                auth_valid_after,
+                updated_at,
+                deletion_requested_at
+            ) ON TABLE ownership_accounts TO {quoted_role};
+            GRANT UPDATE (
+                canceled_at
+            ) ON TABLE ownership_account_deletion_requests TO {quoted_role}
             """
         )
         parsed = urlsplit(DATABASE_URL)
