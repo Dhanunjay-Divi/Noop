@@ -439,37 +439,49 @@ class ManagedCloudService private constructor(context: Context) {
 
     suspend fun exportCompleteCloudHistory(destination: Uri) {
         if (!beginBusy()) return
-        var writer: ManagedHistorySafArchiveWriter? = null
+        var transferStore: ManagedHistoryTransferStore? = null
         val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("managed_export")
         try {
             withContext(Dispatchers.IO) {
-                for (pass in 1..MAXIMUM_EXPORT_PREPARATION_PASSES) {
-                    coroutineContext.ensureActive()
-                    setStatus(
-                        text(
-                            R.string.managed_cloud_status_export_preparing_pass,
-                            pass,
-                        ),
-                    )
-                    val summary = performSync(SyncMode.EXPORT_PREPARATION)
-                    if (!summary.hasMore) break
-                    if (pass == MAXIMUM_EXPORT_PREPARATION_PASSES) {
-                        throw ManagedCloudException.ExportPreparationIncomplete
+                val transfer = ManagedHistoryTransferStore(
+                    appContext,
+                    accountScopeHash(),
+                )
+                transferStore = transfer
+                val checkpoint = transfer.loadExportCheckpoint()
+                val resumed = checkpoint != null
+                if (checkpoint == null) {
+                    transfer.clearExport()
+                    for (pass in 1..MAXIMUM_EXPORT_PREPARATION_PASSES) {
+                        coroutineContext.ensureActive()
+                        setStatus(
+                            text(
+                                R.string.managed_cloud_status_export_preparing_pass,
+                                pass,
+                            ),
+                        )
+                        val summary = performSync(SyncMode.EXPORT_PREPARATION)
+                        if (!summary.hasMore) break
+                        if (pass == MAXIMUM_EXPORT_PREPARATION_PASSES) {
+                            throw ManagedCloudException.ExportPreparationIncomplete
+                        }
                     }
                 }
 
-                val archiveWriter = ManagedHistorySafArchiveWriter(
-                    appContext,
-                    destination,
-                )
-                writer = archiveWriter
                 val manifest = ManagedHistoryExporter(client()).export(
+                    resumeFrom = checkpoint,
                     authorization = ::authorization,
                     progress = ::setExportStatus,
-                    consume = archiveWriter::add,
+                    saveCheckpoint = transfer::saveExportCheckpoint,
+                    consume = transfer::add,
                 )
-                archiveWriter.finish(manifest)
-                writer = null
+                try {
+                    transfer.validateExport(manifest)
+                } catch (error: Throwable) {
+                    transfer.clearExport()
+                    throw error
+                }
+                transfer.publishExport(destination, manifest)
                 setStatus(text(R.string.managed_cloud_status_export_saved))
                 com.noop.AppDiagnosticsRecorder.endOperation(
                     diagnostic,
@@ -477,13 +489,13 @@ class ManagedCloudService private constructor(context: Context) {
                     fields = mapOf(
                         "objects" to manifest.exportedObjects.toString(),
                         "chunk_bytes" to manifest.exportedChunkBytes.toString(),
+                        "resumed" to resumed.toString(),
                     ),
                     includeResourceSnapshot = true,
                 )
             }
         } catch (error: CancellationException) {
-            writer?.abort()
-                ?: ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
+            ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
             setStatus(text(R.string.managed_cloud_status_export_canceled))
             com.noop.AppDiagnosticsRecorder.endOperation(
                 diagnostic,
@@ -492,8 +504,10 @@ class ManagedCloudService private constructor(context: Context) {
             )
             throw error
         } catch (error: Throwable) {
-            writer?.abort()
-                ?: ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
+            ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
+            if (shouldResetManagedHistoryExport(error)) {
+                transferStore?.clearExport()
+            }
             setStatus(userMessage(error))
             com.noop.AppDiagnosticsRecorder.endOperation(
                 diagnostic,
@@ -503,6 +517,73 @@ class ManagedCloudService private constructor(context: Context) {
                 ),
                 includeResourceSnapshot = true,
             )
+        } finally {
+            endBusy()
+        }
+    }
+
+    suspend fun importCompleteCloudHistory(
+        source: Uri,
+    ): ManagedHistoryImportSummary? {
+        if (!beginBusy()) return null
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("managed_import")
+        return try {
+            withContext(Dispatchers.IO) {
+                val scopeHash = accountScopeHash()
+                val transfer = ManagedHistoryTransferStore(
+                    appContext,
+                    scopeHash,
+                )
+                val reader = transfer.stageImport(source)
+                bindManagedDocumentProfile(scopeHash)
+                val documents = RoomManagedDocumentAdapter(
+                    database = database,
+                    accountScopeHash = scopeHash,
+                    context = appContext,
+                )
+                val restore = RoomManagedRestoreApplier(
+                    database = database,
+                    documentRestore = documents,
+                )
+                val summary = ManagedHistoryImporter().importArchive(
+                    manifestData = reader.manifestData(),
+                    entryPaths = reader.entryPaths(),
+                    resumeFrom = transfer.loadImportCheckpoint(),
+                    restore = restore,
+                    saveCheckpoint = transfer::saveImportCheckpoint,
+                    read = reader::data,
+                )
+                transfer.clearImport()
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "completed",
+                    fields = mapOf(
+                        "objects" to summary.importedObjects.toString(),
+                        "chunk_bytes" to summary.importedChunkBytes.toString(),
+                        "resumed" to summary.resumed.toString(),
+                    ),
+                    includeResourceSnapshot = true,
+                )
+                summary
+            }
+        } catch (error: CancellationException) {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "canceled",
+                includeResourceSnapshot = true,
+            )
+            throw error
+        } catch (error: Throwable) {
+            setStatus(userMessage(error))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = diagnosticOperationOutcome(error),
+                fields = mapOf(
+                    "failure_kind" to diagnosticSyncFailureKind(error),
+                ),
+                includeResourceSnapshot = true,
+            )
+            null
         } finally {
             endBusy()
         }
@@ -2786,6 +2867,12 @@ class ManagedCloudService private constructor(context: Context) {
             "canceled" -> "canceled"
             else -> "failed"
         }
+
+    private fun shouldResetManagedHistoryExport(error: Throwable): Boolean =
+        error is ManagedStorageException.CursorExpired ||
+            error is ManagedStorageException.NotFound ||
+            error is ManagedStorageException.Conflict ||
+            error is ManagedStorageException.DigestMismatch
 
     private suspend fun performSyncPass(
         mode: SyncMode,

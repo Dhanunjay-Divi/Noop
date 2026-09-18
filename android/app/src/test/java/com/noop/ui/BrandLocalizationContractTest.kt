@@ -4,11 +4,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import javax.xml.parsers.DocumentBuilderFactory
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNotEquals
-import kotlin.test.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 class BrandLocalizationContractTest {
     private val repoRoot: Path by lazy {
@@ -51,8 +51,8 @@ class BrandLocalizationContractTest {
             }
 
             assertTrue(
-                values.getValue("brand_band_accepted_all_r22_flags").isNotBlank(),
                 "$directory must provide the localized R22 completion status",
+                values.getValue("brand_band_accepted_all_r22_flags").isNotBlank(),
             )
             values.getValue("brand_band_accepted_all_r22_flags")
         }
@@ -60,19 +60,22 @@ class BrandLocalizationContractTest {
         val english = localizedValues.getValue("values")
         localeDirectories.drop(1).forEach { directory ->
             assertNotEquals(
+                "$directory must not copy the English fallback",
                 english,
                 localizedValues.getValue(directory),
-                "$directory must not copy the English fallback",
             )
         }
     }
 
     @Test
     fun settingsUsesTheResourceInsteadOfEnglishInlineCopy() {
-        val source = Files.readString(
-            repoRoot.resolve(
-                "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+        val source = String(
+            Files.readAllBytes(
+                repoRoot.resolve(
+                    "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+                ),
             ),
+            Charsets.UTF_8,
         )
 
         assertTrue(

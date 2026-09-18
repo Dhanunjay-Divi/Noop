@@ -401,45 +401,57 @@ final class ManagedCloudService: ObservableObject {
         guard !isBusy, phase == .enrolled else { return nil }
         isBusy = true
         defer { isBusy = false }
-        var writer: ManagedHistoryArchiveWriter?
+        var transferStore: ManagedHistoryTransferStore?
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("managed_export")
         do {
-            for pass in 1...Self.maximumExportPreparationPasses {
-                try Task.checkCancellation()
-                setStatus(
-                    String(localized:
-                        "Preparing current phone data for export (pass \(pass))…"
+            let transfer = try ManagedHistoryTransferStore(
+                accountScopeHash: try accountScopeHash()
+            )
+            transferStore = transfer
+            var checkpoint = try await transfer.loadExportCheckpoint()
+            let resumed = checkpoint != nil
+            if checkpoint == nil {
+                await transfer.clearExport()
+                for pass in 1...Self.maximumExportPreparationPasses {
+                    try Task.checkCancellation()
+                    setStatus(
+                        String(localized:
+                            "Preparing current phone data for export (pass \(pass))…"
+                        )
                     )
-                )
-                let summary = try await sync(
-                    repo: repo,
-                    mode: .exportPreparation
-                )
-                if !summary.hasMore { break }
-                guard pass < Self.maximumExportPreparationPasses else {
-                    throw ManagedCloudError.exportPreparationIncomplete
+                    let summary = try await sync(
+                        repo: repo,
+                        mode: .exportPreparation
+                    )
+                    if !summary.hasMore { break }
+                    guard pass < Self.maximumExportPreparationPasses else {
+                        throw ManagedCloudError.exportPreparationIncomplete
+                    }
+                    await Task.yield()
                 }
-                await Task.yield()
+                checkpoint = nil
             }
 
-            let archiveWriter = try ManagedHistoryArchiveWriter(
-                destinationURL: Self.managedHistoryExportURL()
-            )
-            writer = archiveWriter
             let exporter = ManagedHistoryExporter(transport: try client())
             let manifest = try await exporter.export(
+                resumeFrom: checkpoint,
                 authorization: { [self] forceRefresh in
                     try await authorization(forceRefresh: forceRefresh)
                 },
                 progress: { [weak self] value in
                     await self?.setExportStatus(value)
                 },
+                saveCheckpoint: { value in
+                    try await transfer.saveExportCheckpoint(value)
+                },
                 consume: { entry in
-                    try await archiveWriter.add(entry)
+                    try await transfer.add(entry)
                 }
             )
-            let url = try await archiveWriter.finalize(manifest: manifest)
-            writer = nil
+            _ = try await transfer.finalizeExport(manifest: manifest)
+            let url = try await transfer.publishExport(
+                to: Self.managedHistoryExportURL()
+            )
             setStatus(
                 String(localized:
                     "Complete cloud history is ready. Choose where to save the sensitive archive."
@@ -451,12 +463,12 @@ final class ManagedCloudService: ObservableObject {
                 fields: [
                     "objects": String(manifest.exportedObjects),
                     "chunk_bytes": String(manifest.exportedChunkBytes),
+                    "resumed": resumed ? "true" : "false",
                 ],
                 includeResourceSnapshot: true
             )
             return url
         } catch is CancellationError {
-            if let writer { await writer.cancel() }
             setStatus(String(localized: "Cloud-history export was canceled."))
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -465,11 +477,101 @@ final class ManagedCloudService: ObservableObject {
             )
             return nil
         } catch {
-            if let writer { await writer.cancel() }
+            if let transferStore,
+               Self.shouldResetManagedHistoryExport(after: error) {
+                await transferStore.clearExport()
+            }
             setStatus(Self.userMessage(for: error))
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
                 outcome: "failed",
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ],
+                includeResourceSnapshot: true
+            )
+            return nil
+        }
+    }
+
+    func importCompleteCloudHistory(
+        from sourceURL: URL,
+        repo: Repository
+    ) async -> ManagedHistoryImportSummary? {
+        guard !isBusy, phase == .enrolled else { return nil }
+        isBusy = true
+        defer { isBusy = false }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_import"
+        )
+        let securityScoped = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if securityScoped {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        do {
+            let scope = try accountScopeHash()
+            let transfer = try ManagedHistoryTransferStore(
+                accountScopeHash: scope
+            )
+            let reader = try await transfer.stageImport(from: sourceURL)
+            guard let store = await repo.storeHandle() else {
+                throw ManagedCloudError.storeUnavailable
+            }
+            try await store.activateManagedDocumentProfile(
+                accountScopeHash: scope,
+                updatedAtMs: Self.managedNowMilliseconds()
+            )
+            let documents = try WhoopManagedDocumentAdapter(
+                store: store,
+                accountScopeHash: scope,
+                preferencesDefaults: defaults
+            )
+            let restore = WhoopManagedRestoreApplier(
+                store: store,
+                documentRestore: documents
+            )
+            let checkpoint = try await transfer.loadImportCheckpoint()
+            let summary = try await ManagedHistoryImporter().importArchive(
+                manifestData: try await reader.manifestData(),
+                entryPaths: try await reader.entryPaths(),
+                resumeFrom: checkpoint,
+                restore: restore,
+                saveCheckpoint: { value in
+                    try await transfer.saveImportCheckpoint(value)
+                },
+                read: { path, maximumBytes in
+                    try await reader.data(
+                        for: path,
+                        maximumBytes: maximumBytes
+                    )
+                }
+            )
+            await transfer.clearImport()
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: [
+                    "objects": String(summary.importedObjects),
+                    "chunk_bytes": String(summary.importedChunkBytes),
+                    "resumed": summary.resumed ? "true" : "false",
+                ],
+                includeResourceSnapshot: true
+            )
+            return summary
+        } catch is CancellationError {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "canceled",
+                includeResourceSnapshot: true
+            )
+            return nil
+        } catch {
+            setStatus(Self.userMessage(for: error))
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOperationOutcome(error),
                 fields: [
                     "failure_kind": Self.diagnosticSyncFailureKind(error),
                 ],
@@ -3503,6 +3605,21 @@ final class ManagedCloudService: ObservableObject {
             return false
         }
         return auth == .networkError || auth == .webNetworkRequestFailed
+    }
+
+    nonisolated private static func shouldResetManagedHistoryExport(
+        after error: Error
+    ) -> Bool {
+        if let storage = error as? ManagedStorageError {
+            switch storage {
+            case .cursorExpired, .notFound, .conflict, .digestMismatch,
+                 .decoding:
+                return true
+            default:
+                return false
+            }
+        }
+        return error is ManagedHistoryArchiveError
     }
 
     private func syncPass(
