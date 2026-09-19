@@ -549,7 +549,7 @@ struct HydrationView: View {
             reminderEnabled = HydrationReminders.isEnabled
             refreshNotificationPermissionState()
         }
-        .onChange(of: scenePhase) { phase in
+        .onChangeCompat(of: scenePhase) { phase in
             guard phase == .active else { return }
             reminderEnabled = HydrationReminders.isEnabled
             refreshNotificationPermissionState()

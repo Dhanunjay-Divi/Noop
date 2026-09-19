@@ -2131,7 +2131,7 @@ private struct StrengthProgramBuilder: View {
                     ForEach(2...6, id: \.self) { Text("\($0)").tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .onChange(of: dayCount) { count in
+                .onChangeCompat(of: dayCount) { count in
                     let suggested = Set(
                         StrengthAdaptivePlanner.suggestedWeekdays(for: count)
                     )

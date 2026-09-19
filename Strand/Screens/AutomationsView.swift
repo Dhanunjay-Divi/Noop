@@ -124,7 +124,7 @@ struct AutomationsView: View {
             refreshPlannedWorkoutCalendarState()
             #endif
         }
-        .onChange(of: scenePhase) { phase in
+        .onChangeCompat(of: scenePhase) { phase in
             guard phase == .active else { return }
             refreshNotificationPermissionState()
             #if os(iOS)

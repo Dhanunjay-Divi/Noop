@@ -174,7 +174,7 @@ final class ManagedCloudRetryContractTests: XCTestCase {
             "android/app/src/main/java/com/noop/managed/ManagedCloudScheduler.kt"
         )
         XCTAssertTrue(source.contains("scope = failure.scope"))
-        XCTAssertTrue(source.contains("return allEnqueued"))
+        XCTAssertTrue(source.contains("return aggregateOutcome"))
         XCTAssertTrue(source.contains("scopedRetryEnqueueTransition("))
         XCTAssertTrue(source.contains("retryStore.clear(failure.scope)"))
         XCTAssertTrue(source.contains("RetryEnqueueOutcome.WORKER_RETRY"))

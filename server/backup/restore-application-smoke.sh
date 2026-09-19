@@ -19,6 +19,7 @@ case "$engine" in
 esac
 
 manifest=${NOOP_MIGRATION_MANIFEST:-$selected_manifest}
+smoke_sql=${NOOP_RESTORE_APPLICATION_SMOKE_SQL:-$manifest_directory/restore-application-smoke.sql}
 
 if [ ! -r "$selected_manifest" ]; then
     echo "migration manifest is required: $selected_manifest" >&2
@@ -28,7 +29,6 @@ if [ ! -r "$manifest" ] || ! cmp -s "$manifest" "$selected_manifest"; then
     echo "migration manifest does not match NOOP_DATABASE_ENGINE=$engine" >&2
     exit 66
 fi
-
 expected_count=$(awk 'NF { count += 1 } END { print count + 0 }' "$manifest")
 applied_count=$(psql \
     --dbname="$database" \
@@ -69,10 +69,15 @@ SQL
     fi
 done <"$manifest"
 
+if [ ! -r "$smoke_sql" ]; then
+    echo "restore application smoke SQL is required: $smoke_sql" >&2
+    exit 66
+fi
+
 psql \
     --dbname="$database" \
     --set=ON_ERROR_STOP=1 \
-    --file=/opt/noop/restore-application-smoke.sql \
+    --file="$smoke_sql" \
     >/dev/null
 
 echo "restore application contract smoke test passed"

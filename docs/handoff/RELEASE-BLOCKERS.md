@@ -57,8 +57,9 @@ remains a separate explicit opt-in.
    URLs, and native-speaker review for all shipped locales.
 4. **Complete the ownership/account launch path.** Treat the current
    supplier-independent identity, terms, claim, installation, and onboarding
-   foundation as `PARTIAL`, not production-ready. Keep supplier-backed
-   possession, ownership-account deletion, billing, recovery/release, legal
+   foundation plus cooling-off deletion coordination as `PARTIAL`, not
+   production-ready. Keep supplier-backed possession, provider identity
+   erasure, approved band retirement/wipe, billing, recovery/release, legal
    approval, physical evidence, and production deployment/operations open.
 5. **Deploy and operate the required server paths.** Choose production regions,
    tenancy and identity recovery, PostgreSQL/Timescale topology, secret
@@ -75,10 +76,10 @@ remains a separate explicit opt-in.
    operator response. Keep SMS/voice disabled unless its separate carrier or
    DLT, legal, physical-phone, failover, and staffed-operations gates pass.
 7. **Finish managed portability before advertising round-trip NOOP+ export.**
-   The current snapshot-bound exporter is non-resumable, has no archive
-   importer, and includes `day_ownership` as its only managed document kind.
-   Implement continuation and import, then prove expiry, corruption,
-   large-account, cancellation/auth-refresh, and cross-tenant behavior.
+   Resumable export, full archive prevalidation, and resumable idempotent import
+   now exist for selected chunks and `day_ownership`, the only managed document
+   kind in scope. Prove live expiry, large-account, cancellation/auth-refresh,
+   cross-tenant, low-storage, and physical process-death behavior.
 8. **Validate physical devices.** Exercise supported band generations,
    overnight history, reconnect, clock correlation, background restoration,
    haptics, charging state, low battery, alarms, HealthKit, Watch handoff,
@@ -106,12 +107,11 @@ GitHub Actions results for the ten contexts listed in
 [`../RELEASE_CONTROLS.md`](../RELEASE_CONTROLS.md), including the exact-SHA
 `trusted-release-controls` result.
 
-The active September 17-18 UI/cloud-readiness branch is dirty, uncommitted,
-unpushed, and has not run those hosted checks on an exact candidate head.
-Focused local evidence from that round is not a release wall. It must finish
-the applicable local verification, enter through a protected pull request, pass
-all ten contexts, and merge without bypass before it becomes integrated
-evidence.
+The September 17-19 UI/cloud-readiness candidate has complete local Apple,
+Android, package, server, emulator, simulator, restore, OpenTofu, localization,
+visual, policy, bounded-runner, and exact round-owned cleanup walls. Its
+protected pull request is the authoritative record for the exact candidate
+head, all ten contexts, normal merge, and protected-main result.
 
 Protected source publication and hosted CI prove only the reviewed source
 commit. They do not close the external gates below.

@@ -47,3 +47,7 @@ enable_ownership_runtime            = false
 # Existing secret ID only, never a URL or password. Its PostgreSQL role must
 # have access to ownership_* objects and no managed-health or Safety tables.
 ownership_database_url_secret_id    = null
+# The managed lifecycle job may coordinate ownership-account deletion only
+# through this separate role and secret. Keep both disabled until provisioned.
+enable_ownership_deletion_coordination                = false
+ownership_deletion_lifecycle_database_url_secret_id   = null

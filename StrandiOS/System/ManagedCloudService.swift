@@ -770,9 +770,7 @@ final class ManagedCloudService: ObservableObject {
         do {
             try configureFirebaseIfNeeded()
             let allowed = try await UNUserNotificationCenter.current()
-                .requestAuthorization(
-                    options: [.alert, .sound, .timeSensitive]
-                )
+                .requestAuthorization(options: [.alert, .sound])
             guard allowed else {
                 await retireManagedPushInstallationForNotificationSettings()
                 return false

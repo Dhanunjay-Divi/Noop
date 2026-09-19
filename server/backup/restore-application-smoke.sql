@@ -186,17 +186,58 @@ BEGIN
         SELECT 1
         FROM (
             VALUES
-                ('feedback_report_compatibility'),
-                ('feedback_report_retire_idempotency')
-        ) AS required(trigger_name)
+                (
+                    'feedback_report_compatibility',
+                    'noop_feedback_report_compatibility',
+                    23::smallint,
+                    false
+                ),
+                (
+                    'feedback_report_retire_idempotency',
+                    'noop_feedback_report_retire_idempotency',
+                    11::smallint,
+                    true
+                )
+        ) AS required(
+            trigger_name,
+            function_name,
+            expected_type,
+            requires_exact_duration
+        )
         LEFT JOIN pg_trigger trigger_row
           ON trigger_row.tgrelid = 'feedback_reports'::regclass
          AND trigger_row.tgname = required.trigger_name
          AND NOT trigger_row.tgisinternal
+        LEFT JOIN pg_proc function_row
+          ON function_row.oid = trigger_row.tgfoid
+        LEFT JOIN pg_namespace function_schema
+          ON function_schema.oid = function_row.pronamespace
         WHERE trigger_row.oid IS NULL
            OR trigger_row.tgenabled NOT IN ('O', 'A')
+           OR trigger_row.tgtype IS DISTINCT FROM required.expected_type
+           OR trigger_row.tgconstraint IS DISTINCT FROM 0::oid
+           OR trigger_row.tgnargs IS DISTINCT FROM 0
+           OR trigger_row.tgattr IS DISTINCT FROM ''::int2vector
+           OR trigger_row.tgqual IS NOT NULL
+           OR trigger_row.tgoldtable IS NOT NULL
+           OR trigger_row.tgnewtable IS NOT NULL
+           OR function_schema.nspname IS DISTINCT FROM 'public'
+           OR function_row.proname IS DISTINCT FROM required.function_name
+           OR (
+                required.requires_exact_duration
+                AND (
+                    position(
+                        '1080 hours'
+                        IN COALESCE(function_row.prosrc, '')
+                    ) = 0
+                    OR position(
+                        '45 days'
+                        IN COALESCE(function_row.prosrc, '')
+                    ) > 0
+                )
+           )
     ) THEN
-        RAISE EXCEPTION 'feedback report runtime trigger is missing or disabled';
+        RAISE EXCEPTION 'feedback report runtime trigger binding or shape is invalid';
     END IF;
     IF EXISTS (
         SELECT 1
@@ -230,6 +271,179 @@ BEGIN
         WHERE version = '042_feedback_idempotency_tombstones.sql'
     ) THEN
         RAISE EXCEPTION 'required feedback tombstone migration is missing';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM noop_schema_migrations
+        WHERE version = '044_feedback_idempotency_duration.sql'
+    ) THEN
+        RAISE EXCEPTION 'required feedback tombstone duration migration is missing';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM noop_schema_migrations
+        WHERE version = '045_ownership_account_deletion_progress.sql'
+    ) THEN
+        RAISE EXCEPTION 'required ownership deletion progress migration is missing';
+    END IF;
+    IF to_regclass(
+        'public.ownership_account_deletion_target_progress'
+    ) IS NULL THEN
+        RAISE EXCEPTION 'ownership deletion progress table is missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                ('deletion_request_id', 'uuid', true),
+                ('target_kind', 'text', true),
+                ('current_state', 'text', true),
+                ('blocker', 'text', false),
+                ('progress_version', 'bigint', true),
+                ('attempt_count', 'integer', true),
+                ('lease_owner', 'uuid', false),
+                ('lease_expires_at', 'timestamp with time zone', false),
+                ('retry_after', 'timestamp with time zone', false),
+                ('managed_erasure_job_id', 'uuid', false),
+                ('last_error_kind', 'text', false),
+                ('updated_at', 'timestamp with time zone', true),
+                ('completed_at', 'timestamp with time zone', false)
+        ) AS required(column_name, expected_type, expected_not_null)
+        LEFT JOIN pg_attribute column_state
+          ON column_state.attrelid =
+                'ownership_account_deletion_target_progress'::regclass
+         AND column_state.attname = required.column_name
+         AND column_state.attnum > 0
+         AND NOT column_state.attisdropped
+        WHERE column_state.attname IS NULL
+           OR column_state.attnotnull IS DISTINCT FROM
+                required.expected_not_null
+           OR format_type(
+                column_state.atttypid,
+                column_state.atttypmod
+              ) <> required.expected_type
+    ) THEN
+        RAISE EXCEPTION 'ownership deletion progress column contract is invalid';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                ('ownership_account_deletion_target_progress_pkey', 'p'),
+                ('ownership_account_deletion_progress_target_fk', 'f'),
+                ('ownership_account_deletion_progress_managed_job_fk', 'f'),
+                ('ownership_account_deletion_progress_state', 'c'),
+                ('ownership_account_deletion_progress_blocker', 'c'),
+                ('ownership_account_deletion_progress_state_blocker', 'c'),
+                ('ownership_account_deletion_progress_attempts', 'c'),
+                ('ownership_account_deletion_progress_version', 'c'),
+                ('ownership_account_deletion_progress_lease_pair', 'c'),
+                ('ownership_account_deletion_progress_retry_state', 'c'),
+                ('ownership_account_deletion_progress_managed_target', 'c'),
+                ('ownership_account_deletion_progress_failure_kind', 'c'),
+                ('ownership_account_deletion_progress_completion_state', 'c')
+        ) AS required(constraint_name, constraint_type)
+        LEFT JOIN pg_constraint constraint_row
+          ON constraint_row.conrelid =
+                'ownership_account_deletion_target_progress'::regclass
+         AND constraint_row.conname = required.constraint_name
+         AND constraint_row.contype = required.constraint_type
+        WHERE constraint_row.oid IS NULL
+           OR NOT constraint_row.convalidated
+    ) THEN
+        RAISE EXCEPTION 'ownership deletion progress constraint is missing or invalid';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_class index_row
+        JOIN pg_index index_state
+          ON index_state.indexrelid = index_row.oid
+        JOIN pg_am access_method
+          ON access_method.oid = index_row.relam
+        WHERE index_state.indrelid =
+                'ownership_account_deletion_target_progress'::regclass
+          AND index_row.relname =
+                'ownership_account_deletion_progress_due_idx'
+          AND access_method.amname = 'btree'
+          AND index_state.indisvalid
+          AND index_state.indisready
+          AND NOT index_state.indisunique
+          AND index_state.indpred IS NOT NULL
+          AND position(
+                'current_state = ANY'
+                IN pg_get_expr(
+                    index_state.indpred,
+                    index_state.indrelid
+                )
+              ) > 0
+    ) THEN
+        RAISE EXCEPTION 'ownership deletion progress due index is missing or invalid';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                (
+                    'ownership_account_deletion_progress_guard',
+                    'noop_ownership_account_deletion_progress_guard',
+                    false
+                ),
+                (
+                    'ownership_account_deletion_progress_seed',
+                    'noop_ownership_account_deletion_progress_seed',
+                    true
+                )
+        ) AS required(trigger_name, function_name, security_definer)
+        LEFT JOIN pg_trigger trigger_row
+          ON trigger_row.tgrelid = CASE required.trigger_name
+                WHEN 'ownership_account_deletion_progress_guard'
+                THEN 'ownership_account_deletion_target_progress'::regclass
+                ELSE 'ownership_account_deletion_targets'::regclass
+             END
+         AND trigger_row.tgname = required.trigger_name
+         AND NOT trigger_row.tgisinternal
+        LEFT JOIN pg_proc function_row
+          ON function_row.oid = trigger_row.tgfoid
+         AND function_row.proname = required.function_name
+        LEFT JOIN pg_namespace function_schema
+          ON function_schema.oid = function_row.pronamespace
+         AND function_schema.nspname = 'public'
+        WHERE trigger_row.oid IS NULL
+           OR trigger_row.tgenabled NOT IN ('O', 'A')
+           OR function_row.oid IS NULL
+           OR function_row.prosecdef IS DISTINCT FROM
+                required.security_definer
+    ) THEN
+        RAISE EXCEPTION 'ownership deletion progress trigger binding is invalid';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_proc function_row
+        JOIN pg_namespace function_schema
+          ON function_schema.oid = function_row.pronamespace
+        CROSS JOIN LATERAL aclexplode(
+            COALESCE(
+                function_row.proacl,
+                acldefault('f', function_row.proowner)
+            )
+        ) privilege
+        WHERE function_schema.nspname = 'public'
+          AND function_row.proname =
+                'noop_ownership_account_deletion_progress_seed'
+          AND privilege.grantee = 0
+          AND privilege.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'ownership deletion progress seed is executable by PUBLIC';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM ownership_account_deletion_targets target
+        FULL OUTER JOIN ownership_account_deletion_target_progress progress
+          USING (deletion_request_id, target_kind)
+        WHERE target.deletion_request_id IS NULL
+           OR progress.deletion_request_id IS NULL
+    ) THEN
+        RAISE EXCEPTION 'ownership deletion target progress is incomplete or orphaned';
     END IF;
     IF to_regclass('public.feedback_idempotency_tombstones') IS NULL THEN
         RAISE EXCEPTION 'feedback idempotency tombstone table is missing';
@@ -278,7 +492,7 @@ BEGIN
                 ),
                 (
                     'feedback_tombstone_time_order',
-                    $definition$CHECK (expires_at = (reserved_at + '45 days'::interval) AND expires_at > reserved_at)$definition$
+                    $definition$CHECK (expires_at = (reserved_at + '1080:00:00'::interval) AND expires_at > reserved_at)$definition$
                 )
         ) AS required(constraint_name, expected_definition)
         LEFT JOIN pg_constraint constraint_row
@@ -298,6 +512,43 @@ BEGIN
               ) <> required.expected_definition
     ) THEN
         RAISE EXCEPTION 'feedback tombstone check constraint is missing, unvalidated, or invalid';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger trigger_row
+        JOIN pg_proc function_row
+          ON function_row.oid = trigger_row.tgfoid
+        JOIN pg_namespace function_schema
+          ON function_schema.oid = function_row.pronamespace
+        WHERE trigger_row.tgrelid =
+                'feedback_idempotency_tombstones'::regclass
+          AND trigger_row.tgname =
+                'feedback_tombstone_normalize_expiry'
+          AND NOT trigger_row.tgisinternal
+          AND trigger_row.tgenabled IN ('O', 'A')
+          AND trigger_row.tgtype = 23
+          AND trigger_row.tgconstraint = 0::oid
+          AND trigger_row.tgnargs = 0
+          AND trigger_row.tgqual IS NULL
+          AND trigger_row.tgoldtable IS NULL
+          AND trigger_row.tgnewtable IS NULL
+          AND ARRAY(
+                SELECT attribute.attname::text
+                FROM unnest(
+                    trigger_row.tgattr::smallint[]
+                ) WITH ORDINALITY AS selected(attnum, position)
+                JOIN pg_attribute attribute
+                  ON attribute.attrelid = trigger_row.tgrelid
+                 AND attribute.attnum = selected.attnum
+                ORDER BY selected.position
+              ) = ARRAY['reserved_at', 'expires_at']
+          AND function_schema.nspname = 'public'
+          AND function_row.proname =
+                'noop_feedback_tombstone_normalize_expiry'
+          AND position('1080 hours' IN function_row.prosrc) > 0
+          AND position('45 days' IN function_row.prosrc) = 0
+    ) THEN
+        RAISE EXCEPTION 'feedback tombstone duration normalization trigger is missing or invalid';
     END IF;
     IF NOT EXISTS (
         SELECT 1

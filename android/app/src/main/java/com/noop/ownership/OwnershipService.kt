@@ -120,6 +120,10 @@ class OwnershipService private constructor(
                     replaceState {
                         it.copy(
                             phase = OwnershipPhase.SIGNED_OUT,
+                            terms = null,
+                            overview = null,
+                            installations = emptyList(),
+                            accountDeletion = null,
                             maskedEmail = "",
                         )
                     }
@@ -936,6 +940,205 @@ class OwnershipService private constructor(
         }
     }
 
+    suspend fun requestAccountDeletion(
+        password: String,
+        confirmation: String,
+        exportAcknowledged: Boolean,
+        retentionAcknowledged: Boolean,
+    ) {
+        if (!beginBusy()) return
+        val operation = AppDiagnosticsRecorder.beginOperation(
+            "ownership.account_deletion.request",
+        )
+        try {
+            if (confirmation != ACCOUNT_DELETION_CONFIRMATION) {
+                throw OwnershipException.DeletionConfirmationRequired
+            }
+            if (!exportAcknowledged || !retentionAcknowledged) {
+                throw OwnershipException.DeletionAcknowledgementsRequired
+            }
+            val user = currentUser()
+            reauthenticateWithPassword(user, password)
+            val checkpoint = checkpoint(user)
+            val policyVersion = checkpoint.acceptedPolicyVersion
+                ?: throw OwnershipException.TermsRequired
+            val policySha256 = checkpoint.acceptedPolicySha256
+                ?: throw OwnershipException.TermsRequired
+            val locale = checkpoint.acceptedLocale
+                ?: throw OwnershipException.TermsRequired
+            val scope = accountScope(user)
+            val requestId = secureStore().accountDeletionAttemptId(scope)
+                ?: UUID.randomUUID().also { created ->
+                    secureStore().writeAccountDeletionAttemptId(scope, created)
+                }
+            val deletion = client().requestAccountDeletion(
+                requestId = requestId,
+                confirmationSha256 = accountDeletionConfirmationSha256(),
+                exportAcknowledged = exportAcknowledged,
+                retentionAcknowledged = retentionAcknowledged,
+                policyVersion = policyVersion,
+                policySha256 = policySha256,
+                locale = locale,
+                authorization = authorization(forceRefresh = true),
+            )
+            replaceState {
+                it.copy(
+                    phase = OwnershipPhase.DELETION_PENDING,
+                    status = text(R.string.ownership_deletion_pending_status),
+                    terms = null,
+                    overview = null,
+                    installations = emptyList(),
+                    accountDeletion = deletion,
+                )
+            }
+            try {
+                secureStore().writeAccountDeletionRequestId(
+                    scope,
+                    deletion.id,
+                )
+                val cleanupCompleted =
+                    secureStore().clearAccountDeletionAttemptId(scope)
+                AppDiagnosticsRecorder.endOperation(
+                    operation,
+                    outcome = "accepted",
+                    fields = deletionDiagnosticFields(deletion) +
+                        (
+                            "cleanup_outcome" to
+                                if (cleanupCompleted) "completed" else "deferred"
+                        ),
+                )
+            } catch (_: Throwable) {
+                replaceState {
+                    it.copy(
+                        status = text(
+                            R.string.ownership_deletion_reference_not_saved,
+                        ),
+                    )
+                }
+                AppDiagnosticsRecorder.endOperation(
+                    operation,
+                    outcome = "partial",
+                    fields = deletionDiagnosticFields(deletion) +
+                        ("failure_kind" to "secure_storage"),
+                )
+            }
+        } catch (error: CancellationException) {
+            AppDiagnosticsRecorder.endOperation(
+                operation,
+                outcome = "canceled",
+                fields = mapOf("failure_kind" to "canceled"),
+            )
+            throw error
+        } catch (error: Throwable) {
+            val reportedError = reconcileChangedTerms(error)
+            replaceState {
+                it.copy(
+                    phase = ownershipFailureRecoveryPhase(
+                        phase = it.phase,
+                        termsChanged =
+                            reportedError == OwnershipException.TermsChanged,
+                        secureStorageFailed =
+                            reportedError == OwnershipException.SecureStorage,
+                    ),
+                    status = userMessage(reportedError),
+                )
+            }
+            AppDiagnosticsRecorder.endOperation(
+                operation,
+                outcome = diagnosticOutcome(reportedError),
+                fields = mapOf(
+                    "failure_kind" to diagnosticFailureKind(reportedError),
+                ),
+            )
+        } finally {
+            endBusy()
+        }
+    }
+
+    suspend fun refreshAccountDeletion(password: String) {
+        if (!beginBusy()) return
+        val operation = AppDiagnosticsRecorder.beginOperation(
+            "ownership.account_deletion.refresh",
+        )
+        try {
+            val user = currentUser()
+            reauthenticateWithPassword(user, password)
+            val scope = accountScope(user)
+            val requestId = state.value.accountDeletion?.id
+                ?: secureStore().accountDeletionRequestId(scope)
+                ?: throw OwnershipException.InvalidState
+            val deletion = client().accountDeletion(
+                requestId = requestId,
+                authorization = authorization(forceRefresh = true),
+            )
+            val cleanupOutcome = applyAccountDeletion(deletion, scope)
+            AppDiagnosticsRecorder.endOperation(
+                operation,
+                outcome = deletion.state,
+                fields = deletionDiagnosticFields(deletion) +
+                    ("cleanup_outcome" to cleanupOutcome),
+            )
+        } catch (error: CancellationException) {
+            AppDiagnosticsRecorder.endOperation(
+                operation,
+                outcome = "canceled",
+                fields = mapOf("failure_kind" to "canceled"),
+            )
+            throw error
+        } catch (error: Throwable) {
+            replaceState { it.copy(status = userMessage(error)) }
+            AppDiagnosticsRecorder.endOperation(
+                operation,
+                outcome = diagnosticOutcome(error),
+                fields = mapOf("failure_kind" to diagnosticFailureKind(error)),
+            )
+        } finally {
+            endBusy()
+        }
+    }
+
+    suspend fun cancelAccountDeletion(password: String) {
+        if (!beginBusy()) return
+        val operation = AppDiagnosticsRecorder.beginOperation(
+            "ownership.account_deletion.cancel",
+        )
+        try {
+            val user = currentUser()
+            reauthenticateWithPassword(user, password)
+            val scope = accountScope(user)
+            val requestId = state.value.accountDeletion?.id
+                ?: secureStore().accountDeletionRequestId(scope)
+                ?: throw OwnershipException.InvalidState
+            val deletion = client().cancelAccountDeletion(
+                requestId = requestId,
+                authorization = authorization(forceRefresh = true),
+            )
+            val cleanupOutcome = applyAccountDeletion(deletion, scope)
+            AppDiagnosticsRecorder.endOperation(
+                operation,
+                outcome = deletion.state,
+                fields = deletionDiagnosticFields(deletion) +
+                    ("cleanup_outcome" to cleanupOutcome),
+            )
+        } catch (error: CancellationException) {
+            AppDiagnosticsRecorder.endOperation(
+                operation,
+                outcome = "canceled",
+                fields = mapOf("failure_kind" to "canceled"),
+            )
+            throw error
+        } catch (error: Throwable) {
+            replaceState { it.copy(status = userMessage(error)) }
+            AppDiagnosticsRecorder.endOperation(
+                operation,
+                outcome = diagnosticOutcome(error),
+                fields = mapOf("failure_kind" to diagnosticFailureKind(error)),
+            )
+        } finally {
+            endBusy()
+        }
+    }
+
     fun signOut() {
         if (!beginBusy()) return
         val operation = AppDiagnosticsRecorder.beginOperation(
@@ -1040,6 +1243,24 @@ class OwnershipService private constructor(
     ) {
         checkReconciliation(generation)
         if (!user.isEmailVerified) return
+        val scope = accountScope(user)
+        val deletionRequestId = secureStore().accountDeletionRequestId(scope)
+        if (deletionRequestId != null) {
+            val deletion = client().accountDeletion(
+                requestId = deletionRequestId,
+                authorization = authorization(forceRefresh = false),
+            )
+            checkReconciliation(generation)
+            applyAccountDeletion(deletion, scope)
+            AppDiagnosticsRecorder.record(
+                "ownership.lifecycle",
+                mapOf(
+                    "phase" to "reconciliation",
+                    "outcome" to "account_deletion",
+                ),
+            )
+            return
+        }
         var checkpoint = initialCheckpoint
         if (
             checkpoint.stage == OwnershipCheckpointStage.EMAIL_VERIFICATION &&
@@ -1345,7 +1566,12 @@ class OwnershipService private constructor(
         user: FirebaseUser,
         checkpoint: OwnershipCheckpoint,
     ) {
-        val phase = if (!user.isEmailVerified) {
+        val deletionPending = secureStore().accountDeletionRequestId(
+            accountScope(user),
+        ) != null
+        val phase = if (deletionPending) {
+            OwnershipPhase.DELETION_PENDING
+        } else if (!user.isEmailVerified) {
             OwnershipPhase.EMAIL_VERIFICATION
         } else {
             when (checkpoint.stage) {
@@ -1384,6 +1610,22 @@ class OwnershipService private constructor(
         replaceState {
             it.copy(
                 phase = phase,
+                status = if (deletionPending) {
+                    text(R.string.ownership_deletion_restart_status)
+                } else {
+                    it.status
+                },
+                overview = if (deletionPending) null else it.overview,
+                installations = if (deletionPending) {
+                    emptyList()
+                } else {
+                    it.installations
+                },
+                accountDeletion = if (deletionPending) {
+                    null
+                } else {
+                    it.accountDeletion
+                },
                 maskedEmail = maskEmail(user.email),
             )
         }
@@ -1398,6 +1640,56 @@ class OwnershipService private constructor(
         checkpointStage = checkpoint.stage,
         possessionAvailable = possessionProvider.isAvailable,
     )
+
+    private fun applyAccountDeletion(
+        deletion: OwnershipAccountDeletion,
+        scope: String,
+    ): String {
+        if (deletion.state == "canceled") {
+            val requestReferenceCleared =
+                secureStore().clearAccountDeletionRequestId(scope)
+            val attemptReferenceCleared =
+                secureStore().clearAccountDeletionAttemptId(scope)
+            val cleanupCompleted =
+                requestReferenceCleared && attemptReferenceCleared
+            invalidateBootstrapReconciliation()
+            runtime().auth.signOut()
+            replaceState {
+                OwnershipState(
+                    phase = OwnershipPhase.SIGNED_OUT,
+                    busy = true,
+                    status = text(
+                        if (cleanupCompleted) {
+                            R.string.ownership_deletion_canceled_status
+                        } else {
+                            R.string
+                                .ownership_deletion_canceled_cleanup_deferred_status
+                        },
+                    ),
+                )
+            }
+            return if (cleanupCompleted) "completed" else "deferred"
+        }
+        secureStore().writeAccountDeletionRequestId(scope, deletion.id)
+        secureStore().clearAccountDeletionAttemptId(scope)
+        replaceState {
+            it.copy(
+                phase = OwnershipPhase.DELETION_PENDING,
+                status = text(
+                    if (deletion.cancellationAllowed) {
+                        R.string.ownership_deletion_pending_status
+                    } else {
+                        R.string.ownership_deletion_coordinating_status
+                    },
+                ),
+                terms = null,
+                overview = null,
+                installations = emptyList(),
+                accountDeletion = deletion,
+            )
+        }
+        return "not_needed"
+    }
 
     private fun checkpoint(user: FirebaseUser): OwnershipCheckpoint {
         val scope = accountScope(user)
@@ -1441,6 +1733,41 @@ class OwnershipService private constructor(
                 ),
             )
         }
+
+    private suspend fun reauthenticateWithPassword(
+        user: FirebaseUser,
+        password: String,
+    ) {
+        if (password.isEmpty() || password.length > 128) {
+            throw OwnershipException.InvalidCredentials
+        }
+        val email = user.email
+            ?.takeIf(String::isNotBlank)
+            ?: throw OwnershipException.InvalidCredentials
+        user.reauthenticate(
+            EmailAuthProvider.getCredential(email, password),
+        ).awaitManaged()
+    }
+
+    private fun accountDeletionConfirmationSha256(): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(
+                ACCOUNT_DELETION_CONFIRMATION.toByteArray(
+                    StandardCharsets.UTF_8,
+                ),
+            )
+            .joinToString("") { byte -> "%02x".format(byte) }
+
+    private fun deletionDiagnosticFields(
+        deletion: OwnershipAccountDeletion,
+    ): Map<String, String> = mapOf(
+        "deletion_state" to deletion.state,
+        "cloud_state" to deletion.cloudDataState,
+        "identity_state" to deletion.identityState,
+        "band_eligibility" to deletion.bandRetirementEligibility,
+        "band_state" to deletion.bandRetirementState,
+        "control_state" to deletion.controlPlaneState,
+    )
 
     private fun secureStore(): OwnershipSecureStore {
         secureStoreInstance?.let { return it }
@@ -1763,6 +2090,10 @@ class OwnershipService private constructor(
         OwnershipException.InvalidCode,
         OwnershipException.PhoneCodeRequired,
         -> text(R.string.ownership_invalid_code)
+        OwnershipException.DeletionConfirmationRequired ->
+            text(R.string.ownership_deletion_confirmation_required)
+        OwnershipException.DeletionAcknowledgementsRequired ->
+            text(R.string.ownership_deletion_acknowledgements_required)
         OwnershipException.NotSignedIn,
         OwnershipException.Authentication,
         -> text(R.string.ownership_sign_in_again)
@@ -1782,6 +2113,16 @@ class OwnershipService private constructor(
         OwnershipException.InvalidState,
         OwnershipException.SecureStorage,
         -> text(R.string.ownership_cannot_continue)
+        is FirebaseAuthException -> when (error.errorCode) {
+            "ERROR_INVALID_EMAIL",
+            "ERROR_WRONG_PASSWORD",
+            "ERROR_USER_NOT_FOUND",
+            "ERROR_INVALID_CREDENTIAL",
+            -> text(R.string.ownership_invalid_credentials)
+            "ERROR_REQUIRES_RECENT_LOGIN" ->
+                text(R.string.ownership_deletion_password_required)
+            else -> text(R.string.ownership_action_failed)
+        }
         else -> text(R.string.ownership_action_failed)
     }
 
@@ -1794,6 +2135,8 @@ class OwnershipService private constructor(
         OwnershipException.InvalidPhone,
         OwnershipException.InvalidCode,
         OwnershipException.PhoneCodeRequired,
+        OwnershipException.DeletionConfirmationRequired,
+        OwnershipException.DeletionAcknowledgementsRequired,
         OwnershipException.NotSignedIn,
         OwnershipException.Authentication,
         OwnershipException.ChallengeInactive,
@@ -1820,6 +2163,10 @@ class OwnershipService private constructor(
         OwnershipException.InvalidPhone -> "phone_format"
         OwnershipException.InvalidCode -> "code_format"
         OwnershipException.PhoneCodeRequired -> "verification_state"
+        OwnershipException.DeletionConfirmationRequired ->
+            "deletion_confirmation"
+        OwnershipException.DeletionAcknowledgementsRequired ->
+            "deletion_acknowledgements"
         OwnershipException.NotSignedIn -> "identity_missing"
         OwnershipException.Authentication -> "authentication"
         OwnershipException.ChallengeInactive -> "challenge_inactive"
@@ -1853,6 +2200,8 @@ class OwnershipService private constructor(
 
     companion object {
         private const val FIREBASE_APP_NAME = "noop-ownership"
+        const val ACCOUNT_DELETION_CONFIRMATION =
+            "DELETE MY NOOP OWNERSHIP ACCOUNT"
         private val EMAIL = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
         private val PHONE = Regex("^\\+[1-9][0-9]{7,14}$")
         private val CODE = Regex("^[0-9]{6}$")

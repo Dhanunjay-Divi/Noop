@@ -79,6 +79,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.NoopApplication
 import com.noop.R
 import com.noop.ownership.NoopProductPlan
+import com.noop.ownership.OwnershipAccountDeletion
 import com.noop.ownership.OwnershipInstallation
 import com.noop.ownership.OwnershipPhase
 import com.noop.ownership.OwnershipService
@@ -108,6 +109,12 @@ internal fun OwnershipAccountScreen() {
     }
     var pendingRevocation by remember { mutableStateOf<OwnershipInstallation?>(null) }
     var confirmsLocalReset by remember { mutableStateOf(false) }
+    var showsDeletionRequest by remember { mutableStateOf(false) }
+    var deletionPassword by remember { mutableStateOf("") }
+    var deletionConfirmation by remember { mutableStateOf("") }
+    var exportAcknowledged by remember { mutableStateOf(false) }
+    var retentionAcknowledged by remember { mutableStateOf(false) }
+    var pendingDeletionPassword by remember { mutableStateOf("") }
 
     LaunchedEffect(service) {
         service.bootstrap()
@@ -210,6 +217,28 @@ internal fun OwnershipAccountScreen() {
                     title = stringResource(R.string.ownership_replacement_working_title),
                     detail = stringResource(R.string.ownership_replacement_working_detail),
                 )
+                OwnershipPhase.DELETION_PENDING -> OwnershipDeletionPendingCard(
+                    deletion = state.accountDeletion,
+                    password = pendingDeletionPassword,
+                    onPasswordChange = {
+                        pendingDeletionPassword = it.take(128)
+                    },
+                    busy = state.busy,
+                    onRefresh = {
+                        val suppliedPassword = pendingDeletionPassword
+                        pendingDeletionPassword = ""
+                        scope.launch {
+                            service.refreshAccountDeletion(suppliedPassword)
+                        }
+                    },
+                    onCancel = {
+                        val suppliedPassword = pendingDeletionPassword
+                        pendingDeletionPassword = ""
+                        scope.launch {
+                            service.cancelAccountDeletion(suppliedPassword)
+                        }
+                    },
+                )
                 OwnershipPhase.ACCOUNT_READY,
                 OwnershipPhase.POSSESSION_UNAVAILABLE,
                 OwnershipPhase.CLAIMED,
@@ -288,6 +317,12 @@ internal fun OwnershipAccountScreen() {
                     )
                 }
             }
+            item {
+                OwnershipDeletionEntryCard(
+                    busy = state.busy,
+                    onDelete = { showsDeletionRequest = true },
+                )
+            }
         }
 
         if (state.status.isNotBlank()) {
@@ -361,6 +396,157 @@ internal fun OwnershipAccountScreen() {
                 TextButton(
                     enabled = !state.busy,
                     onClick = { confirmsLocalReset = false },
+                ) {
+                    Text(stringResource(R.string.ownership_cancel))
+                }
+            },
+            containerColor = Palette.surfaceOverlay,
+        )
+    }
+    if (showsDeletionRequest) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!state.busy) {
+                    showsDeletionRequest = false
+                    deletionPassword = ""
+                    deletionConfirmation = ""
+                    exportAcknowledged = false
+                    retentionAcknowledged = false
+                }
+            },
+            title = {
+                Text(stringResource(R.string.ownership_delete_account_title))
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 520.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.ownership_delete_account_detail),
+                        style = NoopType.body,
+                        color = Palette.textSecondary,
+                    )
+                    SelectionContainer {
+                        Text(
+                            stringResource(
+                                R.string.ownership_delete_confirmation_instruction,
+                                OwnershipService.ACCOUNT_DELETION_CONFIRMATION,
+                            ),
+                            style = NoopType.caption,
+                            color = Palette.textPrimary,
+                        )
+                    }
+                    OwnershipTextField(
+                        value = deletionPassword,
+                        onValueChange = { deletionPassword = it.take(128) },
+                        label = stringResource(R.string.ownership_delete_password),
+                        keyboardType = KeyboardType.Password,
+                        autofillType = AutofillType.Password,
+                        password = true,
+                        enabled = !state.busy,
+                        modifier = Modifier.testTag(
+                            "noop.ownership.delete-password",
+                        ),
+                    )
+                    OwnershipTextField(
+                        value = deletionConfirmation,
+                        onValueChange = {
+                            deletionConfirmation = it.take(
+                                OwnershipService.ACCOUNT_DELETION_CONFIRMATION.length,
+                            )
+                        },
+                        label = stringResource(
+                            R.string.ownership_delete_confirmation_label,
+                        ),
+                        keyboardType = KeyboardType.Text,
+                        enabled = !state.busy,
+                        modifier = Modifier.testTag(
+                            "noop.ownership.delete-confirmation",
+                        ),
+                    )
+                    OwnershipAcknowledgement(
+                        checked = exportAcknowledged,
+                        onCheckedChange = { exportAcknowledged = it },
+                        text = stringResource(R.string.ownership_delete_export_ack),
+                        enabled = !state.busy,
+                        testTag = "noop.ownership.delete-export-ack",
+                    )
+                    OwnershipAcknowledgement(
+                        checked = retentionAcknowledged,
+                        onCheckedChange = { retentionAcknowledged = it },
+                        text = stringResource(R.string.ownership_delete_retention_ack),
+                        enabled = !state.busy,
+                        testTag = "noop.ownership.delete-retention-ack",
+                    )
+                    Text(
+                        stringResource(R.string.ownership_deletion_local_preserved),
+                        style = NoopType.caption,
+                        color = Palette.textTertiary,
+                    )
+                    Text(
+                        stringResource(R.string.ownership_deletion_no_unpair),
+                        style = NoopType.caption,
+                        color = Palette.textTertiary,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    modifier = Modifier.testTag(
+                        "noop.ownership.delete-account-confirm",
+                    ),
+                    enabled = !state.busy &&
+                        deletionPassword.isNotEmpty() &&
+                        deletionConfirmation ==
+                        OwnershipService.ACCOUNT_DELETION_CONFIRMATION &&
+                        exportAcknowledged &&
+                        retentionAcknowledged,
+                    onClick = {
+                        val suppliedPassword = deletionPassword
+                        val suppliedConfirmation = deletionConfirmation
+                        val suppliedExportAcknowledgement = exportAcknowledged
+                        val suppliedRetentionAcknowledgement =
+                            retentionAcknowledged
+                        showsDeletionRequest = false
+                        deletionPassword = ""
+                        deletionConfirmation = ""
+                        exportAcknowledged = false
+                        retentionAcknowledged = false
+                        scope.launch {
+                            service.requestAccountDeletion(
+                                password = suppliedPassword,
+                                confirmation = suppliedConfirmation,
+                                exportAcknowledged =
+                                    suppliedExportAcknowledgement,
+                                retentionAcknowledged =
+                                    suppliedRetentionAcknowledgement,
+                            )
+                        }
+                    },
+                ) {
+                    Text(
+                        if (state.busy) {
+                            stringResource(R.string.ownership_delete_working)
+                        } else {
+                            stringResource(R.string.ownership_delete_schedule)
+                        },
+                        color = Palette.statusCritical,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !state.busy,
+                    onClick = {
+                        showsDeletionRequest = false
+                        deletionPassword = ""
+                        deletionConfirmation = ""
+                        exportAcknowledged = false
+                        retentionAcknowledged = false
+                    },
                 ) {
                     Text(stringResource(R.string.ownership_cancel))
                 }
@@ -796,6 +982,238 @@ private fun OwnershipReplacementCard(
                 onClick = onSignOut,
             )
         }
+    }
+}
+
+@Composable
+private fun OwnershipDeletionEntryCard(
+    busy: Boolean,
+    onDelete: () -> Unit,
+) {
+    NoopCard(padding = 20.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            OwnershipHeader(
+                icon = Icons.Filled.CloudOff,
+                title = stringResource(R.string.ownership_delete_account_title),
+                detail = stringResource(R.string.ownership_delete_account_detail),
+            )
+            Text(
+                stringResource(R.string.ownership_deletion_no_unpair),
+                style = NoopType.caption,
+                color = Palette.statusWarning,
+            )
+            NoopButton(
+                text = stringResource(R.string.ownership_delete_review),
+                leadingIcon = Icons.Filled.CloudOff,
+                kind = NoopButtonKind.Tertiary,
+                fullWidth = true,
+                enabled = !busy,
+                modifier = Modifier.testTag(
+                    "noop.ownership.review-account-deletion",
+                ),
+                onClick = onDelete,
+            )
+        }
+    }
+}
+
+@Composable
+private fun OwnershipDeletionPendingCard(
+    deletion: OwnershipAccountDeletion?,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    busy: Boolean,
+    onRefresh: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    NoopCard(padding = 20.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            OwnershipHeader(
+                icon = Icons.Filled.CloudOff,
+                title = stringResource(
+                    if (deletion?.cancellationAllowed != false) {
+                        R.string.ownership_deletion_pending_title
+                    } else {
+                        R.string.ownership_deletion_coordinating_title
+                    },
+                ),
+                detail = stringResource(
+                    R.string.ownership_deletion_pending_detail,
+                ),
+            )
+            if (deletion == null) {
+                Text(
+                    stringResource(R.string.ownership_deletion_restart_status),
+                    style = NoopType.body,
+                    color = Palette.textSecondary,
+                )
+            } else {
+                OwnershipDeletionTargetRow(
+                    label = stringResource(
+                        R.string.ownership_deletion_cloud_target,
+                    ),
+                    state = deletion.cloudDataState,
+                )
+                OwnershipDeletionTargetRow(
+                    label = stringResource(
+                        R.string.ownership_deletion_identity_target,
+                    ),
+                    state = deletion.identityState,
+                )
+                OwnershipDeletionTargetRow(
+                    label = stringResource(
+                        R.string.ownership_deletion_band_target,
+                    ),
+                    state = deletion.bandRetirementState,
+                )
+                OwnershipDeletionTargetRow(
+                    label = stringResource(
+                        R.string.ownership_deletion_control_target,
+                    ),
+                    state = deletion.controlPlaneState,
+                )
+            }
+            Text(
+                stringResource(R.string.ownership_deletion_local_preserved),
+                style = NoopType.caption,
+                color = Palette.textSecondary,
+            )
+            Text(
+                stringResource(R.string.ownership_deletion_no_unpair),
+                style = NoopType.caption,
+                color = Palette.statusWarning,
+            )
+            OwnershipTextField(
+                value = password,
+                onValueChange = onPasswordChange,
+                label = stringResource(R.string.ownership_delete_password),
+                keyboardType = KeyboardType.Password,
+                autofillType = AutofillType.Password,
+                password = true,
+                enabled = !busy,
+                modifier = Modifier.testTag(
+                    "noop.ownership.pending-deletion-password",
+                ),
+            )
+            NoopButton(
+                text = if (busy) {
+                    stringResource(R.string.ownership_checking)
+                } else {
+                    stringResource(R.string.ownership_deletion_refresh)
+                },
+                leadingIcon = Icons.Filled.Refresh,
+                kind = NoopButtonKind.Secondary,
+                fullWidth = true,
+                enabled = !busy && password.isNotEmpty(),
+                modifier = Modifier.testTag(
+                    "noop.ownership.refresh-account-deletion",
+                ),
+                onClick = onRefresh,
+            )
+            if (deletion?.cancellationAllowed != false) {
+                TextButton(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("noop.ownership.cancel-account-deletion"),
+                    enabled = !busy && password.isNotEmpty(),
+                    onClick = onCancel,
+                ) {
+                    Text(
+                        stringResource(R.string.ownership_deletion_cancel),
+                        color = Palette.statusCritical,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OwnershipDeletionTargetRow(
+    label: String,
+    state: String,
+) {
+    val completed = state == "completed"
+    val blocked = state == "blocked" || state == "failed"
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            imageVector = when {
+                completed -> Icons.Filled.CheckCircle
+                blocked -> Icons.Filled.Security
+                else -> Icons.Filled.Refresh
+            },
+            contentDescription = null,
+            tint = when {
+                completed -> Palette.statusPositive
+                blocked -> Palette.statusWarning
+                else -> Palette.textSecondary
+            },
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            text = label,
+            style = NoopType.body,
+            color = Palette.textPrimary,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = ownershipDeletionStateLabel(state),
+            style = NoopType.caption,
+            color = Palette.textSecondary,
+        )
+    }
+}
+
+@Composable
+private fun ownershipDeletionStateLabel(state: String): String =
+    stringResource(
+        when (state) {
+            "scheduled" -> R.string.ownership_deletion_state_scheduled
+            "blocked" -> R.string.ownership_deletion_state_blocked
+            "not_required" -> R.string.ownership_deletion_state_not_required
+            "canceled" -> R.string.ownership_deletion_state_canceled
+            "processing" -> R.string.ownership_deletion_state_processing
+            "completed" -> R.string.ownership_deletion_state_completed
+            "failed" -> R.string.ownership_deletion_state_attention
+            else -> R.string.ownership_deletion_state_pending
+        },
+    )
+
+@Composable
+private fun OwnershipAcknowledgement(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    text: String,
+    enabled: Boolean,
+    testTag: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+            colors = CheckboxDefaults.colors(
+                checkedColor = Palette.accent,
+                uncheckedColor = Palette.textTertiary,
+                checkmarkColor = Palette.accentInk,
+            ),
+        )
+        Text(
+            text = text,
+            style = NoopType.body,
+            color = Palette.textPrimary,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

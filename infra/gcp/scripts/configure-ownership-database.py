@@ -51,6 +51,10 @@ OWNERSHIP_TABLE_PRIVILEGES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "ownership_account_deletion_targets",
         ("SELECT", "INSERT"),
     ),
+    (
+        "ownership_account_deletion_target_progress",
+        ("SELECT",),
+    ),
     ("ownership_events", ("INSERT",)),
 )
 
@@ -110,6 +114,73 @@ OWNERSHIP_COLUMN_PRIVILEGES: tuple[
         ("canceled_at",),
     ),
 )
+
+OWNERSHIP_DELETION_LIFECYCLE_TABLE_PRIVILEGES: tuple[
+    tuple[str, tuple[str, ...]],
+    ...,
+] = (
+    ("ownership_account_deletion_target_progress", ("SELECT",)),
+    ("ownership_account_deletion_requests", ("SELECT",)),
+    ("ownership_external_identities", ("SELECT",)),
+)
+
+OWNERSHIP_DELETION_LIFECYCLE_COLUMN_PRIVILEGES: tuple[
+    tuple[str, str, tuple[str, ...]],
+    ...,
+] = (
+    (
+        "ownership_account_deletion_target_progress",
+        "UPDATE",
+        (
+            "current_state",
+            "blocker",
+            "progress_version",
+            "attempt_count",
+            "lease_owner",
+            "lease_expires_at",
+            "retry_after",
+            "managed_erasure_job_id",
+            "last_error_kind",
+            "updated_at",
+            "completed_at",
+        ),
+    ),
+)
+
+
+@dataclass(frozen=True)
+class ProvisioningProfile:
+    role_kind: str
+    default_user: str
+    default_secret: str
+    secret_purpose: str
+    table_privileges: tuple[tuple[str, tuple[str, ...]], ...]
+    column_privileges: tuple[tuple[str, str, tuple[str, ...]], ...]
+
+
+OWNERSHIP_API_PROFILE = ProvisioningProfile(
+    role_kind="api",
+    default_user="noop_ownership",
+    default_secret="noop-staging-ownership-database-url",
+    secret_purpose="ownership",
+    table_privileges=OWNERSHIP_TABLE_PRIVILEGES,
+    column_privileges=OWNERSHIP_COLUMN_PRIVILEGES,
+)
+OWNERSHIP_DELETION_LIFECYCLE_PROFILE = ProvisioningProfile(
+    role_kind="deletion-lifecycle",
+    default_user="noop_ownership_lifecycle",
+    default_secret="noop-staging-ownership-lifecycle-database-url",
+    secret_purpose="ownership-lifecycle",
+    table_privileges=OWNERSHIP_DELETION_LIFECYCLE_TABLE_PRIVILEGES,
+    column_privileges=OWNERSHIP_DELETION_LIFECYCLE_COLUMN_PRIVILEGES,
+)
+PROVISIONING_PROFILES = {
+    profile.role_kind: profile
+    for profile in (
+        OWNERSHIP_API_PROFILE,
+        OWNERSHIP_DELETION_LIFECYCLE_PROFILE,
+    )
+}
 
 OWNERSHIP_TABLE_PRIVILEGE_PAIRS = frozenset(
     (table, privilege)
@@ -204,7 +275,11 @@ def build_database_url(
     )
 
 
-def exact_grant_statements(role: str) -> tuple[str, ...]:
+def exact_grant_statements(
+    role: str,
+    *,
+    profile: ProvisioningProfile = OWNERSHIP_API_PROFILE,
+) -> tuple[str, ...]:
     quoted_role = quote_identifier(role)
     table_grants = tuple(
         "GRANT "
@@ -213,7 +288,7 @@ def exact_grant_statements(role: str) -> tuple[str, ...]:
         + quote_identifier(table)
         + " TO "
         + quoted_role
-        for table, privileges in OWNERSHIP_TABLE_PRIVILEGES
+        for table, privileges in profile.table_privileges
     )
     column_grants = tuple(
         "GRANT "
@@ -224,7 +299,7 @@ def exact_grant_statements(role: str) -> tuple[str, ...]:
         + quote_identifier(table)
         + " TO "
         + quoted_role
-        for table, privilege, columns in OWNERSHIP_COLUMN_PRIVILEGES
+        for table, privilege, columns in profile.column_privileges
     )
     return table_grants + column_grants
 
@@ -298,6 +373,7 @@ def ensure_secret(
     project: str,
     region: str,
     secret_id: str,
+    purpose: str,
 ) -> None:
     project_path = urllib.parse.quote(project, safe="")
     secret_path = urllib.parse.quote(secret_id, safe="")
@@ -325,7 +401,7 @@ def ensure_secret(
             "labels": {
                 "app": "noop",
                 "environment": "staging",
-                "purpose": "ownership",
+                "purpose": purpose,
             },
         },
     )
@@ -549,8 +625,9 @@ async def provision_role(
     *,
     role: str,
     database: str,
+    profile: ProvisioningProfile = OWNERSHIP_API_PROFILE,
 ) -> None:
-    required_tables = {table for table, _ in OWNERSHIP_TABLE_PRIVILEGES}
+    required_tables = {table for table, _ in profile.table_privileges}
     present_tables = await connection.fetch(
         """
         SELECT table_name
@@ -616,11 +693,15 @@ async def provision_role(
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
             "REVOKE ALL PRIVILEGES ON SEQUENCES FROM " + quoted_role
         )
-        for statement in exact_grant_statements(role):
+        for statement in exact_grant_statements(role, profile=profile):
             await connection.execute(statement)
 
 
-async def verify_role(connection: asyncpg.Connection) -> None:
+async def verify_role(
+    connection: asyncpg.Connection,
+    *,
+    profile: ProvisioningProfile = OWNERSHIP_API_PROFILE,
+) -> None:
     role_is_bounded = await connection.fetchval(
         """
         SELECT EXISTS (
@@ -687,10 +768,10 @@ async def verify_role(connection: asyncpg.Connection) -> None:
         ORDER BY namespace.nspname, candidate.relname
         """
     )
-    expected_tables = dict(OWNERSHIP_TABLE_PRIVILEGES)
+    expected_tables = dict(profile.table_privileges)
     expected_columns = {
         (table, privilege): frozenset(columns)
-        for table, privilege, columns in OWNERSHIP_COLUMN_PRIVILEGES
+        for table, privilege, columns in profile.column_privileges
     }
     for relation in relations:
         schema = relation["nspname"]
@@ -785,10 +866,15 @@ async def verify_role(connection: asyncpg.Connection) -> None:
 
 
 async def configure(args: argparse.Namespace) -> str:
+    profile = PROVISIONING_PROFILES[args.role_kind]
     project = require_match(args.project, PROJECT_IDENTIFIER, "project")
     region = require_match(args.region, REGION_IDENTIFIER, "region")
     instance = require_match(args.instance, INSTANCE_IDENTIFIER, "instance")
-    role = require_match(args.user, ROLE_IDENTIFIER, "database user")
+    role = require_match(
+        args.user or profile.default_user,
+        ROLE_IDENTIFIER,
+        "database user",
+    )
     database = require_match(args.database, ROLE_IDENTIFIER, "database")
     source_secret = require_match(
         args.bootstrap_secret,
@@ -796,7 +882,7 @@ async def configure(args: argparse.Namespace) -> str:
         "bootstrap secret",
     )
     destination_secret = require_match(
-        args.secret,
+        args.secret or profile.default_secret,
         RESOURCE_IDENTIFIER,
         "ownership secret",
     )
@@ -825,6 +911,7 @@ async def configure(args: argparse.Namespace) -> str:
                 admin_connection,
                 role=role,
                 database=database,
+                profile=profile,
             )
         finally:
             await admin_connection.close()
@@ -847,7 +934,7 @@ async def configure(args: argparse.Namespace) -> str:
             process=proxy,
         )
         try:
-            await verify_role(target_connection)
+            await verify_role(target_connection, profile=profile)
         finally:
             await target_connection.close()
 
@@ -856,6 +943,7 @@ async def configure(args: argparse.Namespace) -> str:
         project=project,
         region=region,
         secret_id=destination_secret,
+        purpose=profile.secret_purpose,
     )
     database_url = build_database_url(
         user=role,
@@ -876,19 +964,23 @@ async def configure(args: argparse.Namespace) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--role-kind",
+        choices=tuple(PROVISIONING_PROFILES),
+        default="api",
+    )
     parser.add_argument("--project", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--instance", required=True)
     parser.add_argument("--connection-name", required=True)
     parser.add_argument("--database", default="noop")
-    parser.add_argument("--user", default="noop_ownership")
+    parser.add_argument("--user")
     parser.add_argument(
         "--bootstrap-secret",
         default="noop-staging-database-url",
     )
     parser.add_argument(
         "--secret",
-        default="noop-staging-ownership-database-url",
     )
     parser.add_argument("--proxy-binary", default="cloud-sql-proxy")
     parser.add_argument(
@@ -910,7 +1002,7 @@ def main() -> int:
             "Verify the proxy, migration, IAM, and Secret Manager access.\n",
         )
     print(
-        "Configured the least-privilege ownership database credential as "
+        "Configured the least-privilege ownership database credential profile as "
         f"secret version {version}."
     )
     return 0

@@ -44,6 +44,37 @@ def _wait_for_path(path: Path, timeout_seconds: float = 3) -> None:
 
 
 class RunBoundedCommandTests(unittest.TestCase):
+    def test_child_output_is_discarded_without_an_explicit_log_file(self) -> None:
+        program = (
+            "import sys;"
+            "sys.stdout.write('x' * 1_000_000);"
+            "sys.stderr.write('y' * 1_000_000)"
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--timeout-seconds",
+                "5",
+                "--grace-seconds",
+                "1",
+                "--label",
+                "discarded-output",
+                "--",
+                sys.executable,
+                "-c",
+                program,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
     def test_log_file_captures_child_output_without_terminal_flooding(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             log_file = Path(temporary) / "nested" / "command.log"
@@ -76,6 +107,127 @@ class RunBoundedCommandTests(unittest.TestCase):
             )
             self.assertEqual(stat.S_IMODE(log_file.stat().st_mode), 0o600)
 
+    def test_log_file_limit_stops_runaway_output_and_caps_the_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log_file = Path(temporary) / "command.log"
+            status_file = Path(temporary) / "command.status"
+            stderr = io.StringIO()
+            max_log_bytes = 16 * 1024
+            program = (
+                "import sys;"
+                "chunk=b'x' * 65536;"
+                "[sys.stdout.buffer.write(chunk) for _ in range(64)];"
+                "sys.stdout.buffer.flush()"
+            )
+
+            with contextlib.redirect_stderr(stderr):
+                exit_code = RUNNER.run_command(
+                    [sys.executable, "-c", program],
+                    timeout_seconds=5,
+                    grace_seconds=1,
+                    label="runaway-output",
+                    status_file=status_file,
+                    log_file=log_file,
+                    max_log_bytes=max_log_bytes,
+                )
+
+            self.assertEqual(exit_code, RUNNER.RESOURCE_EXIT_CODE)
+            self.assertLessEqual(log_file.stat().st_size, max_log_bytes)
+            self.assertEqual(
+                stderr.getvalue(),
+                "bounded-command: label=runaway-output "
+                "status=resource-pressure kind=output\n",
+            )
+            self.assertEqual(
+                status_file.read_text(encoding="utf-8"),
+                "label=runaway-output\nstatus=resource-output\nexit_code=125\n",
+            )
+
+    def test_fast_writer_is_capped_during_observation_and_at_completion(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log_file = Path(temporary) / "command.log"
+            max_log_bytes = 16 * 1024
+            finished = threading.Event()
+            maximum_observed = 0
+
+            def monitor_log() -> None:
+                nonlocal maximum_observed
+                while not finished.is_set():
+                    try:
+                        maximum_observed = max(
+                            maximum_observed,
+                            log_file.stat().st_size,
+                        )
+                    except FileNotFoundError:
+                        pass
+                    time.sleep(0.001)
+
+            monitor = threading.Thread(target=monitor_log)
+            monitor.start()
+            try:
+                exit_code = RUNNER.run_command(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import os;"
+                        "chunk=b'x'*65536;"
+                        "exec('while True:\\n os.write(1, chunk)')",
+                    ],
+                    timeout_seconds=5,
+                    grace_seconds=1,
+                    label="fast-writer",
+                    log_file=log_file,
+                    max_log_bytes=max_log_bytes,
+                )
+            finally:
+                finished.set()
+                monitor.join(timeout=1)
+            maximum_observed = max(
+                maximum_observed,
+                log_file.stat().st_size,
+            )
+
+            self.assertEqual(exit_code, RUNNER.RESOURCE_EXIT_CODE)
+            self.assertLessEqual(maximum_observed, max_log_bytes)
+            self.assertFalse(monitor.is_alive())
+
+    def test_blocked_log_writer_does_not_make_abort_wait_unbounded(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log_file = Path(temporary) / "command.log"
+            descriptor = os.open(
+                log_file,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o600,
+            )
+            capture = RUNNER._BoundedLogCapture(descriptor, 16 * 1024)
+            write_started = threading.Event()
+            release_write = threading.Event()
+
+            def blocked_write(_data: memoryview) -> bool:
+                write_started.set()
+                release_write.wait(timeout=5)
+                return True
+
+            with mock.patch.object(
+                capture,
+                "_write_bounded",
+                side_effect=blocked_write,
+            ):
+                os.write(capture.child_write_fd, b"x")
+                capture.close_parent_write()
+                self.assertTrue(write_started.wait(timeout=1))
+                started_at = time.monotonic()
+                self.assertFalse(capture.abort())
+                self.assertLess(time.monotonic() - started_at, 1.5)
+                release_write.set()
+                capture._thread.join(timeout=1)
+
+            self.assertFalse(capture._thread.is_alive())
+
     def test_log_file_and_status_file_must_be_distinct(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             shared_path = Path(temporary) / "shared.txt"
@@ -91,6 +243,54 @@ class RunBoundedCommandTests(unittest.TestCase):
                     status_file=shared_path,
                     log_file=shared_path,
                 )
+
+    def test_log_and_status_alias_through_symlinked_parent_are_rejected(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            real_parent = root / "real"
+            real_parent.mkdir()
+            alias_parent = root / "alias"
+            alias_parent.symlink_to(real_parent, target_is_directory=True)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "log file and status file must be different",
+            ):
+                RUNNER.run_command(
+                    [sys.executable, "-c", "pass"],
+                    timeout_seconds=2,
+                    grace_seconds=1,
+                    label="parent-alias",
+                    status_file=alias_parent / "shared.txt",
+                    log_file=real_parent / "shared.txt",
+                )
+
+    def test_existing_case_alias_is_rejected_on_case_insensitive_volume(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lower_path = root / "case-alias.txt"
+            lower_path.write_text("preserve", encoding="utf-8")
+            upper_path = root / "CASE-ALIAS.TXT"
+            if not upper_path.exists():
+                self.skipTest("temporary volume is case-sensitive")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "log file and status file must be different",
+            ):
+                RUNNER.run_command(
+                    [sys.executable, "-c", "pass"],
+                    timeout_seconds=2,
+                    grace_seconds=1,
+                    label="case-alias",
+                    status_file=upper_path,
+                    log_file=lower_path,
+                )
+            self.assertEqual(lower_path.read_text(encoding="utf-8"), "preserve")
 
     def test_log_file_refuses_a_symbolic_link(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -114,8 +314,140 @@ class RunBoundedCommandTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), "preserve")
             self.assertEqual(
                 stderr.getvalue(),
-                "bounded-command: label=symlink-output "
-                "status=log-file-error\n",
+                "bounded-command: label=symlink-output status=log-file-error\n",
+            )
+
+    def test_log_file_refuses_a_hard_link_without_truncating_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target.log"
+            target.write_text("preserve", encoding="utf-8")
+            log_file = root / "command.log"
+            os.link(target, log_file)
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr):
+                exit_code = RUNNER.run_command(
+                    [sys.executable, "-c", "print('secret')"],
+                    timeout_seconds=2,
+                    grace_seconds=1,
+                    label="hardlink-output",
+                    log_file=log_file,
+                )
+
+            self.assertEqual(exit_code, RUNNER.START_FAILURE_EXIT_CODE)
+            self.assertEqual(target.read_text(encoding="utf-8"), "preserve")
+            self.assertEqual(
+                stderr.getvalue(),
+                "bounded-command: label=hardlink-output status=log-file-error\n",
+            )
+
+    def test_log_file_refuses_a_fifo_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log_file = Path(temporary) / "command.log"
+            os.mkfifo(log_file)
+            stderr = io.StringIO()
+            started_at = time.monotonic()
+
+            with contextlib.redirect_stderr(stderr):
+                exit_code = RUNNER.run_command(
+                    [sys.executable, "-c", "print('secret')"],
+                    timeout_seconds=2,
+                    grace_seconds=1,
+                    label="fifo-output",
+                    log_file=log_file,
+                )
+
+            self.assertEqual(exit_code, RUNNER.START_FAILURE_EXIT_CODE)
+            self.assertLess(time.monotonic() - started_at, 1)
+            self.assertEqual(
+                stderr.getvalue(),
+                "bounded-command: label=fifo-output status=log-file-error\n",
+            )
+
+    def test_log_file_descriptor_survives_path_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log_file = root / "command.log"
+            moved_log = root / "moved.log"
+            status_file = root / "command.status"
+            max_log_bytes = 16 * 1024
+            program = (
+                "import os,pathlib,sys;"
+                f"log=pathlib.Path({str(log_file)!r});"
+                f"moved=pathlib.Path({str(moved_log)!r});"
+                "os.rename(log,moved);"
+                "log.write_text('replacement',encoding='utf-8');"
+                "chunk=b'x'*65536;"
+                "[sys.stdout.buffer.write(chunk) for _ in range(64)];"
+                "sys.stdout.buffer.flush()"
+            )
+
+            exit_code = RUNNER.run_command(
+                [sys.executable, "-c", program],
+                timeout_seconds=5,
+                grace_seconds=1,
+                label="replaced-output",
+                status_file=status_file,
+                log_file=log_file,
+                max_log_bytes=max_log_bytes,
+            )
+
+            self.assertEqual(exit_code, RUNNER.RESOURCE_EXIT_CODE)
+            self.assertLessEqual(moved_log.stat().st_size, max_log_bytes)
+            self.assertEqual(
+                log_file.read_text(encoding="utf-8"),
+                "replacement",
+            )
+            self.assertEqual(
+                status_file.read_text(encoding="utf-8"),
+                "label=replaced-output\nstatus=resource-output\nexit_code=125\n",
+            )
+
+    def test_log_is_capped_when_descendant_writes_during_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log_file = root / "command.log"
+            status_file = root / "command.status"
+            ready = root / "ready"
+            write_started = root / "write-started"
+            max_log_bytes = 16 * 1024
+            descendant = (
+                "import pathlib,signal,sys,time;"
+                "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+                f"pathlib.Path({str(ready)!r}).write_text('1');"
+                "time.sleep(0.15);"
+                f"pathlib.Path({str(write_started)!r}).write_text('1');"
+                "chunk=b'x'*65536;"
+                "[sys.stdout.buffer.write(chunk) for _ in range(64)];"
+                "sys.stdout.buffer.flush();"
+                "time.sleep(60)"
+            )
+            program = (
+                "import pathlib,subprocess,sys,time\n"
+                f"ready=pathlib.Path({str(ready)!r})\n"
+                f"subprocess.Popen([sys.executable,'-c',{descendant!r}])\n"
+                "deadline=time.monotonic()+2\n"
+                "while not ready.exists() and time.monotonic()<deadline:\n"
+                "    time.sleep(0.01)\n"
+            )
+
+            exit_code = RUNNER.run_command(
+                [sys.executable, "-c", program],
+                timeout_seconds=5,
+                grace_seconds=0.5,
+                label="cleanup-output",
+                status_file=status_file,
+                log_file=log_file,
+                max_log_bytes=max_log_bytes,
+            )
+
+            self.assertTrue(write_started.exists())
+            self.assertEqual(exit_code, RUNNER.RESOURCE_EXIT_CODE)
+            self.assertLessEqual(log_file.stat().st_size, max_log_bytes)
+            self.assertEqual(
+                status_file.read_text(encoding="utf-8"),
+                "label=cleanup-output\nstatus=resource-output\nexit_code=125\n",
             )
 
     def test_success_and_failure_codes_are_preserved(self) -> None:
@@ -205,7 +537,7 @@ class RunBoundedCommandTests(unittest.TestCase):
                 timeout_seconds=1,
                 grace_seconds=0.1,
                 label="deadline-complete",
-        )
+            )
 
         self.assertEqual(exit_code, 0)
         fake_process.wait.assert_called_once_with(timeout=1.0)
@@ -474,9 +806,7 @@ class RunBoundedCommandTests(unittest.TestCase):
             )
             self.assertEqual(
                 status_file.read_text(encoding="utf-8"),
-                "label=resource-preflight\n"
-                "status=resource-memory\n"
-                "exit_code=125\n",
+                "label=resource-preflight\nstatus=resource-memory\nexit_code=125\n",
             )
 
     def test_preflight_interruption_replaces_stale_terminal_status(self) -> None:
@@ -560,9 +890,7 @@ class RunBoundedCommandTests(unittest.TestCase):
             )
             self.assertEqual(
                 status_file.read_text(encoding="utf-8"),
-                "label=resource-runtime\n"
-                "status=resource-memory\n"
-                "exit_code=125\n",
+                "label=resource-runtime\nstatus=resource-memory\nexit_code=125\n",
             )
             child_pid = int(child_pid_path.read_text(encoding="utf-8"))
             deadline = time.monotonic() + 3
@@ -719,8 +1047,7 @@ class RunBoundedCommandTests(unittest.TestCase):
         self.assertTrue(
             all(
                 line.startswith(
-                    "bounded-command: label=heartbeat-case "
-                    "status=running heartbeat="
+                    "bounded-command: label=heartbeat-case status=running heartbeat="
                 )
                 for line in lines
             )
@@ -765,9 +1092,7 @@ class RunBoundedCommandTests(unittest.TestCase):
                 status_file.read_text(encoding="utf-8"),
                 "label=running-case\nstatus=running\nexit_code=-1\n",
             )
-            self.assertFalse(
-                list(root.glob(f".{status_file.name}.*.tmp"))
-            )
+            self.assertFalse(list(root.glob(f".{status_file.name}.*.tmp")))
             self.assertEqual(wrapper.wait(timeout=2), 0)
             self.assertEqual(
                 status_file.read_text(encoding="utf-8"),
@@ -965,9 +1290,7 @@ class RunBoundedCommandTests(unittest.TestCase):
             )
             self.assertEqual(
                 status_file.read_text(encoding="utf-8"),
-                "label=supervisor-timeout\n"
-                "status=timeout\n"
-                "exit_code=124\n",
+                "label=supervisor-timeout\nstatus=timeout\nexit_code=124\n",
             )
 
     @unittest.skipUnless(
@@ -1221,8 +1544,7 @@ class RunBoundedCommandTests(unittest.TestCase):
             os.waitpid(supervisor_pid, os.WNOHANG)
         self.assertEqual(
             stderr.getvalue(),
-            "bounded-command: label=discovery-failure "
-            "status=cleanup-failed\n",
+            "bounded-command: label=discovery-failure status=cleanup-failed\n",
         )
 
     @unittest.skipUnless(
@@ -1315,8 +1637,7 @@ class RunBoundedCommandTests(unittest.TestCase):
             os.waitpid(supervisor_pid, os.WNOHANG)
         self.assertEqual(
             stderr.getvalue(),
-            "bounded-command: label=persistent-identity "
-            "status=cleanup-failed\n",
+            "bounded-command: label=persistent-identity status=cleanup-failed\n",
         )
 
     def test_fallback_process_scan_respects_item_and_time_bounds(self) -> None:
@@ -1460,8 +1781,7 @@ class RunBoundedCommandTests(unittest.TestCase):
             )
 
     @unittest.skipUnless(
-        hasattr(signal, "pthread_sigmask")
-        and hasattr(signal, "setitimer"),
+        hasattr(signal, "pthread_sigmask") and hasattr(signal, "setitimer"),
         "POSIX signal masks and interval timers are required",
     )
     def test_blocked_alarm_is_temporarily_unblocked_and_restored(self) -> None:
@@ -1609,8 +1929,7 @@ class RunBoundedCommandTests(unittest.TestCase):
             self.assertEqual(exit_code, RUNNER.CLEANUP_EXIT_CODE)
             self.assertEqual(
                 stderr.getvalue(),
-                "bounded-command: label=deadline-cleanup "
-                "status=cleanup-failed\n",
+                "bounded-command: label=deadline-cleanup status=cleanup-failed\n",
             )
             self.assertEqual(
                 status_file.read_text(encoding="utf-8"),
@@ -2142,8 +2461,7 @@ class RunBoundedCommandTests(unittest.TestCase):
             self.assertEqual(exit_code, RUNNER.CLEANUP_EXIT_CODE)
             self.assertEqual(
                 stderr.getvalue(),
-                "bounded-command: label=timeout-cleanup-failed "
-                "status=cleanup-failed\n",
+                "bounded-command: label=timeout-cleanup-failed status=cleanup-failed\n",
             )
             self.assertEqual(
                 status_file.read_text(encoding="utf-8"),
@@ -2253,9 +2571,7 @@ class RunBoundedCommandTests(unittest.TestCase):
             self.assertFalse(_process_is_live(child_pid))
             self.assertEqual(
                 status_file.read_text(encoding="utf-8"),
-                "label=interrupt-case\n"
-                "status=interrupted\n"
-                "exit_code=130\n",
+                "label=interrupt-case\nstatus=interrupted\nexit_code=130\n",
             )
 
     def test_signal_exit_is_normalized_for_status_and_return(self) -> None:
@@ -2363,6 +2679,87 @@ class RunBoundedCommandTests(unittest.TestCase):
                 min_free_memory_percent=float("inf"),
                 label="invalid-memory-infinity",
             )
+
+    def test_direct_api_rejects_invalid_log_caps_before_spawning(self) -> None:
+        invalid_values = (
+            True,
+            False,
+            1.5,
+            float("nan"),
+            float("inf"),
+            0,
+            RUNNER.MAX_MAX_LOG_MIB * RUNNER.MIB_BYTES + 1,
+        )
+        with mock.patch.object(
+            RUNNER,
+            "_spawn_process_before_deadline",
+        ) as spawn:
+            for value in invalid_values:
+                with (
+                    self.subTest(value=value),
+                    self.assertRaisesRegex(
+                        ValueError,
+                        "maximum log size is invalid",
+                    ),
+                ):
+                    RUNNER.run_command(
+                        [sys.executable, "-c", "pass"],
+                        timeout_seconds=1,
+                        grace_seconds=1,
+                        label="invalid-log-cap",
+                        max_log_bytes=value,
+                    )
+        spawn.assert_not_called()
+
+    def test_cli_enables_conservative_resource_floors_by_default(self) -> None:
+        with mock.patch.object(RUNNER, "run_command", return_value=0) as run:
+            exit_code = RUNNER.main(
+                [
+                    "--timeout-seconds",
+                    "1",
+                    "--label",
+                    "default-resource-floors",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "pass",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            run.call_args.kwargs["min_free_memory_percent"],
+            RUNNER.DEFAULT_MIN_FREE_MEMORY_PERCENT,
+        )
+        self.assertEqual(
+            run.call_args.kwargs["min_free_disk_bytes"],
+            RUNNER._minimum_free_disk_bytes(
+                RUNNER.DEFAULT_MIN_FREE_DISK_GIB,
+            ),
+        )
+
+    def test_cli_allows_an_explicit_zero_resource_floor(self) -> None:
+        with mock.patch.object(RUNNER, "run_command", return_value=0) as run:
+            exit_code = RUNNER.main(
+                [
+                    "--timeout-seconds",
+                    "1",
+                    "--label",
+                    "explicit-zero-resource-floors",
+                    "--min-free-memory-percent",
+                    "0",
+                    "--min-free-disk-gib",
+                    "0",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "pass",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(run.call_args.kwargs["min_free_memory_percent"], 0)
+        self.assertEqual(run.call_args.kwargs["min_free_disk_bytes"], 0)
 
     def test_cli_rejects_infinite_disk_limit_without_traceback(self) -> None:
         stderr = io.StringIO()

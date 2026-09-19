@@ -140,8 +140,23 @@ final class OwnershipFlowStateTests: XCTestCase {
         )
     }
 
+    func testPendingDeletionHasARecoverableDedicatedPhase() {
+        for stage in OwnershipAccountStage.allCases {
+            XCTAssertEqual(
+                ownershipPhaseForOverview(
+                    accountState: "deletion_pending",
+                    bandState: "claimed",
+                    checkpointStage: stage,
+                    possessionAvailable: true
+                ),
+                .deletionPending,
+                "\(stage)"
+            )
+        }
+    }
+
     func testInactiveOwnershipAccountsFailClosedBeforeBandStateResolution() {
-        for accountState in ["deletion_pending", "retired", "unknown"] {
+        for accountState in ["retired", "unknown"] {
             for stage in OwnershipAccountStage.allCases {
                 XCTAssertEqual(
                     ownershipPhaseForOverview(
@@ -1086,6 +1101,7 @@ private extension OwnershipServicePhase {
         .claiming,
         .claimed,
         .complete,
+        .deletionPending,
         .replacementRequired,
         .authorizingReplacement,
     ]
@@ -1101,6 +1117,7 @@ private extension OwnershipServicePhase {
         .claiming,
         .claimed,
         .complete,
+        .deletionPending,
         .replacementRequired,
     ]
 }

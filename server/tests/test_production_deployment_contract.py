@@ -461,6 +461,73 @@ def test_gcp_lifecycle_identity_can_only_delete_firebase_users() -> None:
     assert "google_project_iam_member.managed_lifecycle_identity_deleter" in (runtime)
 
 
+def test_gcp_ownership_deletion_coordination_uses_a_distinct_bounded_secret() -> None:
+    iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    variables = (REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf").read_text(
+        encoding="utf-8"
+    )
+    staging = (REPOSITORY_ROOT / "infra" / "gcp" / "staging.tfvars.example").read_text(
+        encoding="utf-8"
+    )
+    lifecycle = runtime.split(
+        'resource "google_cloud_run_v2_job" "managed_lifecycle"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_job_iam_member" "managed_lifecycle_scheduler"',
+        maxsplit=1,
+    )[0]
+
+    assert 'variable "enable_ownership_deletion_coordination"' in variables
+    assert 'variable "ownership_deletion_lifecycle_database_url_secret_id"' in variables
+    assert "var.enable_managed_runtime" in variables
+    assert "var.enable_ownership_runtime" in variables
+    assert (
+        "var.ownership_deletion_lifecycle_database_url_secret_id != null" in variables
+    )
+    assert (
+        'data "google_secret_manager_secret" '
+        '"ownership_deletion_lifecycle_database_url"'
+    ) in iam
+    assert (
+        'resource "google_secret_manager_secret_iam_member" '
+        '"managed_lifecycle_ownership_database_url"'
+    ) in iam
+    lifecycle_secret_access = iam.split(
+        'resource "google_secret_manager_secret_iam_member" '
+        '"managed_lifecycle_ownership_database_url"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_secret_manager_secret_iam_member" '
+        '"managed_api_replay_secret"',
+        maxsplit=1,
+    )[0]
+    assert "var.enable_ownership_deletion_coordination ? 1 : 0" in (
+        lifecycle_secret_access
+    )
+    assert "google_service_account.managed_lifecycle.email" in lifecycle_secret_access
+    assert "google_service_account.ownership_api" not in lifecycle_secret_access
+    assert 'name  = "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED"' in lifecycle
+    assert 'value = "true"' in lifecycle
+    assert 'name = "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL"' in lifecycle
+    assert (
+        "data.google_secret_manager_secret."
+        "ownership_deletion_lifecycle_database_url[0].secret_id"
+    ) in lifecycle
+    assert (
+        "google_secret_manager_secret_iam_member."
+        "managed_lifecycle_ownership_database_url"
+    ) in lifecycle
+    assert (
+        lifecycle.count('name  = "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED"') == 1
+    )
+    assert lifecycle.count('name = "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL"') == 1
+    assert "ownership_deletion_lifecycle_database_url_secret_id   = null" in staging
+    assert "enable_ownership_deletion_coordination                = false" in staging
+
+
 def test_gcp_managed_runtime_cannot_list_health_objects() -> None:
     iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
 

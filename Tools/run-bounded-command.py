@@ -15,6 +15,7 @@ import secrets
 import select
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -35,11 +36,17 @@ MAX_HEARTBEAT_SECONDS = 300
 DEFAULT_RESOURCE_CHECK_SECONDS = 5
 MAX_RESOURCE_CHECK_SECONDS = 300
 MAX_RESOURCE_PROBE_SECONDS = 5
+DEFAULT_MIN_FREE_MEMORY_PERCENT = 10.0
+DEFAULT_MIN_FREE_DISK_GIB = 10.0
+DEFAULT_MAX_LOG_MIB = 128
+MAX_MAX_LOG_MIB = 1_024
+LOG_SIZE_CHECK_SECONDS = 0.1
 FINAL_KILL_WAIT_SECONDS = 10
 PROCESS_GROUP_POLL_SECONDS = 0.05
 MAX_RECOVERY_PROCESS_SCAN = 4_096
 MAX_CLEANUP_INTERRUPTION_RETRIES = 3
 GIB_BYTES = 1024 * 1024 * 1024
+MIB_BYTES = 1024 * 1024
 SAFE_LABEL = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
 MEMORY_PERCENT = re.compile(
     r"System-wide memory free percentage:\s*([0-9]+(?:\.[0-9]+)?)%"
@@ -92,7 +99,7 @@ class _SpawnedProcess:
             return
         try:
             os.close(self._spawn_status_fd)
-        except OSError:
+        except (OSError, RuntimeError):
             pass
         self._spawn_status_fd = None
 
@@ -313,10 +320,7 @@ def _native_waitid_result(
     *,
     nohang: bool,
 ) -> tuple[int, int] | None:
-    if not all(
-        hasattr(os, attribute)
-        for attribute in ("P_PID", "WEXITED", "WNOWAIT")
-    ):
+    if not all(hasattr(os, attribute) for attribute in ("P_PID", "WEXITED", "WNOWAIT")):
         raise OSError("unreaped process waiting is unavailable")
     try:
         libc = ctypes.CDLL(None, use_errno=True)
@@ -555,9 +559,7 @@ def _darwin_direct_child_pids(parent_pid: int) -> set[int]:
 
 
 def _linux_direct_child_pids(parent_pid: int) -> set[int]:
-    children_path = Path(
-        f"/proc/{parent_pid}/task/{parent_pid}/children"
-    )
+    children_path = Path(f"/proc/{parent_pid}/task/{parent_pid}/children")
     try:
         raw_children = children_path.read_text(encoding="ascii")
     except OSError as error:
@@ -689,9 +691,7 @@ def _process_has_supervisor_identity(
     process_id: int,
     supervisor_identity: str,
 ) -> bool:
-    expected = (
-        f"{_SUPERVISOR_IDENTITY_ENV}={supervisor_identity}".encode("ascii")
-    )
+    expected = f"{_SUPERVISOR_IDENTITY_ENV}={supervisor_identity}".encode("ascii")
     if sys.platform == "darwin":
         process_data = _darwin_process_arguments(process_id)
     elif sys.platform.startswith("linux"):
@@ -721,9 +721,7 @@ def _recover_unreported_supervisor(
     except OSError:
         recovery_error = True
         try:
-            candidate_pids, scan_incomplete = _all_process_pids(
-                remaining_scan_items
-            )
+            candidate_pids, scan_incomplete = _all_process_pids(remaining_scan_items)
         except OSError:
             return False, True
 
@@ -758,9 +756,7 @@ def _recover_unreported_supervisor(
             except OSError:
                 fallback_pids = set()
                 scan_incomplete = True
-        fallback_candidates = (
-            fallback_pids - candidate_pids
-        ) | identity_error_pids
+        fallback_candidates = (fallback_pids - candidate_pids) | identity_error_pids
         for pid in fallback_candidates:
             if remaining_scan_items <= 0 or time.monotonic() >= deadline:
                 scan_incomplete = True
@@ -782,8 +778,7 @@ def _recover_unreported_supervisor(
             scan_incomplete = True
             break
         cleanup_succeeded = (
-            _kill_failed_supervisor(pid, deadline=deadline)
-            and cleanup_succeeded
+            _kill_failed_supervisor(pid, deadline=deadline) and cleanup_succeeded
         )
     if not matched_pids and (identity_error or scan_incomplete):
         cleanup_succeeded = False
@@ -904,7 +899,7 @@ def _supervisor_file_actions(
     release_write_fd: int,
     supervisor_status_fd: int,
     supervisor_release_fd: int,
-    log_file: Path | None = None,
+    log_fd: int | None = None,
 ) -> list[tuple[int, ...]]:
     actions: list[tuple[int, ...]] = [
         (
@@ -918,31 +913,37 @@ def _supervisor_file_actions(
             supervisor_release_fd,
         ),
     ]
-    if log_file is not None:
-        log_flags = os.O_WRONLY | os.O_APPEND
-        if hasattr(os, "O_NOFOLLOW"):
-            log_flags |= os.O_NOFOLLOW
-        actions.extend(
-            [
-                (
-                    os.POSIX_SPAWN_OPEN,
-                    1,
-                    str(log_file),
-                    log_flags,
-                    0o600,
-                ),
-                (os.POSIX_SPAWN_DUP2, 1, 2),
-            ]
+    if log_fd is None:
+        actions.append(
+            (
+                os.POSIX_SPAWN_OPEN,
+                1,
+                os.devnull,
+                os.O_WRONLY,
+                0o666,
+            )
         )
+    else:
+        actions.append((os.POSIX_SPAWN_DUP2, log_fd, 1))
+    actions.extend(
+        [
+            (os.POSIX_SPAWN_DUP2, 1, 2),
+        ]
+    )
     for descriptor in {
         status_read_fd,
         status_write_fd,
         release_read_fd,
         release_write_fd,
+        log_fd,
     }:
+        if descriptor is None:
+            continue
         if descriptor not in {
             supervisor_status_fd,
             supervisor_release_fd,
+            1,
+            2,
         }:
             actions.append((os.POSIX_SPAWN_CLOSE, descriptor))
     return actions
@@ -951,7 +952,7 @@ def _supervisor_file_actions(
 def _spawn_process_locked(
     command: list[str],
     *,
-    log_file: Path | None = None,
+    log_fd: int | None = None,
 ) -> _SpawnedProcess:
     required_spawn_attributes = (
         "POSIX_SPAWN_CLOSE",
@@ -959,10 +960,7 @@ def _spawn_process_locked(
         "POSIX_SPAWN_OPEN",
         "posix_spawnp",
     )
-    if any(
-        not hasattr(os, attribute)
-        for attribute in required_spawn_attributes
-    ):
+    if any(not hasattr(os, attribute) for attribute in required_spawn_attributes):
         raise OSError("supervised process spawning is unavailable")
 
     supervisor_identity = secrets.token_hex(32)
@@ -982,6 +980,7 @@ def _spawn_process_locked(
                 status_write_fd,
                 release_read_fd,
                 release_write_fd,
+                *(() if log_fd is None else (log_fd,)),
             }
         )
     except BaseException:
@@ -1009,7 +1008,7 @@ def _spawn_process_locked(
                 release_write_fd=release_write_fd,
                 supervisor_status_fd=supervisor_status_fd,
                 supervisor_release_fd=supervisor_release_fd,
-                log_file=log_file,
+                log_fd=log_fd,
             ),
             setpgroup=0,
             setsigdef=_default_child_signals(),
@@ -1032,16 +1031,13 @@ def _spawn_process_locked(
                     deadline=cleanup_deadline,
                 )
             else:
-                cleanup_succeeded, recovery_error = (
-                    _recover_unreported_supervisor(
-                        supervisor_identity=supervisor_identity,
-                        deadline=cleanup_deadline,
-                    )
+                cleanup_succeeded, recovery_error = _recover_unreported_supervisor(
+                    supervisor_identity=supervisor_identity,
+                    deadline=cleanup_deadline,
                 )
                 if (
-                    (not cleanup_succeeded or recovery_error)
-                    and time.monotonic() < cleanup_deadline
-                ):
+                    not cleanup_succeeded or recovery_error
+                ) and time.monotonic() < cleanup_deadline:
                     supervisor_pid = _await_supervisor_identity_pid(
                         status_read_fd,
                         timeout_seconds=max(
@@ -1082,10 +1078,10 @@ def _spawn_process_locked(
 def _spawn_process(
     command: list[str],
     *,
-    log_file: Path | None = None,
+    log_fd: int | None = None,
 ) -> _SpawnedProcess:
     with _SPAWN_LOCK:
-        return _spawn_process_locked(command, log_file=log_file)
+        return _spawn_process_locked(command, log_fd=log_fd)
 
 
 @contextlib.contextmanager
@@ -1140,15 +1136,15 @@ def _spawn_process_before_deadline(
     command: list[str],
     *,
     deadline: float,
-    log_file: Path | None = None,
+    log_fd: int | None = None,
 ) -> _SpawnedProcess:
     process: _SpawnedProcess | None = None
     try:
         with _spawn_deadline_alarm(deadline):
-            if log_file is None:
+            if log_fd is None:
                 process = _spawn_process(command)
             else:
-                process = _spawn_process(command, log_file=log_file)
+                process = _spawn_process(command, log_fd=log_fd)
     except BaseException:
         if process is not None and not _terminate_process_group(
             process,
@@ -1200,9 +1196,7 @@ def _write_status(
             delete=False,
         ) as temporary:
             temporary_path = Path(temporary.name)
-            temporary.write(
-                f"label={label}\nstatus={status}\nexit_code={exit_code}\n"
-            )
+            temporary.write(f"label={label}\nstatus={status}\nexit_code={exit_code}\n")
         os.replace(temporary_path, path)
         return True
     except OSError:
@@ -1294,14 +1288,10 @@ def _signal_managed_processes(
         target_process_group_id is not None
         and target_process_group_id != supervisor_process_group_id
     ):
-        outcomes.append(
-            _signal_process_group(target_process_group_id, signum)
-        )
+        outcomes.append(_signal_process_group(target_process_group_id, signum))
     if target_pid is not None and target_pid != process.pid:
         outcomes.append(_signal_process(target_pid, signum))
-    outcomes.append(
-        _signal_process_group(supervisor_process_group_id, signum)
-    )
+    outcomes.append(_signal_process_group(supervisor_process_group_id, signum))
     if outcomes[-1] == "missing" and process.poll() is None:
         outcomes.append(_signal_process(process.pid, signum))
     return "denied" not in outcomes
@@ -1331,9 +1321,7 @@ def _wait_for_process_group_exit(
             target_gone = True
             target_group_gone = True
         else:
-            target_gone = (
-                target_pid is None or not _process_exists(target_pid)
-            )
+            target_gone = target_pid is None or not _process_exists(target_pid)
             target_group_gone = (
                 target_process_group_id is None
                 or target_process_group_id == process_group_id
@@ -1359,12 +1347,8 @@ def _terminate_process_group(
 ) -> bool:
     process_group_id = process.pid
     supervisor_returncode = process.poll()
-    if (
-        supervisor_returncode is not None
-        and not (
-            isinstance(process, _SpawnedProcess)
-            and not process.reaped
-        )
+    if supervisor_returncode is not None and not (
+        isinstance(process, _SpawnedProcess) and not process.reaped
     ):
         return _wait_for_process_group_exit(
             process,
@@ -1394,16 +1378,13 @@ def _terminate_process_group(
 
     post_grace_returncode = process.poll()
     if post_grace_returncode is None:
-        refreshed_target_pid, refreshed_target_process_group_id = (
-            _tracked_target(process)
+        refreshed_target_pid, refreshed_target_process_group_id = _tracked_target(
+            process
         )
         if refreshed_target_pid is not None:
             target_pid = refreshed_target_pid
             target_process_group_id = refreshed_target_process_group_id
-    elif not (
-        isinstance(process, _SpawnedProcess)
-        and not process.reaped
-    ):
+    elif not (isinstance(process, _SpawnedProcess) and not process.reaped):
         return _wait_for_process_group_exit(
             process,
             process_group_id=process_group_id,
@@ -1446,9 +1427,7 @@ def _system_free_memory_percent() -> float | None:
     if sys.platform.startswith("linux"):
         try:
             values: dict[str, int] = {}
-            for line in Path("/proc/meminfo").read_text(
-                encoding="utf-8"
-            ).splitlines():
+            for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
                 key, separator, remainder = line.partition(":")
                 if separator and key in {"MemAvailable", "MemTotal"}:
                     values[key] = int(remainder.strip().split()[0])
@@ -1547,8 +1526,7 @@ def _write_resource_pressure(
     kind: str,
 ) -> bool:
     print(
-        f"bounded-command: label={label} "
-        f"status=resource-pressure kind={kind}",
+        f"bounded-command: label={label} status=resource-pressure kind={kind}",
         file=sys.stderr,
         flush=True,
     )
@@ -1597,17 +1575,29 @@ def _finish_interrupted_run(
     label: str,
     status_file: Path | None,
     error: BaseException,
+    log_fd: int | None = None,
+    log_capture: _BoundedLogCapture | None = None,
+    max_log_bytes: int = DEFAULT_MAX_LOG_MIB * MIB_BYTES,
 ) -> int | None:
     for _ in range(MAX_CLEANUP_INTERRUPTION_RETRIES):
         try:
             with _blocked_cleanup_signals():
-                cleanup_succeeded = (
-                    process is None
-                    or _terminate_process_group(
+                if process is None:
+                    if log_capture is not None:
+                        cleanup_succeeded = log_capture.finish()
+                    else:
+                        cleanup_succeeded, _ = _finalize_log_file(
+                            log_fd,
+                            max_log_bytes,
+                        )
+                else:
+                    cleanup_succeeded, _ = _terminate_process_group_and_finalize_log(
                         process,
                         grace_seconds=grace_seconds,
+                        log_fd=log_fd,
+                        log_capture=log_capture,
+                        max_log_bytes=max_log_bytes,
                     )
-                )
                 if not cleanup_succeeded:
                     if not _write_status(
                         status_file,
@@ -1648,18 +1638,250 @@ def _minimum_free_disk_bytes(value_gib: float) -> int:
     return math.ceil(value_bytes)
 
 
-def _prepare_log_file(path: Path) -> Path:
+def _maximum_log_bytes(value_mib: float) -> int:
+    if not math.isfinite(value_mib) or value_mib <= 0 or value_mib > MAX_MAX_LOG_MIB:
+        raise ValueError("maximum log size is invalid")
+    value_bytes = value_mib * MIB_BYTES
+    if not math.isfinite(value_bytes) or value_bytes < 1:
+        raise ValueError("maximum log size is invalid")
+    return math.ceil(value_bytes)
+
+
+class _BoundedLogCapture:
+    """Drain child output through a pipe while retaining at most the hard cap."""
+
+    def __init__(self, descriptor: int, max_log_bytes: int) -> None:
+        self._descriptor: int | None = descriptor
+        self.max_log_bytes = max_log_bytes
+        self.read_fd, self.write_fd = os.pipe()
+        os.set_blocking(self.read_fd, False)
+        self._state_lock = threading.Lock()
+        self._parent_write_fd: int | None = self.write_fd
+        self._stop = threading.Event()
+        self._pressure_kind: str | None = None
+        self._thread = threading.Thread(
+            target=self._drain,
+            name="noop-bounded-log-drain",
+            daemon=True,
+        )
+        try:
+            self._thread.start()
+        except BaseException:
+            _close_descriptor(self.read_fd)
+            _close_descriptor(self.write_fd)
+            raise
+
+    @property
+    def child_write_fd(self) -> int:
+        with self._state_lock:
+            if self._parent_write_fd is None:
+                raise OSError("bounded log pipe is closed")
+            return self._parent_write_fd
+
+    def close_parent_write(self) -> None:
+        with self._state_lock:
+            descriptor = self._parent_write_fd
+            self._parent_write_fd = None
+        _close_descriptor(descriptor)
+
+    def _set_pressure(self, kind: str) -> None:
+        with self._state_lock:
+            if self._pressure_kind is None or kind == "output-unavailable":
+                self._pressure_kind = kind
+
+    def _write_bounded(self, data: memoryview) -> bool:
+        descriptor = self._descriptor
+        if descriptor is None:
+            self._set_pressure("output-unavailable")
+            return False
+        while data:
+            try:
+                written = os.write(descriptor, data)
+            except InterruptedError:
+                continue
+            except OSError:
+                self._set_pressure("output-unavailable")
+                return False
+            if written <= 0:
+                self._set_pressure("output-unavailable")
+                return False
+            data = data[written:]
+        return True
+
+    def _finalize_owned_descriptor(self) -> None:
+        descriptor = self._descriptor
+        self._descriptor = None
+        if descriptor is None:
+            return
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1:
+                self._set_pressure("output-unavailable")
+            elif metadata.st_size > self.max_log_bytes:
+                try:
+                    os.ftruncate(descriptor, self.max_log_bytes)
+                except OSError:
+                    pass
+                self._set_pressure("output-unavailable")
+        except OSError:
+            self._set_pressure("output-unavailable")
+        finally:
+            _close_descriptor(descriptor)
+
+    def _drain(self) -> None:
+        retained = 0
+        try:
+            while not self._stop.is_set():
+                try:
+                    readable, _, _ = select.select(
+                        [self.read_fd],
+                        [],
+                        [],
+                        LOG_SIZE_CHECK_SECONDS,
+                    )
+                except (InterruptedError, OSError):
+                    if self._stop.is_set():
+                        break
+                    self._set_pressure("output-unavailable")
+                    break
+                if not readable:
+                    continue
+                try:
+                    chunk = os.read(self.read_fd, 64 * 1024)
+                except BlockingIOError:
+                    continue
+                except InterruptedError:
+                    continue
+                except OSError:
+                    if not self._stop.is_set():
+                        self._set_pressure("output-unavailable")
+                    break
+                if not chunk:
+                    break
+                remaining = max(0, self.max_log_bytes - retained)
+                if remaining:
+                    retained_chunk = memoryview(chunk)[:remaining]
+                    if not self._write_bounded(retained_chunk):
+                        break
+                    retained += len(retained_chunk)
+                if len(chunk) > remaining:
+                    self._set_pressure("output")
+        finally:
+            _close_descriptor(self.read_fd)
+            self._finalize_owned_descriptor()
+
+    def pressure_kind(self) -> str | None:
+        with self._state_lock:
+            return self._pressure_kind
+
+    def finish(self) -> bool:
+        self.close_parent_write()
+        self._thread.join(timeout=FINAL_KILL_WAIT_SECONDS)
+        if self._thread.is_alive():
+            self._stop.set()
+            self._thread.join(timeout=max(1.0, LOG_SIZE_CHECK_SECONDS * 4))
+        return not self._thread.is_alive()
+
+    def abort(self) -> bool:
+        self._stop.set()
+        self.close_parent_write()
+        self._thread.join(timeout=max(1.0, LOG_SIZE_CHECK_SECONDS * 4))
+        return not self._thread.is_alive()
+
+
+def _prepare_log_file(path: Path) -> tuple[Path, int]:
     expanded = path.expanduser().absolute()
     expanded.parent.mkdir(parents=True, exist_ok=True)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
     descriptor = os.open(expanded, flags, 0o600)
     try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise OSError("log path is not a regular unlinked file")
         os.fchmod(descriptor, 0o600)
-    finally:
+        os.ftruncate(descriptor, 0)
+    except BaseException:
         os.close(descriptor)
-    return expanded
+        raise
+    return expanded, descriptor
+
+
+def _paths_alias(left: Path, right: Path) -> bool:
+    left = left.expanduser().absolute()
+    right = right.expanduser().absolute()
+    if left == right:
+        return True
+    try:
+        if left.exists() and right.exists() and os.path.samefile(left, right):
+            return True
+    except OSError:
+        pass
+    try:
+        return left.resolve(strict=False) == right.resolve(strict=False)
+    except OSError:
+        return False
+
+
+def _log_pressure_kind(descriptor: int, max_log_bytes: int) -> str | None:
+    try:
+        metadata = os.fstat(descriptor)
+    except OSError:
+        return "output-unavailable"
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1:
+        return "output-unavailable"
+    if metadata.st_size > max_log_bytes:
+        return "output"
+    return None
+
+
+def _truncate_log_file(descriptor: int, max_log_bytes: int) -> bool:
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1:
+            return False
+        os.ftruncate(descriptor, max_log_bytes)
+    except OSError:
+        return False
+    return True
+
+
+def _finalize_log_file(
+    descriptor: int | None,
+    max_log_bytes: int,
+) -> tuple[bool, str | None]:
+    if descriptor is None:
+        return True, None
+    pressure_kind = _log_pressure_kind(descriptor, max_log_bytes)
+    if pressure_kind == "output":
+        return (
+            _truncate_log_file(descriptor, max_log_bytes),
+            pressure_kind,
+        )
+    return pressure_kind is None, pressure_kind
+
+
+def _terminate_process_group_and_finalize_log(
+    process: subprocess.Popen[bytes] | _SpawnedProcess,
+    *,
+    grace_seconds: float,
+    log_fd: int | None,
+    log_capture: _BoundedLogCapture | None = None,
+    max_log_bytes: int,
+) -> tuple[bool, str | None]:
+    if not _terminate_process_group(
+        process,
+        grace_seconds=grace_seconds,
+    ):
+        return False, None
+    if log_capture is not None:
+        if not log_capture.finish():
+            return False, None
+        return True, log_capture.pressure_kind()
+    return _finalize_log_file(log_fd, max_log_bytes)
 
 
 def _run_command(
@@ -1675,6 +1897,7 @@ def _run_command(
     disk_path: Path | None = None,
     resource_check_seconds: float = DEFAULT_RESOURCE_CHECK_SECONDS,
     log_file: Path | None = None,
+    max_log_bytes: int = DEFAULT_MAX_LOG_MIB * MIB_BYTES,
 ) -> int:
     if not command:
         raise ValueError("command is required")
@@ -1694,6 +1917,13 @@ def _run_command(
     if min_free_disk_bytes < 0:
         raise ValueError("minimum free disk size is invalid")
     if (
+        isinstance(max_log_bytes, bool)
+        or not isinstance(max_log_bytes, int)
+        or max_log_bytes <= 0
+        or max_log_bytes > MAX_MAX_LOG_MIB * MIB_BYTES
+    ):
+        raise ValueError("maximum log size is invalid")
+    if (
         not math.isfinite(resource_check_seconds)
         or not 0 < resource_check_seconds <= MAX_RESOURCE_CHECK_SECONDS
     ):
@@ -1701,7 +1931,7 @@ def _run_command(
     if (
         log_file is not None
         and status_file is not None
-        and log_file.expanduser().absolute() == status_file.expanduser().absolute()
+        and _paths_alias(log_file, status_file)
     ):
         raise ValueError("log file and status file must be different")
 
@@ -1709,10 +1939,23 @@ def _run_command(
     wrapper_deadline = wrapper_started_at + timeout_seconds
     effective_disk_path = disk_path or Path.cwd()
     prepared_log_file: Path | None = None
+    prepared_log_fd: int | None = None
+    prepared_log_capture: _BoundedLogCapture | None = None
     if log_file is not None:
         try:
-            prepared_log_file = _prepare_log_file(log_file)
+            prepared_log_file, prepared_log_fd = _prepare_log_file(log_file)
+            if status_file is not None and _paths_alias(prepared_log_file, status_file):
+                raise OSError("log file and status file alias")
+            prepared_log_capture = _BoundedLogCapture(
+                prepared_log_fd,
+                max_log_bytes,
+            )
+            prepared_log_fd = None
         except OSError:
+            if prepared_log_capture is not None:
+                prepared_log_capture.abort()
+            _close_descriptor(prepared_log_fd)
+            prepared_log_fd = None
             print(
                 f"bounded-command: label={label} status=log-file-error",
                 file=sys.stderr,
@@ -1726,9 +1969,7 @@ def _run_command(
             ):
                 return CLEANUP_EXIT_CODE
             return START_FAILURE_EXIT_CODE
-    resource_limits_enabled = (
-        min_free_memory_percent > 0 or min_free_disk_bytes > 0
-    )
+    resource_limits_enabled = min_free_memory_percent > 0 or min_free_disk_bytes > 0
     if resource_limits_enabled:
         try:
             pressure_kind = _bounded_resource_pressure_kind(
@@ -1743,7 +1984,13 @@ def _run_command(
                     label=label,
                     kind=pressure_kind,
                 ):
+                    if prepared_log_capture is not None:
+                        prepared_log_capture.abort()
+                    _close_descriptor(prepared_log_fd)
                     return CLEANUP_EXIT_CODE
+                if prepared_log_capture is not None:
+                    prepared_log_capture.abort()
+                _close_descriptor(prepared_log_fd)
                 return RESOURCE_EXIT_CODE
         except BaseException as error:
             terminal_exit_code = _finish_interrupted_run(
@@ -1752,6 +1999,9 @@ def _run_command(
                 label=label,
                 status_file=status_file,
                 error=error,
+                log_fd=prepared_log_fd,
+                log_capture=prepared_log_capture,
+                max_log_bytes=max_log_bytes,
             )
             if terminal_exit_code is not None:
                 return terminal_exit_code
@@ -1769,9 +2019,15 @@ def _run_command(
                 process = _spawn_process_before_deadline(
                     command,
                     deadline=wrapper_deadline,
-                    log_file=prepared_log_file,
+                    log_fd=prepared_log_capture.child_write_fd,
                 )
+        if prepared_log_capture is not None:
+            prepared_log_capture.close_parent_write()
     except _SpawnCleanupFailed:
+        if prepared_log_capture is not None:
+            prepared_log_capture.abort()
+        _close_descriptor(prepared_log_fd)
+        prepared_log_fd = None
         print(
             f"bounded-command: label={label} status=cleanup-failed",
             file=sys.stderr,
@@ -1785,6 +2041,40 @@ def _run_command(
         )
         return CLEANUP_EXIT_CODE
     except _SpawnDeadlineExceeded:
+        if prepared_log_capture is not None:
+            prepared_log_capture.close_parent_write()
+            capture_finished = prepared_log_capture.finish()
+            log_finalized = capture_finished
+            log_pressure_kind = prepared_log_capture.pressure_kind()
+        else:
+            capture_finished = True
+            log_finalized, log_pressure_kind = _finalize_log_file(
+                prepared_log_fd,
+                max_log_bytes,
+            )
+        _close_descriptor(prepared_log_fd)
+        prepared_log_fd = None
+        if not log_finalized:
+            print(
+                f"bounded-command: label={label} status=cleanup-failed",
+                file=sys.stderr,
+                flush=True,
+            )
+            _write_status(
+                status_file,
+                label=label,
+                status="cleanup-failed",
+                exit_code=CLEANUP_EXIT_CODE,
+            )
+            return CLEANUP_EXIT_CODE
+        if log_pressure_kind == "output":
+            if not _write_resource_pressure(
+                status_file,
+                label=label,
+                kind=log_pressure_kind,
+            ):
+                return CLEANUP_EXIT_CODE
+            return RESOURCE_EXIT_CODE
         print(
             f"bounded-command: label={label} status=timeout",
             file=sys.stderr,
@@ -1799,6 +2089,31 @@ def _run_command(
             return CLEANUP_EXIT_CODE
         return TIMEOUT_EXIT_CODE
     except OSError:
+        if prepared_log_capture is not None:
+            prepared_log_capture.close_parent_write()
+            capture_finished = prepared_log_capture.finish()
+            log_finalized = capture_finished
+        else:
+            capture_finished = True
+            log_finalized, _ = _finalize_log_file(
+                prepared_log_fd,
+                max_log_bytes,
+            )
+        _close_descriptor(prepared_log_fd)
+        prepared_log_fd = None
+        if not log_finalized:
+            print(
+                f"bounded-command: label={label} status=cleanup-failed",
+                file=sys.stderr,
+                flush=True,
+            )
+            _write_status(
+                status_file,
+                label=label,
+                status="cleanup-failed",
+                exit_code=CLEANUP_EXIT_CODE,
+            )
+            return CLEANUP_EXIT_CODE
         print(
             f"bounded-command: label={label} status=start-error",
             file=sys.stderr,
@@ -1819,7 +2134,12 @@ def _run_command(
             label=label,
             status_file=status_file,
             error=error,
+            log_fd=prepared_log_fd,
+            log_capture=prepared_log_capture,
+            max_log_bytes=max_log_bytes,
         )
+        _close_descriptor(prepared_log_fd)
+        prepared_log_fd = None
         if terminal_exit_code is not None:
             return terminal_exit_code
         raise
@@ -1831,9 +2151,12 @@ def _run_command(
             status="running",
             exit_code=-1,
         ):
-            _terminate_process_group(
+            _terminate_process_group_and_finalize_log(
                 process,
                 grace_seconds=grace_seconds,
+                log_fd=prepared_log_fd,
+                log_capture=prepared_log_capture,
+                max_log_bytes=max_log_bytes,
             )
             return CLEANUP_EXIT_CODE
 
@@ -1843,6 +2166,11 @@ def _run_command(
         next_resource_check_at = (
             started_at + resource_check_seconds
             if resource_limits_enabled
+            else float("inf")
+        )
+        next_log_check_at = (
+            started_at + LOG_SIZE_CHECK_SECONDS
+            if prepared_log_capture is not None
             else float("inf")
         )
         heartbeat = 0
@@ -1858,16 +2186,25 @@ def _run_command(
                 deadline,
                 next_heartbeat_at,
                 next_resource_check_at,
+                next_log_check_at,
             )
             try:
-                exit_code = process.wait(
-                    timeout=max(0.001, next_event_at - now)
-                )
+                exit_code = process.wait(timeout=max(0.001, next_event_at - now))
             except subprocess.TimeoutExpired:
                 now = time.monotonic()
                 if now >= deadline:
                     exit_code = process.poll()
                     break
+                if now >= next_log_check_at:
+                    pressure_kind = prepared_log_capture.pressure_kind()
+                    exit_code = process.poll()
+                    now = time.monotonic()
+                    if pressure_kind is not None:
+                        break
+                    if exit_code is not None:
+                        break
+                    while next_log_check_at <= now:
+                        next_log_check_at += LOG_SIZE_CHECK_SECONDS
                 if now >= next_resource_check_at:
                     pressure_kind = _bounded_resource_pressure_kind(
                         min_free_memory_percent=min_free_memory_percent,
@@ -1899,10 +2236,18 @@ def _run_command(
                     while next_heartbeat_at <= now:
                         next_heartbeat_at += heartbeat_seconds
 
+        if pressure_kind is None and prepared_log_capture is not None:
+            pressure_kind = prepared_log_capture.pressure_kind()
+
         if pressure_kind is not None:
-            cleanup_succeeded = _terminate_process_group(
-                process,
-                grace_seconds=grace_seconds,
+            cleanup_succeeded, final_log_pressure_kind = (
+                _terminate_process_group_and_finalize_log(
+                    process,
+                    grace_seconds=grace_seconds,
+                    log_fd=prepared_log_fd,
+                    log_capture=prepared_log_capture,
+                    max_log_bytes=max_log_bytes,
+                )
             )
             if not cleanup_succeeded:
                 print(
@@ -1917,6 +2262,8 @@ def _run_command(
                     exit_code=CLEANUP_EXIT_CODE,
                 )
                 return CLEANUP_EXIT_CODE
+            if final_log_pressure_kind is not None:
+                pressure_kind = final_log_pressure_kind
             if not _write_resource_pressure(
                 status_file,
                 label=label,
@@ -1926,9 +2273,14 @@ def _run_command(
             return RESOURCE_EXIT_CODE
 
         if exit_code is None:
-            cleanup_succeeded = _terminate_process_group(
-                process,
-                grace_seconds=grace_seconds,
+            cleanup_succeeded, final_log_pressure_kind = (
+                _terminate_process_group_and_finalize_log(
+                    process,
+                    grace_seconds=grace_seconds,
+                    log_fd=prepared_log_fd,
+                    log_capture=prepared_log_capture,
+                    max_log_bytes=max_log_bytes,
+                )
             )
             if not cleanup_succeeded:
                 print(
@@ -1943,6 +2295,14 @@ def _run_command(
                     exit_code=CLEANUP_EXIT_CODE,
                 )
                 return CLEANUP_EXIT_CODE
+            if final_log_pressure_kind is not None:
+                if not _write_resource_pressure(
+                    status_file,
+                    label=label,
+                    kind=final_log_pressure_kind,
+                ):
+                    return CLEANUP_EXIT_CODE
+                return RESOURCE_EXIT_CODE
             print(
                 f"bounded-command: label={label} status=timeout",
                 file=sys.stderr,
@@ -1957,9 +2317,14 @@ def _run_command(
                 return CLEANUP_EXIT_CODE
             return TIMEOUT_EXIT_CODE
 
-        cleanup_succeeded = _terminate_process_group(
-            process,
-            grace_seconds=grace_seconds,
+        cleanup_succeeded, final_log_pressure_kind = (
+            _terminate_process_group_and_finalize_log(
+                process,
+                grace_seconds=grace_seconds,
+                log_fd=prepared_log_fd,
+                log_capture=prepared_log_capture,
+                max_log_bytes=max_log_bytes,
+            )
         )
         if not cleanup_succeeded:
             print(
@@ -1974,6 +2339,15 @@ def _run_command(
                 exit_code=CLEANUP_EXIT_CODE,
             )
             return CLEANUP_EXIT_CODE
+
+        if final_log_pressure_kind is not None:
+            if not _write_resource_pressure(
+                status_file,
+                label=label,
+                kind=final_log_pressure_kind,
+            ):
+                return CLEANUP_EXIT_CODE
+            return RESOURCE_EXIT_CODE
 
         if isinstance(process, _SpawnedProcess) and process.start_failed:
             print(
@@ -2007,10 +2381,17 @@ def _run_command(
             label=label,
             status_file=status_file,
             error=error,
+            log_fd=prepared_log_fd,
+            log_capture=prepared_log_capture,
+            max_log_bytes=max_log_bytes,
         )
         if terminal_exit_code is not None:
             return terminal_exit_code
         raise
+    finally:
+        if prepared_log_capture is not None:
+            prepared_log_capture.abort()
+        _close_descriptor(prepared_log_fd)
 
 
 @contextlib.contextmanager
@@ -2039,6 +2420,7 @@ def run_command(
     disk_path: Path | None = None,
     resource_check_seconds: float = DEFAULT_RESOURCE_CHECK_SECONDS,
     log_file: Path | None = None,
+    max_log_bytes: int = DEFAULT_MAX_LOG_MIB * MIB_BYTES,
 ) -> int:
     with _default_ignored_sigchld():
         return _run_command(
@@ -2053,6 +2435,7 @@ def run_command(
             disk_path=disk_path,
             resource_check_seconds=resource_check_seconds,
             log_file=log_file,
+            max_log_bytes=max_log_bytes,
         )
 
 
@@ -2070,8 +2453,16 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=DEFAULT_HEARTBEAT_SECONDS,
     )
-    parser.add_argument("--min-free-memory-percent", type=float, default=0)
-    parser.add_argument("--min-free-disk-gib", type=float, default=0)
+    parser.add_argument(
+        "--min-free-memory-percent",
+        type=float,
+        default=DEFAULT_MIN_FREE_MEMORY_PERCENT,
+    )
+    parser.add_argument(
+        "--min-free-disk-gib",
+        type=float,
+        default=DEFAULT_MIN_FREE_DISK_GIB,
+    )
     parser.add_argument("--disk-path", type=Path)
     parser.add_argument(
         "--resource-check-seconds",
@@ -2081,6 +2472,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label", required=True)
     parser.add_argument("--status-file", type=Path)
     parser.add_argument("--log-file", type=Path)
+    parser.add_argument(
+        "--max-log-mib",
+        type=float,
+        default=DEFAULT_MAX_LOG_MIB,
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args(argv)
 
@@ -2088,9 +2484,8 @@ def main(argv: list[str] | None = None) -> int:
     if command[:1] == ["--"]:
         command = command[1:]
     try:
-        min_free_disk_bytes = _minimum_free_disk_bytes(
-            arguments.min_free_disk_gib
-        )
+        min_free_disk_bytes = _minimum_free_disk_bytes(arguments.min_free_disk_gib)
+        max_log_bytes = _maximum_log_bytes(arguments.max_log_mib)
     except ValueError as error:
         parser.error(str(error))
 
@@ -2117,6 +2512,7 @@ def main(argv: list[str] | None = None) -> int:
                 disk_path=arguments.disk_path,
                 resource_check_seconds=arguments.resource_check_seconds,
                 log_file=arguments.log_file,
+                max_log_bytes=max_log_bytes,
             )
         except ValueError as error:
             parser.error(str(error))

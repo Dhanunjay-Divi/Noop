@@ -247,6 +247,10 @@ class OwnershipRepository(Protocol):
         *,
         principal: OwnershipPrincipal,
         deletion_request_id: UUID,
+        installation_id: str,
+        installation_token_hash: str,
+        expected_platform: str,
+        identity_auth_time: datetime,
     ) -> dict[str, Any]: ...
 
     async def select_plan(
@@ -306,6 +310,10 @@ class PostgresOwnershipRepository:
                     ('ownership_account_deletion_requests', 'INSERT'),
                     ('ownership_account_deletion_targets', 'SELECT'),
                     ('ownership_account_deletion_targets', 'INSERT'),
+                    (
+                        'ownership_account_deletion_target_progress',
+                        'SELECT'
+                    ),
                     ('ownership_events', 'INSERT')
             ),
             ownership_column_allowed (
@@ -2388,13 +2396,9 @@ class PostgresOwnershipRepository:
                     claims.subject_hash,
                 )
                 if identity is None:
-                    raise OwnershipNotFoundError(
-                        "ownership account is not registered"
-                    )
+                    raise OwnershipNotFoundError("ownership account is not registered")
                 if identity["identity_status"] != "active":
-                    raise OwnershipForbiddenError(
-                        "ownership account is unavailable"
-                    )
+                    raise OwnershipForbiddenError("ownership account is unavailable")
                 account_id = identity["account_id"]
                 requester_identity_hash = _digest(str(identity["identity_id"]))
                 await _lock_account(connection, account_id)
@@ -2460,9 +2464,7 @@ class PostgresOwnershipRepository:
                     identity["account_status"] != "active"
                     or claims.auth_time < identity["auth_valid_after"]
                 ):
-                    raise OwnershipForbiddenError(
-                        "ownership account is unavailable"
-                    )
+                    raise OwnershipForbiddenError("ownership account is unavailable")
                 installation = await connection.fetchrow(
                     """
                     SELECT account_id,
@@ -2487,9 +2489,7 @@ class PostgresOwnershipRepository:
                         installation_token_hash,
                     )
                 ):
-                    raise OwnershipForbiddenError(
-                        "ownership installation was rejected"
-                    )
+                    raise OwnershipForbiddenError("ownership installation was rejected")
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 policy = await _current_terms_document(
                     connection,
@@ -2523,9 +2523,7 @@ class PostgresOwnershipRepository:
                     account_id,
                 )
                 if live_request:
-                    raise OwnershipConflictError(
-                        "account deletion is already pending"
-                    )
+                    raise OwnershipConflictError("account deletion is already pending")
                 band = await connection.fetchrow(
                     """
                     SELECT band_id,
@@ -2561,9 +2559,7 @@ class PostgresOwnershipRepository:
                     or 0
                 )
                 if not 1 <= expected_revoked_count <= 10:
-                    raise OwnershipForbiddenError(
-                        "ownership installation was rejected"
-                    )
+                    raise OwnershipForbiddenError("ownership installation was rejected")
                 cancel_before = now + cooling_off
                 await connection.execute(
                     """
@@ -2686,9 +2682,7 @@ class PostgresOwnershipRepository:
                 )
                 revoked_count = int(sessions_revoked or 0)
                 if revoked_count != expected_revoked_count:
-                    raise OwnershipForbiddenError(
-                        "ownership installation was rejected"
-                    )
+                    raise OwnershipForbiddenError("ownership installation was rejected")
                 account_update = await connection.execute(
                     """
                     UPDATE ownership_accounts
@@ -2702,9 +2696,7 @@ class PostgresOwnershipRepository:
                     now,
                 )
                 if account_update != "UPDATE 1":
-                    raise OwnershipConflictError(
-                        "account deletion request conflicts"
-                    )
+                    raise OwnershipConflictError("account deletion request conflicts")
                 await self._record_event(
                     connection,
                     account_id=account_id,
@@ -2780,9 +2772,7 @@ class PostgresOwnershipRepository:
                 deletion_request_id,
             )
             if row is None:
-                raise OwnershipNotFoundError(
-                    "account deletion request was not found"
-                )
+                raise OwnershipNotFoundError("account deletion request was not found")
             targets = await _account_deletion_targets(
                 connection,
                 deletion_request_id=deletion_request_id,
@@ -2800,6 +2790,10 @@ class PostgresOwnershipRepository:
         *,
         principal: OwnershipPrincipal,
         deletion_request_id: UUID,
+        installation_id: str,
+        installation_token_hash: str,
+        expected_platform: str,
+        identity_auth_time: datetime,
     ) -> dict[str, Any]:
         async with self._pool().acquire() as connection:
             async with connection.transaction():
@@ -2822,7 +2816,35 @@ class PostgresOwnershipRepository:
                         "account deletion request was not found"
                     )
                 now = await connection.fetchval("SELECT clock_timestamp()")
+                installation = await connection.fetchrow(
+                    """
+                    SELECT account_id,
+                           platform,
+                           token_hash,
+                           status,
+                           auth_valid_after
+                    FROM ownership_installations
+                    WHERE installation_id = $1
+                    FOR UPDATE
+                    """,
+                    installation_id,
+                )
+                if (
+                    installation is None
+                    or installation["account_id"] != principal.account_id
+                    or installation["platform"] != expected_platform
+                    or not hmac.compare_digest(
+                        str(installation["token_hash"]).strip(),
+                        installation_token_hash,
+                    )
+                    or identity_auth_time < installation["auth_valid_after"]
+                ):
+                    raise OwnershipForbiddenError("ownership installation was rejected")
                 if row["canceled_at"] is not None:
+                    if installation["status"] != "active":
+                        raise OwnershipConflictError(
+                            "account deletion cancellation is inconsistent"
+                        )
                     targets = await _account_deletion_targets(
                         connection,
                         deletion_request_id=deletion_request_id,
@@ -2836,6 +2858,7 @@ class PostgresOwnershipRepository:
                 if (
                     row["account_status"] != "deletion_pending"
                     or row["cancel_before"] <= now
+                    or installation["status"] != "revoked"
                 ):
                     raise OwnershipConflictError(
                         "account deletion can no longer be canceled"
@@ -2874,11 +2897,39 @@ class PostgresOwnershipRepository:
                     raise OwnershipConflictError(
                         "account deletion can no longer be canceled"
                     )
+                installation_update = await connection.execute(
+                    """
+                    UPDATE ownership_installations
+                    SET status = 'active',
+                        revoked_at = NULL,
+                        auth_valid_after = $3,
+                        last_seen_at = GREATEST(last_seen_at, $4)
+                    WHERE account_id = $1
+                      AND installation_id = $2
+                      AND status = 'revoked'
+                    """,
+                    principal.account_id,
+                    installation_id,
+                    identity_auth_time,
+                    now,
+                )
+                if installation_update != "UPDATE 1":
+                    raise OwnershipConflictError(
+                        "account deletion can no longer be canceled"
+                    )
                 await self._record_event(
                     connection,
                     account_id=principal.account_id,
                     event_kind="account_deletion_canceled",
                     outcome="canceled",
+                    occurred_at=now,
+                )
+                await self._record_event(
+                    connection,
+                    account_id=principal.account_id,
+                    installation_id=installation_id,
+                    event_kind="installation_authorized",
+                    outcome="completed",
                     occurred_at=now,
                 )
                 row = dict(row)
@@ -3037,16 +3088,23 @@ async def _account_deletion_targets(
 ) -> list[Any]:
     return await connection.fetch(
         """
-        SELECT target_kind,
-               initial_state,
-               blocker,
-               policy_version,
-               hardware_capability_version,
-               scheduled_at,
-               not_before
-        FROM ownership_account_deletion_targets
-        WHERE deletion_request_id = $1
-        ORDER BY target_kind
+        SELECT target.target_kind,
+               target.initial_state,
+               target.blocker AS initial_blocker,
+               target.policy_version,
+               target.hardware_capability_version,
+               target.scheduled_at,
+               target.not_before,
+               progress.current_state,
+               progress.blocker,
+               progress.attempt_count,
+               progress.updated_at,
+               progress.completed_at
+        FROM ownership_account_deletion_targets target
+        JOIN ownership_account_deletion_target_progress progress
+          USING (deletion_request_id, target_kind)
+        WHERE target.deletion_request_id = $1
+        ORDER BY target.target_kind
         """,
         deletion_request_id,
     )
@@ -3067,23 +3125,27 @@ def _public_account_deletion(
         "ownership_control_plane",
     }
     if set(target_map) != required_targets:
-        raise OwnershipConfigurationError(
-            "account deletion coordination is incomplete"
-        )
+        raise OwnershipConfigurationError("account deletion coordination is incomplete")
     canceled = row["canceled_at"] is not None
 
     def work_state(target_kind: str) -> str:
         target = target_map[target_kind]
         if canceled and target["initial_state"] != "not_required":
             return "canceled"
-        return str(target["initial_state"])
+        return str(target["current_state"])
+
+    def blocker(target_kind: str) -> str | None:
+        target = target_map[target_kind]
+        if work_state(target_kind) != "blocked" or target["blocker"] is None:
+            return None
+        return str(target["blocker"])
 
     band_target = target_map["band_retirement"]
     if band_target["initial_state"] == "not_required":
         band_eligibility = "not_required"
-    elif band_target["blocker"] == "hardware_capability_unavailable":
+    elif band_target["initial_blocker"] == "hardware_capability_unavailable":
         band_eligibility = "blocked_hardware"
-    elif band_target["blocker"] == "operator_approval_required":
+    elif band_target["initial_blocker"] == "operator_approval_required":
         band_eligibility = "eligible_pending_operator"
     else:
         band_eligibility = "blocked_policy"
@@ -3093,7 +3155,8 @@ def _public_account_deletion(
     elif now < row["cancel_before"]:
         phase = "cooling_off"
     elif any(
-        target["initial_state"] == "blocked" for target in target_map.values()
+        target["current_state"] in {"blocked", "failed"}
+        for target in target_map.values()
     ):
         phase = "blocked"
     else:
@@ -3106,9 +3169,7 @@ def _public_account_deletion(
         "requested_at": row["requested_at"],
         "cancel_before": row["cancel_before"],
         "canceled_at": row["canceled_at"],
-        "cancellation_allowed": (
-            not canceled and now < row["cancel_before"]
-        ),
+        "cancellation_allowed": (not canceled and now < row["cancel_before"]),
         "policy_version": str(row["policy_version"]),
         "export_acknowledged": True,
         "retention_acknowledged": True,
@@ -3121,21 +3182,19 @@ def _public_account_deletion(
         },
         "identity_deletion": {
             "state": work_state("identity_provider"),
-            "blocker": target_map["identity_provider"]["blocker"],
+            "blocker": blocker("identity_provider"),
         },
         "band_retirement": {
             "required": band_target["initial_state"] != "not_required",
             "eligibility": band_eligibility,
             "work_state": work_state("band_retirement"),
-            "blocker": band_target["blocker"],
+            "blocker": blocker("band_retirement"),
             "policy_version": band_target["policy_version"],
-            "hardware_capability_version": (
-                band_target["hardware_capability_version"]
-            ),
+            "hardware_capability_version": (band_target["hardware_capability_version"]),
         },
         "control_plane_deletion": {
             "state": work_state("ownership_control_plane"),
-            "blocker": target_map["ownership_control_plane"]["blocker"],
+            "blocker": blocker("ownership_control_plane"),
         },
         "destructive_completion_claimed": False,
         "duplicate": duplicate,

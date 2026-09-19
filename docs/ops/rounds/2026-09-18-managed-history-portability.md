@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `implemented locally; compile and runtime verification deferred`
+- State: `implemented and exact-current local verification complete; live and physical evidence pending`
 - Owner: project team
 - Branch: `codex/managed-history-portability-20260918`
 - Start commit: `b688b3b725cd497e96a31b28540a219bf50446e1`
-- End implementation commit: commit containing this record
-- Record commit or PR: local commit containing this record; no push authorized
+- End implementation commit: `57df5cdf`
+- Record commit or PR: integrated into the September 17 readiness candidate;
+  protected review remains pending
 
 ## Objective
 
@@ -111,7 +112,10 @@ import.
 |---|---|---|---|
 | `git diff --check` | passed before commit | The scoped patch has no whitespace errors | Compilation or runtime behavior |
 | `xcrun swiftc -parse` on the changed Swift source files | passed with empty output before the final test/doc edits | Changed Swift production syntax parsed without invoking Xcode build orchestration | Type checking, linking, or the newly authored tests |
-| Focused Apple/Android tests | authored, not executed under the explicit shared-resource restriction | The requested integrity, resume, conflict, compatibility, and staging cases are represented | A passing compile/test result |
+| Complete macOS `Strand` suite | 2,142 passed, 1 intentional skip | Shared Apple archive, service, and integration contracts compile and pass with the current source | Physical process death, low storage, or live service behavior |
+| Complete Android Full and Demo unit walls | 4,883 tests per variant, 7 skipped, 0 failed after the final stale-expectation correction | Android export/import/archive/service contracts compile and pass in both variants | OEM process death, low storage, or live service behavior |
+| API 35 managed-device lanes | 114 production-shell tests passed with 2 private-pilot skips; fresh Review Sample passed 1/1 | Current app packaging and Android runtime shell remain compatible | Production cloud, physical phone, or large archive behavior |
+| Swift package/tool wall | all 11 build-and-test pairs passed, including `NoopRemoteSync` | Shared portability packages compile and their focused plus complete tests pass | Live cross-tenant authorization or production expiry |
 
 ## Physical device and deployment
 
@@ -127,8 +131,9 @@ import.
 - Changed paths: shared Swift export/import source and tests; Apple transfer
   writer/service/tests; Android export/import/archive/service source and tests;
   this round, the round index, and the managed-history portability contract.
-- Commits: local commit containing this record
-- Branch and remote state: local feature branch; no push authorized
+- Commits: implementation commit `57df5cdf`
+- Branch and remote state: implementation is present on the active readiness
+  branch; protected push/review remains pending
 - Repository visibility verified: not changed
 - Version/build impact: none planned
 - Release or distribution impact: none
@@ -142,19 +147,14 @@ import.
 
 ## Open risks and honest limitations
 
-- Apple and Android compile/type-check and focused test execution were not run
-  because the main rollout owned heavy build resources and the host reported
-  severe memory pressure.
 - Live managed-service, low-storage, large-account, cross-tenant, and physical
   process-death evidence remain external.
 
 ## Next round
 
-1. When the shared-resource gate clears, run the focused Swift package, Apple
-   archive, and Android JVM tests using agent-unique build/cache directories and
-   bounded logs.
-2. Exercise synthetic staging interruption/resume and then physical process
-   death, low-storage, and large-archive scenarios before release.
+1. Exercise live synthetic staging expiry, cancellation/auth refresh,
+   cross-tenant isolation, and large-account interruption/resume.
+2. Exercise physical process death and low-storage behavior before release.
 
 ## Privacy check
 

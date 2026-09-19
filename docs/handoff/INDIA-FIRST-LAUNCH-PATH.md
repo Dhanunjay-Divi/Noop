@@ -13,10 +13,11 @@ registration, certification, locale quality, or launch evidence.
 > superseded. Core collection, scoring, local history, export, and supported
 > local controls remain local-first. A first-party band uses a narrow ownership
 > account and one-time network claim; its supplier-independent foundation is
-> only `PARTIAL`, while possession, ownership-account deletion, billing,
-> recovery/release, legal approval, physical evidence, and production
-> operation remain open. NOOP+ health-data services remain a separate explicit
-> opt-in.
+> only `PARTIAL`. Cooling-off deletion coordination exists, while
+> supplier-backed possession, provider identity erasure, approved band
+> retirement/wipe, billing, recovery/release, legal approval, physical
+> evidence, and production operation remain open. NOOP+ health-data services
+> remain a separate explicit opt-in.
 >
 > The first Safety transport is manual app-to-app paging of accepted NOOP
 > Safety contacts. Precise location is off by default and requires explicit
@@ -114,7 +115,7 @@ product but is not local-only:
 | Capability | India first-release direction | Gate |
 |---|---|---|
 | Core health experience | Keep collection, scoring, local history, export, and supported local controls on device and useful without NOOP+ or continuous network access | Physical band, data-integrity, performance, privacy, signing, and store evidence |
-| Band ownership | Use the narrow ownership account and one-time claim; do not treat it as NOOP+ or health-data consent | Foundation is `PARTIAL`; supplier possession, deletion, billing, recovery/release, legal, physical, and production gates stay open |
+| Band ownership | Use the narrow ownership account and one-time claim; do not treat it as NOOP+ or health-data consent | Foundation is `PARTIAL`; cooling-off deletion, durable target progress, and restricted managed-data erasure coordination exist default-off, while supplier possession, provider/control-plane final erasure, physical retirement/wipe, billing, recovery/release, legal, physical, and production gates stay open |
 | Safety primary transport | Manual app-to-app paging of accepted NOOP Safety contacts | Production APNs/FCM relay, accepted-contact authorization, explicit location-consent journey, latest-only retention/deletion, physical-phone/background delivery, monitoring, legal, and staffed operations |
 | SMS/voice fallback | Keep disabled for the app-to-app launch path | Enable only after DLT entity/header/templates, carrier delivery, legal review, physical-phone tests, monitoring, failover, and staffed operations |
 | NOOP+ | Keep a separate explicit opt-in; do not make it a prerequisite for core band use | Enable each managed-data feature only after its consent, identity, privacy, security, portability, deletion, load, recovery, and production gates pass |

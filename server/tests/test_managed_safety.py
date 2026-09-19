@@ -48,6 +48,10 @@ REPLAY_SECRET = "test-managed-safety-replay-secret-at-least-32-bytes"
 PUSH_SECRET = "test-managed-safety-push-secret-at-least-32-bytes"
 
 
+def _capability() -> str:
+    return "noopsafety_" + uuid4().hex + uuid4().hex[:11]
+
+
 def test_incident_location_requires_explicit_opt_in() -> None:
     request = ManagedSafetyIncidentCreate(request_id=uuid4())
 
@@ -768,7 +772,7 @@ async def test_safety_invite_churn_has_account_scoped_daily_quota() -> None:
                 principal=owner,
                 request=ManagedSafetyInviteCreate(
                     request_id=uuid4(),
-                    capability="noopsafety_" + ("q" * 43),
+                    capability=_capability(),
                 ),
             )
         assert 1 <= limited.value.retry_after_seconds <= 24 * 60 * 60
@@ -789,7 +793,7 @@ async def test_safety_invite_churn_has_account_scoped_daily_quota() -> None:
                 principal=owner,
                 request=ManagedSafetyInviteCreate(
                     request_id=uuid4(),
-                    capability="noopsafety_" + ("w" * 43),
+                    capability=_capability(),
                 ),
             )
 
@@ -813,7 +817,7 @@ async def test_safety_invite_churn_has_account_scoped_daily_quota() -> None:
             principal=owner,
             request=ManagedSafetyInviteCreate(
                 request_id=uuid4(),
-                capability="noopsafety_" + ("x" * 43),
+                capability=_capability(),
             ),
         )
         assert after_window["duplicate"] is False
@@ -1120,7 +1124,7 @@ async def test_safety_relationships_require_active_managed_accounts() -> None:
             contact,
             display_name="Contact",
         )
-        capability = "noopsafety_" + ("a" * 43)
+        capability = _capability()
         await safety.create_invite(
             principal=owner,
             request=ManagedSafetyInviteCreate(
@@ -2826,7 +2830,7 @@ async def test_invite_redeem_and_owner_profile_delete_do_not_deadlock() -> None:
         contact = await _principal(primary, label=f"invite-race-contact-{uuid4()}")
         owner_profile = await _profile(managed, owner, display_name="Owner")
         await _profile(managed, contact, display_name="Contact")
-        capability = "noopsafety_" + ("r" * 43)
+        capability = _capability()
         invite = await safety.create_invite(
             principal=owner,
             request=ManagedSafetyInviteCreate(

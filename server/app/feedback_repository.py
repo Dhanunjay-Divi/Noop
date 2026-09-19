@@ -1722,9 +1722,9 @@ class PostgresFeedbackRepository:
                             principal_hash,
                             idempotency_hash,
                             created_at,
-                            created_at + INTERVAL '45 days'
+                            created_at + INTERVAL '1080 hours'
                         FROM deleted_report
-                        WHERE created_at + INTERVAL '45 days' > $3::timestamptz
+                        WHERE created_at + INTERVAL '1080 hours' > $3::timestamptz
                         ON CONFLICT (
                             client_app_id,
                             principal_hash_version,

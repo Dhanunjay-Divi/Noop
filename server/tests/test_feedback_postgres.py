@@ -231,6 +231,12 @@ async def test_restore_smoke_rejects_non_timestamptz_feedback_timestamps(
                     """
                 )
                 await connection.execute(
+                    """
+                    DROP TRIGGER feedback_tombstone_normalize_expiry
+                    ON feedback_idempotency_tombstones
+                    """
+                )
+                await connection.execute(
                     f"""
                     ALTER TABLE feedback_idempotency_tombstones
                     ALTER COLUMN {column_name}
@@ -374,8 +380,105 @@ async def test_restore_smoke_rejects_disabled_feedback_retirement_trigger() -> N
                 )
                 with pytest.raises(
                     asyncpg.PostgresError,
-                    match="feedback report runtime trigger is missing or disabled",
+                    match=(
+                        "feedback report runtime trigger binding or shape is invalid"
+                    ),
                 ):
+                    await connection.execute(_restore_smoke_contract_block())
+            finally:
+                await transaction.rollback()
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "feedback tests"
+    ),
+)
+@pytest.mark.parametrize(
+    ("replacement_sql", "expected_error"),
+    (
+        (
+            """
+            DROP TRIGGER feedback_report_compatibility ON feedback_reports;
+            CREATE TRIGGER feedback_report_compatibility
+            AFTER INSERT OR UPDATE ON feedback_reports
+            FOR EACH ROW
+            EXECUTE FUNCTION noop_feedback_report_compatibility()
+            """,
+            "feedback report runtime trigger binding or shape is invalid",
+        ),
+        (
+            """
+            DROP TRIGGER feedback_report_retire_idempotency ON feedback_reports;
+            CREATE TRIGGER feedback_report_retire_idempotency
+            BEFORE DELETE ON feedback_reports
+            FOR EACH ROW
+            EXECUTE FUNCTION noop_feedback_report_compatibility()
+            """,
+            "feedback report runtime trigger binding or shape is invalid",
+        ),
+        (
+            """
+            DROP TRIGGER feedback_tombstone_normalize_expiry
+            ON feedback_idempotency_tombstones;
+            CREATE TRIGGER feedback_tombstone_normalize_expiry
+            BEFORE UPDATE OF reserved_at, expires_at
+            ON feedback_idempotency_tombstones
+            FOR EACH ROW
+            EXECUTE FUNCTION noop_feedback_tombstone_normalize_expiry()
+            """,
+            "feedback tombstone duration normalization trigger is missing or invalid",
+        ),
+        (
+            """
+            DROP TRIGGER feedback_tombstone_normalize_expiry
+            ON feedback_idempotency_tombstones;
+            CREATE TRIGGER feedback_tombstone_normalize_expiry
+            BEFORE INSERT OR UPDATE OF expires_at
+            ON feedback_idempotency_tombstones
+            FOR EACH ROW
+            EXECUTE FUNCTION noop_feedback_tombstone_normalize_expiry()
+            """,
+            "feedback tombstone duration normalization trigger is missing or invalid",
+        ),
+        (
+            """
+            DROP TRIGGER feedback_tombstone_normalize_expiry
+            ON feedback_idempotency_tombstones;
+            CREATE TRIGGER feedback_tombstone_normalize_expiry
+            BEFORE INSERT OR UPDATE
+            ON feedback_idempotency_tombstones
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION noop_feedback_tombstone_normalize_expiry()
+            """,
+            "feedback tombstone duration normalization trigger is missing or invalid",
+        ),
+    ),
+    ids=(
+        "compatibility-timing",
+        "retirement-function-binding",
+        "normalizer-events",
+        "normalizer-update-columns",
+        "normalizer-orientation",
+    ),
+)
+async def test_restore_smoke_rejects_feedback_trigger_binding_or_shape(
+    replacement_sql: str,
+    expected_error: str,
+) -> None:
+    primary = _primary()
+    await primary.startup()
+    try:
+        async with primary._require_pool().acquire() as connection:
+            transaction = connection.transaction()
+            await transaction.start()
+            try:
+                await connection.execute(replacement_sql)
+                with pytest.raises(asyncpg.PostgresError, match=expected_error):
                     await connection.execute(_restore_smoke_contract_block())
             finally:
                 await transaction.rollback()

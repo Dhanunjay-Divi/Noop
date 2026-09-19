@@ -126,6 +126,78 @@ internal class OwnershipSecureStore(context: Context) {
         }
     }
 
+    fun accountDeletionRequestId(scope: String): UUID? {
+        require(scope.matches(SHA256))
+        val persisted = secureStorageOperation {
+            preferences.getString("$DELETION_PREFIX$scope", null)
+        } ?: return null
+        return runCatching { UUID.fromString(persisted) }
+            .getOrNull()
+            ?.takeIf { it.toString() == persisted.lowercase() }
+            ?: throw OwnershipException.SecureStorage
+    }
+
+    fun accountDeletionAttemptId(scope: String): UUID? {
+        require(scope.matches(SHA256))
+        val persisted = secureStorageOperation {
+            preferences.getString("$DELETION_ATTEMPT_PREFIX$scope", null)
+        } ?: return null
+        return runCatching { UUID.fromString(persisted) }
+            .getOrNull()
+            ?.takeIf { it.toString() == persisted.lowercase() }
+            ?: throw OwnershipException.SecureStorage
+    }
+
+    fun writeAccountDeletionRequestId(scope: String, value: UUID) {
+        require(scope.matches(SHA256))
+        if (!secureStorageOperation {
+                preferences.edit()
+                    .putString(
+                        "$DELETION_PREFIX$scope",
+                        value.toString().lowercase(),
+                    )
+                    .commit()
+            }
+        ) {
+            throw OwnershipException.SecureStorage
+        }
+    }
+
+    fun writeAccountDeletionAttemptId(scope: String, value: UUID) {
+        require(scope.matches(SHA256))
+        if (!secureStorageOperation {
+                preferences.edit()
+                    .putString(
+                        "$DELETION_ATTEMPT_PREFIX$scope",
+                        value.toString().lowercase(),
+                    )
+                    .commit()
+            }
+        ) {
+            throw OwnershipException.SecureStorage
+        }
+    }
+
+    fun clearAccountDeletionRequestId(scope: String): Boolean {
+        require(scope.matches(SHA256))
+        return bestEffortOwnershipCleanup {
+            secureStorageOperation {
+                preferences.edit().remove("$DELETION_PREFIX$scope").commit()
+            }
+        }
+    }
+
+    fun clearAccountDeletionAttemptId(scope: String): Boolean {
+        require(scope.matches(SHA256))
+        return bestEffortOwnershipCleanup {
+            secureStorageOperation {
+                preferences.edit()
+                    .remove("$DELETION_ATTEMPT_PREFIX$scope")
+                    .commit()
+            }
+        }
+    }
+
     private fun createCredential(): OwnershipInstallationCredential {
         val bytes = ByteArray(32).also(SecureRandom()::nextBytes)
         val token = "noopo_" +
@@ -143,6 +215,8 @@ internal class OwnershipSecureStore(context: Context) {
         private const val INSTALLATION_PREFIX = "installation."
         private const val CHECKPOINT_PREFIX = "checkpoint."
         private const val PHONE_PREFIX = "phone_verification."
+        private const val DELETION_PREFIX = "account_deletion."
+        private const val DELETION_ATTEMPT_PREFIX = "account_deletion_attempt."
         private val SHA256 = Regex("^[0-9a-f]{64}$")
         private val INSTALLATION_TOKEN =
             Regex("^noopo_[A-Za-z0-9_-]{43}$")

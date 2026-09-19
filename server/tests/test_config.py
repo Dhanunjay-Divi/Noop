@@ -30,6 +30,27 @@ def test_database_engine_rejects_unknown_values(
         Settings.from_env()
 
 
+def test_ownership_deletion_coordination_is_explicit_and_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL",
+        "postgresql://ownership-lifecycle.invalid/noop",
+    )
+
+    settings = Settings.from_env()
+
+    assert settings.ownership_deletion_coordination_enabled is True
+    assert (
+        settings.ownership_lifecycle_database_url
+        == "postgresql://ownership-lifecycle.invalid/noop"
+    )
+
+
 def test_managed_entitlement_accepts_scoped_pilot_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

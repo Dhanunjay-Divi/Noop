@@ -35,6 +35,12 @@ from app.managed_models import (
     validate_managed_server_readable_payload,
 )
 from app.managed_object_store import ManagedObjectMetadata
+from app.ownership_deletion_lifecycle import (
+    ManagedErasureJobStatus,
+    ManagedErasureRetryableError,
+    ManagedErasureScheduleResult,
+    ManagedErasureTerminalError,
+)
 
 SOCIAL_ALIAS_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 SOCIAL_SUMMARY_FIELDS = (
@@ -54,6 +60,16 @@ SOCIAL_MAX_RECEIVED_REQUESTS_PER_DAY = 100
 SOCIAL_MAX_FRIENDS = 500
 SOCIAL_MAX_SENT_POKES_PER_DAY = 10
 SOCIAL_MAX_RECEIVED_POKES_PER_DAY = 20
+_MANAGED_ERASURE_SUBJECT_HASH = re.compile(r"^[0-9a-f]{64}$")
+_MANAGED_ERASURE_PROVIDER_TENANT = re.compile(
+    r"^(?:|[A-Za-z0-9][A-Za-z0-9._-]{0,127})$"
+)
+_MANAGED_ERASURE_LIVE_STATUSES = (
+    "queued",
+    "cooling_off",
+    "running",
+    "verifying",
+)
 
 
 async def _lock_active_managed_safety_incidents_for_profile_pair(
@@ -8345,6 +8361,319 @@ class PostgresManagedRepository:
                         now,
                     )
         return self._public_erasure(dict(row), duplicate=False)
+
+    async def schedule_all_managed_data(
+        self,
+        *,
+        request_key: UUID,
+        issuer: str,
+        provider_tenant: str,
+        subject_hash: str,
+    ) -> ManagedErasureScheduleResult:
+        """Schedule ownership-led managed-data erasure without customer authority."""
+        if (
+            not isinstance(request_key, UUID)
+            or not 1 <= len(issuer) <= 512
+            or re.search(r"\s", issuer) is not None
+            or _MANAGED_ERASURE_PROVIDER_TENANT.fullmatch(provider_tenant) is None
+            or _MANAGED_ERASURE_SUBJECT_HASH.fullmatch(subject_hash) is None
+        ):
+            raise ManagedErasureTerminalError(
+                "managed erasure scheduling request is invalid"
+            )
+
+        confirmation_sha256 = hashlib.sha256(
+            b"noop-ownership-managed-erasure-v1:" + request_key.bytes
+        ).hexdigest()
+        try:
+            async with self._pool().acquire() as connection:
+                async with connection.transaction():
+                    initial = await connection.fetchrow(
+                        """
+                        SELECT identity.account_id
+                        FROM managed_external_identities identity
+                        WHERE identity.issuer = $1
+                          AND identity.provider_tenant = $2
+                          AND identity.subject_hash = $3
+                        """,
+                        issuer,
+                        provider_tenant,
+                        subject_hash,
+                    )
+                    if initial is None:
+                        return ManagedErasureScheduleResult(outcome="absent")
+
+                    account_id = initial["account_id"]
+                    await connection.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                        f"noop-managed-erasure-account:{account_id}",
+                    )
+                    identity = await connection.fetchrow(
+                        """
+                        SELECT identity.identity_id,
+                               identity.account_id,
+                               account.status AS account_status
+                        FROM managed_external_identities identity
+                        JOIN managed_accounts account USING (account_id)
+                        WHERE identity.issuer = $1
+                          AND identity.provider_tenant = $2
+                          AND identity.subject_hash = $3
+                        FOR UPDATE OF identity, account
+                        """,
+                        issuer,
+                        provider_tenant,
+                        subject_hash,
+                    )
+                    if identity is None:
+                        return ManagedErasureScheduleResult(outcome="absent")
+                    if identity["account_id"] != account_id:
+                        raise ManagedErasureTerminalError(
+                            "managed erasure scheduling conflicts with existing state"
+                        )
+                    if identity["account_status"] == "erased":
+                        return ManagedErasureScheduleResult(outcome="already_completed")
+                    if identity["account_status"] not in {
+                        "active",
+                        "suspended",
+                        "erasure_pending",
+                    }:
+                        raise ManagedErasureTerminalError(
+                            "managed erasure scheduling conflicts with existing state"
+                        )
+
+                    existing = await connection.fetchrow(
+                        """
+                        SELECT erasure_job_id, scope, status
+                        FROM managed_erasure_jobs
+                        WHERE account_id = $1 AND request_id = $2
+                        FOR UPDATE
+                        """,
+                        account_id,
+                        request_key,
+                    )
+                    if existing is not None:
+                        if existing["scope"] not in {
+                            "all_managed_data",
+                            "account",
+                        }:
+                            raise ManagedErasureTerminalError(
+                                "managed erasure scheduling conflicts "
+                                "with existing state"
+                            )
+                        if existing["status"] == "completed":
+                            return ManagedErasureScheduleResult(
+                                outcome="already_completed"
+                            )
+                        mapped_status = self._managed_erasure_service_status(
+                            str(existing["status"])
+                        )
+                        if mapped_status in {"pending", "running"}:
+                            await self._prepare_service_managed_erasure(
+                                connection,
+                                account_id=account_id,
+                            )
+                        return ManagedErasureScheduleResult(
+                            outcome="job",
+                            job_id=existing["erasure_job_id"],
+                            job_status=mapped_status,
+                        )
+
+                    live = await connection.fetchrow(
+                        """
+                        SELECT erasure_job_id, status
+                        FROM managed_erasure_jobs
+                        WHERE account_id = $1
+                          AND scope IN ('all_managed_data', 'account')
+                          AND status = ANY($2::text[])
+                        ORDER BY requested_at, erasure_job_id
+                        FOR UPDATE
+                        LIMIT 1
+                        """,
+                        account_id,
+                        list(_MANAGED_ERASURE_LIVE_STATUSES),
+                    )
+                    if live is not None:
+                        await self._prepare_service_managed_erasure(
+                            connection,
+                            account_id=account_id,
+                        )
+                        return ManagedErasureScheduleResult(
+                            outcome="job",
+                            job_id=live["erasure_job_id"],
+                            job_status=self._managed_erasure_service_status(
+                                str(live["status"])
+                            ),
+                        )
+
+                    now = await connection.fetchval("SELECT clock_timestamp()")
+                    job_id = uuid4()
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_erasure_jobs (
+                            erasure_job_id,
+                            account_id,
+                            request_id,
+                            requested_by_identity_id,
+                            scope,
+                            status,
+                            tenant_replay_hash,
+                            confirmation_sha256,
+                            identity_deletion_ticket,
+                            requested_at,
+                            not_before,
+                            verification_expires_at
+                        ) VALUES (
+                            $1, $2, $3, $4, 'all_managed_data', 'queued',
+                            $5, $6, NULL, $7, $7,
+                            $7::timestamptz + interval '400 days'
+                        )
+                        """,
+                        job_id,
+                        account_id,
+                        request_key,
+                        identity["identity_id"],
+                        self._tenant_replay_hash(account_id),
+                        confirmation_sha256,
+                        now,
+                    )
+                    await self._prepare_service_managed_erasure(
+                        connection,
+                        account_id=account_id,
+                        now=now,
+                    )
+                    return ManagedErasureScheduleResult(
+                        outcome="job",
+                        job_id=job_id,
+                        job_status="pending",
+                    )
+        except (ManagedErasureRetryableError, ManagedErasureTerminalError):
+            raise
+        except Exception as error:
+            if self._managed_erasure_service_error_is_retryable(error):
+                raise ManagedErasureRetryableError(
+                    "managed erasure scheduling is temporarily unavailable"
+                ) from None
+            raise ManagedErasureTerminalError(
+                "managed erasure scheduling failed"
+            ) from None
+
+    async def managed_erasure_status(
+        self,
+        *,
+        job_id: UUID,
+    ) -> ManagedErasureJobStatus:
+        if not isinstance(job_id, UUID):
+            raise ManagedErasureTerminalError(
+                "managed erasure status request is invalid"
+            )
+        try:
+            row = await self._pool().fetchrow(
+                """
+                SELECT scope, status
+                FROM managed_erasure_jobs
+                WHERE erasure_job_id = $1
+                """,
+                job_id,
+            )
+            if row is None or row["scope"] not in {
+                "all_managed_data",
+                "account",
+            }:
+                raise ManagedErasureTerminalError("managed erasure job is unavailable")
+            return self._managed_erasure_service_status(str(row["status"]))
+        except (ManagedErasureRetryableError, ManagedErasureTerminalError):
+            raise
+        except Exception as error:
+            if self._managed_erasure_service_error_is_retryable(error):
+                raise ManagedErasureRetryableError(
+                    "managed erasure status is temporarily unavailable"
+                ) from None
+            raise ManagedErasureTerminalError("managed erasure status failed") from None
+
+    async def _prepare_service_managed_erasure(
+        self,
+        connection: Any,
+        *,
+        account_id: UUID,
+        now: datetime | None = None,
+    ) -> None:
+        reference = now or await connection.fetchval("SELECT clock_timestamp()")
+        profile = await connection.fetchrow(
+            """
+            SELECT profile_id
+            FROM managed_social_profiles
+            WHERE account_id = $1 AND status = 'active'
+            FOR UPDATE
+            """,
+            account_id,
+        )
+        if profile is not None:
+            await _retire_managed_safety_profile(
+                connection,
+                profile_id=profile["profile_id"],
+                now=reference,
+            )
+            await connection.execute(
+                """
+                UPDATE managed_social_profiles
+                SET status = 'disabled',
+                    poke_opt_in = false,
+                    updated_at = $2
+                WHERE profile_id = $1 AND status = 'active'
+                """,
+                profile["profile_id"],
+                reference,
+            )
+        await connection.execute(
+            """
+            UPDATE managed_accounts
+            SET status = 'erasure_pending',
+                erasure_requested_at =
+                    COALESCE(erasure_requested_at, $2),
+                updated_at = $2
+            WHERE account_id = $1
+              AND status IN ('active', 'suspended', 'erasure_pending')
+            """,
+            account_id,
+            reference,
+        )
+
+    @staticmethod
+    def _managed_erasure_service_status(status: str) -> ManagedErasureJobStatus:
+        if status in {"queued", "cooling_off"}:
+            return "pending"
+        if status in {"running", "verifying"}:
+            return "running"
+        if status == "completed":
+            return "completed"
+        if status in {"failed", "canceled"}:
+            return "terminal_failure"
+        raise ManagedErasureTerminalError("managed erasure job state is invalid")
+
+    @staticmethod
+    def _managed_erasure_service_error_is_retryable(error: Exception) -> bool:
+        retryable_types: tuple[type[BaseException], ...] = (
+            ConnectionError,
+            TimeoutError,
+            OSError,
+        )
+        try:
+            import asyncpg
+        except ImportError:
+            return isinstance(error, retryable_types)
+        driver_types = tuple(
+            error_type
+            for name in (
+                "CannotConnectNowError",
+                "ConnectionDoesNotExistError",
+                "DeadlockDetectedError",
+                "InterfaceError",
+                "PostgresConnectionError",
+                "SerializationError",
+            )
+            if isinstance((error_type := getattr(asyncpg, name, None)), type)
+        )
+        return isinstance(error, retryable_types + driver_types)
 
     async def get_erasure(
         self,

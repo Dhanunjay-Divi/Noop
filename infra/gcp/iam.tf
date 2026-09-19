@@ -448,6 +448,26 @@ resource "google_secret_manager_secret_iam_member" "ownership_api_database_url" 
   member    = "serviceAccount:${google_service_account.ownership_api[0].email}"
 }
 
+data "google_secret_manager_secret" "ownership_deletion_lifecycle_database_url" {
+  count = var.enable_ownership_deletion_coordination ? 1 : 0
+
+  project = var.project_id
+  secret_id = (
+    var.ownership_deletion_lifecycle_database_url_secret_id != null
+    ? var.ownership_deletion_lifecycle_database_url_secret_id
+    : "ownership-deletion-lifecycle-database-url-required"
+  )
+}
+
+resource "google_secret_manager_secret_iam_member" "managed_lifecycle_ownership_database_url" {
+  count = var.enable_ownership_deletion_coordination ? 1 : 0
+
+  project   = var.project_id
+  secret_id = data.google_secret_manager_secret.ownership_deletion_lifecycle_database_url[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.managed_lifecycle.email}"
+}
+
 resource "google_secret_manager_secret_iam_member" "managed_api_replay_secret" {
   project   = var.project_id
   secret_id = google_secret_manager_secret.managed_replay_secret.secret_id

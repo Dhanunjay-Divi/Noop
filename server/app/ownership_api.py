@@ -84,6 +84,15 @@ class OwnershipRequestIdentity:
     app_assertion: OwnershipAppAssertion
 
 
+@dataclass(frozen=True, slots=True)
+class OwnershipDeletionCancellationIdentity:
+    claims: ManagedIdentityClaims
+    principal: OwnershipPrincipal
+    installation_id: str
+    installation_token_hash: str
+    expected_platform: str
+
+
 def ownership_router(
     *,
     settings: Settings,
@@ -256,6 +265,36 @@ def ownership_router(
         request.state.auth_scope = "ownership_account_deletion"
         request.state.auth_result = "account_deletion_accepted"
         return principal
+
+    async def require_account_deletion_cancellation(
+        request: Request,
+        claims: ManagedIdentityClaims = Depends(require_claims),
+        app_assertion: OwnershipAppAssertion = Depends(require_app_check),
+        installation_id: str = Depends(installation_id_header),
+        installation_token_hash: str = Depends(installation_token_hash_header),
+    ) -> OwnershipDeletionCancellationIdentity:
+        expected_platform = _platform_for_app(
+            settings=settings,
+            app_id=app_assertion.claims.app_id,
+        )
+        _require_verified_fresh_identity(settings=settings, claims=claims)
+        try:
+            principal = await repository.principal_for_account_deletion(claims)
+        except (OwnershipNotFoundError, OwnershipForbiddenError):
+            request.state.auth_result = "account_deletion_rejected"
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="account deletion authentication was rejected",
+            ) from None
+        request.state.auth_scope = "ownership_account_deletion"
+        request.state.auth_result = "account_deletion_accepted"
+        return OwnershipDeletionCancellationIdentity(
+            claims=claims,
+            principal=principal,
+            installation_id=installation_id,
+            installation_token_hash=installation_token_hash,
+            expected_platform=expected_platform,
+        )
 
     @router.get("/terms/current")
     async def current_terms(
@@ -779,8 +818,7 @@ def ownership_router(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
-                    "account deletion requires export and retention "
-                    "acknowledgements"
+                    "account deletion requires export and retention acknowledgements"
                 ),
             )
         try:
@@ -822,9 +860,7 @@ def ownership_router(
     async def get_account_deletion(
         deletion_request_id: UUID,
         response: Response,
-        principal: OwnershipPrincipal = Depends(
-            require_account_deletion_principal
-        ),
+        principal: OwnershipPrincipal = Depends(require_account_deletion_principal),
     ) -> dict:
         try:
             deletion = await repository.get_account_deletion(
@@ -845,19 +881,33 @@ def ownership_router(
     async def cancel_account_deletion(
         deletion_request_id: UUID,
         response: Response,
-        principal: OwnershipPrincipal = Depends(
-            require_account_deletion_principal
+        identity: OwnershipDeletionCancellationIdentity = Depends(
+            require_account_deletion_cancellation
         ),
     ) -> dict:
         try:
             deletion = await repository.cancel_account_deletion(
-                principal=principal,
+                principal=identity.principal,
                 deletion_request_id=deletion_request_id,
+                installation_id=identity.installation_id,
+                installation_token_hash=identity.installation_token_hash,
+                expected_platform=identity.expected_platform,
+                identity_auth_time=identity.claims.auth_time,
             )
         except OwnershipNotFoundError:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="account deletion request is unavailable",
+            ) from None
+        except OwnershipForbiddenError:
+            _emit(
+                event_sink,
+                phase="account_deletion",
+                outcome="cancel_rejected",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="account deletion authentication was rejected",
             ) from None
         except OwnershipConflictError:
             _emit(

@@ -261,13 +261,38 @@ Run the following on the exact candidate commit. Commands that need accounts,
 signing, devices, providers, or production systems remain explicit external
 gates rather than local substitutes.
 
+The command list below defines required payloads. Every payload that can run
+longer than one minute or emit verbose build/test output MUST be passed after
+`--` to `Tools/run-bounded-command.py`; do not invoke raw `xcodebuild`, Gradle,
+Swift package, full pytest, OpenTofu, Docker, or equivalent walls in an
+interactive terminal. Use a unique safe label plus round-owned private
+`--status-file` and `--log-file`. The CLI automatically stops below 10% free
+system memory, below 10 GiB free disk, after its deadline, or when the private
+log reaches 128 MiB. Lowering or disabling a floor requires a narrow evidenced
+exception in the active operations record.
+
+Example wrapper:
+
+```bash
+EVIDENCE_ROOT="$(mktemp -d)"
+python3 Tools/run-bounded-command.py \
+  --timeout-seconds 3600 \
+  --grace-seconds 30 \
+  --label apple-complete-wall \
+  --status-file "$EVIDENCE_ROOT/apple-complete-wall.status" \
+  --log-file "$EVIDENCE_ROOT/apple-complete-wall.log" \
+  -- \
+  xcodebuild -project Strand.xcodeproj -scheme Strand \
+    -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+```
+
 ```bash
 # Repository and policy
 python3 Tools/release-control-gate.py check
 python3 Tools/calibration-parity-audit.py check
 python3 Tools/terminology-audit.py check
 python3 Tools/required-ci-gate.py check
-python3 Tools/trusted-release-controls.py verify-self
+python3 Tools/trusted-release-controls.py verify-self --root .
 python3 Tools/release-legal-gate.py distribution
 python3 Tools/check-private-data.py
 python3 Tools/health_claims_gate.py
@@ -357,8 +382,8 @@ python3 Tools/release-evidence.py verify \
 ```
 
 The two API 35 commands mirror the required production-shell and fresh-process
-Review Sample lanes. Local execution should use the repository bounded runner;
-the hosted workflow's classified one-time retry is permitted only when
+Review Sample lanes. The hosted workflow's classified one-time retry is
+permitted only when
 `Tools/android-managed-device-retry.py` proves that infrastructure failed
 before any test started.
 

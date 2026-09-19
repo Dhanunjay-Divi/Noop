@@ -24,9 +24,7 @@ SAFE_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SAFE_SHA = re.compile(r"^[0-9a-f]{40}$")
 JOB_HEADER = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_-]*):[ \t]*$", re.MULTILINE)
 JOB_HEADER_LINE = re.compile(r"^  [A-Za-z_][A-Za-z0-9_-]*:[ \t]*$")
-JOB_PROPERTY_LINE = re.compile(
-    r"^    [A-Za-z_][A-Za-z0-9_-]*:(?:[ \t].*)?$"
-)
+JOB_PROPERTY_LINE = re.compile(r"^    [A-Za-z_][A-Za-z0-9_-]*:(?:[ \t].*)?$")
 JOB_NAME = re.compile(r"^    name:\s*(.*?)\s*$", re.MULTILINE)
 GITHUB_EXPRESSION = re.compile(r"\$\{\{.*?\}\}")
 TRUSTED_CONTEXT = "trusted-release-controls"
@@ -73,7 +71,7 @@ RELEASE_SOURCE_DIGESTS = {
         "26b7f54c51937564e02225d45bd92222e9226310029b860b23b7aaf8bc67e614"
     ),
     "release/terminology/legacy-inventory.json": (
-        "2150a029ab7137cfb8c6e020b33b800354f03ae320b38b7cced3553a86adc990"
+        "5f11b441e903d89ca3950f518182183e12a248824041d0f90a123618fe197430"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -136,7 +134,7 @@ RELEASE_SOURCE_DIGESTS = {
         "76d015c094ef603515d70cd56ead7501be52ad68b8286c4d04a0ee84dff81b95"
     ),
     "Tools/run-bounded-command.py": (
-        "24471f32c3e70945d0ad6f927d3eaa29096a65566956eb589a0a472d87be1dd3"
+        "f0b63ead11c0eefbd98dff1c5489d7eb9a16d01e7c7b5c064bfbcc950c102406"
     ),
     "Tools/terminology-audit.py": (
         "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"
@@ -164,9 +162,7 @@ def _require_reviewed_source_digest(root: Path, relative_path: str) -> None:
         ) from error
     actual = hashlib.sha256(data).hexdigest()
     if actual != expected:
-        raise GateError(
-            f"{relative_path} changed outside its reviewed source contract"
-        )
+        raise GateError(f"{relative_path} changed outside its reviewed source contract")
 
 
 def check_reviewed_release_sources(root: Path) -> None:
@@ -233,16 +229,12 @@ def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
                 f"universalWorkflows[{index}].path must stay inside the repository"
             )
         if SAFE_JOB.fullmatch(str(workflow["requiredJob"])) is None:
-            raise GateError(
-                f"universalWorkflows[{index}].requiredJob is invalid"
-            )
+            raise GateError(f"universalWorkflows[{index}].requiredJob is invalid")
         if workflow["pullRequestEvent"] not in {
             "pull_request",
             "pull_request_target",
         }:
-            raise GateError(
-                f"universalWorkflows[{index}].pullRequestEvent is invalid"
-            )
+            raise GateError(f"universalWorkflows[{index}].pullRequestEvent is invalid")
         universal_paths.append(path)
         universal_jobs.append(workflow["requiredJob"])
     if universal_paths != sorted(set(universal_paths)):
@@ -324,13 +316,9 @@ def _jobs_section(text: str) -> str:
                 )
             saw_job = True
         if indent < 2:
-            raise GateError(
-                "workflow jobs must use canonical two-space block syntax"
-            )
+            raise GateError("workflow jobs must use canonical two-space block syntax")
         if indent == 2 and JOB_HEADER_LINE.fullmatch(line) is None:
-            raise GateError(
-                "workflow jobs must use canonical two-space block syntax"
-            )
+            raise GateError("workflow jobs must use canonical two-space block syntax")
         jobs.append(line)
     if not saw_job:
         raise GateError("workflow has no jobs")
@@ -473,9 +461,7 @@ def _reject_direct_release_publication(text: str, label: str) -> None:
                 and lowered.count("gh api") == 1
             )
             if mutation and not generate_notes:
-                raise GateError(
-                    f"{label} contains a direct release API mutation"
-                )
+                raise GateError(f"{label} contains a direct release API mutation")
 
         if "release" in lowered and any(
             primitive in lowered
@@ -558,9 +544,7 @@ def _named_step(section: str, name: str) -> str:
     for index in range(start + 1, len(lines)):
         line = lines[index]
         indent = len(line) - len(line.lstrip(" "))
-        if line.startswith("      - ") or (
-            line.strip() and indent <= 4
-        ):
+        if line.startswith("      - ") or (line.strip() and indent <= 4):
             end = index
             break
     return "\n".join(lines[start:end])
@@ -607,10 +591,7 @@ def _step_environment(
     for line in lines[env_index + 1 : run_index]:
         if not line.strip():
             continue
-        if (
-            len(line) - len(line.lstrip(" ")) != 10
-            or ":" not in line.strip()
-        ):
+        if len(line) - len(line.lstrip(" ")) != 10 or ":" not in line.strip():
             raise GateError(f"step {name} has an invalid environment")
         key, value = line.strip().split(":", 1)
         if (
@@ -635,9 +616,7 @@ def _literal_run_body(step: str, name: str) -> str:
         len(line) - len(line.lstrip(" ")) < 10 for line in body if line.strip()
     ):
         raise GateError(f"step {name} has an invalid literal run body")
-    return "\n".join(
-        line[10:] if line.strip() else "" for line in body
-    )
+    return "\n".join(line[10:] if line.strip() else "" for line in body)
 
 
 def _needs(section: str, job_id: str) -> set[str]:
@@ -664,26 +643,16 @@ def _job_display_name(section: str, job_id: str) -> str:
             continue
         indent = len(line) - len(line.lstrip(" "))
         if indent == 4 and JOB_PROPERTY_LINE.fullmatch(line) is None:
-            raise GateError(
-                f"job {job_id} must use canonical property key syntax"
-            )
+            raise GateError(f"job {job_id} must use canonical property key syntax")
     match = JOB_NAME.search(section)
     if match is None:
         return job_id
     name = match.group(1).strip()
-    if (
-        len(name) >= 2
-        and name[0] in {"'", '"'}
-        and name[-1] == name[0]
-    ):
+    if len(name) >= 2 and name[0] in {"'", '"'} and name[-1] == name[0]:
         name = name[1:-1]
     if not name:
         raise GateError(f"job {job_id} has an empty display name")
-    if (
-        name[0] in {"|", ">", "&", "*", "!", "{", "["}
-        or "#" in name
-        or "\\" in name
-    ):
+    if name[0] in {"|", ">", "&", "*", "!", "{", "["} or "#" in name or "\\" in name:
         raise GateError(f"job {job_id} uses an unsupported display name")
     return name
 
@@ -710,13 +679,9 @@ def _dynamic_name_can_resolve_to_context(name: str, context: str) -> bool:
     return re.fullmatch(pattern, context) is not None
 
 
-def check_required_context_ownership(
-    root: Path, config: dict[str, Any]
-) -> None:
+def check_required_context_ownership(root: Path, config: dict[str, Any]) -> None:
     expected = required_workflow_paths(config)
-    owners: dict[str, list[tuple[str, str]]] = {
-        context: [] for context in expected
-    }
+    owners: dict[str, list[tuple[str, str]]] = {context: [] for context in expected}
     workflow_directory = root / ".github" / "workflows"
     paths = sorted(
         {
@@ -735,11 +700,7 @@ def check_required_context_ownership(
         jobs = _jobs_section(text)
         matches = list(JOB_HEADER.finditer(jobs))
         for index, match in enumerate(matches):
-            end = (
-                matches[index + 1].start()
-                if index + 1 < len(matches)
-                else len(jobs)
-            )
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(jobs)
             section = jobs[match.start() : end]
             relative = path.relative_to(root).as_posix()
             job_id = match.group(1)
@@ -774,9 +735,7 @@ def check_required_context_ownership(
                 f"required context {context} is owned by an unexpected workflow"
             )
         if matches[0][1] != context:
-            raise GateError(
-                f"required context {context} is owned by an unexpected job"
-            )
+            raise GateError(f"required context {context} is owned by an unexpected job")
 
 
 def check_workflow(root: Path, workflow: dict[str, Any]) -> None:
@@ -791,9 +750,7 @@ def check_workflow(root: Path, workflow: dict[str, Any]) -> None:
         if re.search(rf"^  {event}:", before_jobs, re.MULTILINE) is None:
             raise GateError(f"{workflow['path']} must run for {event}")
     if re.search(r"^\s+paths(?:-ignore)?:", before_jobs, re.MULTILINE):
-        raise GateError(
-            f"{workflow['path']} cannot use event-level path filters"
-        )
+        raise GateError(f"{workflow['path']} cannot use event-level path filters")
 
     applicability = workflow["applicabilityJob"]
     applicability_section = _job_section(text, applicability)
@@ -801,7 +758,7 @@ def check_workflow(root: Path, workflow: dict[str, Any]) -> None:
         "outputs:",
         "run: ${{ steps.scope.outputs.run }}",
         "fetch-depth: 0",
-        'EVENT_NAME: ${{ github.event_name }}',
+        "EVENT_NAME: ${{ github.event_name }}",
         'CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"',
         'git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA"',
         '> "$CHANGED_FILES"',
@@ -820,11 +777,7 @@ def check_workflow(root: Path, workflow: dict[str, Any]) -> None:
             raise GateError(
                 f"{workflow['path']} job {heavy_job} must need only {applicability}"
             )
-        expected_if = (
-            "if: ${{ needs."
-            + applicability
-            + ".outputs.run == 'true' }}"
-        )
+        expected_if = "if: ${{ needs." + applicability + ".outputs.run == 'true' }}"
         if expected_if not in section:
             raise GateError(
                 f"{workflow['path']} job {heavy_job} is not applicability-gated"
@@ -846,14 +799,10 @@ def check_workflow(root: Path, workflow: dict[str, Any]) -> None:
         'test "$RUN_REQUIRED" = "false"',
     ):
         if required_text not in required_section:
-            raise GateError(
-                f"{workflow['path']} required job lacks {required_text}"
-            )
+            raise GateError(f"{workflow['path']} required job lacks {required_text}")
     for heavy_job in workflow["heavyJobs"]:
         if f"${{{{ needs.{heavy_job}.result }}}}" not in required_section:
-            raise GateError(
-                f"{workflow['path']} required job ignores {heavy_job}"
-            )
+            raise GateError(f"{workflow['path']} required job ignores {heavy_job}")
     success_checks = required_section.count('= "success"')
     if success_checks < len(workflow["heavyJobs"]) + 1:
         raise GateError(
@@ -961,10 +910,10 @@ def check_trusted_release_workflow(root: Path) -> None:
             raise GateError(
                 "trusted release-controls workflow has an unsafe capability"
             )
-    if text.count(
-        "uses: actions/checkout@"
-        "3d3c42e5aac5ba805825da76410c181273ba90b1"
-    ) != 5:
+    if (
+        text.count("uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
+        != 5
+    ):
         raise GateError(
             "trusted release-controls workflow must use five exact checkouts"
         )
@@ -975,26 +924,20 @@ def check_trusted_release_workflow(root: Path) -> None:
         "runs-on",
         "steps",
     ]:
-        raise GateError(
-            "trusted pull-request validation job is not canonical"
-        )
+        raise GateError("trusted pull-request validation job is not canonical")
     verify_name = "Verify candidate with protected base controls"
     verify_step = _named_step(verify, verify_name)
     if _step_environment(verify_step, verify_name) != {
         "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
         "HEAD_ACTOR": "${{ github.actor }}",
-        "HEAD_REPOSITORY": (
-            "${{ github.event.pull_request.head.repo.full_name }}"
-        ),
+        "HEAD_REPOSITORY": ("${{ github.event.pull_request.head.repo.full_name }}"),
         "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
         "REPOSITORY": "${{ github.repository }}",
         "REPOSITORY_OWNER": "${{ github.repository_owner }}",
     }:
-        raise GateError(
-            "trusted pull-request validation environment is not exact"
-        )
+        raise GateError("trusted pull-request validation environment is not exact")
     expected_verify = (
-        'python3 Tools/trusted-release-controls.py verify-pr '
+        "python3 Tools/trusted-release-controls.py verify-pr "
         '--base-root "$GITHUB_WORKSPACE" '
         '--candidate-root "$GITHUB_WORKSPACE/candidate" '
         '--base-sha "$BASE_SHA" '
@@ -1005,9 +948,7 @@ def check_trusted_release_workflow(root: Path) -> None:
         '--actor "$HEAD_ACTOR"'
     )
     if _folded_run_command(verify_step, verify_name) != expected_verify:
-        raise GateError(
-            "trusted pull-request validation command is not canonical"
-        )
+        raise GateError("trusted pull-request validation command is not canonical")
 
     report = _job_section(text, "report-pr")
     if _job_property_keys(report, "report-pr") != [
@@ -1020,9 +961,7 @@ def check_trusted_release_workflow(root: Path) -> None:
     ]:
         raise GateError("trusted pull-request reporting job is not canonical")
     if _needs(report, "report-pr") != {"verify-pr"}:
-        raise GateError(
-            "trusted pull-request reporting must depend on validation"
-        )
+        raise GateError("trusted pull-request reporting must depend on validation")
     report_name = "Publish exact pull-request head result"
     report_step = _named_step(report, report_name)
     if _step_environment(report_step, report_name) != {
@@ -1030,22 +969,18 @@ def check_trusted_release_workflow(root: Path) -> None:
         "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
         "VALIDATION_RESULT": "${{ needs.verify-pr.result }}",
     }:
-        raise GateError(
-            "trusted pull-request reporting environment is not exact"
-        )
+        raise GateError("trusted pull-request reporting environment is not exact")
     expected_report = (
-        'python3 Tools/trusted-release-controls.py report-check '
+        "python3 Tools/trusted-release-controls.py report-check "
         '--repository "$GITHUB_REPOSITORY" '
         '--head-sha "$HEAD_SHA" '
-        '--scope pull-request '
+        "--scope pull-request "
         '--validation-result "$VALIDATION_RESULT" '
         '--run-id "$GITHUB_RUN_ID" '
         '--run-attempt "$GITHUB_RUN_ATTEMPT"'
     )
     if _folded_run_command(report_step, report_name) != expected_report:
-        raise GateError(
-            "trusted pull-request reporting command is not canonical"
-        )
+        raise GateError("trusted pull-request reporting command is not canonical")
 
     verify_main = _job_section(text, "verify-main")
     if _job_property_keys(verify_main, "verify-main") != [
@@ -1054,27 +989,18 @@ def check_trusted_release_workflow(root: Path) -> None:
         "runs-on",
         "steps",
     ]:
-        raise GateError(
-            "trusted protected-main validation job is not canonical"
-        )
+        raise GateError("trusted protected-main validation job is not canonical")
     if (
         "    if: github.event_name == 'push'\n" not in verify_main
-        or "    name: trusted-release-controls-main-validation\n"
-        not in verify_main
+        or "    name: trusted-release-controls-main-validation\n" not in verify_main
     ):
-        raise GateError(
-            "trusted protected-main validation identity is not exact"
-        )
+        raise GateError("trusted protected-main validation identity is not exact")
     self_step = _named_step(verify_main, "Verify protected main source")
-    if _folded_run_command(
-        self_step, "Verify protected main source"
-    ) != (
+    if _folded_run_command(self_step, "Verify protected main source") != (
         "python3 Tools/trusted-release-controls.py verify-self "
         '--root "$GITHUB_WORKSPACE"'
     ):
-        raise GateError(
-            "trusted protected-main validation command is not canonical"
-        )
+        raise GateError("trusted protected-main validation command is not canonical")
 
     report_main = _job_section(text, "report-main")
     if _job_property_keys(report_main, "report-main") != [
@@ -1087,18 +1013,12 @@ def check_trusted_release_workflow(root: Path) -> None:
     ]:
         raise GateError("trusted protected-main reporting job is not canonical")
     if _needs(report_main, "report-main") != {"verify-main"}:
-        raise GateError(
-            "trusted protected-main reporting must depend on validation"
-        )
+        raise GateError("trusted protected-main reporting must depend on validation")
     if (
-        "    if: always() && github.event_name == 'push'\n"
-        not in report_main
-        or "    name: trusted-release-controls-main-report\n"
-        not in report_main
+        "    if: always() && github.event_name == 'push'\n" not in report_main
+        or "    name: trusted-release-controls-main-report\n" not in report_main
     ):
-        raise GateError(
-            "trusted protected-main reporting identity is not exact"
-        )
+        raise GateError("trusted protected-main reporting identity is not exact")
     report_main_name = "Publish exact protected-main result"
     report_main_step = _named_step(report_main, report_main_name)
     if _step_environment(report_main_step, report_main_name) != {
@@ -1106,25 +1026,18 @@ def check_trusted_release_workflow(root: Path) -> None:
         "HEAD_SHA": "${{ github.sha }}",
         "VALIDATION_RESULT": "${{ needs.verify-main.result }}",
     }:
-        raise GateError(
-            "trusted protected-main reporting environment is not exact"
-        )
+        raise GateError("trusted protected-main reporting environment is not exact")
     expected_main_report = (
-        'python3 Tools/trusted-release-controls.py report-check '
+        "python3 Tools/trusted-release-controls.py report-check "
         '--repository "$GITHUB_REPOSITORY" '
         '--head-sha "$HEAD_SHA" '
-        '--scope protected-main '
+        "--scope protected-main "
         '--validation-result "$VALIDATION_RESULT" '
         '--run-id "$GITHUB_RUN_ID" '
         '--run-attempt "$GITHUB_RUN_ATTEMPT"'
     )
-    if (
-        _folded_run_command(report_main_step, report_main_name)
-        != expected_main_report
-    ):
-        raise GateError(
-            "trusted protected-main reporting command is not canonical"
-        )
+    if _folded_run_command(report_main_step, report_main_name) != expected_main_report:
+        raise GateError("trusted protected-main reporting command is not canonical")
 
 
 def check_release_workflow(root: Path) -> None:
@@ -1156,9 +1069,7 @@ def check_release_workflow(root: Path) -> None:
     bump_section = _job_section(text, "bump")
     android_section = _job_section(text, "android")
     if "ANDROID_STAGING_KEYSTORE_BASE64" in bump_section:
-        raise GateError(
-            "release metadata job can access Android signing secrets"
-        )
+        raise GateError("release metadata job can access Android signing secrets")
     if "    environment: staging\n" not in android_section:
         raise GateError(
             "release Android signing job lacks the protected staging environment"
@@ -1170,9 +1081,7 @@ def check_release_workflow(root: Path) -> None:
         "ANDROID_STAGING_KEY_PASSWORD",
     ):
         if secret not in android_section:
-            raise GateError(
-                f"release Android job lacks protected secret {secret}"
-            )
+            raise GateError(f"release Android job lacks protected secret {secret}")
     required_text = (
         "actions: read",
         "checks: read",
@@ -1185,8 +1094,8 @@ def check_release_workflow(root: Path) -> None:
         "Tools/release-version-gate.py check",
         "--exclude-drafts --exclude-pre-releases --limit 1",
         'PREV="$PREV_TAG"',
-        "--release-sha \"$GITHUB_SHA\"",
-        "--sha \"$GITHUB_SHA\"",
+        '--release-sha "$GITHUB_SHA"',
+        '--sha "$GITHUB_SHA"',
         "git diff --exit-code",
         "run-name: NOOP release candidate v${{ inputs.version }} @ "
         "${{ inputs.release_sha }}",
@@ -1194,17 +1103,16 @@ def check_release_workflow(root: Path) -> None:
         "Verify complete candidate bytes",
         "Record exact release draft",
         "Retain exact candidate manifest",
-        "--sha \"$RELEASE_SHA\"",
+        '--sha "$RELEASE_SHA"',
         "Tools/github-release-publish.py",
         "--verify-draft-only",
-        "--write-manifest \"$RUNNER_TEMP/release-candidate.json\"",
+        '--write-manifest "$RUNNER_TEMP/release-candidate.json"',
         "bodySha: ${{ steps.b.outputs.bodySha }}",
         '--title "NOOP ${NEW}" --notes-file "$BODY"',
         'release.get("body") == body',
         'release.get("target_commitish") == sys.argv[4]',
-        "production-release-candidate-${{ github.run_id }}-"
-        "${{ github.run_attempt }}",
-        'RELEASE_SHA: ${{ needs.bump.outputs.sha }}',
+        "production-release-candidate-${{ github.run_id }}-${{ github.run_attempt }}",
+        "RELEASE_SHA: ${{ needs.bump.outputs.sha }}",
     )
     for item in required_text:
         if item not in text:
@@ -1242,14 +1150,11 @@ def check_release_workflow(root: Path) -> None:
     }:
         raise GateError("release exact-check step environment is not exact")
     expected_checks_command = (
-        'python3 Tools/required-ci-gate.py verify-github '
+        "python3 Tools/required-ci-gate.py verify-github "
         '--repository "$GITHUB_REPOSITORY" '
         '--sha "$RELEASE_SHA"'
     )
-    if (
-        _folded_run_command(checks_step, checks_step_name)
-        != expected_checks_command
-    ):
+    if _folded_run_command(checks_step, checks_step_name) != expected_checks_command:
         raise GateError("release exact-check command is not canonical")
     byte_step_name = "Verify complete candidate bytes"
     byte_step = _named_step(ready_section, byte_step_name)
@@ -1291,7 +1196,7 @@ rm -rf "$VERIFY_DIR"'''
     }:
         raise GateError("release draft-verification environment is not exact")
     expected_draft_command = (
-        'python3 Tools/github-release-publish.py '
+        "python3 Tools/github-release-publish.py "
         '--repository "$GITHUB_REPOSITORY" '
         '--tag "$TAG" '
         '--version "$VER" '
@@ -1299,19 +1204,16 @@ rm -rf "$VERIFY_DIR"'''
         '--expected-name "NOOP $VER" '
         '--expected-body-sha256 "$BODY_SHA" '
         '--expected-target "$RELEASE_SHA" '
-        '--verify-draft-only '
+        "--verify-draft-only "
         '--write-manifest "$RUNNER_TEMP/release-candidate.json" '
         '--run-id "$GITHUB_RUN_ID" '
         '--run-attempt "$GITHUB_RUN_ATTEMPT"'
     )
     if (
-        _folded_run_command(draft_step, draft_step_name)
-        != expected_draft_command
+        _folded_run_command(draft_step, draft_step_name) != expected_draft_command
         or text.count("Tools/github-release-publish.py") != 1
     ):
-        raise GateError(
-            "release workflow must execute only the exact draft verifier"
-        )
+        raise GateError("release workflow must execute only the exact draft verifier")
     manifest_step_name = "Retain exact candidate manifest"
     manifest_step = _named_step(ready_section, manifest_step_name)
     expected_manifest_step = (
@@ -1338,9 +1240,7 @@ rm -rf "$VERIFY_DIR"'''
             raise GateError(
                 "release workflow cannot publish or invoke post-release channels"
             )
-    _require_reviewed_source_digest(
-        root, ".github/workflows/release.yml"
-    )
+    _require_reviewed_source_digest(root, ".github/workflows/release.yml")
 
 
 def check_testing_release_workflow(root: Path) -> None:
@@ -1380,9 +1280,7 @@ def check_testing_release_workflow(root: Path) -> None:
     meta_section = _job_section(text, "meta")
     android_section = _job_section(text, "android")
     if "ANDROID_STAGING_KEYSTORE_BASE64" in meta_section:
-        raise GateError(
-            "testing release metadata job can access signing secrets"
-        )
+        raise GateError("testing release metadata job can access signing secrets")
     for secret in (
         "ANDROID_STAGING_KEYSTORE_BASE64",
         "ANDROID_STAGING_STORE_PASSWORD",
@@ -1390,13 +1288,9 @@ def check_testing_release_workflow(root: Path) -> None:
         "ANDROID_STAGING_KEY_PASSWORD",
     ):
         if secret not in android_section:
-            raise GateError(
-                f"testing Android job lacks protected secret {secret}"
-            )
+            raise GateError(f"testing Android job lacks protected secret {secret}")
     if text.count("          ref: ${{ github.sha }}") != 5:
-        raise GateError(
-            "testing release checkouts must use the exact protected source"
-        )
+        raise GateError("testing release checkouts must use the exact protected source")
     ready_section = _job_section(text, "ready")
     if _job_property_keys(ready_section, "ready") != [
         "needs",
@@ -1420,7 +1314,7 @@ def check_testing_release_workflow(root: Path) -> None:
     }:
         raise GateError("testing draft-verification environment is not exact")
     expected_draft_command = (
-        'python3 Tools/github-release-publish.py '
+        "python3 Tools/github-release-publish.py "
         '--repository "$GITHUB_REPOSITORY" '
         '--tag "$CANDIDATE_TAG" '
         '--version "$VER" '
@@ -1428,23 +1322,20 @@ def check_testing_release_workflow(root: Path) -> None:
         '--expected-name "$EXPECTED_NAME" '
         '--expected-body-sha256 "$EXPECTED_BODY_SHA" '
         '--expected-target "$TARGET_SHA" '
-        '--verify-draft-only '
-        '--testing-snapshot '
+        "--verify-draft-only "
+        "--testing-snapshot "
         '--write-manifest "$RUNNER_TEMP/testing-release-candidate.json" '
         '--run-id "$GITHUB_RUN_ID" '
         '--run-attempt "$GITHUB_RUN_ATTEMPT"'
     )
     if (
-        _folded_run_command(draft_step, draft_step_name)
-        != expected_draft_command
+        _folded_run_command(draft_step, draft_step_name) != expected_draft_command
         or text.count("Tools/github-release-publish.py") != 1
     ):
         raise GateError(
             "testing release workflow must execute only the exact draft verifier"
         )
-    _require_reviewed_source_digest(
-        root, ".github/workflows/testing-build.yml"
-    )
+    _require_reviewed_source_digest(root, ".github/workflows/testing-build.yml")
 
 
 def check_altstore_workflow(root: Path) -> None:
@@ -1461,7 +1352,7 @@ def check_altstore_workflow(root: Path) -> None:
         'git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"',
         "Tools/altstore-source.py update",
         "releases/download/${CHANNEL_TAG}/altstore-source.json",
-        "gh release upload \"$CHANNEL_TAG\" \"$MANIFEST\"",
+        'gh release upload "$CHANNEL_TAG" "$MANIFEST"',
         "curl --fail --silent --show-error --location",
         "timeout-minutes: 20",
         'select(.name == "altstore-source.json")',
@@ -1480,9 +1371,7 @@ def check_altstore_workflow(root: Path) -> None:
         if item not in text:
             raise GateError(f"AltStore source workflow lacks {item}")
     if text.count("--connect-timeout 10 --max-time 30") != 3:
-        raise GateError(
-            "AltStore source workflow must bound every anonymous download"
-        )
+        raise GateError("AltStore source workflow must bound every anonymous download")
     if re.search(r"git\s+push", text):
         raise GateError("AltStore source workflow cannot mutate Git refs")
     backup_upload = text.index('gh release upload "$CHANNEL_TAG" "$BACKUP"')
@@ -1525,7 +1414,7 @@ def check_homebrew_workflow(root: Path) -> None:
         "vars.NOOP_HOMEBREW_FORGE_DOMAIN || '' }}",
         "FORGE_ORG: ${{ inputs.publish_forgejo && "
         "vars.NOOP_HOMEBREW_FORGE_ORG || '' }}",
-        'export NOOP_HOMEBREW_FORGE=1',
+        "export NOOP_HOMEBREW_FORGE=1",
         'SOURCE_VISIBILITY=$(gh api "repos/${GITHUB_REPOSITORY}"',
         'gh api "repos/${NOOP_HOMEBREW_TAP_ORG}/homebrew-noop"',
         'gh release download "$TAG"',
@@ -1575,7 +1464,7 @@ def check_forgejo_workflow(root: Path) -> None:
         raise GateError("Forgejo release helper is missing") from error
     for item in (
         "Tools/forgejo-version-gate.py",
-        'releases?limit=50&page=$page',
+        "releases?limit=50&page=$page",
         "Forgejo release history exceeded the bounded page limit",
         "--max-filesize 10485760",
         'case "$REL_STATUS" in',
@@ -1594,9 +1483,7 @@ def check_forgejo_workflow(root: Path) -> None:
         'api -X PATCH "$API/repos/$ORG/$REPO/releases/$REL_ID"',
     ):
         if gate >= helper.index(mutation):
-            raise GateError(
-                "Forgejo version gate must run before release mutation"
-            )
+            raise GateError("Forgejo version gate must run before release mutation")
 
 
 def check_release_control_test_suite(root: Path) -> None:
@@ -1617,17 +1504,13 @@ def check_release_control_test_suite(root: Path) -> None:
     )
     for module in required_modules:
         if module not in text:
-            raise GateError(
-                f"release controls workflow does not run {module}"
-            )
+            raise GateError(f"release controls workflow does not run {module}")
     for command in (
         "bash -n Tools/release.sh Tools/publish-testing-snapshot.sh",
         "shellcheck Tools/release.sh Tools/publish-testing-snapshot.sh",
     ):
         if command not in text:
-            raise GateError(
-                f"release controls workflow does not run {command}"
-            )
+            raise GateError(f"release controls workflow does not run {command}")
 
 
 def check_local_release_entrypoint(root: Path) -> None:
@@ -1658,12 +1541,12 @@ def check_local_release_entrypoint(root: Path) -> None:
         "git diff --quiet",
         "git diff --cached --quiet",
         "git fetch --quiet origin main --tags",
-        'gh workflow run release.yml',
+        "gh workflow run release.yml",
         "--ref main",
         '--field "release_sha=$SOURCE_SHA"',
-        'gh workflow run homebrew-cask.yml',
+        "gh workflow run homebrew-cask.yml",
         '--field "publish_forgejo=$PUBLISH_HOMEBREW_FORGEJO"',
-        'gh workflow run forgejo-release.yml',
+        "gh workflow run forgejo-release.yml",
         '--tag "v${VERSION}"',
         '--expected-sha "$SOURCE_SHA"',
         '--manifest "$MANIFEST"',
@@ -1705,7 +1588,7 @@ def check_local_testing_entrypoint(root: Path) -> None:
         'run.get("display_title") == f"NOOP testing candidate @ {sha}"',
         'run.get("conclusion") == "success"',
         'if [ "$SOURCE_SHA" != "$TRUSTED_SHA" ]',
-        'git status --porcelain=v1 --untracked-files=normal',
+        "git status --porcelain=v1 --untracked-files=normal",
         'git worktree add --quiet --detach "$SOURCE_TREE" "$TRUSTED_SHA"',
         'if [ "$(git rev-parse origin/main)" != "$TRUSTED_SHA" ]',
         'python3 "$SOURCE_TREE/Tools/github-release-publish.py"',
@@ -1740,9 +1623,7 @@ def check_local_testing_entrypoint(root: Path) -> None:
                 "local testing snapshot publisher bypasses the exact publisher"
             )
     _reject_owner_script_mutations(text, "local testing snapshot publisher")
-    _require_reviewed_source_digest(
-        root, "Tools/publish-testing-snapshot.sh"
-    )
+    _require_reviewed_source_digest(root, "Tools/publish-testing-snapshot.sh")
 
 
 def check_repository(root: Path = ROOT, config_path: Path = DEFAULT_CONFIG) -> None:
@@ -1784,10 +1665,7 @@ def evaluate_check_runs(
             continue
         if name not in expected_paths:
             continue
-        if (
-            name == TRUSTED_CONTEXT
-            and run.get("trustedScope") != "protected-main"
-        ):
+        if name == TRUSTED_CONTEXT and run.get("trustedScope") != "protected-main":
             continue
         if run.get("workflowPath") != expected_paths[name]:
             ownership_failures.add(f"{name}=unexpected-workflow")
@@ -1809,9 +1687,7 @@ def evaluate_check_runs(
             bounded_conclusion = (
                 conclusion if isinstance(conclusion, str) else "unknown"
             )
-            failures.append(
-                f"{context}={bounded_status}/{bounded_conclusion}"
-            )
+            failures.append(f"{context}={bounded_status}/{bounded_conclusion}")
     if failures:
         raise GateError("required checks are not green: " + ", ".join(failures))
 
@@ -1890,13 +1766,10 @@ def _trusted_workflow_run_identity(
     run_id = int(match.group(2))
     check_id = check_run.get("id")
     valid_check_id = (
-        isinstance(check_id, int)
-        and not isinstance(check_id, bool)
-        and check_id > 0
+        isinstance(check_id, int) and not isinstance(check_id, bool) and check_id > 0
     )
     valid_path = (
-        actions_match is not None
-        and int(actions_match.group(1)) == run_id
+        actions_match is not None and int(actions_match.group(1)) == run_id
     ) or (
         check_match is not None
         and valid_check_id
@@ -1913,9 +1786,7 @@ def _trusted_workflow_run_identity(
     return scope, run_id, int(match.group(3))
 
 
-def _workflow_path_from_run(
-    payload: Any, run_id: int, expected_sha: str
-) -> str:
+def _workflow_path_from_run(payload: Any, run_id: int, expected_sha: str) -> str:
     if (
         not isinstance(payload, dict)
         or payload.get("id") != run_id
@@ -1939,9 +1810,7 @@ def _workflow_path_from_trusted_run(
     head_repository = (
         payload.get("head_repository") if isinstance(payload, dict) else None
     )
-    expected_event = (
-        "pull_request_target" if scope == "pull-request" else "push"
-    )
+    expected_event = "pull_request_target" if scope == "pull-request" else "push"
     if (
         not isinstance(payload, dict)
         or payload.get("id") != run_id
@@ -1951,10 +1820,7 @@ def _workflow_path_from_trusted_run(
         or payload.get("path") != TRUSTED_WORKFLOW_PATH
         or not isinstance(head_repository, dict)
         or head_repository.get("full_name") != repository
-        or (
-            scope == "protected-main"
-            and payload.get("head_sha") != expected_sha
-        )
+        or (scope == "protected-main" and payload.get("head_sha") != expected_sha)
     ):
         raise GateError("trusted GitHub Actions workflow run identity is invalid")
     return TRUSTED_WORKFLOW_PATH
@@ -1992,24 +1858,19 @@ def fetch_check_runs(
                 raise GateError("GitHub check-runs response is invalid")
             app = run.get("app")
             app_id = app.get("id") if isinstance(app, dict) else None
-            if (
-                run.get("name") in required_contexts
-                and app_id == required_app_id
-            ):
+            if run.get("name") in required_contexts and app_id == required_app_id:
                 external_id = run.get("external_id")
-                if run.get("name") == TRUSTED_CONTEXT and isinstance(
-                    external_id, str
-                ) and external_id.startswith(f"{TRUSTED_CONTEXT}:"):
-                    scope, run_id, run_attempt = (
-                        _trusted_workflow_run_identity(
-                            run, repository, sha
-                        )
+                if (
+                    run.get("name") == TRUSTED_CONTEXT
+                    and isinstance(external_id, str)
+                    and external_id.startswith(f"{TRUSTED_CONTEXT}:")
+                ):
+                    scope, run_id, run_attempt = _trusted_workflow_run_identity(
+                        run, repository, sha
                     )
                     cache_key = (run_id, scope, run_attempt)
                 else:
-                    run_id = _workflow_run_id(
-                        run.get("details_url"), repository
-                    )
+                    run_id = _workflow_run_id(run.get("details_url"), repository)
                     run_attempt = 0
                     cache_key = (run_id, "native", run_attempt)
                 if cache_key not in workflow_runs:
@@ -2027,15 +1888,13 @@ def fetch_check_runs(
                         "GitHub Actions workflow-run query failed",
                     )
                     if cache_key[1] in {"pull-request", "protected-main"}:
-                        workflow_runs[cache_key] = (
-                            _workflow_path_from_trusted_run(
-                                run_payload,
-                                scope=cache_key[1],
-                                run_id=run_id,
-                                run_attempt=run_attempt,
-                                repository=repository,
-                                expected_sha=sha,
-                            )
+                        workflow_runs[cache_key] = _workflow_path_from_trusted_run(
+                            run_payload,
+                            scope=cache_key[1],
+                            run_id=run_id,
+                            run_attempt=run_attempt,
+                            repository=repository,
+                            expected_sha=sha,
                         )
                     else:
                         workflow_runs[cache_key] = _workflow_path_from_run(

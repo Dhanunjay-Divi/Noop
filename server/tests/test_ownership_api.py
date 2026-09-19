@@ -413,8 +413,19 @@ class FakeOwnershipRepository:
         *,
         principal,
         deletion_request_id,
+        installation_id,
+        installation_token_hash,
+        expected_platform,
+        identity_auth_time,
     ) -> dict:
         assert principal == self.principal
+        assert installation_id == INSTALLATION_ID
+        assert (
+            installation_token_hash
+            == hashlib.sha256(INSTALLATION_TOKEN.encode("ascii")).hexdigest()
+        )
+        assert expected_platform == self.installation_platform
+        assert identity_auth_time.tzinfo is not None
         if deletion_request_id != DELETION_REQUEST_ID:
             raise OwnershipNotFoundError("not found")
         self.account_deletion_cancel_calls += 1
@@ -428,6 +439,25 @@ class FakeOwnershipRepository:
                 "duplicate": self.account_deletion_cancel_calls > 1,
             }
         )
+        result["cloud_data_deletion"] = {
+            **result["cloud_data_deletion"],
+            "state": "canceled",
+        }
+        result["identity_deletion"] = {
+            **result["identity_deletion"],
+            "state": "canceled",
+            "blocker": None,
+        }
+        result["band_retirement"] = {
+            **result["band_retirement"],
+            "work_state": "canceled",
+            "blocker": None,
+        }
+        result["control_plane_deletion"] = {
+            **result["control_plane_deletion"],
+            "state": "canceled",
+            "blocker": None,
+        }
         return result
 
     async def select_plan(
@@ -532,9 +562,7 @@ def _possession() -> dict:
 def _account_deletion() -> dict:
     return {
         "request_id": str(uuid4()),
-        "confirmation_sha256": (
-            OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256
-        ),
+        "confirmation_sha256": (OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256),
         "export_acknowledged": True,
         "retention_acknowledged": True,
         "policy_version": "ownership-v1",
@@ -1107,11 +1135,8 @@ def test_account_deletion_request_status_and_cancel_are_no_store() -> None:
             headers=_identity_headers(),
         )
         canceled = client.post(
-            (
-                "/v1/ownership/account/deletion-requests/"
-                f"{DELETION_REQUEST_ID}/cancel"
-            ),
-            headers=_identity_headers(),
+            (f"/v1/ownership/account/deletion-requests/{DELETION_REQUEST_ID}/cancel"),
+            headers=_identity_headers(installation=True),
         )
 
     assert requested.status_code == 202
@@ -1131,7 +1156,18 @@ def test_account_deletion_request_status_and_cancel_are_no_store() -> None:
         "blocker": "provider_credentials_unavailable",
     }
     assert deletion["band_retirement"]["eligibility"] == "blocked_policy"
-    assert canceled.json()["deletion"]["state"] == "canceled"
+    canceled_deletion = canceled.json()["deletion"]
+    assert canceled_deletion["state"] == "canceled"
+    assert canceled_deletion["identity_deletion"] == {
+        "state": "canceled",
+        "blocker": None,
+    }
+    assert canceled_deletion["band_retirement"]["work_state"] == "canceled"
+    assert canceled_deletion["band_retirement"]["blocker"] is None
+    assert canceled_deletion["control_plane_deletion"] == {
+        "state": "canceled",
+        "blocker": None,
+    }
     assert repository.account_deletion_request_calls == 1
     assert repository.account_deletion_cancel_calls == 1
 
@@ -1141,9 +1177,29 @@ def test_account_deletion_request_status_and_cancel_are_no_store() -> None:
     assert str(DELETION_REQUEST_ID) not in serialized
     assert OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256 not in serialized
     assert all(
-        set(event) == {"event", "service", "phase", "outcome"}
-        for event in events
+        set(event) == {"event", "service", "phase", "outcome"} for event in events
     )
+
+
+def test_account_deletion_cancellation_requires_current_installation() -> None:
+    repository = FakeOwnershipRepository()
+    with _client(repository=repository) as client:
+        missing = client.post(
+            (f"/v1/ownership/account/deletion-requests/{DELETION_REQUEST_ID}/cancel"),
+            headers=_identity_headers(),
+        )
+        malformed = client.post(
+            (f"/v1/ownership/account/deletion-requests/{DELETION_REQUEST_ID}/cancel"),
+            headers={
+                **_identity_headers(),
+                "X-Noop-Ownership-Installation-ID": INSTALLATION_ID,
+                "X-Noop-Ownership-Installation-Token": "invalid",
+            },
+        )
+
+    assert missing.status_code == 401
+    assert malformed.status_code == 401
+    assert repository.account_deletion_cancel_calls == 0
 
 
 def test_account_deletion_conflict_and_cancellation_conflict_are_bounded() -> None:
@@ -1161,19 +1217,14 @@ def test_account_deletion_conflict_and_cancellation_conflict_are_bounded() -> No
             json=_account_deletion(),
         )
         canceled = client.post(
-            (
-                "/v1/ownership/account/deletion-requests/"
-                f"{DELETION_REQUEST_ID}/cancel"
-            ),
-            headers=_identity_headers(),
+            (f"/v1/ownership/account/deletion-requests/{DELETION_REQUEST_ID}/cancel"),
+            headers=_identity_headers(installation=True),
         )
 
     assert requested.status_code == 409
     assert requested.json() == {"detail": "account deletion request conflicts"}
     assert canceled.status_code == 409
-    assert canceled.json() == {
-        "detail": "account deletion can no longer be canceled"
-    }
+    assert canceled.json() == {"detail": "account deletion can no longer be canceled"}
     assert "private" not in requested.text
     assert "private" not in canceled.text
 

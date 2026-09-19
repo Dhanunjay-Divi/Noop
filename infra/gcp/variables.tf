@@ -473,6 +473,41 @@ variable "ownership_database_url_secret_id" {
   }
 }
 
+variable "enable_ownership_deletion_coordination" {
+  description = "Allow the existing managed lifecycle job to coordinate ownership account deletion through a separate least-privilege database credential."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = (
+      !var.enable_ownership_deletion_coordination
+      || (
+        var.enable_managed_runtime
+        && var.enable_ownership_runtime
+        && var.ownership_deletion_lifecycle_database_url_secret_id != null
+      )
+    )
+    error_message = "enable_ownership_deletion_coordination requires both managed and ownership runtimes plus the separate ownership lifecycle database credential secret."
+  }
+}
+
+variable "ownership_deletion_lifecycle_database_url_secret_id" {
+  description = "Existing Secret Manager secret containing the PostgreSQL URL for the ownership deletion lifecycle role only."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.ownership_deletion_lifecycle_database_url_secret_id == null
+      || can(regex(
+        "^[A-Za-z0-9_-]{1,255}$",
+        var.ownership_deletion_lifecycle_database_url_secret_id,
+      ))
+    )
+    error_message = "ownership_deletion_lifecycle_database_url_secret_id must be a Secret Manager secret ID, not a URL or secret value."
+  }
+}
+
 variable "enable_public_managed_api" {
   description = "Allow unauthenticated Cloud Run invocation so the managed API can enforce Firebase identity and App Check."
   type        = bool

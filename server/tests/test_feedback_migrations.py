@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 from datetime import UTC, datetime, timedelta
@@ -110,10 +111,289 @@ def test_feedback_migration_042_is_bounded_hash_only_tombstone_storage() -> None
     assert "object_key" not in table_contract
     assert "archive_sha256" not in table_contract
     assert "noop_feedback_report_retire_idempotency" in sql
-    assert "BEFORE DELETE ON feedback_reports" in sql
+
+
+def test_feedback_migration_044_makes_lifetime_duration_exact() -> None:
+    migration = MIGRATIONS / "044_feedback_idempotency_duration.sql"
+    checksum = hashlib.sha256(migration.read_bytes()).hexdigest()
+    manifest = {
+        version: digest
+        for digest, version in (
+            line.split()
+            for line in MANIFEST.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+    }
+    sql = migration.read_text(encoding="utf-8")
+
+    assert manifest["044_feedback_idempotency_duration.sql"] == checksum
+    assert "INTERVAL '1080 hours'" in sql
+    assert "INTERVAL '45 days'" not in sql
+    assert "SET LOCAL TIME ZONE 'UTC'" in sql
+    assert sql.count("WITH repair_batch AS MATERIALIZED") == 2
+    assert sql.count("FOR UPDATE SKIP LOCKED") == 1
+    assert sql.count("FOR UPDATE\n") == 1
+    assert sql.count("LIMIT 256") == 2
+    assert sql.count("UPDATE feedback_idempotency_tombstones AS tombstone") == 2
+    initial_repair = sql.index("WITH repair_batch AS MATERIALIZED")
+    writer_fence = sql.index("LOCK TABLE feedback_idempotency_tombstones")
+    first_alter = sql.index("ALTER TABLE feedback_idempotency_tombstones")
+    assert initial_repair < writer_fence < first_alter
+    assert "IN EXCLUSIVE MODE" in sql
+    assert "IN SHARE ROW EXCLUSIVE MODE" not in sql
+    assert "CREATE OR REPLACE FUNCTION noop_feedback_tombstone_normalize_expiry" in sql
+    assert "BEFORE INSERT OR UPDATE OF reserved_at, expires_at" in sql
+    assert "NEW.expires_at := NEW.reserved_at + INTERVAL '1080 hours'" in sql
+    assert "CREATE OR REPLACE FUNCTION noop_feedback_report_retire_idempotency" in sql
     assert "COALESCE(OLD.principal_hash, OLD.subject_hash)" in sql
-    assert "OLD.created_at + INTERVAL '45 days'" in sql
+    assert "OLD.created_at + INTERVAL '1080 hours'" in sql
     assert "ON CONFLICT" in sql
+    assert "ADD CONSTRAINT feedback_tombstone_time_order_v2" in sql
+    assert ") NOT VALID;" in sql
+    assert "VALIDATE CONSTRAINT feedback_tombstone_time_order_v2" in sql
+    assert "DROP CONSTRAINT feedback_tombstone_time_order" in sql
+    assert (
+        "RENAME CONSTRAINT feedback_tombstone_time_order_v2\n"
+        "TO feedback_tombstone_time_order"
+    ) in sql
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL or asyncpg is None,
+    reason="PostgreSQL upgrade tests require asyncpg and NOOP_TEST_DATABASE_URL",
+)
+async def test_feedback_migration_042_to_044_normalizes_old_dst_writers() -> None:
+    assert asyncpg is not None
+    connection = await asyncpg.connect(DATABASE_URL)
+    schema = f"feedback_duration_upgrade_{uuid4().hex}"
+    try:
+        async with connection.transaction():
+            await connection.execute(f'CREATE SCHEMA "{schema}"')
+            await connection.execute(f'SET LOCAL search_path TO "{schema}"')
+            await connection.execute("SET LOCAL TIME ZONE 'America/Chicago'")
+            for migration_name in (
+                "039_feedback_reports.sql",
+                "040_feedback_principal_cleanup.sql",
+                "042_feedback_idempotency_tombstones.sql",
+            ):
+                await connection.execute(
+                    (MIGRATIONS / migration_name).read_text(encoding="utf-8")
+                )
+
+            await connection.executemany(
+                """
+                INSERT INTO feedback_idempotency_tombstones (
+                    client_app_id,
+                    principal_hash_version,
+                    principal_hash,
+                    idempotency_hash,
+                    reserved_at,
+                    expires_at
+                ) VALUES (
+                    $1,
+                    1,
+                    $2,
+                    $3,
+                    TIMESTAMPTZ '2026-10-15 12:00:00-05',
+                    TIMESTAMPTZ '2026-10-15 12:00:00-05'
+                        + INTERVAL '45 days'
+                )
+                """,
+                [
+                    (
+                        f"legacy-app-{index:04d}",
+                        hashlib.sha256(f"principal-{index}".encode()).hexdigest(),
+                        hashlib.sha256(f"idempotency-{index}".encode()).hexdigest(),
+                    )
+                    for index in range(257)
+                ],
+            )
+
+            await connection.execute(
+                (MIGRATIONS / "044_feedback_idempotency_duration.sql").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            existing_durations = await connection.fetchrow(
+                """
+                SELECT
+                    count(*) AS row_count,
+                    count(DISTINCT EXTRACT(
+                        EPOCH FROM (expires_at - reserved_at)
+                    )) AS duration_count,
+                    min(EXTRACT(
+                        EPOCH FROM (expires_at - reserved_at)
+                    )) AS minimum_duration
+                FROM feedback_idempotency_tombstones
+                """
+            )
+            assert existing_durations["row_count"] == 257
+            assert existing_durations["duration_count"] == 1
+            assert int(existing_durations["minimum_duration"]) == 1080 * 60 * 60
+
+            constraint = await connection.fetchrow(
+                """
+                SELECT
+                    convalidated,
+                    pg_get_constraintdef(oid, true) AS definition
+                FROM pg_constraint
+                WHERE conrelid = 'feedback_idempotency_tombstones'::regclass
+                  AND conname = 'feedback_tombstone_time_order'
+                """
+            )
+            assert constraint is not None
+            assert constraint["convalidated"] is True
+            assert "1080:00:00" in constraint["definition"]
+
+            await connection.execute("SET LOCAL TIME ZONE 'America/Chicago'")
+
+            await connection.execute(
+                """
+                INSERT INTO feedback_idempotency_tombstones (
+                    client_app_id,
+                    principal_hash_version,
+                    principal_hash,
+                    idempotency_hash,
+                    reserved_at,
+                    expires_at
+                ) VALUES (
+                    'legacy-app-id',
+                    1,
+                    $1,
+                    $2,
+                    TIMESTAMPTZ '2026-10-15 12:00:00-05',
+                    TIMESTAMPTZ '2026-10-15 12:00:00-05'
+                        + INTERVAL '45 days'
+                )
+                """,
+                "c" * 64,
+                "d" * 64,
+            )
+            old_writer_duration = await connection.fetchval(
+                """
+                SELECT EXTRACT(EPOCH FROM (expires_at - reserved_at))
+                FROM feedback_idempotency_tombstones
+                WHERE principal_hash = $1
+                """,
+                "c" * 64,
+            )
+            assert int(old_writer_duration) == 1080 * 60 * 60
+    finally:
+        await connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        await connection.close()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL or asyncpg is None,
+    reason="PostgreSQL upgrade tests require asyncpg and NOOP_TEST_DATABASE_URL",
+)
+async def test_feedback_migration_044_waits_for_row_lock_before_final_repair() -> None:
+    assert asyncpg is not None
+    observer = await asyncpg.connect(DATABASE_URL)
+    holder = await asyncpg.connect(DATABASE_URL)
+    migrator = await asyncpg.connect(DATABASE_URL)
+    schema = f"feedback_duration_lock_{uuid4().hex}"
+    holder_transaction = None
+    migration_task = None
+    try:
+        async with observer.transaction():
+            await observer.execute(f'CREATE SCHEMA "{schema}"')
+            await observer.execute(f'SET LOCAL search_path TO "{schema}"')
+            await observer.execute("SET LOCAL TIME ZONE 'America/Chicago'")
+            for migration_name in (
+                "039_feedback_reports.sql",
+                "040_feedback_principal_cleanup.sql",
+                "042_feedback_idempotency_tombstones.sql",
+            ):
+                await observer.execute(
+                    (MIGRATIONS / migration_name).read_text(encoding="utf-8")
+                )
+            await observer.execute(
+                """
+                INSERT INTO feedback_idempotency_tombstones (
+                    client_app_id,
+                    principal_hash_version,
+                    principal_hash,
+                    idempotency_hash,
+                    reserved_at,
+                    expires_at
+                ) VALUES (
+                    'lock-repro-app',
+                    1,
+                    $1,
+                    $2,
+                    TIMESTAMPTZ '2026-10-15 12:00:00-05',
+                    TIMESTAMPTZ '2026-10-15 12:00:00-05'
+                        + INTERVAL '45 days'
+                )
+                """,
+                "a" * 64,
+                "b" * 64,
+            )
+
+        holder_transaction = holder.transaction()
+        await holder_transaction.start()
+        await holder.execute(f'SET LOCAL search_path TO "{schema}"')
+        await holder.execute("SELECT 1 FROM feedback_idempotency_tombstones FOR UPDATE")
+
+        async def apply_migration() -> None:
+            async with migrator.transaction():
+                await migrator.execute(f'SET LOCAL search_path TO "{schema}"')
+                await migrator.execute(
+                    (MIGRATIONS / "044_feedback_idempotency_duration.sql").read_text(
+                        encoding="utf-8"
+                    )
+                )
+
+        migration_task = asyncio.create_task(apply_migration())
+        waiting_for_fence = False
+        for _ in range(200):
+            if migration_task.done():
+                await migration_task
+            waiting_for_fence = bool(
+                await observer.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_locks
+                        WHERE pid = $1
+                          AND relation = to_regclass($2)
+                          AND mode = 'ExclusiveLock'
+                          AND NOT granted
+                    )
+                    """,
+                    migrator.get_server_pid(),
+                    f"{schema}.feedback_idempotency_tombstones",
+                )
+            )
+            if waiting_for_fence:
+                break
+            await asyncio.sleep(0.01)
+
+        assert waiting_for_fence
+        assert not migration_task.done()
+        await holder_transaction.rollback()
+        holder_transaction = None
+        await asyncio.wait_for(migration_task, timeout=10)
+
+        duration_seconds = await observer.fetchval(
+            f"""
+            SELECT EXTRACT(EPOCH FROM (expires_at - reserved_at))
+            FROM "{schema}".feedback_idempotency_tombstones
+            """
+        )
+        assert int(duration_seconds) == 1080 * 60 * 60
+    finally:
+        if holder_transaction is not None:
+            await holder_transaction.rollback()
+        if migration_task is not None and not migration_task.done():
+            migration_task.cancel()
+            await asyncio.gather(migration_task, return_exceptions=True)
+        await observer.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        await holder.close()
+        await migrator.close()
+        await observer.close()
 
 
 def test_feedback_migration_v0_identity_is_ambiguous_and_fails_closed() -> None:

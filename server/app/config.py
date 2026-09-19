@@ -150,6 +150,8 @@ class Settings:
     ownership_app_check_cache_seconds: int = 6 * 60 * 60
     ownership_challenge_ttl_seconds: int = 3 * 60
     ownership_fresh_auth_seconds: int = 10 * 60
+    ownership_deletion_coordination_enabled: bool = False
+    ownership_lifecycle_database_url: str | None = None
     public_base_url: str | None = None
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
@@ -434,6 +436,13 @@ class Settings:
             ownership_fresh_auth_seconds=_positive_int(
                 "NOOP_OWNERSHIP_FRESH_AUTH_SECONDS",
                 10 * 60,
+            ),
+            ownership_deletion_coordination_enabled=_boolean(
+                "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED",
+                False,
+            ),
+            ownership_lifecycle_database_url=os.getenv(
+                "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL"
             ),
             public_base_url=os.getenv("NOOP_PUBLIC_BASE_URL"),
             twilio_account_sid=os.getenv("NOOP_TWILIO_ACCOUNT_SID"),

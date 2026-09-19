@@ -227,7 +227,7 @@ class OwnershipFoundationTest {
 
     @Test
     fun inactiveOwnershipAccountsFailClosedBeforeBandStateResolution() {
-        listOf("deletion_pending", "retired", "unknown").forEach { accountState ->
+        listOf("retired", "unknown").forEach { accountState ->
             OwnershipCheckpointStage.entries.forEach { stage ->
                 assertEquals(
                     "$accountState $stage",
@@ -240,6 +240,22 @@ class OwnershipFoundationTest {
                     ),
                 )
             }
+        }
+    }
+
+    @Test
+    fun deletionPendingAccountsSurfaceCancellationBeforeBandStateResolution() {
+        OwnershipCheckpointStage.entries.forEach { stage ->
+            assertEquals(
+                stage.name,
+                OwnershipPhase.DELETION_PENDING,
+                ownershipPhaseForOverview(
+                    accountState = "deletion_pending",
+                    bandState = "claimed",
+                    checkpointStage = stage,
+                    possessionAvailable = true,
+                ),
+            )
         }
     }
 

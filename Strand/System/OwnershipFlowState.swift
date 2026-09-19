@@ -21,6 +21,7 @@ enum OwnershipServicePhase: Equatable {
     case claiming
     case claimed
     case complete
+    case deletionPending
     case replacementRequired
     case authorizingReplacement
 }
@@ -97,6 +98,9 @@ func ownershipPhaseForOverview(
     checkpointStage: OwnershipAccountStage,
     possessionAvailable: Bool
 ) -> OwnershipServicePhase {
+    if accountState == "deletion_pending" {
+        return .deletionPending
+    }
     guard accountState == "active" else {
         return .unavailable
     }

@@ -1070,6 +1070,27 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
             }
           }
         }
+        dynamic "env" {
+          for_each = var.enable_ownership_deletion_coordination ? [true] : []
+
+          content {
+            name  = "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED"
+            value = "true"
+          }
+        }
+        dynamic "env" {
+          for_each = var.enable_ownership_deletion_coordination ? [true] : []
+
+          content {
+            name = "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL"
+            value_source {
+              secret_key_ref {
+                secret  = data.google_secret_manager_secret.ownership_deletion_lifecycle_database_url[0].secret_id
+                version = "latest"
+              }
+            }
+          }
+        }
         env {
           name = "NOOP_MANAGED_REPLAY_SECRET"
           value_source {
@@ -1121,6 +1142,7 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
     terraform_data.migration_execution,
     google_project_iam_member.managed_lifecycle_cloud_sql_client,
     google_secret_manager_secret_iam_member.managed_lifecycle_database_url,
+    google_secret_manager_secret_iam_member.managed_lifecycle_ownership_database_url,
     google_secret_manager_secret_iam_member.managed_lifecycle_push_token_secret,
     google_secret_manager_secret_iam_member.managed_lifecycle_push_token_previous_secret,
     google_secret_manager_secret_iam_member.managed_lifecycle_replay_secret,

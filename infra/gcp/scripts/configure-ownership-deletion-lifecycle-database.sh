@@ -28,26 +28,26 @@ instance="$(tofu -chdir="${INFRA_DIR}" output -raw database_instance)"
 connection_name="$(
   tofu -chdir="${INFRA_DIR}" output -raw database_connection_name
 )"
-ownership_runtime="$(tofu -chdir="${INFRA_DIR}" output -json ownership_api)"
+managed_lifecycle="$(tofu -chdir="${INFRA_DIR}" output -json managed_lifecycle_job)"
 
 if [[ -z "${instance}" || -z "${connection_name}" ]]; then
   printf 'Managed database is disabled; apply that stage first.\n' >&2
   exit 1
 fi
-if [[ "${ownership_runtime}" != "null" ]]; then
-  printf 'Disable the ownership runtime before creating or rotating its database role.\n' >&2
+if [[ "${managed_lifecycle}" != "null" ]]; then
+  printf 'Disable the managed runtime before creating or rotating the ownership lifecycle role.\n' >&2
   exit 1
 fi
 
 "${python}" "${SCRIPT_DIR}/configure-ownership-database.py" \
-  --role-kind="api" \
+  --role-kind="deletion-lifecycle" \
   --project="${project_id}" \
   --region="${region}" \
   --instance="${instance}" \
   --connection-name="${connection_name}" \
   --database="noop" \
-  --user="noop_ownership" \
+  --user="noop_ownership_lifecycle" \
   --bootstrap-secret="noop-staging-database-url" \
-  --secret="noop-staging-ownership-database-url" \
+  --secret="noop-staging-ownership-lifecycle-database-url" \
   --proxy-binary="$(command -v cloud-sql-proxy)" \
   --confirm-runtime-disabled

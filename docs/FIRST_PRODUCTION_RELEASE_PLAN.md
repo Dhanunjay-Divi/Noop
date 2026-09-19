@@ -1,7 +1,7 @@
 # NOOP first production release master plan
 
 - **Plan date:** 2026-09-05
-- **Last evidence update:** 2026-09-18
+- **Last evidence update:** 2026-09-19
 - **Target:** first public production release of the NOOP mobile apps and the
   first-party NOOP Band
 - **Launch sequence:** India first, then the USA
@@ -159,11 +159,12 @@ commit's checks were reverified on 2026-09-18:
   scope can authorize release publication.
 - Historical exact-main evidence at `1443acb1` and `b5caec52` remains valid for
   those exact trees, including the retained commit/tree-bound SBOM manifest.
-  It is not evidence for the active September 17-18 branch.
-- The active `codex/ui-cloud-readiness-20260917` branch is still dirty,
-  uncommitted, unpushed, and has not run the ten hosted contexts on an exact
-  head. Complete current local and hosted walls remain required before its PR
-  can merge.
+  It is not evidence for the active September 17-19 branch.
+- The `codex/ui-cloud-readiness-20260917` candidate has complete local Apple,
+  Android, package, server, simulator, infrastructure, bounded-runner, and
+  exact-current policy walls, and exact round-owned cleanup is complete. Its
+  protected pull request and exact-head check suite are the authoritative
+  record for the candidate SHA, hosted wall, merge, and protected-main result.
 - Reviewed deployment environments, production credentials and rotation,
   signed artifacts, physical-device evidence, supplier inputs, legal and
   certification approvals, store records, production operations, and final
@@ -179,8 +180,8 @@ The protected-baseline terminology inventory classifies 17,368 legacy-name
 occurrences across 1,356 tracked paths (1,508 path/category groups) for
 `WHOOP`, `Whoop`, `whoop`, `OpenWhoop`, or `my-whoop`. The largest areas are
 Android, Swift packages, Apple application source, tests, and documentation.
-The active branch's final inventory and reviewed digest remain
-`<pending final terminology gate>`.
+The active branch inventory classifies 17,702 occurrences across 1,565
+path/category groups and remains protected by the reviewed required-CI digest.
 The footprint includes:
 
 - active third-party protocol and transport implementation;
@@ -684,10 +685,11 @@ logic, and both clients agree with firmware on every supported protocol version.
 
 The supplier-independent ownership/account foundation is **PARTIAL**. It
 provides default-off identity, control-schema, terms, claim-transaction,
-installation, and resumable-onboarding primitives, but it is not a production
-ownership system. Supplier-backed possession, ownership-account deletion,
-billing, recovery/release, legal approval, physical evidence, and production
-operation remain `OPEN`.
+installation, resumable-onboarding, and cooling-off deletion-coordination
+primitives, but it is not a production ownership system. Supplier-backed
+possession, provider identity erasure, approved band retirement/wipe, billing,
+recovery/release, legal approval, physical evidence, and production operation
+remain `OPEN`.
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
@@ -697,7 +699,7 @@ operation remain `OPEN`.
 | A3A.4 | PARTIAL | Claim and onboarding checkpoints provide resumable source-level foundations; production band provisioning and every partial-success recovery boundary remain open. | Fault-injection state-machine evidence |
 | A3A.5 | OPEN | Keep post-activation collection, metrics, export, and local controls working through identity-service and network outages. | Physical offline and outage matrix |
 | A3A.6 | PARTIAL | Same-account replacement-installation authorization and installation revocation primitives exist; signed physical possession, old-device loss, data continuity, and production recovery evidence remain open. | Signed physical replacement-phone journey |
-| A3A.7 | OPEN | Implement support-controlled return, RMA, recovery, deletion, dispute, and eligible-upgrade release with owner-key revocation and band wipe. | Legal approval, operator exercise, and physical reclaim |
+| A3A.7 | PARTIAL | Cooling-off deletion request, cancellation, target coordination, session revocation, and mobile status flows exist. Integrate provider identity erasure plus support-controlled return, RMA, recovery, dispute, approved band retirement/wipe, and eligible-upgrade release. | Legal approval, provider deletion, operator exercise, and physical reclaim |
 | A3A.8 | PARTIAL | Matched Apple/Android account visibility, resumable onboarding, and the pre-Home NOOP/NOOP+ preference exist; supplier-linked possession, production terms, accessibility acceptance, physical journeys, and end-to-end launch evidence remain open. | Accessibility trees, visual states, and end-to-end tests |
 | A3A.9 | OPEN | Keep billing and NOOP+ consent separate from band ownership; leave checkout unavailable until gateway and store billing pass. | Entitlement, cancellation, downgrade, and no-charge tests |
 | A3A.10 | OPEN | Add bounded local/backend claim evidence without band, account, contact, challenge, credential, or health identifiers. | Redaction, retention, and outcome tests |
@@ -752,7 +754,7 @@ export without understanding BLE or waiting on an unexplained blocking screen.
 | D6.4 | OPEN | Add compaction/index/query work only from measured profiles and preserve write throughput under backfill. | Before/after traces and regression tests |
 | D6.5 | OPEN | Prove low-storage, full-disk, WAL growth, corrupt DB, failed migration, restore, process death, and concurrent read/write recovery. | Fault matrix with no silent loss |
 | D6.6 | PARTIAL | Complete same-platform and portable backup/import coverage for the final schema and NOOP Band provenance. | Old/new/cross-platform restore fixtures |
-| D6.7 | PARTIAL | The current managed-history exporter is non-resumable and has no importer. Implement interrupted continuation and a documented archive importer, then prove selected-scope export, corruption rejection, effective snapshot expiry, large accounts, cancellation/auth refresh, and cross-tenant isolation. | Large live synthetic account evidence plus importer round trip |
+| D6.7 | PARTIAL | Resumable selected-scope export, v2 integrity, complete corruption rejection before mutation, and resumable idempotent import are implemented and documented. Prove effective snapshot expiry, large accounts, cancellation/auth refresh, cross-tenant isolation, low storage, and physical process death. | Large live synthetic account evidence plus physical importer round trip |
 
 **Exit:** storage remains bounded and responsive, and every destructive or
 space-reclaiming action has a verified backup, exact eligibility, and rollback.
