@@ -545,9 +545,7 @@ async def test_managed_reconciliation_cannot_relink_after_erasure_starts(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 f"noop-managed-erasure-account:{seeded['managed_account_id']}",
             )
-            reconcile_task = asyncio.create_task(
-                repository.reconcile_identity(claims)
-            )
+            reconcile_task = asyncio.create_task(repository.reconcile_identity(claims))
             await _wait_for_lock_waiters(pool, minimum=1)
             now = datetime.now(UTC)
             await blocker.execute(

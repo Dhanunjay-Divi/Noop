@@ -34,20 +34,14 @@ from app.repository import PostgresRepository
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "server/migrations/050_managed_document_keys.sql"
-AUTHORITY_MIGRATION = (
-    ROOT / "server/migrations/055_managed_document_key_authority.sql"
-)
-FENCE_MIGRATION = (
-    ROOT / "server/migrations/056_managed_identity_and_key_fences.sql"
-)
+AUTHORITY_MIGRATION = ROOT / "server/migrations/055_managed_document_key_authority.sql"
+FENCE_MIGRATION = ROOT / "server/migrations/056_managed_identity_and_key_fences.sql"
 ENVELOPE_SIZE_MIGRATION = (
     ROOT / "server/migrations/054_managed_document_key_envelope_size.sql"
 )
 FIXTURE = ROOT / "Fixtures/managed-document-sync/v1/golden-vectors.json"
 DATABASE_URL = (
-    os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL")
-    if asyncpg is not None
-    else None
+    os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL") if asyncpg is not None else None
 )
 
 
@@ -419,9 +413,7 @@ async def test_document_upload_uses_active_account_scoped_document_keys() -> Non
             """,
             [first.identity_id, second.identity_id, cross_tenant.identity_id],
         )
-        assert {
-            row["identity_id"]: row["provider_tenant"] for row in tenant_rows
-        } == {
+        assert {row["identity_id"]: row["provider_tenant"] for row in tenant_rows} == {
             first.identity_id: "tenant-a",
             second.identity_id: "tenant-a",
             cross_tenant.identity_id: "tenant-b",
