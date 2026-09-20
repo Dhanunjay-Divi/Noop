@@ -15,6 +15,15 @@ MAX_EVIDENCE_BYTES = 1_000_000
 MAX_STATUS_BYTES = 4_096
 DEFAULT_EXPECTED_LABEL = "review-sample-fresh-process"
 SAFE_LABEL = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
+BOUNDED_RESOURCE_STATUSES = {
+    "resource-disk",
+    "resource-disk-unavailable",
+    "resource-memory",
+    "resource-memory-unavailable",
+    "resource-output",
+    "resource-probe-timeout",
+    "resource-probe-unavailable",
+}
 
 
 @dataclass(frozen=True)
@@ -63,11 +72,27 @@ def _read_status(
         return None, "invalid-bounded-status"
     if fields["label"] != expected_label:
         return None, "invalid-bounded-status"
-    if fields["status"] not in {"success", "failed", "timeout", "start-error"}:
+    allowed_statuses = {
+        "success",
+        "failed",
+        "timeout",
+        "start-error",
+        *BOUNDED_RESOURCE_STATUSES,
+    }
+    if fields["status"] not in allowed_statuses:
         return None, "invalid-bounded-status"
     try:
-        int(fields["exit_code"])
+        exit_code = int(fields["exit_code"])
     except ValueError:
+        return None, "invalid-bounded-status"
+    status = fields["status"]
+    if (
+        (status == "success" and exit_code != 0)
+        or (status == "failed" and exit_code == 0)
+        or (status == "timeout" and exit_code != 124)
+        or (status == "start-error" and exit_code != 127)
+        or (status in BOUNDED_RESOURCE_STATUSES and exit_code != 125)
+    ):
         return None, "invalid-bounded-status"
     return fields, None
 
@@ -91,6 +116,13 @@ def classify(
         "status": "timeout",
         "exit_code": "124",
     }
+    resource_status = (
+        bounded_status["status"]
+        if bounded_status is not None
+        and bounded_status["status"] in BOUNDED_RESOURCE_STATUSES
+        and bounded_status["exit_code"] == "125"
+        else None
+    )
 
     if not results_root.is_dir():
         if timeout_before_results:
@@ -99,6 +131,8 @@ def classify(
                 "managed-device-timeout-before-results",
                 0,
             )
+        if resource_status is not None:
+            return RetryDecision(False, f"bounded-{resource_status}", 0)
         return RetryDecision(False, "missing-results", 0)
 
     textprotos = sorted(results_root.rglob("test-result.textproto"))
@@ -109,6 +143,12 @@ def classify(
             return RetryDecision(
                 True,
                 "managed-device-timeout-before-results",
+                evidence_files,
+            )
+        if resource_status is not None:
+            return RetryDecision(
+                False,
+                f"bounded-{resource_status}",
                 evidence_files,
             )
         return RetryDecision(False, "missing-test-result", evidence_files)
@@ -126,6 +166,12 @@ def classify(
 
     if "test_case {" in proto_text:
         return RetryDecision(False, "test-results-present", evidence_files)
+    if resource_status is not None:
+        return RetryDecision(
+            False,
+            f"bounded-{resource_status}",
+            evidence_files,
+        )
 
     instrumentation_failed = (
         'test_status: FAILED' in proto_text

@@ -45,6 +45,22 @@ class AndroidManagedDeviceRetryTests(unittest.TestCase):
         )
         return path
 
+    def _resource_status(
+        self,
+        root: Path,
+        *,
+        status: str,
+        label: str = RETRY.DEFAULT_EXPECTED_LABEL,
+    ) -> Path:
+        path = root / f"{label}.status"
+        path.write_text(
+            f"label={label}\n"
+            f"status={status}\n"
+            "exit_code=125\n",
+            encoding="utf-8",
+        )
+        return path
+
     def test_activity_service_loss_before_any_test_is_retriable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = self._results(
@@ -157,6 +173,61 @@ test_result {
             )
             self.assertFalse(decision.retry)
             self.assertEqual(decision.category, "test-results-present")
+
+    def test_bounded_disk_pressure_is_valid_but_not_retriable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            decision = RETRY.classify(
+                root / "missing",
+                bounded_status_file=self._resource_status(
+                    root,
+                    status="resource-disk",
+                ),
+            )
+            self.assertFalse(decision.retry)
+            self.assertEqual(decision.category, "bounded-resource-disk")
+
+    def test_bounded_resource_pressure_never_hides_test_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = self._results(
+                root / "results",
+                proto="""
+test_status: FAILED
+test_result {
+  test_case {
+    test_class: "com.noop.ui.AppShellInstrumentedTest"
+  }
+  test_status: FAILED
+}
+""",
+            )
+            decision = RETRY.classify(
+                results,
+                bounded_status_file=self._resource_status(
+                    root,
+                    status="resource-memory",
+                ),
+            )
+            self.assertFalse(decision.retry)
+            self.assertEqual(decision.category, "test-results-present")
+
+    def test_resource_status_requires_resource_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            status = root / "invalid-resource.status"
+            status.write_text(
+                "label=review-sample-fresh-process\n"
+                "status=resource-disk\n"
+                "exit_code=1\n",
+                encoding="utf-8",
+            )
+            decision = RETRY.classify(
+                root / "missing",
+                bounded_status_file=status,
+            )
+            self.assertFalse(decision.retry)
+            self.assertEqual(decision.category, "invalid-bounded-status")
 
     def test_mismatched_expected_label_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

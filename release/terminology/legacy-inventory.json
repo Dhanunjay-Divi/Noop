@@ -5,7 +5,7 @@
     "customer": 814,
     "fixture": 5574,
     "generated": 21,
-    "historical": 3142,
+    "historical": 3144,
     "import": 871,
     "persisted": 666
   },
@@ -35683,17 +35683,19 @@
     {
       "category": "historical",
       "lineNumbers": [
-        209,
-        210,
-        456,
-        459,
-        642
+        221,
+        222,
+        488,
+        489,
+        503,
+        506,
+        720
       ],
-      "occurrenceCount": 5,
+      "occurrenceCount": 7,
       "path": "docs/handoff/CLAUDE-FINAL-PRODUCTION-REVIEW-PROMPT.md",
-      "sha256": "edfb29015827be53e96d827c653181eb23c9e5d8afa24e46fd7939792d6355c7",
+      "sha256": "785b95e44696a45d4c4f683b9562bae8a928ee27232d36b9efbce545825ebce9",
       "tokenCounts": {
-        "whoop": 3,
+        "whoop": 5,
         "whoopprotocol": 1,
         "whoopstore": 1
       }
@@ -36224,7 +36226,7 @@
         55,
         139,
         182,
-        255
+        259
       ],
       "occurrenceCount": 4,
       "path": "docs/ops/rounds/2026-09-19-cloud-authority-safety-live-surfaces.md",
@@ -38462,7 +38464,7 @@
       }
     }
   ],
-  "occurrenceCount": 17802,
+  "occurrenceCount": 17804,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

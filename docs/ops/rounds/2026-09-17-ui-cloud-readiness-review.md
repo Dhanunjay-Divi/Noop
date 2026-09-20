@@ -207,6 +207,7 @@ specification:
 | Final focused Android Full-debug unit run | 50 passed, 0 failed/errors/skips across `PrimaryNavigationContractTest`, `FormulaPublicationGateTest`, `RemoteSyncCoordinatorTest`, `ManagedCloudSchedulerTest`, and `IntelligenceDaySourceTokenTest`; build success | The exact-current navigation/accessibility, formula-publication, remote-sync, managed-retry, and bounded historical-diagnostic contracts compile and pass on the JVM | Demo flavor, lint, APK, instrumentation, emulator, OEM, or physical behavior |
 | Exact round-owned resource cleanup | The earlier checksummed session cleanup removed 47 closed September 18 session JSONLs totaling 51.92 GiB while preserving the current goal and active agents. Final September 19 cleanup then removed exactly 16 regeneratable targets: Android app/root build output and worktree `.gradle`, the local OpenTofu cache, 11 Swift package/tool `.build` directories, and the synthetic server virtualenv; synthetic database `noop_ui_cloud_deletion_20260918_r1` was dropped. Every target and database absence was verified, no matching DerivedData remained, and free disk rose from about 15 GiB to 20 GiB. | Enumerated round-owned generated resources were removed without deleting source, credentials, sessions, simulators, user data, or unidentified external resources | Future cache growth, unrelated application memory, hosted resources, or product correctness |
 | Terminal-output memory guard | The bounded runner discards child output unless a private log is explicitly requested, checks explicit logs every 100 ms, stops the complete process group at the default 128 MiB ceiling, truncates overshoot, and reports `resource-output`; its CLI now refuses to start or continue below 10% free system memory or 10 GiB free disk unless a narrow recorded caller override is supplied. All eight Android managed-device CI calls retain capped private logs as uploaded diagnostics. The active iTerm profile has unlimited scrollback disabled with a 1,000-line limit. The final runner/required/trusted-control regression executed 134 tests in 27.006 seconds with zero failures; iTerm stayed near 219 MiB with 48% free system memory. | Repository heavy commands cannot flood iTerm merely because a caller omitted `--log-file`; explicit runner logs cannot grow without a hard ceiling; and output, timeout, resource-pressure, and process-group cleanup paths are regression-covered | Commands run outside the bounded runner, unrelated applications, OS-wide faults, or a user changing terminal preferences |
+| Hosted Android disk-floor correction | PR `#16` candidate `1505be75` built both managed-device APK sets successfully, then production-shell and Review Sample emulator setup each stopped before tests with exact uploaded `resource-disk`/`125` status under the generic 10 GiB floor. The correction retains that floor for compilation, applies `--min-free-disk-gib 4` only to the six managed-emulator execution/reset commands, and makes every bounded resource status parse as valid fail-closed non-retry evidence. The exact production artifact now classifies as `bounded-resource-disk`; 304 tool tests with one intentional skip, required-CI `10/10`, actionlint, Python compilation, and diff validation pass locally. | The two failures share one diagnosed hosted-capacity boundary; the correction does not hide assertion failures, and a genuine test result still prevents retry | The replacement hosted API 35 run, OEM/physical behavior, or proof that every future runner image has sufficient capacity |
 | Complete Apple wall | macOS 2,144 passed and 1 intentional skip; iPhone shell 38 passed and 1 intentional skip; unsigned iOS, widgets, Watch, and Watch complications builds passed; ownership contract 8/8 passed after localization | Exact-current Apple source compiles across app targets and the complete app/simulator contracts pass | Physical BLE, Watch connectivity, notification delivery, battery, physiology, or physical accessibility |
 | Apple visual and accessibility review | The preserved tab-shell output revalidated 21 scenarios on each of iPhone 17 Pro Max and 17e plus 42 unique manifest rows. All 11 expected Daily Plan captures revalidated at 1170x2532 with clean crash logs and distinct check-in/stop states. Representative normal, dark, contrast, and accessibility-size renders were inspected during capture. | No blocking overlap or clipping was found in the exercised simulator states, and cleanup did not destroy the evidence | VoiceOver order, touch ergonomics, physical contrast, haptics, or device performance |
 | Complete Android wall | Full and Demo each completed 4,883 unit tests with 7 skips and 0 failures after the final stale expectation was corrected; both lint variants, APKs, and instrumentation source compilation passed | Exact-current Android source compiles and passes both shipped variants | OEM/background/BLE/haptic/battery/attestation or physical accessibility |
@@ -247,9 +248,9 @@ specification:
   `docs/handoff/HARDWARE-AND-PREMIUM-STRATEGY.md`,
   `docs/handoff/RELEASE-BLOCKERS.md`, `docs/ops/ACTIVE.md`,
   `docs/ops/rounds/INDEX.md`, and this round record.
-- Commits: local implementation commits through `431c4c60` and initial
-  candidate `9d859d9a`; blocker remediation and the exact final head are
-  recorded by protected PR `#16`.
+- Commits: local implementation commits through `431c4c60`, initial candidate
+  `9d859d9a`, and hosted candidate `1505be75`; the managed-emulator disk-floor
+  correction and exact final head are recorded by protected PR `#16`.
 - Branch and remote state: pushed to protected PR `#16`. The initial candidate's
   remaining Apple, Android, and server workflows were canceled after a late
   independent audit found portability blockers; it was not merged.
@@ -268,8 +269,9 @@ specification:
 
 ## Open risks and honest limitations
 
-- Hosted exact-SHA checks, protected integration, and the protected-main trusted
-  result remain pending until the consolidated candidate is pushed.
+- Replacement hosted exact-SHA checks, protected integration, and the
+  protected-main trusted result remain pending until the disk-floor correction
+  is pushed and every required context passes.
 - Managed-history code has resumable export/import and corruption rejection;
   live expiry, large-account, cancellation/auth-refresh, cross-tenant,
   low-storage, and physical process-death proof remain (`DAT-170`).

@@ -87,6 +87,11 @@ from, or treat it as product truth. Validate each proposal against exact current
 source, current product decisions, platform guidance, safety constraints,
 accessibility, and rendered evidence.
 
+Apply the same boundary to owner-supplied screenshots, videos, exports, and
+competitor references available in the current session or local review bundle.
+Extract the customer problem and interaction principle; do not copy the asset,
+branding, wording, layout, formula, or unsupported product claim.
+
 ## 3. Research Without Copying
 
 Review current publicly available wearable products, health applications,
@@ -191,6 +196,13 @@ cross-device state, not an abrupt production flip. One phone remains the
 encrypted edge collector with a short-lived BLE/upload journal, bounded offline
 working cache, immediate Safety initiation, and enough current state for safe
 offline use.
+
+Be precise about the word `encrypted`: the current mobile databases rely on
+Apple file protection/platform disk encryption and Android device encryption.
+Neither database currently has proven application-level SQLCipher encryption.
+Treat stronger database encryption as a separately gated migration with key
+recovery, backup/restore, performance, rollback, and existing-user evidence;
+never describe it as already implemented.
 
 For every data class and formula, require explicit consent and migration,
 dual-run parity, provenance, restore and deletion evidence, performance,
@@ -364,6 +376,15 @@ xcodebuild -project Strand.xcodeproj -scheme Strand \
   -configuration Debug -destination 'platform=macOS' \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
 
+xcodebuild -project Strand.xcodeproj -scheme Strand \
+  -configuration Debug -destination 'generic/platform=macOS' \
+  ARCHS='x86_64 arm64' ONLY_ACTIVE_ARCH=NO \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+python3 -m unittest Tools.tests.test_launch_gate_isolation
+python3 Tools/validate-launch-gate-isolation.py \
+  --allow-missing-iphone-secrets
+
 xcodebuild -project Strand.xcodeproj -scheme NOOPiOS \
   -configuration Release -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO build
@@ -412,6 +433,13 @@ at compact and wide sizes. Rendering evidence does not prove VoiceOver,
 physical Watch behavior, notifications, BLE, haptics, battery, or background
 collection.
 
+There is no checked-in deterministic macOS, Watch, widget, or complication
+visual matrix equivalent to the iPhone scripts. Do not record those runtime
+visuals as passed merely because the targets build. Inspect an actual launched
+macOS window and capture only the states you can reproduce. Record Watch,
+widget, and complication runtime visuals as unavailable unless you create and
+verify a deterministic fictional-data harness in the reviewed branch.
+
 ### Android Full, Demo, And API 35
 
 From `android/`:
@@ -446,6 +474,25 @@ test began. Inspect Android renders on the managed emulator for the same
 meaning, states, accessibility sizes, contrast, navigation, clipping, and
 missing-data behavior as Apple. Do not infer OEM or physical-device behavior
 from the emulator.
+
+There is no checked-in Android visual-matrix harness. Do not call Android
+visual review complete unless the state is reproducible. For a running managed
+device, a minimal exact-build capture starts with:
+
+```bash
+ANDROID_APK="$(
+  find app/build/outputs/apk/full/debug -maxdepth 1 -name '*.apk' -print -quit
+)"
+test -n "$ANDROID_APK"
+adb install -r "$ANDROID_APK"
+adb shell am force-stop com.noop.whoop.debug
+adb shell monkey -p com.noop.whoop.debug \
+  -c android.intent.category.LAUNCHER 1
+adb exec-out screencap -p > '<round-owned capture directory>/android-current.png'
+```
+
+Use only fictional seeded states. Record inaccessible routes or states as
+unavailable; do not substitute code inspection for rendered evidence.
 
 ### Swift Packages And Harnesses
 
@@ -505,6 +552,28 @@ terminal deletion, formula provenance, key lifecycle, and rollback. Docker,
 provider, production database, and restore-soak checks remain explicit external
 or hosted gates when the local toolchain cannot execute them.
 
+When Docker is available, also run the current hosted container and encrypted
+restore contracts against the same disposable synthetic database:
+
+```bash
+cd server
+for script in backup/*.sh; do sh -n "$script"; done
+NOOP_API_TOKEN='synthetic-review-token-at-least-32-bytes' \
+NOOP_DB_PASSWORD='synthetic-review-database-password' \
+NOOP_BACKUP_SECRET_FILE=/dev/null \
+  docker compose config --quiet
+docker build --tag noop-server-review .
+docker build --tag noop-server-backup-review backup
+```
+
+Then execute the exact current `Exercise encrypted backup and disposable
+restore drill` step body from `.github/workflows/server.yml`, changing only
+round-owned synthetic names. Require encrypted archive creation, checksum
+validation, restore into a newly created disposable database, migration
+manifest agreement, application-contract smoke success, and cleanup. If local
+Docker is unavailable, require the exact hosted `server-ci-required` result;
+only production restore/load/failover/soak remains an external runtime gate.
+
 ### Repository Policy And Release Controls
 
 ```bash
@@ -521,9 +590,18 @@ python3 Tools/i18n_audit.py --platform all --full
 python3 Tools/i18n_audit.py --ci HEAD
 PYTHONPATH=Tools python3 -m unittest Tools.test_i18n_audit
 python3 -m unittest Tools.tests.test_health_claims_gate
+python3 -m unittest discover -s Tools/tests -p 'test_*.py'
 python3 Tools/validate-ops-rounds.py --all .
 git diff --check
 ```
+
+For Safety-affecting changes, additionally retain a zero-provider synthetic
+`Tools/safety-paging-smoke.py` result, its direct test, the focused Apple
+`SafetyPagingAndShellContractTests`, both Android Full/Demo managed-Safety
+contract groups, and the PostgreSQL accepted-contact, acknowledgement,
+revocation, latest-location deletion, and expiry lifecycle tests. No real
+person, provider, emergency service, contact value, health value, or coordinate
+may be used.
 
 Also run the current actionlint, ShellCheck, structured-file parsing, OpenTofu
 format/validate/test, backup/restore syntax, dependency, and migration-manifest

@@ -13,14 +13,19 @@ Last updated: **2026-09-20**
 - Current round implementation resumed from:
   `9d859d9aa6788a936be75bdfeac93603c9fd0ae8`
 - Current state: supplier-independent implementation and applicable local
-  platform verification are green. Pull request `#16` reached candidate
-  `a3f36473`: server, package, policy, and trust contexts passed, while macOS
-  exposed five stale source-shape assertions and both Android shell jobs were
-  stopped by the bounded runner's 10% free-memory floor during compilation.
-  The locally verified replacement asserts the hardened runtime behavior and
-  removes the extra Kotlin compiler-daemon peak without lowering that floor.
-  Final policy reruns are green; replacement commit/push, hosted exact-SHA
-  checks, protected merge, and protected-main verification remain pending.
+  platform verification are green. Pull request `#16` candidate `1505be75`
+  passed policy, trust, server, Swift-package, macOS, and iOS production-shell
+  hosted work, plus Android's independent build-and-test job. Both Android
+  managed-device jobs built their APKs successfully, then the bounded runner
+  stopped emulator setup at its generic 10 GiB free-disk floor before any test
+  ran. The exact uploaded status artifacts report
+  `status=resource-disk` and `exit_code=125`; this is hosted-runner capacity,
+  not a product or assertion failure. The locally verified correction retains
+  the 10 GiB compilation floor, applies a recorded 4 GiB floor only to
+  ephemeral managed-emulator run/reset steps, and recognizes bounded resource
+  statuses as valid non-retryable evidence. Replacement commit/push, hosted
+  exact-SHA checks, protected merge, and protected-main verification remain
+  pending.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
 - Surviving exact-current local evidence: 24 affected macOS contracts pass; the
@@ -53,7 +58,7 @@ Last updated: **2026-09-20**
   all 51 Safety contracts, and the exact Android Full app plus instrumentation
   APK preparation graph with Kotlin in-process. This is local correction
   evidence only; the replacement hosted macOS and API 35 jobs remain required.
-- The final policy wall passed all 301 tool tests with one intentional skip plus release, calibration, terminology, required-CI, trusted-control, provenance, privacy, medical-truth, localization, operations-record, and diff gates.
+- The final policy wall passed all 301 tool tests with one intentional skip plus release, calibration, terminology, required-CI, trusted-control, provenance, privacy, medical-truth, localization, operations-record, and diff gates. The hosted disk-control correction then passed 304 tool tests with one intentional skip, the exact failed-artifact classifier check, required-CI `10/10`, actionlint, Python compilation, and `git diff --check`.
 - Exact cleanup manifest
   `8080d7201bc9ec1ac940842c2aa8d0c0026b79fd8980275d8fe187f97583a62f`
   removed three closed completed review-session files totaling
@@ -113,8 +118,8 @@ Resume from:
 
 ## Immediate next actions
 
-1. Create one replacement correction commit and push its exact head to PR
-   `#16`.
+1. Create one replacement hosted-disk correction commit and push its exact
+   head to PR `#16`.
 2. Require all ten hosted contexts before protected merge, then verify the
    protected-main trusted result. Physical hardware, signing/store,
    legal, carrier, credential, production-runtime, and elapsed soak gates

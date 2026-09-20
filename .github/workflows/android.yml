@@ -162,6 +162,7 @@ jobs:
             --status-file app/build/noop-managed-device-status/production-shell-instrumentation.status \
             --log-file app/build/noop-managed-device-status/production-shell-instrumentation.log \
             --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
@@ -194,6 +195,7 @@ jobs:
             --status-file app/build/noop-managed-device-status/production-shell-reset.status \
             --log-file app/build/noop-managed-device-status/production-shell-reset.log \
             --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew cleanManagedDevices \
             --no-daemon \
@@ -214,6 +216,7 @@ jobs:
             --status-file app/build/noop-managed-device-status/production-shell-infrastructure-retry.status \
             --log-file app/build/noop-managed-device-status/production-shell-infrastructure-retry.log \
             --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
@@ -310,6 +313,7 @@ jobs:
             --status-file app/build/noop-managed-device-status/review-sample-fresh-process.status \
             --log-file app/build/noop-managed-device-status/review-sample-fresh-process.log \
             --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
@@ -342,6 +346,7 @@ jobs:
             --status-file app/build/noop-managed-device-status/review-sample-reset.status \
             --log-file app/build/noop-managed-device-status/review-sample-reset.log \
             --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew cleanManagedDevices \
             --no-daemon \
@@ -362,6 +367,7 @@ jobs:
             --status-file app/build/noop-managed-device-status/review-sample-infrastructure-retry.status \
             --log-file app/build/noop-managed-device-status/review-sample-infrastructure-retry.log \
             --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \

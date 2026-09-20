@@ -778,6 +778,7 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertEqual(source.count("--status-file "), 8)
         self.assertEqual(source.count("--log-file "), 8)
         self.assertEqual(source.count("--max-log-mib 16"), 8)
+        self.assertEqual(source.count("--min-free-disk-gib 4"), 6)
         self.assertEqual(source.count("app/build/noop-managed-device-status/"), 22)
         self.assertEqual(source.count("--no-daemon"), 8)
         self.assertEqual(source.count("--no-configuration-cache"), 8)
@@ -828,6 +829,13 @@ class RequiredCIGateTests(unittest.TestCase):
             self.assertEqual(block.count("Tools/run-bounded-command.py"), 1)
             self.assertEqual(block.count("--status-file "), 1)
             self.assertEqual(block.count("--log-file "), 1)
+            expected_disk_floor_count = (
+                0 if "without starting an emulator" in step_name else 1
+            )
+            self.assertEqual(
+                block.count("--min-free-disk-gib 4"),
+                expected_disk_floor_count,
+            )
             self.assertEqual(block.count("--max-log-mib 16"), 1)
             status_path = re.search(r"--status-file ([^ \\\\\n]+)", block)
             log_path = re.search(r"--log-file ([^ \\\\\n]+)", block)
