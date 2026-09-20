@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `hosted Android disk-floor correction verified locally; replacement integration pending`
+- State: `hosted Android execution-memory correction verified locally; replacement integration pending`
 - Owner: project team
 - Branch: `codex/ui-cloud-readiness-20260917`
 - Round implementation start:
@@ -10,7 +10,7 @@
 - Branch base against protected `main`:
   `b688b3b725cd497e96a31b28540a219bf50446e1`
 - Latest hosted candidate:
-  `1505be759e7e417adaa7e2edd7deb0666a927df4`
+  `ef9478ec59e832c18fd1faeb20552689a63ed61f`
 - End implementation commit: commit containing this record
 - Record commit or PR: protected pull request `#16`
 
@@ -172,6 +172,7 @@ carrier, legal, production-runtime, or elapsed-soak evidence.
 | Repository policy wall | The final correction wall passed 301 tool tests with one intentional skip plus required-CI, trusted release, release controls, calibration, terminology, legal/provenance, private-data, health claims across 1,295 files, strict and differential localization, all 76 operations records, workflow lint, and diff checks. | The final dirty replacement candidate satisfies the repository-controlled policy, claim, localization, operations, and trust contracts | Hosted exact-SHA checks, protected integration, or external approvals |
 | Fresh combined-diff review | The release-evidence audit found stale counts, premature cleanup/policy claims, D-054 ambiguity, old-head PR wording, temporal architecture ambiguity, and two Claude-prompt omissions. These were corrected. Previously reported cancellation, coalescing, log-redaction, notification-freshness, Test Centre concurrency, and reactive-state defects were rechecked against current source and their fixes are present. | The complete candidate delta received a fresh semantic and release-evidence review after implementation | Final policy reruns, physical runtime behavior, or hosted exact-SHA checks |
 | Hosted-candidate correction | Candidate `a3f36473` exposed stale macOS source-shape assertions and Android compiler-daemon memory pressure. Candidate `1505be75` then passed policy, trust, server including encrypted backup/disposable restore, Swift packages, both Apple builds including the iOS production shell, Android's independent build-and-test job, and both managed-device APK preparation graphs. Its production-shell and Review Sample emulator jobs each stopped before tests with exact uploaded `resource-disk`/`125` status under the generic 10 GiB disk floor. The current correction retains 10 GiB for compilation, uses a recorded 4 GiB floor only for the six ephemeral managed-emulator execution/reset commands, and recognizes bounded resource statuses as valid fail-closed non-retry evidence. Focused contracts and the complete 304-test tools wall pass locally. | Both product-source corrections and the common hosted-capacity boundary have exact evidence without weakening Safety behavior or hiding test failures | Replacement-head API 35 execution, all required hosted contexts, protected integration, or physical behavior |
+| Hosted execution-memory correction | Candidate `ef9478ec` retained the disk correction and passed 32 hosted jobs, including Android Review Sample API 35, Android build-and-test, Apple, server, package, policy, and trust work. Production-shell completed 104/114 tests with zero failures before the bounded runner stopped the host at exact `resource-memory`/`125` evidence. Explicit APK preparation retains the project-wide 4 GiB heap, while only the four emulator test invocations use a 2 GiB Gradle heap and two workers under the unchanged 10% free-memory guard. Required-CI pins these boundaries. A timeout now requires positive bounded activity-service-loss evidence before the single retry; an unproven product startup hang fails closed. The exact daemon command, 65 focused tests, complete 305-test tools wall with one intentional skip, and all repository policy gates pass locally. | The second hosted-capacity boundary has exact partial-test and resource evidence; neither partial execution, resource pressure, nor an unproven startup timeout is relabelled as success | Replacement-head completion of all 114 API 35 tests, all required hosted contexts, protected integration, or physical behavior |
 | Exact resource cleanup | Checksummed manifest `8080d7201bc9ec1ac940842c2aa8d0c0026b79fd8980275d8fe187f97583a62f` removed three closed completed review-session files totaling 4,475,749,846 bytes. Manifest `991d0340c6e0d4cf61856c0c41b8135dfe059dec471b0646aaed69e84bffbfca` removed 62 exact round-owned `/private/tmp/noop-*` paths totaling 16,566,458 bytes after evidence capture. Current agent-session files with open handles and the two cleanup manifests are deliberately retained; no round test/build process remains; about 10 GiB is free. | Exact completed generated resources were removed without deleting source, credentials, simulator state, user data, private inputs, or the unrelated system PostgreSQL 14 service | Current open agent-session files, unrelated host applications, future cache growth, cloud resources, or product correctness |
 | Hosted required contexts | Pending | Pending | External launch gates |
 
@@ -188,12 +189,10 @@ carrier, legal, production-runtime, or elapsed-soak evidence.
 - Worktree: dedicated `noop-ui-cloud-readiness-20260917` checkout
 - Branch: `codex/ui-cloud-readiness-20260917`
 - Existing integration record: pull request `#16`, currently at candidate
-  `1505be75`. Policy, trust, server, package, and macOS work passed; both
-  Android managed-emulator jobs exposed the common disk-floor correction
-  described above.
-- The hosted disk-floor correction is intentionally uncommitted after its
-  complete local tools and workflow-contract wall passed, pending the single
-  replacement commit.
+  `ef9478ec`. Thirty-two hosted jobs passed; production-shell exposed the
+  execution-memory correction described above.
+- The execution-memory correction is intentionally uncommitted after its local
+  tools and workflow-contract wall passed.
 - Replacement commit, push, hosted checks, merge, and protected-main
   verification: pending.
 
@@ -217,8 +216,8 @@ carrier, legal, production-runtime, or elapsed-soak evidence.
 
 - Cloud authority is a target, not current production behavior.
 - No product assertion or implementation blocker is currently known from the
-  accepted September 17/19 review. The hosted disk-control correction still
-  requires exact-head API 35 proof before integration.
+  accepted September 17/19 review. The hosted execution-memory correction still
+  requires exact-head completion of all 114 API 35 tests before integration.
 - Current apps do not yet have encrypted SQLCipher databases.
 - Server canonical formulas are not yet implemented.
 - Personal encrypted-document transfer and key recovery remain gated and
@@ -229,7 +228,7 @@ carrier, legal, production-runtime, or elapsed-soak evidence.
 - Physiological accuracy and battery performance require approved datasets and
   physical devices.
 - Supplier binaries are not approved for redistribution or imported.
-- Docker was unavailable locally. Candidate `1505be75` supplied exact hosted
+- Docker was unavailable locally. Candidate `ef9478ec` retained exact hosted
   container, Compose, encrypted backup, and disposable-restore evidence; the
   replacement head must retain the required server context.
 
@@ -247,8 +246,8 @@ carrier, legal, production-runtime, or elapsed-soak evidence.
 
 ## Next ordered action
 
-1. Commit once, push the hosted disk-floor correction, and inspect all ten
-   required contexts on the exact SHA.
+1. Commit and push the verified hosted execution-memory correction, then
+   inspect all ten required contexts on the exact SHA.
 2. Merge only through protected main when all required contexts are green, then
    verify the protected-main trusted result.
 3. Execute the signed physical-device and supplier-band handoff separately.

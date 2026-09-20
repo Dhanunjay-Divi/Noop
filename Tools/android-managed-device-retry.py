@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Classify the one Android managed-device failure that is safe to retry."""
+"""Classify the exact Android managed-device failures that are safe to retry."""
 
 from __future__ import annotations
 
@@ -97,6 +97,16 @@ def _read_status(
     return fields, None
 
 
+def _activity_service_lost(proto_text: str, log_text: str) -> bool:
+    return (
+        (
+            "IActivityManager.startInstrumentation" in proto_text
+            and "on a null object reference" in proto_text
+        )
+        or "cmd: Can't find service: activity" in log_text
+    )
+
+
 def classify(
     results_root: Path,
     *,
@@ -126,11 +136,7 @@ def classify(
 
     if not results_root.is_dir():
         if timeout_before_results:
-            return RetryDecision(
-                True,
-                "managed-device-timeout-before-results",
-                0,
-            )
+            return RetryDecision(False, "timeout-without-infrastructure-evidence", 0)
         if resource_status is not None:
             return RetryDecision(False, f"bounded-{resource_status}", 0)
         return RetryDecision(False, "missing-results", 0)
@@ -138,11 +144,23 @@ def classify(
     textprotos = sorted(results_root.rglob("test-result.textproto"))
     logs = sorted(results_root.rglob("utp*.log"))
     evidence_files = len(textprotos) + len(logs)
+    if evidence_files > MAX_EVIDENCE_FILES:
+        return RetryDecision(False, "too-many-evidence-files", evidence_files)
     if not textprotos:
+        log_text, log_error = _read_bounded(logs)
+        if log_error is not None:
+            return RetryDecision(False, log_error, evidence_files)
+        assert log_text is not None
         if timeout_before_results:
+            if _activity_service_lost("", log_text):
+                return RetryDecision(
+                    True,
+                    "activity-service-unavailable-before-tests",
+                    evidence_files,
+                )
             return RetryDecision(
-                True,
-                "managed-device-timeout-before-results",
+                False,
+                "timeout-without-infrastructure-evidence",
                 evidence_files,
             )
         if resource_status is not None:
@@ -152,8 +170,6 @@ def classify(
                 evidence_files,
             )
         return RetryDecision(False, "missing-test-result", evidence_files)
-    if evidence_files > MAX_EVIDENCE_FILES:
-        return RetryDecision(False, "too-many-evidence-files", evidence_files)
 
     proto_text, proto_error = _read_bounded(textprotos)
     log_text, log_error = _read_bounded(logs)
@@ -173,19 +189,28 @@ def classify(
             evidence_files,
         )
 
+    activity_service_lost = _activity_service_lost(proto_text, log_text)
+    if timeout_before_results and activity_service_lost:
+        return RetryDecision(
+            True,
+            "activity-service-unavailable-before-tests",
+            evidence_files,
+        )
     instrumentation_failed = (
         'test_status: FAILED' in proto_text
         and 'name: "INSTRUMENTATION_FAILED"' in proto_text
         and "Test run failed to complete. No test results." in proto_text
     )
-    activity_service_lost = (
-        "IActivityManager.startInstrumentation" in proto_text
-        and "on a null object reference" in proto_text
-    ) or "cmd: Can't find service: activity" in log_text
     if instrumentation_failed and activity_service_lost:
         return RetryDecision(
             True,
             "activity-service-unavailable-before-tests",
+            evidence_files,
+        )
+    if timeout_before_results:
+        return RetryDecision(
+            False,
+            "timeout-without-infrastructure-evidence",
             evidence_files,
         )
     return RetryDecision(False, "unclassified-failure", evidence_files)

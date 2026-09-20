@@ -13,19 +13,21 @@ Last updated: **2026-09-20**
 - Current round implementation resumed from:
   `9d859d9aa6788a936be75bdfeac93603c9fd0ae8`
 - Current state: supplier-independent implementation and applicable local
-  platform verification are green. Pull request `#16` candidate `1505be75`
-  passed policy, trust, server, Swift-package, macOS, and iOS production-shell
-  hosted work, plus Android's independent build-and-test job. Both Android
-  managed-device jobs built their APKs successfully, then the bounded runner
-  stopped emulator setup at its generic 10 GiB free-disk floor before any test
-  ran. The exact uploaded status artifacts report
-  `status=resource-disk` and `exit_code=125`; this is hosted-runner capacity,
-  not a product or assertion failure. The locally verified correction retains
-  the 10 GiB compilation floor, applies a recorded 4 GiB floor only to
-  ephemeral managed-emulator run/reset steps, and recognizes bounded resource
-  statuses as valid non-retryable evidence. Replacement commit/push, hosted
-  exact-SHA checks, protected merge, and protected-main verification remain
-  pending.
+  platform verification are green. Pull request `#16` candidate `ef9478ec`
+  passed 32 hosted jobs, including policy, trust, server, Swift packages, Apple,
+  Android Review Sample API 35, and Android build-and-test. Android
+  production-shell completed 104/114 API 35 tests with zero failures before the
+  bounded runner stopped the host at its unchanged 10% free-memory floor. Its
+  exact status is `resource-memory`/`125`, not an assertion failure. The
+  correction keeps explicit APK preparation on the project-wide 4 GiB heap,
+  caps only the four managed-emulator test invocations at a 2 GiB Gradle heap
+  and two workers, retains the 10% host-memory guard, and keeps bounded
+  resource statuses fail-closed and non-retryable. A timeout now requires
+  positive bounded activity-service-loss evidence before the single retry; an
+  unproven product startup hang fails closed. The exact command shape, 65
+  focused CI tests, complete 305-test tool wall, and all repository policy
+  gates pass locally. Replacement commit/push, hosted exact-SHA checks,
+  protected merge, and protected-main verification remain pending.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
 - Surviving exact-current local evidence: 24 affected macOS contracts pass; the
@@ -56,9 +58,11 @@ Last updated: **2026-09-20**
   or commands run outside that boundary.
 - The hosted-candidate correction passes 77/77 focused macOS tests, including
   all 51 Safety contracts, and the exact Android Full app plus instrumentation
-  APK preparation graph with Kotlin in-process. This is local correction
-  evidence only; the replacement hosted macOS and API 35 jobs remain required.
-- The final policy wall passed all 301 tool tests with one intentional skip plus release, calibration, terminology, required-CI, trusted-control, provenance, privacy, medical-truth, localization, operations-record, and diff gates. The hosted disk-control correction then passed 304 tool tests with one intentional skip, the exact failed-artifact classifier check, required-CI `10/10`, actionlint, Python compilation, and `git diff --check`.
+  APK preparation graph with Kotlin in-process. Candidate `ef9478ec` also
+  proves Review Sample API 35 and 104 zero-failure production-shell cases
+  before a host-memory stop. The smaller execution heap still requires local
+  workflow-contract and replacement hosted API 35 verification.
+- The final policy wall passed all 301 tool tests with one intentional skip plus release, calibration, terminology, required-CI, trusted-control, provenance, privacy, medical-truth, localization, operations-record, and diff gates. The hosted disk-control and initial execution-memory corrections passed the complete 304-test wall with one intentional skip; the final retry-hardening tree passes 305 tool tests with one intentional skip, the exact 2 GiB daemon command, 65 focused CI tests, required-CI `10/10`, actionlint, Python compilation, and `git diff --check`.
 - Exact cleanup manifest
   `8080d7201bc9ec1ac940842c2aa8d0c0026b79fd8980275d8fe187f97583a62f`
   removed three closed completed review-session files totaling
@@ -118,8 +122,8 @@ Resume from:
 
 ## Immediate next actions
 
-1. Create one replacement hosted-disk correction commit and push its exact
-   head to PR `#16`.
+1. Commit the verified hosted-emulator execution-heap correction, then push its
+   exact head to PR `#16`.
 2. Require all ten hosted contexts before protected merge, then verify the
    protected-main trusted result. Physical hardware, signing/store,
    legal, carrier, credential, production-runtime, and elapsed soak gates

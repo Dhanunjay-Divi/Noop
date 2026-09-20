@@ -767,6 +767,12 @@ class RequiredCIGateTests(unittest.TestCase):
 
     def test_android_infrastructure_retry_is_bounded_and_fail_closed(self) -> None:
         source = (ROOT / ".github/workflows/android.yml").read_text(encoding="utf-8")
+        gradle_properties = (ROOT / "android/gradle.properties").read_text(
+            encoding="utf-8"
+        )
+        bounded_runner = (ROOT / "Tools/run-bounded-command.py").read_text(
+            encoding="utf-8"
+        )
         self.assertEqual(source.count("timeout-minutes: 50"), 2)
         self.assertEqual(source.count("continue-on-error: true"), 2)
         self.assertIn("Tools/android-managed-device-retry.py", source)
@@ -779,6 +785,24 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertEqual(source.count("--log-file "), 8)
         self.assertEqual(source.count("--max-log-mib 16"), 8)
         self.assertEqual(source.count("--min-free-disk-gib 4"), 6)
+        self.assertNotIn("--min-free-memory-percent", source)
+        self.assertEqual(
+            gradle_properties.count(
+                "org.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8"
+            ),
+            1,
+        )
+        self.assertIn(
+            "DEFAULT_MIN_FREE_MEMORY_PERCENT = 10.0",
+            bounded_runner,
+        )
+        self.assertEqual(
+            source.count(
+                '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
+            ),
+            4,
+        )
+        self.assertEqual(source.count("--max-workers=2"), 4)
         self.assertEqual(source.count("app/build/noop-managed-device-status/"), 22)
         self.assertEqual(source.count("--no-daemon"), 8)
         self.assertEqual(source.count("--no-configuration-cache"), 8)
@@ -832,9 +856,29 @@ class RequiredCIGateTests(unittest.TestCase):
             expected_disk_floor_count = (
                 0 if "without starting an emulator" in step_name else 1
             )
+            expected_test_heap_count = (
+                1
+                if (
+                    "Run production-shell instrumentation tests" in step_name
+                    or "Retry production-shell once" in step_name
+                    or "Prove Review Sample worker isolation" in step_name
+                    or "Retry Review Sample isolation once" in step_name
+                )
+                else 0
+            )
             self.assertEqual(
                 block.count("--min-free-disk-gib 4"),
                 expected_disk_floor_count,
+            )
+            self.assertEqual(
+                block.count(
+                    '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
+                ),
+                expected_test_heap_count,
+            )
+            self.assertEqual(
+                block.count("--max-workers=2"),
+                expected_test_heap_count,
             )
             self.assertEqual(block.count("--max-log-mib 16"), 1)
             status_path = re.search(r"--status-file ([^ \\\\\n]+)", block)

@@ -166,6 +166,8 @@ jobs:
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
+            "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" \
+            --max-workers=2 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
@@ -220,6 +222,8 @@ jobs:
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
+            "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" \
+            --max-workers=2 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
@@ -318,6 +322,8 @@ jobs:
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
+            "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" \
+            --max-workers=2 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
@@ -372,6 +378,8 @@ jobs:
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
+            "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" \
+            --max-workers=2 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace

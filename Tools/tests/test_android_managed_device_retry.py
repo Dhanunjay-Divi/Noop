@@ -45,6 +45,12 @@ class AndroidManagedDeviceRetryTests(unittest.TestCase):
         )
         return path
 
+    def _logs_only(self, root: Path, *, log: str) -> Path:
+        results = root / "managedDevice" / "pixel2Api35"
+        results.mkdir(parents=True)
+        (results / "utp.0.log").write_text(log, encoding="utf-8")
+        return root
+
     def _resource_status(
         self,
         root: Path,
@@ -123,7 +129,7 @@ issue {
             self.assertFalse(decision.retry)
             self.assertEqual(decision.category, "missing-results")
 
-    def test_bounded_timeout_before_results_is_retriable_once(self) -> None:
+    def test_bounded_timeout_without_results_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             status = self._timeout_status(root)
@@ -131,13 +137,13 @@ issue {
                 root / "missing",
                 bounded_status_file=status,
             )
-            self.assertTrue(decision.retry)
+            self.assertFalse(decision.retry)
             self.assertEqual(
                 decision.category,
-                "managed-device-timeout-before-results",
+                "timeout-without-infrastructure-evidence",
             )
 
-    def test_bounded_timeout_supports_a_reviewed_broad_suite_label(self) -> None:
+    def test_bounded_timeout_broad_suite_label_still_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             label = "production-shell-instrumentation"
@@ -146,10 +152,27 @@ issue {
                 bounded_status_file=self._timeout_status(root, label=label),
                 expected_label=label,
             )
+            self.assertFalse(decision.retry)
+            self.assertEqual(
+                decision.category,
+                "timeout-without-infrastructure-evidence",
+            )
+
+    def test_timeout_with_activity_service_loss_log_is_retriable_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = self._logs_only(
+                root / "results",
+                log="cmd: Can't find service: activity\n",
+            )
+            decision = RETRY.classify(
+                results,
+                bounded_status_file=self._timeout_status(root),
+            )
             self.assertTrue(decision.retry)
             self.assertEqual(
                 decision.category,
-                "managed-device-timeout-before-results",
+                "activity-service-unavailable-before-tests",
             )
 
     def test_timeout_never_retries_after_a_test_result_exists(self) -> None:
