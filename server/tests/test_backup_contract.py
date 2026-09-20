@@ -90,6 +90,8 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "--cipher-algo AES256" in backup
     assert "passphrase-file" in backup
     assert "sha256sum" in backup
+    assert "--no-privileges" not in backup
+    assert "--no-privileges" not in restore
     assert backup.index("gpg ") < backup.index('mv "$encrypted_partial"')
     assert restore.index("sha256sum --check") < restore.index("pg_restore \\")
     assert restore.index("pg_restore --list") < restore.index("timescaledb_pre_restore")

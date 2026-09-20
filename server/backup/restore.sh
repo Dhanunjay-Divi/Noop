@@ -98,7 +98,6 @@ restore_prepared=1
 pg_restore \
     --exit-on-error \
     --no-owner \
-    --no-privileges \
     --dbname="${PGDATABASE:?PGDATABASE is required}" \
     "$plain_backup"
 psql \

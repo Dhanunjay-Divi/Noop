@@ -53,7 +53,6 @@ pg_dump \
     --format=custom \
     --compress=9 \
     --no-owner \
-    --no-privileges \
     --file="$plain_partial"
 
 gpg \
