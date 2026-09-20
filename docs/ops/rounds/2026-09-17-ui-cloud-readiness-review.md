@@ -250,9 +250,10 @@ specification:
   `docs/handoff/RELEASE-BLOCKERS.md`, `docs/ops/ACTIVE.md`,
   `docs/ops/rounds/INDEX.md`, and this round record.
 - Commits: local implementation commits through `431c4c60`, initial candidate
-  `9d859d9a`, disk-floor candidate `1505be75`, and hosted candidate `ef9478ec`;
-  the managed-emulator execution-memory correction and exact final head are
-  recorded by protected PR `#16`.
+  `9d859d9a`, disk-floor candidate `1505be75`, execution-memory candidate
+  `ef9478ec`, and hosted candidate `e9b3a380`; the final iOS simulator
+  liveness correction and exact integration head are recorded by protected PR
+  `#16`.
 - Branch and remote state: pushed to protected PR `#16`. The initial candidate's
   remaining Apple, Android, and server workflows were canceled after a late
   independent audit found portability blockers; it was not merged.
@@ -271,9 +272,12 @@ specification:
 
 ## Open risks and honest limitations
 
-- Replacement hosted exact-SHA checks, protected integration, and the
-  protected-main trusted result remain pending until the execution-memory
-  correction is pushed and every required context passes.
+- Candidate `e9b3a380` completed every hosted Android job and all non-iOS
+  required work, but one iOS simulator performance case failed after XCTest
+  performed uncounted measurement gestures and wedged its event-loop observer.
+  The corrected exact-one-round-trip simulator path passes four local
+  executions; replacement hosted exact-SHA checks, protected integration, and
+  the protected-main trusted result remain pending.
 - Managed-history code has resumable export/import and corruption rejection;
   live expiry, large-account, cancellation/auth-refresh, cross-tenant,
   low-storage, and physical process-death proof remain (`DAT-170`).
@@ -292,7 +296,8 @@ specification:
 
 ## Next round
 
-1. Commit once, run all ten hosted required checks on that exact SHA, and
+1. Commit the iOS simulator liveness correction once, run all ten hosted
+   required checks on that exact SHA, and
    integrate normally only if every applicable gate is green; candidate SHA,
    pull request, hosted `10/10`, protected merge SHA, and protected-main trusted
    result remain pending until they exist.

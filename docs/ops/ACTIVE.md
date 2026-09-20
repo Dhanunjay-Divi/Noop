@@ -13,21 +13,25 @@ Last updated: **2026-09-20**
 - Current round implementation resumed from:
   `9d859d9aa6788a936be75bdfeac93603c9fd0ae8`
 - Current state: supplier-independent implementation and applicable local
-  platform verification are green. Pull request `#16` candidate `ef9478ec`
-  passed 32 hosted jobs, including policy, trust, server, Swift packages, Apple,
-  Android Review Sample API 35, and Android build-and-test. Android
-  production-shell completed 104/114 API 35 tests with zero failures before the
-  bounded runner stopped the host at its unchanged 10% free-memory floor. Its
-  exact status is `resource-memory`/`125`, not an assertion failure. The
-  correction keeps explicit APK preparation on the project-wide 4 GiB heap,
-  caps only the four managed-emulator test invocations at a 2 GiB Gradle heap
-  and two workers, retains the 10% host-memory guard, and keeps bounded
-  resource statuses fail-closed and non-retryable. A timeout now requires
-  positive bounded activity-service-loss evidence before the single retry; an
-  unproven product startup hang fails closed. The exact command shape, 65
-  focused CI tests, complete 305-test tool wall, and all repository policy
-  gates pass locally. Replacement commit/push, hosted exact-SHA checks,
-  protected merge, and protected-main verification remain pending.
+  platform verification are green. Pull request `#16` candidate `e9b3a380`
+  passed 32 hosted jobs, including every Android job (Review Sample,
+  production shell, and build-and-test), policy, trust, server, Swift packages,
+  and the macOS build/tests. The iOS build passed; its production shell
+  completed 37 tests, skipped one intentional private case, and failed only
+  `testTodayScrollPerformance`. The first timed scroll round trip completed,
+  then XCTest invoked the simulator measurement closure for extra calibration
+  gestures and its event-loop observer stopped becoming idle. The correction
+  makes the simulator path execute exactly one wall-clock-bounded round trip
+  while retaining Apple's five-iteration scrolling/deceleration metric on real
+  devices. The corrected simulator test passed once and then 3/3 repeated
+  iterations locally through the bounded runner. The exact Android command
+  shape and 65 focused CI tests pass. After the test-only correction, 66
+  focused terminology/required-CI/trust tests and the complete 305-test tool
+  wall pass with one intentional skip. The reviewed active terminology
+  allowlist is unchanged and the historical inventory has zero forbidden
+  mappings. The exact Python 3.14 release-policy matrix is green; replacement
+  commit/push, hosted exact-SHA checks, protected merge, and protected-main
+  verification remain pending.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
 - Surviving exact-current local evidence: 24 affected macOS contracts pass; the
@@ -58,11 +62,12 @@ Last updated: **2026-09-20**
   or commands run outside that boundary.
 - The hosted-candidate correction passes 77/77 focused macOS tests, including
   all 51 Safety contracts, and the exact Android Full app plus instrumentation
-  APK preparation graph with Kotlin in-process. Candidate `ef9478ec` also
-  proves Review Sample API 35 and 104 zero-failure production-shell cases
-  before a host-memory stop. The smaller execution heap still requires local
-  workflow-contract and replacement hosted API 35 verification.
-- The final policy wall passed all 301 tool tests with one intentional skip plus release, calibration, terminology, required-CI, trusted-control, provenance, privacy, medical-truth, localization, operations-record, and diff gates. The hosted disk-control and initial execution-memory corrections passed the complete 304-test wall with one intentional skip; the final retry-hardening tree passes 305 tool tests with one intentional skip, the exact 2 GiB daemon command, 65 focused CI tests, required-CI `10/10`, actionlint, Python compilation, and `git diff --check`.
+  APK preparation graph with Kotlin in-process. Candidate `e9b3a380` proves
+  all three hosted Android jobs complete under the smaller execution heap and
+  unchanged host guards. It also exposed the iOS simulator's extra XCTest
+  measurement invocations; the corrected single-round-trip path passes four
+  local executions while physical devices retain the real performance metric.
+- The final policy wall passed all 301 tool tests with one intentional skip plus release, calibration, terminology, required-CI, trusted-control, provenance, privacy, medical-truth, localization, operations-record, and diff gates. The hosted disk-control and initial execution-memory corrections passed the complete 304-test wall with one intentional skip; the retry-hardening tree and corrected iOS simulator liveness path each pass the 305-test wall with one intentional skip. The exact 2 GiB daemon command, 65 focused Android CI tests, 66 focused terminology/required-CI/trust tests, and four iOS scroll executions also pass.
 - Exact cleanup manifest
   `8080d7201bc9ec1ac940842c2aa8d0c0026b79fd8980275d8fe187f97583a62f`
   removed three closed completed review-session files totaling
@@ -71,7 +76,8 @@ Last updated: **2026-09-20**
   removed 62 exact round-owned `/private/tmp/noop-*` paths totaling
   16,566,458 bytes after preserving their results. Current agent-session files
   with open handles and the two cleanup manifests are deliberately retained.
-  No round test/build process remains and about 10 GiB is free.
+  New exact Apple verification logs and round-owned DerivedData remain until
+  the replacement hosted result is durable, then require exact-owner cleanup.
 - Replacement candidate SHA, hosted `10/10`, protected merge SHA, and
   protected-main trusted result remain pending. No Docker image build,
   production runtime, signing, legal, carrier, physiology, or physical
@@ -122,8 +128,8 @@ Resume from:
 
 ## Immediate next actions
 
-1. Commit the verified hosted-emulator execution-heap correction, then push its
-   exact head to PR `#16`.
+1. Commit once and push the exact replacement head to protected pull request
+   `#16`.
 2. Require all ten hosted contexts before protected merge, then verify the
    protected-main trusted result. Physical hardware, signing/store,
    legal, carrier, credential, production-runtime, and elapsed soak gates
