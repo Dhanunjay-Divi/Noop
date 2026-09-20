@@ -786,6 +786,10 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertNotIn("Prepare managed-device artifacts", source)
         self.assertEqual(source.count("without starting an emulator"), 2)
         self.assertEqual(source.count("assembleFullDebugAndroidTest"), 2)
+        self.assertEqual(
+            source.count("-Pkotlin.compiler.execution.strategy=in-process"),
+            2,
+        )
         self.assertNotIn("pixel2Api35Setup", source)
         self.assertIn("cleanManagedDevices", source)
         self.assertEqual(source.count("--bounded-status-file "), 2)
@@ -834,6 +838,12 @@ class RequiredCIGateTests(unittest.TestCase):
                 log_path.group(1),
                 step_name,
             )
+            if "Prepare " in step_name:
+                self.assertIn(
+                    "-Pkotlin.compiler.execution.strategy=in-process",
+                    block,
+                    step_name,
+                )
         for first_step in (
             "production_shell_first",
             "review_sample_first",

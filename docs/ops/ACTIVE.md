@@ -13,11 +13,14 @@ Last updated: **2026-09-20**
 - Current round implementation resumed from:
   `9d859d9aa6788a936be75bdfeac93603c9fd0ae8`
 - Current state: supplier-independent implementation and applicable local
-  platform verification are green. Final post-documentation policy reruns,
-  the consolidated commit, hosted exact-SHA checks, protected merge, and
-  protected-main verification are still pending. Pull request `#16` currently
-  points to superseded head `9d859d9a` and is not yet evidence for this
-  replacement candidate.
+  platform verification are green. Pull request `#16` reached candidate
+  `a3f36473`: server, package, policy, and trust contexts passed, while macOS
+  exposed five stale source-shape assertions and both Android shell jobs were
+  stopped by the bounded runner's 10% free-memory floor during compilation.
+  The locally verified replacement asserts the hardened runtime behavior and
+  removes the extra Kotlin compiler-daemon peak without lowering that floor.
+  Final policy reruns are green; replacement commit/push, hosted exact-SHA
+  checks, protected merge, and protected-main verification remain pending.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
 - Surviving exact-current local evidence: 24 affected macOS contracts pass; the
@@ -46,6 +49,10 @@ Last updated: **2026-09-20**
   directly guards the observed iTerm application-memory failure mode when
   repository heavy commands use the runner; it does not control unrelated apps
   or commands run outside that boundary.
+- The hosted-candidate correction passes 77/77 focused macOS tests, including
+  all 51 Safety contracts, and the exact Android Full app plus instrumentation
+  APK preparation graph with Kotlin in-process. This is local correction
+  evidence only; the replacement hosted macOS and API 35 jobs remain required.
 - The final policy wall passed all 301 tool tests with one intentional skip plus release, calibration, terminology, required-CI, trusted-control, provenance, privacy, medical-truth, localization, operations-record, and diff gates.
 - Exact cleanup manifest
   `8080d7201bc9ec1ac940842c2aa8d0c0026b79fd8980275d8fe187f97583a62f`
@@ -106,8 +113,8 @@ Resume from:
 
 ## Immediate next actions
 
-1. Finish the fresh combined-diff audit, create one consolidated commit, and
-   push the replacement exact head to PR `#16`.
+1. Create one replacement correction commit and push its exact head to PR
+   `#16`.
 2. Require all ten hosted contexts before protected merge, then verify the
    protected-main trusted result. Physical hardware, signing/store,
    legal, carrier, credential, production-runtime, and elapsed soak gates

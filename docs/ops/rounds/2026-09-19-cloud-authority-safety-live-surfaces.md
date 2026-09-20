@@ -2,14 +2,16 @@
 
 ## Status
 
-- State: `platform and final policy verification complete; hosted integration pending`
+- State: `replacement correction and final policy verified; hosted integration pending`
 - Owner: project team
 - Branch: `codex/ui-cloud-readiness-20260917`
 - Round implementation start:
   `9d859d9aa6788a936be75bdfeac93603c9fd0ae8`
 - Branch base against protected `main`:
   `b688b3b725cd497e96a31b28540a219bf50446e1`
-- End implementation commit: pending
+- Latest hosted candidate:
+  `a3f364735cd31b8f15fe51d0d7e250073b72f2de`
+- End implementation commit: commit containing this record
 - Record commit or PR: protected pull request `#16`
 
 ## Objective
@@ -167,8 +169,9 @@ carrier, legal, production-runtime, or elapsed-soak evidence.
 | Swift packages and harnesses | The complete package/tool wall passed before final account-scope corrections; `NoopRemoteSync` then passed 177/177 on the exact current source | Protocol, storage, analytics, import, design, local/remote access, study, and backfill contracts passed on their recorded tree, with the changed remote-sync package rerun exactly | Supplier firmware, skipped private fixtures, clinical accuracy, or an exact-current rerun of unchanged packages |
 | Safety transport capture | Owner confirmation plus two dummy contacts reached 3/3 installations and 2/2 contacts across iOS/Android with zero network requests and no health, location, identity, or token value in the payload; its `unittest` contract now executes 1/1 | Production codec/service/payload composition remains private and deterministic for synthetic recipients | APNs/FCM receipt, audible presentation, location transport, or real responder behavior |
 | Static and infrastructure wall | 28 tracked shell scripts passed interpreter syntax; 26 applicable scripts passed ShellCheck; Actionlint passed all workflows; 113 JSON files parsed; launch-gate config, six isolation tests, and resolved Xcode settings passed; OpenTofu format/validate and 14 mocked plan tests passed without apply | Repository scripts, workflows, structured files, launch-secret isolation, and default-off infrastructure plans are internally valid | Cloud drift, credentials, deployment, or production traffic |
-| Repository policy wall | The final wall passed 301 tool tests with one intentional skip plus required-CI, trusted release, release controls, calibration, terminology, legal/provenance, private-data, health claims, strict and differential localization, operations-record, and diff checks. | The implementation passed the policy wall before final evidence wording changed | The final dirty candidate, hosted exact-SHA checks, or external approvals |
+| Repository policy wall | The final correction wall passed 301 tool tests with one intentional skip plus required-CI, trusted release, release controls, calibration, terminology, legal/provenance, private-data, health claims across 1,295 files, strict and differential localization, all 76 operations records, workflow lint, and diff checks. | The final dirty replacement candidate satisfies the repository-controlled policy, claim, localization, operations, and trust contracts | Hosted exact-SHA checks, protected integration, or external approvals |
 | Fresh combined-diff review | The release-evidence audit found stale counts, premature cleanup/policy claims, D-054 ambiguity, old-head PR wording, temporal architecture ambiguity, and two Claude-prompt omissions. These were corrected. Previously reported cancellation, coalescing, log-redaction, notification-freshness, Test Centre concurrency, and reactive-state defects were rechecked against current source and their fixes are present. | The complete candidate delta received a fresh semantic and release-evidence review after implementation | Final policy reruns, physical runtime behavior, or hosted exact-SHA checks |
+| Hosted-candidate correction | Candidate `a3f36473` passed server CI, including the encrypted backup/disposable-restore drill, after preserving database ACLs. Its macOS job then exposed five stale source-shape assertions after runtime-role and account-fence hardening; its two Android managed-device preparation jobs were stopped by the bounded runner's 10% free-memory floor while Gradle was still compiling, with no compiler, test, or emulator failure. The assertions now verify the operational and account-boundary behavior rather than obsolete formatting. Both APK-preparation lanes use Kotlin in-process to remove the extra compiler-daemon peak while retaining the memory floor. Focused macOS verification passed 77/77, including all 51 Safety contracts, and the exact Android `assembleFullDebug assembleFullDebugAndroidTest` preparation graph passed locally with the new setting. | The observed hosted failures have evidence-backed, locally passing corrections without weakening Safety behavior or the resource guard | Replacement-head API 35 execution, all required hosted contexts, protected integration, or physical behavior |
 | Exact resource cleanup | Checksummed manifest `8080d7201bc9ec1ac940842c2aa8d0c0026b79fd8980275d8fe187f97583a62f` removed three closed completed review-session files totaling 4,475,749,846 bytes. Manifest `991d0340c6e0d4cf61856c0c41b8135dfe059dec471b0646aaed69e84bffbfca` removed 62 exact round-owned `/private/tmp/noop-*` paths totaling 16,566,458 bytes after evidence capture. Current agent-session files with open handles and the two cleanup manifests are deliberately retained; no round test/build process remains; about 10 GiB is free. | Exact completed generated resources were removed without deleting source, credentials, simulator state, user data, private inputs, or the unrelated system PostgreSQL 14 service | Current open agent-session files, unrelated host applications, future cache growth, cloud resources, or product correctness |
 | Hosted required contexts | Pending | Pending | External launch gates |
 
@@ -184,11 +187,13 @@ carrier, legal, production-runtime, or elapsed-soak evidence.
 
 - Worktree: dedicated `noop-ui-cloud-readiness-20260917` checkout
 - Branch: `codex/ui-cloud-readiness-20260917`
-- Existing integration record: pull request `#16`, currently at superseded head
-  `9d859d9a` and blocked
-- The fresh-reviewed source delta is intentionally uncommitted. Final policy
-  reruns remain before the one consolidated candidate commit.
-- Commit, push, hosted checks, merge, and protected-main verification: pending.
+- Existing integration record: pull request `#16`, currently at candidate
+  `a3f36473`. Server, package, policy, and trust contexts passed; macOS and the
+  two Android shell jobs exposed the correction described above.
+- The replacement correction is intentionally uncommitted after its final
+  policy wall passed, pending the single replacement commit.
+- Replacement commit, push, hosted checks, merge, and protected-main
+  verification: pending.
 
 ## Decisions
 

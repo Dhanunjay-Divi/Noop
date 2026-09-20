@@ -15973,11 +15973,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        1793,
-        1855,
-        1855,
-        1855,
-        1856
+        1796,
+        1858,
+        1858,
+        1858,
+        1859
       ],
       "occurrenceCount": 5,
       "path": "StrandTests/SafetyPagingAndShellContractTests.swift",
@@ -36221,10 +36221,10 @@
     {
       "category": "historical",
       "lineNumbers": [
-        53,
-        137,
-        179,
-        250
+        55,
+        139,
+        182,
+        255
       ],
       "occurrenceCount": 4,
       "path": "docs/ops/rounds/2026-09-19-cloud-authority-safety-live-surfaces.md",

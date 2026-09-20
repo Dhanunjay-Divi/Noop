@@ -464,7 +464,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         )
         let loadStart = try XCTUnwrap(
             service.range(
-                of: "private func loadSafetyData()",
+                of: "private func loadSafetyData(",
                 range: refreshStart.upperBound..<service.endIndex
             )
         )
@@ -765,7 +765,10 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             #"source: "stream""#
         ))
         XCTAssertTrue(service.contains(
-            "stopManagedSafetyLocationSharing(reason: \"disconnect\")"
+            "beginAccountBoundaryTransition(reason: \"disconnect_completed\")"
+        ))
+        XCTAssertTrue(service.contains(
+            "stopManagedSafetyLocationSharing(reason: \"account_boundary\")"
         ))
         XCTAssertTrue(service.contains(
             "stopManagedSafetyLocationSharing(reason: \"presentation_cleared\")"

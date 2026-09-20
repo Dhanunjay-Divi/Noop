@@ -146,6 +146,7 @@ jobs:
             --max-log-mib 16 \
             -- \
             ./gradlew assembleFullDebug assembleFullDebugAndroidTest \
+            -Pkotlin.compiler.execution.strategy=in-process \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
@@ -293,6 +294,7 @@ jobs:
             --max-log-mib 16 \
             -- \
             ./gradlew assembleFullDebug assembleFullDebugAndroidTest \
+            -Pkotlin.compiler.execution.strategy=in-process \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
