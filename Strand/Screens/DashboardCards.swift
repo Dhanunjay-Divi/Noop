@@ -39,11 +39,16 @@ enum RecoveryBandPresentation {
         }
     }
 
-    static func gaugeStops(for score: Double) -> [Gradient.Stop] {
+    static func gaugeColors(for score: Double) -> (base: Color, tip: Color) {
         let color = color(for: score)
+        return (color.opacity(0.68), color)
+    }
+
+    static func gaugeStops(for score: Double) -> [Gradient.Stop] {
+        let colors = gaugeColors(for: score)
         return [
-            .init(color: color.opacity(0.68), location: 0),
-            .init(color: color, location: 1),
+            .init(color: colors.base, location: 0),
+            .init(color: colors.tip, location: 1),
         ]
     }
 }

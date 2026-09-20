@@ -22,11 +22,13 @@ interface ManagedDocumentRestoring {
     suspend fun apply(document: ManagedDocument, change: ManagedChange)
 }
 
-class RoomManagedDocumentAdapter(
+class RoomManagedDocumentAdapter internal constructor(
     private val database: WhoopDatabase,
     private val accountScopeHash: String,
     context: Context? = null,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val documentKeys: ManagedDocumentKeyProvider? = null,
+    private val ciphertextInbox: ManagedDocumentCiphertextInbox? = null,
 ) : ManagedDocumentOutbox, ManagedDocumentRestoring {
     private data class DayOwnershipValue(
         val deviceId: String,
@@ -104,18 +106,68 @@ class RoomManagedDocumentAdapter(
         require(limit in 1..101)
         return withContext(Dispatchers.IO) {
             val localProfileId = requireLocalProfile()
-            val local = pendingCandidates(localProfileId, limit)
+            val encryptionEnabled =
+                documentKeys?.recoveryEnrollmentComplete(accountScopeHash) == true
+            if (encryptionEnabled && ciphertextInbox == null) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+            val local = pendingCandidates(localProfileId, limit, encryptionEnabled)
             local.map { candidate ->
                 val kind = ManagedDocumentKind.fromWire(candidate.documentKind)
-                if (!isServerReadableKind(kind)) {
+                val serverReadable = isServerReadableKind(kind)
+                if (!serverReadable && !encryptionEnabled) {
                     throw ManagedStorageException.InvalidResponse()
                 }
                 val documentId = documentId(kind, candidate.tableName, candidate.keyJson)
-                val payload = candidate.payloadJson?.let(::JSONObject)
-                val digest = payload?.let {
-                    ManagedDigest.sha256(
-                        ManagedCanonicalJson.encode(it).toByteArray(StandardCharsets.UTF_8),
+                val localIdentifier = ManagedDigest.sha256(
+                    "${candidate.tableName}\u0000${candidate.localKey}"
+                        .toByteArray(StandardCharsets.UTF_8),
+                )
+                val payloadText = candidate.payloadJson?.let {
+                    ManagedCanonicalJson.encode(JSONObject(it))
+                }
+                if (payloadText != candidate.payloadJson) {
+                    throw ManagedStorageException.InvalidResponse()
+                }
+                val deleted = payloadText == null
+                val payload: JSONObject?
+                val ciphertextBase64: String?
+                val clientKeyId: UUID?
+                val digest: String?
+                val contentMode = if (serverReadable) {
+                    "server_readable"
+                } else {
+                    "client_encrypted"
+                }
+                if (deleted) {
+                    payload = null
+                    ciphertextBase64 = null
+                    clientKeyId = null
+                    digest = null
+                } else if (serverReadable) {
+                    payload = JSONObject(payloadText)
+                    ciphertextBase64 = null
+                    clientKeyId = null
+                    digest = ManagedDigest.sha256(
+                        payloadText.toByteArray(StandardCharsets.UTF_8),
                     )
+                } else {
+                    val key = documentKeys?.activeDocumentKey(accountScopeHash)
+                        ?: throw ManagedStorageException.InvalidResponse()
+                    val ciphertext = ciphertextInbox?.outgoingEnvelope(
+                        accountScopeHash = accountScopeHash,
+                        localIdentifier = localIdentifier,
+                        generation = candidate.generation,
+                        documentKind = kind,
+                        documentId = documentId,
+                        revision = candidate.baseRevision + 1,
+                        key = key,
+                        plaintext = payloadText.toByteArray(StandardCharsets.UTF_8),
+                    ) ?: throw ManagedStorageException.InvalidResponse()
+                    payload = null
+                    ciphertextBase64 = Base64.getEncoder().encodeToString(ciphertext)
+                    clientKeyId = key.keyId
+                    digest = ManagedDigest.sha256(ciphertext)
                 }
                 val requestId = requestId(
                     documentId,
@@ -128,15 +180,13 @@ class RoomManagedDocumentAdapter(
                     documentKind = kind,
                     documentId = documentId,
                     baseRevision = candidate.baseRevision,
-                    contentMode = "server_readable",
+                    contentMode = contentMode,
+                    clientKeyId = clientKeyId,
                     payloadJson = payload,
+                    payloadCiphertextBase64 = ciphertextBase64,
                     contentSha256 = digest,
                     updatedAt = Instant.ofEpochMilli(candidate.updatedAtMs).toString(),
-                    deleted = candidate.payloadJson == null,
-                )
-                val localIdentifier = ManagedDigest.sha256(
-                    "${candidate.tableName}\u0000${candidate.localKey}"
-                        .toByteArray(StandardCharsets.UTF_8),
+                    deleted = deleted,
                 )
                 synchronized(candidateLock) {
                     candidates[localIdentifier] = candidate
@@ -189,6 +239,14 @@ class RoomManagedDocumentAdapter(
                 )
             }
         }
+        if (!isServerReadableKind(remote.documentKind)) {
+            ciphertextInbox?.removeOutgoing(
+                accountScopeHash = accountScopeHash,
+                localIdentifier = pending.localIdentifier,
+                generation = pending.generation,
+                revision = remote.revision,
+            )
+        }
         synchronized(candidateLock) {
             if (candidates[pending.localIdentifier] == candidate) {
                 candidates.remove(pending.localIdentifier)
@@ -201,10 +259,45 @@ class RoomManagedDocumentAdapter(
         validateDocumentMetadata(document, change)
         if (document.contentMode == "client_encrypted") {
             validateIgnoredEncryptedDocument(document)
-            // This client has no key recovery or durable ciphertext inbox yet.
-            // Failing keeps the feed cursor anchored so a capable client can
-            // replay the document instead of silently losing it.
-            throw ManagedStorageException.InvalidResponse()
+            if (document.deletedAt != null) {
+                applyVerifiedDocument(document, null, true)
+                return
+            }
+            val keyId = document.clientKeyId
+                ?: throw ManagedStorageException.InvalidResponse()
+            val encoded = document.payloadCiphertextBase64
+                ?: throw ManagedStorageException.InvalidResponse()
+            val ciphertext = runCatching { Base64.getDecoder().decode(encoded) }
+                .getOrElse { throw ManagedStorageException.InvalidResponse() }
+            val inbox = ciphertextInbox ?: throw ManagedStorageException.InvalidResponse()
+            inbox.stageIncoming(accountScopeHash, document)
+            val key = documentKeys?.documentKey(accountScopeHash, keyId)
+                ?: throw ManagedStorageException.InvalidResponse()
+            val plaintext = ManagedDocumentEnvelope.open(
+                ciphertext,
+                key.keyData,
+                ManagedDocumentEnvelopeMetadata(
+                    accountScopeHash,
+                    document.documentKind,
+                    document.documentId,
+                    document.revision,
+                ),
+            )
+            val payloadText = plaintext.toString(StandardCharsets.UTF_8)
+            val payload = runCatching { JSONObject(payloadText) }
+                .getOrElse { throw ManagedStorageException.InvalidResponse() }
+            if (
+                ManagedCanonicalJson.encode(payload) != payloadText ||
+                documentId(document.documentKind, payload) != document.documentId
+            ) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+            if (document.documentKind == ManagedDocumentKind.PREFERENCES) {
+                applyPreferences(payloadText, localProfileId)
+            }
+            applyVerifiedDocument(document, payloadText, false)
+            inbox.removeIncoming(accountScopeHash, document)
+            return
         }
         validateServerReadableDocument(document)
         val deleted = document.deletedAt != null
@@ -244,17 +337,34 @@ class RoomManagedDocumentAdapter(
         applyVerifiedDocument(document, payloadText, deleted)
     }
 
-    private fun pendingCandidates(localProfileId: String, limit: Int): List<LocalCandidate> {
+    private fun pendingCandidates(
+        localProfileId: String,
+        limit: Int,
+        includeClientEncrypted: Boolean,
+    ): List<LocalCandidate> {
         val db = database.openHelper.readableDatabase
-        val storagePredicates = SERVER_READABLE_TABLE_SPECS.joinToString(" OR ") {
-            "(dirty.tableName = ? AND dirty.documentKind = ?)"
+        val selectedSpecs = if (includeClientEncrypted) {
+            TABLE_SPECS
+        } else {
+            SERVER_READABLE_TABLE_SPECS
         }
+        val predicates = selectedSpecs.map {
+            "(dirty.tableName = ? AND dirty.documentKind = ?)"
+        }.toMutableList()
+        if (includeClientEncrypted) {
+            predicates += "(dirty.tableName = ? AND dirty.documentKind = ?)"
+        }
+        val storagePredicates = predicates.joinToString(" OR ")
         val arguments = buildList<Any?> {
             add(accountScopeHash)
             add(localProfileId)
-            SERVER_READABLE_TABLE_SPECS.forEach { spec ->
+            selectedSpecs.forEach { spec ->
                 add(spec.table)
                 add(spec.kind.wireValue)
+            }
+            if (includeClientEncrypted) {
+                add(PREFERENCES_TABLE)
+                add(ManagedDocumentKind.PREFERENCES.wireValue)
             }
             add(limit)
         }.toTypedArray()
@@ -302,10 +412,14 @@ class RoomManagedDocumentAdapter(
                 }
             }
         }
-        return dirty.map { row -> candidate(db, row) }
+        return dirty.map { row -> candidate(db, row, includeClientEncrypted) }
     }
 
-    private fun candidate(db: SupportSQLiteDatabase, dirty: DirtyRow): LocalCandidate {
+    private fun candidate(
+        db: SupportSQLiteDatabase,
+        dirty: DirtyRow,
+        includeClientEncrypted: Boolean,
+    ): LocalCandidate {
         if (dirty.generation <= 0L || dirty.baseRevision < 0L || dirty.updatedAtMs < 0L) {
             throw ManagedStorageException.InvalidResponse()
         }
@@ -331,7 +445,7 @@ class RoomManagedDocumentAdapter(
         val spec = TABLE_SPECS.firstOrNull {
             it.table == dirty.tableName && it.kind.wireValue == dirty.documentKind
         } ?: throw ManagedStorageException.InvalidResponse()
-        if (spec !in SERVER_READABLE_TABLE_SPECS) {
+        if (!includeClientEncrypted && spec !in SERVER_READABLE_TABLE_SPECS) {
             throw ManagedStorageException.InvalidResponse()
         }
         val current = db.query(

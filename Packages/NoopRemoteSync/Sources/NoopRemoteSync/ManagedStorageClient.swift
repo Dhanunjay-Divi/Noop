@@ -203,6 +203,19 @@ public actor ManagedStorageClient {
     private struct SocialPokeReceiptResponse: Decodable {
         let poke: ManagedSocialPokeReceipt
     }
+    private struct WrappedKeyResponse: Decodable {
+        let key: ManagedWrappedKeyRecord
+    }
+    private struct WrappedKeyVersionResponse: Decodable {
+        let keyVersion: ManagedWrappedKeyVersion
+    }
+    private struct WrappedKeyRevocation: Encodable {
+        let successorKeyID: UUID?
+
+        private enum CodingKeys: String, CodingKey {
+            case successorKeyID = "successorKeyId"
+        }
+    }
     private struct SocialProfileCreateRequest: Encodable {
         let requestID: UUID
         let displayName: String
@@ -1457,6 +1470,139 @@ public actor ManagedStorageClient {
         return data
     }
 
+    public func putManagedDocumentKey(
+        keyID: UUID,
+        mutation: ManagedWrappedKeyMutation,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedWrappedKeyRecord {
+        try Self.validateRouteKey(keyID, mutation: mutation)
+        let response: WrappedKeyResponse = try await send(
+            path: "v1/managed/document-keys/"
+                + keyID.uuidString.lowercased(),
+            method: "PUT",
+            body: mutation,
+            authorization: authorization
+        )
+        try Self.validateWrappedKey(response.key)
+        guard response.key.keyID == keyID,
+              response.key.status == .active,
+              Self.matches(response.key, mutation: mutation) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.key
+    }
+
+    public func managedDocumentKey(
+        keyID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedWrappedKeyRecord {
+        let response: WrappedKeyResponse = try await send(
+            path: "v1/managed/document-keys/"
+                + keyID.uuidString.lowercased(),
+            method: "GET",
+            authorization: authorization
+        )
+        try Self.validateWrappedKey(response.key)
+        guard response.key.keyID == keyID,
+              response.key.status != .revoked else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.key
+    }
+
+    public func managedDocumentKeyVersion(
+        keyID: UUID,
+        wrappingRevision: Int,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedWrappedKeyVersion {
+        guard (1...1_000_000).contains(wrappingRevision) else {
+            throw ManagedStorageError.invalidConfiguration
+        }
+        let response: WrappedKeyVersionResponse = try await send(
+            path: "v1/managed/document-keys/"
+                + keyID.uuidString.lowercased()
+                + "/versions/\(wrappingRevision)",
+            method: "GET",
+            authorization: authorization
+        )
+        try Self.validateWrappedKeyVersion(response.keyVersion)
+        guard response.keyVersion.keyID == keyID,
+              response.keyVersion.wrappingRevision == wrappingRevision else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.keyVersion
+    }
+
+    public func rotateManagedDocumentKey(
+        keyID: UUID,
+        rotation: ManagedWrappedKeyRotation,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedWrappedKeyRecord {
+        try Self.validateRouteKey(
+            keyID,
+            mutation: ManagedWrappedKeyMutation(
+                keyKind: rotation.keyKind,
+                wrappingKeyID: rotation.wrappingKeyID,
+                wrappingRevision: rotation.wrappingRevision,
+                wrappedKey: try Self.decodedWrappedKey(
+                    rotation.wrappedKeyBase64,
+                    digest: rotation.wrappedKeySHA256
+                ),
+                masterKeyConfirmationHMACSHA256:
+                    rotation.masterKeyConfirmationHMACSHA256,
+                recoveryMethod: rotation.recoveryMethod
+            )
+        )
+        let response: WrappedKeyResponse = try await send(
+            path: "v1/managed/document-keys/"
+                + keyID.uuidString.lowercased()
+                + "/rotate",
+            method: "POST",
+            body: rotation,
+            authorization: authorization
+        )
+        try Self.validateWrappedKey(response.key)
+        guard response.key.keyID == keyID,
+              response.key.status == .active,
+              response.key.keyKind == rotation.keyKind,
+              response.key.wrappingKeyID == rotation.wrappingKeyID,
+              response.key.wrappingRevision == rotation.wrappingRevision,
+              response.key.algorithm == rotation.algorithm,
+              response.key.wrappedKeyBase64 == rotation.wrappedKeyBase64,
+              response.key.wrappedKeySHA256 == rotation.wrappedKeySHA256,
+              response.key.masterKeyConfirmationHMACSHA256
+                == rotation.masterKeyConfirmationHMACSHA256,
+              response.key.recoveryMethod == rotation.recoveryMethod else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.key
+    }
+
+    public func revokeManagedDocumentKey(
+        keyID: UUID,
+        successorKeyID: UUID?,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedWrappedKeyRecord {
+        guard successorKeyID != keyID else {
+            throw ManagedStorageError.invalidConfiguration
+        }
+        let response: WrappedKeyResponse = try await send(
+            path: "v1/managed/document-keys/"
+                + keyID.uuidString.lowercased()
+                + "/revoke",
+            method: "POST",
+            body: WrappedKeyRevocation(successorKeyID: successorKeyID),
+            authorization: authorization
+        )
+        try Self.validateWrappedKey(response.key)
+        guard response.key.keyID == keyID,
+              response.key.status == .revoked,
+              response.key.successorKeyID == successorKeyID else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.key
+    }
+
     public func putDocument(
         _ mutation: ManagedDocumentMutation,
         authorization: ManagedAuthorization
@@ -1549,6 +1695,148 @@ public actor ManagedStorageClient {
             }
         }
         return page
+    }
+
+    private static func validateRouteKey(
+        _ keyID: UUID,
+        mutation: ManagedWrappedKeyMutation
+    ) throws {
+        guard mutation.wrappingKeyID != keyID else {
+            throw ManagedStorageError.invalidConfiguration
+        }
+    }
+
+    private static func matches(
+        _ record: ManagedWrappedKeyRecord,
+        mutation: ManagedWrappedKeyMutation
+    ) -> Bool {
+        record.keyKind == mutation.keyKind
+            && record.wrappingKeyID == mutation.wrappingKeyID
+            && record.wrappingRevision == mutation.wrappingRevision
+            && record.algorithm == mutation.algorithm
+            && record.wrappedKeyBase64 == mutation.wrappedKeyBase64
+            && record.wrappedKeySHA256 == mutation.wrappedKeySHA256
+            && record.masterKeyConfirmationHMACSHA256
+                == mutation.masterKeyConfirmationHMACSHA256
+            && record.recoveryMethod == mutation.recoveryMethod
+    }
+
+    private static func validateWrappedKey(
+        _ record: ManagedWrappedKeyRecord
+    ) throws {
+        let wrappedKey = try decodedWrappedKey(
+            record.wrappedKeyBase64,
+            digest: record.wrappedKeySHA256
+        )
+        try validateWrappedKeyMaterial(
+            keyID: record.keyID,
+            keyKind: record.keyKind,
+            wrappingKeyID: record.wrappingKeyID,
+            wrappingRevision: record.wrappingRevision,
+            wrappedKey: wrappedKey,
+            masterKeyConfirmationHMACSHA256:
+                record.masterKeyConfirmationHMACSHA256,
+            recoveryMethod: record.recoveryMethod
+        )
+        guard let createdAt = ManagedTimestamp.milliseconds(
+                  iso8601: record.createdAt
+              ),
+              let updatedAt = ManagedTimestamp.milliseconds(
+                  iso8601: record.updatedAt
+              ),
+              updatedAt >= createdAt else {
+            throw ManagedStorageError.invalidResponse
+        }
+        switch record.status {
+        case .active, .retired:
+            guard record.successorKeyID == nil,
+                  record.revokedAt == nil else {
+                throw ManagedStorageError.invalidResponse
+            }
+        case .revoked:
+            guard let revokedAt = record.revokedAt.flatMap(
+                      ManagedTimestamp.milliseconds
+                  ),
+                  revokedAt >= createdAt,
+                  updatedAt >= revokedAt,
+                  record.successorKeyID != record.keyID else {
+                throw ManagedStorageError.invalidResponse
+            }
+        }
+    }
+
+    private static func validateWrappedKeyVersion(
+        _ version: ManagedWrappedKeyVersion
+    ) throws {
+        let wrappedKey = try decodedWrappedKey(
+            version.wrappedKeyBase64,
+            digest: version.wrappedKeySHA256
+        )
+        try validateWrappedKeyMaterial(
+            keyID: version.keyID,
+            keyKind: version.keyKind,
+            wrappingKeyID: version.wrappingKeyID,
+            wrappingRevision: version.wrappingRevision,
+            wrappedKey: wrappedKey,
+            masterKeyConfirmationHMACSHA256:
+                version.masterKeyConfirmationHMACSHA256,
+            recoveryMethod: version.recoveryMethod
+        )
+        guard ManagedTimestamp.milliseconds(
+            iso8601: version.createdAt
+        ) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validateWrappedKeyMaterial(
+        keyID: UUID,
+        keyKind: ManagedWrappedKeyKind,
+        wrappingKeyID: UUID?,
+        wrappingRevision: Int,
+        wrappedKey: Data,
+        masterKeyConfirmationHMACSHA256: String?,
+        recoveryMethod: ManagedWrappedKeyRecoveryMethod?
+    ) throws {
+        guard (1...1_000_000).contains(wrappingRevision),
+              (40...16_384).contains(wrappedKey.count) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        switch keyKind {
+        case .accountMaster:
+            guard wrappingKeyID == nil,
+                  recoveryMethod != nil,
+                  masterKeyConfirmationHMACSHA256?.range(
+                      of: #"^[0-9a-f]{64}$"#,
+                      options: .regularExpression
+                  ) != nil else {
+                throw ManagedStorageError.invalidResponse
+            }
+        case .document:
+            guard let wrappingKeyID,
+                  wrappingKeyID != keyID,
+                  wrappedKey.count == 72,
+                  recoveryMethod == nil,
+                  masterKeyConfirmationHMACSHA256 == nil else {
+                throw ManagedStorageError.invalidResponse
+            }
+        }
+    }
+
+    private static func decodedWrappedKey(
+        _ encoded: String,
+        digest: String
+    ) throws -> Data {
+        guard digest.range(
+                  of: #"^[0-9a-f]{64}$"#,
+                  options: .regularExpression
+              ) != nil,
+              let data = Data(base64Encoded: encoded),
+              data.base64EncodedString() == encoded,
+              ManagedDigest.sha256(data) == digest else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return data
     }
 
     private static func validateManagedDocument(
@@ -1712,6 +2000,22 @@ public actor ManagedStorageClient {
         return response.erasure
     }
 
+    public func erasureReceipt(
+        jobID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedErasureJob {
+        let response: ManagedErasureResponse = try await send(
+            path:
+                "v1/managed/erasure/"
+                + "\(jobID.uuidString.lowercased())/receipt",
+            method: "GET",
+            body: Optional<Int>.none,
+            authorization: authorization,
+            includeIdentity: false
+        )
+        return response.erasure
+    }
+
     public func cancelErasure(
         jobID: UUID,
         authorization: ManagedAuthorization
@@ -1730,7 +2034,8 @@ public actor ManagedStorageClient {
         method: String,
         body: Body?,
         authorization: ManagedAuthorization,
-        includeInstallation: Bool = true
+        includeInstallation: Bool = true,
+        includeIdentity: Bool = true
     ) throws -> URLRequest {
         guard let url = URL(string: path, relativeTo: configuration.baseURL)?.absoluteURL,
               url.scheme == configuration.baseURL.scheme,
@@ -1741,10 +2046,12 @@ public actor ManagedStorageClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = configuration.timeout
-        request.setValue(
-            "Bearer \(authorization.identityToken)",
-            forHTTPHeaderField: "Authorization"
-        )
+        if includeIdentity {
+            request.setValue(
+                "Bearer \(authorization.identityToken)",
+                forHTTPHeaderField: "Authorization"
+            )
+        }
         request.setValue(
             authorization.appCheckToken,
             forHTTPHeaderField: "X-Firebase-AppCheck"
@@ -1789,6 +2096,7 @@ public actor ManagedStorageClient {
         body: Body?,
         authorization: ManagedAuthorization,
         includeInstallation: Bool = true,
+        includeIdentity: Bool = true,
         acceptAnyJSONObject: Bool = false
     ) async throws -> Response {
         let request = try makeRequest(
@@ -1796,7 +2104,8 @@ public actor ManagedStorageClient {
             method: method,
             body: body,
             authorization: authorization,
-            includeInstallation: includeInstallation
+            includeInstallation: includeInstallation,
+            includeIdentity: includeIdentity
         )
         let (data, response) = try await data(for: request)
         guard (200..<300).contains(response.statusCode) else {

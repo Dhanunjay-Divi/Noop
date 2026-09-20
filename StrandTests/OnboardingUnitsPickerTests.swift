@@ -123,9 +123,11 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
         XCTAssertTrue(onboarding.contains("OwnershipAccountView()"))
         XCTAssertTrue(
             onboarding.contains(
-                "$0 != .ownership || ownershipRequired"
+                "static func onboardingSteps(ownershipConfigured _: Bool) -> [Step]"
             )
         )
+        XCTAssertTrue(onboarding.contains("Step.allCases"))
+        XCTAssertTrue(onboarding.contains("OwnershipAvailabilityStep()"))
         XCTAssertTrue(
             onboarding.contains(
                 "forKey: Self.progressStorageKey"

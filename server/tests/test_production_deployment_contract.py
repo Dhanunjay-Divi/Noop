@@ -184,6 +184,10 @@ def test_gcp_managed_identity_is_attested_and_uses_restricted_keys() -> None:
     assert "value = google_firebase_apple_app.staging[0].app_id" in runtime
     assert 'name  = "NOOP_MANAGED_ANDROID_APP_ID"' in runtime
     assert "value = google_firebase_android_app.staging[0].app_id" in runtime
+    assert 'variable "managed_macos_app_id"' in variables
+    assert "This stack does not provision the macOS Firebase app." in variables
+    assert 'name  = "NOOP_MANAGED_MACOS_APP_ID"' in runtime
+    assert "for_each = var.managed_macos_app_id == null" in runtime
 
 
 def test_gcp_feedback_lifecycle_is_independent_and_retention_bounded() -> None:
@@ -268,6 +272,11 @@ def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
     assert "managed_lifecycle_push_token_previous_secret" in iam
     assert 'name  = "NOOP_MANAGED_PUSH_ENABLED"' in runtime
     assert 'name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"' in runtime
+    assert 'name  = "NOOP_MANAGED_FORMULA_SHADOW_ENABLED"' in runtime
+    assert 'name  = "NOOP_MANAGED_DOCUMENT_KEY_RECOVERY_ENABLED"' in runtime
+    assert runtime.index(
+        'name  = "NOOP_MANAGED_FORMULA_SHADOW_ENABLED"'
+    ) < runtime.index('name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"')
     assert 'name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"' in runtime
     assert 'name = "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"' in runtime
     assert runtime.count('name  = "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION"') == 2

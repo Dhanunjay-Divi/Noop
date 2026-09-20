@@ -33,6 +33,9 @@ enable_private_api = false
 enable_managed_identity             = false
 enable_managed_app_check            = false
 managed_auth_app_check_enforcement  = "UNENFORCED"
+# Existing Firebase macOS app ID only. Leave null until the signed macOS viewer
+# and its App Check provider are registered and physically validated.
+managed_macos_app_id                = null
 # Ownership uses the same Firebase apps but a separate named client session and
 # backend. This flag enables email/password only; it does not enable a runtime.
 enable_ownership_identity           = false

@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from app.managed_formula_executor import FormulaExecution
+from app.managed_repository import ManagedPrincipal
 
 
 class FormulaShadowConflictError(Exception):
@@ -16,6 +17,10 @@ class FormulaShadowConflictError(Exception):
 
 class FormulaShadowNotFoundError(Exception):
     """Raised when a requested shadow result or rollback revision is absent."""
+
+
+class FormulaShadowAccountUnavailableError(Exception):
+    """Raised when formula work uses a stale or inactive account authority."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +70,7 @@ class PostgresManagedFormulaRepository:
     async def publish_shadow(
         self,
         *,
+        principal: ManagedPrincipal,
         request_id: UUID,
         execution: FormulaExecution,
         now: datetime,
@@ -72,8 +78,16 @@ class PostgresManagedFormulaRepository:
         _require_aware(now)
         pool = self._primary._require_pool()
         account_id = execution.context.account_id
+        if account_id != principal.account_id:
+            raise FormulaShadowConflictError(
+                "formula shadow account does not match authenticated principal"
+            )
         async with pool.acquire() as connection:
             async with connection.transaction():
+                await self._lock_active_account(
+                    connection,
+                    principal=principal,
+                )
                 await self._lock_request(
                     connection,
                     account_id=account_id,
@@ -179,7 +193,7 @@ class PostgresManagedFormulaRepository:
     async def rollback_to_revision(
         self,
         *,
-        account_id: UUID,
+        principal: ManagedPrincipal,
         request_id: UUID,
         metric_key: str,
         local_day: date,
@@ -187,9 +201,14 @@ class PostgresManagedFormulaRepository:
         now: datetime,
     ) -> FormulaShadowRecord:
         _require_aware(now)
+        account_id = principal.account_id
         pool = self._primary._require_pool()
         async with pool.acquire() as connection:
             async with connection.transaction():
+                await self._lock_active_account(
+                    connection,
+                    principal=principal,
+                )
                 await self._lock_request(
                     connection,
                     account_id=account_id,
@@ -205,8 +224,7 @@ class PostgresManagedFormulaRepository:
                         existing.publication_kind != "rollback"
                         or existing.metric_key != metric_key
                         or existing.local_day != local_day
-                        or existing.formula_revision
-                        != target_formula_revision
+                        or existing.formula_revision != target_formula_revision
                     ):
                         raise FormulaShadowConflictError(
                             "formula rollback request was reused with different content"
@@ -307,30 +325,36 @@ class PostgresManagedFormulaRepository:
     async def current_result(
         self,
         *,
-        account_id: UUID,
+        principal: ManagedPrincipal,
         metric_key: str,
         local_day: date,
     ) -> FormulaShadowRecord | None:
         pool = self._primary._require_pool()
-        row = await pool.fetchrow(
-            """
-            SELECT *
-            FROM managed_formula_shadow_results
-            WHERE account_id = $1
-              AND metric_key = $2
-              AND local_day = $3
-              AND is_current
-            """,
-            account_id,
-            metric_key,
-            local_day,
-        )
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await self._lock_active_account(
+                    connection,
+                    principal=principal,
+                )
+                row = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_formula_shadow_results
+                    WHERE account_id = $1
+                      AND metric_key = $2
+                      AND local_day = $3
+                      AND is_current
+                    """,
+                    principal.account_id,
+                    metric_key,
+                    local_day,
+                )
         return _record(row) if row is not None else None
 
     async def result_history(
         self,
         *,
-        account_id: UUID,
+        principal: ManagedPrincipal,
         metric_key: str,
         local_day: date,
         limit: int = 100,
@@ -338,22 +362,56 @@ class PostgresManagedFormulaRepository:
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
         pool = self._primary._require_pool()
-        rows = await pool.fetch(
-            """
-            SELECT *
-            FROM managed_formula_shadow_results
-            WHERE account_id = $1
-              AND metric_key = $2
-              AND local_day = $3
-            ORDER BY created_at DESC, shadow_result_id DESC
-            LIMIT $4
-            """,
-            account_id,
-            metric_key,
-            local_day,
-            limit,
-        )
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await self._lock_active_account(
+                    connection,
+                    principal=principal,
+                )
+                rows = await connection.fetch(
+                    """
+                    SELECT *
+                    FROM managed_formula_shadow_results
+                    WHERE account_id = $1
+                      AND metric_key = $2
+                      AND local_day = $3
+                    ORDER BY created_at DESC, shadow_result_id DESC
+                    LIMIT $4
+                    """,
+                    principal.account_id,
+                    metric_key,
+                    local_day,
+                    limit,
+                )
         return tuple(_record(row) for row in rows)
+
+    @staticmethod
+    async def _lock_active_account(
+        connection: Any,
+        *,
+        principal: ManagedPrincipal,
+    ) -> None:
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            f"noop-managed-erasure-account:{principal.account_id}",
+        )
+        account = await connection.fetchrow(
+            """
+            SELECT status, auth_valid_after
+            FROM managed_accounts
+            WHERE account_id = $1
+            FOR SHARE
+            """,
+            principal.account_id,
+        )
+        if (
+            account is None
+            or account["status"] != "active"
+            or account["auth_valid_after"] != principal.auth_valid_after
+        ):
+            raise FormulaShadowAccountUnavailableError(
+                "formula shadow account is unavailable"
+            )
 
     @staticmethod
     async def _lock_request(
@@ -473,9 +531,7 @@ def _record(row: Any) -> FormulaShadowRecord:
         ),
         server_status=str(row["server_status"]),
         server_value=(
-            float(row["server_value"])
-            if row["server_value"] is not None
-            else None
+            float(row["server_value"]) if row["server_value"] is not None else None
         ),
         client_status=str(row["client_status"]),
         client_formula_revision=(
@@ -484,15 +540,11 @@ def _record(row: Any) -> FormulaShadowRecord:
             else None
         ),
         client_value=(
-            float(row["client_value"])
-            if row["client_value"] is not None
-            else None
+            float(row["client_value"]) if row["client_value"] is not None else None
         ),
         parity_status=str(row["parity_status"]),
         absolute_delta=(
-            float(row["absolute_delta"])
-            if row["absolute_delta"] is not None
-            else None
+            float(row["absolute_delta"]) if row["absolute_delta"] is not None else None
         ),
         parity_tolerance=float(row["parity_tolerance"]),
         missing_inputs=tuple(row["missing_inputs"]),

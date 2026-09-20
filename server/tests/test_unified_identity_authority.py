@@ -41,13 +41,13 @@ def test_unified_identity_migrations_are_additive_and_account_scoped() -> None:
 
 def test_authority_transition_graph_is_explicit_and_fail_closed() -> None:
     assert ALLOWED_AUTHORITY_TRANSITIONS == {
-        "local_only": frozenset({"uploading"}),
+        "local_only": frozenset({"local_only", "uploading", "rollback"}),
         "uploading": frozenset({"shadow", "rollback"}),
         "shadow": frozenset({"parity_approved", "rollback"}),
         "parity_approved": frozenset({"restore_proven", "rollback"}),
         "restore_proven": frozenset({"cloud_authoritative", "rollback"}),
         "cloud_authoritative": frozenset({"rollback"}),
-        "rollback": frozenset({"local_only", "uploading"}),
+        "rollback": frozenset({"local_only", "uploading", "rollback"}),
     }
 
 
@@ -145,6 +145,31 @@ def test_restore_proof_cannot_predate_upload_acknowledgement() -> None:
         )
 
 
+def test_reconsent_requires_exact_policy_evidence() -> None:
+    with pytest.raises(AuthorityTransitionRejectedError, match="policy"):
+        _validate_transition_request(
+            data_class="raw_motion",
+            target_state="local_only",
+            reason="reconsent_recorded",
+            upload_acknowledgement=None,
+            restore_proof=None,
+            authorize_pruning=False,
+        )
+
+    _validate_transition_request(
+        data_class="raw_motion",
+        target_state="local_only",
+        reason="reconsent_recorded",
+        upload_acknowledgement=None,
+        restore_proof=None,
+        authorize_pruning=False,
+        reconsent_policy_kind="managed_storage",
+        reconsent_policy_version="staging-v2",
+        reconsent_policy_sha256="a" * 64,
+        reconsent_installation_id="ios-test-1",
+    )
+
+
 def test_authority_request_digest_binds_exact_evidence() -> None:
     now = datetime.now(UTC)
     first = AuthorityEvidence(
@@ -197,6 +222,10 @@ def test_pruning_requires_cloud_state_ack_restore_and_authorization() -> None:
         "restore_proven_at": now,
         "pruning_authorized_at": now,
         "last_opt_out_at": None,
+        "last_reconsented_at": None,
+        "reconsent_consent_event_id": None,
+        "reconsent_policy_version": None,
+        "reconsent_policy_sha256": None,
     }
 
     assert ManagedAuthorityState(**base).pruning_authorized is True

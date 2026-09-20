@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
+import app.managed_api as managed_api_module
 from app.config import Settings
 from app.main import create_app
 from app.managed_app_check import (
@@ -16,27 +20,41 @@ from app.managed_identity import (
     ManagedIdentityClaims,
     StaticManagedTokenVerifier,
 )
+from app.managed_formula_executor import ManagedFormulaExecutor
 from app.managed_object_store import ManagedObjectCapability, ManagedObjectMetadata
 from app.managed_repository import (
     ManagedForbiddenError,
+    ManagedNotFoundError,
     ManagedPrincipal,
     ManagedRateLimitError,
 )
 from app.repository import MemoryRepository
+from app.unified_identity_authority import (
+    AuthorityTransitionResult,
+    ManagedAuthorityState,
+    UnifiedPrincipal,
+)
 
 TOKEN = "test-token-abcdefghijklmnopqrstuvwxyz-0123456789"
 MANAGED_TOKEN = "managed-test-token"
+OTHER_MANAGED_TOKEN = "managed-other-tenant-token"
 APP_CHECK_TOKEN = "managed-app-check-token"
+ANDROID_APP_CHECK_TOKEN = "managed-android-app-check-token"
+MACOS_APP_CHECK_TOKEN = "managed-macos-app-check-token"
 INSTALLATION_TOKEN = "noopm_" + ("a" * 43)
 OTHER_INSTALLATION_TOKEN = "noopm_" + ("b" * 43)
 POLICY_SHA256 = "a" * 64
 PROJECT_NUMBER = "123456789012"
 APPLE_APP_ID = f"1:{PROJECT_NUMBER}:ios:0123456789abcdef"
 ANDROID_APP_ID = f"1:{PROJECT_NUMBER}:android:fedcba9876543210"
+MACOS_APP_ID = f"1:{PROJECT_NUMBER}:ios:89abcdef01234567"
 
 
 class FakeManagedRepository:
     def __init__(self, claims: ManagedIdentityClaims) -> None:
+        self.identity_issuer = claims.issuer
+        self.identity_provider_tenant = claims.provider_tenant
+        self.identity_subject_hash = claims.subject_hash
         self.principal = ManagedPrincipal(
             account_id=uuid4(),
             identity_id=uuid4(),
@@ -73,9 +91,12 @@ class FakeManagedRepository:
         self.chunk_reservations = []
         self.upload_grants = []
         self.restore_requests = []
+        self.restore_jobs: dict[UUID, dict] = {}
+        self.restore_completions: list[dict] = []
         self.export_row: dict | None = None
         self.completed_exports: list[dict] = []
         self.erasure_requests: list[dict] = []
+        self.erasure_receipts: dict[UUID, dict] = {}
         self.social_profile_requests = []
         self.social_profile_deletions = 0
         self.social_invite_requests = []
@@ -94,12 +115,20 @@ class FakeManagedRepository:
                 OTHER_INSTALLATION_TOKEN.encode("ascii")
             ).hexdigest(),
         }
+        self.unified_authority = FakeUnifiedIdentityAuthorityRepository(
+            managed_principal=self.principal,
+        )
 
     async def principal_for_identity(
         self,
         claims: ManagedIdentityClaims,
     ) -> ManagedPrincipal:
-        assert claims.subject_hash == self.principal.subject_hash
+        if (
+            claims.issuer != self.identity_issuer
+            or claims.provider_tenant != self.identity_provider_tenant
+            or claims.subject_hash != self.identity_subject_hash
+        ):
+            raise ManagedForbiddenError("managed account authorization was rejected")
         return self.principal
 
     async def overview(self, *, principal: ManagedPrincipal) -> dict:
@@ -262,11 +291,12 @@ class FakeManagedRepository:
         request,
     ) -> dict:
         assert principal == self.principal
-        assert installation_id == "ios-test-1"
+        assert installation_id in {"ios-test-1", "macos-viewer-1"}
         self.restore_requests.append(request)
         now = datetime.now(UTC)
-        return {
-            "restore_job_id": str(uuid4()),
+        restore_job_id = uuid4()
+        restore = {
+            "restore_job_id": str(restore_job_id),
             "status": "running",
             "snapshot_at": now,
             "change_sequence": 4,
@@ -277,6 +307,38 @@ class FakeManagedRepository:
             "expires_at": now + timedelta(days=1),
             "duplicate": False,
         }
+        self.restore_jobs[restore_job_id] = restore
+        return restore
+
+    async def complete_restore(
+        self,
+        *,
+        principal,
+        installation_id,
+        restore_job_id,
+        delivered_objects,
+        delivered_bytes,
+    ) -> dict:
+        assert principal == self.principal
+        assert installation_id in {"ios-test-1", "macos-viewer-1"}
+        restore = self.restore_jobs[restore_job_id]
+        assert delivered_objects == restore["selected_objects"]
+        assert delivered_bytes == restore["selected_bytes"]
+        completion = {
+            "restore_job_id": restore_job_id,
+            "installation_id": installation_id,
+            "delivered_objects": delivered_objects,
+            "delivered_bytes": delivered_bytes,
+        }
+        self.restore_completions.append(completion)
+        completed = {
+            **restore,
+            "status": "completed",
+            "delivered_objects": delivered_objects,
+            "delivered_bytes": delivered_bytes,
+        }
+        self.restore_jobs[restore_job_id] = completed
+        return completed
 
     async def record_access_grant(self, **kwargs):
         assert kwargs["principal"] == self.principal
@@ -317,12 +379,41 @@ class FakeManagedRepository:
 
     async def request_erasure(self, **kwargs) -> dict:
         self.erasure_requests.append(kwargs)
-        return {
-            "erasure_job_id": str(uuid4()),
+        erasure_job_id = uuid4()
+        result = {
+            "erasure_job_id": str(erasure_job_id),
             "scope": kwargs["scope"],
             "status": "cooling_off",
             "not_before": datetime.now(UTC) + timedelta(hours=24),
         }
+        if kwargs["scope"] == "account":
+            self.erasure_receipts[erasure_job_id] = result
+        return result
+
+    async def get_erasure_receipt(
+        self,
+        *,
+        erasure_job_id: UUID,
+        installation_id: str,
+        installation_token_hash: str,
+    ) -> tuple[dict, str]:
+        receipt = self.erasure_receipts.get(erasure_job_id)
+        installation = next(
+            (
+                row
+                for row in self.installations
+                if row["installation_id"] == installation_id
+            ),
+            None,
+        )
+        if (
+            receipt is None
+            or installation is None
+            or self.installation_token_hashes.get(installation_id)
+            != installation_token_hash
+        ):
+            raise ManagedNotFoundError("managed erasure receipt was not found")
+        return receipt, str(installation["platform"])
 
     async def create_social_profile(self, *, principal, request) -> dict:
         assert principal == self.principal
@@ -414,6 +505,248 @@ class FakeManagedRepository:
         }
 
 
+class FakeUnifiedIdentityAuthorityRepository:
+    def __init__(
+        self,
+        *,
+        managed_principal: ManagedPrincipal,
+    ) -> None:
+        self.principal = UnifiedPrincipal(
+            principal_id=uuid4(),
+            status="active",
+            managed_account_id=managed_principal.account_id,
+            managed_identity_id=managed_principal.identity_id,
+            ownership_account_id=None,
+            ownership_identity_id=None,
+        )
+        self.reconciled_claims: list[ManagedIdentityClaims] = []
+        self.authority = self._state("local_only", transition_version=0)
+        self.rollback_requests: list[dict] = []
+        self.reconsent_requests: list[dict] = []
+
+    def _state(
+        self,
+        state: str,
+        *,
+        transition_version: int,
+        last_opt_out_at: datetime | None = None,
+        last_reconsented_at: datetime | None = None,
+        reconsent_consent_event_id: UUID | None = None,
+        reconsent_policy_version: str | None = None,
+        reconsent_policy_sha256: str | None = None,
+    ) -> ManagedAuthorityState:
+        managed_account_id = self.principal.managed_account_id
+        assert managed_account_id is not None
+        return ManagedAuthorityState(
+            principal_id=self.principal.principal_id,
+            managed_account_id=managed_account_id,
+            data_class="essential_timeseries",
+            state=state,  # type: ignore[arg-type]
+            transition_version=transition_version,
+            upload_acknowledgement_id=None,
+            upload_acknowledgement_sha256=None,
+            upload_acknowledged_at=None,
+            restore_proof_id=None,
+            restore_proof_sha256=None,
+            restore_proven_at=None,
+            pruning_authorized_at=None,
+            last_opt_out_at=last_opt_out_at,
+            last_reconsented_at=last_reconsented_at,
+            reconsent_consent_event_id=reconsent_consent_event_id,
+            reconsent_policy_version=reconsent_policy_version,
+            reconsent_policy_sha256=reconsent_policy_sha256,
+        )
+
+    async def reconcile_identity(
+        self,
+        claims: ManagedIdentityClaims,
+    ) -> UnifiedPrincipal:
+        self.reconciled_claims.append(claims)
+        return self.principal
+
+    async def authority_state(
+        self,
+        *,
+        principal_id,
+        managed_account_id,
+        data_class,
+    ) -> ManagedAuthorityState:
+        assert principal_id == self.principal.principal_id
+        assert managed_account_id == self.principal.managed_account_id
+        return replace(self.authority, data_class=data_class)
+
+    async def request_rollback(self, **kwargs) -> AuthorityTransitionResult:
+        assert kwargs["principal_id"] == self.principal.principal_id
+        assert kwargs["managed_account_id"] == self.principal.managed_account_id
+        assert kwargs["opt_out"] is True
+        self.rollback_requests.append(kwargs)
+        version = self.authority.transition_version + 1
+        self.authority = self._state(
+            "rollback",
+            transition_version=version,
+            last_opt_out_at=datetime.now(UTC),
+            last_reconsented_at=self.authority.last_reconsented_at,
+            reconsent_consent_event_id=(self.authority.reconsent_consent_event_id),
+            reconsent_policy_version=self.authority.reconsent_policy_version,
+            reconsent_policy_sha256=self.authority.reconsent_policy_sha256,
+        )
+        return AuthorityTransitionResult(
+            transition_id=uuid4(),
+            state="rollback",
+            transition_version=version,
+            pruning_authorized=False,
+            duplicate=False,
+        )
+
+    async def record_reconsent(self, **kwargs) -> AuthorityTransitionResult:
+        assert kwargs["principal_id"] == self.principal.principal_id
+        assert kwargs["managed_account_id"] == self.principal.managed_account_id
+        self.reconsent_requests.append(kwargs)
+        version = self.authority.transition_version + 1
+        self.authority = self._state(
+            "local_only",
+            transition_version=version,
+            last_opt_out_at=self.authority.last_opt_out_at,
+            last_reconsented_at=datetime.now(UTC),
+            reconsent_consent_event_id=uuid4(),
+            reconsent_policy_version=kwargs["policy_version"],
+            reconsent_policy_sha256=kwargs["policy_sha256"],
+        )
+        return AuthorityTransitionResult(
+            transition_id=uuid4(),
+            state="local_only",
+            transition_version=version,
+            pruning_authorized=False,
+            duplicate=False,
+        )
+
+
+class FakeManagedFormulaRepository:
+    def __init__(self) -> None:
+        self.publications: list[dict] = []
+        self.current = None
+
+    async def publish_shadow(self, **kwargs):
+        execution = kwargs["execution"]
+        self.publications.append(kwargs)
+        self.current = SimpleNamespace(
+            metric_key=execution.metric_key,
+            formula_revision=execution.formula_revision,
+            input_schema_revision=execution.input_schema_revision,
+            output_unit=execution.output_unit,
+            local_day=execution.context.local_day,
+            server_status=execution.server_status,
+            server_value=execution.server_value,
+            client_status=execution.client_status,
+            client_formula_revision=execution.client_formula_revision,
+            client_value=execution.client_value,
+            parity_status=execution.parity_status,
+            absolute_delta=execution.absolute_delta,
+            parity_tolerance=execution.parity_tolerance,
+            missing_inputs=execution.missing_inputs,
+            publication_kind="shadow",
+            is_current=True,
+            created_at=kwargs["now"],
+        )
+        return self.current
+
+    async def current_result(self, **kwargs):
+        if self.current is None:
+            return None
+        assert kwargs["metric_key"] == self.current.metric_key
+        assert kwargs["local_day"] == self.current.local_day
+        return self.current
+
+
+class FakeManagedDocumentKeyRepository:
+    def __init__(self) -> None:
+        self.records: dict = {}
+        self.versions: dict = {}
+        self.mutations: list[dict] = []
+
+    async def put(self, **kwargs):
+        mutation = kwargs["mutation"]
+        self.mutations.append(kwargs)
+        record = SimpleNamespace(
+            key_id=mutation.key_id,
+            key_kind=mutation.key_kind,
+            wrapping_key_id=mutation.wrapping_key_id,
+            wrapping_revision=mutation.wrapping_revision,
+            algorithm=mutation.algorithm,
+            wrapped_key=mutation.wrapped_key,
+            wrapped_key_sha256=mutation.wrapped_key_sha256,
+            master_key_confirmation_hmac_sha256=(
+                mutation.master_key_confirmation_hmac_sha256
+            ),
+            recovery_method=mutation.recovery_method,
+            status="active",
+            successor_key_id=None,
+            created_at=kwargs["now"],
+            updated_at=kwargs["now"],
+            revoked_at=None,
+        )
+        self.records[mutation.key_id] = record
+        self.versions[(mutation.key_id, mutation.wrapping_revision)] = SimpleNamespace(
+            key_id=mutation.key_id,
+            key_kind=mutation.key_kind,
+            wrapping_key_id=mutation.wrapping_key_id,
+            wrapping_revision=mutation.wrapping_revision,
+            algorithm=mutation.algorithm,
+            wrapped_key=mutation.wrapped_key,
+            wrapped_key_sha256=mutation.wrapped_key_sha256,
+            master_key_confirmation_hmac_sha256=(
+                mutation.master_key_confirmation_hmac_sha256
+            ),
+            recovery_method=mutation.recovery_method,
+            created_at=kwargs["now"],
+        )
+        return record
+
+    async def get(self, **kwargs):
+        from app.managed_document_keys import ManagedDocumentKeyNotFoundError
+
+        try:
+            return self.records[kwargs["key_id"]]
+        except KeyError:
+            raise ManagedDocumentKeyNotFoundError(
+                "managed document key was not found"
+            ) from None
+
+    async def get_version(self, **kwargs):
+        from app.managed_document_keys import ManagedDocumentKeyNotFoundError
+
+        try:
+            return self.versions[(kwargs["key_id"], kwargs["wrapping_revision"])]
+        except KeyError:
+            raise ManagedDocumentKeyNotFoundError(
+                "managed document key version was not found"
+            ) from None
+
+    async def rotate_wrapping(self, **kwargs):
+        return await self.put(
+            principal=kwargs["principal"],
+            mutation=kwargs["mutation"],
+            now=kwargs["now"],
+        )
+
+    async def revoke(self, **kwargs):
+        record = await self.get(
+            principal=kwargs["principal"],
+            key_id=kwargs["key_id"],
+        )
+        updated = SimpleNamespace(
+            **{
+                **vars(record),
+                "status": "revoked",
+                "successor_key_id": kwargs["successor_key_id"],
+                "updated_at": kwargs["now"],
+                "revoked_at": kwargs["now"],
+            }
+        )
+        self.records[kwargs["key_id"]] = updated
+        return updated
+
+
 class UnusedObjectStore:
     async def upload_capability(self, **kwargs):
         raise AssertionError("object store should not be called")
@@ -468,7 +801,13 @@ class MismatchedGenerationObjectStore(UnusedObjectStore):
         )
 
 
-def _settings(*, enabled: bool) -> Settings:
+def _settings(
+    *,
+    enabled: bool,
+    formula_shadow: bool = False,
+    document_key_recovery: bool = False,
+    macos_app_id: str | None = None,
+) -> Settings:
     return Settings(
         api_token=TOKEN,
         database_url=None,
@@ -479,11 +818,14 @@ def _settings(*, enabled: bool) -> Settings:
         managed_identity_api_key="identity-api-key",
         managed_apple_app_id=APPLE_APP_ID,
         managed_android_app_id=ANDROID_APP_ID,
+        managed_macos_app_id=macos_app_id,
         managed_raw_bucket="noop-private-bucket",
         managed_signer_email="noop-api@example.iam.gserviceaccount.com",
         managed_replay_secret="managed-replay-secret-at-least-32-bytes",
         managed_consent_policy_version="staging-v1",
         managed_consent_policy_sha256=POLICY_SHA256,
+        managed_formula_shadow_enabled=formula_shadow,
+        managed_document_key_recovery_enabled=document_key_recovery,
     )
 
 
@@ -493,6 +835,14 @@ def _managed_client(
     object_store=None,
     managed_safety_repository=None,
     managed_safety_push_service=None,
+    unified_identity_authority_repository=None,
+    formula_repository=None,
+    formula_shadow: bool = False,
+    document_key_repository=None,
+    document_key_recovery: bool = False,
+    macos_app_id: str | None = None,
+    additional_identity_tokens: dict[str, ManagedIdentityClaims] | None = None,
+    additional_app_check_tokens: dict[str, ManagedAppCheckClaims] | None = None,
 ) -> tuple[TestClient, FakeManagedRepository]:
     now = datetime.now(UTC)
     claims = ManagedIdentityClaims(
@@ -504,6 +854,9 @@ def _managed_client(
         expires_at=now + timedelta(hours=1),
     )
     managed_repository = FakeManagedRepository(claims)
+    unified_repository = (
+        unified_identity_authority_repository or managed_repository.unified_authority
+    )
     app_check_claims = ManagedAppCheckClaims(
         app_id=APPLE_APP_ID,
         issuer=f"https://firebaseappcheck.googleapis.com/{PROJECT_NUMBER}",
@@ -512,16 +865,35 @@ def _managed_client(
         expires_at=now + timedelta(hours=1),
     )
     app = create_app(
-        settings=_settings(enabled=True),
+        settings=_settings(
+            enabled=True,
+            formula_shadow=formula_shadow,
+            document_key_recovery=document_key_recovery,
+            macos_app_id=macos_app_id,
+        ),
         repository=MemoryRepository(),
         managed_repository=managed_repository,  # type: ignore[arg-type]
         managed_app_check_verifier=StaticManagedAppCheckVerifier(
-            {APP_CHECK_TOKEN: app_check_claims}
+            {
+                APP_CHECK_TOKEN: app_check_claims,
+                **(additional_app_check_tokens or {}),
+            }
         ),
-        managed_token_verifier=StaticManagedTokenVerifier({MANAGED_TOKEN: claims}),
+        managed_token_verifier=StaticManagedTokenVerifier(
+            {
+                MANAGED_TOKEN: claims,
+                **(additional_identity_tokens or {}),
+            }
+        ),
         managed_object_store=object_store or UnusedObjectStore(),
         managed_safety_repository=managed_safety_repository,
         managed_safety_push_service=managed_safety_push_service,
+        managed_unified_identity_authority_repository=unified_repository,
+        managed_formula_repository=formula_repository,
+        managed_formula_executor=(
+            ManagedFormulaExecutor() if formula_repository is not None else None
+        ),
+        managed_document_key_repository=document_key_repository,
     )
     return TestClient(app), managed_repository
 
@@ -530,13 +902,43 @@ def _managed_headers(
     *,
     installation_id: str = "ios-test-1",
     installation_token: str = INSTALLATION_TOKEN,
+    app_check_token: str = APP_CHECK_TOKEN,
 ) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {MANAGED_TOKEN}",
-        "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+        "X-Firebase-AppCheck": app_check_token,
         "X-Noop-Installation-ID": installation_id,
         "X-Noop-Installation-Token": installation_token,
     }
+
+
+def _enable_macos_viewer(repository: FakeManagedRepository) -> None:
+    now = datetime.now(UTC)
+    repository.installations.append(
+        {
+            "installation_id": "macos-viewer-1",
+            "platform": "macos",
+            "status": "active",
+            "attestation_state": "accepted",
+            "registered_at": now,
+            "last_seen_at": now,
+            "revoked_at": None,
+        }
+    )
+    repository.installation_token_hashes["macos-viewer-1"] = hashlib.sha256(
+        OTHER_INSTALLATION_TOKEN.encode("ascii")
+    ).hexdigest()
+
+
+def _macos_headers(
+    *,
+    app_check_token: str = MACOS_APP_CHECK_TOKEN,
+) -> dict[str, str]:
+    return _managed_headers(
+        installation_id="macos-viewer-1",
+        installation_token=OTHER_INSTALLATION_TOKEN,
+        app_check_token=app_check_token,
+    )
 
 
 def test_managed_routes_are_absent_when_feature_is_disabled() -> None:
@@ -622,12 +1024,700 @@ def test_managed_enrollment_requires_exact_policy_and_is_explicit() -> None:
         "account_optional": True,
         "local_metrics_available": True,
         "storage_only_entitlement": True,
+        "cloud_authority_mode": "staged_per_data_class",
+        "formula_authority": "client_until_parity_approved",
+        "edge_collection_required": True,
     }
     assert len(repository.enrollments) == 1
+    assert len(repository.unified_authority.reconciled_claims) == 1
     assert (
         repository.enrollments[0][1].installation_token.get_secret_value()
         == INSTALLATION_TOKEN
     )
+
+
+def test_macos_enrollment_is_default_off_and_app_check_platform_bound() -> None:
+    now = datetime.now(UTC)
+    macos_assertion = ManagedAppCheckClaims(
+        app_id=MACOS_APP_ID,
+        issuer=f"https://firebaseappcheck.googleapis.com/{PROJECT_NUMBER}",
+        audience=(f"projects/{PROJECT_NUMBER}",),
+        issued_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    body = {
+        "installation_id": "macos-viewer-1",
+        "installation_token": INSTALLATION_TOKEN,
+        "platform": "macos",
+        "enrollment_request_id": str(uuid4()),
+        "policy_version": "staging-v1",
+        "policy_sha256": POLICY_SHA256,
+        "data_classes": ["essential_timeseries", "user_documents"],
+    }
+    headers = {
+        "Authorization": f"Bearer {MANAGED_TOKEN}",
+        "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+    }
+    disabled_client, disabled_repository = _managed_client()
+    with disabled_client:
+        disabled = disabled_client.post(
+            "/v1/managed/enroll",
+            headers=headers,
+            json=body,
+        )
+
+    client, repository = _managed_client(
+        macos_app_id=MACOS_APP_ID,
+        additional_app_check_tokens={
+            MACOS_APP_CHECK_TOKEN: macos_assertion,
+        },
+    )
+    with client:
+        wrong_platform = client.post(
+            "/v1/managed/enroll",
+            headers=headers,
+            json=body,
+        )
+        accepted = client.post(
+            "/v1/managed/enroll",
+            headers={
+                **headers,
+                "X-Firebase-AppCheck": MACOS_APP_CHECK_TOKEN,
+            },
+            json=body,
+        )
+        ios_with_macos_assertion = client.post(
+            "/v1/managed/enroll",
+            headers={
+                **headers,
+                "X-Firebase-AppCheck": MACOS_APP_CHECK_TOKEN,
+            },
+            json={**body, "platform": "ios"},
+        )
+
+    assert disabled.status_code == 503
+    assert disabled_repository.enrollments == []
+    assert wrong_platform.status_code == 403
+    assert ios_with_macos_assertion.status_code == 403
+    assert accepted.status_code == 201
+    assert len(repository.enrollments) == 1
+    assert repository.enrollments[0][1].platform == "macos"
+
+
+def test_macos_viewer_route_contract_enumerates_allowed_and_denied_families() -> None:
+    allowed = {
+        ("GET", "/v1/managed/me"): "read",
+        ("GET", "/v1/managed/chunks"): "read",
+        ("GET", "/v1/managed/changes"): "read",
+        ("GET", "/v1/managed/documents"): "read",
+        ("GET", "/v1/managed/documents/{document_kind}/{document_id}"): "read",
+        ("GET", "/v1/managed/restores/{restore_job_id}"): "read",
+        ("GET", "/v1/managed/safety/incidents"): "read",
+        ("GET", "/v1/managed/social/feed"): "read",
+        ("POST", "/v1/managed/chunks/{chunk_id}/download"): "restore",
+        ("POST", "/v1/managed/restores"): "restore",
+        ("POST", "/v1/managed/restores/{restore_job_id}/complete"): "restore",
+    }
+    denied = {
+        ("POST", "/v1/managed/sources"): "source_registration",
+        ("POST", "/v1/managed/keys"): "collector_key_registration",
+        ("POST", "/v1/managed/chunks:reserve"): "upload_reservation",
+        ("POST", "/v1/managed/chunks/{chunk_id}/complete"): "upload_commit",
+        ("PUT", "/v1/managed/documents/{document_kind}/{document_id}"): (
+            "document_write"
+        ),
+        ("POST", "/v1/managed/authority/{data_class}/opt-out"): ("authority_mutation"),
+        ("DELETE", "/v1/managed/installations/{target_installation_id}"): (
+            "installation_ownership_mutation"
+        ),
+        ("POST", "/v1/managed/safety/incidents"): "safety_paging",
+        ("PUT", "/v1/managed/safety/incidents/{incident_id}/location"): (
+            "safety_location_write"
+        ),
+        ("POST", "/v1/managed/social/pokes/{poke_id}:ack"): ("social_acknowledgement"),
+        ("POST", "/v1/managed/erasure"): "prune_or_erasure",
+    }
+
+    for (method, route_template), expected in allowed.items():
+        assert (
+            managed_api_module.macos_managed_viewer_access(
+                method=method,
+                route_template=route_template,
+            )
+            == expected
+        )
+    for (method, route_template), family in denied.items():
+        assert (
+            managed_api_module.macos_managed_viewer_access(
+                method=method,
+                route_template=route_template,
+            )
+            is None
+        ), family
+    assert (
+        managed_api_module.macos_managed_viewer_access(
+            method="POST",
+            route_template=None,
+        )
+        is None
+    )
+
+
+def test_macos_viewer_authenticates_for_reads_and_restore_only() -> None:
+    now = datetime.now(UTC)
+    macos_assertion = ManagedAppCheckClaims(
+        app_id=MACOS_APP_ID,
+        issuer=f"https://firebaseappcheck.googleapis.com/{PROJECT_NUMBER}",
+        audience=(f"projects/{PROJECT_NUMBER}",),
+        issued_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    client, repository = _managed_client(
+        object_store=DownloadObjectStore(),
+        macos_app_id=MACOS_APP_ID,
+        additional_app_check_tokens={
+            MACOS_APP_CHECK_TOKEN: macos_assertion,
+        },
+    )
+    _enable_macos_viewer(repository)
+    chunk_id = uuid4()
+    repository.available_chunk_row = {
+        "chunk_id": chunk_id,
+        "object_key": "accounts/test/chunk.gz",
+        "object_generation": 42,
+        "expected_sha256": "a" * 64,
+        "compression": "gzip",
+        "content_type": "application/vnd.noop.chunk+json",
+        "expected_uncompressed_bytes": 12_345,
+    }
+
+    with client:
+        me = client.get("/v1/managed/me", headers=_macos_headers())
+        chunks = client.get("/v1/managed/chunks", headers=_macos_headers())
+        restore = client.post(
+            "/v1/managed/restores",
+            headers=_macos_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "data_classes": ["essential_timeseries"],
+                "document_kinds": [],
+                "include_documents": False,
+            },
+        )
+        download = client.post(
+            f"/v1/managed/chunks/{chunk_id}/download",
+            headers=_macos_headers(),
+            json={"request_id": str(uuid4())},
+        )
+        restore_body = restore.json()["restore"]
+        complete = client.post(
+            f"/v1/managed/restores/{restore_body['restore_job_id']}/complete",
+            headers=_macos_headers(),
+            json={
+                "delivered_objects": restore_body["selected_objects"],
+                "delivered_bytes": restore_body["selected_bytes"],
+            },
+        )
+
+    assert me.status_code == 200
+    assert chunks.status_code == 200
+    assert restore.status_code == 201
+    assert download.status_code == 200
+    assert complete.status_code == 200
+    assert complete.json()["restore"]["status"] == "completed"
+    assert len(repository.restore_requests) == 1
+    assert len(repository.restore_completions) == 1
+
+
+def test_macos_viewer_rejects_cross_platform_assertion_and_writes_before_handler() -> (
+    None
+):
+    disabled_client, disabled_repository = _managed_client()
+    _enable_macos_viewer(disabled_repository)
+    with disabled_client:
+        disabled = disabled_client.get(
+            "/v1/managed/me",
+            headers=_macos_headers(app_check_token=APP_CHECK_TOKEN),
+        )
+
+    assertion_time = datetime.now(UTC)
+    macos_assertion = ManagedAppCheckClaims(
+        app_id=MACOS_APP_ID,
+        issuer=f"https://firebaseappcheck.googleapis.com/{PROJECT_NUMBER}",
+        audience=(f"projects/{PROJECT_NUMBER}",),
+        issued_at=assertion_time,
+        expires_at=assertion_time + timedelta(hours=1),
+    )
+    client, repository = _managed_client(
+        object_store=UploadObjectStore(),
+        macos_app_id=MACOS_APP_ID,
+        additional_app_check_tokens={
+            MACOS_APP_CHECK_TOKEN: macos_assertion,
+        },
+    )
+    _enable_macos_viewer(repository)
+    event_end = datetime.now(UTC).replace(microsecond=0)
+
+    with client:
+        cross_platform = client.get(
+            "/v1/managed/me",
+            headers=_macos_headers(app_check_token=APP_CHECK_TOKEN),
+        )
+        reserve = client.post(
+            "/v1/managed/chunks:reserve",
+            headers=_macos_headers(),
+            json={
+                "chunk_id": str(uuid4()),
+                "request_id": str(uuid4()),
+                "source_id": str(uuid4()),
+                "data_class": "essential_timeseries",
+                "schema_version": 1,
+                "content_mode": "server_readable",
+                "event_start": (event_end - timedelta(minutes=5)).isoformat(),
+                "event_end": event_end.isoformat(),
+                "compression": "gzip",
+                "content_type": "application/vnd.noop.chunk+json",
+                "expected_sha256": "a" * 64,
+                "expected_compressed_bytes": 128,
+                "expected_uncompressed_bytes": 256,
+                "streams": [],
+            },
+        )
+        location = client.put(
+            f"/v1/managed/safety/incidents/{uuid4()}/location",
+            headers=_macos_headers(),
+            json={
+                "sequence": 1,
+                "latitude": 0.0,
+                "longitude": 0.0,
+                "horizontal_accuracy_m": 5.0,
+                "captured_at": event_end.isoformat(),
+            },
+        )
+
+    assert disabled.status_code == 503
+    assert disabled.json()["detail"] == "managed macOS viewer is not configured"
+    assert cross_platform.status_code == 403
+    assert cross_platform.json()["detail"] == (
+        "managed app assertion does not match installation platform"
+    )
+    assert reserve.status_code == 403
+    assert reserve.json()["detail"] == "managed macOS viewer is read-only"
+    assert location.status_code == 403
+    assert location.json()["detail"] == "managed macOS viewer is read-only"
+    assert repository.chunk_reservations == []
+    assert repository.upload_grants == []
+
+
+def test_managed_installation_authorization_is_provider_tenant_bound() -> None:
+    now = datetime.now(UTC)
+    other_tenant_claims = ManagedIdentityClaims(
+        issuer="https://securetoken.google.com/noop-test-project",
+        subject="firebase-user-1",
+        provider_tenant="other-tenant",
+        issued_at=now,
+        auth_time=now - timedelta(minutes=1),
+        expires_at=now + timedelta(hours=1),
+    )
+    client, _ = _managed_client(
+        additional_identity_tokens={
+            OTHER_MANAGED_TOKEN: other_tenant_claims,
+        }
+    )
+    with client:
+        response = client.get(
+            "/v1/managed/me",
+            headers={
+                **_managed_headers(),
+                "Authorization": f"Bearer {OTHER_MANAGED_TOKEN}",
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == ("managed account authorization was rejected")
+
+
+def test_managed_identity_reconciliation_rejects_cross_account_link() -> None:
+    client, repository = _managed_client()
+    repository.unified_authority.principal = UnifiedPrincipal(
+        principal_id=uuid4(),
+        status="active",
+        managed_account_id=uuid4(),
+        managed_identity_id=uuid4(),
+        ownership_account_id=None,
+        ownership_identity_id=None,
+    )
+    with client:
+        response = client.get(
+            "/v1/managed/me",
+            headers=_managed_headers(),
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "managed account identity is linked differently"
+    )
+
+
+def test_managed_authority_state_and_opt_out_fail_closed() -> None:
+    client, repository = _managed_client()
+    with client:
+        local = client.get(
+            "/v1/managed/authority/essential_timeseries",
+            headers=_managed_headers(),
+        )
+        local_opt_out = client.post(
+            "/v1/managed/authority/essential_timeseries/opt-out",
+            headers=_managed_headers(),
+            json={"request_id": str(uuid4())},
+        )
+        repository.unified_authority.authority = repository.unified_authority._state(
+            "shadow",
+            transition_version=2,
+        )
+        rolled_back = client.post(
+            "/v1/managed/authority/essential_timeseries/opt-out",
+            headers=_managed_headers(),
+            json={"request_id": str(uuid4())},
+        )
+
+    assert local.status_code == 200
+    assert local.json()["authority"] == {
+        "data_class": "essential_timeseries",
+        "state": "local_only",
+        "transition_version": 0,
+        "pruning_authorized": False,
+        "last_opt_out_at": None,
+        "last_reconsented_at": None,
+        "reconsent_policy_version": None,
+        "reconsent_policy_sha256": None,
+    }
+    assert local_opt_out.status_code == 200
+    assert local_opt_out.json()["duplicate"] is False
+    assert local_opt_out.json()["authority"]["state"] == "rollback"
+    assert local_opt_out.json()["authority"]["last_opt_out_at"] is not None
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["authority"]["state"] == "rollback"
+    assert rolled_back.json()["authority"]["transition_version"] == 3
+    assert rolled_back.json()["authority"]["pruning_authorized"] is False
+    assert rolled_back.json()["duplicate"] is False
+    assert len(repository.unified_authority.rollback_requests) == 2
+
+
+def test_managed_authority_reconsent_requires_current_policy() -> None:
+    client, repository = _managed_client()
+    with client:
+        opted_out = client.post(
+            "/v1/managed/authority/essential_timeseries/opt-out",
+            headers=_managed_headers(),
+            json={"request_id": str(uuid4())},
+        )
+        stale = client.post(
+            "/v1/managed/authority/essential_timeseries/re-consent",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "policy_version": "staging-v0",
+                "policy_sha256": "b" * 64,
+            },
+        )
+        accepted = client.post(
+            "/v1/managed/authority/essential_timeseries/re-consent",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "policy_version": "staging-v1",
+                "policy_sha256": POLICY_SHA256,
+            },
+        )
+
+    assert opted_out.status_code == 200
+    assert stale.status_code == 409
+    assert accepted.status_code == 200
+    assert accepted.json()["authority"]["state"] == "local_only"
+    assert accepted.json()["authority"]["last_opt_out_at"] is not None
+    assert accepted.json()["authority"]["last_reconsented_at"] is not None
+    assert accepted.json()["authority"]["reconsent_policy_version"] == "staging-v1"
+    assert len(repository.unified_authority.reconsent_requests) == 1
+
+
+def test_managed_formula_shadow_is_default_off() -> None:
+    client, _ = _managed_client(
+        formula_repository=FakeManagedFormulaRepository(),
+    )
+    with client:
+        response = client.post(
+            "/v1/managed/formula-shadow/recovery/noop-charge-v2",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "local_day": "2026-09-19",
+                "timezone_name": "America/Chicago",
+                "inputs": {
+                    "hrv": 55.0,
+                    "rhr": 52.0,
+                    "hrv_baseline": {
+                        "mean": 50.0,
+                        "spread": 5.0,
+                        "usable": True,
+                    },
+                },
+                "provenance": {
+                    "source_kind": "synthetic_test",
+                    "source_revision": "fixture-v1",
+                    "input_manifest_sha256": "a" * 64,
+                },
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "managed formula shadow comparison is not configured"
+    )
+
+
+def test_managed_formula_shadow_is_tenant_bound_and_non_authoritative() -> None:
+    formula_repository = FakeManagedFormulaRepository()
+    client, repository = _managed_client(
+        formula_repository=formula_repository,
+        formula_shadow=True,
+    )
+    body = {
+        "request_id": str(uuid4()),
+        "local_day": "2026-09-19",
+        "timezone_name": "America/Chicago",
+        "inputs": {
+            "hrv": 55.0,
+            "rhr": 52.0,
+            "hrv_baseline": {
+                "mean": 50.0,
+                "spread": 5.0,
+                "usable": True,
+            },
+        },
+        "provenance": {
+            "source_kind": "synthetic_test",
+            "source_revision": "fixture-v1",
+            "input_manifest_sha256": "a" * 64,
+        },
+    }
+    with client:
+        published = client.post(
+            "/v1/managed/formula-shadow/recovery/noop-charge-v2",
+            headers=_managed_headers(),
+            json=body,
+        )
+        current = client.get(
+            "/v1/managed/formula-shadow/recovery/current?local_day=2026-09-19",
+            headers=_managed_headers(),
+        )
+
+    assert published.status_code == 200
+    assert published.json()["authority"] == "shadow_only"
+    assert published.json()["result"]["metric_key"] == "recovery"
+    assert published.json()["result"]["parity_status"] == "not_compared"
+    assert current.status_code == 200
+    assert current.json()["authority"] == "shadow_only"
+    assert len(formula_repository.publications) == 1
+    execution = formula_repository.publications[0]["execution"]
+    assert execution.context.account_id == repository.principal.account_id
+
+
+def test_managed_formula_shadow_exposes_no_authority_promotion_route() -> None:
+    client, _ = _managed_client(
+        formula_repository=FakeManagedFormulaRepository(),
+        formula_shadow=True,
+    )
+    formula_routes = {
+        path: frozenset(method.upper() for method in operation)
+        for path, operation in client.app.openapi()["paths"].items()
+        if path.startswith("/v1/managed/formula-shadow/")
+    }
+
+    assert formula_routes == {
+        "/v1/managed/formula-shadow/{metric_key}/{formula_revision}": frozenset(
+            {"POST"}
+        ),
+        "/v1/managed/formula-shadow/{metric_key}/current": frozenset({"GET"}),
+    }
+
+
+def test_managed_formula_huge_number_is_a_contract_rejection() -> None:
+    client, _ = _managed_client(
+        formula_repository=FakeManagedFormulaRepository(),
+        formula_shadow=True,
+    )
+    with client:
+        response = client.post(
+            "/v1/managed/formula-shadow/recovery/noop-charge-v2",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "local_day": "2026-09-19",
+                "timezone_name": "UTC",
+                "inputs": {
+                    "hrv": 10**400,
+                    "rhr": 52.0,
+                    "hrv_baseline": {
+                        "mean": 50.0,
+                        "spread": 5.0,
+                        "usable": True,
+                    },
+                },
+                "provenance": {
+                    "source_kind": "synthetic_test",
+                    "source_revision": "fixture-v1",
+                    "input_manifest_sha256": "a" * 64,
+                },
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "formula shadow request did not match a registered contract"
+    )
+
+
+def test_formula_metric_event_cardinality_is_registry_bounded(
+    monkeypatch,
+) -> None:
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        managed_api_module,
+        "emit_operational_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    client, _ = _managed_client(
+        formula_repository=FakeManagedFormulaRepository(),
+        formula_shadow=True,
+    )
+    unknown_metric = "synthetic_user_metric"
+    with client:
+        response = client.post(
+            f"/v1/managed/formula-shadow/{unknown_metric}/v1",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "local_day": "2026-09-19",
+                "timezone_name": "UTC",
+                "inputs": {"value": 1},
+                "provenance": {
+                    "source_kind": "synthetic_test",
+                    "source_revision": "fixture-v1",
+                    "input_manifest_sha256": "a" * 64,
+                },
+            },
+        )
+
+    assert response.status_code == 422
+    publication = next(
+        fields
+        for event, fields in events
+        if event == "managed_formula.shadow_publication"
+    )
+    assert publication["metric_key"] == "unregistered"
+    assert unknown_metric not in repr(events)
+
+
+def test_managed_document_key_recovery_is_default_off() -> None:
+    key_repository = FakeManagedDocumentKeyRepository()
+    client, _ = _managed_client(document_key_repository=key_repository)
+    wrapped = b"w" * 40
+    with client:
+        response = client.put(
+            f"/v1/managed/document-keys/{uuid4()}",
+            headers=_managed_headers(),
+            json={
+                "key_kind": "account_master",
+                "wrapping_key_id": None,
+                "wrapping_revision": 1,
+                "algorithm": "A256GCM",
+                "wrapped_key_base64": base64.b64encode(wrapped).decode("ascii"),
+                "wrapped_key_sha256": hashlib.sha256(wrapped).hexdigest(),
+                "master_key_confirmation_hmac_sha256": "f" * 64,
+                "recovery_method": "recovery_key",
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "managed document key recovery is not configured"
+    )
+
+
+def test_managed_document_key_recovery_is_account_scoped_and_opaque() -> None:
+    key_repository = FakeManagedDocumentKeyRepository()
+    client, repository = _managed_client(
+        document_key_repository=key_repository,
+        document_key_recovery=True,
+    )
+    key_id = uuid4()
+    wrapped = b"k" * 40
+    body = {
+        "key_kind": "account_master",
+        "wrapping_key_id": None,
+        "wrapping_revision": 1,
+        "algorithm": "A256GCM",
+        "wrapped_key_base64": base64.b64encode(wrapped).decode("ascii"),
+        "wrapped_key_sha256": hashlib.sha256(wrapped).hexdigest(),
+        "master_key_confirmation_hmac_sha256": "e" * 64,
+        "recovery_method": "device_transfer",
+    }
+    with client:
+        stored = client.put(
+            f"/v1/managed/document-keys/{key_id}",
+            headers=_managed_headers(),
+            json=body,
+        )
+        fetched = client.get(
+            f"/v1/managed/document-keys/{key_id}",
+            headers=_managed_headers(),
+        )
+        version = client.get(
+            f"/v1/managed/document-keys/{key_id}/versions/1",
+            headers=_managed_headers(),
+        )
+        revoked = client.post(
+            f"/v1/managed/document-keys/{key_id}/revoke",
+            headers=_managed_headers(),
+            json={"successor_key_id": None},
+        )
+
+    assert stored.status_code == 200
+    assert stored.json()["key"]["wrapped_key_base64"] == (
+        base64.b64encode(wrapped).decode("ascii")
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["key"]["key_kind"] == "account_master"
+    assert fetched.json()["key"]["master_key_confirmation_hmac_sha256"] == "e" * 64
+    assert version.status_code == 200
+    assert version.json()["key_version"]["wrapped_key_base64"] == (
+        base64.b64encode(wrapped).decode("ascii")
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["key"]["status"] == "revoked"
+    assert len(key_repository.mutations) == 1
+    assert (
+        key_repository.mutations[0]["principal"].account_id
+        == repository.principal.account_id
+    )
+
+
+def test_standalone_managed_api_sets_private_response_headers(monkeypatch) -> None:
+    monkeypatch.setenv("NOOP_MANAGED_REPLAY_SECRET", "s" * 32)
+    from app.managed_main import create_managed_app
+
+    app = create_managed_app(settings=_settings(enabled=True))
+    client = TestClient(app)
+    try:
+        response = client.get("/v1/managed/me")
+    finally:
+        client.close()
+
+    assert response.status_code == 401
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["x-content-type-options"] == "nosniff"
 
 
 def test_managed_route_requires_installation_credential() -> None:
@@ -1118,6 +2208,64 @@ def test_managed_account_erasure_seals_provider_identity_for_lifecycle() -> None
     ticket = request["identity_deletion_ticket"]
     assert isinstance(ticket, bytes)
     assert b"firebase-user-1" not in ticket
+
+
+def test_managed_account_erasure_receipt_uses_installation_credential() -> None:
+    now = datetime.now(UTC)
+    android_assertion = ManagedAppCheckClaims(
+        app_id=ANDROID_APP_ID,
+        issuer=f"https://firebaseappcheck.googleapis.com/{PROJECT_NUMBER}",
+        audience=(f"projects/{PROJECT_NUMBER}",),
+        issued_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    client, _ = _managed_client(
+        additional_app_check_tokens={
+            ANDROID_APP_CHECK_TOKEN: android_assertion,
+        }
+    )
+    with client:
+        requested = client.post(
+            "/v1/managed/erasure",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "scope": "account",
+                "confirmation_sha256": hashlib.sha256(
+                    b"delete-noop-plus-managed-account-v1"
+                ).hexdigest(),
+            },
+        )
+        erasure_job_id = requested.json()["erasure"]["erasure_job_id"]
+        receipt_headers = {
+            "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+            "X-Noop-Installation-ID": "ios-test-1",
+            "X-Noop-Installation-Token": INSTALLATION_TOKEN,
+        }
+        received = client.get(
+            f"/v1/managed/erasure/{erasure_job_id}/receipt",
+            headers=receipt_headers,
+        )
+        wrong_installation_secret = client.get(
+            f"/v1/managed/erasure/{erasure_job_id}/receipt",
+            headers={
+                **receipt_headers,
+                "X-Noop-Installation-Token": OTHER_INSTALLATION_TOKEN,
+            },
+        )
+        wrong_platform_assertion = client.get(
+            f"/v1/managed/erasure/{erasure_job_id}/receipt",
+            headers={
+                **receipt_headers,
+                "X-Firebase-AppCheck": ANDROID_APP_CHECK_TOKEN,
+            },
+        )
+
+    assert requested.status_code == 202
+    assert received.status_code == 200
+    assert received.json()["erasure"]["status"] == "cooling_off"
+    assert wrong_installation_secret.status_code == 404
+    assert wrong_platform_assertion.status_code == 403
 
 
 def test_managed_erasure_cancel_does_not_require_fresh_destructive_auth() -> None:

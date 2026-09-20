@@ -31,6 +31,7 @@ AuthorityTransitionReason = Literal[
     "rollback_requested",
     "opt_out_requested",
     "local_authority_restored",
+    "reconsent_recorded",
 ]
 OperationalSink = Callable[..., None]
 
@@ -46,13 +47,13 @@ AUTHORITY_STATES = frozenset(
     }
 )
 ALLOWED_AUTHORITY_TRANSITIONS: dict[str, frozenset[str]] = {
-    "local_only": frozenset({"uploading"}),
+    "local_only": frozenset({"local_only", "uploading", "rollback"}),
     "uploading": frozenset({"shadow", "rollback"}),
     "shadow": frozenset({"parity_approved", "rollback"}),
     "parity_approved": frozenset({"restore_proven", "rollback"}),
     "restore_proven": frozenset({"cloud_authoritative", "rollback"}),
     "cloud_authoritative": frozenset({"rollback"}),
-    "rollback": frozenset({"local_only", "uploading"}),
+    "rollback": frozenset({"local_only", "uploading", "rollback"}),
 }
 AUTHORITY_REASON_TARGETS: dict[str, frozenset[str]] = {
     "migration_started": frozenset({"uploading"}),
@@ -63,9 +64,13 @@ AUTHORITY_REASON_TARGETS: dict[str, frozenset[str]] = {
     "rollback_requested": frozenset({"rollback"}),
     "opt_out_requested": frozenset({"rollback"}),
     "local_authority_restored": frozenset({"local_only"}),
+    "reconsent_recorded": frozenset({"local_only"}),
 }
 _DATA_CLASS_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_POLICY_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_POLICY_KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+_INSTALLATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 class UnifiedIdentityAuthorityError(Exception):
@@ -127,6 +132,10 @@ class ManagedAuthorityState:
     restore_proven_at: datetime | None
     pruning_authorized_at: datetime | None
     last_opt_out_at: datetime | None
+    last_reconsented_at: datetime | None
+    reconsent_consent_event_id: UUID | None
+    reconsent_policy_version: str | None
+    reconsent_policy_sha256: str | None
 
     @property
     def pruning_authorized(self) -> bool:
@@ -223,11 +232,15 @@ class PostgresUnifiedIdentityAuthorityRepository:
 
                     managed_identity = await connection.fetchrow(
                         """
-                        SELECT account_id, identity_id
-                        FROM managed_external_identities
-                        WHERE issuer = $1
-                          AND provider_tenant = $2
-                          AND subject_hash = $3
+                        SELECT identity.account_id, identity.identity_id
+                        FROM managed_external_identities AS identity
+                        JOIN managed_accounts AS account
+                          ON account.account_id = identity.account_id
+                        WHERE identity.issuer = $1
+                          AND identity.provider_tenant = $2
+                          AND identity.subject_hash = $3
+                          AND identity.status = 'active'
+                          AND account.status = 'active'
                         """,
                         claims.issuer,
                         claims.provider_tenant,
@@ -235,11 +248,15 @@ class PostgresUnifiedIdentityAuthorityRepository:
                     )
                     ownership_identity = await connection.fetchrow(
                         """
-                        SELECT account_id, identity_id
-                        FROM ownership_external_identities
-                        WHERE issuer = $1
-                          AND provider_tenant = $2
-                          AND subject_hash = $3
+                        SELECT identity.account_id, identity.identity_id
+                        FROM ownership_external_identities AS identity
+                        JOIN ownership_accounts AS account
+                          ON account.account_id = identity.account_id
+                        WHERE identity.issuer = $1
+                          AND identity.provider_tenant = $2
+                          AND identity.subject_hash = $3
+                          AND identity.status = 'active'
+                          AND account.status = 'active'
                         """,
                         claims.issuer,
                         claims.provider_tenant,
@@ -299,13 +316,33 @@ class PostgresUnifiedIdentityAuthorityRepository:
         _validate_data_class(data_class)
         async with self._pool().acquire() as connection:
             async with connection.transaction():
-                row = await self._ensure_authority_state(
+                await self._require_authority_scope(
                     connection,
                     principal_id=principal_id,
                     managed_account_id=managed_account_id,
                     data_class=data_class,
                 )
-        return _authority_state(row)
+                row = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_authority_states
+                    WHERE managed_account_id = $1
+                      AND data_class = $2
+                    """,
+                    managed_account_id,
+                    data_class,
+                )
+                if row is None:
+                    return _baseline_authority_state(
+                        principal_id=principal_id,
+                        managed_account_id=managed_account_id,
+                        data_class=data_class,
+                    )
+                if row["principal_id"] != principal_id:
+                    raise UnifiedIdentityCollisionError(
+                        "managed authority scope is linked differently"
+                    )
+                return _authority_state(row)
 
     async def transition_authority(
         self,
@@ -319,6 +356,10 @@ class PostgresUnifiedIdentityAuthorityRepository:
         upload_acknowledgement: AuthorityEvidence | None = None,
         restore_proof: AuthorityEvidence | None = None,
         authorize_pruning: bool = False,
+        reconsent_policy_kind: str | None = None,
+        reconsent_policy_version: str | None = None,
+        reconsent_policy_sha256: str | None = None,
+        reconsent_installation_id: str | None = None,
     ) -> AuthorityTransitionResult:
         outcome = "failed"
         from_state = "unknown"
@@ -331,6 +372,10 @@ class PostgresUnifiedIdentityAuthorityRepository:
                 upload_acknowledgement=upload_acknowledgement,
                 restore_proof=restore_proof,
                 authorize_pruning=authorize_pruning,
+                reconsent_policy_kind=reconsent_policy_kind,
+                reconsent_policy_version=reconsent_policy_version,
+                reconsent_policy_sha256=reconsent_policy_sha256,
+                reconsent_installation_id=reconsent_installation_id,
             )
             request_sha256 = _transition_request_digest(
                 target_state=target_state,
@@ -338,6 +383,10 @@ class PostgresUnifiedIdentityAuthorityRepository:
                 upload_acknowledgement=upload_acknowledgement,
                 restore_proof=restore_proof,
                 authorize_pruning=authorize_pruning,
+                reconsent_policy_kind=reconsent_policy_kind,
+                reconsent_policy_version=reconsent_policy_version,
+                reconsent_policy_sha256=reconsent_policy_sha256,
+                reconsent_installation_id=reconsent_installation_id,
             )
             async with self._pool().acquire() as connection:
                 async with connection.transaction():
@@ -392,6 +441,16 @@ class PostgresUnifiedIdentityAuthorityRepository:
                         raise AuthorityTransitionRejectedError(
                             "authority transition is not allowed"
                         )
+                    if target_state == "uploading":
+                        last_opt_out_at = state["last_opt_out_at"]
+                        last_reconsented_at = state["last_reconsented_at"]
+                        if last_opt_out_at is not None and (
+                            last_reconsented_at is None
+                            or last_reconsented_at <= last_opt_out_at
+                        ):
+                            raise AuthorityTransitionRejectedError(
+                                "authority promotion requires explicit re-consent"
+                            )
                     now = await connection.fetchval("SELECT clock_timestamp()")
                     (
                         upload_id,
@@ -411,6 +470,34 @@ class PostgresUnifiedIdentityAuthorityRepository:
                     )
                     transition_id = uuid4()
                     transition_version = int(state["transition_version"]) + 1
+                    last_opt_out_at = state["last_opt_out_at"]
+                    last_reconsented_at = state["last_reconsented_at"]
+                    stored_consent_event_id = state["reconsent_consent_event_id"]
+                    stored_policy_version = state["reconsent_policy_version"]
+                    stored_policy_sha256 = _optional_digest(
+                        state["reconsent_policy_sha256"]
+                    )
+                    if reason == "opt_out_requested":
+                        last_opt_out_at = now
+                    elif reason == "reconsent_recorded":
+                        last_reconsented_at = now
+                        assert reconsent_policy_kind is not None
+                        assert reconsent_policy_version is not None
+                        assert reconsent_policy_sha256 is not None
+                        assert reconsent_installation_id is not None
+                        stored_consent_event_id = await self._record_reconsent_event(
+                            connection,
+                            managed_account_id=managed_account_id,
+                            data_class=data_class,
+                            request_id=request_id,
+                            policy_kind=reconsent_policy_kind,
+                            policy_version=reconsent_policy_version,
+                            policy_sha256=reconsent_policy_sha256,
+                            installation_id=reconsent_installation_id,
+                            now=now,
+                        )
+                        stored_policy_version = reconsent_policy_version
+                        stored_policy_sha256 = reconsent_policy_sha256
                     await connection.execute(
                         """
                         INSERT INTO managed_authority_transitions (
@@ -431,10 +518,16 @@ class PostgresUnifiedIdentityAuthorityRepository:
                             restore_proof_sha256,
                             restore_proven_at,
                             pruning_authorized_at,
+                            last_opt_out_at,
+                            last_reconsented_at,
+                            reconsent_consent_event_id,
+                            reconsent_policy_version,
+                            reconsent_policy_sha256,
                             occurred_at
                         ) VALUES (
                             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                            $11, $12, $13, $14, $15, $16, $17, $18
+                            $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                            $20, $21, $22, $23
                         )
                         """,
                         transition_id,
@@ -454,11 +547,13 @@ class PostgresUnifiedIdentityAuthorityRepository:
                         restore_sha256,
                         restore_at,
                         pruning_at,
+                        last_opt_out_at,
+                        last_reconsented_at,
+                        stored_consent_event_id,
+                        stored_policy_version,
+                        stored_policy_sha256,
                         now,
                     )
-                    last_opt_out_at = state["last_opt_out_at"]
-                    if target_state == "rollback" and reason == "opt_out_requested":
-                        last_opt_out_at = now
                     await connection.execute(
                         """
                         UPDATE managed_authority_states
@@ -473,7 +568,11 @@ class PostgresUnifiedIdentityAuthorityRepository:
                             restore_proven_at = $12,
                             pruning_authorized_at = $13,
                             last_opt_out_at = $14,
-                            updated_at = $15
+                            last_reconsented_at = $15,
+                            reconsent_consent_event_id = $16,
+                            reconsent_policy_version = $17,
+                            reconsent_policy_sha256 = $18,
+                            updated_at = $19
                         WHERE principal_id = $1
                           AND managed_account_id = $2
                           AND data_class = $3
@@ -492,6 +591,10 @@ class PostgresUnifiedIdentityAuthorityRepository:
                         restore_at,
                         pruning_at,
                         last_opt_out_at,
+                        last_reconsented_at,
+                        stored_consent_event_id,
+                        stored_policy_version,
+                        stored_policy_sha256,
                         now,
                     )
             outcome = "transitioned"
@@ -556,6 +659,131 @@ class PostgresUnifiedIdentityAuthorityRepository:
             reason="local_authority_restored",
         )
 
+    async def record_reconsent(
+        self,
+        *,
+        principal_id: UUID,
+        managed_account_id: UUID,
+        data_class: str,
+        request_id: UUID,
+        policy_kind: str,
+        policy_version: str,
+        policy_sha256: str,
+        installation_id: str,
+    ) -> AuthorityTransitionResult:
+        return await self.transition_authority(
+            principal_id=principal_id,
+            managed_account_id=managed_account_id,
+            data_class=data_class,
+            request_id=request_id,
+            target_state="local_only",
+            reason="reconsent_recorded",
+            reconsent_policy_kind=policy_kind,
+            reconsent_policy_version=policy_version,
+            reconsent_policy_sha256=policy_sha256,
+            reconsent_installation_id=installation_id,
+        )
+
+    @staticmethod
+    async def _record_reconsent_event(
+        connection: Any,
+        *,
+        managed_account_id: UUID,
+        data_class: str,
+        request_id: UUID,
+        policy_kind: str,
+        policy_version: str,
+        policy_sha256: str,
+        installation_id: str,
+        now: datetime,
+    ) -> UUID:
+        reconsent_ready = await connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM managed_policy_documents AS policy
+                JOIN managed_account_installations AS installation
+                  ON installation.account_id = $5
+                 AND installation.installation_id = $6
+                JOIN installation_credentials AS credential
+                  ON credential.installation_id
+                        = installation.installation_id
+                WHERE policy.policy_kind = $1
+                  AND policy.policy_version = $2
+                  AND policy.document_sha256 = $3
+                  AND policy.effective_at <= $4
+                  AND (
+                        policy.retired_at IS NULL
+                        OR policy.retired_at > $4
+                  )
+                  AND installation.status IN ('active', 'limited')
+                  AND installation.revoked_at IS NULL
+                  AND installation.registered_at <= $4
+                  AND credential.revoked_at IS NULL
+                  AND credential.created_at <= $4
+            )
+            """,
+            policy_kind,
+            policy_version,
+            policy_sha256,
+            now,
+            managed_account_id,
+            installation_id,
+        )
+        if reconsent_ready is not True:
+            raise AuthorityTransitionRejectedError(
+                "re-consent policy or installation is not active"
+            )
+        existing = await connection.fetchrow(
+            """
+            SELECT consent_event_id,
+                   policy_kind,
+                   policy_version,
+                   decision,
+                   data_classes,
+                   installation_id,
+                   occurred_at
+            FROM managed_consent_events
+            WHERE account_id = $1 AND request_id = $2
+            """,
+            managed_account_id,
+            request_id,
+        )
+        if existing is not None:
+            raise AuthorityTransitionConflictError(
+                "re-consent request was already used by the consent ledger"
+            )
+
+        consent_event_id = uuid4()
+        await connection.execute(
+            """
+            INSERT INTO managed_consent_events (
+                consent_event_id,
+                account_id,
+                policy_kind,
+                policy_version,
+                decision,
+                data_classes,
+                installation_id,
+                request_id,
+                occurred_at,
+                recorded_at
+            ) VALUES (
+                $1, $2, $3, $4, 'granted', ARRAY[$5]::text[],
+                $6, $7, $8, $8
+            )
+            """,
+            consent_event_id,
+            managed_account_id,
+            policy_kind,
+            policy_version,
+            data_class,
+            installation_id,
+            request_id,
+            now,
+        )
+        return consent_event_id
+
     async def pruning_authorized(
         self,
         *,
@@ -580,6 +808,35 @@ class PostgresUnifiedIdentityAuthorityRepository:
         claims: ManagedIdentityClaims,
         linked_at: datetime,
     ) -> None:
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            f"noop-managed-erasure-account:{account_id}",
+        )
+        active_identity = await connection.fetchrow(
+            """
+            SELECT identity.issuer,
+                   identity.provider_tenant,
+                   identity.subject_hash
+            FROM managed_external_identities AS identity
+            JOIN managed_accounts AS account
+              ON account.account_id = identity.account_id
+            WHERE identity.account_id = $1
+              AND identity.identity_id = $2
+              AND identity.status = 'active'
+              AND account.status = 'active'
+            FOR SHARE OF identity, account
+            """,
+            account_id,
+            identity_id,
+        )
+        if active_identity is None or (
+            active_identity["issuer"] != claims.issuer
+            or active_identity["provider_tenant"] != claims.provider_tenant
+            or str(active_identity["subject_hash"]).strip() != claims.subject_hash
+        ):
+            raise UnifiedIdentityUnavailableError(
+                "managed account identity is unavailable"
+            )
         rows = await connection.fetch(
             """
             SELECT principal_id, managed_account_id, managed_identity_id
@@ -722,32 +979,12 @@ class PostgresUnifiedIdentityAuthorityRepository:
         managed_account_id: UUID,
         data_class: str,
     ) -> Any:
-        active = await connection.fetchval(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM unified_account_principals AS principal
-                JOIN unified_managed_account_links AS link
-                  USING (principal_id)
-                JOIN managed_accounts AS account
-                  ON account.account_id = link.managed_account_id
-                JOIN managed_external_identities AS identity
-                  ON identity.account_id = link.managed_account_id
-                 AND identity.identity_id = link.managed_identity_id
-                WHERE principal.principal_id = $1
-                  AND link.managed_account_id = $2
-                  AND principal.status = 'active'
-                  AND account.status = 'active'
-                  AND identity.status = 'active'
-            )
-            """,
-            principal_id,
-            managed_account_id,
+        await self._require_authority_scope(
+            connection,
+            principal_id=principal_id,
+            managed_account_id=managed_account_id,
+            data_class=data_class,
         )
-        if active is not True:
-            raise UnifiedIdentityUnavailableError(
-                "managed authority account link is unavailable"
-            )
         await connection.execute(
             """
             INSERT INTO managed_authority_states (
@@ -778,6 +1015,65 @@ class PostgresUnifiedIdentityAuthorityRepository:
             )
         return row
 
+    async def _require_authority_scope(
+        self,
+        connection: Any,
+        *,
+        principal_id: UUID,
+        managed_account_id: UUID,
+        data_class: str,
+    ) -> None:
+        active = await connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM unified_account_principals AS principal
+                JOIN unified_managed_account_links AS link
+                  USING (principal_id)
+                JOIN managed_accounts AS account
+                  ON account.account_id = link.managed_account_id
+                JOIN managed_external_identities AS identity
+                  ON identity.account_id = link.managed_account_id
+                 AND identity.identity_id = link.managed_identity_id
+                JOIN managed_subscriptions AS subscription
+                  ON subscription.account_id = link.managed_account_id
+                 AND subscription.status IN (
+                        'trial',
+                        'active',
+                        'grace',
+                        'paused'
+                 )
+                JOIN managed_plan_data_rules AS rule
+                  ON rule.plan_code = subscription.plan_code
+                 AND rule.plan_revision = subscription.plan_revision
+                 AND rule.data_class = $3
+                JOIN LATERAL (
+                    SELECT consent.decision
+                    FROM managed_consent_events AS consent
+                    WHERE consent.account_id = link.managed_account_id
+                      AND $3 = ANY(consent.data_classes)
+                    ORDER BY consent.occurred_at DESC,
+                             consent.recorded_at DESC,
+                             consent.consent_event_id DESC
+                    LIMIT 1
+                ) AS consent
+                  ON consent.decision = 'granted'
+                WHERE principal.principal_id = $1
+                  AND link.managed_account_id = $2
+                  AND principal.status = 'active'
+                  AND account.status = 'active'
+                  AND identity.status = 'active'
+            )
+            """,
+            principal_id,
+            managed_account_id,
+            data_class,
+        )
+        if active is not True:
+            raise AuthorityTransitionRejectedError(
+                "managed authority data class is unavailable"
+            )
+
     def _event(self, event: str, **fields: object) -> None:
         try:
             self.event_sink(
@@ -802,6 +1098,10 @@ def _validate_transition_request(
     upload_acknowledgement: AuthorityEvidence | None,
     restore_proof: AuthorityEvidence | None,
     authorize_pruning: bool,
+    reconsent_policy_kind: str | None = None,
+    reconsent_policy_version: str | None = None,
+    reconsent_policy_sha256: str | None = None,
+    reconsent_installation_id: str | None = None,
 ) -> None:
     _validate_data_class(data_class)
     if target_state not in AUTHORITY_STATES:
@@ -831,6 +1131,29 @@ def _validate_transition_request(
     if authorize_pruning and target_state != "cloud_authoritative":
         raise AuthorityTransitionRejectedError(
             "pruning can be authorized only with cloud authority"
+        )
+    if reason == "reconsent_recorded":
+        if (
+            reconsent_policy_kind is None
+            or _POLICY_KIND_PATTERN.fullmatch(reconsent_policy_kind) is None
+            or reconsent_policy_version is None
+            or _POLICY_VERSION_PATTERN.fullmatch(reconsent_policy_version) is None
+            or reconsent_policy_sha256 is None
+            or _SHA256_PATTERN.fullmatch(reconsent_policy_sha256) is None
+            or reconsent_installation_id is None
+            or _INSTALLATION_ID_PATTERN.fullmatch(reconsent_installation_id) is None
+        ):
+            raise AuthorityTransitionRejectedError(
+                "re-consent requires an exact policy version and digest"
+            )
+    elif (
+        reconsent_policy_kind is not None
+        or reconsent_policy_version is not None
+        or reconsent_policy_sha256 is not None
+        or reconsent_installation_id is not None
+    ):
+        raise AuthorityTransitionRejectedError(
+            "re-consent policy evidence is accepted only for re-consent"
         )
 
 
@@ -931,6 +1254,37 @@ def _authority_state(row: Any) -> ManagedAuthorityState:
         restore_proven_at=row["restore_proven_at"],
         pruning_authorized_at=row["pruning_authorized_at"],
         last_opt_out_at=row["last_opt_out_at"],
+        last_reconsented_at=row["last_reconsented_at"],
+        reconsent_consent_event_id=row["reconsent_consent_event_id"],
+        reconsent_policy_version=row["reconsent_policy_version"],
+        reconsent_policy_sha256=_optional_digest(row["reconsent_policy_sha256"]),
+    )
+
+
+def _baseline_authority_state(
+    *,
+    principal_id: UUID,
+    managed_account_id: UUID,
+    data_class: str,
+) -> ManagedAuthorityState:
+    return ManagedAuthorityState(
+        principal_id=principal_id,
+        managed_account_id=managed_account_id,
+        data_class=data_class,
+        state="local_only",
+        transition_version=0,
+        upload_acknowledgement_id=None,
+        upload_acknowledgement_sha256=None,
+        upload_acknowledged_at=None,
+        restore_proof_id=None,
+        restore_proof_sha256=None,
+        restore_proven_at=None,
+        pruning_authorized_at=None,
+        last_opt_out_at=None,
+        last_reconsented_at=None,
+        reconsent_consent_event_id=None,
+        reconsent_policy_version=None,
+        reconsent_policy_sha256=None,
     )
 
 
@@ -963,6 +1317,10 @@ def _transition_request_digest(
     upload_acknowledgement: AuthorityEvidence | None,
     restore_proof: AuthorityEvidence | None,
     authorize_pruning: bool,
+    reconsent_policy_kind: str | None = None,
+    reconsent_policy_version: str | None = None,
+    reconsent_policy_sha256: str | None = None,
+    reconsent_installation_id: str | None = None,
 ) -> str:
     def evidence(value: AuthorityEvidence | None) -> dict[str, str] | None:
         if value is None:
@@ -977,6 +1335,10 @@ def _transition_request_digest(
         {
             "authorize_pruning": authorize_pruning,
             "reason": reason,
+            "reconsent_installation_id": reconsent_installation_id,
+            "reconsent_policy_kind": reconsent_policy_kind,
+            "reconsent_policy_sha256": reconsent_policy_sha256,
+            "reconsent_policy_version": reconsent_policy_version,
             "restore_proof": evidence(restore_proof),
             "target_state": target_state,
             "upload_acknowledgement": evidence(upload_acknowledgement),

@@ -5,9 +5,8 @@ import org.junit.Test
 
 /**
  * Kotlin parity for StrandAnalytics/CaptureAccumulatorTests.swift (#965): each active mode's captured-day
- * count is the number of DISTINCT days that mode produced its own trace on, read off the shareable log, so
- * Sleep / Battery / Steps accumulate INDEPENDENTLY rather than sharing one elapsed-clock number. Same
- * vectors + expectations as the Swift twin.
+ * count is the number of DISTINCT days that mode produced its own trace on. Production persists only the
+ * extracted day tokens in bounded Test Centre state; these pure vectors pin the extraction/parity logic.
  */
 class CaptureAccumulatorTest {
 
@@ -77,5 +76,54 @@ class CaptureAccumulatorTest {
         val one = "[battery] bank soc=40.0 t=1782957600s"
         assertEquals(setOf("2026-07-02"), CaptureAccumulator.capturedDayKeys(TestDomain.BATTERY, one, 0L))
         assertEquals(setOf("2026-07-01"), CaptureAccumulator.capturedDayKeys(TestDomain.BATTERY, one, -32400L))
+    }
+
+    @Test
+    fun batteryUsesTheOffsetAtTheHistoricalSampleRatherThanTodaysOffset() {
+        // 2026-07-02 04:30 UTC is July 2 at UTC-4 but July 1 at UTC-5. The event-time
+        // offset therefore decides the captured day near midnight.
+        val eventUnix = 1_782_966_600L
+        val observedEpochs = mutableListOf<Long>()
+        assertEquals(
+            "2026-07-02",
+            CaptureAccumulator.capturedDayKey(
+                TestDomain.BATTERY,
+                "[battery] bank soc=40.0 t=${eventUnix}s",
+                tzOffsetSeconds = -18_000L,
+                offsetForEpoch = { epoch ->
+                    observedEpochs += epoch
+                    -14_400L
+                },
+            ),
+        )
+        assertEquals(listOf(eventUnix), observedEpochs)
+    }
+
+    @Test
+    fun extractsOneValidatedTokenWithoutRetainingTheTrace() {
+        assertEquals(
+            "2026-07-02",
+            CaptureAccumulator.capturedDayKey(
+                TestDomain.SLEEP,
+                "[sleep] gate run=1 day=2026-07-02 KEPT",
+                0L,
+            ),
+        )
+        assertEquals(
+            "2026-07-01",
+            CaptureAccumulator.capturedDayKey(
+                TestDomain.BATTERY,
+                "[battery] bank soc=40.0 t=1782957600s",
+                -32400L,
+            ),
+        )
+        assertEquals(
+            null,
+            CaptureAccumulator.capturedDayKey(
+                TestDomain.SLEEP,
+                "[battery] bank soc=40.0 t=1782957600s",
+                0L,
+            ),
+        )
     }
 }

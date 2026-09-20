@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="managed_safety_presentation_title">Safety 求助通知</string>
+    <string name="managed_safety_presentation_blurb">来自已接受联系人的私密 App 求助通知。NOOP 不会联系紧急服务。</string>
+    <string name="managed_safety_urgent_sound_title">紧急 Safety 提示音</string>
+    <string name="managed_safety_urgent_sound_detail">使用专用高优先级声音、振动和指示灯。默认关闭。仍遵循 Android 声音和勿扰设置；NOOP 不会打开全屏提醒。</string>
+    <string name="managed_safety_urgent_channel_name">NOOP Safety 联系人 · 紧急提示音</string>
+    <string name="managed_safety_urgent_channel_description">为私密 NOOP Safety 求助通知启用可选的紧急声音、振动和指示灯。</string>
+    <string name="managed_safety_open_notification_settings">打开 Safety 通知设置</string>
+    <string name="live_heart_rate_notification_title">在后台通知中显示心率</string>
+    <string name="live_heart_rate_notification_detail">在现有后台通知中显示最新实时心率。最多每 15 秒更新一次以限制耗电；不会开启连续心率采集。</string>
+    <string name="live_heart_rate_notification_accessibility">在后台通知中显示心率。不会启动连续心率采集。</string>
+    <string name="live_heart_rate_notification_value">心率 %1$d 次/分</string>
+</resources>

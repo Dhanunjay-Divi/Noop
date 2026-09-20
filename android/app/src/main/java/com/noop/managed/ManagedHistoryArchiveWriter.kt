@@ -211,35 +211,6 @@ internal class ManagedHistoryTransferStore(
         destination: Uri,
         manifest: ManagedHistoryExportManifest,
     ) {
-        val writer = ManagedHistorySafArchiveWriter(appContext, destination)
-        try {
-            manifest.chunks.forEach { chunk ->
-                writer.add(
-                    ManagedHistoryExportEntry(
-                        ManagedHistoryExportEntryKind.CHUNK,
-                        chunk.path,
-                        readExport(chunk.path, chunk.compressedBytes),
-                    ),
-                )
-            }
-            manifest.documents.forEach { document ->
-                writer.add(
-                    ManagedHistoryExportEntry(
-                        ManagedHistoryExportEntryKind.DOCUMENT,
-                        document.path,
-                        readExport(document.path, document.archiveBytes),
-                    ),
-                )
-            }
-            writer.finish(manifest)
-            clearExport()
-        } catch (error: Throwable) {
-            writer.abort()
-            throw error
-        }
-    }
-
-    fun validateExport(manifest: ManagedHistoryExportManifest) {
         val expected = (
             manifest.chunks.map(ManagedHistoryExportChunk::path) +
                 manifest.documents.map(ManagedHistoryExportDocument::path)
@@ -253,23 +224,59 @@ internal class ManagedHistoryTransferStore(
             emptySet()
         }
         if (expected.size != manifest.exportedObjects || actual != expected) {
-            throw IOException("Managed history staged entries are inconsistent.")
+            throw ManagedHistoryExportStateException(
+                IOException("Managed history staged entries are inconsistent."),
+            )
         }
-        manifest.chunks.forEach { chunk ->
-            val data = readExport(chunk.path, chunk.compressedBytes)
-            if (data.size != chunk.compressedBytes ||
-                ManagedDigest.sha256(data) != chunk.sha256
-            ) {
-                throw IOException("Managed history staged entry failed validation.")
+        val writer = ManagedHistorySafArchiveWriter(appContext, destination)
+        try {
+            manifest.chunks.forEach { chunk ->
+                val data = try {
+                    readExport(chunk.path, chunk.compressedBytes)
+                } catch (error: Throwable) {
+                    throw ManagedHistoryExportStateException(error)
+                }
+                if (data.size != chunk.compressedBytes ||
+                    ManagedDigest.sha256(data) != chunk.sha256
+                ) {
+                    throw ManagedHistoryExportStateException(
+                        IOException("Managed history staged entry failed validation."),
+                    )
+                }
+                writer.add(
+                    ManagedHistoryExportEntry(
+                        ManagedHistoryExportEntryKind.CHUNK,
+                        chunk.path,
+                        data,
+                    ),
+                )
             }
-        }
-        manifest.documents.forEach { document ->
-            val data = readExport(document.path, document.archiveBytes)
-            if (data.size != document.archiveBytes ||
-                ManagedDigest.sha256(data) != document.archiveSha256
-            ) {
-                throw IOException("Managed history staged entry failed validation.")
+            manifest.documents.forEach { document ->
+                val data = try {
+                    readExport(document.path, document.archiveBytes)
+                } catch (error: Throwable) {
+                    throw ManagedHistoryExportStateException(error)
+                }
+                if (data.size != document.archiveBytes ||
+                    ManagedDigest.sha256(data) != document.archiveSha256
+                ) {
+                    throw ManagedHistoryExportStateException(
+                        IOException("Managed history staged entry failed validation."),
+                    )
+                }
+                writer.add(
+                    ManagedHistoryExportEntry(
+                        ManagedHistoryExportEntryKind.DOCUMENT,
+                        document.path,
+                        data,
+                    ),
+                )
             }
+            writer.finish(manifest)
+            clearExport()
+        } catch (error: Throwable) {
+            writer.abort()
+            throw error
         }
     }
 

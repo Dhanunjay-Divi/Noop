@@ -1,5 +1,13 @@
 import Foundation
 
+/// Explicit semantic state for a daily score on launch surfaces. `nil` remains decodable from older
+/// snapshots; consumers resolve an older non-nil value to measured and an older nil value to missing.
+public enum WidgetScoreState: String, Codable, Equatable {
+    case measured
+    case calibrating
+    case missing
+}
+
 /// Small, Codable glance snapshot shared between the iOS app and its widget/Live-Activity extension
 /// via an App Group. The app writes it; the widget reads it. Keeping it tiny avoids any cross-process
 /// database access — the widget never opens SQLite.
@@ -27,11 +35,18 @@ public struct WidgetSnapshot: Codable, Equatable {
     /// Logical day represented by the daily scores (`yyyy-MM-dd`). This prevents a carried prior-day
     /// score from being labelled as today's measurement around the overnight rollover.
     public var scoreDay: String?
+    /// Explicit daily-score states. Optional preserves decoding of snapshots written by older app builds.
+    public var recoveryState: WidgetScoreState?
+    public var effortState: WidgetScoreState?
+    public var restState: WidgetScoreState?
 
     public init(recovery: Int?, bpm: Int?, batteryPct: Int?, bonded: Bool, updated: Date,
                 effort: Int? = nil, rest: Int? = nil, hrv: Int? = nil, restingHr: Int? = nil,
                 sleepMinutes: Int? = nil, connected: Bool? = nil,
-                heartRateObservedAt: Date? = nil, scoreDay: String? = nil) {
+                heartRateObservedAt: Date? = nil, scoreDay: String? = nil,
+                recoveryState: WidgetScoreState? = nil,
+                effortState: WidgetScoreState? = nil,
+                restState: WidgetScoreState? = nil) {
         self.recovery = recovery
         self.bpm = bpm
         self.batteryPct = batteryPct
@@ -45,6 +60,9 @@ public struct WidgetSnapshot: Codable, Equatable {
         self.connected = connected
         self.heartRateObservedAt = heartRateObservedAt
         self.scoreDay = scoreDay
+        self.recoveryState = recoveryState
+        self.effortState = effortState
+        self.restState = restState
     }
 
     /// App Group suite the app and widget both use. Injected from the `APP_GROUP_ID` build setting
@@ -91,12 +109,15 @@ public struct WidgetSnapshot: Codable, Equatable {
         WidgetSnapshot(recovery: 72, bpm: 58, batteryPct: 84, bonded: true, updated: Date(),
                        effort: 42, rest: 81, hrv: 64, restingHr: 52,
                        sleepMinutes: 462, connected: true, heartRateObservedAt: Date(),
-                       scoreDay: Self.dayFormatter.string(from: Date()))
+                       scoreDay: Self.dayFormatter.string(from: Date()),
+                       recoveryState: .measured, effortState: .measured, restState: .measured)
     }
 
     /// Honest runtime fallback; sample numbers are reserved for gallery previews.
     static var unavailable: WidgetSnapshot {
-        WidgetSnapshot(recovery: nil, bpm: nil, batteryPct: nil, bonded: false, updated: .distantPast)
+        WidgetSnapshot(recovery: nil, bpm: nil, batteryPct: nil, bonded: false,
+                       updated: .distantPast, recoveryState: .missing,
+                       effortState: .missing, restState: .missing)
     }
 
     /// Read the last-published snapshot from the shared suite, if any.
@@ -120,8 +141,15 @@ public struct WidgetSnapshot: Codable, Equatable {
         case current, recent, stale, unavailable
     }
 
+    /// Tolerate small wall-clock disagreement between processes, but never let a materially future
+    /// publication or sensor timestamp become a current-looking health value.
+    public static let maximumFutureClockSkew: TimeInterval = 5 * 60
+
     public func freshness(at now: Date = Date()) -> Freshness {
-        guard updated != .distantPast else { return .unavailable }
+        guard updated != .distantPast,
+              updated <= now.addingTimeInterval(Self.maximumFutureClockSkew) else {
+            return .unavailable
+        }
         let age = max(0, now.timeIntervalSince(updated))
         if age <= 20 * 60 { return .current }
         if age <= 2 * 60 * 60 { return .recent }
@@ -136,7 +164,11 @@ public struct WidgetSnapshot: Codable, Equatable {
     /// Freshness of the actual HR packet, not of the widget publication. An older snapshot has no
     /// `heartRateObservedAt`, so it resolves to `.unavailable` rather than being upgraded to live.
     public func heartRateFreshness(at now: Date = Date()) -> Freshness {
-        guard bpm != nil, let observed = heartRateObservedAt else { return .unavailable }
+        guard bpm != nil,
+              let observed = heartRateObservedAt,
+              observed <= now.addingTimeInterval(Self.maximumFutureClockSkew) else {
+            return .unavailable
+        }
         let age = max(0, now.timeIntervalSince(observed))
         if age <= Self.liveHeartRateMaxAge { return .current }
         if age <= 2 * 60 * 60 { return .recent }
@@ -160,12 +192,69 @@ public struct WidgetSnapshot: Codable, Equatable {
         return observed.addingTimeInterval(Self.liveHeartRateMaxAge)
     }
 
+    public var recoveryPresentationState: WidgetScoreState {
+        Self.resolvedScoreState(value: recovery, declared: recoveryState)
+    }
+
+    public var effortPresentationState: WidgetScoreState {
+        Self.resolvedScoreState(value: effort, declared: effortState)
+    }
+
+    public var restPresentationState: WidgetScoreState {
+        Self.resolvedScoreState(value: rest, declared: restState)
+    }
+
     public var hasDailySignal: Bool {
-        recovery != nil || effort != nil || rest != nil
+        recoveryPresentationState != .missing
+            || effortPresentationState != .missing
+            || restPresentationState != .missing
     }
 
     public var hasVitals: Bool {
         bpm != nil || hrv != nil || restingHr != nil
+    }
+
+    /// Produces the values a widget may present at a specific timeline instant.
+    ///
+    /// Daily values remain useful when the app has not republished recently, but only when their logical
+    /// day is known. A heart-rate value requires its original observation time and is withheld once it is
+    /// stale; an old app build or held value must never become an undated current-looking number.
+    public func presented(at now: Date = Date()) -> WidgetSnapshot {
+        guard freshness(at: now) != .unavailable else { return .unavailable }
+
+        var presented = self
+        if scoreDay == nil {
+            presented.recovery = nil
+            presented.effort = nil
+            presented.rest = nil
+            presented.hrv = nil
+            presented.restingHr = nil
+            presented.sleepMinutes = nil
+            presented.recoveryState = .missing
+            presented.effortState = .missing
+            presented.restState = .missing
+        } else {
+            presented.recoveryState = recoveryPresentationState
+            presented.effortState = effortPresentationState
+            presented.restState = restPresentationState
+        }
+        if heartRateFreshness(at: now) == .stale
+            || heartRateFreshness(at: now) == .unavailable {
+            presented.bpm = nil
+            presented.heartRateObservedAt = nil
+        }
+        if !hasCurrentConnection(at: now) {
+            presented.connected = false
+        }
+        return presented
+    }
+
+    private static func resolvedScoreState(
+        value: Int?,
+        declared: WidgetScoreState?
+    ) -> WidgetScoreState {
+        if value != nil { return .measured }
+        return declared == .calibrating ? .calibrating : .missing
     }
 
     private static let dayFormatter: DateFormatter = {

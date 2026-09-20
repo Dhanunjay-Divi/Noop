@@ -32,6 +32,7 @@ from app.managed_repository import (
 )
 from app.managed_safety_repository import (
     ManagedSafetyPushService,
+    ManagedSafetyRepeatPolicy,
     PostgresManagedSafetyRepository,
 )
 from app.ownership_deletion_lifecycle import (
@@ -68,6 +69,7 @@ class ManagedLifecycleResult:
     safety_push_retryable_failures: int = 0
     safety_push_terminal_failures: int = 0
     safety_push_receipt_failures: int = 0
+    safety_push_repeated_claimed: int = 0
     ownership_deletion_claimed: int = 0
     ownership_deletion_processing_examined: int = 0
     ownership_deletion_not_required: int = 0
@@ -233,6 +235,9 @@ class ManagedLifecycleRunner:
                 ),
                 safety_push_receipt_failures=(
                     push_result.receipt_failures if push_result is not None else 0
+                ),
+                safety_push_repeated_claimed=(
+                    push_result.repeated_claimed if push_result is not None else 0
                 ),
                 ownership_deletion_claimed=ownership_before.claimed,
                 ownership_deletion_processing_examined=(
@@ -509,6 +514,7 @@ async def _run() -> ManagedLifecycleResult:
                         timeout_seconds=settings.managed_push_timeout_seconds,
                     ),
                     max_concurrency=settings.managed_push_max_concurrency,
+                    repeat_policy=ManagedSafetyRepeatPolicy.from_environment(),
                 )
             return await ManagedLifecycleRunner(
                 repository,

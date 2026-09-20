@@ -17,6 +17,51 @@ public struct ManagedHistoryExportEntry: Equatable, Sendable {
     }
 }
 
+public enum ManagedHistoryExportStateError: Error, Equatable, Sendable {
+    case unusableStagedArchive
+}
+
+public enum ManagedHistoryStagedArchiveValidator {
+    public typealias EntryReader =
+        (_ path: String, _ maximumBytes: Int) throws -> Data
+
+    public static func validate(
+        manifest: ManagedHistoryExportManifest,
+        entryPaths: [String],
+        read: EntryReader
+    ) throws {
+        let expectedPaths =
+            manifest.chunks.map(\.path) + manifest.documents.map(\.path)
+        guard expectedPaths.count == manifest.exportedObjects,
+              Set(expectedPaths).count == expectedPaths.count,
+              entryPaths.count == expectedPaths.count,
+              Set(entryPaths) == Set(expectedPaths) else {
+            throw ManagedHistoryExportStateError.unusableStagedArchive
+        }
+
+        for chunk in manifest.chunks {
+            guard chunk.compressedBytes >= 0 else {
+                throw ManagedHistoryExportStateError.unusableStagedArchive
+            }
+            let data = try read(chunk.path, chunk.compressedBytes)
+            guard data.count == chunk.compressedBytes,
+                  ManagedDigest.sha256(data) == chunk.sha256 else {
+                throw ManagedHistoryExportStateError.unusableStagedArchive
+            }
+        }
+        for document in manifest.documents {
+            guard document.archiveBytes >= 0 else {
+                throw ManagedHistoryExportStateError.unusableStagedArchive
+            }
+            let data = try read(document.path, document.archiveBytes)
+            guard data.count == document.archiveBytes,
+                  ManagedDigest.sha256(data) == document.archiveSHA256 else {
+                throw ManagedHistoryExportStateError.unusableStagedArchive
+            }
+        }
+    }
+}
+
 public struct ManagedHistoryExportProgress: Equatable, Sendable {
     public enum Phase: String, Sendable {
         case preparing
@@ -901,8 +946,8 @@ public actor ManagedHistoryExporter {
     ) throws {
         let paths = checkpoint.chunks.map(\.path)
             + checkpoint.documents.map(\.path)
-        let chunkBytes = checkpoint.chunks.reduce(Int64(0)) {
-            $0 + Int64($1.compressedBytes)
+        let chunkBytes = try checkpoint.chunks.reduce(Int64(0)) {
+            try add($0, Int64($1.compressedBytes))
         }
         let expiresAt = ManagedTimestamp.milliseconds(
             iso8601: checkpoint.expiresAt

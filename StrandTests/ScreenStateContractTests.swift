@@ -424,6 +424,12 @@ final class ScreenStateContractTests: XCTestCase {
         let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
 
         XCTAssertTrue(today.contains("RecoveryBandPresentation.label(for: score)"))
+        XCTAssertTrue(liquidToday.contains(
+            "RecoveryBandPresentation.gaugeColors(for: score)"
+        ))
+        XCTAssertTrue(liquidToday.contains(
+            "RecoveryBandPresentation.label(for: score)"
+        ))
         XCTAssertTrue(calendar.contains(
             "RecoveryBandPresentation.color(for: v).opacity(0.9)"
         ))
@@ -1060,10 +1066,11 @@ final class ReferenceSurfaceContractTests: XCTestCase {
             "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
         ))
         XCTAssertTrue(classic.contains("StrandPalette.recoveryGaugeColors(s).base"))
-        XCTAssertTrue(liquid.contains("StrandPalette.recoveryGaugeColors(score)"))
+        XCTAssertTrue(liquid.contains("RecoveryBandPresentation.gaugeColors(for: score)"))
         XCTAssertTrue(recoveryRing.contains("StrandPalette.recoveryGaugeStops(score)"))
+        XCTAssertTrue(androidToday.contains("TodayRecoveryHeroTone.RECOVERY ->"))
         XCTAssertTrue(androidToday.contains(
-            "TodayRecoveryHeroTone.RECOVERY -> Palette.recoveryGaugeColors"
+            "RecoveryBandPresentation.gaugeColors(requireNotNull(recovery))"
         ))
         XCTAssertTrue(androidToday.contains("tint = todayRecoveryHeroColors("))
         XCTAssertTrue(androidRing.contains("Palette.recoveryGaugeStops(score)"))

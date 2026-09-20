@@ -68,6 +68,15 @@ struct LiquidTodayView: View {
             .filter { hydrationEnabled || $0 != .hydration }
     }
 
+    /// Live Session controls the paired band, so viewer processes must not
+    /// advertise or open it even when the shared beta preference is enabled.
+    static func showsCollectorLiveSessionEntry(
+        liveSessionsBeta: Bool,
+        runtimeRole: AppRuntimeRole = .currentPlatform
+    ) -> Bool {
+        liveSessionsBeta && runtimeRole.allowsLocalCollection
+    }
+
     // async-loaded via the confirmed Repository accessors
     @State private var restScore: Double?          // sleep_performance, day-keyed
     /// Raw resolver source ids for the three scores, keyed by recovery / strain / sleep_performance.
@@ -987,7 +996,7 @@ struct LiquidTodayView: View {
         case .hero:
             heroCard
         case .liveSession:
-            if liveSessionsBeta {
+            if Self.showsCollectorLiveSessionEntry(liveSessionsBeta: liveSessionsBeta) {
                 liveSessionStartRow
             }
         case .why:
@@ -1339,7 +1348,7 @@ struct LiquidTodayView: View {
     private var recoveryHeroColors: (base: Color, tip: Color) {
         switch chargeDisplay.heroTone {
         case .recovery(let score):
-            return StrandPalette.recoveryGaugeColors(score)
+            return RecoveryBandPresentation.gaugeColors(for: score)
         case .baselineReady:
             return (StrandPalette.chargeColor, StrandPalette.chargeBright)
         case .learning:
@@ -1365,7 +1374,7 @@ struct LiquidTodayView: View {
 
     private var recoveryHeroCaption: String {
         if let score = chargeDisplay.pct {
-            return StrandPalette.recoveryState(score).localizedCapitalized
+            return RecoveryBandPresentation.label(for: score)
         }
         return chargeDisplay.calibrationCaption
             ?? chargeDisplay.stateLabel

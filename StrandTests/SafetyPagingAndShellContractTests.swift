@@ -1698,7 +1698,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             "scheduleManagedDocumentProfileBinding(accountScopeHash: nil)"
         ))
         XCTAssertTrue(service.contains(
-            "scheduleManagedDocumentProfileBinding(accountScopeHash: scope)"
+            "scheduleManagedDocumentProfileBinding(\n            accountScopeHash: binding.dataScopeHash"
         ))
         XCTAssertTrue(service.contains(
             "try await store.activateManagedDocumentProfile("

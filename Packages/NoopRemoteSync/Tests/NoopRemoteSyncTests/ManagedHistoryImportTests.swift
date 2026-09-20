@@ -126,6 +126,73 @@ final class ManagedHistoryImportTests: XCTestCase {
         XCTAssertEqual(calls, 1)
     }
 
+    func testManifestChunkByteOverflowFailsClosedBeforeLocalMutation()
+        async throws
+    {
+        try await assertManifestChunkByteTotalRejected(
+            compressedBytes: Int.max
+        )
+    }
+
+    func testManifestChunkByteUnderflowFailsClosedBeforeLocalMutation()
+        async throws
+    {
+        try await assertManifestChunkByteTotalRejected(
+            compressedBytes: Int.min
+        )
+    }
+
+    private func assertManifestChunkByteTotalRejected(
+        compressedBytes: Int
+    ) async throws {
+        let fixture = try makeFixture(bpms: [68, 72], formatVersion: 1)
+        let chunks = fixture.manifest.chunks.map { chunk in
+            ManagedHistoryExportManifest.Chunk(
+                path: chunk.path,
+                chunkID: chunk.chunkID,
+                sourceID: chunk.sourceID,
+                dataClass: chunk.dataClass,
+                schemaVersion: chunk.schemaVersion,
+                eventStart: chunk.eventStart,
+                eventEnd: chunk.eventEnd,
+                compression: chunk.compression,
+                contentType: chunk.contentType,
+                sha256: chunk.sha256,
+                compressedBytes: compressedBytes,
+                uncompressedBytes: chunk.uncompressedBytes,
+                objectGeneration: chunk.objectGeneration
+            )
+        }
+        let malformed = ImportFixture(
+            manifest: ManagedHistoryExportManifest(
+                format: fixture.manifest.format,
+                formatVersion: fixture.manifest.formatVersion,
+                createdAt: fixture.manifest.createdAt,
+                snapshotAt: fixture.manifest.snapshotAt,
+                changeSequence: fixture.manifest.changeSequence,
+                dataClasses: fixture.manifest.dataClasses,
+                selectedObjects: chunks.count,
+                selectedChunkBytes: Int64.max,
+                exportedObjects: chunks.count,
+                exportedChunkBytes: Int64.max,
+                chunks: chunks,
+                documents: []
+            ),
+            entries: fixture.entries
+        )
+        let restore = ImportRestoreRecorder()
+
+        do {
+            _ = try await importFixture(malformed, restore: restore)
+            XCTFail("Expected byte-total overflow rejection")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let calls = await restore.applyCalls()
+        XCTAssertEqual(calls, 0)
+    }
+
     private func importFixture(
         _ fixture: ImportFixture,
         resumeFrom: ManagedHistoryImportCheckpoint? = nil,

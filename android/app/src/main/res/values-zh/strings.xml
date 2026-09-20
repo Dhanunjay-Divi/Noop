@@ -2191,6 +2191,12 @@
     <string name="health_live_display_paused">实时显示已暂停</string>
     <string name="onboarding_page_animation_label">引导页面</string>
     <string name="onboarding_direct_local_bluetooth">直接连接的本地蓝牙</string>
+    <string name="onboarding_data_boundary_configured_title">激活手环账户</string>
+    <string name="onboarding_data_boundary_configured_body">手环读数会先在此手机上采集。此已配置版本要求先登录并完成手环认领，才能完成设置。除非您另外启用并同意托管数据功能，否则不会上传健康数据。</string>
+    <string name="onboarding_data_boundary_exploration_title">本地探索</string>
+    <string name="onboarding_data_boundary_exploration_body">此版本不会创建账户或上传健康数据。设置保留在此手机上；手环所有权激活和托管云功能不可用。</string>
+    <string name="onboarding_bluetooth_boundary_configured">NOOP 通过低功耗蓝牙直接连接 Noop Band。手环发现和实时读数保留在此手机上。已配置的账户服务仅用于账户和手环所有权激活；传输健康数据需要单独明确同意。</string>
+    <string name="onboarding_bluetooth_boundary_exploration">NOOP 通过低功耗蓝牙直接连接 Noop Band。手环发现、实时读数和设置都保留在此手机上。此探索版本已关闭账户操作和云端上传。</string>
     <string name="onboarding_bluetooth_permission_prompt">系统提示出现时，请选择“允许”，以便 NOOP 找到 Noop Band。</string>
     <string name="onboarding_date_of_birth">出生日期</string>
     <string name="onboarding_age_years">%1$d 岁</string>
@@ -2697,6 +2703,13 @@
     <string name="ownership_plan_save_plus">保存 NOOP+ 偏好</string>
     <string name="ownership_plan_saving">正在保存…</string>
     <string name="ownership_onboarding_continue_locked">认领手环后继续</string>
+    <string name="ownership_onboarding_exploration_title">在本地探索 NOOP</string>
+    <string name="ownership_onboarding_exploration_detail">此版本未配置账户和手环所有权激活。</string>
+    <string name="ownership_onboarding_local_mode_title">以本地模式继续</string>
+    <string name="ownership_onboarding_local_mode_detail">您无需创建账户即可完成引导并查看应用。设置数据保留在此手机上。</string>
+    <string name="ownership_onboarding_unavailable_features_title">此版本不可用</string>
+    <string name="ownership_onboarding_unavailable_features_detail">手环所有权激活、账户恢复和托管云功能需要已配置的正式版本。</string>
+    <string name="ownership_onboarding_unconfigured_boundary">继续后，此版本将保持本地探索模式。它不会创建账户、认领手环或上传数据。</string>
     <string name="ownership_screen_title">手环账户</string>
     <string name="ownership_screen_subtitle">所有权激活与 NOOP+ 相互独立，且绝不存储健康数据。</string>
     <string name="ownership_unavailable_title">手环所有权尚未启用</string>

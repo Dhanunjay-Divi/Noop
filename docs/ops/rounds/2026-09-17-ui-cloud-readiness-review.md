@@ -2,20 +2,20 @@
 
 ## Status
 
-- State: `local implementation and verification complete; protected integration is recorded by the branch pull request`
+- State: `historical checkpoint; final evidence and authority scope are superseded by the 2026-09-19 round`
 - Owner: project team
 - Branch: `codex/ui-cloud-readiness-20260917`
 - Start commit: `b688b3b725cd497e96a31b28540a219bf50446e1`
 - End implementation commit: commit containing this record
 - Record commit or PR: protected pull request opened from this branch
-- Final local verification counts: macOS 2,142 passed plus 1 skip; iPhone shell
+- Final local verification counts: macOS 2,144 passed plus 1 skip; iPhone shell
   38 passed plus 1 skip; Android Full and Demo 4,883 tests per variant plus 7
   skips; API 35 114 passed plus 2 private-pilot skips and Review Sample 1/1;
   server 647 passed plus 1 skip; 11 Swift package/tool build-and-test pairs,
   6 OpenTofu tests, and 134 bounded-runner/required/trusted-control tests passed
-- Hosted required contexts: recorded on the protected pull request for the end
-  implementation commit
-- Protected merge SHA: recorded by the protected pull request after merge
+- Hosted required contexts and protected merge: not established by this
+  checkpoint; pull request `#16` and the 2026-09-19 successor round are
+  authoritative for the replacement candidate.
 
 ## Objective
 
@@ -116,6 +116,13 @@ Success means:
   10 GiB free-disk floors, and output/memory/disk pressure terminates the
   complete process group. Android managed-device CI now uploads capped logs
   only for failure/cancellation.
+- Added a deterministic Safety paging smoke that routes preselected dummy
+  registrations through the production token codec, managed push service, and
+  FCM payload builder without provider traffic. It captures a test-only owner
+  confirmation plus two dummy emergency-contact deliveries across iOS and
+  Android and rejects location, health values, and names in the push. Accepted
+  contact selection/revocation and latest-only location persistence/deletion
+  remain separate PostgreSQL integration-test boundaries.
 
 ## External finding disposition
 
@@ -146,7 +153,11 @@ specification:
   round.
 - Source/provenance or formula impact: Recovery/Rest explanation and revision
   contracts were aligned without changing unvalidated physiology; no
-  physiological-accuracy claim follows from these source edits or tests.
+  physiological-accuracy claim follows from these source edits or tests. Direct
+  phone/watch or device step counts remain preferred over NOOP motion estimates.
+  Exact-band rejection of stationary hand movement remains a physical
+  ground-truth gate because the supplier SDK exposes firmware-computed totals,
+  not enough evidence for reliable app-side false-step removal.
 - Permissions/network disclosure impact: no new transfer or permission is
   enabled by this review.
 - Cloud-authority impact: none. NOOP+ remains opt-in and cannot become a
@@ -178,6 +189,11 @@ specification:
 - Cross-platform/backend correlation: no new correlation at round start.
 - Remaining blind spots: OS and hardware behavior that requires physical
   devices.
+- Safety smoke evidence is deterministic and bounded: it reports only fixed
+  roles, platforms, target kinds, payload category, route, priority, generic
+  localization keys, and aggregate delivery counts. It emits no token, account,
+  installation, incident, capability, phone, name, health, or coordinate value
+  and makes no external network request.
 
 ## Evidence
 
@@ -191,12 +207,13 @@ specification:
 | Final focused Android Full-debug unit run | 50 passed, 0 failed/errors/skips across `PrimaryNavigationContractTest`, `FormulaPublicationGateTest`, `RemoteSyncCoordinatorTest`, `ManagedCloudSchedulerTest`, and `IntelligenceDaySourceTokenTest`; build success | The exact-current navigation/accessibility, formula-publication, remote-sync, managed-retry, and bounded historical-diagnostic contracts compile and pass on the JVM | Demo flavor, lint, APK, instrumentation, emulator, OEM, or physical behavior |
 | Exact round-owned resource cleanup | The earlier checksummed session cleanup removed 47 closed September 18 session JSONLs totaling 51.92 GiB while preserving the current goal and active agents. Final September 19 cleanup then removed exactly 16 regeneratable targets: Android app/root build output and worktree `.gradle`, the local OpenTofu cache, 11 Swift package/tool `.build` directories, and the synthetic server virtualenv; synthetic database `noop_ui_cloud_deletion_20260918_r1` was dropped. Every target and database absence was verified, no matching DerivedData remained, and free disk rose from about 15 GiB to 20 GiB. | Enumerated round-owned generated resources were removed without deleting source, credentials, sessions, simulators, user data, or unidentified external resources | Future cache growth, unrelated application memory, hosted resources, or product correctness |
 | Terminal-output memory guard | The bounded runner discards child output unless a private log is explicitly requested, checks explicit logs every 100 ms, stops the complete process group at the default 128 MiB ceiling, truncates overshoot, and reports `resource-output`; its CLI now refuses to start or continue below 10% free system memory or 10 GiB free disk unless a narrow recorded caller override is supplied. All eight Android managed-device CI calls retain capped private logs as uploaded diagnostics. The active iTerm profile has unlimited scrollback disabled with a 1,000-line limit. The final runner/required/trusted-control regression executed 134 tests in 27.006 seconds with zero failures; iTerm stayed near 219 MiB with 48% free system memory. | Repository heavy commands cannot flood iTerm merely because a caller omitted `--log-file`; explicit runner logs cannot grow without a hard ceiling; and output, timeout, resource-pressure, and process-group cleanup paths are regression-covered | Commands run outside the bounded runner, unrelated applications, OS-wide faults, or a user changing terminal preferences |
-| Complete Apple wall | macOS 2,142 passed and 1 intentional skip; iPhone shell 38 passed and 1 intentional skip; unsigned iOS, widgets, Watch, and Watch complications builds passed; ownership contract 8/8 passed after localization | Exact-current Apple source compiles across app targets and the complete app/simulator contracts pass | Physical BLE, Watch connectivity, notification delivery, battery, physiology, or physical accessibility |
+| Complete Apple wall | macOS 2,144 passed and 1 intentional skip; iPhone shell 38 passed and 1 intentional skip; unsigned iOS, widgets, Watch, and Watch complications builds passed; ownership contract 8/8 passed after localization | Exact-current Apple source compiles across app targets and the complete app/simulator contracts pass | Physical BLE, Watch connectivity, notification delivery, battery, physiology, or physical accessibility |
 | Apple visual and accessibility review | The preserved tab-shell output revalidated 21 scenarios on each of iPhone 17 Pro Max and 17e plus 42 unique manifest rows. All 11 expected Daily Plan captures revalidated at 1170x2532 with clean crash logs and distinct check-in/stop states. Representative normal, dark, contrast, and accessibility-size renders were inspected during capture. | No blocking overlap or clipping was found in the exercised simulator states, and cleanup did not destroy the evidence | VoiceOver order, touch ergonomics, physical contrast, haptics, or device performance |
 | Complete Android wall | Full and Demo each completed 4,883 unit tests with 7 skips and 0 failures after the final stale expectation was corrected; both lint variants, APKs, and instrumentation source compilation passed | Exact-current Android source compiles and passes both shipped variants | OEM/background/BLE/haptic/battery/attestation or physical accessibility |
 | Android API 35 lanes | production shell passed 114 tests with 2 expected private-pilot skips; fresh Review Sample passed 1/1 | Current packaging, WorkManager startup, navigation, and production-shell runtime contracts pass on the managed emulator | OEM, terminated-process delivery, physical sensors, or hardware behavior |
 | Swift packages and tools | all 11 build-and-test pairs passed: nine packages plus `StudyHarness` and `Backfill` | Shared protocol, storage, analytics, import, design, access, managed-sync, and tool code compiles and tests | App signing, live cloud, or hardware behavior |
 | Server wall | PostgreSQL-backed suite passed 647 tests with 1 intentional skip; Ruff check and format check passed; restore-application smoke passed | Ownership deletion declarations and durable progress, restricted managed erasure coordination, feedback migration, backup/restore, tenancy, Safety, and server contracts pass against the test database | Production credentials, public runtime, regional recovery, load, or live provider deletion |
+| Synthetic Safety paging smoke | `Tools/safety-paging-smoke.py` reported 3/3 installations and 2/2 preselected dummy emergency-contact roles reached for a test-only owner preview, one iOS contact, and one Android contact. Its direct pytest passed 1/1 and Ruff passed. Three PostgreSQL tests passed: accepted-contact selection with encrypted token opening, acknowledgement and revocation; latest-only location with direct resolved-state deletion; and transactional expiry with direct deletion. The Apple `SafetyPagingAndShellContractTests` passed 51/51. Android Full and Demo each passed 45/45 across payload, scheduler, runtime-notification, and paging-policy contracts. Database `noop_safety_paging_20260919_r3`, the temporary Python environment, and test logs were removed after evidence. | Dummy owner-preview and iOS/Android contact payload construction make no provider request and contain no name, health value, or coordinate. Separate database tests cover accepted-recipient and precise-location contracts, while both client suites cover fixed payload parsing, notification routing, private generic copy, and bounded lifecycle behavior. | APNs/FCM receipt, lock-screen presentation on a physical phone, background wake, carrier/SMS/voice delivery, physical-device acknowledgement, or emergency suitability |
 | OpenTofu ownership defaults | 6 of 6 tests passed | Managed ownership deletion coordination stays default-off and wires only a separate secret-backed lifecycle database credential when explicitly enabled | Applied cloud IAM, production secrets, runtime reachability, or public traffic |
 | Localization and policy walls | The September 19 post-documentation rerun passed release controls, calibration, terminology, required-CI, trusted self-verification, distribution provenance, private-data, health-claims across 1,273 files, changed-file localization, complete Apple/Android localization, validation of all 75 operations records, and `git diff --check`. The terminology snapshot contains 17,702 classified occurrences across 1,565 path/category groups, zero forbidden mappings, and is pinned by required-CI. | The exact pre-commit working tree satisfies the repository-controlled localization, policy, claim, terminology, operations, and trust contracts | Counsel approval, physiological truth, signing, stores, hosted exact-SHA checks, or production authorization |
 | Hosted protected checks and integration | The protected pull request for the end implementation commit records the exact candidate SHA, ten required contexts, merge result, and protected-main verification | Exact-head source integration only after recorded success | Signing, stores, legal, carrier, hardware, physiology, or production launch |
@@ -213,6 +230,9 @@ specification:
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: all supplier-band, BLE, Watch connectivity, background,
   battery, haptic, notification-delivery, and physiological validation.
+- Step-count accuracy is not claimed: the exact production firmware still
+  needs synchronized manual/video ground truth for stationary hand-motion
+  false positives and representative walking conditions on both wrists.
 
 ## Git and release state
 
@@ -227,11 +247,13 @@ specification:
   `docs/handoff/HARDWARE-AND-PREMIUM-STRATEGY.md`,
   `docs/handoff/RELEASE-BLOCKERS.md`, `docs/ops/ACTIVE.md`,
   `docs/ops/rounds/INDEX.md`, and this round record.
-- Commits: local implementation commits through `431c4c60`; final consolidated
-  record commit pending.
-- Branch and remote state: isolated local branch, not pushed during incomplete
-  local verification.
-- Repository visibility verified: not re-verified in this round yet.
+- Commits: local implementation commits through `431c4c60` and initial
+  candidate `9d859d9a`; blocker remediation and the exact final head are
+  recorded by protected PR `#16`.
+- Branch and remote state: pushed to protected PR `#16`. The initial candidate's
+  remaining Apple, Android, and server workflows were canceled after a late
+  independent audit found portability blockers; it was not merged.
+- Repository visibility verified: private on 2026-09-19.
 - Version/build impact: none at round start.
 - Release or distribution impact: no deployment or release action.
 
@@ -259,6 +281,10 @@ specification:
 - The first-party band SDK/protocol, representative hardware, signing/store,
   legal, carrier, production-runtime, and physical accessibility/device gates
   remain release blockers outside this source-only review.
+- Final-band step accuracy remains unproven. The current source correctly
+  prefers phone/watch or device counts and labels motion-only output as an
+  estimate, but seated hand-motion rejection must pass the supplier acceptance
+  matrix before a measured-step claim.
 
 ## Next round
 

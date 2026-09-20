@@ -7,18 +7,21 @@ and [`docs/IOS.md`](docs/IOS.md) covers the iOS target. Read this first; follow 
 
 ## What NOOP is (and the hard scope limits)
 
-NOOP is a **local-first, on-device** companion app for WHOOP 4.0 and 5.0/MG straps (with
+NOOP is currently a **local-first, on-device** companion app for WHOOP 4.0 and 5.0/MG straps (with
 **experimental** Oura support in the tree — gated behind `ExperimentalBrand`, not a shipped supported
 strap). It pairs over Bluetooth, stores everything in on-device SQLite, and computes recovery / strain
 / HRV / sleep locally. There is **no required account, Noop-operated cloud, or telemetry**, and the
 public distribution is permitted only after its signing, privacy, device-validation,
 and redistribution gates pass.
 That sentence describes the current compatible-device implementation. The
-first-party NOOP Band release target adds one narrow exception: initial band
-claim, replacement-phone authorization, and approved ownership release use a
-NOOP ownership account. After activation, collection, scoring, history, export,
-and supported local device control must continue without NOOP+, payment,
-subscription, or continuous network access.
+approved first-party target in D-059 is a staged cloud-authoritative account
+model for durable history, canonical metric publication, recommendations, and
+cross-device state. One phone remains the encrypted edge collector with a
+bounded offline working set, immediate Safety initiation, and enough state for
+safe offline use. This target is not an authorization to flip current users or
+delete local history: every data class moves only after explicit migration,
+dual-run parity, provenance, restore and deletion, rollback, security,
+performance, and physical-device evidence.
 Optional network features are explicit opt-ins: bring-your-own-provider Coach, Oura import, and
 replication/private friend sharing through a server the user operates. A separately consented NOOP+
 managed-sync service may be developed, but it must never become a dependency of core collection,
@@ -26,14 +29,15 @@ storage, metrics, export, or device control. The core BLE, storage, and analytic
 fully useful offline.
 
 These are hard constraints, not preferences. A PR is out of scope if it:
-- makes ongoing core collection, scoring, history, export, or local device
-  control depend on a Noop-operated account/cloud, NOOP+, payment, or
-  subscription; the first-party ownership claim exception may hold only
-  identity/control records and must not imply managed-health-data consent;
+- makes BLE collection, immediate Safety initiation, the bounded offline
+  working set, export, or local device control depend on payment, NOOP+, or a
+  continuously available network; cloud-authoritative history and formulas
+  require the staged gates in D-059 and separate managed-health-data consent;
 - enables health-data network transfer by default or sends data anywhere other
   than the exact destination and data classes the user explicitly selected;
-- moves core metric computation behind NOOP+, withholds local history to force an upgrade, or
-  silently enrolls an existing user into managed sync;
+- withholds protection, restore, export, or current safe offline use to force an
+  upgrade, silently enrolls an existing user, or prunes local history before an
+  exact server acknowledgement and proven restore;
 - weakens self-hosted sharing boundaries: member credentials must be scoped, secrets stored securely,
   invites short-lived, and every shared metric revocable server-side;
 - adds analytics/telemetry/crash-reporting that phones home;
@@ -74,9 +78,10 @@ strap, no CoreBluetooth. Never add `import AppKit` / `import UIKit` / `import Co
 Android is an independent reimplementation of the same logic, **not** a port that shares code with
 Swift. So:
 
-- **Analytics and stored data must be byte-identical across Swift and Kotlin.** If you change a
-  decoder, an analytics formula, a migration, or a stored value on one platform, change the twin on
-  the other in the same PR (or explicitly call out why not). "It's Compose vs SwiftUI" is *not* a
+- **Analytics and stored data must remain deterministic across Swift, Kotlin,
+  and the canonical server engine during migration.** A formula change updates
+  every active shadow implementation and parity fixture until D-059 authorizes
+  retirement of a client implementation. "It's Compose vs SwiftUI" is not a
   license to let the numbers diverge.
 - **UI parity is feature-level, not pixel-level.** SwiftUI Charts vs Compose Canvas legitimately
   differ; the *behavior* and the *data* must not.

@@ -17,9 +17,7 @@ def test_canonical_registry_pins_current_client_revisions_and_contracts() -> Non
         ("daily_effort", "noop-effort-v2"),
     }
     assert contracts[("recovery", "noop-charge-v2")].input_schema_revision == 1
-    assert contracts[("daily_effort", "noop-effort-v2")].output_unit == (
-        "score_0_100"
-    )
+    assert contracts[("daily_effort", "noop-effort-v2")].output_unit == ("score_0_100")
     assert {
         name
         for name, field in contracts[

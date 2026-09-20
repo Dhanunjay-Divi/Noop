@@ -1,4 +1,5 @@
 import Foundation
+@testable import NoopRemoteSync
 @testable import Strand
 import XCTest
 
@@ -90,12 +91,27 @@ final class ManagedCloudRetryContractTests: XCTestCase {
 
     func testCompletedAccountLifecyclesClearEveryRetryScope() throws {
         let apple = try source("StrandiOS/System/ManagedCloudService.swift")
-        XCTAssertGreaterThanOrEqual(
-            apple.components(
-                separatedBy: "ManagedCloudRetryScheduler.clearAll()"
-            ).count - 1,
-            3
+        let clearEnrollment = try section(
+            apple,
+            from: "    private func clearEnrollment()",
+            to: "    private func clearSocialPresentation()"
         )
+        let disconnect = try section(
+            apple,
+            from: "    func disconnect() async",
+            to: "    private func unregisterManagedMessagingInstallation()"
+        )
+        let completedErasure = try section(
+            apple,
+            from: "    private func completeLocalErasureState()",
+            to: "    private func purgeManagedDocumentLocalState()"
+        )
+
+        XCTAssertTrue(
+            clearEnrollment.contains("ManagedCloudRetryScheduler.clearAll()")
+        )
+        XCTAssertTrue(disconnect.contains("clearEnrollment()"))
+        XCTAssertTrue(completedErasure.contains("clearEnrollment()"))
         XCTAssertTrue(
             apple.contains(
                 "stopManagedSafetyLocationSharing(reason: \"signed_out\")\n"
@@ -117,6 +133,135 @@ final class ManagedCloudRetryContractTests: XCTestCase {
         )
         let body = String(apple[start.lowerBound..<end.lowerBound])
         XCTAssertFalse(body.contains("ManagedCloudRetryScheduler.clear"))
+    }
+
+    func testManagedHistoryExportResetPolicyClearsOnlyUnusableState() {
+        let resetErrors: [Error] = [
+            ManagedHistoryExportStateError.unusableStagedArchive,
+            ManagedStorageError.invalidResponse,
+            ManagedStorageError.decoding,
+            ManagedStorageError.cursorExpired(minimumSequence: nil),
+            ManagedStorageError.notFound,
+            ManagedStorageError.conflict,
+            ManagedStorageError.digestMismatch,
+            ManagedHistoryArchiveError.invalidArchive,
+        ]
+        for error in resetErrors {
+            XCTAssertTrue(
+                managedHistoryExportNeedsReset(after: error),
+                "Expected reset for \(error)"
+            )
+        }
+
+        let resumableErrors: [Error] = [
+            ManagedStorageError.transport,
+            ManagedStorageError.authentication,
+            ManagedStorageError.forbidden,
+            ManagedStorageError.policyChanged,
+            ManagedStorageError.quotaExceeded,
+            ManagedStorageError.server(status: 503),
+        ]
+        for error in resumableErrors {
+            XCTAssertFalse(
+                managedHistoryExportNeedsReset(after: error),
+                "Expected checkpoint preservation for \(error)"
+            )
+        }
+        XCTAssertFalse(
+            managedHistoryExportNeedsReset(
+                after: ManagedHistoryArchiveError.invalidArchive,
+                at: .localArchiveOutput
+            )
+        )
+    }
+
+    func testAppleExportRecoveryClearsCorruptStagedState() async throws {
+        let fixture = try await managedHistoryTransferFixture()
+        try Data("corrupt".utf8).write(to: fixture.stagedEntryURL)
+
+        do {
+            try await fixture.store.validateStagedExport(
+                manifest: fixture.manifest
+            )
+            XCTFail("Expected corrupt staged state")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedHistoryExportStateError,
+                .unusableStagedArchive
+            )
+            let reset = await applyManagedHistoryExportRecovery(
+                after: error,
+                at: .stagedState,
+                clearExport: {
+                    await fixture.store.clearExport()
+                }
+            )
+            XCTAssertTrue(reset)
+        }
+
+        let checkpoint = try await fixture.store.loadExportCheckpoint()
+        XCTAssertNil(checkpoint)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: fixture.stagedEntryURL.path
+            )
+        )
+    }
+
+    func testAppleExportRecoveryPreservesStateForTransientOutputFailure()
+        async throws
+    {
+        let fixture = try await managedHistoryTransferFixture()
+        try await fixture.store.validateStagedExport(
+            manifest: fixture.manifest
+        )
+        let outputFailure = NSError(
+            domain: NSCocoaErrorDomain,
+            code: NSFileWriteOutOfSpaceError
+        )
+
+        let reset = await applyManagedHistoryExportRecovery(
+            after: outputFailure,
+            at: .localArchiveOutput,
+            clearExport: {
+                await fixture.store.clearExport()
+            }
+        )
+
+        XCTAssertFalse(reset)
+        let checkpoint = try await fixture.store.loadExportCheckpoint()
+        XCTAssertNotNil(checkpoint)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: fixture.stagedEntryURL.path
+            )
+        )
+    }
+
+    func testAppleServiceClassifiesAtomicFinalizeBeforeOutputBoundary() throws {
+        let apple = try source("StrandiOS/System/ManagedCloudService.swift")
+        let finalization = try XCTUnwrap(
+            apple.range(of: "try await transfer.finalizeExport(")
+        )
+        let outputBoundary = try XCTUnwrap(
+            apple.range(
+                of: "failureBoundary = .localArchiveOutput",
+                range: finalization.upperBound..<apple.endIndex
+            )
+        )
+        XCTAssertLessThan(
+            finalization.lowerBound,
+            outputBoundary.lowerBound
+        )
+        XCTAssertTrue(
+            apple.contains(
+                "catch let error as ManagedHistoryExportStateError"
+            )
+        )
+        XCTAssertFalse(
+            apple.contains("try await transfer.validateStagedExport(")
+        )
+        XCTAssertTrue(apple.contains("\"retry_state\": resetApplied"))
     }
 
     func testAppleCatchUpRetriesAndClearsEachScopeIndependently() throws {
@@ -191,5 +336,109 @@ final class ManagedCloudRetryContractTests: XCTestCase {
             )
         )
         XCTAssertTrue(source.contains("\"enqueue_outcome\""))
+    }
+
+    private func managedHistoryTransferFixture() async throws -> (
+        store: ManagedHistoryTransferStore,
+        manifest: ManagedHistoryExportManifest,
+        stagedEntryURL: URL
+    ) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "managed-history-retry-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: root)
+        }
+        let scope = String(repeating: "d", count: 64)
+        let store = try ManagedHistoryTransferStore(
+            accountScopeHash: scope,
+            baseDirectoryURL: root
+        )
+        let data = Data("staged-entry".utf8)
+        let path =
+            "chunks/essential_timeseries/"
+            + "14000000-0000-5000-8000-000000000001.json"
+        let chunk = ManagedHistoryExportManifest.Chunk(
+            path: path,
+            chunkID: UUID(
+                uuidString: "14000000-0000-5000-8000-000000000001"
+            )!,
+            sourceID: UUID(
+                uuidString: "14000000-0000-5000-8000-000000000002"
+            )!,
+            dataClass: "essential_timeseries",
+            schemaVersion: 1,
+            eventStart: "2026-09-18T00:00:00Z",
+            eventEnd: "2026-09-18T00:01:00Z",
+            compression: "none",
+            contentType: "application/vnd.noop.chunk+json",
+            sha256: ManagedDigest.sha256(data),
+            compressedBytes: data.count,
+            uncompressedBytes: data.count,
+            objectGeneration: 1
+        )
+        let manifest = ManagedHistoryExportManifest(
+            format: "noop_managed_history",
+            formatVersion: 2,
+            createdAt: "2026-09-19T12:00:00Z",
+            snapshotAt: "2026-09-19T11:59:00Z",
+            changeSequence: 42,
+            dataClasses: ["essential_timeseries"],
+            selectedObjects: 1,
+            selectedChunkBytes: Int64(data.count),
+            exportedObjects: 1,
+            exportedChunkBytes: Int64(data.count),
+            chunks: [chunk],
+            documents: []
+        )
+        let checkpoint = ManagedHistoryExportCheckpoint(
+            createdAt: manifest.createdAt,
+            requestID: UUID(),
+            restoreJobID: UUID(),
+            snapshotAt: manifest.snapshotAt,
+            changeSequence: manifest.changeSequence,
+            expiresAt: "2026-09-20T12:00:00Z",
+            dataClasses: manifest.dataClasses,
+            pageSize: 100,
+            selectedObjects: 1,
+            selectedChunkBytes: Int64(data.count),
+            dataClassIndex: 1,
+            documentsComplete: true,
+            serverCompleted: true,
+            exportedObjects: 1,
+            exportedChunkBytes: Int64(data.count),
+            chunks: [chunk]
+        )
+        try await store.add(
+            ManagedHistoryExportEntry(
+                kind: .chunk,
+                path: path,
+                data: data
+            )
+        )
+        try await store.saveExportCheckpoint(checkpoint)
+        let stagedEntryURL = root
+            .appendingPathComponent("ManagedHistoryTransfers", isDirectory: true)
+            .appendingPathComponent(scope, isDirectory: true)
+            .appendingPathComponent("export-entries", isDirectory: true)
+            .appendingPathComponent(path, isDirectory: false)
+        return (store, manifest, stagedEntryURL)
+    }
+
+    private func section(
+        _ source: String,
+        from start: String,
+        to end: String
+    ) throws -> String {
+        let startRange = try XCTUnwrap(source.range(of: start))
+        let endRange = try XCTUnwrap(
+            source.range(
+                of: end,
+                range: startRange.upperBound..<source.endIndex
+            )
+        )
+        return String(source[startRange.lowerBound..<endRange.lowerBound])
     }
 }

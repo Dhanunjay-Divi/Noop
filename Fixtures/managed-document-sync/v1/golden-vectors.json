@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "document": {
+    "account_scope_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "document_kind": "journal",
+    "document_id": "11111111-2222-4333-8444-555555555555",
+    "revision": 7,
+    "key_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaab",
+    "aad_hex": "6e6f6f702d6d616e616765642d646f63756d656e742d6161642d76310061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161006a6f75726e616c0031313131313131312d323232322d343333332d383434342d3535353535353535353535350037",
+    "plaintext_base64": "eyJrZXkiOnsiZGF5IjoiMjAyNi0wOS0xOSIsImRldmljZUlkIjoic3RyYXAiLCJxdWVzdGlvbiI6Im5vdGUifSwicmVjb3JkIjp7ImFuc3dlciI6InByaXZhdGUifSwic2NoZW1hX3ZlcnNpb24iOjEsInRhYmxlIjoiam91cm5hbCJ9",
+    "envelope_base64": "Tk9PUERPQwABDAAAoKGio6SlpqeoqaqrnToXSDzpOMRAAeaqJUDi7ECebz2ijm9dpSwKpBvOA2ixEw6bjRhxTivuZbgrVqGIMn41PAu/dFx7fGUx0BWnzZie9wpTypaE1tiEOu6gv82oeYme57HrE5gUSv+T52G2/OdDzm7P0O37qXU56ubPEhV8Q9q/V/dZDfX8ztsggCOkfZICZTyHvrQ925LgqBYn6lMCHw==",
+    "envelope_sha256": "1e4446e20f1c3b18cc61f8d5ec4ac60caf49b4e26c2a1ad1e813045857f841bf"
+  },
+  "key_wrap": {
+    "account_scope_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "document_key_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "wrapping_key_id": "99999999-8888-4777-8666-555555555555",
+    "wrapping_revision": 3,
+    "document_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "wrapping_key_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "nonce_hex": "b0b1b2b3b4b5b6b7b8b9babb",
+    "aad_hex": "6e6f6f702d6d616e616765642d646f63756d656e742d6b65792d777261702d763100616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161610061616161616161612d626262622d346363632d386464642d6565656565656565656565650039393939393939392d383838382d343737372d383636362d3535353535353535353535350033",
+    "wrapped_key_base64": "Tk9PUEtFWQABDAAAsLGys7S1tre4ubq7NvsoRJYmzgk6BBfxDzCTOYYisIieXYIm+F21Q8k6E8Dr3FXMdhkw1f/lyLLJLFP8",
+    "wrapped_key_sha256": "2e2e60e7b5f8ceb9962acac015f870a06524c7f23173c9a9e0f3ca116a3c0f87"
+  }
+}

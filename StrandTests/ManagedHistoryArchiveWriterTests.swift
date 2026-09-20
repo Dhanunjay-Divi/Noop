@@ -173,6 +173,46 @@ final class ManagedHistoryArchiveWriterTests: XCTestCase {
         XCTAssertEqual(restoredData, entry.data)
     }
 
+    func testTransferStoreRejectsSameSizeMutationDuringAtomicFinalize()
+        async throws
+    {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "noop-managed-transfer-corrupt-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let store = try ManagedHistoryTransferStore(
+            accountScopeHash: String(repeating: "c", count: 64),
+            baseDirectoryURL: root
+        )
+        let entry = ManagedHistoryExportEntry(
+            kind: .chunk,
+            path: "chunks/essential_timeseries/"
+                + "10000000-0000-5000-8000-000000000003.json",
+            data: Data("canonical".utf8)
+        )
+        let exportManifest = manifest(for: entry, formatVersion: 2)
+        try await store.add(entry)
+
+        let stagedURL = root
+            .appendingPathComponent("ManagedHistoryTransfers", isDirectory: true)
+            .appendingPathComponent(String(repeating: "c", count: 64), isDirectory: true)
+            .appendingPathComponent("export-entries", isDirectory: true)
+            .appendingPathComponent(entry.path, isDirectory: false)
+        try Data("different".utf8).write(to: stagedURL, options: [.atomic])
+
+        do {
+            _ = try await store.finalizeExport(manifest: exportManifest)
+            XCTFail("Expected staged mutation rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedHistoryExportStateError,
+                .unusableStagedArchive
+            )
+        }
+    }
+
     func testImportStagingKeepsMatchingCheckpointAndClearsDifferentArchive() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(

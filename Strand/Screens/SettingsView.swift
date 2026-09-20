@@ -347,7 +347,9 @@ struct SettingsView: View {
             if focus == nil {
                 // Everyday sections stay expanded (S3): the ones a first-run user actually needs.
                 appearanceCard.staggeredAppear(index: 3)
-                strapCard.staggeredAppear(index: 4)
+                if model.allowsLocalCollection {
+                    strapCard.staggeredAppear(index: 4)
+                }
                 powerSavingCard.staggeredAppear(index: 5)
                 featuresCard.staggeredAppear(index: 6)
 
@@ -1315,6 +1317,9 @@ struct SettingsView: View {
                 #if os(iOS)
                 Divider().overlay(StrandPalette.hairline)
                 LiveActivityPreferenceRow()
+                #elseif os(macOS)
+                Divider().overlay(StrandPalette.hairline)
+                MacLiveHeartRatePreferenceRow()
                 #endif
             }
         }
@@ -2772,28 +2777,63 @@ struct SettingsView: View {
 }
 
 #if os(iOS)
-/// ActivityKit presents one Live Activity across the Lock Screen and, on supported iPhones, the Dynamic
-/// Island. The system does not offer two independently addressable destinations, so this row exposes one
-/// honest surface switch plus a separate privacy choice for the extra daily scores.
+/// The foreground pill and ActivityKit are independent presentation choices. ActivityKit itself presents
+/// one Live Activity across the Lock Screen and, on supported iPhones, the Dynamic Island; Apple does not
+/// expose those two destinations as independently selectable surfaces.
 struct LiveActivityPreferenceRow: View {
     var compact = false
-    @AppStorage(UnitPrefs.liveActivityKey) private var liveActivityEnabled = true
-    @AppStorage(UnitPrefs.liveActivityChargeKey) private var showCharge = true
-    @AppStorage(UnitPrefs.liveActivityEffortKey) private var showEffort = true
+    @AppStorage(LiveHeartRatePresentationPreferences.inAppBannerKey)
+    private var inAppBannerEnabled =
+        LiveHeartRatePresentationPreferences.inAppBannerEnabled()
+    @AppStorage(UnitPrefs.liveActivityKey)
+    private var liveActivityEnabled = UnitPrefs.liveActivityEnabled()
+    @AppStorage(UnitPrefs.liveActivityChargeKey)
+    private var showCharge = UnitPrefs.liveActivityShowsCharge()
+    @AppStorage(UnitPrefs.liveActivityEffortKey)
+    private var showEffort = UnitPrefs.liveActivityShowsEffort()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: $inAppBannerEnabled) {
+                Text("appwide.health.live_hr.in_app_title")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
+            .toggleStyle(.noopSwitch)
+            .accessibilityHint("appwide.health.live_hr.in_app_detail")
+            .onChangeCompat(of: inAppBannerEnabled) { enabled in
+                LiveHeartRatePresentationPreferences.recordChange(
+                    surface: "ios_in_app",
+                    enabled: enabled
+                )
+            }
+
+            Text("appwide.health.live_hr.in_app_detail")
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider().overlay(StrandPalette.hairline)
+
             Toggle(isOn: $liveActivityEnabled) {
                 Text("appwide.health.live_activity.lock_screen")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
             }
             .toggleStyle(.noopSwitch)
-            .accessibilityHint("Shows live heart rate on the Lock Screen and, on supported iPhones, in the Dynamic Island.")
+            .accessibilityHint("appwide.health.live_activity.accessibility_hint")
+            .onChangeCompat(of: liveActivityEnabled) { enabled in
+                LiveHeartRatePresentationPreferences.recordChange(
+                    surface: "ios_live_activity",
+                    enabled: enabled
+                )
+            }
 
-            Text(compact
-                 ? "Shows this live reading on the Lock Screen and, on supported iPhones, in the Dynamic Island. Apple controls those two locations together."
-                 : "Apple shows the same Live Activity on the Lock Screen and, on supported iPhones, in the Dynamic Island; those locations cannot be selected separately. Turning this off ends NOOP’s current Live Activity immediately.")
+            Text(
+                compact
+                    ? LocalizedStringKey("appwide.health.live_activity.compact_detail")
+                    : LocalizedStringKey("appwide.health.live_activity.detail")
+            )
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -2822,6 +2862,14 @@ struct LiveActivityPreferenceRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+#endif
+
+#if os(macOS)
+struct MacLiveHeartRatePreferenceRow: View {
+    var body: some View {
+        EmptyView()
     }
 }
 #endif

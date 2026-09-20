@@ -382,7 +382,8 @@ actor ManagedHistoryTransferStore {
                 )
                 guard data.count == chunk.compressedBytes,
                       ManagedDigest.sha256(data) == chunk.sha256 else {
-                    throw ManagedHistoryArchiveError.invalidArchive
+                    throw ManagedHistoryExportStateError
+                        .unusableStagedArchive
                 }
                 try await writer.add(
                     ManagedHistoryExportEntry(
@@ -400,7 +401,8 @@ actor ManagedHistoryTransferStore {
                 guard data.count == document.archiveBytes,
                       ManagedDigest.sha256(data)
                         == document.archiveSHA256 else {
-                    throw ManagedHistoryArchiveError.invalidArchive
+                    throw ManagedHistoryExportStateError
+                        .unusableStagedArchive
                 }
                 try await writer.add(
                     ManagedHistoryExportEntry(

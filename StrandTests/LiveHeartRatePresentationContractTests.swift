@@ -1,0 +1,96 @@
+import Foundation
+import XCTest
+
+final class LiveHeartRatePresentationContractTests: XCTestCase {
+    func testPhoneSurfaceRemainsConfigurableAndViewerHasNoFalseLiveSurface() throws {
+        let root = repositoryRoot()
+        let settings = try String(
+            contentsOf: root.appendingPathComponent("Strand/Screens/SettingsView.swift"),
+            encoding: .utf8
+        )
+        let phone = try String(
+            contentsOf: root.appendingPathComponent("StrandiOS/App/StrandiOSApp.swift"),
+            encoding: .utf8
+        )
+        let mac = try String(
+            contentsOf: root.appendingPathComponent("Strand/App/RootView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            settings.contains(
+                "LiveHeartRatePresentationPreferences.inAppBannerKey"
+            )
+        )
+        XCTAssertFalse(
+            settings.contains(
+                "LiveHeartRatePresentationPreferences.macToolbarKey"
+            )
+        )
+        XCTAssertTrue(phone.contains("InAppLiveHeartRateBanner(live: model.live)"))
+        XCTAssertTrue(phone.contains("scenePhase == .active"))
+        XCTAssertFalse(mac.contains("MacLiveHeartRateToolbarSurface()"))
+        XCTAssertTrue(
+            settings.contains(
+                #"LocalizedStringKey("appwide.health.live_activity.compact_detail")"#
+            )
+        )
+        XCTAssertTrue(
+            settings.contains(
+                #"LocalizedStringKey("appwide.health.live_activity.detail")"#
+            )
+        )
+    }
+
+    func testPresentationUsesFreshPacketTimeAndNeverLogsHeartRateValues() throws {
+        let source = try String(
+            contentsOf: repositoryRoot().appendingPathComponent(
+                "Strand/System/LiveHeartRatePresentation.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("live.heartRateSample?.receivedAt"))
+        XCTAssertTrue(source.contains("LiveHeartRateSurfacePolicy.isLive"))
+        XCTAssertTrue(source.contains("ViewThatFits(in: .horizontal)"))
+        XCTAssertTrue(source.contains("case reconnecting"))
+        XCTAssertFalse(source.contains(".fixedSize(horizontal: true"))
+        XCTAssertTrue(source.contains("\"surface\": surface"))
+        XCTAssertTrue(source.contains("\"state\": enabled ? \"enabled\" : \"disabled\""))
+        XCTAssertFalse(source.contains("\"bpm\":"))
+        XCTAssertFalse(source.contains("\"heart_rate\":"))
+    }
+
+    func testLiveActivityLifecycleIsBoundedAndPrivacySafe() throws {
+        let source = try String(
+            contentsOf: repositoryRoot().appendingPathComponent(
+                "StrandiOS/Widgets/LiveActivityController.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("failedStartRetryDelay: TimeInterval = 30"))
+        XCTAssertTrue(source.contains("desired.now >= startRetryNotBefore"))
+        XCTAssertTrue(source.contains(#""live_hr.live_activity""#))
+        XCTAssertTrue(source.contains(#"operation: "start""#))
+        XCTAssertTrue(source.contains(#"operation: "update""#))
+        XCTAssertTrue(source.contains(#"operation: "end""#))
+        XCTAssertTrue(source.contains(#"failureKind: "platform""#))
+        XCTAssertFalse(source.contains(#""bpm": bpm"#))
+        XCTAssertFalse(source.contains(#""error": error"#))
+    }
+
+    private func repositoryRoot() -> URL {
+        var candidate = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        while !FileManager.default.fileExists(
+            atPath: candidate.appendingPathComponent("project.yml").path
+        ) {
+            let parent = candidate.deletingLastPathComponent()
+            precondition(parent.path != candidate.path, "Could not locate repository root")
+            candidate = parent
+        }
+        return candidate
+    }
+}

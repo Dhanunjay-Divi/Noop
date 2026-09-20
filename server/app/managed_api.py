@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import re
@@ -8,7 +9,16 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    status,
+)
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import Settings
@@ -25,18 +35,42 @@ from app.managed_identity import (
     ManagedTokenVerifying,
 )
 from app.managed_identity_deletion import ManagedIdentityDeletionTicketCodec
+from app.managed_formula_executor import (
+    ClientFormulaObservation,
+    FormulaDayContext,
+    FormulaInputContractError,
+    FormulaProvenance,
+    ManagedFormulaExecutor,
+)
+from app.managed_formula_repository import (
+    FormulaShadowAccountUnavailableError,
+    FormulaShadowConflictError,
+    PostgresManagedFormulaRepository,
+)
+from app.managed_formula_registry import CANONICAL_FORMULA_METRIC_KEYS
+from app.managed_document_keys import (
+    ManagedDocumentKeyConflictError,
+    ManagedDocumentKeyDisabledError,
+    ManagedDocumentKeyNotFoundError,
+    ManagedWrappedKeyMutation,
+    PostgresManagedDocumentKeyRepository,
+)
 from app.managed_models import (
     MANAGED_DOCUMENT_KINDS,
     MANAGED_INSTALLATION_TOKEN_PATTERN,
     ManagedAccessRequest,
+    ManagedAuthorityOptOutRequest,
+    ManagedAuthorityReconsentRequest,
     ManagedChunkCompletion,
     ManagedChunkReservation,
+    ManagedClientPlatform,
     ManagedClientKeyRegistration,
     ManagedDocumentMutation,
     ManagedEnrollment,
     ManagedErasureRequest,
     ManagedExportCompletion,
     ManagedExportRequest,
+    ManagedFormulaShadowRequest,
     ManagedRestoreCompletion,
     ManagedRestoreRequest,
     ManagedSocialInviteCreate,
@@ -50,6 +84,9 @@ from app.managed_models import (
     ManagedSocialSummaryMutation,
     ManagedSocialVisibilityPatch,
     ManagedSourceRegistration,
+    ManagedWrappedDocumentKeyMutation,
+    ManagedWrappedDocumentKeyRevocation,
+    ManagedWrappedDocumentKeyRotation,
 )
 from app.observability import emit_operational_event
 from app.managed_object_store import (
@@ -84,6 +121,14 @@ from app.managed_repository import (
     PostgresManagedRepository,
 )
 from app.models import INSTALLATION_ID_PATTERN
+from app.unified_identity_authority import (
+    AuthorityTransitionConflictError,
+    AuthorityTransitionRejectedError,
+    PostgresUnifiedIdentityAuthorityRepository,
+    UnifiedIdentityCollisionError,
+    UnifiedIdentityUnavailableError,
+    UnifiedPrincipal,
+)
 
 managed_security = HTTPBearer(auto_error=False)
 INSTALLATION_RE = re.compile(INSTALLATION_ID_PATTERN)
@@ -105,6 +150,35 @@ class ManagedRequestIdentity:
     claims: ManagedIdentityClaims
     principal: ManagedPrincipal
     installation_id: str
+    platform: ManagedClientPlatform
+    unified_principal: UnifiedPrincipal | None = None
+
+
+MACOS_VIEWER_RESTORE_POST_ROUTES = frozenset(
+    {
+        "/v1/managed/chunks/{chunk_id}/download",
+        "/v1/managed/restores",
+        "/v1/managed/restores/{restore_job_id}/complete",
+    }
+)
+
+
+def macos_managed_viewer_access(
+    *,
+    method: str,
+    route_template: str | None,
+) -> str | None:
+    """Return the bounded macOS viewer capability for one managed route."""
+
+    normalized_method = method.upper()
+    if normalized_method == "GET":
+        return "read"
+    if (
+        normalized_method == "POST"
+        and route_template in MACOS_VIEWER_RESTORE_POST_ROUTES
+    ):
+        return "restore"
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +197,12 @@ def managed_router(
     identity_deletion_ticket_codec: ManagedIdentityDeletionTicketCodec,
     safety_repository: PostgresManagedSafetyRepository | None = None,
     safety_push_service: ManagedSafetyPushService | None = None,
+    unified_identity_authority_repository: (
+        PostgresUnifiedIdentityAuthorityRepository | None
+    ) = None,
+    formula_repository: PostgresManagedFormulaRepository | None = None,
+    formula_executor: ManagedFormulaExecutor | None = None,
+    document_key_repository: PostgresManagedDocumentKeyRepository | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1/managed", tags=["managed-storage"])
 
@@ -233,12 +313,13 @@ def managed_router(
     async def require_identity(
         request: Request,
         claims: ManagedIdentityClaims = Depends(require_claims),
+        app_assertion: ManagedAppAssertion = Depends(require_app_check),
         installation_id: str = Depends(installation_header),
         installation_token_hash: str = Depends(installation_token_header),
     ) -> ManagedRequestIdentity:
         try:
             principal = await repository.principal_for_identity(claims)
-            await repository.ensure_installation(
+            installation = await repository.ensure_installation(
                 principal=principal,
                 installation_id=installation_id,
                 installation_token_hash=installation_token_hash,
@@ -247,13 +328,128 @@ def managed_router(
             request.state.auth_result = "installation_rejected"
             _raise_managed(error)
             raise AssertionError("unreachable")
+        platform = installation.get("platform")
+        if platform not in {"ios", "android", "macos"}:
+            request.state.auth_result = "installation_platform_rejected"
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="managed installation platform is not supported",
+            )
+        if platform == "macos":
+            if not settings.managed_macos_app_id:
+                request.state.auth_result = "macos_viewer_unavailable"
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="managed macOS viewer is not configured",
+                )
+            if app_assertion.claims.app_id != settings.managed_macos_app_id:
+                request.state.auth_result = "macos_viewer_app_check_rejected"
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="managed app assertion does not match installation platform",
+                )
+            route = request.scope.get("route")
+            route_template = getattr(route, "path", None)
+            if (
+                macos_managed_viewer_access(
+                    method=request.method,
+                    route_template=route_template,
+                )
+                is None
+            ):
+                request.state.auth_result = "macos_viewer_write_rejected"
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="managed macOS viewer is read-only",
+                )
+        unified_principal = await reconcile_unified_identity(
+            request=request,
+            claims=claims,
+            principal=principal,
+        )
         request.state.auth_scope = "managed_installation"
         request.state.auth_result = "installation_accepted"
         return ManagedRequestIdentity(
             claims=claims,
             principal=principal,
             installation_id=installation_id,
+            platform=platform,
+            unified_principal=unified_principal,
         )
+
+    async def reconcile_unified_identity(
+        *,
+        request: Request,
+        claims: ManagedIdentityClaims,
+        principal: ManagedPrincipal,
+    ) -> UnifiedPrincipal | None:
+        if unified_identity_authority_repository is None:
+            return None
+        try:
+            unified = await unified_identity_authority_repository.reconcile_identity(
+                claims
+            )
+        except (
+            UnifiedIdentityCollisionError,
+            AuthorityTransitionConflictError,
+        ) as error:
+            request.state.auth_result = "unified_identity_conflict"
+            _raise_unified_identity(error)
+            raise AssertionError("unreachable")
+        except UnifiedIdentityUnavailableError as error:
+            request.state.auth_result = "unified_identity_unavailable"
+            _raise_unified_identity(error)
+            raise AssertionError("unreachable")
+        if (
+            unified.managed_account_id != principal.account_id
+            or unified.managed_identity_id != principal.identity_id
+        ):
+            request.state.auth_result = "unified_identity_mismatch"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="managed account identity is linked differently",
+            )
+        request.state.auth_result = "unified_identity_accepted"
+        return unified
+
+    def require_unified_principal(
+        identity: ManagedRequestIdentity,
+    ) -> UnifiedPrincipal:
+        if (
+            unified_identity_authority_repository is None
+            or identity.unified_principal is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="managed authority state is not configured",
+            )
+        return identity.unified_principal
+
+    def require_formula_shadow() -> tuple[
+        PostgresManagedFormulaRepository,
+        ManagedFormulaExecutor,
+    ]:
+        if (
+            not settings.managed_formula_shadow_enabled
+            or formula_repository is None
+            or formula_executor is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="managed formula shadow comparison is not configured",
+            )
+        return formula_repository, formula_executor
+
+    def require_document_key_recovery() -> PostgresManagedDocumentKeyRepository:
+        if (
+            not settings.managed_document_key_recovery_enabled
+            or document_key_repository is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="managed document key recovery is not configured",
+            )
+        return document_key_repository
 
     def require_safety_repository() -> PostgresManagedSafetyRepository:
         if safety_repository is None:
@@ -286,15 +482,23 @@ def managed_router(
     )
     async def enroll(
         body: ManagedEnrollment,
+        request: Request,
         app_assertion: ManagedAppAssertion = Depends(require_app_check),
         claims: ManagedIdentityClaims = Depends(require_claims),
     ) -> dict:
-        expected_app_id = (
-            settings.managed_apple_app_id
-            if body.platform == "ios"
-            else settings.managed_android_app_id
-        )
+        expected_app_id = {
+            "ios": settings.managed_apple_app_id,
+            "android": settings.managed_android_app_id,
+            "macos": settings.managed_macos_app_id,
+        }[body.platform]
+        if not expected_app_id:
+            request.state.auth_result = "managed_platform_unavailable"
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="managed enrollment is not configured for this platform",
+            )
         if app_assertion.claims.app_id != expected_app_id:
+            request.state.auth_result = "managed_platform_app_check_mismatch"
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="managed app assertion does not match enrollment platform",
@@ -309,15 +513,24 @@ def managed_router(
             )
         try:
             result = await repository.enroll(claims=claims, enrollment=body)
+            principal = await repository.principal_for_identity(claims)
         except ManagedStorageError as error:
             _raise_managed(error)
             raise AssertionError("unreachable")
+        await reconcile_unified_identity(
+            request=request,
+            claims=claims,
+            principal=principal,
+        )
         return {
             **result,
             "product_boundary": {
                 "account_optional": True,
                 "local_metrics_available": True,
                 "storage_only_entitlement": True,
+                "cloud_authority_mode": "staged_per_data_class",
+                "formula_authority": "client_until_parity_approved",
+                "edge_collection_required": True,
             },
         }
 
@@ -330,6 +543,414 @@ def managed_router(
         except ManagedStorageError as error:
             _raise_managed(error)
             raise AssertionError("unreachable")
+
+    @router.get("/authority/{data_class}")
+    async def get_authority_state(
+        data_class: str,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        if DATA_CLASS_RE.fullmatch(data_class) is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="managed data class is invalid",
+            )
+        unified = require_unified_principal(identity)
+        try:
+            authority = await unified_identity_authority_repository.authority_state(
+                principal_id=unified.principal_id,
+                managed_account_id=identity.principal.account_id,
+                data_class=data_class,
+            )
+        except (
+            UnifiedIdentityUnavailableError,
+            UnifiedIdentityCollisionError,
+            AuthorityTransitionConflictError,
+            AuthorityTransitionRejectedError,
+        ) as error:
+            _raise_unified_identity(error)
+            raise AssertionError("unreachable")
+        return {"authority": _authority_response(authority)}
+
+    @router.post("/authority/{data_class}/opt-out")
+    async def opt_out_authority(
+        data_class: str,
+        body: ManagedAuthorityOptOutRequest,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        if DATA_CLASS_RE.fullmatch(data_class) is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="managed data class is invalid",
+            )
+        unified = require_unified_principal(identity)
+        try:
+            result = await unified_identity_authority_repository.request_rollback(
+                principal_id=unified.principal_id,
+                managed_account_id=identity.principal.account_id,
+                data_class=data_class,
+                request_id=body.request_id,
+                opt_out=True,
+            )
+            current = await unified_identity_authority_repository.authority_state(
+                principal_id=unified.principal_id,
+                managed_account_id=identity.principal.account_id,
+                data_class=data_class,
+            )
+        except (
+            UnifiedIdentityUnavailableError,
+            UnifiedIdentityCollisionError,
+            AuthorityTransitionConflictError,
+            AuthorityTransitionRejectedError,
+        ) as error:
+            _raise_unified_identity(error)
+            raise AssertionError("unreachable")
+        emit_operational_event(
+            "managed_authority.opt_out",
+            service="noop-managed-api",
+            outcome="completed",
+            authority_state=result.state,
+            pruning_authorized=result.pruning_authorized,
+            duplicate=result.duplicate,
+        )
+        return {
+            "authority": _authority_response(current),
+            "duplicate": result.duplicate,
+        }
+
+    @router.post("/authority/{data_class}/re-consent")
+    async def reconsent_authority(
+        data_class: str,
+        body: ManagedAuthorityReconsentRequest,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        if DATA_CLASS_RE.fullmatch(data_class) is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="managed data class is invalid",
+            )
+        if (
+            body.policy_version != settings.managed_consent_policy_version
+            or body.policy_sha256 != settings.managed_consent_policy_sha256
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="managed storage policy has changed; review the current policy",
+            )
+        unified = require_unified_principal(identity)
+        try:
+            result = await unified_identity_authority_repository.record_reconsent(
+                principal_id=unified.principal_id,
+                managed_account_id=identity.principal.account_id,
+                data_class=data_class,
+                request_id=body.request_id,
+                policy_kind=settings.managed_consent_policy_kind,
+                policy_version=body.policy_version,
+                policy_sha256=body.policy_sha256,
+                installation_id=identity.installation_id,
+            )
+            current = await unified_identity_authority_repository.authority_state(
+                principal_id=unified.principal_id,
+                managed_account_id=identity.principal.account_id,
+                data_class=data_class,
+            )
+        except (
+            UnifiedIdentityUnavailableError,
+            UnifiedIdentityCollisionError,
+            AuthorityTransitionConflictError,
+            AuthorityTransitionRejectedError,
+        ) as error:
+            _raise_unified_identity(error)
+            raise AssertionError("unreachable")
+        emit_operational_event(
+            "managed_authority.reconsent",
+            service="noop-managed-api",
+            outcome="completed",
+            authority_state=result.state,
+            pruning_authorized=result.pruning_authorized,
+            duplicate=result.duplicate,
+        )
+        return {
+            "authority": _authority_response(current),
+            "duplicate": result.duplicate,
+        }
+
+    @router.post("/formula-shadow/{metric_key}/{formula_revision}")
+    async def publish_formula_shadow(
+        metric_key: str,
+        formula_revision: str,
+        body: ManagedFormulaShadowRequest,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        formula_store, executor = require_formula_shadow()
+        outcome = "rejected"
+        parity_status = "unknown"
+        server_status = "unknown"
+        try:
+            execution = executor.execute(
+                metric_key=metric_key,
+                formula_revision=formula_revision,
+                context=FormulaDayContext.create(
+                    account_id=identity.principal.account_id,
+                    local_day=body.local_day,
+                    timezone_name=body.timezone_name,
+                ),
+                inputs=body.inputs,
+                provenance=FormulaProvenance(
+                    source_kind=body.provenance.source_kind,
+                    source_revision=body.provenance.source_revision,
+                    input_manifest_sha256=(body.provenance.input_manifest_sha256),
+                    calibration_revision=(body.provenance.calibration_revision),
+                ),
+                client_observation=ClientFormulaObservation(
+                    status=body.client_observation.status,
+                    formula_revision=(body.client_observation.formula_revision),
+                    value=body.client_observation.value,
+                ),
+            )
+            record = await formula_store.publish_shadow(
+                principal=identity.principal,
+                request_id=body.request_id,
+                execution=execution,
+                now=await repository.coordination_now(),
+            )
+            parity_status = record.parity_status
+            server_status = record.server_status
+            outcome = "completed"
+            return {
+                "authority": "shadow_only",
+                "result": _formula_shadow_response(record),
+            }
+        except (KeyError, FormulaInputContractError):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="formula shadow request did not match a registered contract",
+            ) from None
+        except FormulaShadowConflictError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="formula shadow request conflicted with existing work",
+            ) from None
+        except FormulaShadowAccountUnavailableError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="formula shadow account is not active",
+            ) from None
+        finally:
+            emit_operational_event(
+                "managed_formula.shadow_publication",
+                service="noop-managed-api",
+                outcome=outcome,
+                metric_key=(
+                    metric_key
+                    if metric_key in CANONICAL_FORMULA_METRIC_KEYS
+                    else "unregistered"
+                ),
+                parity_status=parity_status,
+                server_status=server_status,
+                authority="shadow_only",
+            )
+
+    @router.get("/formula-shadow/{metric_key}/current")
+    async def current_formula_shadow(
+        metric_key: str,
+        local_day: date = Query(),
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        if DATA_CLASS_RE.fullmatch(metric_key) is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="formula metric key is invalid",
+            )
+        formula_store, _ = require_formula_shadow()
+        try:
+            record = await formula_store.current_result(
+                principal=identity.principal,
+                metric_key=metric_key,
+                local_day=local_day,
+            )
+        except FormulaShadowAccountUnavailableError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="formula shadow account is not active",
+            ) from None
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="formula shadow result was not found",
+            )
+        return {
+            "authority": "shadow_only",
+            "result": _formula_shadow_response(record),
+        }
+
+    @router.put("/document-keys/{key_id}")
+    async def put_document_key(
+        key_id: UUID,
+        body: ManagedWrappedDocumentKeyMutation,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        key_store = require_document_key_recovery()
+        outcome = "rejected"
+        try:
+            record = await key_store.put(
+                principal=identity.principal,
+                mutation=_wrapped_key_mutation(key_id, body),
+                now=await repository.coordination_now(),
+            )
+            outcome = "completed"
+            return {"key": _wrapped_key_response(record)}
+        except (
+            ManagedDocumentKeyDisabledError,
+            ManagedDocumentKeyConflictError,
+            ManagedDocumentKeyNotFoundError,
+            ValueError,
+        ) as error:
+            _raise_document_key(error)
+            raise AssertionError("unreachable")
+        finally:
+            emit_operational_event(
+                "managed_documents.key_mutation",
+                service="noop-managed-api",
+                outcome=outcome,
+                operation="put",
+                key_kind=body.key_kind,
+            )
+
+    @router.get("/document-keys/{key_id}")
+    async def get_document_key(
+        key_id: UUID,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        key_store = require_document_key_recovery()
+        outcome = "not_found"
+        key_kind = "unknown"
+        try:
+            record = await key_store.get(
+                principal=identity.principal,
+                key_id=key_id,
+            )
+            outcome = "completed"
+            key_kind = record.key_kind
+            return {"key": _wrapped_key_response(record)}
+        except (
+            ManagedDocumentKeyDisabledError,
+            ManagedDocumentKeyConflictError,
+            ManagedDocumentKeyNotFoundError,
+            ValueError,
+        ) as error:
+            _raise_document_key(error)
+            raise AssertionError("unreachable")
+        finally:
+            emit_operational_event(
+                "managed_documents.key_read",
+                service="noop-managed-api",
+                outcome=outcome,
+                key_kind=key_kind,
+            )
+
+    @router.get("/document-keys/{key_id}/versions/{wrapping_revision}")
+    async def get_document_key_version(
+        key_id: UUID,
+        wrapping_revision: Annotated[int, Path(ge=1, le=1_000_000)],
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        key_store = require_document_key_recovery()
+        outcome = "not_found"
+        key_kind = "unknown"
+        try:
+            record = await key_store.get_version(
+                principal=identity.principal,
+                key_id=key_id,
+                wrapping_revision=wrapping_revision,
+            )
+            outcome = "completed"
+            key_kind = record.key_kind
+            return {"key_version": _wrapped_key_version_response(record)}
+        except (
+            ManagedDocumentKeyDisabledError,
+            ManagedDocumentKeyConflictError,
+            ManagedDocumentKeyNotFoundError,
+            ValueError,
+        ) as error:
+            _raise_document_key(error)
+            raise AssertionError("unreachable")
+        finally:
+            emit_operational_event(
+                "managed_documents.key_version_read",
+                service="noop-managed-api",
+                outcome=outcome,
+                key_kind=key_kind,
+            )
+
+    @router.post("/document-keys/{key_id}/rotate")
+    async def rotate_document_key(
+        key_id: UUID,
+        body: ManagedWrappedDocumentKeyRotation,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        key_store = require_document_key_recovery()
+        outcome = "rejected"
+        try:
+            record = await key_store.rotate_wrapping(
+                principal=identity.principal,
+                mutation=_wrapped_key_mutation(key_id, body),
+                expected_wrapping_revision=(body.expected_wrapping_revision),
+                now=await repository.coordination_now(),
+            )
+            outcome = "completed"
+            return {"key": _wrapped_key_response(record)}
+        except (
+            ManagedDocumentKeyDisabledError,
+            ManagedDocumentKeyConflictError,
+            ManagedDocumentKeyNotFoundError,
+            ValueError,
+        ) as error:
+            _raise_document_key(error)
+            raise AssertionError("unreachable")
+        finally:
+            emit_operational_event(
+                "managed_documents.key_mutation",
+                service="noop-managed-api",
+                outcome=outcome,
+                operation="rotate",
+                key_kind=body.key_kind,
+            )
+
+    @router.post("/document-keys/{key_id}/revoke")
+    async def revoke_document_key(
+        key_id: UUID,
+        body: ManagedWrappedDocumentKeyRevocation,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        key_store = require_document_key_recovery()
+        outcome = "not_found"
+        key_kind = "unknown"
+        try:
+            record = await key_store.revoke(
+                principal=identity.principal,
+                key_id=key_id,
+                successor_key_id=body.successor_key_id,
+                now=await repository.coordination_now(),
+            )
+            outcome = "completed"
+            key_kind = record.key_kind
+            return {"key": _wrapped_key_response(record)}
+        except (
+            ManagedDocumentKeyDisabledError,
+            ManagedDocumentKeyConflictError,
+            ManagedDocumentKeyNotFoundError,
+            ValueError,
+        ) as error:
+            _raise_document_key(error)
+            raise AssertionError("unreachable")
+        finally:
+            emit_operational_event(
+                "managed_documents.key_mutation",
+                service="noop-managed-api",
+                outcome=outcome,
+                operation="revoke",
+                key_kind=key_kind,
+            )
 
     @router.post(
         "/social/profile",
@@ -1902,6 +2523,37 @@ def managed_router(
             _raise_managed(error)
             raise AssertionError("unreachable")
 
+    @router.get("/erasure/{erasure_job_id}/receipt")
+    async def get_erasure_receipt(
+        erasure_job_id: UUID,
+        app_assertion: ManagedAppAssertion = Depends(require_app_check),
+        installation_id: str = Depends(installation_header),
+        installation_token_hash: str = Depends(installation_token_header),
+    ) -> dict:
+        try:
+            job, platform = await repository.get_erasure_receipt(
+                erasure_job_id=erasure_job_id,
+                installation_id=installation_id,
+                installation_token_hash=installation_token_hash,
+            )
+            expected_app_id = {
+                "ios": settings.managed_apple_app_id,
+                "android": settings.managed_android_app_id,
+                "macos": settings.managed_macos_app_id,
+            }.get(platform)
+            if (
+                expected_app_id is None
+                or app_assertion.claims.app_id != expected_app_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="managed app assertion does not match installation platform",
+                )
+            return {"erasure": job}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
     @router.post("/erasure/{erasure_job_id}/cancel")
     async def cancel_erasure(
         erasure_job_id: UUID,
@@ -1977,4 +2629,180 @@ def _raise_managed(error: ManagedStorageError) -> None:
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="managed storage request failed",
+    )
+
+
+def _authority_response(authority: object) -> dict:
+    return {
+        "data_class": getattr(authority, "data_class"),
+        "state": getattr(authority, "state"),
+        "transition_version": getattr(authority, "transition_version"),
+        "pruning_authorized": bool(getattr(authority, "pruning_authorized")),
+        "last_opt_out_at": getattr(authority, "last_opt_out_at"),
+        "last_reconsented_at": getattr(authority, "last_reconsented_at"),
+        "reconsent_policy_version": getattr(
+            authority,
+            "reconsent_policy_version",
+        ),
+        "reconsent_policy_sha256": getattr(
+            authority,
+            "reconsent_policy_sha256",
+        ),
+    }
+
+
+def _formula_shadow_response(record: object) -> dict:
+    return {
+        "metric_key": getattr(record, "metric_key"),
+        "formula_revision": getattr(record, "formula_revision"),
+        "input_schema_revision": getattr(record, "input_schema_revision"),
+        "output_unit": getattr(record, "output_unit"),
+        "local_day": getattr(record, "local_day"),
+        "server_status": getattr(record, "server_status"),
+        "server_value": getattr(record, "server_value"),
+        "client_status": getattr(record, "client_status"),
+        "client_formula_revision": getattr(record, "client_formula_revision"),
+        "client_value": getattr(record, "client_value"),
+        "parity_status": getattr(record, "parity_status"),
+        "absolute_delta": getattr(record, "absolute_delta"),
+        "parity_tolerance": getattr(record, "parity_tolerance"),
+        "missing_inputs": list(getattr(record, "missing_inputs")),
+        "publication_kind": getattr(record, "publication_kind"),
+        "is_current": bool(getattr(record, "is_current")),
+        "created_at": getattr(record, "created_at"),
+    }
+
+
+def _wrapped_key_mutation(
+    key_id: UUID,
+    body: ManagedWrappedDocumentKeyMutation,
+) -> ManagedWrappedKeyMutation:
+    try:
+        wrapped_key = base64.b64decode(
+            body.wrapped_key_base64.get_secret_value(),
+            validate=True,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="wrapped document key is invalid",
+        ) from error
+    try:
+        return ManagedWrappedKeyMutation(
+            key_id=key_id,
+            key_kind=body.key_kind,
+            wrapping_key_id=body.wrapping_key_id,
+            wrapping_revision=body.wrapping_revision,
+            algorithm=body.algorithm,
+            wrapped_key=wrapped_key,
+            wrapped_key_sha256=body.wrapped_key_sha256,
+            master_key_confirmation_hmac_sha256=(
+                body.master_key_confirmation_hmac_sha256
+            ),
+            recovery_method=body.recovery_method,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="wrapped document key contract is invalid",
+        ) from error
+
+
+def _wrapped_key_response(record: object) -> dict:
+    return {
+        "key_id": getattr(record, "key_id"),
+        "key_kind": getattr(record, "key_kind"),
+        "wrapping_key_id": getattr(record, "wrapping_key_id"),
+        "wrapping_revision": getattr(record, "wrapping_revision"),
+        "algorithm": getattr(record, "algorithm"),
+        "wrapped_key_base64": base64.b64encode(getattr(record, "wrapped_key")).decode(
+            "ascii"
+        ),
+        "wrapped_key_sha256": getattr(record, "wrapped_key_sha256"),
+        "master_key_confirmation_hmac_sha256": getattr(
+            record,
+            "master_key_confirmation_hmac_sha256",
+        ),
+        "recovery_method": getattr(record, "recovery_method"),
+        "status": getattr(record, "status"),
+        "successor_key_id": getattr(record, "successor_key_id"),
+        "created_at": getattr(record, "created_at"),
+        "updated_at": getattr(record, "updated_at"),
+        "revoked_at": getattr(record, "revoked_at"),
+    }
+
+
+def _wrapped_key_version_response(record: object) -> dict:
+    return {
+        "key_id": getattr(record, "key_id"),
+        "key_kind": getattr(record, "key_kind"),
+        "wrapping_key_id": getattr(record, "wrapping_key_id"),
+        "wrapping_revision": getattr(record, "wrapping_revision"),
+        "algorithm": getattr(record, "algorithm"),
+        "wrapped_key_base64": base64.b64encode(getattr(record, "wrapped_key")).decode(
+            "ascii"
+        ),
+        "wrapped_key_sha256": getattr(record, "wrapped_key_sha256"),
+        "master_key_confirmation_hmac_sha256": getattr(
+            record,
+            "master_key_confirmation_hmac_sha256",
+        ),
+        "recovery_method": getattr(record, "recovery_method"),
+        "created_at": getattr(record, "created_at"),
+    }
+
+
+def _raise_document_key(error: Exception) -> None:
+    if isinstance(error, ManagedDocumentKeyDisabledError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="managed document key recovery is not configured",
+        )
+    if isinstance(error, ManagedDocumentKeyNotFoundError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="managed document key was not found",
+        )
+    if isinstance(error, ManagedDocumentKeyConflictError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="managed document key conflicted with existing state",
+        )
+    if isinstance(error, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="managed document key request was invalid",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="managed document key request failed",
+    )
+
+
+def _raise_unified_identity(error: Exception) -> None:
+    if isinstance(error, UnifiedIdentityUnavailableError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="managed account identity is temporarily unavailable",
+            headers={"Retry-After": "5"},
+        )
+    if isinstance(
+        error,
+        (
+            UnifiedIdentityCollisionError,
+            AuthorityTransitionConflictError,
+        ),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="managed account identity or authority state conflicted",
+        )
+    if isinstance(error, AuthorityTransitionRejectedError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="managed authority transition was rejected",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="managed identity authority request failed",
     )

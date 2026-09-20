@@ -2227,6 +2227,12 @@
     <string name="health_live_display_paused">Live display paused</string>
     <string name="onboarding_page_animation_label">Onboarding page</string>
     <string name="onboarding_direct_local_bluetooth">Direct, local Bluetooth</string>
+    <string name="onboarding_data_boundary_configured_title">Activate your band account</string>
+    <string name="onboarding_data_boundary_configured_body">Band readings start on this phone. This configured build requires sign-in and a completed band claim before setup can finish. Health data is not uploaded unless you separately enable and consent to a managed data feature.</string>
+    <string name="onboarding_data_boundary_exploration_title">Explore locally</string>
+    <string name="onboarding_data_boundary_exploration_body">This build does not create an account or upload health data. Setup stays on this phone; band ownership activation and managed cloud features are unavailable.</string>
+    <string name="onboarding_bluetooth_boundary_configured">NOOP connects directly to Noop Band over Bluetooth Low Energy. Band discovery and live readings stay on this phone. The configured account service is used for account and band-ownership activation; health data transfer requires separate explicit consent.</string>
+    <string name="onboarding_bluetooth_boundary_exploration">NOOP connects directly to Noop Band over Bluetooth Low Energy. Band discovery, live readings and setup stay on this phone. Account actions and cloud upload are off in this exploration build.</string>
     <string name="onboarding_bluetooth_permission_prompt">When the system prompt appears, choose Allow so NOOP can find Noop Band.</string>
     <string name="onboarding_date_of_birth">Date of birth</string>
     <string name="onboarding_age_years">%1$d yrs</string>
@@ -2441,6 +2447,13 @@
     <string name="ownership_plan_save_plus">Save NOOP+ preference</string>
     <string name="ownership_plan_saving">Saving…</string>
     <string name="ownership_onboarding_continue_locked">Claim band to continue</string>
+    <string name="ownership_onboarding_exploration_title">Explore NOOP locally</string>
+    <string name="ownership_onboarding_exploration_detail">Account and band-ownership activation are not configured in this build.</string>
+    <string name="ownership_onboarding_local_mode_title">Continue in local mode</string>
+    <string name="ownership_onboarding_local_mode_detail">You can finish onboarding and inspect the app without creating an account. Setup data stays on this phone.</string>
+    <string name="ownership_onboarding_unavailable_features_title">Unavailable in this build</string>
+    <string name="ownership_onboarding_unavailable_features_detail">Band ownership activation, account restore and managed cloud features require a configured release build.</string>
+    <string name="ownership_onboarding_unconfigured_boundary">Continuing keeps this build in local exploration mode. It does not create an account, claim a band or upload data.</string>
     <string name="ownership_screen_title">Band Account</string>
     <string name="ownership_screen_subtitle">Ownership activation is separate from NOOP+ and never stores health data.</string>
     <string name="ownership_unavailable_title">Band ownership is not enabled</string>

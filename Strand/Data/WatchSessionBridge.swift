@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import WatchConnectivity
+import StrandAnalytics
 import StrandDesign
 import WhoopStore   // DailyMetric (the anchor row's recovery / strain / sleep fields)
 
@@ -230,7 +231,18 @@ final class WatchSessionBridge: NSObject, ObservableObject {
         // day for the recovery side.
         let days = model.repo.days
         let now = Date()
-        let day = Repository.widgetAnchor(days: days, now: now)
+        let logicalKey = Repository.logicalDayKey(now)
+        let localKey = Repository.localDayKey(now)
+        let today = Repository.resolveToday(
+            days: days,
+            logicalKey: logicalKey,
+            localKey: localKey
+        )
+        let day = Repository.widgetAnchor(
+            days: days,
+            logicalKey: logicalKey,
+            localKey: localKey
+        )
 
         // Rest (sleep_performance) for that same anchor day. exploreSeries merges imported + on-device,
         // exactly like the Today Rest tile and the widget. The tail fallback (restSeries.last) is ONLY
@@ -251,30 +263,36 @@ final class WatchSessionBridge: NSObject, ObservableObject {
                 lastValue: restSeries.last?.value, isTodaySelected: anchorIsToday, todayKey: day.day)
         }
 
-        // The honesty rule: a missing number that is genuinely mid-calibration is flagged so the watch
-        // shows a cal marker, not a dash that looks like an outage. We treat "no number for the anchor
-        // day" as calibrating only when there is at least some day data to calibrate FROM. With no day
-        // at all (a fresh, never-synced phone) the flags stay false and the watch shows its neutral
-        // "open NOOP on your iPhone" empty state instead of implying calibration is underway.
-        let hasAnyDay = day != nil
+        // Recovery owns a real baseline gate, so only the shared scorer may declare it calibrating.
+        // Effort and Sleep have no equivalent launch-surface readiness evidence here; a missing value is
+        // therefore missing, never inferred as calibrating from the existence of some unrelated day row.
+        let recoveryCalibration = RecoveryScorer.calibrationNights(
+            nightlyHrv: days.map(\.avgHrv),
+            dayKeys: days.map(\.day),
+            before: today?.day ?? logicalKey,
+            hasRecovery: today?.recovery != nil
+        )
         let charge = day?.recovery
         let effort = day?.strain
         let rest = restScore
+        let scoreDay = day?.day
+            ?? (recoveryCalibration == nil ? nil : (today?.day ?? logicalKey))
+        let summaryDay = day ?? (recoveryCalibration == nil ? nil : today)
 
         let launchAuthorization = LaunchSurfaceAuthorization.current()
         let snap = WatchScoreSnapshot(
             charge: charge,
-            chargeCalibrating: hasAnyDay && charge == nil,
+            chargeCalibrating: charge == nil && recoveryCalibration != nil,
             effort: effort,
-            effortCalibrating: hasAnyDay && effort == nil,
+            effortCalibrating: false,
             rest: rest,
-            restCalibrating: hasAnyDay && rest == nil,
+            restCalibrating: false,
             hr: model.bpm ?? model.live.heartRate,
-            sleepSummary: sleepSummary(for: day),
+            sleepSummary: sleepSummary(for: summaryDay),
             asOf: Date(),
             // The day the scores are ABOUT (not when we built this), so the watch can label recency
             // honestly ("Yesterday") even when the build is fresh. nil when there's no anchor day at all.
-            scoreDay: day?.day,
+            scoreDay: scoreDay,
             launchGateRequired: launchAuthorization.required,
             launchGateVersion: launchAuthorization.gateVersion,
             launchGateAuthorized: launchAuthorization.authorized

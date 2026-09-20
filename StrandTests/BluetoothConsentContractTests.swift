@@ -20,7 +20,7 @@ final class BluetoothConsentContractTests: XCTestCase {
         XCTAssertTrue(initializer.contains("activateCentralIfNeeded(recordUserIntent: false)"))
         XCTAssertFalse(iosInitializer.contains("central = CBCentralManager"),
                        "A fresh AppModel must not directly construct CoreBluetooth before rationale.")
-        XCTAssertTrue(source.contains("func resumeRememberedRuntimeAfterLaunchAccess() {\n        guard Self.shouldResumeBluetoothRuntime else { return }"),
+        XCTAssertTrue(source.contains("func resumeRememberedRuntimeAfterLaunchAccess() {\n        guard allowsBluetoothRuntime else { return }\n        guard Self.shouldResumeBluetoothRuntime else { return }"),
                       "A locked launch must be able to resume a remembered runtime after data access unlocks.")
         XCTAssertTrue(source.contains("activateCentralIfNeeded(recordUserIntent: true)"),
                       "Explicit Connect/Scan entry points must prime the lazy runtime.")
@@ -40,10 +40,10 @@ final class BluetoothConsentContractTests: XCTestCase {
         XCTAssertTrue(initializer.contains("if resumeRememberedRuntimeAtLaunch, restoredPeripheralID != nil {"))
         XCTAssertFalse(iosInitializer.contains("central = CBCentralManager"),
                        "An unpaired scale source must not directly construct CoreBluetooth at launch.")
-        XCTAssertTrue(source.contains("func resumePairedScale() {\n        guard pairedPeripheralID != nil else { return }\n        activateCentralIfNeeded()"),
+        XCTAssertTrue(source.contains("func resumePairedScale() {\n        guard allowsBluetoothRuntime else { return }\n        guard pairedPeripheralID != nil else { return }\n        activateCentralIfNeeded()"),
                       "A locked launch must be able to resume a previously paired scale after unlock.")
-        XCTAssertTrue(source.contains("func scan() {\n        activateCentralIfNeeded()"))
-        XCTAssertTrue(source.contains("func connect(_ id: UUID) {\n        activateCentralIfNeeded()"))
+        XCTAssertTrue(source.contains("func scan() {\n        guard allowsBluetoothRuntime else {"))
+        XCTAssertTrue(source.contains("func connect(_ id: UUID) {\n        guard allowsBluetoothRuntime else {"))
     }
 
     func testAddDeviceWizardConstructsOnlyTheSelectedScannerAfterScan() throws {

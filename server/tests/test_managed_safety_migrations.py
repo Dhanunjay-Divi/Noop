@@ -26,6 +26,7 @@ DATABASE_URL = os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL") or os.getenv(
 )
 EXPECTED_038_SHA256 = "da26324bf1c99c3f384af4fc24c8ef7ad728afcd5e5fd84b1e9a81fe4c61a943"
 EXPECTED_041_SHA256 = "227809febdd3369ef530cab71deb08553a45a1d5e62ea070c86547b8d9ae3f9f"
+EXPECTED_046_SHA256 = "5b4f814174860ebe4938e87e765d21114e360948715dd1fde21650e26641acf5"
 
 
 class _ReadyPool:
@@ -234,6 +235,24 @@ def test_managed_safety_migration_041_is_manifested_forward_evolution() -> None:
     assert "incident_trigger IS DISTINCT FROM NEW.trigger" in sql
     assert "FOR SHARE OF incident" in sql
     assert "Incident ownership and trigger provenance never have" in sql
+
+
+def test_managed_safety_migration_046_is_additive_and_manifested() -> None:
+    migration = MIGRATIONS / "046_managed_safety_repeated_paging.sql"
+    manifest = _manifest_entries()
+    sql = migration.read_text(encoding="utf-8")
+
+    assert hashlib.sha256(migration.read_bytes()).hexdigest() == EXPECTED_046_SHA256
+    assert manifest[migration.name] == EXPECTED_046_SHA256
+    assert "ADD COLUMN page_round integer NOT NULL DEFAULT 1" in sql
+    assert "ADD COLUMN next_page_at timestamptz" in sql
+    assert "ADD COLUMN first_delivered_at timestamptz" in sql
+    assert "SET first_delivered_at = delivered_at" in sql
+    assert "CHECK (page_round BETWEEN 1 AND 8) NOT VALID" in sql
+    assert "VALIDATE CONSTRAINT managed_safety_delivery_page_round" in sql
+    assert "managed_safety_push_repeat_queue_idx" in sql
+    assert "DROP TABLE" not in sql
+    assert "DROP COLUMN" not in sql
 
 
 def test_safety_writer_compatibility_bundle_precedes_interleaved_migrations() -> None:

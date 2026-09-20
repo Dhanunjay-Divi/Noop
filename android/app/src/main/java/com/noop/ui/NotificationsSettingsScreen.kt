@@ -75,6 +75,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.noop.notif.CallAlertController
 import com.noop.notif.CallAlertSource
 import com.noop.notif.DailyReviewReminders
+import com.noop.notif.ManagedSafetyNotifier
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StrainTargetNotifier
 import java.util.Calendar
@@ -259,6 +260,9 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
     var quietHoursEnabled by remember { mutableStateOf(NotifPrefs.getBool(context, NotifPrefs.QUIET, false)) }
     var quietStartMinutes by remember { mutableStateOf(NotifPrefs.getInt(context, NotifPrefs.QUIET_START, 22 * 60)) }
     var quietEndMinutes by remember { mutableStateOf(NotifPrefs.getInt(context, NotifPrefs.QUIET_END, 7 * 60)) }
+    var managedSafetyUrgentSound by remember {
+        mutableStateOf(ManagedSafetyNotifier.urgentSoundEnabled(context))
+    }
     var callsEnabled by remember { mutableStateOf(NotifPrefs.getBool(context, NotifPrefs.CALLS_MASTER, false)) }
     var phoneCallsEnabled by remember { mutableStateOf(NotifPrefs.getBool(context, NotifPrefs.CALLS_PHONE, false)) }
     var voipCallsEnabled by remember { mutableStateOf(NotifPrefs.getBool(context, NotifPrefs.CALLS_VOIP, false)) }
@@ -409,6 +413,33 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
         title = uiString(R.string.l10n_notifications_settings_screen_notifications_753a22b2),
         subtitle = "Vibrate Noop Band when these apps notify you. Everything runs on this device.",
     ) {
+        AlertSection(
+            icon = Icons.Filled.NotificationsActive,
+            title = stringResource(R.string.managed_safety_presentation_title),
+            blurb = stringResource(R.string.managed_safety_presentation_blurb),
+        ) {
+            FormToggleRow(
+                label = stringResource(R.string.managed_safety_urgent_sound_title),
+                help = stringResource(R.string.managed_safety_urgent_sound_detail),
+                checked = managedSafetyUrgentSound,
+                onChange = {
+                    managedSafetyUrgentSound = it
+                    ManagedSafetyNotifier.setUrgentSoundEnabled(context, it)
+                },
+            )
+            RowDivider()
+            TextButton(
+                onClick = {
+                    context.startActivity(
+                        ManagedSafetyNotifier.notificationSettingsIntent(context)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                },
+            ) {
+                Text(stringResource(R.string.managed_safety_open_notification_settings))
+            }
+        }
+
         // MARK: Master card
         AlertSection(
             icon = Icons.Filled.NotificationsActive,

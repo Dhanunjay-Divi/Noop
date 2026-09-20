@@ -136,6 +136,7 @@ final class AlarmReadbackDecodeTests: XCTestCase {
     /// appends the "(rawValue)" suffix), so an equality compare against "GET_ALARM_TIME" was dead code and
     /// nothing ever logged. With hasPrefix matching, a synthesized readback frame now fires the branch and
     /// writes the "strap reports armed" line - proving the branch is reachable, not just the pure decode.
+    /// The report sink must redact the exact epoch and raw response bytes.
     @MainActor
     func testHandle_alarmReadbackFrame_logsStrapReports() {
         let live = LiveState()
@@ -143,7 +144,12 @@ final class AlarmReadbackDecodeTests: XCTestCase {
         router.family = .whoop4
         // SET-mirror payload with the #535 capture epoch (1781912880 = LE 30 D5 35 6A).
         router.handle(frame: alarmResponseFrame(payload: [0x01, 0x30, 0xD5, 0x35, 0x6A, 0x00, 0x00, 0x00, 0x00]))
-        XCTAssertTrue(live.log.contains { $0.contains("strap reports armed") && $0.contains("1781912880") },
+        XCTAssertTrue(live.log.contains {
+            $0.contains("strap reports armed")
+                && $0.contains("<timestamp>")
+                && $0.contains("<raw-bytes>")
+                && !$0.contains("1781912880")
+        },
                       "GET_ALARM_TIME readback branch must fire via handle(): \(live.log)")
     }
 

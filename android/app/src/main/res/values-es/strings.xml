@@ -2197,6 +2197,12 @@
     <string name="health_live_display_paused">Visualización en directo pausada</string>
     <string name="onboarding_page_animation_label">Página de configuración</string>
     <string name="onboarding_direct_local_bluetooth">Bluetooth local y directo</string>
+    <string name="onboarding_data_boundary_configured_title">Activa tu cuenta de la banda</string>
+    <string name="onboarding_data_boundary_configured_body">Las lecturas de la banda comienzan en este teléfono. Esta compilación configurada requiere iniciar sesión y completar la reclamación de la banda antes de terminar la configuración. Los datos de salud no se suben salvo que actives y aceptes por separado una función de datos gestionados.</string>
+    <string name="onboarding_data_boundary_exploration_title">Explora de forma local</string>
+    <string name="onboarding_data_boundary_exploration_body">Esta compilación no crea una cuenta ni sube datos de salud. La configuración permanece en este teléfono; la activación de propiedad de la banda y las funciones de nube gestionada no están disponibles.</string>
+    <string name="onboarding_bluetooth_boundary_configured">NOOP se conecta directamente a Noop Band mediante Bluetooth Low Energy. La búsqueda de la banda y las lecturas en directo permanecen en este teléfono. El servicio de cuenta configurado se usa para activar la cuenta y la propiedad de la banda; transferir datos de salud requiere un consentimiento explícito independiente.</string>
+    <string name="onboarding_bluetooth_boundary_exploration">NOOP se conecta directamente a Noop Band mediante Bluetooth Low Energy. La búsqueda de la banda, las lecturas en directo y la configuración permanecen en este teléfono. Las acciones de cuenta y la subida a la nube están desactivadas en esta compilación de exploración.</string>
     <string name="onboarding_bluetooth_permission_prompt">Cuando aparezca el aviso del sistema, elige Permitir para que NOOP pueda encontrar Noop Band.</string>
     <string name="onboarding_date_of_birth">Fecha de nacimiento</string>
     <string name="onboarding_age_years">%1$d años</string>
@@ -2707,6 +2713,13 @@
     <string name="ownership_plan_save_plus">Guardar preferencia de NOOP+</string>
     <string name="ownership_plan_saving">Guardando…</string>
     <string name="ownership_onboarding_continue_locked">Reclama la pulsera para continuar</string>
+    <string name="ownership_onboarding_exploration_title">Explora NOOP de forma local</string>
+    <string name="ownership_onboarding_exploration_detail">La activación de la cuenta y de la propiedad de la banda no está configurada en esta compilación.</string>
+    <string name="ownership_onboarding_local_mode_title">Continuar en modo local</string>
+    <string name="ownership_onboarding_local_mode_detail">Puedes terminar la configuración y revisar la aplicación sin crear una cuenta. Los datos de configuración permanecen en este teléfono.</string>
+    <string name="ownership_onboarding_unavailable_features_title">No disponible en esta compilación</string>
+    <string name="ownership_onboarding_unavailable_features_detail">La activación de propiedad de la banda, la restauración de la cuenta y las funciones de nube gestionada requieren una compilación de lanzamiento configurada.</string>
+    <string name="ownership_onboarding_unconfigured_boundary">Al continuar, esta compilación permanece en modo de exploración local. No crea una cuenta, no reclama una banda ni sube datos.</string>
     <string name="ownership_screen_title">Cuenta de la banda</string>
     <string name="ownership_screen_subtitle">La activación de propiedad es independiente de NOOP+ y nunca almacena datos de salud.</string>
     <string name="ownership_unavailable_title">La propiedad de la banda no está activada</string>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -15,10 +16,12 @@ from app.unified_identity_authority import (
     AuthorityTransitionConflictError,
     AuthorityTransitionRejectedError,
     PostgresUnifiedIdentityAuthorityRepository,
+    UnifiedIdentityUnavailableError,
 )
 
 DATABASE_URL = os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL")
 ISSUER = "https://securetoken.google.com/noop-synthetic-project"
+POLICY_SHA256 = "e9324e49b411f124635c24b2de509f4e459cb164b7bdd23519c65c778d12d7ef"
 
 
 @pytest.fixture
@@ -60,6 +63,15 @@ def _claims(subject: str, *, tenant: str = "") -> ManagedIdentityClaims:
         email_verified=True,
         sign_in_provider="password",
     )
+
+
+async def _wait_for_lock_waiters(pool, *, minimum: int) -> None:
+    for _ in range(500):
+        waiting = await pool.fetchval("SELECT count(*) FROM pg_locks WHERE NOT granted")
+        if int(waiting) >= minimum:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"expected at least {minimum} lock waiters")
 
 
 async def _seed_accounts(
@@ -113,6 +125,61 @@ async def _seed_accounts(
                     claims.subject_hash,
                     now,
                 )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_subscriptions (
+                        subscription_id,
+                        account_id,
+                        plan_code,
+                        plan_revision,
+                        status,
+                        billing_provider,
+                        period_started_at,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        $1, $2, 'noop_plus_staging', 1,
+                        'active', 'manual', $3, $3, $3
+                    )
+                    """,
+                    uuid4(),
+                    managed_account_id,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_consent_events (
+                        consent_event_id,
+                        account_id,
+                        policy_kind,
+                        policy_version,
+                        decision,
+                        data_classes,
+                        installation_id,
+                        request_id,
+                        occurred_at,
+                        recorded_at
+                    )
+                    SELECT
+                        $1,
+                        $2,
+                        'managed_storage',
+                        'synthetic-v1',
+                        'granted',
+                        array_agg(rule.data_class ORDER BY rule.data_class),
+                        NULL,
+                        $3,
+                        $4,
+                        $4
+                    FROM managed_plan_data_rules AS rule
+                    WHERE rule.plan_code = 'noop_plus_staging'
+                      AND rule.plan_revision = 1
+                    """,
+                    uuid4(),
+                    managed_account_id,
+                    uuid4(),
+                    now,
+                )
                 result["managed_account_id"] = managed_account_id
                 result["managed_identity_id"] = managed_identity_id
             if ownership:
@@ -157,6 +224,174 @@ async def _seed_accounts(
                 result["ownership_account_id"] = ownership_account_id
                 result["ownership_identity_id"] = ownership_identity_id
     return result
+
+
+async def _seed_authority_state(
+    primary: PostgresRepository,
+    *,
+    principal_id: UUID,
+    managed_account_id: UUID,
+    data_class: str,
+) -> None:
+    await primary._require_pool().execute(
+        """
+        INSERT INTO managed_authority_states (
+            principal_id,
+            managed_account_id,
+            data_class
+        ) VALUES ($1, $2, $3)
+        """,
+        principal_id,
+        managed_account_id,
+        data_class,
+    )
+
+
+@pytest.mark.asyncio
+async def test_authority_get_is_read_only_and_unknown_classes_do_not_mutate(
+    authority_repository,
+) -> None:
+    repository, primary, _ = authority_repository
+    claims = _claims(f"authority-scope-{uuid4()}")
+    await _seed_accounts(primary, claims, ownership=False)
+    principal = await repository.reconcile_identity(claims)
+    assert principal.managed_account_id is not None
+    pool = primary._require_pool()
+    before = await pool.fetchrow(
+        """
+        SELECT
+            (
+                SELECT count(*)
+                FROM managed_authority_states
+                WHERE managed_account_id = $1
+            ) AS state_rows,
+            (
+                SELECT count(*)
+                FROM managed_authority_transitions
+                WHERE managed_account_id = $1
+            ) AS transition_rows,
+            (
+                SELECT count(*)
+                FROM managed_consent_events
+                WHERE account_id = $1
+            ) AS consent_rows
+        """,
+        principal.managed_account_id,
+    )
+
+    baseline = await repository.authority_state(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class="essential_timeseries",
+    )
+    assert baseline.state == "local_only"
+    assert baseline.transition_version == 0
+    assert (
+        await pool.fetchval(
+            """
+            SELECT count(*)
+            FROM managed_authority_states
+            WHERE managed_account_id = $1
+            """,
+            principal.managed_account_id,
+        )
+        == before["state_rows"]
+    )
+
+    unknown = "synthetic_unknown_class"
+    with pytest.raises(AuthorityTransitionRejectedError):
+        await repository.authority_state(
+            principal_id=principal.principal_id,
+            managed_account_id=principal.managed_account_id,
+            data_class=unknown,
+        )
+    with pytest.raises(AuthorityTransitionRejectedError):
+        await repository.request_rollback(
+            principal_id=principal.principal_id,
+            managed_account_id=principal.managed_account_id,
+            data_class=unknown,
+            request_id=uuid4(),
+            opt_out=True,
+        )
+    with pytest.raises(AuthorityTransitionRejectedError):
+        await repository.record_reconsent(
+            principal_id=principal.principal_id,
+            managed_account_id=principal.managed_account_id,
+            data_class=unknown,
+            request_id=uuid4(),
+            policy_kind="managed_storage",
+            policy_version="synthetic-v1",
+            policy_sha256=POLICY_SHA256,
+            installation_id="unused-test-installation",
+        )
+
+    after = await pool.fetchrow(
+        """
+        SELECT
+            (
+                SELECT count(*)
+                FROM managed_authority_states
+                WHERE managed_account_id = $1
+            ) AS state_rows,
+            (
+                SELECT count(*)
+                FROM managed_authority_transitions
+                WHERE managed_account_id = $1
+            ) AS transition_rows,
+            (
+                SELECT count(*)
+                FROM managed_consent_events
+                WHERE account_id = $1
+            ) AS consent_rows
+        """,
+        principal.managed_account_id,
+    )
+    assert dict(after) == dict(before)
+
+
+async def _seed_installation(
+    primary: PostgresRepository,
+    *,
+    account_id: UUID,
+    installation_id: str,
+) -> None:
+    now = datetime.now(UTC)
+    token_hash = hashlib.sha256(
+        f"authority:{installation_id}".encode("ascii")
+    ).hexdigest()
+    async with primary._require_pool().acquire() as connection:
+        async with connection.transaction():
+            await connection.execute(
+                """
+                INSERT INTO installation_credentials (
+                    installation_id,
+                    enrollment_id,
+                    token_hash,
+                    created_at,
+                    updated_at
+                ) VALUES ($1, $2, $3, $4, $4)
+                """,
+                installation_id,
+                uuid4(),
+                token_hash,
+                now,
+            )
+            await connection.execute(
+                """
+                INSERT INTO managed_account_installations (
+                    account_id,
+                    installation_id,
+                    platform,
+                    status,
+                    token_valid_after,
+                    registered_at,
+                    last_seen_at
+                ) VALUES ($1, $2, 'ios', 'active', $3, $3, $3)
+                """,
+                account_id,
+                installation_id,
+                now,
+            )
 
 
 async def _advance_to_cloud_authority(
@@ -292,6 +527,129 @@ async def test_concurrent_reconciliation_creates_one_unified_root_and_links(
 
 
 @pytest.mark.asyncio
+async def test_managed_reconciliation_cannot_relink_after_erasure_starts(
+    authority_repository,
+) -> None:
+    repository, primary, _ = authority_repository
+    claims = _claims(f"managed-erasure-link-race-{uuid4()}")
+    seeded = await _seed_accounts(
+        primary,
+        claims,
+        managed=True,
+        ownership=False,
+    )
+    pool = primary._require_pool()
+    async with pool.acquire() as blocker:
+        async with blocker.transaction():
+            await blocker.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"noop-managed-erasure-account:{seeded['managed_account_id']}",
+            )
+            reconcile_task = asyncio.create_task(
+                repository.reconcile_identity(claims)
+            )
+            await _wait_for_lock_waiters(pool, minimum=1)
+            now = datetime.now(UTC)
+            await blocker.execute(
+                """
+                UPDATE managed_accounts
+                SET status = 'erasure_pending',
+                    auth_valid_after = $2,
+                    erasure_requested_at = $2,
+                    updated_at = $2
+                WHERE account_id = $1
+                """,
+                seeded["managed_account_id"],
+                now,
+            )
+
+    with pytest.raises(
+        UnifiedIdentityUnavailableError,
+        match="managed account identity is unavailable",
+    ):
+        await asyncio.wait_for(reconcile_task, timeout=5)
+    assert (
+        await pool.fetchval(
+            """
+            SELECT count(*)
+            FROM unified_managed_account_links
+            WHERE managed_account_id = $1
+            """,
+            seeded["managed_account_id"],
+        )
+        == 0
+    )
+
+
+@pytest.mark.asyncio
+async def test_link_guard_rejects_inactive_managed_identity_and_account(
+    authority_repository,
+) -> None:
+    _, primary, _ = authority_repository
+    claims = _claims(f"inactive-managed-link-{uuid4()}")
+    seeded = await _seed_accounts(
+        primary,
+        claims,
+        managed=True,
+        ownership=False,
+    )
+    pool = primary._require_pool()
+    principal_id = uuid4()
+    now = datetime.now(UTC)
+    await pool.execute(
+        """
+        INSERT INTO unified_account_principals (
+            principal_id,
+            issuer,
+            provider_tenant,
+            subject_hash,
+            created_at,
+            updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $5)
+        """,
+        principal_id,
+        claims.issuer,
+        claims.provider_tenant,
+        claims.subject_hash,
+        now,
+    )
+    await pool.execute(
+        """
+        UPDATE managed_accounts
+        SET status = 'erasure_pending',
+            auth_valid_after = $2,
+            erasure_requested_at = $2,
+            updated_at = $2
+        WHERE account_id = $1
+        """,
+        seeded["managed_account_id"],
+        now,
+    )
+    with pytest.raises(
+        asyncpg.CheckViolationError,
+        match="unavailable or mismatched",
+    ):
+        await pool.execute(
+            """
+            INSERT INTO unified_managed_account_links (
+                principal_id,
+                managed_account_id,
+                managed_identity_id,
+                issuer,
+                provider_tenant,
+                subject_hash
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            principal_id,
+            seeded["managed_account_id"],
+            seeded["managed_identity_id"],
+            claims.issuer,
+            claims.provider_tenant,
+            claims.subject_hash,
+        )
+
+
+@pytest.mark.asyncio
 async def test_link_guards_and_composite_fks_reject_mismatched_identity(
     authority_repository,
 ) -> None:
@@ -314,7 +672,10 @@ async def test_link_guards_and_composite_fks_reject_mismatched_identity(
     )
     pool = primary._require_pool()
 
-    with pytest.raises(asyncpg.CheckViolationError, match="does not match"):
+    with pytest.raises(
+        asyncpg.CheckViolationError,
+        match="unavailable or mismatched",
+    ):
         await pool.execute(
             """
             INSERT INTO unified_managed_account_links (
@@ -350,7 +711,10 @@ async def test_link_guards_and_composite_fks_reject_mismatched_identity(
         in constraint_definition
     )
 
-    with pytest.raises(asyncpg.CheckViolationError, match="does not match"):
+    with pytest.raises(
+        asyncpg.CheckViolationError,
+        match="unavailable or mismatched",
+    ):
         await pool.execute(
             """
             INSERT INTO unified_managed_account_links (
@@ -518,7 +882,8 @@ async def test_database_guard_rejects_direct_state_skip(
     principal = await repository.reconcile_identity(claims)
     assert principal.managed_account_id is not None
     data_class = "derived_summaries"
-    await repository.authority_state(
+    await _seed_authority_state(
+        primary,
         principal_id=principal.principal_id,
         managed_account_id=principal.managed_account_id,
         data_class=data_class,
@@ -609,6 +974,64 @@ async def test_database_guard_rejects_direct_state_skip(
 
 
 @pytest.mark.asyncio
+async def test_database_guard_rejects_direct_cloud_authority_insert(
+    authority_repository,
+) -> None:
+    repository, primary, _ = authority_repository
+    claims = _claims(f"direct-cloud-insert-{uuid4()}")
+    await _seed_accounts(primary, claims, ownership=False)
+    principal = await repository.reconcile_identity(claims)
+    assert principal.managed_account_id is not None
+    now = datetime.now(UTC)
+
+    with pytest.raises(asyncpg.CheckViolationError, match="ledger baseline"):
+        await primary._require_pool().execute(
+            """
+            INSERT INTO managed_authority_states (
+                principal_id,
+                managed_account_id,
+                data_class,
+                state,
+                transition_version,
+                last_transition_id,
+                upload_acknowledgement_id,
+                upload_acknowledgement_sha256,
+                upload_acknowledged_at,
+                restore_proof_id,
+                restore_proof_sha256,
+                restore_proven_at,
+                pruning_authorized_at,
+                created_at,
+                updated_at
+            ) VALUES (
+                $1, $2, 'raw_motion', 'cloud_authoritative', 5, $3,
+                $4, $5, $6, $7, $8, $6, $6, $6, $6
+            )
+            """,
+            principal.principal_id,
+            principal.managed_account_id,
+            uuid4(),
+            uuid4(),
+            "a" * 64,
+            now,
+            uuid4(),
+            "b" * 64,
+        )
+
+    assert (
+        await primary._require_pool().fetchval(
+            """
+            SELECT count(*)
+            FROM managed_authority_states
+            WHERE managed_account_id = $1 AND data_class = 'raw_motion'
+            """,
+            principal.managed_account_id,
+        )
+        == 0
+    )
+
+
+@pytest.mark.asyncio
 async def test_database_guard_rejects_unapplied_ledger_event(
     authority_repository,
 ) -> None:
@@ -618,7 +1041,8 @@ async def test_database_guard_rejects_unapplied_ledger_event(
     principal = await repository.reconcile_identity(claims)
     assert principal.managed_account_id is not None
     data_class = "raw_motion"
-    await repository.authority_state(
+    await _seed_authority_state(
+        primary,
         principal_id=principal.principal_id,
         managed_account_id=principal.managed_account_id,
         data_class=data_class,
@@ -684,6 +1108,215 @@ async def test_opt_out_rollback_revokes_pruning_and_restores_local_authority(
         data_class=data_class,
         authorize_pruning=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_opt_out_is_ledgered_while_local_and_blocks_repromotion(
+    authority_repository,
+) -> None:
+    repository, primary, _ = authority_repository
+    claims = _claims(f"authority-local-opt-out-{uuid4()}")
+    await _seed_accounts(primary, claims, ownership=False)
+    principal = await repository.reconcile_identity(claims)
+    assert principal.managed_account_id is not None
+    data_class = "essential_timeseries"
+    installation_id = f"ios-authority-{uuid4().hex}"
+    await _seed_installation(
+        primary,
+        account_id=principal.managed_account_id,
+        installation_id=installation_id,
+    )
+    first_request_id = uuid4()
+
+    first = await repository.request_rollback(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class=data_class,
+        request_id=first_request_id,
+        opt_out=True,
+    )
+    replay = await repository.request_rollback(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class=data_class,
+        request_id=first_request_id,
+        opt_out=True,
+    )
+    second = await repository.request_rollback(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class=data_class,
+        request_id=uuid4(),
+        opt_out=True,
+    )
+    blocked = await repository.authority_state(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class=data_class,
+    )
+
+    assert first.state == "rollback"
+    assert first.transition_version == 1
+    assert replay.duplicate is True
+    assert replay.transition_id == first.transition_id
+    assert second.state == "rollback"
+    assert second.transition_version == 2
+    assert blocked.last_opt_out_at is not None
+    assert blocked.last_reconsented_at is None
+    with pytest.raises(AuthorityTransitionRejectedError, match="re-consent"):
+        await repository.transition_authority(
+            principal_id=principal.principal_id,
+            managed_account_id=principal.managed_account_id,
+            data_class=data_class,
+            request_id=uuid4(),
+            target_state="uploading",
+            reason="migration_started",
+        )
+
+    reconsented = await repository.record_reconsent(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class=data_class,
+        request_id=uuid4(),
+        policy_kind="managed_storage",
+        policy_version="synthetic-v1",
+        policy_sha256=POLICY_SHA256,
+        installation_id=installation_id,
+    )
+    promoted = await repository.transition_authority(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class=data_class,
+        request_id=uuid4(),
+        target_state="uploading",
+        reason="migration_started",
+    )
+    allowed = await repository.authority_state(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class=data_class,
+    )
+
+    assert reconsented.state == "local_only"
+    assert promoted.state == "uploading"
+    assert allowed.last_reconsented_at is not None
+    assert allowed.last_reconsented_at > allowed.last_opt_out_at
+    assert allowed.reconsent_consent_event_id is not None
+    assert allowed.reconsent_policy_version == "synthetic-v1"
+    assert allowed.reconsent_policy_sha256 == POLICY_SHA256
+    consent = await primary._require_pool().fetchrow(
+        """
+        SELECT consent_event_id,
+               policy_kind,
+               policy_version,
+               decision,
+               data_classes,
+               installation_id
+        FROM managed_consent_events
+        WHERE account_id = $1
+          AND consent_event_id = $2
+        """,
+        principal.managed_account_id,
+        allowed.reconsent_consent_event_id,
+    )
+    assert consent is not None
+    assert consent["policy_kind"] == "managed_storage"
+    assert consent["policy_version"] == "synthetic-v1"
+    assert consent["decision"] == "granted"
+    assert list(consent["data_classes"]) == [data_class]
+    assert consent["installation_id"] == installation_id
+    assert (
+        await primary._require_pool().fetchval(
+            """
+            SELECT count(*)
+            FROM managed_authority_transitions
+            WHERE managed_account_id = $1
+              AND data_class = $2
+              AND reason = 'opt_out_requested'
+            """,
+            principal.managed_account_id,
+            data_class,
+        )
+        == 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_database_guard_blocks_direct_repromotion_after_opt_out(
+    authority_repository,
+) -> None:
+    repository, primary, _ = authority_repository
+    claims = _claims(f"authority-direct-repromotion-{uuid4()}")
+    await _seed_accounts(primary, claims, ownership=False)
+    principal = await repository.reconcile_identity(claims)
+    assert principal.managed_account_id is not None
+    data_class = "raw_ppg"
+    await repository.request_rollback(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class=data_class,
+        request_id=uuid4(),
+        opt_out=True,
+    )
+    state = await repository.authority_state(
+        principal_id=principal.principal_id,
+        managed_account_id=principal.managed_account_id,
+        data_class=data_class,
+    )
+    transition_id = uuid4()
+    now = datetime.now(UTC)
+
+    with pytest.raises(asyncpg.CheckViolationError, match="re-consent"):
+        async with primary._require_pool().acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """
+                    INSERT INTO managed_authority_transitions (
+                        transition_id,
+                        principal_id,
+                        managed_account_id,
+                        data_class,
+                        request_id,
+                        request_sha256,
+                        transition_version,
+                        from_state,
+                        to_state,
+                        reason,
+                        last_opt_out_at,
+                        occurred_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7,
+                        'rollback', 'uploading', 'migration_started', $8, $9
+                    )
+                    """,
+                    transition_id,
+                    principal.principal_id,
+                    principal.managed_account_id,
+                    data_class,
+                    uuid4(),
+                    "d" * 64,
+                    state.transition_version + 1,
+                    state.last_opt_out_at,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_authority_states
+                    SET state = 'uploading',
+                        transition_version = $4,
+                        last_transition_id = $5,
+                        updated_at = $6
+                    WHERE principal_id = $1
+                      AND managed_account_id = $2
+                      AND data_class = $3
+                    """,
+                    principal.principal_id,
+                    principal.managed_account_id,
+                    data_class,
+                    state.transition_version + 1,
+                    transition_id,
+                    now,
+                )
 
     rollback = await repository.request_rollback(
         principal_id=principal.principal_id,

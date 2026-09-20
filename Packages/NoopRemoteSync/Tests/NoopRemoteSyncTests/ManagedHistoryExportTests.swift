@@ -214,6 +214,184 @@ final class ManagedHistoryExportTests: XCTestCase {
         XCTAssertNil(completion)
     }
 
+    func testCheckpointChunkByteOverflowFailsClosedBeforeNetworkUse()
+        async throws
+    {
+        try await assertCheckpointChunkByteTotalRejected(
+            compressedBytes: Int.max
+        )
+    }
+
+    func testCheckpointChunkByteUnderflowFailsClosedBeforeNetworkUse()
+        async throws
+    {
+        try await assertCheckpointChunkByteTotalRejected(
+            compressedBytes: Int.min
+        )
+    }
+
+    func testStagedArchiveValidatorAcceptsMatchingEntries() throws {
+        let data = Data("staged-entry".utf8)
+        let manifest = stagedManifest(data: data)
+
+        XCTAssertNoThrow(
+            try ManagedHistoryStagedArchiveValidator.validate(
+                manifest: manifest,
+                entryPaths: manifest.chunks.map(\.path),
+                read: { path, maximumBytes in
+                    XCTAssertEqual(path, manifest.chunks[0].path)
+                    XCTAssertEqual(maximumBytes, data.count)
+                    return data
+                }
+            )
+        )
+    }
+
+    func testStagedArchiveValidatorClassifiesCorruptionAsUnusableState() {
+        let data = Data("staged-entry".utf8)
+        let manifest = stagedManifest(data: data)
+
+        XCTAssertThrowsError(
+            try ManagedHistoryStagedArchiveValidator.validate(
+                manifest: manifest,
+                entryPaths: manifest.chunks.map(\.path),
+                read: { _, _ in Data("corrupt".utf8) }
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ManagedHistoryExportStateError,
+                .unusableStagedArchive
+            )
+        }
+    }
+
+    func testStagedArchiveValidatorPreservesFilesystemFailureClassification() {
+        let data = Data("staged-entry".utf8)
+        let manifest = stagedManifest(data: data)
+
+        XCTAssertThrowsError(
+            try ManagedHistoryStagedArchiveValidator.validate(
+                manifest: manifest,
+                entryPaths: manifest.chunks.map(\.path),
+                read: { _, _ in throw StagedArchiveReadFailure.transient }
+            )
+        ) { error in
+            XCTAssertEqual(error as? StagedArchiveReadFailure, .transient)
+        }
+    }
+
+    private func assertCheckpointChunkByteTotalRejected(
+        compressedBytes: Int
+    ) async throws {
+        let data = Data("checkpoint".utf8)
+        let available = makeChunk(
+            id: UUID(uuidString: "12000000-0000-5000-8000-000000000001")!,
+            data: data,
+            start: "2026-09-01T00:00:00Z"
+        )
+        let chunks = (1...2).map { index in
+            ManagedHistoryExportManifest.Chunk(
+                path:
+                    "chunks/essential_timeseries/"
+                    + "12000000-0000-5000-8000-"
+                    + String(format: "%012d", index)
+                    + ".json",
+                chunkID: UUID(
+                    uuidString:
+                        "12000000-0000-5000-8000-"
+                        + String(format: "%012d", index)
+                )!,
+                sourceID: available.sourceID,
+                dataClass: available.dataClass,
+                schemaVersion: available.schemaVersion,
+                eventStart: available.eventStart,
+                eventEnd: available.eventEnd,
+                compression: available.compression,
+                contentType: available.contentType,
+                sha256: available.expectedSHA256,
+                compressedBytes: compressedBytes,
+                uncompressedBytes: available.expectedUncompressedBytes,
+                objectGeneration: available.objectGeneration
+            )
+        }
+        let checkpoint = ManagedHistoryExportCheckpoint(
+            createdAt: "2026-09-04T12:00:00Z",
+            requestID: UUID(),
+            restoreJobID: UUID(),
+            snapshotAt: "2026-09-04T12:00:00Z",
+            changeSequence: 42,
+            expiresAt: "2026-09-05T00:00:00Z",
+            dataClasses: ["essential_timeseries"],
+            pageSize: 25,
+            selectedObjects: chunks.count,
+            selectedChunkBytes: Int64.max,
+            exportedObjects: chunks.count,
+            exportedChunkBytes: Int64.max,
+            chunks: chunks
+        )
+        let transport = ExportTransport(chunks: [], chunkData: [:])
+
+        do {
+            _ = try await ManagedHistoryExporter(transport: transport).export(
+                dataClasses: ["essential_timeseries"],
+                pageSize: 25,
+                resumeFrom: checkpoint,
+                authorization: { _ in try Self.authorization() },
+                now: { Self.date("2026-09-04T12:01:00Z") },
+                consume: { _ in }
+            )
+            XCTFail("Expected byte-total overflow rejection")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let restoreCreations = await transport.restoreCreationCount()
+        let completion = await transport.completedValues()
+        XCTAssertEqual(restoreCreations, 0)
+        XCTAssertNil(completion)
+    }
+
+    private func stagedManifest(
+        data: Data
+    ) -> ManagedHistoryExportManifest {
+        let path =
+            "chunks/essential_timeseries/"
+            + "13000000-0000-5000-8000-000000000001.json"
+        let chunk = ManagedHistoryExportManifest.Chunk(
+            path: path,
+            chunkID: UUID(
+                uuidString: "13000000-0000-5000-8000-000000000001"
+            )!,
+            sourceID: UUID(
+                uuidString: "13000000-0000-5000-8000-000000000002"
+            )!,
+            dataClass: "essential_timeseries",
+            schemaVersion: 1,
+            eventStart: "2026-09-01T00:00:00Z",
+            eventEnd: "2026-09-01T00:01:00Z",
+            compression: "none",
+            contentType: "application/vnd.noop.chunk+json",
+            sha256: ManagedDigest.sha256(data),
+            compressedBytes: data.count,
+            uncompressedBytes: data.count,
+            objectGeneration: 1
+        )
+        return ManagedHistoryExportManifest(
+            format: "noop_managed_history",
+            formatVersion: 2,
+            createdAt: "2026-09-04T12:00:00Z",
+            snapshotAt: "2026-09-04T11:59:00Z",
+            changeSequence: 42,
+            dataClasses: ["essential_timeseries"],
+            selectedObjects: 1,
+            selectedChunkBytes: Int64(data.count),
+            exportedObjects: 1,
+            exportedChunkBytes: Int64(data.count),
+            chunks: [chunk],
+            documents: []
+        )
+    }
+
     func testDigestMismatchFailsBeforePublishingEntryOrCompletingSnapshot() async throws {
         let expected = Data("expected".utf8)
         let chunk = makeChunk(
@@ -443,6 +621,10 @@ final class ManagedHistoryExportTests: XCTestCase {
             duplicate: false
         )
     }
+}
+
+private enum StagedArchiveReadFailure: Error {
+    case transient
 }
 
 private actor ExportEntryRecorder {

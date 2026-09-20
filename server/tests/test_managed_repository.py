@@ -10,6 +10,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from app.managed_document_keys import (
+    ManagedWrappedKeyMutation,
+    PostgresManagedDocumentKeyRepository,
+)
 from app.managed_identity import ManagedIdentityClaims
 from app.managed_models import (
     ManagedChunkReservation,
@@ -62,6 +66,14 @@ def test_erasure_request_preserves_job_before_account_lock_order() -> None:
     assert "account.status = 'active'" in claim_source
 
 
+def test_document_mutation_uses_account_erasure_fence() -> None:
+    source = inspect.getsource(PostgresManagedRepository.put_document)
+    account_fence = source.index("_lock_active_account_mutation")
+    document_lock = source.index("noop-managed-document:", account_fence)
+    insert = source.index("INSERT INTO managed_documents", document_lock)
+    assert account_fence < document_lock < insert
+
+
 async def _wait_for_lock_waiters(pool, *, minimum: int) -> None:
     for _ in range(500):
         waiting = await pool.fetchval("SELECT count(*) FROM pg_locks WHERE NOT granted")
@@ -76,11 +88,12 @@ def _claims(
     now: datetime,
     *,
     managed_pilot: bool = False,
+    provider_tenant: str = "noop-staging",
 ) -> ManagedIdentityClaims:
     return ManagedIdentityClaims(
         issuer="https://securetoken.google.com/noop-test-project",
         subject=subject,
-        provider_tenant="noop-staging",
+        provider_tenant=provider_tenant,
         issued_at=now,
         auth_time=now - timedelta(minutes=1),
         expires_at=now + timedelta(hours=1),
@@ -141,6 +154,56 @@ def _managed(
         entitlement_mode=entitlement_mode,
         replay_secret="test-managed-replay-secret-at-least-32-bytes",
     )
+
+
+def _wrapped_key(
+    *,
+    key_id: UUID,
+    key_kind: str,
+    wrapped_key: bytes,
+    wrapping_key_id: UUID | None = None,
+) -> ManagedWrappedKeyMutation:
+    return ManagedWrappedKeyMutation(
+        key_id=key_id,
+        key_kind=key_kind,  # type: ignore[arg-type]
+        wrapping_key_id=wrapping_key_id,
+        wrapping_revision=1,
+        algorithm="A256GCM",
+        wrapped_key=wrapped_key,
+        wrapped_key_sha256=hashlib.sha256(wrapped_key).hexdigest(),
+        master_key_confirmation_hmac_sha256=(
+            "f" * 64 if key_kind == "account_master" else None
+        ),
+        recovery_method="recovery_key" if key_kind == "account_master" else None,
+    )
+
+
+async def _create_wrapped_document_key(
+    repository: PostgresManagedDocumentKeyRepository,
+    *,
+    principal: ManagedPrincipal,
+    marker: bytes,
+) -> tuple[UUID, UUID]:
+    master_key_id = uuid4()
+    document_key_id = uuid4()
+    await repository.put(
+        principal=principal,
+        mutation=_wrapped_key(
+            key_id=master_key_id,
+            key_kind="account_master",
+            wrapped_key=marker * 72,
+        ),
+    )
+    await repository.put(
+        principal=principal,
+        mutation=_wrapped_key(
+            key_id=document_key_id,
+            key_kind="document",
+            wrapping_key_id=master_key_id,
+            wrapped_key=marker.upper() * 72,
+        ),
+    )
+    return master_key_id, document_key_id
 
 
 @pytest.mark.asyncio
@@ -784,12 +847,12 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
         assert duplicate_completed_restore["status"] == "completed"
         assert duplicate_completed_restore["duplicate"] is True
 
-        key_id = uuid4()
+        legacy_key_id = uuid4()
         await repository.register_client_key(
             principal=first_principal,
             installation_id=first_installation,
             registration=ManagedClientKeyRegistration(
-                client_key_id=key_id,
+                client_key_id=legacy_key_id,
                 purpose="recovery",
                 algorithm="X25519-AESGCM",
                 public_key_base64=None,
@@ -797,6 +860,27 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
                 recovery_method="recovery_key",
                 hardware_backed=True,
             ),
+        )
+        document_key_repository = PostgresManagedDocumentKeyRepository(
+            primary,
+            enabled=True,
+        )
+        _, document_key_id = await _create_wrapped_document_key(
+            document_key_repository,
+            principal=first_principal,
+            marker=b"d",
+        )
+        assert (
+            await primary._require_pool().fetchval(
+                """
+                SELECT count(*)
+                FROM managed_client_keys
+                WHERE account_id = $1 AND client_key_id = $2
+                """,
+                first_principal.account_id,
+                document_key_id,
+            )
+            == 0
         )
         # Reuse the day-ownership UUID deliberately. Document identity includes kind, so
         # the change-feed join must not cross-match same-revision rows from another kind.
@@ -811,14 +895,29 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
                 document_id=encrypted_document_id,
                 base_revision=0,
                 content_mode="client_encrypted",
-                client_key_id=key_id,
+                client_key_id=document_key_id,
                 payload_ciphertext_base64=encrypted_payload,
                 updated_at=now,
             ),
         )
         assert encrypted_document["revision"] == 1
+        assert encrypted_document["client_key_id"] == str(document_key_id)
         assert encrypted_document["payload_json"] is None
         assert encrypted_document["payload_ciphertext_base64"] == encrypted_payload
+        stored_document_keys = await primary._require_pool().fetchrow(
+            """
+            SELECT client_key_id, document_key_id
+            FROM managed_documents
+            WHERE account_id = $1
+              AND document_kind = 'journal'
+              AND document_id = $2
+              AND document_revision = 1
+            """,
+            first_principal.account_id,
+            encrypted_document_id,
+        )
+        assert stored_document_keys["client_key_id"] is None
+        assert stored_document_keys["document_key_id"] == document_key_id
         encrypted_tombstone = await repository.put_document(
             principal=first_principal,
             installation_id=first_installation,
@@ -865,6 +964,7 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
             document_id=encrypted_document_id,
             revision=1,
         )
+        assert encrypted_revision["client_key_id"] == str(document_key_id)
         assert encrypted_revision["payload_ciphertext_base64"] == encrypted_payload
         export = await repository.create_export(
             principal=first_principal,
@@ -873,7 +973,7 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
                 request_id=uuid4(),
                 format="noopbak",
                 content_mode="client_encrypted",
-                client_key_id=key_id,
+                client_key_id=legacy_key_id,
                 scope={"all": True},
                 expected_sha256="f" * 64,
                 expected_bytes=4096,
@@ -911,6 +1011,14 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
             for change in document_changes["changes"]
             if change["resource_kind"] == "document"
         } == {"day_ownership", "journal"}
+        encrypted_change = next(
+            change
+            for change in document_changes["changes"]
+            if change["resource_kind"] == "document"
+            and change["operation"] == "upsert"
+            and change["document"]["document_kind"] == "journal"
+        )
+        assert encrypted_change["document"]["client_key_id"] == str(document_key_id)
         filtered_changes = await repository.list_changes(
             principal=first_principal,
             after_sequence=3,
@@ -1343,6 +1451,96 @@ async def test_erasure_request_and_cancel_serialize_on_account_lock() -> None:
             ("active", 0),
             ("erasure_pending", 1),
         }
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_document_write_cannot_commit_after_account_erasure_fence() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(primary)
+        now = datetime.now(UTC)
+        claims = _claims(f"document-erasure-race-{uuid4()}", now)
+        installation_id = str(uuid4())
+        await repository.enroll(
+            claims=claims,
+            enrollment=_enrollment(installation_id, uuid4()),
+        )
+        principal = await repository.principal_for_identity(claims)
+        document_id = uuid4()
+        mutation = ManagedDocumentMutation(
+            request_id=uuid4(),
+            document_kind="day_ownership",
+            document_id=document_id,
+            base_revision=0,
+            content_mode="server_readable",
+            payload_json={
+                "schema_version": 1,
+                "table": "dayOwnership",
+                "key": {"day": "2026-09-20"},
+                "record": {
+                    "day": "2026-09-20",
+                    "deviceId": "synthetic-device",
+                    "locked": 0,
+                },
+            },
+            updated_at=now,
+        )
+        pool = primary._require_pool()
+        async with pool.acquire() as blocker:
+            async with blocker.transaction():
+                await blocker.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-erasure-account:{principal.account_id}",
+                )
+                write_task = asyncio.create_task(
+                    repository.put_document(
+                        principal=principal,
+                        installation_id=installation_id,
+                        mutation=mutation,
+                    )
+                )
+                await _wait_for_lock_waiters(pool, minimum=1)
+                erasure_started_at = now + timedelta(seconds=1)
+                await blocker.execute(
+                    """
+                    UPDATE managed_accounts
+                    SET status = 'erasure_pending',
+                        auth_valid_after = $2,
+                        erasure_requested_at = $2,
+                        updated_at = $2
+                    WHERE account_id = $1
+                    """,
+                    principal.account_id,
+                    erasure_started_at,
+                )
+
+        with pytest.raises(ManagedForbiddenError, match="not active"):
+            await asyncio.wait_for(write_task, timeout=5)
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_documents
+                WHERE account_id = $1 AND document_id = $2
+                """,
+                principal.account_id,
+                document_id,
+            )
+            == 0
+        )
     finally:
         await primary.shutdown()
 

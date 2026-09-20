@@ -36,10 +36,16 @@ struct NOOPLiveActivity: Widget {
                         // Keep the same at-a-glance daily and strap state as Android's ongoing notification.
                         HStack(spacing: 10) {
                             if let r = context.state.recovery {
-                                bannerStat(label: "Recovery", value: "\(r)%")
+                                bannerStat(
+                                    label: liveScoreLabel("Recovery", scoreDay: context.state.scoreDay),
+                                    value: "\(r)%"
+                                )
                             }
                             if let e = context.state.effort {
-                                bannerStat(label: "Effort", value: "\(e)")
+                                bannerStat(
+                                    label: liveScoreLabel("Effort", scoreDay: context.state.scoreDay),
+                                    value: "\(e)"
+                                )
                             }
                             if let battery = context.state.batteryPct {
                                 bannerStat(label: "Battery", value: "\(battery)%")
@@ -81,10 +87,16 @@ struct NOOPLiveActivity: Widget {
                         // Recovery + Effort (#446) — one more stat alongside the leading live HR.
                         HStack(spacing: 10) {
                             if let r = context.state.recovery {
-                                statColumn(label: "Recovery", value: "\(r)%")
+                                statColumn(
+                                    label: liveScoreLabel("Recovery", scoreDay: context.state.scoreDay),
+                                    value: "\(r)%"
+                                )
                             }
                             if let e = context.state.effort {
-                                statColumn(label: "Effort", value: "\(e)")
+                                statColumn(
+                                    label: liveScoreLabel("Effort", scoreDay: context.state.scoreDay),
+                                    value: "\(e)"
+                                )
                             }
                         }
                     } else {
@@ -152,26 +164,70 @@ private struct LaunchLockedLiveActivityView: View {
 /// #759 - the label and value are CENTRE-aligned so each value sits directly under its own label. The
 /// old `.trailing` alignment right-pinned both to the column's edge: when the value was narrower than
 /// the label (e.g. "12" under "Effort") it drifted to the label's right edge instead of under it, which
-/// read as "the number doesn't line up with its label". `fixedSize` stops either line truncating so the
-/// pairing is never clipped at narrow widths.
+/// read as "the number doesn't line up with its label". Flexible equal-width columns keep that pairing
+/// stable while single-line scaling lets localized labels yield at narrow Lock Screen widths.
 @ViewBuilder
-private func bannerStat(label: LocalizedStringKey, value: String) -> some View {
+private func bannerStat(label: String, value: String) -> some View {
     VStack(alignment: .center, spacing: 2) {
-        Text(label).font(.caption2).foregroundStyle(StrandPalette.textSecondary)
-        Text(value).font(.headline).foregroundStyle(StrandPalette.textPrimary)
+        Text(verbatim: label)
+            .font(.caption2)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.65)
+        Text(value)
+            .font(.headline)
+            .foregroundStyle(StrandPalette.textPrimary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .monospacedDigit()
     }
     .multilineTextAlignment(.center)
-    .fixedSize()
+    .frame(minWidth: 0, maxWidth: .infinity)
+    .accessibilityElement(children: .combine)
 }
 
 /// Dynamic Island expanded-region stat column (label over value). File-scope for the same reason as
-/// `bannerStat`. #759 - centre-aligned + `fixedSize` for the same value-under-its-label fix as the banner.
+/// `bannerStat`. It uses the same bounded single-line compression because the trailing region is narrower.
 @ViewBuilder
-private func statColumn(label: LocalizedStringKey, value: String) -> some View {
+private func statColumn(label: String, value: String) -> some View {
     VStack(alignment: .center, spacing: 1) {
-        Text(label).font(.caption2).foregroundStyle(.secondary)
-        Text(value).font(.headline)
+        Text(verbatim: label)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.65)
+        Text(value)
+            .font(.headline)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .monospacedDigit()
     }
     .multilineTextAlignment(.center)
-    .fixedSize()
+    .frame(minWidth: 0, maxWidth: .infinity)
+    .accessibilityElement(children: .combine)
 }
+
+private func liveScoreLabel(
+    _ base: LocalizedStringResource,
+    scoreDay: String?,
+    now: Date = Date()
+) -> String {
+    let localizedBase = String(localized: base)
+    guard let scoreDay, let date = liveScoreDayFormatter.date(from: scoreDay) else {
+        return localizedBase
+    }
+    if Calendar.current.isDateInToday(date) { return localizedBase }
+    if Calendar.current.isDateInYesterday(date) {
+        return localizedBase + " · " + String(localized: "Yesterday")
+    }
+    return localizedBase + " · " + date.formatted(.dateTime.month(.abbreviated).day())
+}
+
+private let liveScoreDayFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = .current
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter
+}()

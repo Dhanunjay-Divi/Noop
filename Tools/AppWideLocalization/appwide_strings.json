@@ -32,6 +32,50 @@
     "zh-Hans": "%1$s。%2$s",
     "zh-Hant": "%1$s。%2$s"
   },
+  "appwide.mac.viewer.phone_only_detail": {
+    "de": "Verwende diese Steuerung auf dem Sammler-Telefon. Dieser Mac verbindet sich nicht mit dem Band.",
+    "en": "Use this control on the collector phone. This Mac does not connect to the band.",
+    "es": "Usa este control en el teléfono recopilador. Este Mac no se conecta a la pulsera.",
+    "fr": "Utilisez cette commande sur le téléphone collecteur. Ce Mac ne se connecte pas au bracelet.",
+    "it": "Usa questo controllo sul telefono di raccolta. Questo Mac non si connette al dispositivo.",
+    "pt-PT": "Usa este controlo no telefone coletor. Este Mac não se liga à pulseira.",
+    "ru": "Используйте это управление на телефоне-сборщике. Этот Mac не подключается к браслету.",
+    "zh-Hans": "请在采集手机上使用此控制项。此 Mac 不会连接手环。",
+    "zh-Hant": "請在收集手機上使用此控制項。此 Mac 不會連接手環。"
+  },
+  "appwide.mac.viewer.phone_only_title": {
+    "de": "Auf deinem Telefon verfügbar",
+    "en": "Available on your phone",
+    "es": "Disponible en tu teléfono",
+    "fr": "Disponible sur votre téléphone",
+    "it": "Disponibile sul telefono",
+    "pt-PT": "Disponível no telefone",
+    "ru": "Доступно на телефоне",
+    "zh-Hans": "可在手机上使用",
+    "zh-Hant": "可在手機上使用"
+  },
+  "appwide.mac.viewer.synced_detail": {
+    "de": "Kontosynchronisierung nicht konfiguriert",
+    "en": "Account sync is not configured",
+    "es": "La sincronización de la cuenta no está configurada",
+    "fr": "La synchronisation du compte n’est pas configurée",
+    "it": "La sincronizzazione dell’account non è configurata",
+    "pt-PT": "A sincronização da conta não está configurada",
+    "ru": "Синхронизация аккаунта не настроена",
+    "zh-Hans": "尚未配置账户同步",
+    "zh-Hant": "尚未設定帳戶同步"
+  },
+  "appwide.mac.viewer.title": {
+    "de": "Viewer",
+    "en": "Viewer",
+    "es": "Visor",
+    "fr": "Consultation",
+    "it": "Visualizzatore",
+    "pt-PT": "Visualizador",
+    "ru": "Просмотр",
+    "zh-Hans": "查看器",
+    "zh-Hant": "檢視器"
+  },
   "appwide.fitness_age.older_many_profile_age": {
     "de": "%1$d Jahre älter als dein Profilalter",
     "en": "%1$d years older than your profile age",
@@ -8007,6 +8051,39 @@
     "zh-Hans": "可靠",
     "zh-Hant": "可靠"
   },
+  "appwide.health.live_activity.accessibility_hint": {
+    "de": "Zeigt die Live-Herzfrequenz auf dem Sperrbildschirm und auf unterstützten iPhones in der Dynamic Island.",
+    "en": "Shows live heart rate on the Lock Screen and, on supported iPhones, in the Dynamic Island.",
+    "es": "Muestra la frecuencia cardiaca en directo en la pantalla bloqueada y, en iPhones compatibles, en la Dynamic Island.",
+    "fr": "Affiche la fréquence cardiaque en direct sur l’écran verrouillé et, sur les iPhone compatibles, dans la Dynamic Island.",
+    "it": "Mostra la frequenza cardiaca in tempo reale sulla schermata di blocco e, sugli iPhone supportati, nella Dynamic Island.",
+    "pt-PT": "Mostra a frequência cardíaca em direto no ecrã bloqueado e, em iPhones compatíveis, na Dynamic Island.",
+    "ru": "Показывает пульс в реальном времени на экране блокировки и, на поддерживаемых iPhone, в Dynamic Island.",
+    "zh-Hans": "在锁定屏幕以及受支持 iPhone 的灵动岛中显示实时心率。",
+    "zh-Hant": "在鎖定畫面以及支援 iPhone 的動態島中顯示即時心率。"
+  },
+  "appwide.health.live_activity.compact_detail": {
+    "de": "Zeigt diesen Live-Wert auf dem Sperrbildschirm und auf unterstützten iPhones in der Dynamic Island. Apple steuert beide Orte gemeinsam.",
+    "en": "Shows this live reading on the Lock Screen and, on supported iPhones, in the Dynamic Island. Apple controls both locations together.",
+    "es": "Muestra esta lectura en directo en la pantalla bloqueada y, en iPhones compatibles, en la Dynamic Island. Apple controla ambos lugares conjuntamente.",
+    "fr": "Affiche cette mesure en direct sur l’écran verrouillé et, sur les iPhone compatibles, dans la Dynamic Island. Apple contrôle ces deux emplacements ensemble.",
+    "it": "Mostra questa lettura in tempo reale sulla schermata di blocco e, sugli iPhone supportati, nella Dynamic Island. Apple gestisce insieme entrambe le posizioni.",
+    "pt-PT": "Mostra esta leitura em direto no ecrã bloqueado e, em iPhones compatíveis, na Dynamic Island. A Apple controla ambos os locais em conjunto.",
+    "ru": "Показывает это значение на экране блокировки и, на поддерживаемых iPhone, в Dynamic Island. Apple управляет обоими местами вместе.",
+    "zh-Hans": "在锁定屏幕以及受支持 iPhone 的灵动岛中显示此实时读数。Apple 会统一控制这两个位置。",
+    "zh-Hant": "在鎖定畫面以及支援 iPhone 的動態島中顯示此即時讀數。Apple 會統一控制這兩個位置。"
+  },
+  "appwide.health.live_activity.detail": {
+    "de": "Apple zeigt dieselbe Live-Aktivität auf dem Sperrbildschirm und auf unterstützten iPhones in der Dynamic Island; diese Orte können nicht getrennt ausgewählt werden. Beim Ausschalten beendet NOOP die aktuelle Live-Aktivität sofort.",
+    "en": "Apple shows the same Live Activity on the Lock Screen and, on supported iPhones, in the Dynamic Island; these locations cannot be selected separately. Turning this off ends NOOP’s current Live Activity immediately.",
+    "es": "Apple muestra la misma Actividad en Directo en la pantalla bloqueada y, en iPhones compatibles, en la Dynamic Island; no se pueden seleccionar por separado. Al desactivarla, NOOP finaliza inmediatamente la Actividad en Directo actual.",
+    "fr": "Apple affiche la même Activité en direct sur l’écran verrouillé et, sur les iPhone compatibles, dans la Dynamic Island ; ces emplacements ne peuvent pas être sélectionnés séparément. La désactiver met immédiatement fin à l’Activité en direct NOOP en cours.",
+    "it": "Apple mostra la stessa Attività in tempo reale sulla schermata di blocco e, sugli iPhone supportati, nella Dynamic Island; queste posizioni non possono essere selezionate separatamente. Disattivandola, NOOP termina subito l’Attività in tempo reale corrente.",
+    "pt-PT": "A Apple mostra a mesma Atividade em direto no ecrã bloqueado e, em iPhones compatíveis, na Dynamic Island; estes locais não podem ser selecionados separadamente. Ao desativar, a NOOP termina imediatamente a Atividade em direto atual.",
+    "ru": "Apple показывает одну и ту же Live Activity на экране блокировки и, на поддерживаемых iPhone, в Dynamic Island; эти места нельзя выбрать отдельно. При выключении NOOP сразу завершает текущую Live Activity.",
+    "zh-Hans": "Apple 会在锁定屏幕以及受支持 iPhone 的灵动岛中显示同一个实时活动；无法单独选择这两个位置。关闭后，NOOP 会立即结束当前的实时活动。",
+    "zh-Hant": "Apple 會在鎖定畫面以及支援 iPhone 的動態島中顯示同一個即時動態；無法單獨選擇這兩個位置。關閉後，NOOP 會立即結束目前的即時動態。"
+  },
   "appwide.health.live_activity.lock_screen": {
     "de": "Live-HF auf dem Sperrbildschirm anzeigen",
     "en": "Show live HR on Lock Screen",
@@ -8018,6 +8095,105 @@
     "zh-Hans": "在锁定屏幕上显示实时心率",
     "zh-Hant": "在鎖定畫面上顯示即時心率"
   },
+  "appwide.health.live_hr.accessibility_value": {
+    "de": "%1$d Schläge pro Minute",
+    "en": "%1$d beats per minute",
+    "es": "%1$d latidos por minuto",
+    "fr": "%1$d battements par minute",
+    "it": "%1$d battiti al minuto",
+    "pt-PT": "%1$d batimentos por minuto",
+    "ru": "%1$d ударов в минуту",
+    "zh-Hans": "每分钟 %1$d 次",
+    "zh-Hant": "每分鐘 %1$d 次"
+  },
+  "appwide.health.live_hr.bpm_format": {
+    "de": "%1$d bpm",
+    "en": "%1$d bpm",
+    "es": "%1$d lpm",
+    "fr": "%1$d bpm",
+    "it": "%1$d bpm",
+    "pt-PT": "%1$d bpm",
+    "ru": "%1$d уд/мин",
+    "zh-Hans": "%1$d 次/分",
+    "zh-Hant": "%1$d 次/分"
+  },
+  "appwide.health.live_hr.in_app_detail": {
+    "de": "Zeigt eine kompakte Live-HF-Anzeige nur, solange NOOP geöffnet und aktiv ist. Es wird keine Sperrbildschirm-Mitteilung gesendet und keine Herzfrequenzerfassung gestartet.",
+    "en": "Show a compact live-heart-rate pill only while NOOP is open and active. It does not post a Lock Screen notification or start heart-rate capture.",
+    "es": "Muestra un indicador compacto de FC en directo solo mientras NOOP está abierto y activo. No publica una notificación en la pantalla bloqueada ni inicia la captura de frecuencia cardiaca.",
+    "fr": "Affiche un indicateur compact de FC en direct uniquement lorsque NOOP est ouvert et actif. Cela ne publie aucune notification sur l’écran verrouillé et ne démarre pas la mesure de fréquence cardiaque.",
+    "it": "Mostra un indicatore compatto della FC in tempo reale solo mentre NOOP è aperto e attivo. Non pubblica notifiche sulla schermata di blocco né avvia il rilevamento della frequenza cardiaca.",
+    "pt-PT": "Mostra um indicador compacto de FC em direto apenas enquanto o NOOP está aberto e ativo. Não apresenta uma notificação no ecrã bloqueado nem inicia a recolha da frequência cardíaca.",
+    "ru": "Показывает компактный индикатор пульса, только пока NOOP открыт и активен. Это не создаёт уведомление на экране блокировки и не запускает измерение пульса.",
+    "zh-Hans": "仅在 NOOP 打开且处于活跃状态时显示紧凑的实时心率指示。它不会发布锁定屏幕通知，也不会启动心率采集。",
+    "zh-Hant": "僅在 NOOP 開啟且處於使用中時顯示精簡的即時心率指示。它不會發佈鎖定畫面通知，也不會啟動心率擷取。"
+  },
+  "appwide.health.live_hr.in_app_title": {
+    "de": "Live-HF in NOOP anzeigen",
+    "en": "Show live heart rate in NOOP",
+    "es": "Mostrar FC en directo en NOOP",
+    "fr": "Afficher la FC en direct dans NOOP",
+    "it": "Mostra la FC in tempo reale in NOOP",
+    "pt-PT": "Mostrar FC em direto no NOOP",
+    "ru": "Показывать пульс в реальном времени в NOOP",
+    "zh-Hans": "在 NOOP 中显示实时心率",
+    "zh-Hant": "在 NOOP 中顯示即時心率"
+  },
+  "appwide.health.live_hr.mac_toolbar_detail": {
+    "de": "Zeigt eine kompakte Live-HF-Anzeige in der NOOP-Symbolleiste. Die Anzeige verwendet nur einen bereits aktuellen Messwert und startet oder verstärkt die Erfassung nicht.",
+    "en": "Show a compact live-heart-rate pill in the NOOP window toolbar. It uses only an already-fresh reading and does not start or intensify collection.",
+    "es": "Muestra un indicador compacto de FC en directo en la barra de herramientas de NOOP. Solo usa una lectura ya reciente y no inicia ni intensifica la recopilación.",
+    "fr": "Affiche un indicateur compact de FC en direct dans la barre d’outils de NOOP. Il utilise uniquement une mesure déjà récente et ne démarre ni n’intensifie la collecte.",
+    "it": "Mostra un indicatore compatto della FC in tempo reale nella barra degli strumenti di NOOP. Usa solo una lettura già recente e non avvia né intensifica la raccolta.",
+    "pt-PT": "Mostra um indicador compacto de FC em direto na barra de ferramentas do NOOP. Usa apenas uma leitura já recente e não inicia nem intensifica a recolha.",
+    "ru": "Показывает компактный индикатор пульса на панели инструментов NOOP. Он использует только уже полученное свежее значение и не запускает и не усиливает сбор данных.",
+    "zh-Hans": "在 NOOP 窗口工具栏中显示紧凑的实时心率指示。它只使用已有的最新读数，不会启动或增强采集。",
+    "zh-Hant": "在 NOOP 視窗工具列中顯示精簡的即時心率指示。它只使用已有的最新讀數，不會啟動或加強擷取。"
+  },
+  "appwide.health.live_hr.mac_toolbar_title": {
+    "de": "Herzfrequenz in der Mac-Symbolleiste",
+    "en": "Heart rate in Mac toolbar",
+    "es": "Frecuencia cardiaca en la barra del Mac",
+    "fr": "Fréquence cardiaque dans la barre du Mac",
+    "it": "Frequenza cardiaca nella barra del Mac",
+    "pt-PT": "Frequência cardíaca na barra do Mac",
+    "ru": "Пульс на панели Mac",
+    "zh-Hans": "在 Mac 工具栏中显示心率",
+    "zh-Hant": "在 Mac 工具列中顯示心率"
+  },
+  "appwide.health.live_hr.surface_label": {
+    "de": "Live-Herzfrequenz",
+    "en": "Live heart rate",
+    "es": "Frecuencia cardiaca en directo",
+    "fr": "Fréquence cardiaque en direct",
+    "it": "Frequenza cardiaca in tempo reale",
+    "pt-PT": "Frequência cardíaca em direto",
+    "ru": "Пульс в реальном времени",
+    "zh-Hans": "实时心率",
+    "zh-Hant": "即時心率"
+  },
+  "appwide.health.live_hr.waiting": {
+    "de": "Warte auf einen aktuellen Messwert",
+    "en": "Waiting for a fresh reading",
+    "es": "Esperando una lectura reciente",
+    "fr": "En attente d’une mesure récente",
+    "it": "In attesa di una lettura recente",
+    "pt-PT": "A aguardar uma leitura recente",
+    "ru": "Ожидание свежего значения",
+    "zh-Hans": "正在等待最新读数",
+    "zh-Hant": "正在等待最新讀數"
+  },
+  "appwide.health.live_hr.reconnecting": {
+    "de": "Aktueller Messwert wird wiederhergestellt",
+    "en": "Reconnecting to a fresh reading",
+    "es": "Reconectando para obtener una lectura reciente",
+    "fr": "Reconnexion pour obtenir une mesure récente",
+    "it": "Riconnessione per ottenere una lettura recente",
+    "pt-PT": "A restabelecer uma leitura recente",
+    "ru": "Восстановление свежего значения",
+    "zh-Hans": "正在重新连接以获取最新读数",
+    "zh-Hant": "正在重新連線以取得最新讀數"
+  },
   "appwide.health.live_hr.disconnected": {
     "de": "Noop Band ist nicht verbunden. Verbinde es, bevor du Live-HF startest.",
     "en": "Noop Band is not connected. Connect it before starting Live HR.",
@@ -8028,6 +8204,61 @@
     "ru": "Noop Band не подключён. Подключите его перед запуском пульса в реальном времени.",
     "zh-Hans": "Noop Band 未连接。请先连接，再开始实时心率。",
     "zh-Hant": "Noop Band 未連線。請先連線，再開始即時心率。"
+  },
+  "appwide.onboarding.continue_without_band": {
+    "de": "Ohne Band fortfahren",
+    "en": "Continue without a band",
+    "es": "Continuar sin una banda",
+    "fr": "Continuer sans bracelet",
+    "it": "Continua senza fascia",
+    "pt-PT": "Continuar sem uma pulseira",
+    "ru": "Продолжить без браслета",
+    "zh-Hans": "不连接手环继续",
+    "zh-Hant": "不連接手環繼續"
+  },
+  "appwide.watch.live_hr.checking": {
+    "de": "Herzfrequenz wird geprüft",
+    "en": "Checking heart rate",
+    "es": "Comprobando la frecuencia cardiaca",
+    "fr": "Vérification de la fréquence cardiaque",
+    "it": "Controllo della frequenza cardiaca",
+    "pt-PT": "A verificar a frequência cardíaca",
+    "ru": "Проверка пульса",
+    "zh-Hans": "正在检查心率",
+    "zh-Hant": "正在檢查心率"
+  },
+  "appwide.watch.live_hr.no_recent": {
+    "de": "Keine aktuelle Herzfrequenz",
+    "en": "No recent heart rate",
+    "es": "No hay una frecuencia cardiaca reciente",
+    "fr": "Aucune fréquence cardiaque récente",
+    "it": "Nessuna frequenza cardiaca recente",
+    "pt-PT": "Sem frequência cardíaca recente",
+    "ru": "Нет свежего значения пульса",
+    "zh-Hans": "没有最近的心率",
+    "zh-Hant": "沒有最近的心率"
+  },
+  "appwide.watch.live_hr.check_access": {
+    "de": "Health-Zugriff prüfen",
+    "en": "Check Health access",
+    "es": "Revisa el acceso a Salud",
+    "fr": "Vérifiez l’accès à Santé",
+    "it": "Controlla l’accesso a Salute",
+    "pt-PT": "Verifique o acesso à Saúde",
+    "ru": "Проверьте доступ к Здоровью",
+    "zh-Hans": "检查健康权限",
+    "zh-Hant": "檢查健康權限"
+  },
+  "appwide.watch.live_hr.waiting": {
+    "de": "Warte auf die Herzfrequenz",
+    "en": "Waiting for heart rate",
+    "es": "Esperando la frecuencia cardiaca",
+    "fr": "En attente de la fréquence cardiaque",
+    "it": "In attesa della frequenza cardiaca",
+    "pt-PT": "A aguardar a frequência cardíaca",
+    "ru": "Ожидание пульса",
+    "zh-Hans": "正在等待心率",
+    "zh-Hant": "正在等待心率"
   },
   "appwide.live_session.start_detail_unavailable": {
     "de": "Live-Herzfrequenz-Coaching nutzt deine Herzfrequenz, solange die heutige Recovery nicht verfügbar ist.",

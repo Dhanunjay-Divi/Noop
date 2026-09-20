@@ -332,8 +332,8 @@ public actor ManagedHistoryImporter {
         let paths = objects.map(\.path)
         let expectedPaths = Set(paths + ["manifest.json"])
         let actualPaths = Set(entryPaths)
-        let chunkBytes = manifest.chunks.reduce(Int64(0)) {
-            $0 + Int64($1.compressedBytes)
+        let chunkBytes = try manifest.chunks.reduce(Int64(0)) {
+            try add($0, Int64($1.compressedBytes))
         }
         guard manifestData.count <= 8 * 1_024 * 1_024,
               manifest.format == "noop_managed_history",

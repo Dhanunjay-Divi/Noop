@@ -32,14 +32,27 @@ class TestCentre internal constructor(private val prefs: SharedPreferences) {
     }
 
     fun activate(d: TestDomain) {
-        prefs.edit()
-            .putBoolean(ACTIVE_PREFIX + d.id, true)
-            .putLong(STARTED_PREFIX + d.id, System.currentTimeMillis() / 1000L)
-            .apply()
+        synchronized(stateLock) {
+            val editor = prefs.edit()
+                .putBoolean(ACTIVE_PREFIX + d.id, true)
+                .putLong(STARTED_PREFIX + d.id, System.currentTimeMillis() / 1000L)
+            if (d == TestDomain.MASTER) {
+                TestDomain.values().forEach {
+                    editor.remove(CAPTURED_DAYS_PREFIX + it.id)
+                }
+            } else {
+                editor.remove(CAPTURED_DAYS_PREFIX + d.id)
+            }
+            editor.commit()
+        }
     }
 
     fun deactivate(d: TestDomain) {
-        prefs.edit().putBoolean(ACTIVE_PREFIX + d.id, false).apply()
+        synchronized(stateLock) {
+            prefs.edit()
+                .putBoolean(ACTIVE_PREFIX + d.id, false)
+                .commit()
+        }
     }
 
     /** Unix seconds the mode was last activated, or null if never. */
@@ -62,6 +75,50 @@ class TestCentre internal constructor(private val prefs: SharedPreferences) {
         prefs.edit().putString(ANSWERS_PREFIX + d.id, o.toString()).apply()
     }
 
+    /**
+     * Record one privacy-minimized capture-progress token for an explicitly active test mode.
+     *
+     * The shareable strap log must not retain sensor timestamps or health values merely so the UI can
+     * count test days. Instead, the BLE/log boundary derives a local `yyyy-MM-dd` token transiently and
+     * stores only this bounded set. Activating the mode resets its set, so progress describes the current
+     * guided run rather than an old report tail.
+     */
+    fun noteCapturedDay(d: TestDomain, dayKey: String) {
+        if (!active(d) || !CAPTURE_DAY_RE.matches(dayKey)) return
+        synchronized(stateLock) {
+            if (!active(d)) return
+            val key = CAPTURED_DAYS_PREFIX + d.id
+            val days = prefs.getStringSet(key, emptySet())
+                ?.toMutableSet()
+                ?: mutableSetOf()
+            if (!days.add(dayKey)) return
+            val bounded = days.sorted()
+                .takeLast(MAX_CAPTURED_DAYS)
+                .toMutableSet()
+            prefs.edit().putStringSet(key, bounded).commit()
+        }
+    }
+
+    /** Distinct captured days in the current activation, bounded by [MAX_CAPTURED_DAYS]. */
+    fun capturedDays(d: TestDomain): Int = synchronized(stateLock) {
+        prefs.getStringSet(CAPTURED_DAYS_PREFIX + d.id, emptySet())
+            ?.count { CAPTURE_DAY_RE.matches(it) }
+            ?.coerceAtMost(MAX_CAPTURED_DAYS)
+            ?: 0
+    }
+
+    fun registerListener(
+        listener: SharedPreferences.OnSharedPreferenceChangeListener
+    ) {
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun unregisterListener(
+        listener: SharedPreferences.OnSharedPreferenceChangeListener
+    ) {
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
+    }
+
     // All-time drained-rows tally (#990) - twin of the Swift TestCentre accessors. Sits in the
     // testcentre.* namespace because the Connection readout is its consumer, but it accrues
     // UNCONDITIONALLY (the Backfiller session summary is not test-mode gated), so it answers "has this
@@ -73,12 +130,18 @@ class TestCentre internal constructor(private val prefs: SharedPreferences) {
      *  the Backfiller's "session persisted N rows" summary lands (the single emit point). */
     fun noteDrainedRows(rows: Int) {
         if (rows <= 0) return
-        prefs.edit().putLong(CUMULATIVE_DRAINED_KEY, cumulativeDrainedRows() + rows).apply()
+        synchronized(stateLock) {
+            prefs.edit()
+                .putLong(CUMULATIVE_DRAINED_KEY, cumulativeDrainedRows() + rows)
+                .commit()
+        }
     }
 
     /** The all-time drained-rows tally (0 before anything ever drained). Shown beside the per-session
      *  count on the Connection readout (#990). */
-    fun cumulativeDrainedRows(): Long = prefs.getLong(CUMULATIVE_DRAINED_KEY, 0L)
+    fun cumulativeDrainedRows(): Long = synchronized(stateLock) {
+        prefs.getLong(CUMULATIVE_DRAINED_KEY, 0L)
+    }
 
     /**
      * One-time migration. Idempotent, guarded by the v1 bool. Phase 1 has no domain-activation state to
@@ -97,8 +160,12 @@ class TestCentre internal constructor(private val prefs: SharedPreferences) {
         private const val ACTIVE_PREFIX = "testcentre.active."
         private const val STARTED_PREFIX = "testcentre.startedAt."
         private const val ANSWERS_PREFIX = "testcentre.answers."
+        private const val CAPTURED_DAYS_PREFIX = "testcentre.capturedDays."
         private const val MIGRATED_KEY = "testcentre.migrated.v1"
         private const val CUMULATIVE_DRAINED_KEY = "testcentre.cumulativeDrainedRows"
+        internal const val MAX_CAPTURED_DAYS = 31
+        private val CAPTURE_DAY_RE = Regex("^20[0-9]{2}-[0-9]{2}-[0-9]{2}$")
+        private val stateLock = Any()
 
         fun from(context: Context): TestCentre =
             TestCentre(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))

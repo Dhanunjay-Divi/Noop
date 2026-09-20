@@ -1,5 +1,8 @@
+import AppKit
+import SwiftUI
 import XCTest
 import StrandAnalytics
+import StrandDesign
 @testable import Strand
 
 /// Pins the Swift Week-in-Review chip contract (#463): a ROUGH week-over-week comparison (either side
@@ -22,6 +25,64 @@ final class WeeklyDigestChipStyleTests: XCTestCase {
         XCTAssertEqual(RecoveryBandPresentation.label(for: 10), "Low")
         XCTAssertEqual(RecoveryBandPresentation.label(for: 41), "Steady")
         XCTAssertEqual(RecoveryBandPresentation.label(for: 82), "Strong")
+    }
+
+    func testRecoveryPresentationUsesOneSummaryColorPerBand() {
+        assertColor(
+            RecoveryBandPresentation.color(for: 10),
+            matches: StrandPalette.statusCritical
+        )
+        assertColor(
+            RecoveryBandPresentation.color(for: 41),
+            matches: StrandPalette.statusWarning
+        )
+        assertColor(
+            RecoveryBandPresentation.color(for: 82),
+            matches: StrandPalette.statusPositive
+        )
+
+        let steadyGauge = RecoveryBandPresentation.gaugeColors(for: 41)
+        assertColor(
+            steadyGauge.base,
+            matches: StrandPalette.statusWarning.opacity(0.68)
+        )
+        assertColor(steadyGauge.tip, matches: StrandPalette.statusWarning)
+    }
+
+    private func assertColor(
+        _ actual: Color,
+        matches expected: Color,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let actual = resolvedComponents(actual)
+        let expected = resolvedComponents(expected)
+        XCTAssertEqual(actual.red, expected.red, accuracy: 0.0001, file: file, line: line)
+        XCTAssertEqual(actual.green, expected.green, accuracy: 0.0001, file: file, line: line)
+        XCTAssertEqual(actual.blue, expected.blue, accuracy: 0.0001, file: file, line: line)
+        XCTAssertEqual(actual.alpha, expected.alpha, accuracy: 0.0001, file: file, line: line)
+    }
+
+    private func resolvedComponents(
+        _ color: Color
+    ) -> (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) {
+        let appearance = NSAppearance(named: .darkAqua)!
+        var components: (
+            red: CGFloat,
+            green: CGFloat,
+            blue: CGFloat,
+            alpha: CGFloat
+        )?
+        appearance.performAsCurrentDrawingAppearance {
+            let resolved = NSColor(color).usingColorSpace(.sRGB)!
+            components = (
+                resolved.redComponent,
+                resolved.greenComponent,
+                resolved.blueComponent,
+                resolved.alphaComponent
+            )
+        }
+        return components!
     }
 
     func testImportedRestDisclosureIsScopedToTheSelectedWeek() {

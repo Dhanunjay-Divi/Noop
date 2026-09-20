@@ -5472,9 +5472,7 @@ private fun ScoreHeroRow(
         calibrationNights = recoveryCalibration,
     )
     val recoveryCaption = when {
-        recovery != null -> Palette.recoveryState(recovery)
-            .lowercase(Locale.getDefault())
-            .replaceFirstChar { it.titlecase(Locale.getDefault()) }
+        recovery != null -> recoveryBandLabel(recovery)
         recoveryCalibration != null ->
             "Calibrating $recoveryCalibration of ${Baselines.minNightsSeed}"
         else -> "No data"
@@ -5567,7 +5565,8 @@ internal fun todayRecoveryHeroColors(
     recovery: Double?,
     calibrationNights: Int?,
 ): Pair<Color, Color> = when (todayRecoveryHeroTone(recovery, calibrationNights)) {
-    TodayRecoveryHeroTone.RECOVERY -> Palette.recoveryGaugeColors(requireNotNull(recovery))
+    TodayRecoveryHeroTone.RECOVERY ->
+        RecoveryBandPresentation.gaugeColors(requireNotNull(recovery))
     TodayRecoveryHeroTone.BASELINE_READY -> Palette.chargeColor to Palette.chargeBright
     TodayRecoveryHeroTone.LEARNING ->
         Palette.onDarkSecondary.copy(alpha = 0.64f) to

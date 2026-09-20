@@ -1,13 +1,51 @@
 package com.noop.ui
 
+import com.noop.R
 import com.noop.ownership.OwnershipPhase
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OnboardingOwnershipStepSelectionTest {
+    @Test
+    fun accountModeMatchesRuntimeConfiguration() {
+        assertEquals(
+            OnboardingAccountMode.CONFIGURED,
+            onboardingAccountMode(ownershipConfigured = true),
+        )
+        assertEquals(
+            OnboardingAccountMode.EXPLORATION,
+            onboardingAccountMode(ownershipConfigured = false),
+        )
+    }
+
+    @Test
+    fun accountCopyBranchesBetweenConfiguredAndExplorationModes() {
+        assertEquals(
+            OnboardingAccountCopy(
+                dataBoundaryTitle =
+                    R.string.onboarding_data_boundary_configured_title,
+                dataBoundaryBody =
+                    R.string.onboarding_data_boundary_configured_body,
+                bluetoothBoundaryBody =
+                    R.string.onboarding_bluetooth_boundary_configured,
+            ),
+            onboardingAccountCopy(OnboardingAccountMode.CONFIGURED),
+        )
+        assertEquals(
+            OnboardingAccountCopy(
+                dataBoundaryTitle =
+                    R.string.onboarding_data_boundary_exploration_title,
+                dataBoundaryBody =
+                    R.string.onboarding_data_boundary_exploration_body,
+                bluetoothBoundaryBody =
+                    R.string.onboarding_bluetooth_boundary_exploration,
+            ),
+            onboardingAccountCopy(OnboardingAccountMode.EXPLORATION),
+        )
+    }
+
     @Test
     fun configuredOwnershipIncludesAccountStepWithoutConstructingRuntimeService() {
         val pages = onboardingPages(ownershipConfigured = true)
@@ -24,23 +62,27 @@ class OnboardingOwnershipStepSelectionTest {
     }
 
     @Test
-    fun unconfiguredCoreModeOmitsAccountStepAndKeepsProfile() {
+    fun unconfiguredCoreModeKeepsAccountStepVisibleBeforeProfile() {
         val pages = onboardingPages(ownershipConfigured = false)
 
-        assertFalse(pages.contains(OnboardingPage.Ownership))
+        assertTrue(pages.contains(OnboardingPage.Ownership))
         assertTrue(pages.contains(OnboardingPage.Profile))
         assertEquals(
             pages.indexOf(OnboardingPage.Bonded) + 1,
+            pages.indexOf(OnboardingPage.Ownership),
+        )
+        assertEquals(
+            pages.indexOf(OnboardingPage.Ownership) + 1,
             pages.indexOf(OnboardingPage.Profile),
         )
     }
 
     @Test
-    fun unconfiguredCoreModeResumesSavedAccountStepAtProfile() {
+    fun unconfiguredCoreModeResumesSavedAccountStepExactly() {
         val pages = onboardingPages(ownershipConfigured = false)
 
         assertEquals(
-            pages.indexOf(OnboardingPage.Profile),
+            pages.indexOf(OnboardingPage.Ownership),
             restoredOnboardingPageIndex(
                 storedPage = OnboardingPage.Ownership.storageValue,
                 pages = pages,
@@ -130,6 +172,73 @@ class OnboardingOwnershipStepSelectionTest {
                 phase = OwnershipPhase.UNAVAILABLE,
             ),
         )
+    }
+
+    @Test
+    fun unconfiguredAccountStepContinuesWithoutClaimOrReconciliation() {
+        assertTrue(
+            ownershipStepCanContinue(
+                ownershipConfigured = false,
+                reconciliationComplete = false,
+                phase = OwnershipPhase.UNAVAILABLE,
+            ),
+        )
+    }
+
+    @Test
+    fun unconfiguredScanNamesTheOfflinePathExplicitly() {
+        assertTrue(
+            onboardingContinuesWithoutBand(
+                ownershipConfigured = false,
+                bonded = false,
+            ),
+        )
+        assertTrue(
+            !onboardingContinuesWithoutBand(
+                ownershipConfigured = true,
+                bonded = false,
+            ),
+        )
+        assertTrue(
+            !onboardingContinuesWithoutBand(
+                ownershipConfigured = false,
+                bonded = true,
+            ),
+        )
+    }
+
+    @Test
+    fun configuredAccountStepRequiresSettledClaimOrCompletion() {
+        assertTrue(
+            !ownershipStepCanContinue(
+                ownershipConfigured = true,
+                reconciliationComplete = true,
+                phase = OwnershipPhase.SIGNED_OUT,
+            ),
+        )
+        assertTrue(
+            !ownershipStepCanContinue(
+                ownershipConfigured = true,
+                reconciliationComplete = false,
+                phase = OwnershipPhase.CLAIMED,
+            ),
+        )
+        assertTrue(
+            !ownershipStepCanContinue(
+                ownershipConfigured = true,
+                reconciliationComplete = true,
+                phase = OwnershipPhase.ACCOUNT_READY,
+            ),
+        )
+        listOf(OwnershipPhase.CLAIMED, OwnershipPhase.COMPLETE).forEach { phase ->
+            assertTrue(
+                ownershipStepCanContinue(
+                    ownershipConfigured = true,
+                    reconciliationComplete = true,
+                    phase = phase,
+                ),
+            )
+        }
     }
 
     @Test

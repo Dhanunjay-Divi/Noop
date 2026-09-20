@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import asyncpg
 import pytest
 
 from app.managed_formula_executor import (
@@ -19,27 +20,36 @@ from app.managed_formula_registry import (
     FormulaRegistry,
 )
 from app.managed_formula_repository import (
+    FormulaShadowAccountUnavailableError,
     FormulaShadowConflictError,
     PostgresManagedFormulaRepository,
 )
+from app.managed_repository import ManagedPrincipal
 from app.repository import PostgresRepository
 
-DATABASE_URL = os.getenv("NOOP_TEST_DATABASE_URL")
-DATABASE_ENGINE = os.getenv("NOOP_TEST_DATABASE_ENGINE", "postgresql")
+DATABASE_URL = os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL")
+DATABASE_ENGINE = "postgresql"
 MIGRATION = (
     Path(__file__).resolve().parents[1]
     / "migrations"
     / "049_managed_formula_shadow.sql"
 )
+IMMUTABILITY_MIGRATION = (
+    Path(__file__).resolve().parents[1]
+    / "migrations"
+    / "051_managed_authority_reconsent.sql"
+)
 
 
 def test_shadow_migration_is_additive_and_cannot_flip_metric_authority() -> None:
     sql = MIGRATION.read_text(encoding="utf-8")
+    immutability_sql = IMMUTABILITY_MIGRATION.read_text(encoding="utf-8")
     assert "CREATE TABLE managed_formula_shadow_results" in sql
     assert "managed_formula_shadow_current_idx" in sql
     assert "DEFERRABLE INITIALLY DEFERRED" in sql
     assert "parity_status" in sql
     assert "rollback_source_result_id" in sql
+    assert "managed_formula_shadow_immutable" in immutability_sql
     statements = [
         line.strip().upper()
         for line in sql.splitlines()
@@ -66,7 +76,10 @@ def _primary() -> PostgresRepository:
     )
 
 
-async def _seed_account(primary: PostgresRepository, account_id: UUID) -> None:
+async def _seed_account(
+    primary: PostgresRepository,
+    account_id: UUID,
+) -> ManagedPrincipal:
     now = datetime.now(UTC)
     await primary._require_pool().execute(
         """
@@ -81,6 +94,13 @@ async def _seed_account(primary: PostgresRepository, account_id: UUID) -> None:
         account_id,
         uuid4(),
         now,
+    )
+    return ManagedPrincipal(
+        account_id=account_id,
+        identity_id=uuid4(),
+        subject_hash="a" * 64,
+        account_status="active",
+        auth_valid_after=now,
     )
 
 
@@ -160,18 +180,20 @@ async def test_shadow_publication_is_idempotent_and_atomically_supersedes() -> N
     await primary.startup()
     try:
         account_id = uuid4()
-        await _seed_account(primary, account_id)
+        principal = await _seed_account(primary, account_id)
         repository = PostgresManagedFormulaRepository(primary)
         day = date(2026, 9, 1)
         request_id = uuid4()
         now = datetime.now(UTC)
         first_execution = _execution(account_id=account_id, local_day=day)
         first = await repository.publish_shadow(
+            principal=principal,
             request_id=request_id,
             execution=first_execution,
             now=now,
         )
         replay = await repository.publish_shadow(
+            principal=principal,
             request_id=request_id,
             execution=first_execution,
             now=now + timedelta(seconds=1),
@@ -180,6 +202,7 @@ async def test_shadow_publication_is_idempotent_and_atomically_supersedes() -> N
 
         with pytest.raises(FormulaShadowConflictError):
             await repository.publish_shadow(
+                principal=principal,
                 request_id=request_id,
                 execution=_execution(
                     account_id=account_id,
@@ -190,6 +213,7 @@ async def test_shadow_publication_is_idempotent_and_atomically_supersedes() -> N
             )
 
         second = await repository.publish_shadow(
+            principal=principal,
             request_id=uuid4(),
             execution=_execution(
                 account_id=account_id,
@@ -199,12 +223,12 @@ async def test_shadow_publication_is_idempotent_and_atomically_supersedes() -> N
             now=now + timedelta(seconds=3),
         )
         current = await repository.current_result(
-            account_id=account_id,
+            principal=principal,
             metric_key="recovery",
             local_day=day,
         )
         history = await repository.result_history(
-            account_id=account_id,
+            principal=principal,
             metric_key="recovery",
             local_day=day,
         )
@@ -235,17 +259,21 @@ async def test_shadow_reads_are_account_scoped() -> None:
     try:
         first_account = uuid4()
         second_account = uuid4()
-        await _seed_account(primary, first_account)
-        await _seed_account(primary, second_account)
+        empty_account = uuid4()
+        first_principal = await _seed_account(primary, first_account)
+        second_principal = await _seed_account(primary, second_account)
+        empty_principal = await _seed_account(primary, empty_account)
         repository = PostgresManagedFormulaRepository(primary)
         day = date(2026, 9, 2)
         now = datetime.now(UTC)
         first = await repository.publish_shadow(
+            principal=first_principal,
             request_id=uuid4(),
             execution=_execution(account_id=first_account, local_day=day),
             now=now,
         )
         second = await repository.publish_shadow(
+            principal=second_principal,
             request_id=uuid4(),
             execution=_execution(
                 account_id=second_account,
@@ -255,12 +283,12 @@ async def test_shadow_reads_are_account_scoped() -> None:
             now=now,
         )
         first_read = await repository.current_result(
-            account_id=first_account,
+            principal=first_principal,
             metric_key="recovery",
             local_day=day,
         )
         second_read = await repository.current_result(
-            account_id=second_account,
+            principal=second_principal,
             metric_key="recovery",
             local_day=day,
         )
@@ -268,11 +296,103 @@ async def test_shadow_reads_are_account_scoped() -> None:
         assert first_read.shadow_result_id == first.shadow_result_id
         assert second_read.shadow_result_id == second.shadow_result_id
         assert first_read.shadow_result_id != second_read.shadow_result_id
-        assert await repository.result_history(
-            account_id=uuid4(),
-            metric_key="recovery",
-            local_day=day,
-        ) == ()
+        assert (
+            await repository.result_history(
+                principal=empty_principal,
+                metric_key="recovery",
+                local_day=day,
+            )
+            == ()
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_shadow_rejects_stale_account_authorization_epoch() -> None:
+    primary = _primary()
+    await primary.startup()
+    try:
+        account_id = uuid4()
+        principal = await _seed_account(primary, account_id)
+        repository = PostgresManagedFormulaRepository(primary)
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_accounts
+            SET auth_valid_after = $2,
+                updated_at = $2
+            WHERE account_id = $1
+            """,
+            account_id,
+            principal.auth_valid_after + timedelta(seconds=1),
+        )
+
+        with pytest.raises(FormulaShadowAccountUnavailableError):
+            await repository.publish_shadow(
+                principal=principal,
+                request_id=uuid4(),
+                execution=_execution(
+                    account_id=account_id,
+                    local_day=date(2026, 9, 6),
+                ),
+                now=datetime.now(UTC),
+            )
+        with pytest.raises(FormulaShadowAccountUnavailableError):
+            await repository.current_result(
+                principal=principal,
+                metric_key="recovery",
+                local_day=date(2026, 9, 6),
+            )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_shadow_evidence_rejects_direct_mutation_and_delete() -> None:
+    primary = _primary()
+    await primary.startup()
+    try:
+        account_id = uuid4()
+        principal = await _seed_account(primary, account_id)
+        repository = PostgresManagedFormulaRepository(primary)
+        record = await repository.publish_shadow(
+            principal=principal,
+            request_id=uuid4(),
+            execution=_execution(
+                account_id=account_id,
+                local_day=date(2026, 9, 5),
+            ),
+            now=datetime.now(UTC),
+        )
+        pool = primary._require_pool()
+
+        with pytest.raises(asyncpg.CheckViolationError, match="immutable"):
+            await pool.execute(
+                """
+                UPDATE managed_formula_shadow_results
+                SET server_value = server_value + 1
+                WHERE account_id = $1 AND shadow_result_id = $2
+                """,
+                account_id,
+                record.shadow_result_id,
+            )
+        with pytest.raises(asyncpg.CheckViolationError, match="append-only"):
+            await pool.execute(
+                """
+                DELETE FROM managed_formula_shadow_results
+                WHERE account_id = $1 AND shadow_result_id = $2
+                """,
+                account_id,
+                record.shadow_result_id,
+            )
     finally:
         await primary.shutdown()
 
@@ -289,11 +409,12 @@ async def test_failed_replacement_transaction_keeps_prior_current() -> None:
     function_name = f"formula_shadow_fail_fn_{uuid4().hex}"
     try:
         account_id = uuid4()
-        await _seed_account(primary, account_id)
+        principal = await _seed_account(primary, account_id)
         repository = PostgresManagedFormulaRepository(primary)
         day = date(2026, 9, 3)
         now = datetime.now(UTC)
         prior = await repository.publish_shadow(
+            principal=principal,
             request_id=uuid4(),
             execution=_execution(account_id=account_id, local_day=day),
             now=now,
@@ -317,6 +438,7 @@ async def test_failed_replacement_transaction_keeps_prior_current() -> None:
         )
         with pytest.raises(Exception, match="synthetic formula transaction failure"):
             await repository.publish_shadow(
+                principal=principal,
                 request_id=uuid4(),
                 execution=_execution(
                     account_id=account_id,
@@ -327,7 +449,7 @@ async def test_failed_replacement_transaction_keeps_prior_current() -> None:
                 now=now + timedelta(seconds=1),
             )
         current = await repository.current_result(
-            account_id=account_id,
+            principal=principal,
             metric_key="recovery",
             local_day=day,
         )
@@ -357,7 +479,7 @@ async def test_revision_rollback_copies_prior_shadow_without_reexecution() -> No
     await primary.startup()
     try:
         account_id = uuid4()
-        await _seed_account(primary, account_id)
+        principal = await _seed_account(primary, account_id)
         repository = PostgresManagedFormulaRepository(primary)
         day = date(2026, 9, 4)
         now = datetime.now(UTC)
@@ -371,6 +493,7 @@ async def test_revision_rollback_copies_prior_shadow_without_reexecution() -> No
         )
         prior_registry = FormulaRegistry.build((prior_contract,))
         prior = await repository.publish_shadow(
+            principal=principal,
             request_id=uuid4(),
             execution=_execution(
                 account_id=account_id,
@@ -381,6 +504,7 @@ async def test_revision_rollback_copies_prior_shadow_without_reexecution() -> No
             now=now,
         )
         current = await repository.publish_shadow(
+            principal=principal,
             request_id=uuid4(),
             execution=_execution(
                 account_id=account_id,
@@ -391,7 +515,7 @@ async def test_revision_rollback_copies_prior_shadow_without_reexecution() -> No
         )
         rollback_request_id = uuid4()
         rolled_back = await repository.rollback_to_revision(
-            account_id=account_id,
+            principal=principal,
             request_id=rollback_request_id,
             metric_key="recovery",
             local_day=day,
@@ -399,7 +523,7 @@ async def test_revision_rollback_copies_prior_shadow_without_reexecution() -> No
             now=now + timedelta(seconds=2),
         )
         replay = await repository.rollback_to_revision(
-            account_id=account_id,
+            principal=principal,
             request_id=rollback_request_id,
             metric_key="recovery",
             local_day=day,
@@ -412,14 +536,14 @@ async def test_revision_rollback_copies_prior_shadow_without_reexecution() -> No
         assert rolled_back.formula_revision == "synthetic-charge-v1"
         assert rolled_back.server_value == prior.server_value
         after = await repository.current_result(
-            account_id=account_id,
+            principal=principal,
             metric_key="recovery",
             local_day=day,
         )
         assert after is not None
         assert after.shadow_result_id == rolled_back.shadow_result_id
         history = await repository.result_history(
-            account_id=account_id,
+            principal=principal,
             metric_key="recovery",
             local_day=day,
         )

@@ -398,6 +398,14 @@ resource "google_cloud_run_v2_service" "managed_api" {
         value = "true"
       }
       env {
+        name  = "NOOP_MANAGED_FORMULA_SHADOW_ENABLED"
+        value = "false"
+      }
+      env {
+        name  = "NOOP_MANAGED_DOCUMENT_KEY_RECOVERY_ENABLED"
+        value = "false"
+      }
+      env {
         name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"
         value = "5"
       }
@@ -428,6 +436,13 @@ resource "google_cloud_run_v2_service" "managed_api" {
       env {
         name  = "NOOP_MANAGED_ANDROID_APP_ID"
         value = google_firebase_android_app.staging[0].app_id
+      }
+      dynamic "env" {
+        for_each = var.managed_macos_app_id == null ? [] : [var.managed_macos_app_id]
+        content {
+          name  = "NOOP_MANAGED_MACOS_APP_ID"
+          value = env.value
+        }
       }
       env {
         name  = "NOOP_MANAGED_APP_CHECK_CACHE_SECONDS"

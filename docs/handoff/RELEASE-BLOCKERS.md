@@ -1,6 +1,6 @@
 # Release blockers and production readiness
 
-**Assessed:** 2026-08-27; release-control status refreshed 2026-09-18
+**Assessed:** 2026-08-27; release-control status refreshed 2026-09-20
 
 This older blocker summary remains useful historical context. The current
 ordered execution plan, including the first-party NOOP Band, firmware/SDK,
@@ -107,11 +107,12 @@ GitHub Actions results for the ten contexts listed in
 [`../RELEASE_CONTROLS.md`](../RELEASE_CONTROLS.md), including the exact-SHA
 `trusted-release-controls` result.
 
-The September 17-19 UI/cloud-readiness candidate has complete local Apple,
-Android, package, server, emulator, simulator, restore, OpenTofu, localization,
-visual, policy, bounded-runner, and exact round-owned cleanup walls. Its
-protected pull request is the authoritative record for the exact candidate
-head, all ten contexts, normal merge, and protected-main result.
+The September 17-20 UI/cloud-readiness replacement candidate has completed its
+applicable local Apple, Android, package, server, and plan-only OpenTofu
+verification. Final post-documentation policy reruns, the consolidated commit,
+and hosted exact-SHA checks are still pending. Pull request `#16` currently
+points to superseded head `9d859d9a`; it becomes authoritative only after the
+replacement candidate is pushed and all ten contexts pass on that exact SHA.
 
 Protected source publication and hosted CI prove only the reviewed source
 commit. They do not close the external gates below.

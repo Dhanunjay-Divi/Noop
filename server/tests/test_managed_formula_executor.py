@@ -16,9 +16,7 @@ from app.managed_formula_executor import (
 )
 
 FIXTURE = (
-    Path(__file__).resolve().parent
-    / "data"
-    / "managed_formula_shadow_golden_v1.json"
+    Path(__file__).resolve().parent / "data" / "managed_formula_shadow_golden_v1.json"
 )
 
 
@@ -69,9 +67,7 @@ def test_cross_language_golden_formula_cases(case: dict) -> None:
         assert result.absolute_delta == 0
     else:
         assert result.absolute_delta is None
-    assert context.day_start_at == datetime.fromisoformat(
-        expected["day_start_at"]
-    )
+    assert context.day_start_at == datetime.fromisoformat(expected["day_start_at"])
     assert context.day_end_at == datetime.fromisoformat(expected["day_end_at"])
 
 
@@ -161,6 +157,33 @@ def test_extreme_finite_recovery_inputs_saturate_without_overflow() -> None:
     )
     assert result.server_status == "present"
     assert result.server_value == 0.0
+
+
+def test_huge_numeric_input_is_rejected_as_a_contract_error() -> None:
+    with pytest.raises(FormulaInputContractError, match="supported range"):
+        ManagedFormulaExecutor().execute(
+            metric_key="recovery",
+            formula_revision="noop-charge-v2",
+            context=FormulaDayContext.create(
+                account_id=UUID("00000000-0000-4000-8000-000000000001"),
+                local_day=date(2026, 2, 1),
+                timezone_name="UTC",
+            ),
+            inputs={
+                "hrv": 10**400,
+                "rhr": 55.0,
+                "hrv_baseline": {
+                    "mean": 50.0,
+                    "spread": 1.0,
+                    "usable": True,
+                },
+            },
+            provenance=FormulaProvenance(
+                source_kind="synthetic_fixture",
+                source_revision="fixture-v1",
+                input_manifest_sha256="f" * 64,
+            ),
+        )
 
 
 def test_effort_step_evidence_precedes_gravity_and_gaps_are_not_bridged() -> None:

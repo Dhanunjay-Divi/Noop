@@ -530,12 +530,16 @@ public actor WhoopManagedDocumentAdapter:
     private let store: WhoopStore
     private let accountScopeHash: String
     private let preferencesDefaults: UserDefaults?
+    private let documentKeys: (any ManagedDocumentKeyProviding)?
+    private let ciphertextInbox: ManagedDocumentCiphertextInbox?
     private var candidates: [String: ManagedLocalDocumentCandidate] = [:]
 
     public init(
         store: WhoopStore,
         accountScopeHash: String,
-        preferencesDefaults: UserDefaults? = nil
+        preferencesDefaults: UserDefaults? = nil,
+        documentKeys: (any ManagedDocumentKeyProviding)? = nil,
+        ciphertextInbox: ManagedDocumentCiphertextInbox? = nil
     ) throws {
         guard accountScopeHash.range(
             of: #"^[0-9a-f]{64}$"#,
@@ -546,6 +550,8 @@ public actor WhoopManagedDocumentAdapter:
         self.store = store
         self.accountScopeHash = accountScopeHash
         self.preferencesDefaults = preferencesDefaults
+        self.documentKeys = documentKeys
+        self.ciphertextInbox = ciphertextInbox
     }
 
     public func pendingDocuments(
@@ -555,18 +561,35 @@ public actor WhoopManagedDocumentAdapter:
         guard (1...101).contains(limit) else {
             throw ManagedStorageError.invalidConfiguration
         }
-        let local = try await store.pendingManagedDocuments(
+        var local = try await store.pendingManagedDocuments(
             accountScopeHash: accountScopeHash,
             contentMode: .serverReadable,
             limit: limit
         )
+        if let documentKeys,
+           try await documentKeys.recoveryEnrollmentComplete(
+               accountScopeHash: accountScopeHash
+           ) {
+            guard ciphertextInbox != nil else {
+                throw ManagedStorageError.invalidConfiguration
+            }
+            local += try await store.pendingManagedDocuments(
+                accountScopeHash: accountScopeHash,
+                contentMode: .clientEncrypted,
+                limit: limit
+            )
+            local.sort {
+                ($0.updatedAtMs, $0.tableName, $0.localKey)
+                    < ($1.updatedAtMs, $1.tableName, $1.localKey)
+            }
+            local = Array(local.prefix(limit))
+        }
         var pending: [ManagedPendingDocument] = []
         for candidate in local {
-            guard candidate.contentMode == .serverReadable,
-                  let kind = ManagedDocumentKind(
-                      rawValue: candidate.documentKind
-                  ),
-                  Self.serverReadableKinds.contains(kind) else {
+            guard let kind = ManagedDocumentKind(
+                rawValue: candidate.documentKind
+            ), Self.serverReadableKinds.contains(kind)
+                == (candidate.contentMode == .serverReadable) else {
                 throw ManagedStorageError.invalidResponse
             }
             let documentID = Self.documentID(
@@ -574,23 +597,75 @@ public actor WhoopManagedDocumentAdapter:
                 tableName: candidate.tableName,
                 keyJSON: candidate.keyJSON
             )
-            let payload: [String: ManagedDocumentJSONValue]?
-            let contentSHA256: String?
+            let localIdentifier = ManagedDigest.sha256(
+                Data(
+                    (
+                        candidate.tableName + "\0" + candidate.localKey
+                    ).utf8
+                )
+            )
+            let payloadData: Data?
             if let payloadJSON = candidate.payloadJSON {
                 do {
-                    payload = try JSONDecoder().decode(
+                    let payload = try JSONDecoder().decode(
                         [String: ManagedDocumentJSONValue].self,
                         from: payloadJSON
                     )
-                    contentSHA256 = try Self.canonicalDigest(
-                        payload ?? [:]
-                    )
+                    let canonical = try Self.canonicalData(payload)
+                    guard canonical == payloadJSON else {
+                        throw ManagedStorageError.encoding
+                    }
+                    payloadData = canonical
                 } catch {
                     throw ManagedStorageError.encoding
                 }
             } else {
+                payloadData = nil
+            }
+
+            let payload: [String: ManagedDocumentJSONValue]?
+            let ciphertextBase64: String?
+            let clientKeyID: UUID?
+            let contentSHA256: String?
+            if candidate.deleted {
                 payload = nil
+                ciphertextBase64 = nil
+                clientKeyID = nil
                 contentSHA256 = nil
+            } else if candidate.contentMode == .serverReadable {
+                guard let payloadData else {
+                    throw ManagedStorageError.invalidResponse
+                }
+                payload = try JSONDecoder().decode(
+                    [String: ManagedDocumentJSONValue].self,
+                    from: payloadData
+                )
+                ciphertextBase64 = nil
+                clientKeyID = nil
+                contentSHA256 = ManagedDigest.sha256(payloadData)
+            } else {
+                guard let documentKeys,
+                      let ciphertextInbox,
+                      let payloadData else {
+                    throw ManagedStorageError.invalidConfiguration
+                }
+                let key = try await documentKeys.activeDocumentKey(
+                    accountScopeHash: accountScopeHash
+                )
+                let ciphertext = try await ciphertextInbox.outgoingEnvelope(
+                    accountScopeHash: accountScopeHash,
+                    localIdentifier: localIdentifier,
+                    generation: candidate.generation,
+                    documentKind: kind,
+                    documentID: documentID,
+                    revision: candidate.baseRevision + 1,
+                    key: key,
+                    plaintext: payloadData
+                )
+                payload = nil
+                ciphertextBase64 = ciphertext.base64EncodedString()
+                clientKeyID = key.keyID
+                contentSHA256 = ManagedDigest.sha256(ciphertext)
             }
             let requestID = Self.requestID(
                 documentID: documentID,
@@ -604,19 +679,14 @@ public actor WhoopManagedDocumentAdapter:
                 documentID: documentID,
                 baseRevision: candidate.baseRevision,
                 contentMode: candidate.contentMode.rawValue,
+                clientKeyID: clientKeyID,
                 payloadJSON: payload,
+                payloadCiphertextBase64: ciphertextBase64,
                 contentSHA256: contentSHA256,
                 updatedAt: ManagedTimestamp.iso8601(
                     milliseconds: candidate.updatedAtMs
                 ),
                 deleted: candidate.deleted
-            )
-            let localIdentifier = ManagedDigest.sha256(
-                Data(
-                    (
-                        candidate.tableName + "\0" + candidate.localKey
-                    ).utf8
-                )
             )
             candidates[localIdentifier] = candidate
             pending.append(
@@ -669,6 +739,15 @@ public actor WhoopManagedDocumentAdapter:
             remoteContentSHA256: remote.contentSHA256,
             acknowledgedAtMs: Self.nowMilliseconds()
         )
+        if candidate.contentMode == .clientEncrypted,
+           let ciphertextInbox {
+            try await ciphertextInbox.removeOutgoing(
+                accountScopeHash: accountScopeHash,
+                localIdentifier: pending.localIdentifier,
+                generation: pending.generation,
+                revision: remote.revision
+            )
+        }
         candidates.removeValue(forKey: pending.localIdentifier)
     }
 
@@ -680,10 +759,81 @@ public actor WhoopManagedDocumentAdapter:
         if document.contentMode == ManagedDocumentContentMode
             .clientEncrypted.rawValue {
             try Self.validateIgnoredEncryptedDocument(document)
-            // The current client has no key recovery or durable ciphertext inbox.
-            // Failing here keeps the feed cursor anchored so a future capable
-            // client can replay the document instead of losing it permanently.
-            throw ManagedStorageError.invalidConfiguration
+            if document.deletedAt != nil {
+                try await applyVerifiedDocument(
+                    document,
+                    payloadData: nil,
+                    deleted: true
+                )
+                return
+            }
+            guard let documentKeys,
+                  let ciphertextInbox,
+                  let keyID = document.clientKeyID,
+                  let encoded = document.payloadCiphertextBase64,
+                  let ciphertext = Data(base64Encoded: encoded) else {
+                throw ManagedStorageError.invalidConfiguration
+            }
+            try await ciphertextInbox.stageIncoming(
+                accountScopeHash: accountScopeHash,
+                document: document
+            )
+            let key: ManagedDocumentKey
+            do {
+                key = try await documentKeys.documentKey(
+                    accountScopeHash: accountScopeHash,
+                    keyID: keyID
+                )
+            } catch ManagedDocumentKeyProviderError.recoveryNotEnrolled {
+                throw ManagedStorageError.invalidConfiguration
+            } catch ManagedDocumentKeyProviderError.keyNotFound {
+                throw ManagedStorageError.invalidConfiguration
+            } catch ManagedDocumentKeyProviderError.keyRevoked {
+                throw ManagedStorageError.invalidResponse
+            } catch {
+                throw ManagedStorageError.invalidResponse
+            }
+            let plaintext: Data
+            do {
+                plaintext = try ManagedDocumentEnvelope.open(
+                    ciphertext,
+                    key: key.keyData,
+                    metadata: ManagedDocumentEnvelopeMetadata(
+                        accountScopeHash: accountScopeHash,
+                        documentKind: document.documentKind,
+                        documentID: document.documentID,
+                        revision: document.revision
+                    )
+                )
+            } catch {
+                throw ManagedStorageError.invalidResponse
+            }
+            let payload: [String: ManagedDocumentJSONValue]
+            do {
+                payload = try JSONDecoder().decode(
+                    [String: ManagedDocumentJSONValue].self,
+                    from: plaintext
+                )
+                guard try Self.canonicalData(payload) == plaintext,
+                      try Self.documentID(
+                          kind: document.documentKind,
+                          payload: payload
+                      ) == document.documentID else {
+                    throw ManagedStorageError.invalidResponse
+                }
+            } catch {
+                throw ManagedStorageError.invalidResponse
+            }
+            try await applyVerifiedDocument(
+                document,
+                payloadData: plaintext,
+                deleted: false
+            )
+            try await ciphertextInbox.removeIncoming(
+                accountScopeHash: accountScopeHash,
+                document: document
+            )
+            return
         }
 
         guard Self.serverReadableKinds.contains(document.documentKind),
@@ -738,6 +888,18 @@ public actor WhoopManagedDocumentAdapter:
             }
         }
 
+        try await applyVerifiedDocument(
+            document,
+            payloadData: payloadData,
+            deleted: deleted
+        )
+    }
+
+    private func applyVerifiedDocument(
+        _ document: ManagedDocument,
+        payloadData: Data?,
+        deleted: Bool
+    ) async throws {
         if document.documentKind == .preferences, !deleted {
             guard let preferencesDefaults, let payloadData else {
                 throw ManagedStorageError.invalidResponse
@@ -983,7 +1145,9 @@ public struct WhoopManagedRestoreApplier: ManagedRestoreApplying {
             throw ManagedStorageError.invalidResponse
         }
 
+        try Task.checkCancellation()
         _ = try await store.applyManagedSyncChunk(Self.restoreChunk(chunk))
+        try Task.checkCancellation()
     }
 
     public func hydrate(
@@ -1009,10 +1173,12 @@ public struct WhoopManagedRestoreApplier: ManagedRestoreApplying {
               chunk.sourceID == source.sourceID else {
             throw ManagedStorageError.invalidResponse
         }
+        try Task.checkCancellation()
         _ = try await store.hydrateManagedSyncChunk(
             Self.restoreChunk(chunk),
             localSourceID: source.localSourceID
         )
+        try Task.checkCancellation()
     }
 
     public func apply(
@@ -1035,7 +1201,9 @@ public struct WhoopManagedRestoreApplier: ManagedRestoreApplying {
               let documentRestore else {
             throw ManagedStorageError.invalidResponse
         }
+        try Task.checkCancellation()
         try await documentRestore.apply(document: document, change: change)
+        try Task.checkCancellation()
     }
 
     private static func convert(_ value: ManagedJSONValue) -> ManagedSyncCell {

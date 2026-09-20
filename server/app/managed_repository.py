@@ -153,6 +153,71 @@ async def _reconcile_managed_safety_incident_acknowledgement(
     )
 
 
+async def _terminalize_managed_safety_incidents_without_participants(
+    connection: Any,
+    *,
+    incident_ids: Collection[UUID],
+    now: datetime,
+) -> tuple[UUID, ...]:
+    ordered_ids = sorted(set(incident_ids), key=str)
+    if not ordered_ids:
+        return ()
+    terminalized = await connection.fetch(
+        """
+        UPDATE managed_safety_incidents incident
+        SET status = 'canceled',
+            ended_at = $2
+        WHERE incident.incident_id = ANY($1::uuid[])
+          AND incident.status IN ('open', 'acknowledged')
+          AND NOT EXISTS (
+              SELECT 1
+              FROM managed_safety_participants participant
+              WHERE participant.incident_id = incident.incident_id
+                AND participant.status <> 'revoked'
+          )
+        RETURNING incident.incident_id
+        """,
+        ordered_ids,
+        now,
+    )
+    terminalized_ids = tuple(row["incident_id"] for row in terminalized)
+    if not terminalized_ids:
+        return ()
+    await connection.execute(
+        """
+        DELETE FROM managed_safety_locations
+        WHERE incident_id = ANY($1::uuid[])
+        """,
+        terminalized_ids,
+    )
+    await connection.execute(
+        """
+        UPDATE managed_safety_push_deliveries
+        SET status = CASE
+                WHEN status = 'sent' THEN 'sent'
+                ELSE 'rejected'
+            END,
+            claim_id = NULL,
+            claim_expires_at = NULL,
+            next_page_at = NULL,
+            updated_at = $2
+        WHERE incident_id = ANY($1::uuid[])
+          AND (
+                status IN (
+                    'pending',
+                    'sending',
+                    'transient_failure',
+                    'unavailable'
+                )
+                OR (status = 'sent' AND next_page_at IS NOT NULL)
+              )
+        """,
+        terminalized_ids,
+        now,
+    )
+    return terminalized_ids
+
+
 async def _retire_managed_safety_profile(
     connection: Any,
     *,
@@ -208,17 +273,24 @@ async def _retire_managed_safety_profile(
         await connection.execute(
             """
             UPDATE managed_safety_push_deliveries
-            SET status = 'rejected',
+            SET status = CASE
+                    WHEN status = 'sent' THEN 'sent'
+                    ELSE 'rejected'
+                END,
                 claim_id = NULL,
                 claim_expires_at = NULL,
+                next_page_at = NULL,
                 updated_at = $2
             WHERE incident_id = ANY($1::uuid[])
-              AND status IN (
-                  'pending',
-                  'sending',
-                  'transient_failure',
-                  'unavailable'
-              )
+              AND (
+                    status IN (
+                        'pending',
+                        'sending',
+                        'transient_failure',
+                        'unavailable'
+                    )
+                    OR (status = 'sent' AND next_page_at IS NOT NULL)
+                  )
             """,
             owned_incident_ids,
             now,
@@ -246,22 +318,34 @@ async def _retire_managed_safety_profile(
         await connection.execute(
             """
             UPDATE managed_safety_push_deliveries
-            SET status = 'rejected',
+            SET status = CASE
+                    WHEN status = 'sent' THEN 'sent'
+                    ELSE 'rejected'
+                END,
                 claim_id = NULL,
                 claim_expires_at = NULL,
+                next_page_at = NULL,
                 updated_at = $3
             WHERE contact_profile_id = $1
               AND incident_id = ANY($2::uuid[])
-              AND status IN (
-                  'pending',
-                  'sending',
-                  'transient_failure',
-                  'unavailable'
-              )
+              AND (
+                    status IN (
+                        'pending',
+                        'sending',
+                        'transient_failure',
+                        'unavailable'
+                    )
+                    OR (status = 'sent' AND next_page_at IS NOT NULL)
+                  )
             """,
             profile_id,
             participating_incident_ids,
             now,
+        )
+        await _terminalize_managed_safety_incidents_without_participants(
+            connection,
+            incident_ids=participating_incident_ids,
+            now=now,
         )
 
 
@@ -349,6 +433,32 @@ class PostgresManagedRepository:
 
     def _pool(self) -> Any:
         return self.primary_repository._require_pool()
+
+    @staticmethod
+    async def _lock_active_account_mutation(
+        connection: Any,
+        *,
+        principal: ManagedPrincipal,
+    ) -> None:
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            f"noop-managed-erasure-account:{principal.account_id}",
+        )
+        account = await connection.fetchrow(
+            """
+            SELECT status, auth_valid_after
+            FROM managed_accounts
+            WHERE account_id = $1
+            FOR SHARE
+            """,
+            principal.account_id,
+        )
+        if (
+            account is None
+            or account["status"] != "active"
+            or account["auth_valid_after"] != principal.auth_valid_after
+        ):
+            raise ManagedForbiddenError("managed account is not active")
 
     async def coordination_now(self) -> datetime:
         return await self._pool().fetchval("SELECT clock_timestamp()")
@@ -2988,7 +3098,10 @@ class PostgresManagedRepository:
                    chunk.expires_at AS chunk_expires_at,
                    document.document_kind,
                    document.content_mode AS document_content_mode,
-                   document.client_key_id AS document_client_key_id,
+                   COALESCE(
+                       document.document_key_id,
+                       document.client_key_id
+                   ) AS document_client_key_id,
                    document.updated_at AS document_updated_at,
                    document.deleted_at AS document_deleted_at
             FROM managed_change_events change
@@ -3508,6 +3621,22 @@ class PostgresManagedRepository:
                 )
                 remaining = batch_size
                 for job in jobs:
+                    if job["scope"] in {"all_managed_data", "account"}:
+                        profile = await connection.fetchrow(
+                            """
+                            SELECT profile_id
+                            FROM managed_social_profiles
+                            WHERE account_id = $1 AND status = 'active'
+                            FOR UPDATE
+                            """,
+                            job["account_id"],
+                        )
+                        if profile is not None:
+                            await _retire_managed_safety_profile(
+                                connection,
+                                profile_id=profile["profile_id"],
+                                now=now,
+                            )
                     await connection.execute(
                         """
                         UPDATE managed_erasure_jobs
@@ -3735,6 +3864,24 @@ class PostgresManagedRepository:
                 for job in jobs:
                     account_id = job["account_id"]
                     scope = str(job["scope"])
+                    if scope in {"all_managed_data", "account"}:
+                        await connection.execute(
+                            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                            f"noop-managed-erasure-account:{account_id}",
+                        )
+                        account_status = await connection.fetchval(
+                            """
+                            SELECT status
+                            FROM managed_accounts
+                            WHERE account_id = $1
+                            FOR UPDATE
+                            """,
+                            account_id,
+                        )
+                        if account_status != "erasure_pending":
+                            raise ManagedConflictError(
+                                "managed account erasure lost its account fence"
+                            )
                     if scope == "account":
                         identity_target_exists = await connection.fetchval(
                             """
@@ -3835,112 +3982,239 @@ class PostgresManagedRepository:
                                     account_id,
                                 )
                             )
-                    if scope == "account":
-                        database_rows += affected(
+                    if scope in {"all_managed_data", "account"}:
+                        cloud_erasure = await connection.fetchrow(
+                            """
+                            SELECT *
+                            FROM noop_erase_managed_account_cloud_state(
+                                $1,
+                                $2,
+                                $3
+                            )
+                            """,
+                            account_id,
+                            job["erasure_job_id"],
+                            now,
+                        )
+                        if cloud_erasure is None:
+                            raise ManagedConflictError(
+                                "managed account cloud erasure returned no result"
+                            )
+                        database_rows += sum(
+                            int(cloud_erasure[column] or 0)
+                            for column in (
+                                "authority_state_rows",
+                                "authority_transition_rows",
+                                "formula_shadow_rows",
+                                "document_key_rows",
+                                "document_key_version_rows",
+                                "managed_identity_link_rows",
+                            )
+                        )
+                        if scope == "account":
+                            database_rows += affected(
+                                await connection.execute(
+                                    """
+                                    DELETE FROM managed_audit_events
+                                    WHERE account_id = $1
+                                    """,
+                                    account_id,
+                                )
+                            )
+                            database_rows += affected(
+                                await connection.execute(
+                                    """
+                                    DELETE FROM managed_support_access_grants
+                                    WHERE account_id = $1
+                                    """,
+                                    account_id,
+                                )
+                            )
+                            database_rows += affected(
+                                await connection.execute(
+                                    """
+                                    DELETE FROM managed_consent_events
+                                    WHERE account_id = $1
+                                    """,
+                                    account_id,
+                                )
+                            )
+                        erasure_verification = await connection.fetchrow(
+                            """
+                            SELECT
+                                (
+                                    SELECT count(*)
+                                    FROM managed_authority_states
+                                    WHERE managed_account_id = $1
+                                ) AS authority_state_rows,
+                                (
+                                    SELECT count(*)
+                                    FROM managed_authority_transitions
+                                    WHERE managed_account_id = $1
+                                ) AS authority_transition_rows,
+                                (
+                                    SELECT count(*)
+                                    FROM managed_formula_shadow_results
+                                    WHERE account_id = $1
+                                ) AS formula_shadow_rows,
+                                (
+                                    SELECT count(server_value)
+                                         + count(client_value)
+                                    FROM managed_formula_shadow_results
+                                    WHERE account_id = $1
+                                ) AS formula_value_rows,
+                                (
+                                    SELECT count(*)
+                                    FROM managed_document_keys
+                                    WHERE account_id = $1
+                                ) AS document_key_rows,
+                                (
+                                    SELECT COALESCE(
+                                        sum(octet_length(wrapped_key)),
+                                        0
+                                    )
+                                    FROM managed_document_keys
+                                    WHERE account_id = $1
+                                ) AS document_key_bytes,
+                                (
+                                    SELECT count(*)
+                                    FROM managed_document_key_versions
+                                    WHERE account_id = $1
+                                ) AS document_key_version_rows,
+                                (
+                                    SELECT COALESCE(
+                                        sum(octet_length(wrapped_key)),
+                                        0
+                                    )
+                                    FROM managed_document_key_versions
+                                    WHERE account_id = $1
+                                ) AS document_key_version_bytes,
+                                (
+                                    SELECT count(*)
+                                    FROM unified_managed_account_links
+                                    WHERE managed_account_id = $1
+                                      AND $3::text = 'account'
+                                ) AS managed_identity_link_rows,
+                                (
+                                    SELECT count(*)
+                                    FROM managed_consent_events
+                                    WHERE account_id = $1
+                                      AND $3::text = 'account'
+                                ) AS consent_rows,
+                                (
+                                    SELECT count(*)
+                                    FROM managed_account_cloud_erasure_tombstones
+                                    WHERE account_id = $1
+                                      AND erasure_job_id = $2
+                                      AND erasure_scope = $3
+                                ) AS tombstone_rows
+                            """,
+                            account_id,
+                            job["erasure_job_id"],
+                            scope,
+                        )
+                        if erasure_verification is None or any(
+                            int(erasure_verification[column] or 0) != expected
+                            for column, expected in (
+                                ("authority_state_rows", 0),
+                                ("authority_transition_rows", 0),
+                                ("formula_shadow_rows", 0),
+                                ("formula_value_rows", 0),
+                                ("document_key_rows", 0),
+                                ("document_key_bytes", 0),
+                                ("document_key_version_rows", 0),
+                                ("document_key_version_bytes", 0),
+                                ("managed_identity_link_rows", 0),
+                                ("consent_rows", 0),
+                                ("tombstone_rows", 1),
+                            )
+                        ):
+                            raise ManagedConflictError(
+                                "managed account erasure verification failed"
+                            )
+                        if scope == "account":
                             await connection.execute(
                                 """
-                                DELETE FROM managed_audit_events
+                                UPDATE managed_erasure_jobs
+                                SET requested_by_identity_id = NULL
                                 WHERE account_id = $1
                                 """,
                                 account_id,
                             )
-                        )
-                        database_rows += affected(
                             await connection.execute(
                                 """
-                                DELETE FROM managed_support_access_grants
+                                UPDATE managed_external_identities
+                                SET status = 'revoked',
+                                    revoked_at = COALESCE(revoked_at, $2)
                                 WHERE account_id = $1
                                 """,
                                 account_id,
+                                now,
                             )
-                        )
-                        database_rows += affected(
                             await connection.execute(
                                 """
-                                DELETE FROM managed_consent_events
+                                UPDATE managed_account_installations
+                                SET status = 'revoked',
+                                    revoked_at = COALESCE(revoked_at, $2),
+                                    token_valid_after = $2
                                 WHERE account_id = $1
                                 """,
                                 account_id,
+                                now,
                             )
-                        )
-                        await connection.execute(
-                            """
-                            UPDATE managed_erasure_jobs
-                            SET requested_by_identity_id = NULL
-                            WHERE account_id = $1
-                            """,
-                            account_id,
-                        )
-                        await connection.execute(
-                            """
-                            UPDATE managed_external_identities
-                            SET status = 'revoked',
-                                revoked_at = COALESCE(revoked_at, $2)
-                            WHERE account_id = $1
-                            """,
-                            account_id,
-                            now,
-                        )
-                        await connection.execute(
-                            """
-                            UPDATE managed_account_installations
-                            SET status = 'revoked',
-                                revoked_at = COALESCE(revoked_at, $2),
-                                token_valid_after = $2
-                            WHERE account_id = $1
-                            """,
-                            account_id,
-                            now,
-                        )
-                        await connection.execute(
-                            """
-                            UPDATE managed_push_installations
-                            SET status = 'revoked',
-                                token_ciphertext = 'revoked.' || token_hash,
-                                revoked_at = COALESCE(revoked_at, $2),
-                                updated_at = GREATEST(updated_at, $2)
-                            WHERE account_id = $1
-                            """,
-                            account_id,
-                            now,
-                        )
-                        await connection.execute(
-                            """
-                            UPDATE managed_subscriptions
-                            SET status = 'expired',
-                                provider_customer_hash = NULL,
-                                provider_subscription_hash = NULL,
-                                updated_at = $2
-                            WHERE account_id = $1
-                            """,
-                            account_id,
-                            now,
-                        )
-                        await connection.execute(
-                            """
-                            UPDATE managed_accounts
-                            SET status = 'erased',
-                                erased_at = $2,
-                                auth_valid_after = $2,
-                                updated_at = $2
-                            WHERE account_id = $1
-                            """,
-                            account_id,
-                            now,
-                        )
-                    elif scope == "all_managed_data":
-                        await connection.execute(
-                            """
-                            UPDATE managed_accounts
-                            SET status = 'active',
-                                erasure_requested_at = NULL,
-                                updated_at = $2
-                            WHERE account_id = $1
-                              AND status = 'erasure_pending'
-                            """,
-                            account_id,
-                            now,
-                        )
+                            await connection.execute(
+                                """
+                                UPDATE managed_push_installations
+                                SET status = 'revoked',
+                                    token_ciphertext = 'revoked.' || token_hash,
+                                    revoked_at = COALESCE(revoked_at, $2),
+                                    updated_at = GREATEST(updated_at, $2)
+                                WHERE account_id = $1
+                                """,
+                                account_id,
+                                now,
+                            )
+                            await connection.execute(
+                                """
+                                UPDATE managed_subscriptions
+                                SET status = 'expired',
+                                    provider_customer_hash = NULL,
+                                    provider_subscription_hash = NULL,
+                                    updated_at = $2
+                                WHERE account_id = $1
+                                """,
+                                account_id,
+                                now,
+                            )
+                            await connection.execute(
+                                """
+                                UPDATE managed_accounts
+                                SET status = 'erased',
+                                    erased_at = $2,
+                                    auth_valid_after = $2,
+                                    updated_at = $2
+                                WHERE account_id = $1
+                                """,
+                                account_id,
+                                now,
+                            )
+                        else:
+                            await connection.execute(
+                                """
+                                UPDATE managed_accounts
+                                SET status = 'active',
+                                    erasure_requested_at = NULL,
+                                    auth_valid_after = GREATEST(
+                                        auth_valid_after,
+                                        $2
+                                    ),
+                                    updated_at = $2
+                                WHERE account_id = $1
+                                  AND status = 'erasure_pending'
+                                """,
+                                account_id,
+                                now,
+                            )
                     objects_deleted = (
                         int(job["objects_selected"] or 0) if includes_raw else 0
                     )
@@ -4467,6 +4741,10 @@ class PostgresManagedRepository:
 
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await self._lock_active_account_mutation(
+                    connection,
+                    principal=principal,
+                )
                 await connection.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                     (
@@ -4515,23 +4793,6 @@ class PostgresManagedRepository:
                 )
                 if not installation_exists:
                     raise ManagedNotFoundError("managed installation was not found")
-                if mutation.client_key_id is not None:
-                    key_exists = await connection.fetchval(
-                        """
-                        SELECT EXISTS (
-                            SELECT 1
-                            FROM managed_client_keys
-                            WHERE account_id = $1
-                              AND client_key_id = $2
-                              AND revoked_at IS NULL
-                        )
-                        """,
-                        principal.account_id,
-                        mutation.client_key_id,
-                    )
-                    if not key_exists:
-                        raise ManagedNotFoundError("managed client key was not found")
-
                 existing = await connection.fetchrow(
                     """
                     SELECT *
@@ -4547,10 +4808,13 @@ class PostgresManagedRepository:
                     revision,
                 )
                 if existing is not None:
+                    existing_key_id = existing["document_key_id"]
+                    if existing_key_id is None:
+                        existing_key_id = existing["client_key_id"]
                     if (
                         str(existing["content_sha256"]).strip() != digest
                         or existing["content_mode"] != mutation.content_mode
-                        or existing["client_key_id"] != mutation.client_key_id
+                        or existing_key_id != mutation.client_key_id
                         or (existing["deleted_at"] is not None) != mutation.deleted
                     ):
                         raise ManagedConflictError(
@@ -4560,6 +4824,33 @@ class PostgresManagedRepository:
                         dict(existing),
                         duplicate=True,
                     )
+
+                document_key_id = (
+                    mutation.client_key_id
+                    if (
+                        mutation.content_mode == "client_encrypted"
+                        and not mutation.deleted
+                    )
+                    else None
+                )
+                if document_key_id is not None:
+                    active_document_key = await connection.fetchval(
+                        """
+                        SELECT key_id
+                        FROM managed_document_keys
+                        WHERE account_id = $1
+                          AND key_id = $2
+                          AND key_kind = 'document'
+                          AND status = 'active'
+                        FOR SHARE
+                        """,
+                        principal.account_id,
+                        document_key_id,
+                    )
+                    if active_document_key is None:
+                        raise ManagedNotFoundError(
+                            "active managed document key was not found"
+                        )
 
                 head = await connection.fetchrow(
                     """
@@ -4595,7 +4886,7 @@ class PostgresManagedRepository:
                         document_revision,
                         origin_installation_id,
                         content_mode,
-                        client_key_id,
+                        document_key_id,
                         content_sha256,
                         payload_json,
                         payload_ciphertext,
@@ -4613,7 +4904,7 @@ class PostgresManagedRepository:
                     revision,
                     installation_id,
                     mutation.content_mode,
-                    mutation.client_key_id,
+                    document_key_id,
                     digest,
                     (
                         json.dumps(
@@ -5607,6 +5898,11 @@ class PostgresManagedRepository:
                     profile["profile_id"],
                 )
                 await _reconcile_managed_safety_incident_acknowledgement(
+                    connection,
+                    incident_ids=(row["incident_id"] for row in incident_rows),
+                    now=now,
+                )
+                await _terminalize_managed_safety_incidents_without_participants(
                     connection,
                     incident_ids=(row["incident_id"] for row in incident_rows),
                     now=now,
@@ -7037,9 +7333,13 @@ class PostgresManagedRepository:
                 await connection.execute(
                     """
                     UPDATE managed_safety_push_deliveries delivery
-                    SET status = 'rejected',
+                    SET status = CASE
+                            WHEN delivery.status = 'sent' THEN 'sent'
+                            ELSE 'rejected'
+                        END,
                         claim_id = NULL,
                         claim_expires_at = NULL,
+                        next_page_at = NULL,
                         updated_at = $3
                     FROM managed_safety_incidents incident
                     WHERE delivery.incident_id = incident.incident_id
@@ -7053,16 +7353,27 @@ class PostgresManagedRepository:
                             AND delivery.contact_profile_id = $1
                           )
                       )
-                      AND delivery.status IN (
-                          'pending',
-                          'sending',
-                          'transient_failure',
-                          'unavailable'
-                      )
+                      AND (
+                            delivery.status IN (
+                                'pending',
+                                'sending',
+                                'transient_failure',
+                                'unavailable'
+                            )
+                            OR (
+                                delivery.status = 'sent'
+                                AND delivery.next_page_at IS NOT NULL
+                            )
+                          )
                     """,
                     profile["profile_id"],
                     blocked_profile_id,
                     now,
+                )
+                await _terminalize_managed_safety_incidents_without_participants(
+                    connection,
+                    incident_ids=active_incident_ids,
+                    now=now,
                 )
                 for owner_profile_id in (
                     profile["profile_id"],
@@ -8334,21 +8645,6 @@ class PostgresManagedRepository:
                     not_before,
                 )
                 if scope in {"all_managed_data", "account"}:
-                    profile = await connection.fetchrow(
-                        """
-                        SELECT profile_id
-                        FROM managed_social_profiles
-                        WHERE account_id = $1 AND status = 'active'
-                        FOR UPDATE
-                        """,
-                        principal.account_id,
-                    )
-                    if profile is not None:
-                        await _retire_managed_safety_profile(
-                            connection,
-                            profile_id=profile["profile_id"],
-                            now=now,
-                        )
                     await connection.execute(
                         """
                         UPDATE managed_accounts
@@ -8694,6 +8990,35 @@ class PostgresManagedRepository:
             raise ManagedNotFoundError("managed erasure was not found")
         return self._public_erasure(dict(row), duplicate=False)
 
+    async def get_erasure_receipt(
+        self,
+        *,
+        erasure_job_id: UUID,
+        installation_id: str,
+        installation_token_hash: str,
+    ) -> tuple[dict[str, Any], str]:
+        row = await self._pool().fetchrow(
+            """
+            SELECT job.*, installation.platform
+            FROM managed_erasure_jobs job
+            JOIN managed_account_installations installation
+              ON installation.account_id = job.account_id
+             AND installation.installation_id = $2
+            JOIN installation_credentials credential
+              ON credential.installation_id = installation.installation_id
+            WHERE job.erasure_job_id = $1
+              AND job.scope = 'account'
+              AND job.verification_expires_at > clock_timestamp()
+              AND credential.token_hash = $3
+            """,
+            erasure_job_id,
+            installation_id,
+            installation_token_hash,
+        )
+        if row is None:
+            raise ManagedNotFoundError("managed erasure receipt was not found")
+        return self._public_erasure(dict(row), duplicate=False), str(row["platform"])
+
     async def cancel_erasure(
         self,
         *,
@@ -8795,6 +9120,9 @@ class PostgresManagedRepository:
         duplicate: bool,
     ) -> dict[str, Any]:
         ciphertext = row.get("payload_ciphertext")
+        effective_key_id = row.get("document_key_id")
+        if effective_key_id is None:
+            effective_key_id = row.get("client_key_id")
         return {
             "document_kind": row["document_kind"],
             "document_id": str(row["document_id"]),
@@ -8802,9 +9130,7 @@ class PostgresManagedRepository:
             "origin_installation_id": row["origin_installation_id"],
             "content_mode": row["content_mode"],
             "client_key_id": (
-                str(row["client_key_id"])
-                if row.get("client_key_id") is not None
-                else None
+                str(effective_key_id) if effective_key_id is not None else None
             ),
             "content_sha256": str(row["content_sha256"]).strip(),
             "payload_json": _decoded_json(row.get("payload_json")),

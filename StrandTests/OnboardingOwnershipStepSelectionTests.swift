@@ -18,26 +18,30 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
         )
     }
 
-    func testUnconfiguredCoreModeOmitsAccountStepAndKeepsProfile() {
+    func testUnconfiguredCoreModeKeepsAccountStepVisibleBeforeProfile() {
         let steps = OnboardingWizard.onboardingSteps(
             ownershipConfigured: false
         )
 
-        XCTAssertFalse(steps.contains(.ownership))
+        XCTAssertTrue(steps.contains(.ownership))
         XCTAssertTrue(steps.contains(.profile))
         XCTAssertEqual(
-            steps.firstIndex(of: .profile),
+            steps.firstIndex(of: .ownership),
             steps.firstIndex(of: .bonded).map { $0 + 1 }
+        )
+        XCTAssertEqual(
+            steps.firstIndex(of: .profile),
+            steps.firstIndex(of: .ownership).map { $0 + 1 }
         )
     }
 
-    func testUnconfiguredCoreModeResumesSavedOwnershipStepAtProfile() {
+    func testUnconfiguredCoreModeResumesSavedOwnershipStepExactly() {
         XCTAssertEqual(
             OnboardingWizard.restoredOnboardingStep(
                 storedValue: OnboardingWizard.Step.ownership.storageValue,
                 ownershipConfigured: false
             ),
-            .profile
+            .ownership
         )
     }
 
@@ -120,6 +124,64 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
                 phase: .unavailable
             ),
             .done
+        )
+    }
+
+    func testUnconfiguredAccountStepContinuesWithoutClaimOrReconciliation() {
+        XCTAssertTrue(
+            OnboardingWizard.ownershipStepCanContinue(
+                ownershipConfigured: false,
+                claimed: false,
+                reconciliationComplete: false
+            )
+        )
+    }
+
+    func testUnconfiguredScanNamesTheOfflinePathExplicitly() {
+        XCTAssertEqual(
+            OnboardingWizard.scanCTATitle(
+                ownershipConfigured: false,
+                bandBonded: false
+            ),
+            String(localized: "appwide.onboarding.continue_without_band")
+        )
+        XCTAssertEqual(
+            OnboardingWizard.scanCTATitle(
+                ownershipConfigured: true,
+                bandBonded: false
+            ),
+            String(localized: "Continue")
+        )
+        XCTAssertEqual(
+            OnboardingWizard.scanCTATitle(
+                ownershipConfigured: false,
+                bandBonded: true
+            ),
+            String(localized: "Continue")
+        )
+    }
+
+    func testConfiguredAccountStepRequiresSettledClaim() {
+        XCTAssertFalse(
+            OnboardingWizard.ownershipStepCanContinue(
+                ownershipConfigured: true,
+                claimed: false,
+                reconciliationComplete: true
+            )
+        )
+        XCTAssertFalse(
+            OnboardingWizard.ownershipStepCanContinue(
+                ownershipConfigured: true,
+                claimed: true,
+                reconciliationComplete: false
+            )
+        )
+        XCTAssertTrue(
+            OnboardingWizard.ownershipStepCanContinue(
+                ownershipConfigured: true,
+                claimed: true,
+                reconciliationComplete: true
+            )
         )
     }
 

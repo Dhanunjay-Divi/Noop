@@ -142,3 +142,6 @@ DAILY_EFFORT_CONTRACT = FormulaContract(
 CANONICAL_FORMULA_REGISTRY = FormulaRegistry.build(
     (RECOVERY_CONTRACT, DAILY_EFFORT_CONTRACT)
 )
+CANONICAL_FORMULA_METRIC_KEYS = frozenset(
+    contract.metric_key for contract in CANONICAL_FORMULA_REGISTRY.contracts
+)

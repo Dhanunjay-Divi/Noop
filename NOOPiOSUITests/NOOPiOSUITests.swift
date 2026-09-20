@@ -899,7 +899,7 @@ final class NOOPiOSUITests: XCTestCase {
         let app = launchDemoScreen(
             "onboarding",
             extraArguments: [
-                "--demo-onboarding-step", "7",
+                "--demo-onboarding-page", "profile",
                 "-units.system", "metric",
                 "-units.mass", "kg",
                 "-units.height", "cm",

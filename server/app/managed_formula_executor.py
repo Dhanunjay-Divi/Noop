@@ -30,9 +30,7 @@ FormulaParityStatus = Literal[
 _SOURCE_KIND = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _REVISION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_TIME_ZONE = re.compile(
-    r"^[A-Za-z0-9_+.-]+(?:/[A-Za-z0-9_+.-]+)*$"
-)
+_TIME_ZONE = re.compile(r"^[A-Za-z0-9_+.-]+(?:/[A-Za-z0-9_+.-]+)*$")
 
 
 class FormulaInputContractError(ValueError):
@@ -237,9 +235,7 @@ class ManagedFormulaExecutor:
         elif metric_key == "daily_effort":
             value = self._daily_effort(normalized)
             missing_inputs = (
-                ()
-                if value is not None
-                else ("cardio_effort", "movement_evidence")
+                () if value is not None else ("cardio_effort", "movement_evidence")
             )
         else:  # pragma: no cover - registry and dispatch evolve together
             raise FormulaInputContractError("registered formula has no executor")
@@ -410,9 +406,7 @@ class ManagedFormulaExecutor:
         composite_z = sum(z * weight for z, weight in terms) / total_weight
         if not math.isfinite(composite_z):
             return None
-        logistic_input = cls._LOGISTIC_SLOPE * (
-            composite_z - cls._LOGISTIC_MIDPOINT
-        )
+        logistic_input = cls._LOGISTIC_SLOPE * (composite_z - cls._LOGISTIC_MIDPOINT)
         if logistic_input >= 0:
             score = 100.0 / (1.0 + math.exp(-logistic_input))
         else:
@@ -497,19 +491,20 @@ class ManagedFormulaExecutor:
         assert server_value is not None and client.value is not None
         delta = abs(server_value - client.value)
         status: FormulaParityStatus = (
-            "match"
-            if delta <= contract.parity_absolute_tolerance
-            else "mismatch"
+            "match" if delta <= contract.parity_absolute_tolerance else "mismatch"
         )
         return status, delta
 
 
 def _finite_number(value: Any) -> bool:
-    return (
-        not isinstance(value, bool)
-        and isinstance(value, (int, float))
-        and math.isfinite(float(value))
-    )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except OverflowError as error:
+        raise FormulaInputContractError(
+            "formula numeric input is outside the supported range"
+        ) from error
 
 
 def _integer(value: Any) -> int | None:
@@ -525,9 +520,7 @@ def _baseline(value: Any) -> DriverBaseline | None:
         return None
     if set(value) - {"mean", "spread", "usable"}:
         return None
-    if not _finite_number(value.get("mean")) or not _finite_number(
-        value.get("spread")
-    ):
+    if not _finite_number(value.get("mean")) or not _finite_number(value.get("spread")):
         return None
     spread = float(value["spread"])
     if spread < 0:
@@ -550,9 +543,7 @@ def _gravity_samples(value: Any) -> tuple[GravitySample, ...] | None:
         if not isinstance(raw, Mapping) or set(raw) != {"ts", "x", "y", "z"}:
             continue
         ts = _integer(raw["ts"])
-        if ts is None or not all(
-            _finite_number(raw[axis]) for axis in ("x", "y", "z")
-        ):
+        if ts is None or not all(_finite_number(raw[axis]) for axis in ("x", "y", "z")):
             continue
         samples.append(
             GravitySample(

@@ -23,6 +23,17 @@ class RecoveryBandPresentationTest {
     }
 
     @Test
+    fun colorsUseOneSemanticPaletteAcrossSummarySurfaces() {
+        assertEquals(Palette.statusCritical, RecoveryBandPresentation.color(10.0))
+        assertEquals(Palette.statusWarning, RecoveryBandPresentation.color(41.0))
+        assertEquals(Palette.statusPositive, RecoveryBandPresentation.color(82.0))
+
+        val steadyGauge = RecoveryBandPresentation.gaugeColors(41.0)
+        assertEquals(Palette.statusWarning.copy(alpha = 0.68f), steadyGauge.first)
+        assertEquals(Palette.statusWarning, steadyGauge.second)
+    }
+
+    @Test
     fun unscoredRecoveryUsesNeutralVisualStates() {
         assertEquals(
             TodayRecoveryHeroTone.LEARNING,

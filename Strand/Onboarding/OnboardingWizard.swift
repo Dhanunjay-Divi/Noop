@@ -20,7 +20,7 @@ import UIKit
 //  5 Wear & wake       - put your strap on, make sure it is charged
 //  6 Scan              - radar sweep; auto-scans, Scan retries via model.scan()
 //  7 Bonding           - celebration when live.bonded
-//  8 Ownership         - first-party builds only; claim must finish before profile
+//  8 Ownership         - always visible; configured builds require claim before profile
 //  9 Profile           - age / sex / weight / height bound to ProfileStore
 // 10 Import (optional) - wearable / Apple Health history
 // 11 Notifications     - explicit, default-off daily guidance choice
@@ -107,9 +107,8 @@ public struct OnboardingWizard: View {
         }
     }
 
-    static func onboardingSteps(ownershipConfigured: Bool) -> [Step] {
-        let ownershipRequired = ownershipConfigured
-        return Step.allCases.filter { $0 != .ownership || ownershipRequired }
+    static func onboardingSteps(ownershipConfigured _: Bool) -> [Step] {
+        Step.allCases
     }
 
     static func restoredOnboardingStep(
@@ -206,9 +205,13 @@ public struct OnboardingWizard: View {
                     case .bonded:     BondedStep()
                     case .ownership:
                         #if os(iOS)
-                        OwnershipAccountView()
+                        if ownershipConfigured {
+                            OwnershipAccountView()
+                        } else {
+                            OwnershipAvailabilityStep()
+                        }
                         #else
-                        EmptyView()
+                        OwnershipAvailabilityStep()
                         #endif
                     case .profile:    ProfileStep(isEditing: $profileEditing)
                     case .importData: ImportStep()
@@ -374,9 +377,16 @@ public struct OnboardingWizard: View {
         case .expectations: return String(localized: "I understand")
         case .bluetooth:  return String(localized: "Continue")
         case .wear:       return String(localized: "I'm wearing it")
-        case .scan:       return String(localized: "Continue")
+        case .scan:
+            return Self.scanCTATitle(
+                ownershipConfigured: ownershipConfigured,
+                bandBonded: bandBonded
+            )
         case .bonded:     return String(localized: "Continue")
         case .ownership:
+            guard ownershipConfigured else {
+                return String(localized: "Continue")
+            }
             return ownershipClaimed
                 ? String(localized: "Continue")
                 : String(localized: "Claim band to continue")
@@ -397,9 +407,23 @@ public struct OnboardingWizard: View {
         }
     }
 
+    static func scanCTATitle(
+        ownershipConfigured: Bool,
+        bandBonded: Bool
+    ) -> String {
+        if !ownershipConfigured && !bandBonded {
+            return String(localized: "appwide.onboarding.continue_without_band")
+        }
+        return String(localized: "Continue")
+    }
+
     private var primaryActionEnabled: Bool {
         if step == .ownership {
-            return ownershipClaimed && ownershipReconciliationComplete
+            return Self.ownershipStepCanContinue(
+                ownershipConfigured: ownershipConfigured,
+                claimed: ownershipClaimed,
+                reconciliationComplete: ownershipReconciliationComplete
+            )
         }
         if step == .scan && ownershipRequired { return bandBonded }
         if step == .plan {
@@ -431,6 +455,10 @@ public struct OnboardingWizard: View {
     /// its own: only "Enable & Continue" calls the scheduler, which requests the OS permission if needed.
     /// Denial does not block onboarding and the same control remains available under Automations.
     private func advance() {
+        if step == .scan && !bandBonded && !ownershipConfigured {
+            move(to: .ownership, direction: "forward")
+            return
+        }
         if step == .plan {
             planSubmissionAttempted = true
             #if os(iOS)
@@ -522,6 +550,14 @@ public struct OnboardingWizard: View {
 
     private var ownershipRequired: Bool {
         ownershipConfigured
+    }
+
+    static func ownershipStepCanContinue(
+        ownershipConfigured: Bool,
+        claimed: Bool,
+        reconciliationComplete: Bool
+    ) -> Bool {
+        !ownershipConfigured || (claimed && reconciliationComplete)
     }
 
     private var ownershipClaimed: Bool {
@@ -669,6 +705,39 @@ public struct OnboardingWizard: View {
             insertion: .move(edge: .trailing).combined(with: .opacity),
             removal: .move(edge: .leading).combined(with: .opacity)
         )
+    }
+}
+
+private struct OwnershipAvailabilityStep: View {
+    var body: some View {
+        StepShell(
+            title: String(localized: "Band Account"),
+            subtitle: String(localized: "Band ownership is not enabled")
+        ) {
+            VStack(spacing: 12) {
+                InfoCard(
+                    icon: "person.badge.plus",
+                    tint: StrandPalette.accent,
+                    title: String(localized: "Create ownership account"),
+                    message: String(localized: "This build keeps the future account flow dormant. Core local NOOP remains available without an account.")
+                )
+                InfoCard(
+                    icon: "person.crop.circle.badge.checkmark",
+                    tint: StrandPalette.statusPositive,
+                    title: String(localized: "Sign in"),
+                    message: String(localized: "Activation will be enabled only after the approved band SDK can provide fresh, cryptographic possession proof.")
+                )
+                Text(
+                    "Account actions stay off in this build. Continuing does not create an account or upload data."
+                )
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 460)
+                .accessibilityIdentifier("noop.onboarding.account-unconfigured")
+            }
+        }
     }
 }
 

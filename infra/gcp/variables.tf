@@ -304,6 +304,20 @@ variable "managed_apple_bundle_id" {
   }
 }
 
+variable "managed_macos_app_id" {
+  description = "Optional existing Firebase macOS app ID for the restore-only managed viewer. This stack does not provision the macOS Firebase app."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.managed_macos_app_id == null
+      || can(regex("^1:[0-9]+:ios:[0-9a-f]{8,64}$", var.managed_macos_app_id))
+    )
+    error_message = "managed_macos_app_id must be null or an Apple-platform Firebase app ID."
+  }
+}
+
 variable "managed_android_package_name" {
   description = "Exact signed Android staging package registered for synthetic NOOP+ staging."
   type        = string

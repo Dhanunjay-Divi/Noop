@@ -46,8 +46,10 @@ accuracy, ownership, redistribution rights, or clinical validity.
 
 ## Product Invariants
 
-- Core NOOP stays local-first, account-free, fully useful offline, and
-  independent of NOOP+.
+- During the D-059 migration, one phone remains the encrypted edge collector
+  and safe offline working set while durable history and canonical formulas
+  move to the account cloud only after explicit per-data-class gates. NOOP+
+  cannot withhold protection, restore, export, or current safe offline use.
 - Apple and Android behavior and stored/derived contracts change together when
   the capability applies to both. Explain any intentional asymmetry.
 - Missing sensor input remains missing. Builds and simulators do not validate

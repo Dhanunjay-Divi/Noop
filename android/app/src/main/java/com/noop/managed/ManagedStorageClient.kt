@@ -1085,6 +1085,22 @@ class ManagedStorageClient(
         )
     }
 
+    suspend fun erasureReceipt(
+        authorization: ManagedAuthorization,
+        jobId: UUID,
+    ): ManagedErasureJob = withContext(Dispatchers.IO) {
+        parseErasure(
+            executeJson(
+                apiRequest(
+                    "v1/managed/erasure/$jobId/receipt",
+                    authorization,
+                    includeIdentity = false,
+                ).get().build(),
+            ).optJSONObject("erasure")
+                ?: throw ManagedStorageException.InvalidResponse(),
+        )
+    }
+
     suspend fun cancelErasure(
         authorization: ManagedAuthorization,
         jobId: UUID,
@@ -1480,6 +1496,122 @@ class ManagedStorageClient(
         ManagedDocumentPage(documents, nextCursor)
     }
 
+    suspend fun putManagedDocumentKey(
+        authorization: ManagedAuthorization,
+        keyId: UUID,
+        mutation: ManagedWrappedKeyMutation,
+    ): ManagedWrappedKeyRecord = withContext(Dispatchers.IO) {
+        validateRouteKey(keyId, mutation)
+        val record = parseWrappedKeyRecord(
+            executeJson(
+                apiRequest(
+                    "v1/managed/document-keys/${keyId.toString().lowercase()}",
+                    authorization,
+                ).put(wrappedKeyMutationJson(mutation).toString().toRequestBody(JSON)).build(),
+            ).requireObject("key"),
+        )
+        if (record.keyId != keyId ||
+            record.status != ManagedWrappedKeyStatus.ACTIVE ||
+            !record.matches(mutation)
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        record
+    }
+
+    suspend fun managedDocumentKey(
+        authorization: ManagedAuthorization,
+        keyId: UUID,
+    ): ManagedWrappedKeyRecord = withContext(Dispatchers.IO) {
+        val record = parseWrappedKeyRecord(
+            executeJson(
+                apiRequest(
+                    "v1/managed/document-keys/${keyId.toString().lowercase()}",
+                    authorization,
+                ).get().build(),
+            ).requireObject("key"),
+        )
+        if (record.keyId != keyId || record.status == ManagedWrappedKeyStatus.REVOKED) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        record
+    }
+
+    suspend fun managedDocumentKeyVersion(
+        authorization: ManagedAuthorization,
+        keyId: UUID,
+        wrappingRevision: Int,
+    ): ManagedWrappedKeyVersion = withContext(Dispatchers.IO) {
+        if (wrappingRevision !in 1..1_000_000) {
+            throw IllegalArgumentException("Invalid managed document-key revision")
+        }
+        val version = parseWrappedKeyVersion(
+            executeJson(
+                apiRequest(
+                    "v1/managed/document-keys/${keyId.toString().lowercase()}" +
+                        "/versions/$wrappingRevision",
+                    authorization,
+                ).get().build(),
+            ).requireObject("key_version"),
+        )
+        if (version.keyId != keyId || version.wrappingRevision != wrappingRevision) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        version
+    }
+
+    suspend fun rotateManagedDocumentKey(
+        authorization: ManagedAuthorization,
+        keyId: UUID,
+        rotation: ManagedWrappedKeyRotation,
+    ): ManagedWrappedKeyRecord = withContext(Dispatchers.IO) {
+        validateRouteKey(keyId, rotation.mutation)
+        val record = parseWrappedKeyRecord(
+            executeJson(
+                apiRequest(
+                    "v1/managed/document-keys/${keyId.toString().lowercase()}/rotate",
+                    authorization,
+                ).post(wrappedKeyRotationJson(rotation).toString().toRequestBody(JSON)).build(),
+            ).requireObject("key"),
+        )
+        if (record.keyId != keyId ||
+            record.status != ManagedWrappedKeyStatus.ACTIVE ||
+            !record.matches(rotation.mutation)
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        record
+    }
+
+    suspend fun revokeManagedDocumentKey(
+        authorization: ManagedAuthorization,
+        keyId: UUID,
+        successorKeyId: UUID?,
+    ): ManagedWrappedKeyRecord = withContext(Dispatchers.IO) {
+        if (successorKeyId == keyId) {
+            throw IllegalArgumentException("A managed document key cannot succeed itself")
+        }
+        val body = JSONObject().put(
+            "successor_key_id",
+            successorKeyId?.toString()?.lowercase() ?: JSONObject.NULL,
+        )
+        val record = parseWrappedKeyRecord(
+            executeJson(
+                apiRequest(
+                    "v1/managed/document-keys/${keyId.toString().lowercase()}/revoke",
+                    authorization,
+                ).post(body.toString().toRequestBody(JSON)).build(),
+            ).requireObject("key"),
+        )
+        if (record.keyId != keyId ||
+            record.status != ManagedWrappedKeyStatus.REVOKED ||
+            record.successorKeyId != successorKeyId
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        record
+    }
+
     override suspend fun downloadCapability(
         authorization: ManagedAuthorization,
         chunkId: UUID,
@@ -1549,14 +1681,20 @@ class ManagedStorageClient(
         path: String,
         authorization: ManagedAuthorization,
         includeInstallation: Boolean = true,
+        includeIdentity: Boolean = true,
     ): Request.Builder {
         val base = configuration.baseUrl.trimEnd('/')
         val builder = Request.Builder()
             .url("$base/$path")
             .header("Accept", "application/json")
-            .header("Authorization", "Bearer ${authorization.identityToken}")
             .header("X-Firebase-AppCheck", authorization.appCheckToken)
             .header("User-Agent", "NOOP-Android/managed-storage-v1")
+        if (includeIdentity) {
+            builder.header(
+                "Authorization",
+                "Bearer ${authorization.identityToken}",
+            )
+        }
         if (includeInstallation) {
             builder.header("X-Noop-Installation-ID", authorization.installationId)
             builder.header("X-Noop-Installation-Token", authorization.installationToken)
@@ -1614,6 +1752,34 @@ class ManagedStorageClient(
         }
         .put("updated_at", value.updatedAt)
         .put("deleted", value.deleted)
+
+    private fun wrappedKeyMutationJson(value: ManagedWrappedKeyMutation): JSONObject =
+        JSONObject()
+            .put("key_kind", value.keyKind.wireValue)
+            .apply {
+                value.wrappingKeyId?.let {
+                    put("wrapping_key_id", it.toString().lowercase())
+                }
+            }
+            .put("wrapping_revision", value.wrappingRevision)
+            .put("algorithm", value.algorithm.wireValue)
+            .put(
+                "wrapped_key_base64",
+                Base64.getEncoder().encodeToString(value.wrappedKey),
+            )
+            .put("wrapped_key_sha256", ManagedDigest.sha256(value.wrappedKey))
+            .apply {
+                value.masterKeyConfirmationHmacSha256?.let {
+                    put("master_key_confirmation_hmac_sha256", it)
+                }
+                value.recoveryMethod?.let {
+                    put("recovery_method", it.wireValue)
+                }
+            }
+
+    private fun wrappedKeyRotationJson(value: ManagedWrappedKeyRotation): JSONObject =
+        wrappedKeyMutationJson(value.mutation)
+            .put("expected_wrapping_revision", value.expectedWrappingRevision)
 
     private fun parseUpload(value: JSONObject): ManagedUploadCapability =
         ManagedUploadCapability(
@@ -1747,6 +1913,149 @@ class ManagedStorageClient(
         }
         return document
     }
+
+    private fun parseWrappedKeyRecord(value: JSONObject): ManagedWrappedKeyRecord {
+        val keyId = value.requiredUuid("key_id")
+        val material = parseWrappedKeyMaterial(value, keyId)
+        val status = ManagedWrappedKeyStatus.fromWire(value.requiredString("status"))
+        val successorKeyId = value.optionalUuid("successor_key_id")
+        val createdAt = value.requiredString("created_at").requiredInstant()
+        val updatedAt = value.requiredString("updated_at").requiredInstant()
+        val revokedAt = value.optionalString("revoked_at")?.requiredInstant()
+        val created = Instant.parse(createdAt)
+        val updated = Instant.parse(updatedAt)
+        if (updated < created) throw ManagedStorageException.InvalidResponse()
+        when (status) {
+            ManagedWrappedKeyStatus.ACTIVE,
+            ManagedWrappedKeyStatus.RETIRED,
+            -> if (successorKeyId != null || revokedAt != null) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+            ManagedWrappedKeyStatus.REVOKED -> {
+                val revoked = revokedAt?.let(Instant::parse)
+                    ?: throw ManagedStorageException.InvalidResponse()
+                if (revoked < created || updated < revoked || successorKeyId == keyId) {
+                    throw ManagedStorageException.InvalidResponse()
+                }
+            }
+        }
+        return ManagedWrappedKeyRecord(
+            keyId = keyId,
+            keyKind = material.keyKind,
+            wrappingKeyId = material.wrappingKeyId,
+            wrappingRevision = material.wrappingRevision,
+            algorithm = material.algorithm,
+            wrappedKey = material.wrappedKey,
+            wrappedKeySha256 = material.wrappedKeySha256,
+            masterKeyConfirmationHmacSha256 =
+                material.masterKeyConfirmationHmacSha256,
+            recoveryMethod = material.recoveryMethod,
+            status = status,
+            successorKeyId = successorKeyId,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+            revokedAt = revokedAt,
+        )
+    }
+
+    private fun parseWrappedKeyVersion(value: JSONObject): ManagedWrappedKeyVersion {
+        val keyId = value.requiredUuid("key_id")
+        val material = parseWrappedKeyMaterial(value, keyId)
+        return ManagedWrappedKeyVersion(
+            keyId = keyId,
+            keyKind = material.keyKind,
+            wrappingKeyId = material.wrappingKeyId,
+            wrappingRevision = material.wrappingRevision,
+            algorithm = material.algorithm,
+            wrappedKey = material.wrappedKey,
+            wrappedKeySha256 = material.wrappedKeySha256,
+            masterKeyConfirmationHmacSha256 =
+                material.masterKeyConfirmationHmacSha256,
+            recoveryMethod = material.recoveryMethod,
+            createdAt = value.requiredString("created_at").requiredInstant(),
+        )
+    }
+
+    private fun parseWrappedKeyMaterial(
+        value: JSONObject,
+        keyId: UUID,
+    ): ParsedWrappedKeyMaterial {
+        val keyKind = ManagedWrappedKeyKind.fromWire(value.requiredString("key_kind"))
+        val wrappingKeyId = value.optionalUuid("wrapping_key_id")
+        val wrappingRevision = value.requiredRevision("wrapping_revision")
+        val algorithm = ManagedWrappedKeyAlgorithm.fromWire(
+            value.requiredString("algorithm"),
+        )
+        val encoded = value.requiredString("wrapped_key_base64")
+        val wrappedKey = runCatching { Base64.getDecoder().decode(encoded) }
+            .getOrElse { throw ManagedStorageException.InvalidResponse() }
+        val digest = value.requiredString("wrapped_key_sha256")
+        if (Base64.getEncoder().encodeToString(wrappedKey) != encoded ||
+            wrappedKey.size !in 40..16_384 ||
+            !digest.matches(SHA256) ||
+            ManagedDigest.sha256(wrappedKey) != digest
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        val confirmation = value.optionalString(
+            "master_key_confirmation_hmac_sha256",
+        )
+        val recoveryMethod = value.optionalString("recovery_method")?.let {
+            ManagedWrappedKeyRecoveryMethod.fromWire(it)
+        }
+        when (keyKind) {
+            ManagedWrappedKeyKind.ACCOUNT_MASTER -> {
+                if (wrappingKeyId != null ||
+                    confirmation?.matches(SHA256) != true ||
+                    recoveryMethod == null
+                ) {
+                    throw ManagedStorageException.InvalidResponse()
+                }
+            }
+            ManagedWrappedKeyKind.DOCUMENT -> {
+                if (wrappingKeyId == null ||
+                    wrappingKeyId == keyId ||
+                    wrappedKey.size != 72 ||
+                    confirmation != null ||
+                    recoveryMethod != null
+                ) {
+                    throw ManagedStorageException.InvalidResponse()
+                }
+            }
+        }
+        return ParsedWrappedKeyMaterial(
+            keyKind = keyKind,
+            wrappingKeyId = wrappingKeyId,
+            wrappingRevision = wrappingRevision,
+            algorithm = algorithm,
+            wrappedKey = wrappedKey,
+            wrappedKeySha256 = digest,
+            masterKeyConfirmationHmacSha256 = confirmation,
+            recoveryMethod = recoveryMethod,
+        )
+    }
+
+    private fun validateRouteKey(
+        keyId: UUID,
+        mutation: ManagedWrappedKeyMutation,
+    ) {
+        if (mutation.wrappingKeyId == keyId) {
+            throw IllegalArgumentException("A managed document key cannot wrap itself")
+        }
+    }
+
+    private fun ManagedWrappedKeyRecord.matches(
+        mutation: ManagedWrappedKeyMutation,
+    ): Boolean =
+        keyKind == mutation.keyKind &&
+            wrappingKeyId == mutation.wrappingKeyId &&
+            wrappingRevision == mutation.wrappingRevision &&
+            algorithm == mutation.algorithm &&
+            wrappedKey.contentEquals(mutation.wrappedKey) &&
+            wrappedKeySha256 == ManagedDigest.sha256(mutation.wrappedKey) &&
+            masterKeyConfirmationHmacSha256 ==
+            mutation.masterKeyConfirmationHmacSha256 &&
+            recoveryMethod == mutation.recoveryMethod
 
     private fun validDocumentPayload(document: ManagedDocument): Boolean {
         if (document.deletedAt != null) {
@@ -2465,6 +2774,38 @@ class ManagedStorageClient(
         return getBoolean(name)
     }
 
+    private fun JSONObject.requiredString(name: String): String {
+        if (!has(name) || isNull(name) || get(name) !is String) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return getString(name).takeIf(String::isNotEmpty)
+            ?: throw ManagedStorageException.InvalidResponse()
+    }
+
+    private fun JSONObject.optionalString(name: String): String? {
+        if (!has(name) || isNull(name)) return null
+        return requiredString(name)
+    }
+
+    private fun JSONObject.requiredUuid(name: String): UUID =
+        uuidOrThrow(requiredString(name))
+
+    private fun JSONObject.optionalUuid(name: String): UUID? =
+        optionalString(name)?.let(::uuidOrThrow)
+
+    private fun JSONObject.requiredRevision(name: String): Int {
+        if (!has(name) || isNull(name)) throw ManagedStorageException.InvalidResponse()
+        val value = when (val raw = get(name)) {
+            is Byte -> raw.toLong()
+            is Short -> raw.toLong()
+            is Int -> raw.toLong()
+            is Long -> raw
+            else -> throw ManagedStorageException.InvalidResponse()
+        }
+        return value.takeIf { it in 1L..1_000_000L }?.toInt()
+            ?: throw ManagedStorageException.InvalidResponse()
+    }
+
     private fun JSONObject.optionalText(name: String): String? {
         if (!has(name) || isNull(name)) return null
         return runCatching { getString(name) }
@@ -2549,6 +2890,17 @@ class ManagedStorageClient(
     private fun isDay(value: String): Boolean =
         value.matches(Regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) &&
             runCatching { java.time.LocalDate.parse(value) }.isSuccess
+
+    private data class ParsedWrappedKeyMaterial(
+        val keyKind: ManagedWrappedKeyKind,
+        val wrappingKeyId: UUID?,
+        val wrappingRevision: Int,
+        val algorithm: ManagedWrappedKeyAlgorithm,
+        val wrappedKey: ByteArray,
+        val wrappedKeySha256: String,
+        val masterKeyConfirmationHmacSha256: String?,
+        val recoveryMethod: ManagedWrappedKeyRecoveryMethod?,
+    )
 
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()

@@ -118,7 +118,9 @@ import com.noop.analytics.FitnessAgeEngine
 import com.noop.analytics.Zones
 import com.noop.R
 import com.noop.ble.PuffinExperiment
+import com.noop.ble.WhoopConnectionService
 import com.noop.ble.WhoopModel
+import com.noop.notif.NotificationPresentationPreferences
 import com.noop.brand.CustomerFacingBrand
 import com.noop.data.BackupSettingsCodec
 import com.noop.data.DataBackup
@@ -752,6 +754,9 @@ fun SettingsScreen(
     // "Keep connected in the background" - drives WhoopConnectionService (foreground service). Default
     // on. SharedPreferences isn't reactive, so the Switch mirrors into a local state.
     var backgroundConnection by remember { mutableStateOf(NoopPrefs.backgroundConnection(context)) }
+    var liveHeartRateNotification by remember {
+        mutableStateOf(NotificationPresentationPreferences.liveHeartRate(context))
+    }
     var fastHistorySync by remember { mutableStateOf(NoopPrefs.fastHistorySync(context)) }
     var fastLinkPhy by remember { mutableStateOf(NoopPrefs.fastLinkPhy(context)) }
 
@@ -1972,6 +1977,39 @@ fun SettingsScreen(
                         onCheckedChange = {
                             backgroundConnection = it
                             vm.setBackgroundConnection(it)
+                        },
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = context.getString(
+                                R.string.live_heart_rate_notification_accessibility,
+                            )
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.live_heart_rate_notification_title),
+                            style = NoopType.subhead,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            stringResource(R.string.live_heart_rate_notification_detail),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                    NoopToggleSwitch(
+                        checked = liveHeartRateNotification,
+                        onCheckedChange = {
+                            liveHeartRateNotification = it
+                            NotificationPresentationPreferences.setLiveHeartRate(context, it)
+                            WhoopConnectionService.refreshPresentationIfRunning()
                         },
                     )
                 }

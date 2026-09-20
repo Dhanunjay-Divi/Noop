@@ -1047,11 +1047,15 @@ visibility alone.
   enabling managed backup creates a phone-verified managed account only after
   the separate consent in §1.1f.
 - **No telemetry / analytics / crash reporting.** No third-party SDKs of that kind.
-- **No required managed cloud.** Self-hosted Sync and Friends (§1.1c–d) use only
-  the endpoint you configure; both are optional. Oura history import is
-  inbound-only. NOOP+ managed sync is a separate, explicit opt-in and does not
-  participate in local collection or metric computation. Builds without its
-  complete environment configuration cannot connect to it.
+- **No required managed cloud in current compatible-device builds.** Self-hosted
+  Sync and Friends (§1.1c–d) use only the endpoint you configure; both are
+  optional. Oura history import is inbound-only. NOOP+ managed sync is a
+  separate, explicit opt-in and does not currently participate in local
+  collection or metric computation. D-059 is a staged first-party target for
+  durable history and canonical formula publication; no authority changes until
+  its consent, parity, restore, deletion, rollback, security, performance, and
+  physical-device gates pass. Builds without complete managed environment
+  configuration cannot connect to it.
 - **No advertising identifiers, no tracking.**
 - **No WHOOP account or API credentials.** NOOP talks only to the strap over local
   BLE; it does not authenticate against, or pull from, any WHOOP server. (Oura is the

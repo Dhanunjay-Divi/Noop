@@ -479,6 +479,7 @@ async def test_lifecycle_retries_due_managed_safety_pushes() -> None:
             provider_accepted=2,
             retryable_failures=1,
             terminal_failures=1,
+            repeated_claimed=3,
         ),
         events=events,
     )
@@ -499,6 +500,7 @@ async def test_lifecycle_retries_due_managed_safety_pushes() -> None:
     assert result.safety_push_retryable_failures == 1
     assert result.safety_push_terminal_failures == 1
     assert result.safety_push_receipt_failures == 0
+    assert result.safety_push_repeated_claimed == 3
 
 
 def test_lifecycle_cli_emits_bounded_failure_without_traceback(

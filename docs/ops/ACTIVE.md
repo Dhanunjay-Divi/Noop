@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-19**
+Last updated: **2026-09-20**
 
 ## Authoritative context
 
@@ -8,24 +8,37 @@ Last updated: **2026-09-19**
 - Protected branch: `main`
 - Active worktree: dedicated UI/cloud-readiness review checkout
 - Active branch: `codex/ui-cloud-readiness-20260917`
-- Start commit: `b688b3b725cd497e96a31b28540a219bf50446e1`
-- Current state: supplier-independent implementation, external-audit
-  reconciliation, and the complete local Apple, Android, package, server,
-  simulator, localization, policy, and bounded-runner walls are green. Exact
-  round-owned cleanup is complete. The protected pull request for the active
-  branch is the authoritative record for candidate, hosted-check, merge, and
-  protected-main state.
+- Branch base against protected `main`:
+  `b688b3b725cd497e96a31b28540a219bf50446e1`
+- Current round implementation resumed from:
+  `9d859d9aa6788a936be75bdfeac93603c9fd0ae8`
+- Current state: supplier-independent implementation and applicable local
+  platform verification are green. Final post-documentation policy reruns,
+  the consolidated commit, hosted exact-SHA checks, protected merge, and
+  protected-main verification are still pending. Pull request `#16` currently
+  points to superseded head `9d859d9a` and is not yet evidence for this
+  replacement candidate.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
-- Current complete evidence: macOS passes 2,142 tests with one intentional
-  skip; the iPhone simulator shell passes 38 with one intentional skip; iOS,
-  widgets, Watch, and Watch complications build; 42 tab-shell and 11 Daily
-  Plan visual states pass; Android Full and Demo each complete 4,883 unit tests
-  with seven skips plus lint, APK, and instrumentation compilation; API 35
-  passes 114 production-shell tests with two private-pilot skips and one fresh
-  Review Sample test; all 11 Swift package/tool build-and-test pairs pass; and
-  the PostgreSQL-backed server passes 647 tests with one skip plus Ruff;
-  restore smoke and all 6 OpenTofu ownership-default tests pass.
+- Surviving exact-current local evidence: 24 affected macOS contracts pass; the
+  unsigned Release iOS graph builds with widgets and Watch embedded; Android
+  Full and Demo unit-task, compile, lint, APK, and instrumentation-source tasks
+  pass across a 137-task wall; `NoopRemoteSync` passes 177/177; PostgreSQL 16
+  executes 736 cases with 704 passes, 32 skips, and no failures; and 14
+  plan-only OpenTofu tests pass without apply. Earlier complete package,
+  macOS, iPhone-shell, visual, and API 35 walls remain evidence for their exact
+  recorded trees. Exact replacement-candidate API 35 execution remains a
+  required hosted context because the required local x86 managed device is
+  unavailable.
+- Deterministic Safety paging capture passes a test-only user confirmation and
+  two preselected dummy contact roles through the production token codec,
+  managed push service, and FCM payload builder with 3/3 installations and 2/2
+  contacts reached, zero provider traffic, and no sensitive payload values.
+  Accepted-contact selection/revocation and precise-location lifecycle are
+  separate PostgreSQL integration boundaries. The direct smoke test passes 1/1,
+  Ruff passes, three focused PostgreSQL tests pass, the Apple Safety contract
+  passes 51/51, and Android Full and Demo each pass 45/45 focused tests. The
+  disposable database and test environment were removed after evidence.
 - Execution safety now defaults bounded commands to discard unrequested child
   output, cap explicit private logs at 128 MiB, enforce 10% free-memory and
   10 GiB free-disk floors, and terminate runaway-output process groups. All 134
@@ -33,23 +46,25 @@ Last updated: **2026-09-19**
   directly guards the observed iTerm application-memory failure mode when
   repository heavy commands use the runner; it does not control unrelated apps
   or commands run outside that boundary.
-- The final post-documentation policy wall passes, including release controls,
-  calibration, terminology, required-CI, trusted self-verification, legal
-  inventory, private-data, health-claims across 1,273 files, complete
-  localization, all 75 operations records, and `git diff --check`.
-- Final cleanup removed the Android worktree outputs, local OpenTofu cache,
-  eleven Swift package/tool build directories, synthetic server virtualenv,
-  and synthetic test database. Every target is absent, no matching DerivedData
-  remains, and free disk rose from about 15 GiB to 20 GiB.
-- Candidate SHA, hosted `10/10`, protected merge SHA, and protected-main
-  trusted result are recorded by the protected pull request because this source
-  record cannot contain its own future commit or merge SHA. No Docker image
-  build, production runtime, signing, legal, carrier, physiology, or physical
+- The final policy wall passed all 301 tool tests with one intentional skip plus release, calibration, terminology, required-CI, trusted-control, provenance, privacy, medical-truth, localization, operations-record, and diff gates.
+- Exact cleanup manifest
+  `8080d7201bc9ec1ac940842c2aa8d0c0026b79fd8980275d8fe187f97583a62f`
+  removed three closed completed review-session files totaling
+  4,475,749,846 bytes. Manifest
+  `991d0340c6e0d4cf61856c0c41b8135dfe059dec471b0646aaed69e84bffbfca`
+  removed 62 exact round-owned `/private/tmp/noop-*` paths totaling
+  16,566,458 bytes after preserving their results. Current agent-session files
+  with open handles and the two cleanup manifests are deliberately retained.
+  No round test/build process remains and about 10 GiB is free.
+- Replacement candidate SHA, hosted `10/10`, protected merge SHA, and
+  protected-main trusted result remain pending. No Docker image build,
+  production runtime, signing, legal, carrier, physiology, or physical
   accessibility result is claimed without direct evidence.
-- Core NOOP remains local-first, account-free for exploration, and useful
-  offline after any required first-party band activation. NOOP+ remains a
-  separate explicit opt-in and is not authoritative for current collection,
-  scoring, history, export, or local device control.
+- Current production behavior remains local-first and account-free for
+  exploration. D-059 targets staged cloud authority for durable account
+  history, canonical formulas, recommendations, and cross-device state while
+  retaining the encrypted edge collector, bounded offline cache, immediate
+  Safety initiation, and explicit per-data-class rollback gates.
 - Managed portability now has v2 integrity, resumable export, complete
   prevalidation, and resumable idempotent import for selected chunks plus
   `day_ownership`. Ownership deletion now has cooling-off request, status,
@@ -62,14 +77,24 @@ Last updated: **2026-09-19**
 
 Resume from:
 
+- [Cloud authority, Safety paging, and live surfaces](rounds/2026-09-19-cloud-authority-safety-live-surfaces.md)
 - [Current UI/cloud readiness review](rounds/2026-09-17-ui-cloud-readiness-review.md)
 - [First production release checklist](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md)
 - [Release blockers](../handoff/RELEASE-BLOCKERS.md)
+- [Band physical validation handoff](../handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md)
+- [Claude final production review prompt](../handoff/CLAUDE-FINAL-PRODUCTION-REVIEW-PROMPT.md)
 - [Agent entry point](../../AGENTS.md)
 - [NOOP operations skill](../../.agents/skills/noop-ops/SKILL.md)
 
 ## Current scope
 
+- Reconcile the owner's September 19 cloud-authoritative direction through a
+  staged, versioned, dual-run migration. The phone remains the reliable edge
+  collector and offline cache until per-metric and per-data-class authority
+  gates pass.
+- Implement and verify bounded pager-grade app Safety, independent live-HR
+  presentation controls, managed Friends parity, macOS viewer foundations,
+  evidence-backed UI refinements, and the supplier wrapper handoff.
 - Validate every material external finding against current source.
 - Inspect representative current and proposed renders directly.
 - Correct only evidence-backed formula explanation, terminology, loading,
@@ -81,8 +106,9 @@ Resume from:
 
 ## Immediate next actions
 
-1. Commit once, push once, wait for required checks on that exact SHA, and
-   integrate normally only if every applicable gate is green.
-2. Verify the protected-main trusted result. Physical hardware, signing/store,
+1. Finish the fresh combined-diff audit, create one consolidated commit, and
+   push the replacement exact head to PR `#16`.
+2. Require all ten hosted contexts before protected merge, then verify the
+   protected-main trusted result. Physical hardware, signing/store,
    legal, carrier, credential, production-runtime, and elapsed soak gates
    remain external.

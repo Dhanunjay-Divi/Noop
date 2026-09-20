@@ -130,20 +130,32 @@ action:
 
 ## 4. Architectural principles
 
-### 4.1 Local authority
+### 4.1 Staged authority
 
-The phone is authoritative for:
+The phone remains the authoritative edge collector for:
 
 - BLE session state and durable receipt of wearable history;
 - current freshness and data-quality assessment;
-- immediate user-facing metrics;
+- immediate safe offline state and the currently verified metric
+  implementation while a formula is still in dual-run;
 - active workout and breathing interactions;
 - notification eligibility and quiet hours;
 - the final decision to present any cloud-originated suggestion.
 
-The cloud must never be required to render today's core experience. A server
-result may enrich a long-horizon trend, but it cannot make a stale local signal
-fresh or silently override a local safety/privacy gate.
+The D-059 target makes the managed service authoritative for durable account
+history, versioned canonical metric publication, recommendations, and
+cross-device state. This is a per-data-class and per-formula migration, not one
+global switch. A server result cannot make a stale local signal fresh or
+silently override an edge safety/privacy gate. The phone keeps enough encrypted
+working state to collect, explain freshness, initiate Safety, and operate safely
+through a bounded network outage.
+
+Each authority transition requires explicit consent and migration, deterministic
+Swift/Kotlin/server parity fixtures, shadow comparison on representative data,
+source and formula provenance, restore and deletion evidence, rollback,
+performance, security, and signed physical-device validation. Until a metric
+passes those gates, the current client implementation remains authoritative and
+the server output is shadow-only.
 
 #### One collector, multiple viewers
 

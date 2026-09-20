@@ -108,7 +108,8 @@ open gates.
 For the active September 17 branch, record these only after they exist:
 
 - candidate commit: `<pending exact 40-character SHA>`
-- pull request: `<pending>`
+- pull request: `#16` currently points to superseded head `9d859d9a` and is
+  blocked; it is not evidence for the dirty replacement candidate
 - required contexts: `<pending 10/10 on the candidate SHA>`
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`

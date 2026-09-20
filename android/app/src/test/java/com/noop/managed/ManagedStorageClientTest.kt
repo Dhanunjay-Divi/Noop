@@ -130,6 +130,57 @@ class ManagedStorageClientTest {
     }
 
     @Test
+    fun accountErasureReceiptOmitsIdentityBearer() = runTest {
+        var captured: Request? = null
+        val jobId = UUID.fromString("8519298e-c785-45e8-963a-81834be94638")
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured = request
+                response(
+                    request,
+                    200,
+                    """
+                    {
+                      "erasure": {
+                        "erasure_job_id": "$jobId",
+                        "scope": "account",
+                        "status": "completed",
+                        "objects_selected": 0,
+                        "objects_deleted": 0,
+                        "bytes_selected": 0,
+                        "bytes_deleted": 0,
+                        "database_rows_deleted": 0,
+                        "requested_at": "2026-09-04T04:00:00Z",
+                        "not_before": "2026-09-05T04:00:00Z",
+                        "started_at": "2026-09-05T04:00:00Z",
+                        "completed_at": "2026-09-05T04:01:00Z",
+                        "verification_expires_at": "2027-10-09T04:00:00Z",
+                        "duplicate": false
+                      }
+                    }
+                    """.trimIndent(),
+                )
+            },
+        )
+
+        val job = client.erasureReceipt(authorization, jobId)
+
+        assertEquals(jobId, job.jobId)
+        assertEquals("completed", job.status)
+        assertNull(captured!!.header("Authorization"))
+        assertEquals("app-check-token", captured!!.header("X-Firebase-AppCheck"))
+        assertEquals(
+            "android-installation",
+            captured!!.header("X-Noop-Installation-ID"),
+        )
+        assertEquals(
+            "noopm_" + "a".repeat(43),
+            captured!!.header("X-Noop-Installation-Token"),
+        )
+    }
+
+    @Test
     fun signedUploadProducesGenerationBoundReceiptWithoutBearer() = runTest {
         var captured: Request? = null
         val client = ManagedStorageClient(
@@ -456,6 +507,396 @@ class ManagedStorageClientTest {
         )
         assertEquals("false", captured[2].url.queryParameter("include_deleted"))
         assertEquals("25", captured[2].url.queryParameter("limit"))
+    }
+
+    @Test
+    fun managedDocumentKeyPutUsesAuthenticatedOpaqueContract() = runTest {
+        var captured: Request? = null
+        val keyId = UUID.fromString("11111111-1111-4111-8111-111111111111")
+        val wrappedKey = ByteArray(40) { 0x6d }
+        val confirmation = "f".repeat(64)
+        val mutation = ManagedWrappedKeyMutation(
+            keyKind = ManagedWrappedKeyKind.ACCOUNT_MASTER,
+            wrappingKeyId = null,
+            wrappingRevision = 1,
+            wrappedKey = wrappedKey,
+            masterKeyConfirmationHmacSha256 = confirmation,
+            recoveryMethod = ManagedWrappedKeyRecoveryMethod.DEVICE_TRANSFER,
+        )
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured = request
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "key",
+                            wrappedKeyRecordJson(
+                                keyId = keyId,
+                                keyKind = "account_master",
+                                wrappingKeyId = null,
+                                wrappingRevision = 1,
+                                wrappedKey = wrappedKey,
+                                confirmation = confirmation,
+                                recoveryMethod = "device_transfer",
+                            ),
+                        )
+                        .toString(),
+                )
+            },
+        )
+
+        val stored = client.putManagedDocumentKey(
+            authorization = authorization,
+            keyId = keyId,
+            mutation = mutation,
+        )
+
+        assertEquals(ManagedWrappedKeyStatus.ACTIVE, stored.status)
+        assertTrue(stored.wrappedKey.contentEquals(wrappedKey))
+        assertEquals("Bearer identity-token", captured!!.header("Authorization"))
+        assertEquals("app-check-token", captured!!.header("X-Firebase-AppCheck"))
+        assertEquals(
+            authorization.installationId,
+            captured!!.header("X-Noop-Installation-ID"),
+        )
+        assertEquals(
+            authorization.installationToken,
+            captured!!.header("X-Noop-Installation-Token"),
+        )
+        assertEquals("PUT", captured!!.method)
+        assertEquals(
+            "/v1/managed/document-keys/${keyId.toString().lowercase()}",
+            captured!!.url.encodedPath,
+        )
+        val body = captured!!.jsonBody()
+        assertEquals("account_master", body.getString("key_kind"))
+        assertFalse(body.has("wrapping_key_id"))
+        assertEquals(1, body.getInt("wrapping_revision"))
+        assertEquals("A256GCM", body.getString("algorithm"))
+        assertEquals(
+            java.util.Base64.getEncoder().encodeToString(wrappedKey),
+            body.getString("wrapped_key_base64"),
+        )
+        assertEquals(
+            ManagedDigest.sha256(wrappedKey),
+            body.getString("wrapped_key_sha256"),
+        )
+        assertEquals(
+            confirmation,
+            body.getString("master_key_confirmation_hmac_sha256"),
+        )
+        assertEquals("device_transfer", body.getString("recovery_method"))
+    }
+
+    @Test
+    fun managedDocumentKeyCurrentVersionRotateAndRevokeUseExactRoutes() = runTest {
+        val keyId = UUID.fromString("22222222-2222-4222-8222-222222222222")
+        val firstMasterId =
+            UUID.fromString("33333333-3333-4333-8333-333333333333")
+        val secondMasterId =
+            UUID.fromString("44444444-4444-4444-8444-444444444444")
+        val successorKeyId =
+            UUID.fromString("55555555-5555-4555-8555-555555555555")
+        val original = ByteArray(72) { 0x31 }
+        val rotated = ByteArray(72) { 0x32 }
+        val rotation = ManagedWrappedKeyRotation(
+            mutation = ManagedWrappedKeyMutation(
+                keyKind = ManagedWrappedKeyKind.DOCUMENT,
+                wrappingKeyId = secondMasterId,
+                wrappingRevision = 2,
+                wrappedKey = rotated,
+            ),
+            expectedWrappingRevision = 1,
+        )
+        val captured = mutableListOf<Request>()
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured += request
+                val body = when (captured.size) {
+                    1 -> JSONObject().put(
+                        "key",
+                        wrappedKeyRecordJson(
+                            keyId = keyId,
+                            wrappingKeyId = firstMasterId,
+                            wrappingRevision = 1,
+                            wrappedKey = original,
+                        ),
+                    )
+                    2 -> JSONObject().put(
+                        "key_version",
+                        wrappedKeyVersionJson(
+                            keyId = keyId,
+                            wrappingKeyId = firstMasterId,
+                            wrappingRevision = 1,
+                            wrappedKey = original,
+                        ),
+                    )
+                    3 -> JSONObject().put(
+                        "key",
+                        wrappedKeyRecordJson(
+                            keyId = keyId,
+                            wrappingKeyId = secondMasterId,
+                            wrappingRevision = 2,
+                            wrappedKey = rotated,
+                        ),
+                    )
+                    4 -> JSONObject().put(
+                        "key",
+                        wrappedKeyRecordJson(
+                            keyId = keyId,
+                            wrappingKeyId = secondMasterId,
+                            wrappingRevision = 2,
+                            wrappedKey = rotated,
+                            status = "revoked",
+                            successorKeyId = successorKeyId,
+                            updatedAt = "2026-09-20T05:04:00Z",
+                            revokedAt = "2026-09-20T05:04:00Z",
+                        ),
+                    )
+                    else -> error("Unexpected managed document-key request")
+                }
+                response(request, 200, body.toString())
+            },
+        )
+
+        val current = client.managedDocumentKey(authorization, keyId)
+        val version = client.managedDocumentKeyVersion(
+            authorization,
+            keyId,
+            wrappingRevision = 1,
+        )
+        val rotatedRecord = client.rotateManagedDocumentKey(
+            authorization,
+            keyId,
+            rotation,
+        )
+        val revoked = client.revokeManagedDocumentKey(
+            authorization,
+            keyId,
+            successorKeyId,
+        )
+
+        assertTrue(current.wrappedKey.contentEquals(original))
+        assertTrue(version.wrappedKey.contentEquals(original))
+        assertEquals(2, rotatedRecord.wrappingRevision)
+        assertEquals(ManagedWrappedKeyStatus.REVOKED, revoked.status)
+        assertEquals(successorKeyId, revoked.successorKeyId)
+        assertEquals(
+            listOf("GET", "GET", "POST", "POST"),
+            captured.map { it.method },
+        )
+        assertEquals(
+            listOf(
+                "/v1/managed/document-keys/${keyId.toString().lowercase()}",
+                "/v1/managed/document-keys/${keyId.toString().lowercase()}/versions/1",
+                "/v1/managed/document-keys/${keyId.toString().lowercase()}/rotate",
+                "/v1/managed/document-keys/${keyId.toString().lowercase()}/revoke",
+            ),
+            captured.map { it.url.encodedPath },
+        )
+        val rotateBody = captured[2].jsonBody()
+        assertEquals("document", rotateBody.getString("key_kind"))
+        assertEquals(secondMasterId.toString(), rotateBody.getString("wrapping_key_id"))
+        assertEquals(2, rotateBody.getInt("wrapping_revision"))
+        assertEquals(1, rotateBody.getInt("expected_wrapping_revision"))
+        assertFalse(rotateBody.has("master_key_confirmation_hmac_sha256"))
+        assertFalse(rotateBody.has("recovery_method"))
+        assertEquals(
+            successorKeyId.toString(),
+            captured[3].jsonBody().getString("successor_key_id"),
+        )
+    }
+
+    @Test
+    fun managedDocumentKeyResponsesRejectMalformedContracts() = runTest {
+        val keyId = UUID.fromString("66666666-6666-4666-8666-666666666666")
+        val otherKeyId =
+            UUID.fromString("77777777-7777-4777-8777-777777777777")
+        val masterId = UUID.fromString("88888888-8888-4888-8888-888888888888")
+        val wrappedKey = ByteArray(72) { 0x41 }
+        val malformed = listOf<(JSONObject) -> Unit>(
+            { it.put("key_id", otherKeyId.toString()) },
+            { it.put("key_kind", "unsupported") },
+            { it.put("algorithm", "A128GCM") },
+            { it.put("wrapped_key_sha256", "0".repeat(64)) },
+            {
+                it.put(
+                    "wrapped_key_base64",
+                    java.util.Base64.getEncoder().encodeToString(wrappedKey) + "\n",
+                )
+            },
+            {
+                val shortEnvelope = ByteArray(40) { 0x42 }
+                it.put(
+                    "wrapped_key_base64",
+                    java.util.Base64.getEncoder().encodeToString(shortEnvelope),
+                )
+                it.put("wrapped_key_sha256", ManagedDigest.sha256(shortEnvelope))
+            },
+            { it.put("wrapping_revision", 0) },
+            { it.put("status", "unknown") },
+            { it.put("wrapping_key_id", JSONObject.NULL) },
+            {
+                it.put("status", "revoked")
+                it.put("revoked_at", JSONObject.NULL)
+            },
+        )
+
+        malformed.forEach { mutate ->
+            val key = wrappedKeyRecordJson(
+                keyId = keyId,
+                wrappingKeyId = masterId,
+                wrappingRevision = 1,
+                wrappedKey = wrappedKey,
+            )
+            mutate(key)
+            val client = ManagedStorageClient(
+                config,
+                client { request ->
+                    response(
+                        request,
+                        200,
+                        JSONObject().put("key", key).toString(),
+                    )
+                },
+            )
+
+            try {
+                client.managedDocumentKey(authorization, keyId)
+                fail("Expected malformed managed document-key rejection")
+            } catch (_: ManagedStorageException.InvalidResponse) {
+                // Expected.
+            }
+        }
+    }
+
+    @Test
+    fun managedDocumentKeyRouteAndVersionMismatchesFailClosed() = runTest {
+        val keyId = UUID.fromString("99999999-9999-4999-8999-999999999999")
+        val otherKeyId =
+            UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        val masterId = UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+        val wrappedKey = ByteArray(72) { 0x51 }
+        var requests = 0
+        val invalidRequestClient = ManagedStorageClient(
+            config,
+            client { request ->
+                requests += 1
+                response(request, 500, "")
+            },
+        )
+        val selfWrapped = ManagedWrappedKeyMutation(
+            keyKind = ManagedWrappedKeyKind.DOCUMENT,
+            wrappingKeyId = keyId,
+            wrappingRevision = 1,
+            wrappedKey = wrappedKey,
+        )
+
+        runCatching {
+            invalidRequestClient.putManagedDocumentKey(
+                authorization,
+                keyId,
+                selfWrapped,
+            )
+        }.onSuccess { fail("Expected self-wrapping route rejection") }
+        runCatching {
+            invalidRequestClient.managedDocumentKeyVersion(
+                authorization,
+                keyId,
+                wrappingRevision = 0,
+            )
+        }.onSuccess { fail("Expected invalid version route rejection") }
+        runCatching {
+            invalidRequestClient.revokeManagedDocumentKey(
+                authorization,
+                keyId,
+                keyId,
+            )
+        }.onSuccess { fail("Expected self-successor route rejection") }
+        assertEquals(0, requests)
+
+        val mismatches = listOf(
+            wrappedKeyVersionJson(
+                keyId = otherKeyId,
+                wrappingKeyId = masterId,
+                wrappingRevision = 1,
+                wrappedKey = wrappedKey,
+            ),
+            wrappedKeyVersionJson(
+                keyId = keyId,
+                wrappingKeyId = masterId,
+                wrappingRevision = 2,
+                wrappedKey = wrappedKey,
+            ),
+        )
+        mismatches.forEach { keyVersion ->
+            val client = ManagedStorageClient(
+                config,
+                client { request ->
+                    response(
+                        request,
+                        200,
+                        JSONObject().put("key_version", keyVersion).toString(),
+                    )
+                },
+            )
+            try {
+                client.managedDocumentKeyVersion(
+                    authorization,
+                    keyId,
+                    wrappingRevision = 1,
+                )
+                fail("Expected route/version mismatch rejection")
+            } catch (_: ManagedStorageException.InvalidResponse) {
+                // Expected.
+            }
+        }
+    }
+
+    @Test
+    fun managedDocumentKeyDiagnosticsDoNotExposeKeyMaterial() = runTest {
+        val diagnostics = mutableListOf<ManagedStorageRequestDiagnostic>()
+        val keyId = UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+        val masterId = UUID.fromString("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+        val wrappedKey = ByteArray(72) { 0x61 }
+        val client = ManagedStorageClient(
+            configuration = config,
+            http = client { request ->
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "key",
+                            wrappedKeyRecordJson(
+                                keyId = keyId,
+                                wrappingKeyId = masterId,
+                                wrappingRevision = 1,
+                                wrappedKey = wrappedKey,
+                            ),
+                        )
+                        .toString(),
+                    mapOf("X-Noop-Request-ID" to "e".repeat(32)),
+                )
+            },
+            requestObserver = { diagnostics += it },
+        )
+
+        client.managedDocumentKey(authorization, keyId)
+
+        val diagnostic = diagnostics.single()
+        val rendered = diagnostic.toString()
+        assertEquals("/v1/managed/document-keys", diagnostic.routeGroup)
+        assertEquals("completed", diagnostic.outcome)
+        assertFalse(rendered.contains(keyId.toString()))
+        assertFalse(
+            rendered.contains(java.util.Base64.getEncoder().encodeToString(wrappedKey)),
+        )
+        assertFalse(rendered.contains(ManagedDigest.sha256(wrappedKey)))
     }
 
     @Test
@@ -1590,10 +2031,71 @@ class ManagedStorageClientTest {
 
             val incidents = client.safetyIncidents(authorization)
 
-            assertEquals(1, incidents.size)
-            assertEquals(participantCount, incidents.single().participants.size)
+        assertEquals(1, incidents.size)
+        assertEquals(participantCount, incidents.single().participants.size)
         }
     }
+
+    private fun wrappedKeyRecordJson(
+        keyId: UUID,
+        keyKind: String = "document",
+        wrappingKeyId: UUID?,
+        wrappingRevision: Int,
+        wrappedKey: ByteArray,
+        confirmation: String? = null,
+        recoveryMethod: String? = null,
+        status: String = "active",
+        successorKeyId: UUID? = null,
+        createdAt: String = "2026-09-20T05:00:00Z",
+        updatedAt: String = createdAt,
+        revokedAt: String? = null,
+    ): JSONObject = wrappedKeyVersionJson(
+        keyId = keyId,
+        keyKind = keyKind,
+        wrappingKeyId = wrappingKeyId,
+        wrappingRevision = wrappingRevision,
+        wrappedKey = wrappedKey,
+        confirmation = confirmation,
+        recoveryMethod = recoveryMethod,
+        createdAt = createdAt,
+    )
+        .put("status", status)
+        .put(
+            "successor_key_id",
+            successorKeyId?.toString()?.lowercase() ?: JSONObject.NULL,
+        )
+        .put("updated_at", updatedAt)
+        .put("revoked_at", revokedAt ?: JSONObject.NULL)
+
+    private fun wrappedKeyVersionJson(
+        keyId: UUID,
+        keyKind: String = "document",
+        wrappingKeyId: UUID?,
+        wrappingRevision: Int,
+        wrappedKey: ByteArray,
+        confirmation: String? = null,
+        recoveryMethod: String? = null,
+        createdAt: String = "2026-09-20T05:00:00Z",
+    ): JSONObject = JSONObject()
+        .put("key_id", keyId.toString().lowercase())
+        .put("key_kind", keyKind)
+        .put(
+            "wrapping_key_id",
+            wrappingKeyId?.toString()?.lowercase() ?: JSONObject.NULL,
+        )
+        .put("wrapping_revision", wrappingRevision)
+        .put("algorithm", "A256GCM")
+        .put(
+            "wrapped_key_base64",
+            java.util.Base64.getEncoder().encodeToString(wrappedKey),
+        )
+        .put("wrapped_key_sha256", ManagedDigest.sha256(wrappedKey))
+        .put(
+            "master_key_confirmation_hmac_sha256",
+            confirmation ?: JSONObject.NULL,
+        )
+        .put("recovery_method", recoveryMethod ?: JSONObject.NULL)
+        .put("created_at", createdAt)
 
     private fun safetyContact(profileId: UUID, name: String): JSONObject =
         JSONObject()

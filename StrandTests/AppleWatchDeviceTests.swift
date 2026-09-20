@@ -151,6 +151,160 @@ final class AppleWatchDeviceTests: XCTestCase {
         XCTAssertFalse(source.contains("builder.finishWorkout { [weak self] _, _ in"))
     }
 
+    func testWatchGlanceAuthorizationIsUserInitiatedAndSamplesExpire() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let liveHR = try String(
+            contentsOf: root.appendingPathComponent("NOOPWatch/WatchLiveHR.swift"),
+            encoding: .utf8)
+        let glance = try String(
+            contentsOf: root.appendingPathComponent("NOOPWatch/WatchGlanceView.swift"),
+            encoding: .utf8)
+
+        let startRange = try XCTUnwrap(liveHR.range(of: "func start()"))
+        let requestRange = try XCTUnwrap(
+            liveHR.range(of: "func requestAuthorization()", range: startRange.upperBound..<liveHR.endIndex)
+        )
+        let startBody = String(liveHR[startRange.lowerBound..<requestRange.lowerBound])
+
+        XCTAssertTrue(startBody.contains("getRequestStatusForAuthorization"))
+        XCTAssertFalse(startBody.contains("store.requestAuthorization"))
+        XCTAssertTrue(glance.contains(#"Button("Allow access")"#))
+        XCTAssertTrue(glance.contains("liveHR.requestAuthorization()"))
+
+        XCTAssertTrue(liveHR.contains("static let maximumSampleAge: TimeInterval = 30"))
+        XCTAssertTrue(liveHR.contains("age >= 0 && age <= WatchLiveHRPolicy.maximumSampleAge"))
+        XCTAssertTrue(liveHR.contains("WatchLiveHRPolicy.plausibleBPM.contains(rounded)"))
+        XCTAssertTrue(liveHR.contains("case noReadableSample"))
+        XCTAssertTrue(liveHR.contains("case queryFailed"))
+        XCTAssertTrue(liveHR.contains("reportNoSample: true"))
+        XCTAssertTrue(liveHR.contains("owner.accessState = .queryFailed"))
+        XCTAssertTrue(glance.contains("appwide.watch.live_hr.check_access"))
+        XCTAssertTrue(liveHR.contains("owner.scheduleExpiry(observedAt: latest.endDate"))
+        XCTAssertTrue(liveHR.contains("self.isCurrentStreamingGeneration(generation)"))
+        XCTAssertTrue(liveHR.contains("self.bpm = nil"))
+        XCTAssertTrue(glance.contains("dynamicTypeSize.isAccessibilitySize"))
+        XCTAssertTrue(glance.contains("ScrollView"))
+        XCTAssertTrue(glance.contains("liveHR.retry()"))
+    }
+
+    func testWatchLiveHRStopInvalidatesDelayedCallbacks() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("NOOPWatch/WatchLiveHR.swift"),
+            encoding: .utf8)
+
+        let startRange = try XCTUnwrap(source.range(of: "func start()"))
+        let requestRange = try XCTUnwrap(
+            source.range(
+                of: "func requestAuthorization()",
+                range: startRange.upperBound..<source.endIndex
+            )
+        )
+        let stopRange = try XCTUnwrap(
+            source.range(of: "func stop()", range: requestRange.upperBound..<source.endIndex)
+        )
+        let generationRange = try XCTUnwrap(
+            source.range(
+                of: "private func desiredStreamingGeneration()",
+                range: stopRange.upperBound..<source.endIndex
+            )
+        )
+
+        let startBody = String(source[startRange.lowerBound..<requestRange.lowerBound])
+        let requestBody = String(source[requestRange.lowerBound..<stopRange.lowerBound])
+        let stopBody = String(source[stopRange.lowerBound..<generationRange.lowerBound])
+
+        XCTAssertTrue(source.contains("private var desiredStreaming = false"))
+        XCTAssertTrue(startBody.contains("let generation = desiredStreamingGeneration()"))
+        XCTAssertTrue(
+            startBody.contains(
+                "guard let self, self.isCurrentStreamingGeneration(generation) else { return }"
+            )
+        )
+        XCTAssertTrue(requestBody.contains("let generation = desiredStreamingGeneration()"))
+        XCTAssertTrue(
+            requestBody.contains(
+                "guard let self, self.isCurrentStreamingGeneration(generation) else { return }"
+            )
+        )
+        XCTAssertTrue(stopBody.contains("invalidateStreamingGeneration()"))
+        XCTAssertTrue(source.contains("desiredStreaming = false"))
+        XCTAssertTrue(source.contains("streamGeneration &+= 1"))
+        XCTAssertTrue(
+            source.contains(
+                "guard isCurrentStreamingGeneration(generation), let hrType, query == nil else { return }"
+            )
+        )
+        XCTAssertTrue(
+            source.contains(
+                "guard let owner, owner.isCurrentStreamingGeneration(generation) else { return }"
+            )
+        )
+        XCTAssertFalse(source.contains("private static let maximumSampleAge"))
+        XCTAssertFalse(source.contains("private static let plausibleBPM"))
+    }
+
+    func testWatchGlanceSeparatesMeasuredCalibratingMissingAndStaleScores() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("NOOPWatch/WatchGlanceView.swift"),
+            encoding: .utf8)
+
+        XCTAssertTrue(source.contains("private enum ScoreRingState"))
+        XCTAssertTrue(source.contains("case measured(Double)"))
+        XCTAssertTrue(source.contains("case calibrating"))
+        XCTAssertTrue(source.contains("case missing"))
+        XCTAssertTrue(source.contains("case stale(freshness: String)"))
+        XCTAssertTrue(source.contains("if stale {"))
+        XCTAssertTrue(source.contains("} else if calibrating {"))
+        XCTAssertTrue(source.contains("} else if let value {"))
+        XCTAssertFalse(source.contains("calibrating: snap.chargeCalibrating || stale"))
+
+        XCTAssertTrue(source.contains(#"Image(systemName: "hourglass")"#))
+        XCTAssertTrue(source.contains(#"Image(systemName: "clock.badge.exclamationmark")"#))
+        XCTAssertTrue(source.contains(#"return Text("Calibrating")"#))
+        XCTAssertTrue(source.contains(#"return Text("No data")"#))
+        XCTAssertTrue(
+            source.contains(#"return Text("Last sync: \(freshness)")"#)
+        )
+        XCTAssertTrue(source.contains(".accessibilityValue(accessibilityValue)"))
+    }
+
+    func testLiveActivityStatColumnsCompressInsteadOfForcingIntrinsicWidth() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StrandiOSWidgets/NOOPLiveActivity.swift"),
+            encoding: .utf8)
+        let bannerStart = try XCTUnwrap(
+            source.range(of: "private func bannerStat(label: String, value: String)")
+        )
+        let islandStart = try XCTUnwrap(
+            source.range(
+                of: "private func statColumn(label: String, value: String)",
+                range: bannerStart.upperBound..<source.endIndex
+            )
+        )
+        let bannerSource = String(source[bannerStart.lowerBound..<islandStart.lowerBound])
+        let islandSource = String(source[islandStart.lowerBound...])
+
+        for columnSource in [bannerSource, islandSource] {
+            XCTAssertFalse(columnSource.contains(".fixedSize()"))
+            XCTAssertGreaterThanOrEqual(columnSource.components(separatedBy: ".lineLimit(1)").count - 1, 2)
+            XCTAssertTrue(columnSource.contains(".minimumScaleFactor(0.65)"))
+            XCTAssertTrue(columnSource.contains(".minimumScaleFactor(0.75)"))
+            XCTAssertTrue(columnSource.contains(".frame(minWidth: 0, maxWidth: .infinity)"))
+            XCTAssertTrue(columnSource.contains(".accessibilityElement(children: .combine)"))
+        }
+    }
+
     func testWatchAndLiveActivityUseRecoveryVocabulary() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -164,8 +318,20 @@ final class AppleWatchDeviceTests: XCTestCase {
 
         XCTAssertTrue(watch.contains(#"ScoreRing(label: String(localized: "Recovery")"#))
         XCTAssertFalse(watch.contains(#"ScoreRing(label: String(localized: "Charge")"#))
-        XCTAssertTrue(liveActivity.contains(#"bannerStat(label: "Recovery""#))
-        XCTAssertTrue(liveActivity.contains(#"statColumn(label: "Recovery""#))
+        XCTAssertTrue(
+            liveActivity.contains(
+                #"bannerStat("#)
+                && liveActivity.contains(
+                    #"label: liveScoreLabel("Recovery", scoreDay: context.state.scoreDay)"#
+                )
+        )
+        XCTAssertTrue(
+            liveActivity.contains(
+                #"statColumn("#)
+                && liveActivity.contains(
+                    #"label: liveScoreLabel("Recovery", scoreDay: context.state.scoreDay)"#
+                )
+        )
         XCTAssertFalse(liveActivity.contains(#"label: "Charge""#))
     }
 }

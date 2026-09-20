@@ -145,6 +145,13 @@ class UiAuditPresentationContractTest {
         val digest = source("src/main/java/com/noop/ui/WeeklyDigestCard.kt")
 
         assertTrue(today.contains("return recoveryBandLabel(score)"))
+        assertTrue(today.contains("recovery != null -> recoveryBandLabel(recovery)"))
+        assertTrue(
+            today.contains(
+                "TodayRecoveryHeroTone.RECOVERY ->\n" +
+                    "        RecoveryBandPresentation.gaugeColors(requireNotNull(recovery))",
+            ),
+        )
         assertTrue(calendar.contains("RecoveryBandPresentation.color(value)"))
         assertTrue(digest.contains("RecoveryBandPresentation.color(value)"))
         assertTrue(digest.contains("WeeklyDigestChipTone.RECOVERY_BAND"))
@@ -275,6 +282,13 @@ class UiAuditPresentationContractTest {
         assertTrue(testCentre.contains("appwide_ui_audit_test_centre_diagnostic_blurb"))
         assertTrue(testCentre.contains("appwide_ui_audit_test_centre_ppg_description"))
         assertTrue(testCentre.contains("LogExport.shareStrapLog("))
+        assertTrue(testCentre.contains("OnSharedPreferenceChangeListener"))
+        assertTrue(testCentre.contains("testCentre.registerListener(listener)"))
+        assertTrue(testCentre.contains("key(testCentreRevision)"))
+        assertTrue(testCentre.contains("active = testCentre.active(mode.domain)"))
+        assertTrue(testCentre.contains("capturedUnits = testCentre.capturedDays(mode.domain)"))
+        assertTrue(testCentre.contains("checked = active"))
+        assertFalse(testCentre.contains("var on by remember"))
         val reportWarningCall = testCentre
             .substringAfter(
                 "uiString(R.string.l10n_test_centre_screen_heads_up_this_test_mode_is_8b82ed69)",

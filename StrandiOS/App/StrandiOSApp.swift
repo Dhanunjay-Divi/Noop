@@ -294,9 +294,12 @@ struct StrandiOSApp: App {
     /// ActivityKit owns Lock Screen + Dynamic Island as one Live Activity surface. Observe both privacy
     /// choices at the root so disabling it ends the pill immediately and daily scores are included only
     /// after a separate explicit opt-in.
-    @AppStorage(UnitPrefs.liveActivityKey) private var liveActivityEnabled = true
-    @AppStorage(UnitPrefs.liveActivityChargeKey) private var liveActivityShowsCharge = true
-    @AppStorage(UnitPrefs.liveActivityEffortKey) private var liveActivityShowsEffort = true
+    @AppStorage(UnitPrefs.liveActivityKey)
+    private var liveActivityEnabled = UnitPrefs.liveActivityEnabled()
+    @AppStorage(UnitPrefs.liveActivityChargeKey)
+    private var liveActivityShowsCharge = UnitPrefs.liveActivityShowsCharge()
+    @AppStorage(UnitPrefs.liveActivityEffortKey)
+    private var liveActivityShowsEffort = UnitPrefs.liveActivityShowsEffort()
 
     init() {
         AppDiagnosticsRecorder.shared.start()
@@ -559,6 +562,17 @@ struct StrandiOSApp: App {
                 .environment(\.stressNudgeCenter, model.stressNudgeCenter)
                 .toggleStyle(.noopSwitch)
                 .noopAppearance(appearanceRaw)
+                .overlay(alignment: .top) {
+                    if launchAccess.isUnlocked,
+                       acceptedTermsVersion == Terms.currentVersion,
+                       scenePhase == .active {
+                        InAppLiveHeartRateBanner(live: model.live)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                            .allowsHitTesting(false)
+                            .accessibilitySortPriority(10)
+                    }
+                }
                 .onChange(of: appearanceRaw, initial: true) { _, rawValue in
                     // The widget extension is a separate process, so mirror the complete preference to
                     // the App Group and reload immediately. This preserves Graphite vs OLED Black rather
@@ -585,7 +599,8 @@ struct StrandiOSApp: App {
                         effort: liveActivityShowsEffort
                             ? day?.strain.map { Int($0.rounded()) } : nil,
                         batteryPct: model.live.batteryPct.map { Int($0.rounded()) },
-                        observedAt: sample.receivedAt
+                        observedAt: sample.receivedAt,
+                        scoreDay: day?.day
                     )
                 }
                 // End the Live Activity the moment the link drops, even if no further HR tick arrives.
@@ -607,7 +622,8 @@ struct StrandiOSApp: App {
                         effort: liveActivityShowsEffort
                             ? day?.strain.map { Int($0.rounded()) } : nil,
                         batteryPct: model.live.batteryPct.map { Int($0.rounded()) },
-                        observedAt: model.live.heartRateSample?.receivedAt
+                        observedAt: model.live.heartRateSample?.receivedAt,
+                        scoreDay: day?.day
                     )
                 }
                 .onChange(of: liveActivityEnabled, initial: true) { _, _ in
@@ -950,12 +966,14 @@ struct StrandiOSApp: App {
         if repairHydration {
             liveActivity.reconcile(
                 bpm: bpm, recovery: recovery, connected: true,
-                effort: effort, batteryPct: batteryPct, observedAt: observedAt
+                effort: effort, batteryPct: batteryPct, observedAt: observedAt,
+                scoreDay: day?.day
             )
         } else {
             liveActivity.update(
                 bpm: bpm, recovery: recovery, connected: true,
-                effort: effort, batteryPct: batteryPct, observedAt: observedAt
+                effort: effort, batteryPct: batteryPct, observedAt: observedAt,
+                scoreDay: day?.day
             )
         }
     }

@@ -151,7 +151,6 @@ targets:
       path: Strand/Resources/Strand.entitlements
       properties:
         com.apple.security.app-sandbox: true
-        com.apple.security.device.bluetooth: true
         com.apple.security.files.user-selected.read-write: true
         # Outbound client access — used only by explicit opt-ins: BYOK AI Coach, Oura import,
         # and the user's own authenticated self-hosted Noop server.

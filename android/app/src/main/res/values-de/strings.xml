@@ -2213,6 +2213,12 @@
     <string name="health_live_display_paused">Live-Anzeige pausiert</string>
     <string name="onboarding_page_animation_label">Einrichtungsseite</string>
     <string name="onboarding_direct_local_bluetooth">Direktes, lokales Bluetooth</string>
+    <string name="onboarding_data_boundary_configured_title">Bandkonto aktivieren</string>
+    <string name="onboarding_data_boundary_configured_body">Bandmesswerte beginnen auf diesem Telefon. In diesem konfigurierten Build musst du dich anmelden und den Bandbesitz erfolgreich bestätigen, bevor die Einrichtung abgeschlossen werden kann. Gesundheitsdaten werden nur übertragen, wenn du eine verwaltete Datenfunktion separat aktivierst und ihr zustimmst.</string>
+    <string name="onboarding_data_boundary_exploration_title">Lokal erkunden</string>
+    <string name="onboarding_data_boundary_exploration_body">Dieser Build erstellt kein Konto und lädt keine Gesundheitsdaten hoch. Die Einrichtung bleibt auf diesem Telefon; die Aktivierung des Bandbesitzes und verwaltete Cloud-Funktionen sind nicht verfügbar.</string>
+    <string name="onboarding_bluetooth_boundary_configured">NOOP verbindet sich über Bluetooth Low Energy direkt mit Noop Band. Bandsuche und Live-Messwerte bleiben auf diesem Telefon. Der konfigurierte Kontodienst wird für die Konto- und Bandbesitzaktivierung verwendet; die Übertragung von Gesundheitsdaten erfordert eine separate ausdrückliche Zustimmung.</string>
+    <string name="onboarding_bluetooth_boundary_exploration">NOOP verbindet sich über Bluetooth Low Energy direkt mit Noop Band. Bandsuche, Live-Messwerte und Einrichtung bleiben auf diesem Telefon. Kontofunktionen und Cloud-Uploads sind in diesem Erkundungs-Build deaktiviert.</string>
     <string name="onboarding_bluetooth_permission_prompt">Wenn die Systemabfrage erscheint, wähle Zulassen, damit NOOP Noop Band finden kann.</string>
     <string name="onboarding_date_of_birth">Geburtsdatum</string>
     <string name="onboarding_age_years">%1$d Jahre</string>
@@ -2723,6 +2729,13 @@
     <string name="ownership_plan_save_plus">NOOP+ Auswahl speichern</string>
     <string name="ownership_plan_saving">Wird gespeichert…</string>
     <string name="ownership_onboarding_continue_locked">Band beanspruchen, um fortzufahren</string>
+    <string name="ownership_onboarding_exploration_title">NOOP lokal erkunden</string>
+    <string name="ownership_onboarding_exploration_detail">Die Konto- und Bandbesitzaktivierung ist in diesem Build nicht konfiguriert.</string>
+    <string name="ownership_onboarding_local_mode_title">Im lokalen Modus fortfahren</string>
+    <string name="ownership_onboarding_local_mode_detail">Du kannst die Einrichtung abschließen und die App ansehen, ohne ein Konto zu erstellen. Einrichtungsdaten bleiben auf diesem Telefon.</string>
+    <string name="ownership_onboarding_unavailable_features_title">In diesem Build nicht verfügbar</string>
+    <string name="ownership_onboarding_unavailable_features_detail">Bandbesitzaktivierung, Kontowiederherstellung und verwaltete Cloud-Funktionen erfordern einen konfigurierten Release-Build.</string>
+    <string name="ownership_onboarding_unconfigured_boundary">Beim Fortfahren bleibt dieser Build im lokalen Erkundungsmodus. Es werden kein Konto erstellt, kein Band beansprucht und keine Daten hochgeladen.</string>
     <string name="ownership_screen_title">Bandkonto</string>
     <string name="ownership_screen_subtitle">Die Besitzaktivierung ist von NOOP+ getrennt und speichert niemals Gesundheitsdaten.</string>
     <string name="ownership_unavailable_title">Bandbesitz ist nicht aktiviert</string>

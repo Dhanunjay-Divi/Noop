@@ -1,6 +1,6 @@
 # NOOP production readiness
 
-Last reviewed: **2026-09-19**
+Last reviewed: **2026-09-20**
 
 This is the release decision record for NOOP. A compiled screen or passing unit
 test proves code behavior only. It does not prove carrier delivery, wearable
@@ -19,10 +19,13 @@ The appendable action ledger is
 New work belongs at its dependency position there; a checkbox closes only with
 the evidence required by this readiness record.
 
-Core collection, scoring, local history, export, and supported local device
-control remain local-first. The first-party band ownership account is a narrow
-activation/control exception, not health-data consent. NOOP+ remains a separate
-explicit opt-in and cannot become a dependency of core local use.
+Current compatible-device collection, scoring, local history, export, and
+supported local device control remain local-authoritative. The first-party band
+ownership account is a narrow activation/control exception, not health-data
+consent. D-059 is a staged first-party target for durable history and canonical
+formula publication; it does not change authority until its per-data-class and
+per-formula gates pass. NOOP+ remains a separate explicit opt-in and cannot
+withhold current safe offline use, protection, restore, or export.
 
 ## Status vocabulary
 
@@ -70,23 +73,25 @@ result. Candidate release semantics remain independently enforced by
 publishes a distinct `protected-main` result; release publication rejects the
 pull-request-scoped result.
 
-The exact-current local branch wall is complete:
+The surviving exact-current closeout evidence is:
 
-- Apple: macOS passed 2,142 tests with one intentional skip; the iPhone shell
-  passed 38 with one intentional skip; unsigned iOS, widgets, Watch, and Watch
-  complications builds passed; 42 tab-shell and 11 Daily Plan simulator states
-  passed their repository visual validators.
-- Android: Full and Demo each completed 4,883 tests with seven skips and zero
-  failures; both lint variants, APKs, and instrumentation compilation passed;
-  API 35 completed 114 production-shell tests with two intentional
-  private-pilot skips and a fresh Review Sample test passed 1 of 1.
-- Shared Swift: all 11 package/tool build-and-test pairs passed.
-- Server and infrastructure: PostgreSQL passed 647 tests with one intentional
-  skip plus Ruff; restore-application smoke passed; 6 of 6 OpenTofu ownership
-  default tests passed.
-- Execution controls: 134 bounded-runner, required-CI, and trusted-control
-  tests passed. Heavy-command CLI defaults now preserve 10% free memory,
-  10 GiB free disk, and a 128 MiB private-log ceiling.
+- Apple: 24 affected macOS contracts pass and the unsigned Release iOS graph,
+  including embedded widgets and Watch products, builds. Earlier complete
+  macOS, iPhone-shell, and visual matrices remain historical evidence for their
+  recorded trees rather than exact-current proof.
+- Android: the Full and Demo unit-task, compile, lint, APK, and
+  instrumentation-source wall completes successfully across 137 Gradle tasks.
+  Its per-test XML was removed during exact-owner cleanup, so no unsupported
+  exact test total is asserted. Exact replacement-candidate API 35 runtime
+  remains a required hosted context; the 114-case API 35 result belongs to the
+  prior candidate.
+- Shared Swift: the complete package/tool wall passed before the final
+  account-scope corrections, and `NoopRemoteSync` was rerun afterward with
+  177 of 177 tests passing.
+- Server and infrastructure: PostgreSQL 16 executed 736 cases with 704 passes,
+  32 skips, and no failures; Ruff and compile checks pass; 14 plan-only
+  OpenTofu tests pass without apply.
+- The final repository-policy wall passes after the documentation and terminology updates: 301 tool tests with one intentional skip plus all release, calibration, terminology, required-CI, trusted-control, provenance, privacy, health-claims, localization, operations-record, and diff gates.
 
 These results prove the current local software and simulator contracts only.
 They do not replace hosted exact-SHA, signing, physical-device, provider,
@@ -100,10 +105,10 @@ cannot self-attest its future hosted result or merge SHA.
 | First-party NOOP Band and SDK | **Not implemented; hardware and protocol inputs pending** | Reusable framing, history, clock, storage, analytics, diagnostics, and pluggable-source patterns exist, but there is no NOOP firmware, GATT/wire contract, device provisioning, secure boot, signed DFU, manufacturing interface, or first-party native SDK. The required input dossier, architecture, conformance gates, and physical matrix are defined in the master plan. Existing third-party hardware cannot be relabeled as proof. |
 | Band ownership account and onboarding | **PARTIAL** | PostgreSQL/FastAPI, Apple, and Android provide a default-off supplier-independent foundation for verified-email identity mechanics, optional phone linking, immutable terms acceptance, secure per-installation credentials, atomic single-owner claim, replacement-installation authorization, installation revocation, resumable onboarding, the pre-Home NOOP/NOOP+ preference, and cooling-off account-deletion request/status/cancel coordination. It has no public invoker, its production possession provider intentionally returns unavailable, provider identity erasure is blocked, and band retirement fails closed. Supplier label mapping, signed possession, owner-key provisioning, approved band retirement/wipe (`ACC-340`), billing, recovery/release operations, legal approval, physical evidence, and production deployment/operations remain open. |
 | Remote terms and returns | **Terms mechanism implemented; approved policy and return operations pending** | The clients enforce TLS, approved hosts, no redirects, no persistent cache, size/UTF-8 controls, and digest verification; the service stores immutable versions and exact acceptance metadata without placing rendered terms in diagnostics or app databases. No approved production terms document has been published. The owner has not selected 14 versus 30 days or the clock start, and condition grades, lawful disclosed deductions, appeal, operator wipe/unlink, quarantine, legal review, and operations evidence remain open. |
-| macOS app | **Exact-current local wall complete; distribution pending** | The active branch passes 2,142 tests with one intentional skip and the unsigned macOS target builds. A distributable Developer ID build, notarization, physical accessibility, and performance evidence remain external. |
-| iPhone, Watch, widgets | **Exact-current local wall complete; physical evidence pending** | The active branch passes the 38-test iPhone shell with one intentional skip and builds unsigned iOS, widgets, Watch, and Watch complications targets. Simulator visual evidence covers 42 tab-shell and 11 Daily Plan states. None of this proves CoreBluetooth, HealthKit entitlements, background collection, attestation, Watch connectivity, notification delivery, or physical accessibility. |
-| Android app | **Exact-current local wall complete; physical evidence pending** | Full and Demo each pass 4,883 tests with seven skips plus lint, APK, instrumentation compilation, 114 API 35 production-shell tests with two intentional skips, and one fresh Review Sample test. OEM, physical BLE/haptic/battery/background, attestation, and physical accessibility remain open. |
-| Self-hosted server | **Exact-current local wall complete; production runtime pending** | PostgreSQL passes 647 tests with one intentional skip plus Ruff and restore-application smoke. Six OpenTofu ownership-default tests also pass. No Docker publication, public topology, load, regional recovery, production credentials, provider deletion, or production operations result is claimed. |
+| macOS app | **Affected exact-current contracts pass; distribution pending** | Twenty-four affected macOS contracts pass, including viewer-only and account/document lifecycle boundaries. Earlier complete macOS walls remain historical evidence for their exact trees. A distributable Developer ID build, notarization, physical accessibility, and performance evidence remain external. |
+| iPhone, Watch, widgets | **Exact-current source graph builds; physical evidence pending** | The unsigned Release iOS graph builds with embedded widgets and Watch products. Earlier iPhone-shell and visual matrices remain historical evidence for their exact trees. None of this proves CoreBluetooth, HealthKit entitlements, background collection, attestation, Watch connectivity, notification delivery, or physical accessibility. |
+| Android app | **Exact-current build and JVM task wall passes; physical evidence pending** | Full and Demo unit-task, compile, lint, APK, and instrumentation-source tasks pass across the 137-task wall. The exact replacement candidate still requires hosted API 35 runtime because no suitable local managed device is available. OEM, physical BLE/haptic/battery/background, attestation, and physical accessibility remain open. |
+| Self-hosted server | **Exact-current PostgreSQL wall passes; production runtime pending** | PostgreSQL 16 executes 736 cases with 704 passes, 32 skips, and no failures; Ruff and compile checks pass. Fourteen plan-only OpenTofu tests pass without apply. No Docker publication, public topology, load, regional recovery, production credentials, provider deletion, or production operations result is claimed. |
 | Shared server tenancy | **Locally verified, identity pending** | `NOOP_AUTH_MODE=shared` requires retry-safe per-installation credentials for biometric routes, gives each native device one exclusive installation owner, returns `404` across tenant boundaries, and keeps the operator token administrative. Rotation, export, hard deletion, and Safety/Friends erasure pass memory and PostgreSQL isolation tests. Public signup, identity proof, recovery, support access, managed key posture, and independent penetration testing remain launch gates. |
 | Private Friends | **Locally verified on Apple and Android** | Invitation-only enrollment, accepted requests, directional six-field privacy, summary-only replacement upload, removal, deletion, and localized Android UI are implemented. Android uses an encrypted member credential, retry-stable enrollment and upload identities, best-effort WorkManager refresh, and server-confirmed cleanup for an interrupted first join. There is no public directory, ranking, or end-to-end encryption. |
 | Managed Safety contact enrollment | **Locally verified** | Exact-match NOOP IDs and one-time invitations create a separate accepted Safety relationship without granting Friends or health-data access. Two accepted outbound contacts are required, five is the maximum, limits are concurrency-safe, and remove, block, profile deletion, and installation revocation are covered. |

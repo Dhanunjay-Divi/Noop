@@ -2197,6 +2197,12 @@
     <string name="health_live_display_paused">Affichage en direct en pause</string>
     <string name="onboarding_page_animation_label">Page de configuration</string>
     <string name="onboarding_direct_local_bluetooth">Bluetooth direct et local</string>
+    <string name="onboarding_data_boundary_configured_title">Activez votre compte de bracelet</string>
+    <string name="onboarding_data_boundary_configured_body">Les mesures du bracelet commencent sur ce téléphone. Cette version configurée exige une connexion et une revendication du bracelet terminée avant de finir la configuration. Les données de santé ne sont pas téléversées sauf si vous activez et acceptez séparément une fonction de données gérées.</string>
+    <string name="onboarding_data_boundary_exploration_title">Explorer localement</string>
+    <string name="onboarding_data_boundary_exploration_body">Cette version ne crée aucun compte et ne téléverse aucune donnée de santé. La configuration reste sur ce téléphone ; l’activation de la propriété du bracelet et les fonctions cloud gérées ne sont pas disponibles.</string>
+    <string name="onboarding_bluetooth_boundary_configured">NOOP se connecte directement à Noop Band par Bluetooth Low Energy. La recherche du bracelet et les mesures en direct restent sur ce téléphone. Le service de compte configuré sert à activer le compte et la propriété du bracelet ; le transfert de données de santé exige un consentement explicite distinct.</string>
+    <string name="onboarding_bluetooth_boundary_exploration">NOOP se connecte directement à Noop Band par Bluetooth Low Energy. La recherche du bracelet, les mesures en direct et la configuration restent sur ce téléphone. Les actions de compte et le téléversement cloud sont désactivés dans cette version d’exploration.</string>
     <string name="onboarding_bluetooth_permission_prompt">Lorsque l’invite système s’affiche, choisissez Autoriser pour que NOOP puisse trouver Noop Band.</string>
     <string name="onboarding_date_of_birth">Date de naissance</string>
     <string name="onboarding_age_years">%1$d ans</string>
@@ -2707,6 +2713,13 @@
     <string name="ownership_plan_save_plus">Enregistrer la préférence NOOP+</string>
     <string name="ownership_plan_saving">Enregistrement…</string>
     <string name="ownership_onboarding_continue_locked">Réclamez le bracelet pour continuer</string>
+    <string name="ownership_onboarding_exploration_title">Explorer NOOP localement</string>
+    <string name="ownership_onboarding_exploration_detail">L’activation du compte et de la propriété du bracelet n’est pas configurée dans cette version.</string>
+    <string name="ownership_onboarding_local_mode_title">Continuer en mode local</string>
+    <string name="ownership_onboarding_local_mode_detail">Vous pouvez terminer la configuration et consulter l’application sans créer de compte. Les données de configuration restent sur ce téléphone.</string>
+    <string name="ownership_onboarding_unavailable_features_title">Indisponible dans cette version</string>
+    <string name="ownership_onboarding_unavailable_features_detail">L’activation de la propriété du bracelet, la restauration du compte et les fonctions cloud gérées nécessitent une version de lancement configurée.</string>
+    <string name="ownership_onboarding_unconfigured_boundary">En continuant, cette version reste en mode d’exploration locale. Elle ne crée aucun compte, ne revendique aucun bracelet et ne téléverse aucune donnée.</string>
     <string name="ownership_screen_title">Compte du bracelet</string>
     <string name="ownership_screen_subtitle">L’activation de la propriété est distincte de NOOP+ et ne stocke jamais de données de santé.</string>
     <string name="ownership_unavailable_title">La propriété du bracelet n’est pas activée</string>

@@ -1,6 +1,10 @@
 package com.noop.testcentre
 
 import android.content.SharedPreferences
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -95,6 +99,59 @@ class TestCentreTest {
         assertEquals(emptyMap<String, String>(), tc.answers(TestDomain.BATTERY))
         tc.setAnswers(TestDomain.BATTERY, mapOf("whoopAppInstalled" to "yes", "batterySaverApps" to "none"))
         assertEquals(mapOf("whoopAppInstalled" to "yes", "batterySaverApps" to "none"), tc.answers(TestDomain.BATTERY))
+    }
+
+    @Test fun capturedDaysAreActiveOnlyDistinctBoundedAndResetOnActivation() {
+        val tc = newCentre()
+        tc.noteCapturedDay(TestDomain.SLEEP, "2026-09-01")
+        assertEquals(0, tc.capturedDays(TestDomain.SLEEP))
+
+        tc.activate(TestDomain.SLEEP)
+        tc.noteCapturedDay(TestDomain.SLEEP, "2026-09-01")
+        tc.noteCapturedDay(TestDomain.SLEEP, "2026-09-01")
+        tc.noteCapturedDay(TestDomain.SLEEP, "not-a-day")
+        assertEquals(1, tc.capturedDays(TestDomain.SLEEP))
+
+        for (day in 1..40) {
+            tc.noteCapturedDay(TestDomain.SLEEP, "2026-08-${day.coerceAtMost(31).toString().padStart(2, '0')}")
+        }
+        assertTrue(tc.capturedDays(TestDomain.SLEEP) <= TestCentre.MAX_CAPTURED_DAYS)
+
+        tc.activate(TestDomain.SLEEP)
+        assertEquals(0, tc.capturedDays(TestDomain.SLEEP))
+    }
+
+    @Test fun concurrentCaptureUpdatesFromSeparateClientsDoNotLoseDays() {
+        val prefs = FakeSharedPreferences()
+        val first = TestCentre(prefs)
+        val second = TestCentre(prefs)
+        first.activate(TestDomain.SLEEP)
+
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val failures = Collections.synchronizedList(mutableListOf<Throwable>())
+        val executor = Executors.newFixedThreadPool(2)
+        listOf(
+            first to "2026-09-01",
+            second to "2026-09-02",
+        ).forEach { (centre, day) ->
+            executor.execute {
+                try {
+                    ready.countDown()
+                    start.await(2, TimeUnit.SECONDS)
+                    repeat(100) { centre.noteCapturedDay(TestDomain.SLEEP, day) }
+                } catch (error: Throwable) {
+                    failures += error
+                }
+            }
+        }
+        assertTrue(ready.await(2, TimeUnit.SECONDS))
+        start.countDown()
+        executor.shutdown()
+        assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
+
+        assertTrue(failures.isEmpty())
+        assertEquals(2, first.capturedDays(TestDomain.SLEEP))
     }
 
     @Test fun migrationIsIdempotentAndPreservesLegacyKeys() {
