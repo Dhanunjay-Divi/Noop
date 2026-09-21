@@ -6,8 +6,8 @@
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
-- End implementation commit: pending final review-remediation commit
-- Record commit or PR: pending
+- End implementation commit: `4fcc134240a542694c5acc51a4d1487b074064bd`
+- Record commit or PR: PR `#17`; evidence follow-up pending
 
 ## Objective
 
@@ -186,8 +186,8 @@ Success means:
   release/handoff/operations documents.
 - Commits: initial implementation
   `68fb9fd5cfd0f2731917cee8b14f84e391b9128e`; initial operations record
-  `c16488d70001bb3257c7c0c4d6644ab7f88d1372`; review-remediation commit
-  pending.
+  `c16488d70001bb3257c7c0c4d6644ab7f88d1372`; review-remediation implementation
+  `4fcc134240a542694c5acc51a4d1487b074064bd`.
 - Branch and remote state: PR `#17` is open from the dedicated branch; the
   remote head remains `c16488d7` until one consolidated remediation push.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and

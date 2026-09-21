@@ -25,9 +25,10 @@ Last updated: **2026-09-21**
   passes 4/4 focused integration tests. A combined parallel Full+Demo command
   was classified as an avoidable Kotlin heap spike and replaced by sequential
   bounded verification. PR `#17` still needs one consolidated remediation
-  commit/push, new exact-SHA hosted checks, review-thread resolution, protected
-  merge/main verification, and exact cleanup. No supplier binary, firmware,
-  real adapter, or flasher is included.
+  push from local implementation commit `4fcc1342`, new exact-SHA hosted
+  checks, review-thread resolution, protected merge/main verification, and
+  exact cleanup. No supplier binary, firmware, real adapter, or flasher is
+  included.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,
