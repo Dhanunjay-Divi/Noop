@@ -138,6 +138,15 @@ disconnect. It does not establish the retention depth, overflow policy,
 acknowledgement semantics, clock integrity, or off-phone collection behavior of
 the production band. Those must be measured on the exact model and firmware.
 
+The required production behavior is a bounded circular flash history: the band
+continues autonomous sampling while disconnected, retains as much recent data
+as its measured capacity permits, and overwrites only the oldest retained
+records after that capacity is full. The firmware or accepted SDK contract must
+expose oldest/newest retained bounds and a cursor generation, overflow marker,
+or equivalent signal. Without that signal NOOP cannot distinguish a complete
+catch-up from history that was overwritten while the phone was absent, so the
+model is not launch-eligible.
+
 ### Optional and custom capabilities
 
 The headers/docs contain project-specific raw PPG, accelerometer/IMU, GPS,
@@ -269,8 +278,10 @@ hardware and firmware:
   behavior;
 - default-password rotation, replacement-phone recovery, return/RMA wipe, and
   wrong-account rejection;
-- actual history days, overflow, partial resume, duplicate delivery, clock
-  reset, timezone/DST, and multi-day phone absence;
+- actual history days, full-flash circular overwrite of oldest-only data,
+  retained oldest/newest bounds, explicit overflow/gap signaling, partial
+  resume, duplicate delivery, clock reset, timezone/DST, and multi-day phone
+  absence;
 - foreground, screen-off, background, process death, force-quit, reboot, low
   storage, Android OEM restriction, and iOS restoration behavior;
 - live plus catch-up sequencing under the one-command queue;

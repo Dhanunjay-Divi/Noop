@@ -363,8 +363,9 @@ as-is (`unit: "raw_adc"`) — SpO₂ %, skin temperature in °C, and respiratory
 The strap streams `HISTORY_START → type-47 records → METADATA (HISTORY_END) → … → HISTORY_COMPLETE`.
 Each `METADATA` chunk carries a **`trim_cursor`** (u32 at frame offset 17). NOOP persists the decoded +
 raw rows first, then sends `HISTORICAL_DATA_RESULT` (23) as a confirmed write echoing the chunk's
-`end_data` — only then may the strap forget that chunk. This makes the offload resumable: the durable
-`strap_trim` cursor means the next session resumes exactly where the last one stopped.
+`end_data` — only then may the strap forget that chunk. Interrupted offloads are retryable because
+unacknowledged history remains firmware-owned and is requested again. The local `strap_trim` value is
+a diagnostic watermark; it does not tell the firmware where to resume.
 
 ### Offload throughput is firmware-paced (~10 records/s), not link-bound
 

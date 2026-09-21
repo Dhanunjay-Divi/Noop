@@ -103,9 +103,13 @@ authoritative for the physical scenarios and evidence package.
 10. Unknown required protocol or capability revisions fail closed. Unknown
     optional fields may be ignored only when the versioned contract says they
     are optional.
-11. Off-wrist sampling reduction, flash retention, wear detection, and
-    autonomous collection are firmware responsibilities. A phone request
-    cannot substitute for firmware evidence.
+11. Off-wrist sampling reduction, wear detection, autonomous collection, and
+    flash retention are firmware responsibilities. While disconnected, the band
+    must continue sampling into a documented bounded circular history. At full
+    capacity it may overwrite only the oldest retained records, must preserve
+    the newest data, and must expose retained bounds plus an explicit
+    wrap/overflow signal so the app can identify an unrecoverable gap. A phone
+    request or SDK claim cannot substitute for firmware and physical evidence.
 12. Collection, immediate Safety initiation, export, local band control, and a
     bounded safe offline working state remain usable after activation without
     NOOP+, payment, or a continuously available network. History and formulas
@@ -393,6 +397,8 @@ interface BandSession {
 - supported live streams and history categories;
 - units, cadence, quality semantics, and calibration revision;
 - history capacity, cursor type, completion, and overflow semantics;
+- oldest/newest retained bounds and cursor generation or equivalent wrap
+  marker;
 - battery, charging, wear, haptic, alarm, sampling, and OTA support;
 - command concurrency restrictions; and
 - accepted, unsupported, or incompatible result.
@@ -413,6 +419,8 @@ interface BandSession {
 - ordered sample batches;
 - previous/next opaque resume cursor;
 - completion and overflow state;
+- oldest/newest retained bounds plus the first range lost to circular
+  overwrite, when any;
 - an acknowledgment token that has no effect until returned with a durable
   storage receipt; and
 - bounded count/range metadata for progress without health values.
@@ -684,6 +692,10 @@ claim.
 9. Distinguish complete-empty, complete-with-data, interrupted, deferred,
    storage-stalled, cursor-stalled, and transport-failed states.
 10. Resume from the last durable point after reconnect or process restart.
+11. If firmware reports a circular-buffer wrap beyond the last acknowledged
+    point, persist the new retained bounds, publish a bounded history-gap state,
+    and continue from the oldest still-retained record. Never relabel the
+    remaining range as complete or fabricate the overwritten interval.
 
 If the supplier SDK automatically deletes or acknowledges history before NOOP
 can commit it, that behavior is launch-blocking. The supplier must expose
@@ -1034,6 +1046,9 @@ health values.
 - live plus catch-up sequencing;
 - actual history depth, flash utilization, overflow, partial range, empty
   completion, and full flash;
+- circular-buffer wrap that overwrites only the oldest retained records,
+  preserves the newest records, advances its generation/bounds monotonically,
+  and reports the exact unrecoverable gap;
 - durable-before-ack behavior;
 - interrupted commit, interrupted acknowledgment, resume, and duplicate
   delivery;

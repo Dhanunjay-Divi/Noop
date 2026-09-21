@@ -242,13 +242,15 @@ the periodic **type-47 historical offload is the primary metric source**, not th
    ```
    decode chunk  →  await store.insert (decoded durable)
                  →  await store.enqueueRawBatch (only if research toggle on)
-                 →  await store.setCursor("strap_trim", …)
-                 →  ackTrim (.withResponse confirmed ack to strap)
+                 →  await store.setCursor("strap_trim", …) (local diagnostic watermark)
+                 →  queue ackTrim (.withResponse)
+                 →  platform callback confirms the exact ack
    ```
 
    A chunk is forgotten by the strap **only after** decoded data is locally durable and the ack is
-   link-layer confirmed. If the watchdog fires (strap went silent), nothing is acked and the durable
-   `strap_trim` cursor lets the next session resume exactly where it left off.
+   link-layer confirmed. If the watchdog fires (strap went silent), unacknowledged history remains on
+   the strap and the next session requests history again. The firmware's retained/acknowledged state is
+   authoritative; local `strap_trim` is a diagnostic watermark and does not choose the resume range.
 
 Type-47 records carry their **own real-unix timestamps**, so the historical path does *not* depend on
 `GET_CLOCK`; if the clock correlation hasn't landed yet, `Backfiller` falls back to an identity
@@ -397,8 +399,9 @@ computed locally.
    SQLite file, and the UI are the whole system.
 2. **Decoded-first durability.** Metrics are committed before raw is queued; the raw outbox is a
    prunable convenience, never the source of truth.
-3. **Resumable safe-trim.** The strap forgets historical data only after NOOP has it durably and has
-   confirmed the ack; a durable cursor makes every offload resumable.
+3. **Resumable safe-trim.** The strap forgets historical data only after NOOP has it durably and the
+   platform confirms the ack. Firmware-retained history is requested again after interruption; NOOP's
+   local trim watermark diagnoses progress but does not drive firmware resume.
 4. **Pure cores, thin shell.** `WhoopProtocol`, `WhoopStore`, `StrandAnalytics`, and `StrandImport`
    are platform-pure and testable in isolation; the app target is the only CoreBluetooth/SwiftUI
    surface.

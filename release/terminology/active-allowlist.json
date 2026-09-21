@@ -794,12 +794,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 425,
+      "occurrenceCount": 426,
       "owner": "project team",
       "path": "Strand/BLE/BLEManager.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "43f3ae4b811ff589ee611ed010152a37abc1960c2df4bb200526f2628f19f785"
+      "sha256": "cfcf13de80f899585f406613ad4a18a8fee76d9269a0842db2ac0357589ca95b"
     },
     {
       "category": "core",

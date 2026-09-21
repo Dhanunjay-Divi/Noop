@@ -2434,6 +2434,9 @@
     <string name="managed_cloud_sync_now">Sincronizar agora</string>
     <string name="managed_cloud_preparing_export">A preparar exportação…</string>
     <string name="managed_cloud_export_history">Exportar todo o histórico da nuvem</string>
+    <string name="managed_cloud_import_history">Importar todo o histórico da nuvem</string>
+    <string name="managed_cloud_import_alert_title">Importar todo o histórico da nuvem?</string>
+    <string name="managed_cloud_import_alert_detail_android">Escolha um ZIP do histórico na cloud NOOP anteriormente exportado desta conta. A importação valida o arquivo, retoma em segurança e pode substituir registos locais correspondentes. Mantenha o NOOP aberto até terminar.</string>
     <string name="managed_cloud_disconnect_phone">Desligar este telefone</string>
     <string name="managed_cloud_delete_account">Eliminar conta NOOP na nuvem</string>
     <string name="managed_cloud_fresh_code">Novo código de confirmação</string>
@@ -2580,11 +2583,8 @@
     <string name="changelog_clearer_updates_and_reports_9_2_1">Atualizações mais claras e relatórios que ajudam a corrigir problemas</string>
     <string name="whats_new_welcome_version">Bem-vindo à versão %1$s</string>
     <string name="managed_friends_source_noop_plus">NOOP+</string>
-    <string name="managed_friends_source_self_hosted">Alojamento próprio</string>
     <string name="managed_friends_subtitle">Resumos privados com controlo mútuo.</string>
     <string name="managed_friends_refresh">Atualizar Amigos geridos</string>
-    <string name="managed_friends_two_options_title">Duas opções privadas</string>
-    <string name="managed_friends_two_options_body">Os Amigos NOOP+ requerem uma conta NOOP+ ativa. Os Amigos com alojamento próprio continuam disponíveis sem NOOP+.</string>
     <string name="managed_friends_create_title">Criar o perfil gerido de Amigos</string>
     <string name="managed_friends_create_body">É criado um ID NOOP aleatório de correspondência exata. Não existe um diretório público.</string>
     <string name="managed_friends_create_action">Criar perfil privado</string>

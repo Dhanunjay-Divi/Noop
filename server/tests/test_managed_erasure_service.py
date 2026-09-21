@@ -10,8 +10,16 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.managed_identity import ManagedIdentityClaims
-from app.managed_models import ManagedEnrollment, ManagedSocialProfileCreate
-from app.managed_repository import PostgresManagedRepository
+from app.managed_models import (
+    ManagedDocumentMutation,
+    ManagedEnrollment,
+    ManagedSocialProfileCreate,
+)
+from app.managed_repository import (
+    ManagedConflictError,
+    ManagedForbiddenError,
+    PostgresManagedRepository,
+)
 from app.ownership_deletion_lifecycle import (
     ManagedErasureRetryableError,
     ManagedErasureTerminalError,
@@ -235,15 +243,20 @@ async def test_service_schedules_replays_and_attaches_without_identity_deletion(
             SELECT job.request_id,
                    job.scope,
                    job.status,
+                   job.requested_by_identity_id,
                    job.identity_deletion_ticket,
                    account.status AS account_status,
-                   identity.status AS identity_status,
+                   (
+                       SELECT identity.status
+                       FROM managed_external_identities identity
+                       WHERE identity.account_id = job.account_id
+                       ORDER BY identity.created_at, identity.identity_id
+                       LIMIT 1
+                   ) AS identity_status,
                    profile.status AS profile_status,
                    profile.poke_opt_in
             FROM managed_erasure_jobs job
             JOIN managed_accounts account USING (account_id)
-            JOIN managed_external_identities identity
-              ON identity.identity_id = job.requested_by_identity_id
             JOIN managed_social_profiles profile
               ON profile.account_id = job.account_id
             WHERE job.erasure_job_id = $1
@@ -253,6 +266,7 @@ async def test_service_schedules_replays_and_attaches_without_identity_deletion(
         assert row["request_id"] == request_key
         assert row["scope"] == "all_managed_data"
         assert row["status"] == "queued"
+        assert row["requested_by_identity_id"] is None
         assert row["identity_deletion_ticket"] is None
         assert row["account_status"] == "erasure_pending"
         assert row["identity_status"] == "active"
@@ -311,6 +325,17 @@ async def test_service_schedules_replays_and_attaches_without_identity_deletion(
         assert (
             await pool.fetchval(
                 """
+                SELECT requested_by_identity_id
+                FROM managed_erasure_jobs
+                WHERE erasure_job_id = $1
+                """,
+                attached.job_id,
+            )
+            is None
+        )
+        assert (
+            await pool.fetchval(
+                """
                 SELECT count(*)
                 FROM managed_erasure_jobs
                 WHERE account_id = $1
@@ -319,17 +344,21 @@ async def test_service_schedules_replays_and_attaches_without_identity_deletion(
             )
             == 1
         )
-        await repository.cancel_erasure(
-            principal=attach_principal,
-            erasure_job_id=UUID(existing["erasure_job_id"]),
-        )
-        canceled_replay = await repository.schedule_all_managed_data(
+        with pytest.raises(
+            ManagedConflictError,
+            match="^managed erasure can no longer be canceled$",
+        ):
+            await repository.cancel_erasure(
+                principal=attach_principal,
+                erasure_job_id=UUID(existing["erasure_job_id"]),
+            )
+        pending_replay = await repository.schedule_all_managed_data(
             request_key=attach_request_key,
             issuer=attach_claims.issuer,
             provider_tenant=attach_claims.provider_tenant,
             subject_hash=attach_claims.subject_hash,
         )
-        assert canceled_replay.job_status == "terminal_failure"
+        assert pending_replay.job_status == "pending"
         assert (
             await pool.fetchval(
                 """
@@ -339,7 +368,7 @@ async def test_service_schedules_replays_and_attaches_without_identity_deletion(
                 """,
                 attach_principal.account_id,
             )
-            == "active"
+            == "erasure_pending"
         )
 
         absent = await repository.schedule_all_managed_data(
@@ -430,5 +459,106 @@ async def test_service_treats_erased_account_as_completed() -> None:
             )
             == 0
         )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_service_erasure_completion_keeps_account_fenced() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=2,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(primary)
+        now = datetime.now(UTC)
+        claims = _claims(f"ownership-finalize-{uuid4()}", now)
+        installation_id = str(uuid4())
+        await repository.enroll(
+            claims=claims,
+            enrollment=_enrollment(installation_id),
+        )
+        principal = await repository.principal_for_identity(claims)
+        scheduled = await repository.schedule_all_managed_data(
+            request_key=uuid4(),
+            issuer=claims.issuer,
+            provider_tenant=claims.provider_tenant,
+            subject_hash=claims.subject_hash,
+        )
+        assert scheduled.job_id is not None
+
+        lifecycle_now = await repository.coordination_now()
+        assert (
+            await repository.claim_erasure_deletions(
+                now=lifecycle_now,
+                batch_size=10,
+            )
+            == []
+        )
+        completed = await repository.finalize_erasure_jobs(
+            now=lifecycle_now,
+            batch_size=10,
+        )
+        assert [row["erasure_job_id"] for row in completed] == [scheduled.job_id]
+
+        pool = primary._require_pool()
+        fenced = await pool.fetchrow(
+            """
+            SELECT account.status,
+                   account.auth_valid_after,
+                   job.requested_by_identity_id
+            FROM managed_accounts account
+            JOIN managed_erasure_jobs job USING (account_id)
+            WHERE account.account_id = $1
+              AND job.erasure_job_id = $2
+            """,
+            principal.account_id,
+            scheduled.job_id,
+        )
+        assert fenced["status"] == "erasure_pending"
+        assert fenced["auth_valid_after"] >= lifecycle_now
+        assert fenced["requested_by_identity_id"] is None
+
+        refreshed = await repository.principal_for_identity(
+            _claims(
+                claims.subject,
+                fenced["auth_valid_after"] + timedelta(minutes=2),
+            )
+        )
+        assert refreshed.account_status == "erasure_pending"
+        with pytest.raises(
+            ManagedForbiddenError,
+            match="^managed account is not active$",
+        ):
+            await repository.put_document(
+                principal=refreshed,
+                installation_id=installation_id,
+                mutation=ManagedDocumentMutation(
+                    request_id=uuid4(),
+                    document_kind="day_ownership",
+                    document_id=uuid4(),
+                    base_revision=0,
+                    content_mode="server_readable",
+                    payload_json={
+                        "schema_version": 1,
+                        "table": "dayOwnership",
+                        "key": {"day": "2026-09-21"},
+                        "record": {
+                            "day": "2026-09-21",
+                            "deviceId": "synthetic-device",
+                            "locked": 0,
+                        },
+                    },
+                    updated_at=fenced["auth_valid_after"] + timedelta(minutes=2),
+                ),
+            )
     finally:
         await primary.shutdown()

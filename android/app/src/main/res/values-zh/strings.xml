@@ -2434,6 +2434,9 @@
     <string name="managed_cloud_sync_now">立即同步</string>
     <string name="managed_cloud_preparing_export">正在准备导出…</string>
     <string name="managed_cloud_export_history">导出完整云端历史</string>
+    <string name="managed_cloud_import_history">导入完整云端历史</string>
+    <string name="managed_cloud_import_alert_title">导入完整云端历史？</string>
+    <string name="managed_cloud_import_alert_detail_android">请选择之前从此账户导出的 NOOP 云端历史 ZIP。导入会验证归档、可靠续传，并可能替换匹配的本地记录。请保持 NOOP 打开直至完成。</string>
     <string name="managed_cloud_disconnect_phone">断开此手机</string>
     <string name="managed_cloud_delete_account">删除 NOOP 云账户</string>
     <string name="managed_cloud_fresh_code">新验证码</string>
@@ -2576,11 +2579,8 @@
     <string name="changelog_clearer_updates_and_reports_9_2_1">更清晰的更新和有助于修复问题的报告</string>
     <string name="whats_new_welcome_version">欢迎使用 %1$s 版本</string>
     <string name="managed_friends_source_noop_plus">NOOP+</string>
-    <string name="managed_friends_source_self_hosted">自托管</string>
     <string name="managed_friends_subtitle">双方自主控制的私密摘要。</string>
     <string name="managed_friends_refresh">刷新托管好友</string>
-    <string name="managed_friends_two_options_title">两种私密方式</string>
-    <string name="managed_friends_two_options_body">NOOP+ 好友需要已启用的 NOOP+ 账户。无需 NOOP+ 也可继续使用自托管好友。</string>
     <string name="managed_friends_create_title">创建托管好友资料</string>
     <string name="managed_friends_create_body">系统会生成一个随机的精确匹配 NOOP ID，且不提供公开目录。</string>
     <string name="managed_friends_create_action">创建私密资料</string>

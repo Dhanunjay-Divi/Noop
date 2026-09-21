@@ -261,7 +261,7 @@ class RoomManagedDocumentAdapter internal constructor(
     }
 
     override suspend fun apply(document: ManagedDocument, change: ManagedChange) {
-        val localProfileId = withContext(Dispatchers.IO) { requireLocalProfile() }
+        withContext(Dispatchers.IO) { requireLocalProfile() }
         validateDocumentMetadata(document, change)
         if (document.contentMode == "client_encrypted") {
             validateIgnoredEncryptedDocument(document)
@@ -298,9 +298,6 @@ class RoomManagedDocumentAdapter internal constructor(
             ) {
                 throw ManagedStorageException.InvalidResponse()
             }
-            if (document.documentKind == ManagedDocumentKind.PREFERENCES) {
-                applyPreferences(payloadText, localProfileId)
-            }
             applyVerifiedDocument(document, payloadText, false)
             inbox.removeIncoming(accountScopeHash, document)
             return
@@ -334,12 +331,6 @@ class RoomManagedDocumentAdapter internal constructor(
             throw ManagedStorageException.InvalidResponse()
         }
 
-        if (document.documentKind == ManagedDocumentKind.PREFERENCES && !deleted) {
-            applyPreferences(
-                payloadText ?: throw ManagedStorageException.InvalidResponse(),
-                localProfileId,
-            )
-        }
         applyVerifiedDocument(document, payloadText, deleted)
     }
 
@@ -648,8 +639,9 @@ class RoomManagedDocumentAdapter internal constructor(
         }
     }
 
-    private fun applyPreferences(payload: String, localProfileId: String) {
+    private fun applyPreferences(payload: String) {
         val context = appContext ?: throw ManagedStorageException.InvalidResponse()
+        val localProfileId = requiredLocalProfileId()
         val values = BackupSettingsCodec.decode(payload)
         val normalized = BackupSettingsCodec.encode(values)
             ?: throw ManagedStorageException.InvalidResponse()
@@ -710,6 +702,23 @@ class RoomManagedDocumentAdapter internal constructor(
             try {
                 if (document.documentKind == ManagedDocumentKind.PREFERENCES) {
                     if (deleted || payload == null) throw ManagedStorageException.InvalidResponse()
+                    when (
+                        remoteApplyDisposition(
+                            db = db,
+                            tableName = PREFERENCES_TABLE,
+                            localKey = PREFERENCES_KEY,
+                            documentKind = document.documentKind,
+                            documentId = document.documentId,
+                            keyJson = """{"scope":"$PREFERENCES_KEY"}""",
+                            revision = document.revision,
+                            contentSha256 = document.contentSha256,
+                        )
+                    ) {
+                        RemoteApplyDisposition.APPLY -> Unit
+                        RemoteApplyDisposition.ALREADY_CURRENT,
+                        RemoteApplyDisposition.STALE -> return@runInTransaction
+                    }
+                    applyPreferences(payload)
                     upsertStateFromCurrentGeneration(
                         db,
                         PREFERENCES_TABLE,
@@ -770,6 +779,22 @@ class RoomManagedDocumentAdapter internal constructor(
         val spec = TABLE_SPECS.firstOrNull {
             it.table == identity.tableName && it.kind == document.documentKind
         } ?: throw ManagedStorageException.InvalidResponse()
+        when (
+            remoteApplyDisposition(
+                db = db,
+                tableName = spec.table,
+                localKey = identity.localKey,
+                documentKind = document.documentKind,
+                documentId = document.documentId,
+                keyJson = identity.keyJson,
+                revision = document.revision,
+                contentSha256 = document.contentSha256,
+            )
+        ) {
+            RemoteApplyDisposition.APPLY -> Unit
+            RemoteApplyDisposition.ALREADY_CURRENT,
+            RemoteApplyDisposition.STALE -> return
+        }
         if (spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
             validateDayOwnershipKey(
                 runCatching { JSONObject(identity.keyJson) }
@@ -851,6 +876,23 @@ class RoomManagedDocumentAdapter internal constructor(
         }
         val keyValues = spec.keyColumns.map { databaseValue(key.get(it)) }
         val localKey = localKey(db, spec, keyValues)
+        val keyJson = ManagedCanonicalJson.encode(key)
+        when (
+            remoteApplyDisposition(
+                db = db,
+                tableName = spec.table,
+                localKey = localKey,
+                documentKind = document.documentKind,
+                documentId = document.documentId,
+                keyJson = keyJson,
+                revision = document.revision,
+                contentSha256 = document.contentSha256,
+            )
+        ) {
+            RemoteApplyDisposition.APPLY -> Unit
+            RemoteApplyDisposition.ALREADY_CURRENT,
+            RemoteApplyDisposition.STALE -> return
+        }
         val day = if (spec.kind == ManagedDocumentKind.DAY_OWNERSHIP) {
             key.getString("day")
         } else {
@@ -894,10 +936,58 @@ class RoomManagedDocumentAdapter internal constructor(
             localKey,
             document.documentKind,
             document.documentId,
-            ManagedCanonicalJson.encode(key),
+            keyJson,
             document.revision,
             document.contentSha256,
         )
+    }
+
+    private fun remoteApplyDisposition(
+        db: SupportSQLiteDatabase,
+        tableName: String,
+        localKey: String,
+        documentKind: ManagedDocumentKind,
+        documentId: UUID,
+        keyJson: String,
+        revision: Long,
+        contentSha256: String,
+    ): RemoteApplyDisposition {
+        val current = db.query(
+            SimpleSQLiteQuery(
+                """
+                    SELECT documentKind, documentId, keyJSON,
+                           remoteRevision, remoteContentSHA256
+                    FROM managedDocumentState
+                    WHERE accountScopeHash = ? AND tableName = ? AND localKey = ?
+                """.trimIndent(),
+                arrayOf<Any?>(accountScopeHash, tableName, localKey),
+            ),
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) {
+                null
+            } else {
+                RemoteDocumentState(
+                    documentKind = cursor.getString(0),
+                    documentId = cursor.getString(1),
+                    keyJson = cursor.getString(2),
+                    revision = cursor.getLong(3),
+                    contentSha256 = cursor.getString(4),
+                )
+            }
+        } ?: return RemoteApplyDisposition.APPLY
+
+        if (current.documentKind != documentKind.wireValue ||
+            current.documentId != documentId.toString().lowercase() ||
+            canonicalObject(current.keyJson) != canonicalObject(keyJson)
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        if (revision < current.revision) return RemoteApplyDisposition.STALE
+        if (revision > current.revision) return RemoteApplyDisposition.APPLY
+        if (contentSha256 != current.contentSha256) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return RemoteApplyDisposition.ALREADY_CURRENT
     }
 
     private fun validateIncomingDayOwnershipPayload(payload: JSONObject) {
@@ -1510,6 +1600,20 @@ class RoomManagedDocumentAdapter internal constructor(
         val remoteRevision: Long,
         val remoteContentSha256: String,
     )
+
+    private data class RemoteDocumentState(
+        val documentKind: String,
+        val documentId: String,
+        val keyJson: String,
+        val revision: Long,
+        val contentSha256: String,
+    )
+
+    private enum class RemoteApplyDisposition {
+        APPLY,
+        ALREADY_CURRENT,
+        STALE,
+    }
 
     private data class LocalProfileBinding(
         val localProfileId: String,

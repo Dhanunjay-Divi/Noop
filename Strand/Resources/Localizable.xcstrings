@@ -10,7 +10,7 @@
     "NOOP account": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP-Konto"}},"es":{"stringUnit":{"state":"translated","value":"Cuenta de NOOP"}},"fr":{"stringUnit":{"state":"translated","value":"Compte NOOP"}},"it":{"stringUnit":{"state":"translated","value":"Account NOOP"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Conta NOOP"}},"ru":{"stringUnit":{"state":"translated","value":"Учётная запись NOOP"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"NOOP 账户"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"NOOP 帳戶"}}}},
     "Friends account access is active. Health backup remains separate and optional.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Der Zugriff auf das Friends-Konto ist aktiv. Das Gesundheits-Backup bleibt getrennt und optional."}},"es":{"stringUnit":{"state":"translated","value":"El acceso a la cuenta de Friends está activo. La copia de seguridad de salud sigue siendo independiente y opcional."}},"fr":{"stringUnit":{"state":"translated","value":"L’accès au compte Friends est actif. La sauvegarde santé reste séparée et facultative."}},"it":{"stringUnit":{"state":"translated","value":"L’accesso all’account Friends è attivo. Il backup sanitario resta separato e facoltativo."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O acesso à conta do Friends está ativo. A cópia de segurança de saúde permanece separada e opcional."}},"ru":{"stringUnit":{"state":"translated","value":"Доступ к учётной записи Friends активен. Резервное копирование данных о здоровье остаётся отдельным и необязательным."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Friends 账户访问已启用。健康备份仍为独立的可选功能。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"Friends 帳戶存取已啟用。健康備份仍是獨立的選用功能。"}}}},
     "Delete NOOP account...": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP-Konto löschen…"}},"es":{"stringUnit":{"state":"translated","value":"Eliminar cuenta de NOOP…"}},"fr":{"stringUnit":{"state":"translated","value":"Supprimer le compte NOOP…"}},"it":{"stringUnit":{"state":"translated","value":"Elimina account NOOP…"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Eliminar conta NOOP…"}},"ru":{"stringUnit":{"state":"translated","value":"Удалить учётную запись NOOP…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"删除 NOOP 账户…"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"刪除 NOOP 帳戶…"}}}},
-    "Delete NOOP account?": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP-Konto löschen?"}},"es":{"stringUnit":{"state":"translated","value":"¿Eliminar la cuenta de NOOP?"}},"fr":{"stringUnit":{"state":"translated","value":"Supprimer le compte NOOP ?"}},"it":{"stringUnit":{"state":"translated","value":"Eliminare l’account NOOP?"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Eliminar a conta NOOP?"}},"ru":{"stringUnit":{"state":"translated","value":"Удалить учётную запись NOOP?"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"删除 NOOP 账户？"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"要刪除 NOOP 帳戶嗎？"}}}},
+    "Delete NOOP account?": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP-Konto löschen?"}},"es":{"stringUnit":{"state":"translated","value":"¿Eliminar la cuenta de NOOP?"}},"fr":{"stringUnit":{"state":"translated","value":"Supprimer le compte NOOP ?"}},"it":{"stringUnit":{"state":"translated","value":"Eliminare l’account NOOP?"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Eliminar a conta NOOP?"}},"ru":{"stringUnit":{"state":"translated","value":"Удалить учетную запись NOOP?"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"删除 NOOP 账户？"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"要刪除 NOOP 帳戶嗎？"}}}},
     "Friends, managed cloud data, and the NOOP account will be scheduled for deletion after a 24-hour cooling-off period. Local health data on this iPhone is not deleted.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Friends, verwaltete Cloud-Daten und das NOOP-Konto werden nach einer 24-stündigen Bedenkzeit zur Löschung vorgemerkt. Lokale Gesundheitsdaten auf diesem iPhone werden nicht gelöscht."}},"es":{"stringUnit":{"state":"translated","value":"Friends, los datos gestionados en la nube y la cuenta de NOOP se programarán para eliminarse tras un periodo de espera de 24 horas. Los datos de salud locales de este iPhone no se eliminarán."}},"fr":{"stringUnit":{"state":"translated","value":"Friends, les données cloud gérées et le compte NOOP seront programmés pour suppression après un délai de réflexion de 24 heures. Les données de santé locales de cet iPhone ne seront pas supprimées."}},"it":{"stringUnit":{"state":"translated","value":"Friends, i dati cloud gestiti e l’account NOOP verranno programmati per l’eliminazione dopo un periodo di attesa di 24 ore. I dati sanitari locali su questo iPhone non vengono eliminati."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O Friends, os dados geridos na cloud e a conta NOOP serão agendados para eliminação após um período de reflexão de 24 horas. Os dados de saúde locais neste iPhone não serão eliminados."}},"ru":{"stringUnit":{"state":"translated","value":"Friends, управляемые облачные данные и учётная запись NOOP будут запланированы к удалению после 24-часового периода ожидания. Локальные данные о здоровье на этом iPhone не удаляются."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Friends、托管云端数据和 NOOP 账户将在 24 小时冷静期后安排删除。此 iPhone 上的本地健康数据不会被删除。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"Friends、受管理的雲端資料與 NOOP 帳戶將在 24 小時冷靜期後安排刪除。這部 iPhone 上的本機健康資料不會刪除。"}}}},
     "Friends and account services are paused during the 24-hour cooling-off period. Local health data remains on this iPhone.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Friends und Kontodienste sind während der 24-stündigen Bedenkzeit pausiert. Lokale Gesundheitsdaten bleiben auf diesem iPhone."}},"es":{"stringUnit":{"state":"translated","value":"Friends y los servicios de la cuenta están en pausa durante el periodo de espera de 24 horas. Los datos de salud locales permanecen en este iPhone."}},"fr":{"stringUnit":{"state":"translated","value":"Friends et les services du compte sont suspendus pendant le délai de réflexion de 24 heures. Les données de santé locales restent sur cet iPhone."}},"it":{"stringUnit":{"state":"translated","value":"Friends e i servizi dell’account sono sospesi durante il periodo di attesa di 24 ore. I dati sanitari locali restano su questo iPhone."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O Friends e os serviços da conta estão em pausa durante o período de reflexão de 24 horas. Os dados de saúde locais permanecem neste iPhone."}},"ru":{"stringUnit":{"state":"translated","value":"Friends и службы учётной записи приостановлены на 24-часовой период ожидания. Локальные данные о здоровье остаются на этом iPhone."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Friends 和账户服务将在 24 小时冷静期内暂停。本地健康数据仍保留在此 iPhone 上。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"Friends 與帳戶服務會在 24 小時冷靜期內暫停。本機健康資料仍保留在這部 iPhone 上。"}}}},
     "Friends is unavailable": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Friends ist nicht verfügbar"}},"es":{"stringUnit":{"state":"translated","value":"Friends no está disponible"}},"fr":{"stringUnit":{"state":"translated","value":"Friends n’est pas disponible"}},"it":{"stringUnit":{"state":"translated","value":"Friends non è disponibile"}},"pt-PT":{"stringUnit":{"state":"translated","value":"O Friends não está disponível"}},"ru":{"stringUnit":{"state":"translated","value":"Friends недоступен"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Friends 不可用"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"Friends 無法使用"}}}},
@@ -150,7 +150,7 @@
     "No completed band claim was found. Try confirmation again.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Kein abgeschlossener Besitzanspruch gefunden. Versuche die Bestätigung erneut."}},"es":{"stringUnit":{"state":"translated","value":"No se encontró una reclamación de banda completada. Intenta confirmarla de nuevo."}},"fr":{"stringUnit":{"state":"translated","value":"Aucune attribution de bracelet terminée n’a été trouvée. Réessayez la confirmation."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Não foi encontrada uma reivindicação de bracelete concluída. Tente confirmar novamente."}}}},
     "Keep the band worn and nearby until confirmation completes.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Trage das Band und halte es in der Nähe, bis die Bestätigung abgeschlossen ist."}},"es":{"stringUnit":{"state":"translated","value":"Mantén la banda puesta y cerca hasta que finalice la confirmación."}},"fr":{"stringUnit":{"state":"translated","value":"Gardez le bracelet porté et à proximité jusqu’à la fin de la confirmation."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Mantenha a bracelete colocada e próxima até a confirmação terminar."}}}},
     "Confirming band ownership": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Bandbesitz wird bestätigt"}},"es":{"stringUnit":{"state":"translated","value":"Confirmando la propiedad de la banda"}},"fr":{"stringUnit":{"state":"translated","value":"Confirmation de la propriété du bracelet"}},"pt-PT":{"stringUnit":{"state":"translated","value":"A confirmar a propriedade da bracelete"}}}},
-    "Verification code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Bestätigungscode"}},"es":{"stringUnit":{"state":"translated","value":"Código de verificación"}},"fr":{"stringUnit":{"state":"translated","value":"Code de vérification"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Código de verificação"}}}},
+    "Verification code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Bestätigungscode"}},"es":{"stringUnit":{"state":"translated","value":"Código de verificación"}},"fr":{"stringUnit":{"state":"translated","value":"Code de vérification"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Código de verificação"}},"it":{"stringUnit":{"state":"translated","value":"Codice di verifica"}},"ru":{"stringUnit":{"state":"translated","value":"Код подтверждения"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"驗證碼"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"验证码"}}}},
     "Confirm worn band": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Getragenes Band bestätigen"}},"es":{"stringUnit":{"state":"translated","value":"Confirmar banda puesta"}},"fr":{"stringUnit":{"state":"translated","value":"Confirmer le bracelet porté"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Confirmar bracelete colocada"}}}},
     "Confirm password": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Passwort bestätigen"}},"es":{"stringUnit":{"state":"translated","value":"Confirmar contraseña"}},"fr":{"stringUnit":{"state":"translated","value":"Confirmer le mot de passe"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Confirmar palavra-passe"}}}},
     "Create": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Erstellen"}},"es":{"stringUnit":{"state":"translated","value":"Crear"}},"fr":{"stringUnit":{"state":"translated","value":"Créer"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Criar"}}}},
@@ -328,16 +328,16 @@
     "Last cloud sync %@": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Letzte Cloud-Synchronisierung %1$@"}},"es":{"stringUnit":{"state":"translated","value":"Última sincronización en la nube %1$@"}},"fr":{"stringUnit":{"state":"translated","value":"Dernière synchronisation cloud %1$@"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Última sincronização na nuvem %1$@"}}}},
     "NOOP+": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+"}},"es":{"stringUnit":{"state":"translated","value":"NOOP+"}},"fr":{"stringUnit":{"state":"translated","value":"NOOP+"}},"pt-PT":{"stringUnit":{"state":"translated","value":"NOOP+"}}}},
     "Close NOOP+ setup": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ Einrichtung schließen"}},"es":{"stringUnit":{"state":"translated","value":"Cerrar configuración de NOOP+"}},"fr":{"stringUnit":{"state":"translated","value":"Fermer la configuration NOOP+"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Fechar configuração do NOOP+"}}}},
-    "Delete NOOP account?": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP Konto löschen?"}},"es":{"stringUnit":{"state":"translated","value":"¿Eliminar la cuenta NOOP?"}},"fr":{"stringUnit":{"state":"translated","value":"Supprimer le compte NOOP ?"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Eliminar a conta NOOP?"}}}},
-    "Send verification code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Bestätigungscode senden"}},"es":{"stringUnit":{"state":"translated","value":"Enviar código de verificación"}},"fr":{"stringUnit":{"state":"translated","value":"Envoyer le code de vérification"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Enviar código de verificação"}}}},
-    "Cloud data and your NOOP account will be scheduled for deletion after a 24-hour cooling-off period. Data stored locally on this iPhone is not deleted.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Cloud-Daten und das NOOP Konto werden nach einer 24-stündigen Bedenkzeit zur Löschung vorgemerkt. Lokal auf diesem iPhone gespeicherte Daten werden nicht gelöscht."}},"es":{"stringUnit":{"state":"translated","value":"Los datos en la nube y tu cuenta NOOP se programarán para eliminarse tras un periodo de espera de 24 horas. Los datos almacenados localmente en este iPhone no se eliminarán."}},"fr":{"stringUnit":{"state":"translated","value":"Les données cloud et votre compte NOOP seront programmés pour suppression après un délai de réflexion de 24 heures. Les données stockées localement sur cet iPhone ne sont pas supprimées."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Os dados na nuvem e a sua conta NOOP serão agendados para eliminação após um período de reflexão de 24 horas. Os dados guardados localmente neste iPhone não são eliminados."}}}},
+    "Delete NOOP account?": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP Konto löschen?"}},"es":{"stringUnit":{"state":"translated","value":"¿Eliminar la cuenta NOOP?"}},"fr":{"stringUnit":{"state":"translated","value":"Supprimer le compte NOOP ?"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Eliminar a conta NOOP?"}},"it":{"stringUnit":{"state":"translated","value":"Eliminare l’account NOOP?"}},"ru":{"stringUnit":{"state":"translated","value":"Удалить учетную запись NOOP?"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"要刪除 NOOP 帳戶嗎？"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"删除 NOOP 账户？"}}}},
+    "Send verification code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Bestätigungscode senden"}},"es":{"stringUnit":{"state":"translated","value":"Enviar código de verificación"}},"fr":{"stringUnit":{"state":"translated","value":"Envoyer le code de vérification"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Enviar código de verificação"}},"it":{"stringUnit":{"state":"translated","value":"Invia codice di verifica"}},"ru":{"stringUnit":{"state":"translated","value":"Отправить код подтверждения"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"傳送驗證碼"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"发送验证码"}}}},
+    "Cloud data and your NOOP account will be scheduled for deletion after a 24-hour cooling-off period. Data stored locally on this iPhone is not deleted.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Cloud-Daten und das NOOP Konto werden nach einer 24-stündigen Bedenkzeit zur Löschung vorgemerkt. Lokal auf diesem iPhone gespeicherte Daten werden nicht gelöscht."}},"es":{"stringUnit":{"state":"translated","value":"Los datos en la nube y tu cuenta NOOP se programarán para eliminarse tras un periodo de espera de 24 horas. Los datos almacenados localmente en este iPhone no se eliminarán."}},"fr":{"stringUnit":{"state":"translated","value":"Les données cloud et votre compte NOOP seront programmés pour suppression après un délai de réflexion de 24 heures. Les données stockées localement sur cet iPhone ne sont pas supprimées."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Os dados na nuvem e a sua conta NOOP serão agendados para eliminação após um período de reflexão de 24 horas. Os dados guardados localmente neste iPhone não são eliminados."}},"it":{"stringUnit":{"state":"translated","value":"I dati nel cloud e il tuo account NOOP saranno programmati per l’eliminazione dopo un periodo di ripensamento di 24 ore. I dati archiviati localmente su questo iPhone non verranno eliminati."}},"ru":{"stringUnit":{"state":"translated","value":"Облачные данные и ваша учетная запись NOOP будут запланированы к удалению после 24-часового периода ожидания. Данные, хранящиеся локально на этом iPhone, не будут удалены."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"雲端資料與您的 NOOP 帳戶將在 24 小時冷靜期後排程刪除。儲存在此 iPhone 上的本機資料不會被刪除。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"云端数据和您的 NOOP 账户将在 24 小时冷静期后安排删除。存储在此 iPhone 上的本地数据不会被删除。"}}}},
     "Export complete cloud history?": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Vollständigen Cloud-Verlauf exportieren?"}},"es":{"stringUnit":{"state":"translated","value":"¿Exportar todo el historial de la nube?"}},"fr":{"stringUnit":{"state":"translated","value":"Exporter tout l’historique cloud ?"}},"it":{"stringUnit":{"state":"translated","value":"Esportare l’intera cronologia cloud?"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Exportar todo o histórico da nuvem?"}},"ru":{"stringUnit":{"state":"translated","value":"Экспортировать всю историю из облака?"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"要导出完整的云端历史记录吗？"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"要匯出完整的雲端歷史記錄嗎？"}}}},
     "NOOP will first finish backing up current phone data, then download every cloud chunk and personal record, including history no longer stored on this iPhone. The ZIP contains readable sensitive health data and may be large. Keep NOOP open until the share sheet appears.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP schließt zuerst das Backup der aktuellen Telefondaten ab und lädt dann alle Cloud-Blöcke und persönlichen Datensätze herunter, einschließlich des Verlaufs, der nicht mehr auf diesem iPhone gespeichert ist. Die ZIP-Datei enthält lesbare, sensible Gesundheitsdaten und kann groß sein. Lass NOOP geöffnet, bis das Teilen-Menü erscheint."}},"es":{"stringUnit":{"state":"translated","value":"NOOP terminará primero la copia de los datos actuales del teléfono y después descargará cada bloque de la nube y registro personal, incluido el historial que ya no esté guardado en este iPhone. El ZIP contiene datos de salud sensibles legibles y puede ser grande. Mantén NOOP abierto hasta que aparezca la hoja para compartir."}},"fr":{"stringUnit":{"state":"translated","value":"NOOP terminera d’abord la sauvegarde des données actuelles du téléphone, puis téléchargera chaque bloc cloud et enregistrement personnel, y compris l’historique qui n’est plus stocké sur cet iPhone. Le fichier ZIP contient des données de santé sensibles lisibles et peut être volumineux. Gardez NOOP ouvert jusqu’à l’apparition de la feuille de partage."}},"it":{"stringUnit":{"state":"translated","value":"NOOP completerà prima il backup dei dati attuali del telefono, quindi scaricherà ogni blocco cloud e record personale, inclusa la cronologia non più archiviata su questo iPhone. Il file ZIP contiene dati sanitari sensibili leggibili e può essere di grandi dimensioni. Mantieni NOOP aperto finché non compare il foglio di condivisione."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O NOOP concluirá primeiro a cópia dos dados atuais do telemóvel e depois transferirá todos os blocos da nuvem e registos pessoais, incluindo o histórico que já não está guardado neste iPhone. O ZIP contém dados de saúde sensíveis legíveis e pode ser grande. Mantenha o NOOP aberto até aparecer a folha de partilha."}},"ru":{"stringUnit":{"state":"translated","value":"NOOP сначала завершит резервное копирование текущих данных телефона, затем загрузит все облачные блоки и личные записи, включая историю, которая больше не хранится на этом iPhone. ZIP-архив содержит читаемые конфиденциальные данные о здоровье и может быть большим. Не закрывайте NOOP, пока не появится меню «Поделиться»."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"NOOP 会先完成当前手机数据的备份，然后下载所有云端数据块和个人记录，包括已不再存储于此 iPhone 上的历史记录。ZIP 文件包含可读取的敏感健康数据，且文件可能较大。请保持 NOOP 打开，直到共享菜单出现。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"NOOP 會先完成目前手機資料的備份，然後下載所有雲端資料區塊和個人記錄，包括已不再儲存於此 iPhone 上的歷史記錄。ZIP 檔案包含可讀取的敏感健康資料，且檔案可能很大。請保持 NOOP 開啟，直到分享選單出現。"}}}},
     "Revoke this NOOP+ device?": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Diesem NOOP+ Gerät den Zugriff entziehen?"}},"es":{"stringUnit":{"state":"translated","value":"¿Revocar este dispositivo NOOP+?"}},"fr":{"stringUnit":{"state":"translated","value":"Révoquer cet appareil NOOP+ ?"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Revogar este dispositivo NOOP+?"}}}},
     "It will stop server sync and must enroll again before it can access this NOOP+ account. Local data on that device and data already backed up are not deleted.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Serversynchronisierung wird beendet und das Gerät muss erneut registriert werden, bevor es auf dieses NOOP+ Konto zugreifen kann. Lokale Daten auf diesem Gerät und bereits gesicherte Daten werden nicht gelöscht."}},"es":{"stringUnit":{"state":"translated","value":"Dejará de sincronizarse con el servidor y deberá volver a registrarse para acceder a esta cuenta NOOP+. Los datos locales de ese dispositivo y los datos ya copiados no se eliminarán."}},"fr":{"stringUnit":{"state":"translated","value":"La synchronisation avec le serveur s’arrêtera et l’appareil devra être réinscrit avant de pouvoir accéder à ce compte NOOP+. Les données locales de cet appareil et les données déjà sauvegardées ne sont pas supprimées."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A sincronização com o servidor será interrompida e o dispositivo terá de ser novamente registado antes de aceder a esta conta NOOP+. Os dados locais desse dispositivo e os dados já copiados não são eliminados."}}}},
     "Revoke": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Zugriff entziehen"}},"es":{"stringUnit":{"state":"translated","value":"Revocar"}},"fr":{"stringUnit":{"state":"translated","value":"Révoquer"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Revogar"}}}},
     "NOOP+ phone number": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ Telefonnummer"}},"es":{"stringUnit":{"state":"translated","value":"Número de teléfono de NOOP+"}},"fr":{"stringUnit":{"state":"translated","value":"Numéro de téléphone NOOP+"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Número de telefone do NOOP+"}}}},
-    "NOOP+ verification code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ Bestätigungscode"}},"es":{"stringUnit":{"state":"translated","value":"Código de verificación de NOOP+"}},"fr":{"stringUnit":{"state":"translated","value":"Code de vérification NOOP+"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Código de verificação do NOOP+"}}}},
+    "NOOP+ verification code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ Bestätigungscode"}},"es":{"stringUnit":{"state":"translated","value":"Código de verificación de NOOP+"}},"fr":{"stringUnit":{"state":"translated","value":"Code de vérification NOOP+"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Código de verificação do NOOP+"}},"it":{"stringUnit":{"state":"translated","value":"Codice di verifica NOOP+"}},"ru":{"stringUnit":{"state":"translated","value":"Код подтверждения NOOP+"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"NOOP+ 驗證碼"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"NOOP+ 验证码"}}}},
     "Use a different number": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Andere Nummer verwenden"}},"es":{"stringUnit":{"state":"translated","value":"Usar otro número"}},"fr":{"stringUnit":{"state":"translated","value":"Utiliser un autre numéro"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Usar outro número"}}}},
     "I allow NOOP to upload my health backup to NOOP+.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Ich erlaube NOOP, mein Gesundheits-Backup zu NOOP+ hochzuladen."}},"es":{"stringUnit":{"state":"translated","value":"Permito que NOOP suba mi copia de salud a NOOP+."}},"fr":{"stringUnit":{"state":"translated","value":"J’autorise NOOP à envoyer ma sauvegarde de santé vers NOOP+."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Permito que o NOOP envie a minha cópia de saúde para o NOOP+."}}}},
     "Sign out without enabling cloud backup": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Abmelden, ohne Cloud-Backup zu aktivieren"}},"es":{"stringUnit":{"state":"translated","value":"Cerrar sesión sin activar la copia en la nube"}},"fr":{"stringUnit":{"state":"translated","value":"Se déconnecter sans activer la sauvegarde cloud"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Terminar sessão sem ativar a cópia na nuvem"}}}},
@@ -346,8 +346,8 @@
     "After exact cloud validation, keeps %lld days of raw optical, motion, and auxiliary data and %lld days of essential sensor detail on this iPhone. Daily metrics, sleep, workouts, body measurements, journals, plans, and preferences remain local.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Behält nach exakter Cloud-Bestätigung %lld Tage optischer, Bewegungs- und zusätzlicher Rohdaten sowie %lld Tage wesentlicher Sensordetails auf diesem iPhone. Tagesmetriken, Schlaf, Workouts, Körpermessungen, Journale, Pläne und Einstellungen bleiben lokal."}},"es":{"stringUnit":{"state":"translated","value":"Tras la validación exacta en la nube, conserva %lld días de datos ópticos, de movimiento y auxiliares sin procesar y %lld días de detalles esenciales de sensores en este iPhone. Las métricas diarias, el sueño, los entrenamientos, las medidas corporales, los diarios, los planes y las preferencias permanecen en local."}},"fr":{"stringUnit":{"state":"translated","value":"Après validation exacte dans le cloud, conserve %lld jours de données optiques, de mouvement et auxiliaires brutes et %lld jours de détails essentiels des capteurs sur cet iPhone. Les mesures quotidiennes, le sommeil, les entraînements, les mensurations, les journaux, les programmes et les préférences restent locaux."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Após validação exata na cloud, mantém %lld dias de dados óticos, de movimento e auxiliares brutos e %lld dias de detalhes essenciais dos sensores neste iPhone. As métricas diárias, sono, treinos, medições corporais, diários, planos e preferências permanecem localmente."}}}},
     "NOOP+ devices": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ Geräte"}},"es":{"stringUnit":{"state":"translated","value":"Dispositivos NOOP+"}},"fr":{"stringUnit":{"state":"translated","value":"Appareils NOOP+"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Dispositivos NOOP+"}}}},
     "Last successful sync %@": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Letzte erfolgreiche Synchronisierung %1$@"}},"es":{"stringUnit":{"state":"translated","value":"Última sincronización correcta %1$@"}},"fr":{"stringUnit":{"state":"translated","value":"Dernière synchronisation réussie %1$@"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Última sincronização bem-sucedida %1$@"}}}},
-    "Delete NOOP account…": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP Konto löschen…"}},"es":{"stringUnit":{"state":"translated","value":"Eliminar la cuenta NOOP…"}},"fr":{"stringUnit":{"state":"translated","value":"Supprimer le compte NOOP…"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Eliminar a conta NOOP…"}}}},
-    "Account deletion verification code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Bestätigungscode für die Kontolöschung"}},"es":{"stringUnit":{"state":"translated","value":"Código de verificación para eliminar la cuenta"}},"fr":{"stringUnit":{"state":"translated","value":"Code de vérification de suppression du compte"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Código de verificação da eliminação da conta"}}}},
+    "Delete NOOP account…": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP Konto löschen…"}},"es":{"stringUnit":{"state":"translated","value":"Eliminar la cuenta NOOP…"}},"fr":{"stringUnit":{"state":"translated","value":"Supprimer le compte NOOP…"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Eliminar a conta NOOP…"}},"it":{"stringUnit":{"state":"translated","value":"Elimina account NOOP…"}},"ru":{"stringUnit":{"state":"translated","value":"Удалить учетную запись NOOP…"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"刪除 NOOP 帳戶…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"删除 NOOP 账户…"}}}},
+    "Account deletion verification code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Bestätigungscode für die Kontolöschung"}},"es":{"stringUnit":{"state":"translated","value":"Código de verificación para eliminar la cuenta"}},"fr":{"stringUnit":{"state":"translated","value":"Code de vérification de suppression du compte"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Código de verificação da eliminação da conta"}},"it":{"stringUnit":{"state":"translated","value":"Codice di verifica per l’eliminazione dell’account"}},"ru":{"stringUnit":{"state":"translated","value":"Код подтверждения удаления учетной записи"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"帳戶刪除驗證碼"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"账户删除验证码"}}}},
     "Deletion can begin after %@.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Löschung kann nach %1$@ beginnen."}},"es":{"stringUnit":{"state":"translated","value":"La eliminación puede comenzar después de %1$@."}},"fr":{"stringUnit":{"state":"translated","value":"La suppression peut commencer après %1$@."}},"it":{"stringUnit":{"state":"translated","value":"L’eliminazione può iniziare dopo %1$@."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A eliminação pode começar depois de %1$@."}},"ru":{"stringUnit":{"state":"translated","value":"Удаление может начаться после %1$@."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"可在 %1$@ 后开始删除。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"可在 %1$@ 後開始刪除。"}}}},
     "Deletion time unavailable.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Löschzeitpunkt nicht verfügbar."}},"es":{"stringUnit":{"state":"translated","value":"La hora de eliminación no está disponible."}},"fr":{"stringUnit":{"state":"translated","value":"Heure de suppression indisponible."}},"it":{"stringUnit":{"state":"translated","value":"Orario di eliminazione non disponibile."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Hora de eliminação indisponível."}},"ru":{"stringUnit":{"state":"translated","value":"Время удаления недоступно."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"删除时间不可用。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"無法取得刪除時間。"}}}},
     "Cancel ownership account deletion?": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Löschung des Besitzkontos abbrechen?"}},"es":{"stringUnit":{"state":"translated","value":"¿Cancelar la eliminación de la cuenta de propiedad?"}},"fr":{"stringUnit":{"state":"translated","value":"Annuler la suppression du compte de propriété ?"}},"it":{"stringUnit":{"state":"translated","value":"Annullare l’eliminazione dell’account di proprietà?"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Cancelar a eliminação da conta de propriedade?"}},"ru":{"stringUnit":{"state":"translated","value":"Отменить удаление учетной записи владельца?"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"要取消删除所有权账户吗？"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"要取消刪除所有權帳戶嗎？"}}}},
@@ -371,8 +371,8 @@
     "Preparing a private ZIP": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Private ZIP-Datei wird vorbereitet"}},"es":{"stringUnit":{"state":"translated","value":"Preparando un ZIP privado"}},"fr":{"stringUnit":{"state":"translated","value":"Préparation d’un ZIP privé"}},"pt-PT":{"stringUnit":{"state":"translated","value":"A preparar um ZIP privado"}}}},
     "Reading bounded logs and file-size metadata. Your health database stays on this iPhone.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Begrenzte Protokolle und Dateigrößen-Metadaten werden gelesen. Deine Gesundheitsdatenbank bleibt auf diesem iPhone."}},"es":{"stringUnit":{"state":"translated","value":"Leyendo registros limitados y metadatos de tamaño de archivo. Tu base de datos de salud permanece en este iPhone."}},"fr":{"stringUnit":{"state":"translated","value":"Lecture de journaux limités et des métadonnées de taille des fichiers. Votre base de données de santé reste sur cet iPhone."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A ler registos limitados e metadados de tamanho dos ficheiros. A sua base de dados de saúde permanece neste iPhone."}}}},
     "REDACTED PREVIEW": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"BEREINIGTE VORSCHAU"}},"es":{"stringUnit":{"state":"translated","value":"VISTA PREVIA CENSURADA"}},"fr":{"stringUnit":{"state":"translated","value":"APERÇU EXPURGÉ"}},"pt-PT":{"stringUnit":{"state":"translated","value":"PRÉ-VISUALIZAÇÃO EXPURGADA"}}}},
-    "A verification code was sent.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Ein Bestätigungscode wurde gesendet."}},"es":{"stringUnit":{"state":"translated","value":"Se ha enviado un código de verificación."}},"fr":{"stringUnit":{"state":"translated","value":"Un code de vérification a été envoyé."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Foi enviado um código de verificação."}}}},
-    "Request a new verification code.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Fordere einen neuen Bestätigungscode an."}},"es":{"stringUnit":{"state":"translated","value":"Solicita un nuevo código de verificación."}},"fr":{"stringUnit":{"state":"translated","value":"Demandez un nouveau code de vérification."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Peça um novo código de verificação."}}}},
+    "A verification code was sent.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Ein Bestätigungscode wurde gesendet."}},"es":{"stringUnit":{"state":"translated","value":"Se ha enviado un código de verificación."}},"fr":{"stringUnit":{"state":"translated","value":"Un code de vérification a été envoyé."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Foi enviado um código de verificação."}},"it":{"stringUnit":{"state":"translated","value":"È stato inviato un codice di verifica."}},"ru":{"stringUnit":{"state":"translated","value":"Код подтверждения отправлен."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"已傳送驗證碼。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"验证码已发送。"}}}},
+    "Request a new verification code.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Fordere einen neuen Bestätigungscode an."}},"es":{"stringUnit":{"state":"translated","value":"Solicita un nuevo código de verificación."}},"fr":{"stringUnit":{"state":"translated","value":"Demandez un nouveau code de vérification."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Peça um novo código de verificação."}},"it":{"stringUnit":{"state":"translated","value":"Richiedi un nuovo codice di verifica."}},"ru":{"stringUnit":{"state":"translated","value":"Запросите новый код подтверждения."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"要求新的驗證碼。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请求新的验证码。"}}}},
     "Phone verified. Review what NOOP+ will store before allowing upload.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Telefon bestätigt. Prüfe, was NOOP+ speichert, bevor du den Upload erlaubst."}},"es":{"stringUnit":{"state":"translated","value":"Teléfono verificado. Revisa qué almacenará NOOP+ antes de permitir la subida."}},"fr":{"stringUnit":{"state":"translated","value":"Téléphone vérifié. Vérifiez ce que NOOP+ stockera avant d’autoriser l’envoi."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Telemóvel verificado. Reveja o que o NOOP+ irá armazenar antes de permitir o envio."}}}},
     "Signed in to NOOP+.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Bei NOOP+ angemeldet."}},"es":{"stringUnit":{"state":"translated","value":"Sesión iniciada en NOOP+."}},"fr":{"stringUnit":{"state":"translated","value":"Connecté à NOOP+."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Sessão iniciada no NOOP+."}}}},
     "NOOP+ cloud backup is on. Your local NOOP features remain account-free.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Das NOOP+ Cloud-Backup ist aktiviert. Deine lokalen NOOP-Funktionen bleiben ohne Konto verfügbar."}},"es":{"stringUnit":{"state":"translated","value":"La copia en la nube de NOOP+ está activa. Tus funciones locales de NOOP siguen disponibles sin cuenta."}},"fr":{"stringUnit":{"state":"translated","value":"La sauvegarde cloud NOOP+ est activée. Vos fonctions NOOP locales restent accessibles sans compte."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A cópia na nuvem do NOOP+ está ativa. As suas funcionalidades locais do NOOP continuam disponíveis sem conta."}}}},
@@ -381,19 +381,19 @@
     "Cloud-history export was canceled.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Der Cloud-Verlaufsexport wurde abgebrochen."}},"es":{"stringUnit":{"state":"translated","value":"Se canceló la exportación del historial de la nube."}},"fr":{"stringUnit":{"state":"translated","value":"L’exportation de l’historique cloud a été annulée."}},"it":{"stringUnit":{"state":"translated","value":"L’esportazione della cronologia cloud è stata annullata."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A exportação do histórico da nuvem foi cancelada."}},"ru":{"stringUnit":{"state":"translated","value":"Экспорт истории из облака отменен."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"云端历史记录导出已取消。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"雲端歷史記錄匯出已取消。"}}}},
     "The selected NOOP+ device was revoked.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Dem ausgewählten NOOP+ Gerät wurde der Zugriff entzogen."}},"es":{"stringUnit":{"state":"translated","value":"Se revocó el dispositivo NOOP+ seleccionado."}},"fr":{"stringUnit":{"state":"translated","value":"L’accès de l’appareil NOOP+ sélectionné a été révoqué."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O acesso do dispositivo NOOP+ selecionado foi revogado."}}}},
     "NOOP+ is disconnected on this iPhone. Local data and cloud data were not deleted.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ ist auf diesem iPhone getrennt. Lokale und Cloud-Daten wurden nicht gelöscht."}},"es":{"stringUnit":{"state":"translated","value":"NOOP+ está desconectado en este iPhone. No se eliminaron los datos locales ni los de la nube."}},"fr":{"stringUnit":{"state":"translated","value":"NOOP+ est déconnecté sur cet iPhone. Les données locales et cloud n’ont pas été supprimées."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O NOOP+ está desligado neste iPhone. Os dados locais e da nuvem não foram eliminados."}}}},
-    "A fresh verification code was sent to %@.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Ein neuer Bestätigungscode wurde an %1$@ gesendet."}},"es":{"stringUnit":{"state":"translated","value":"Se envió un nuevo código de verificación a %1$@."}},"fr":{"stringUnit":{"state":"translated","value":"Un nouveau code de vérification a été envoyé à %1$@."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Foi enviado um novo código de verificação para %1$@."}}}},
-    "Send a fresh verification code before deleting your NOOP account.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Sende vor dem Löschen deines NOOP Kontos einen neuen Bestätigungscode."}},"es":{"stringUnit":{"state":"translated","value":"Envía un nuevo código de verificación antes de eliminar tu cuenta NOOP."}},"fr":{"stringUnit":{"state":"translated","value":"Envoyez un nouveau code de vérification avant de supprimer votre compte NOOP."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Envie um novo código de verificação antes de eliminar a sua conta NOOP."}}}},
-    "NOOP account deletion is scheduled after the 24-hour cooling-off period.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Löschung des NOOP Kontos ist nach der 24-stündigen Bedenkzeit geplant."}},"es":{"stringUnit":{"state":"translated","value":"La eliminación de la cuenta NOOP está programada tras el periodo de espera de 24 horas."}},"fr":{"stringUnit":{"state":"translated","value":"La suppression du compte NOOP est programmée après le délai de réflexion de 24 heures."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A eliminação da conta NOOP está agendada para depois do período de reflexão de 24 horas."}}}},
-    "NOOP account deletion status: %@.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Status der NOOP Kontolöschung: %1$@."}},"es":{"stringUnit":{"state":"translated","value":"Estado de eliminación de la cuenta NOOP: %1$@."}},"fr":{"stringUnit":{"state":"translated","value":"État de la suppression du compte NOOP : %1$@."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Estado da eliminação da conta NOOP: %1$@."}}}},
+    "A fresh verification code was sent to %@.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Ein neuer Bestätigungscode wurde an %1$@ gesendet."}},"es":{"stringUnit":{"state":"translated","value":"Se envió un nuevo código de verificación a %1$@."}},"fr":{"stringUnit":{"state":"translated","value":"Un nouveau code de vérification a été envoyé à %1$@."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Foi enviado um novo código de verificação para %1$@."}},"it":{"stringUnit":{"state":"translated","value":"È stato inviato un nuovo codice di verifica a %1$@."}},"ru":{"stringUnit":{"state":"translated","value":"Новый код подтверждения отправлен на %1$@."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"新的驗證碼已傳送至 %1$@。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"新的验证码已发送至 %1$@。"}}}},
+    "Send a fresh verification code before deleting your NOOP account.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Sende vor dem Löschen deines NOOP Kontos einen neuen Bestätigungscode."}},"es":{"stringUnit":{"state":"translated","value":"Envía un nuevo código de verificación antes de eliminar tu cuenta NOOP."}},"fr":{"stringUnit":{"state":"translated","value":"Envoyez un nouveau code de vérification avant de supprimer votre compte NOOP."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Envie um novo código de verificação antes de eliminar a sua conta NOOP."}},"it":{"stringUnit":{"state":"translated","value":"Invia un nuovo codice di verifica prima di eliminare il tuo account NOOP."}},"ru":{"stringUnit":{"state":"translated","value":"Перед удалением учетной записи NOOP отправьте новый код подтверждения."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"刪除 NOOP 帳戶前，請先傳送新的驗證碼。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"删除 NOOP 账户前，请先发送新的验证码。"}}}},
+    "NOOP account deletion is scheduled after the 24-hour cooling-off period.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Löschung des NOOP Kontos ist nach der 24-stündigen Bedenkzeit geplant."}},"es":{"stringUnit":{"state":"translated","value":"La eliminación de la cuenta NOOP está programada tras el periodo de espera de 24 horas."}},"fr":{"stringUnit":{"state":"translated","value":"La suppression du compte NOOP est programmée après le délai de réflexion de 24 heures."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A eliminação da conta NOOP está agendada para depois do período de reflexão de 24 horas."}},"it":{"stringUnit":{"state":"translated","value":"L’eliminazione dell’account NOOP è programmata dopo il periodo di ripensamento di 24 ore."}},"ru":{"stringUnit":{"state":"translated","value":"Удаление учетной записи NOOP запланировано после 24-часового периода ожидания."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"NOOP 帳戶將在 24 小時冷靜期後排程刪除。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"NOOP 账户将在 24 小时冷静期后安排删除。"}}}},
+    "NOOP account deletion status: %@.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Status der NOOP Kontolöschung: %1$@."}},"es":{"stringUnit":{"state":"translated","value":"Estado de eliminación de la cuenta NOOP: %1$@."}},"fr":{"stringUnit":{"state":"translated","value":"État de la suppression du compte NOOP : %1$@."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Estado da eliminação da conta NOOP: %1$@."}},"it":{"stringUnit":{"state":"translated","value":"Stato eliminazione account NOOP: %1$@."}},"ru":{"stringUnit":{"state":"translated","value":"Статус удаления учетной записи NOOP: %1$@."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"NOOP 帳戶刪除狀態：%1$@。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"NOOP 账户删除状态：%1$@。"}}}},
     "Syncing NOOP+…": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ wird synchronisiert…"}},"es":{"stringUnit":{"state":"translated","value":"Sincronizando NOOP+…"}},"fr":{"stringUnit":{"state":"translated","value":"Synchronisation de NOOP+…"}},"pt-PT":{"stringUnit":{"state":"translated","value":"A sincronizar o NOOP+…"}}}},
     "Updating NOOP+ in the background…": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ wird im Hintergrund aktualisiert…"}},"es":{"stringUnit":{"state":"translated","value":"Actualizando NOOP+ en segundo plano…"}},"fr":{"stringUnit":{"state":"translated","value":"Mise à jour de NOOP+ en arrière-plan…"}},"pt-PT":{"stringUnit":{"state":"translated","value":"A atualizar o NOOP+ em segundo plano…"}}}},
     "Finishing current phone backup before export…": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Das aktuelle Telefon-Backup wird vor dem Export abgeschlossen…"}},"es":{"stringUnit":{"state":"translated","value":"Terminando la copia actual del teléfono antes de exportar…"}},"fr":{"stringUnit":{"state":"translated","value":"Finalisation de la sauvegarde actuelle du téléphone avant l’exportation…"}},"it":{"stringUnit":{"state":"translated","value":"Completamento del backup attuale del telefono prima dell’esportazione…"}},"pt-PT":{"stringUnit":{"state":"translated","value":"A concluir a cópia atual do telemóvel antes da exportação…"}},"ru":{"stringUnit":{"state":"translated","value":"Завершение текущего резервного копирования данных телефона перед экспортом…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在完成当前手机备份，然后再导出…"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"正在完成目前手機備份，然後再匯出…"}}}},
     "NOOP+ backup is continuing in the background.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Das NOOP+ Backup wird im Hintergrund fortgesetzt."}},"es":{"stringUnit":{"state":"translated","value":"La copia de NOOP+ continúa en segundo plano."}},"fr":{"stringUnit":{"state":"translated","value":"La sauvegarde NOOP+ se poursuit en arrière-plan."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A cópia do NOOP+ continua em segundo plano."}}}},
     "NOOP+ is up to date.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ ist auf dem neuesten Stand."}},"es":{"stringUnit":{"state":"translated","value":"NOOP+ está actualizado."}},"fr":{"stringUnit":{"state":"translated","value":"NOOP+ est à jour."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O NOOP+ está atualizado."}}}},
     "NOOP+ updated %@.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ hat %1$@ aktualisiert."}},"es":{"stringUnit":{"state":"translated","value":"NOOP+ ha actualizado %1$@."}},"fr":{"stringUnit":{"state":"translated","value":"NOOP+ a mis à jour %1$@."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O NOOP+ atualizou %1$@."}}}},
-    "NOOP account deletion completed. Local NOOP data remains on this iPhone.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Löschung des NOOP Kontos ist abgeschlossen. Lokale NOOP-Daten bleiben auf diesem iPhone."}},"es":{"stringUnit":{"state":"translated","value":"Se completó la eliminación de la cuenta NOOP. Los datos locales de NOOP permanecen en este iPhone."}},"fr":{"stringUnit":{"state":"translated","value":"La suppression du compte NOOP est terminée. Les données NOOP locales restent sur cet iPhone."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A eliminação da conta NOOP foi concluída. Os dados locais do NOOP permanecem neste iPhone."}}}},
-    "NOOP account deletion is processing in the cloud. Local NOOP data remains on this iPhone.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Löschung des NOOP Kontos wird in der Cloud verarbeitet. Lokale NOOP-Daten bleiben auf diesem iPhone."}},"es":{"stringUnit":{"state":"translated","value":"La eliminación de la cuenta NOOP se está procesando en la nube. Los datos locales de NOOP permanecen en este iPhone."}},"fr":{"stringUnit":{"state":"translated","value":"La suppression du compte NOOP est en cours dans le cloud. Les données NOOP locales restent sur cet iPhone."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A eliminação da conta NOOP está a ser processada na nuvem. Os dados locais do NOOP permanecem neste iPhone."}}}},
-    "NOOP account deletion was canceled.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Löschung des NOOP Kontos wurde abgebrochen."}},"es":{"stringUnit":{"state":"translated","value":"Se canceló la eliminación de la cuenta NOOP."}},"fr":{"stringUnit":{"state":"translated","value":"La suppression du compte NOOP a été annulée."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A eliminação da conta NOOP foi cancelada."}}}},
+    "NOOP account deletion completed. Local NOOP data remains on this iPhone.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Löschung des NOOP Kontos ist abgeschlossen. Lokale NOOP-Daten bleiben auf diesem iPhone."}},"es":{"stringUnit":{"state":"translated","value":"Se completó la eliminación de la cuenta NOOP. Los datos locales de NOOP permanecen en este iPhone."}},"fr":{"stringUnit":{"state":"translated","value":"La suppression du compte NOOP est terminée. Les données NOOP locales restent sur cet iPhone."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A eliminação da conta NOOP foi concluída. Os dados locais do NOOP permanecem neste iPhone."}},"it":{"stringUnit":{"state":"translated","value":"Eliminazione dell’account NOOP completata. I dati NOOP locali restano su questo iPhone."}},"ru":{"stringUnit":{"state":"translated","value":"Удаление учетной записи NOOP завершено. Локальные данные NOOP остаются на этом iPhone."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"NOOP 帳戶刪除已完成。本機 NOOP 資料仍保留在此 iPhone 上。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"NOOP 账户删除已完成。本地 NOOP 数据仍保留在此 iPhone 上。"}}}},
+    "NOOP account deletion is processing in the cloud. Local NOOP data remains on this iPhone.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Löschung des NOOP Kontos wird in der Cloud verarbeitet. Lokale NOOP-Daten bleiben auf diesem iPhone."}},"es":{"stringUnit":{"state":"translated","value":"La eliminación de la cuenta NOOP se está procesando en la nube. Los datos locales de NOOP permanecen en este iPhone."}},"fr":{"stringUnit":{"state":"translated","value":"La suppression du compte NOOP est en cours dans le cloud. Les données NOOP locales restent sur cet iPhone."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A eliminação da conta NOOP está a ser processada na nuvem. Os dados locais do NOOP permanecem neste iPhone."}},"it":{"stringUnit":{"state":"translated","value":"L’eliminazione dell’account NOOP è in elaborazione nel cloud. I dati NOOP locali restano su questo iPhone."}},"ru":{"stringUnit":{"state":"translated","value":"Удаление учетной записи NOOP обрабатывается в облаке. Локальные данные NOOP остаются на этом iPhone."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"正在雲端處理 NOOP 帳戶刪除。本機 NOOP 資料仍保留在此 iPhone 上。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在云端处理 NOOP 账户删除。本地 NOOP 数据仍保留在此 iPhone 上。"}}}},
+    "NOOP account deletion was canceled.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Löschung des NOOP Kontos wurde abgebrochen."}},"es":{"stringUnit":{"state":"translated","value":"Se canceló la eliminación de la cuenta NOOP."}},"fr":{"stringUnit":{"state":"translated","value":"La suppression du compte NOOP a été annulée."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A eliminação da conta NOOP foi cancelada."}},"it":{"stringUnit":{"state":"translated","value":"L’eliminazione dell’account NOOP è stata annullata."}},"ru":{"stringUnit":{"state":"translated","value":"Удаление учетной записи NOOP отменено."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"NOOP 帳戶刪除已取消。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"NOOP 账户删除已取消。"}}}},
     "Creating a consistent cloud-history snapshot…": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Ein konsistenter Snapshot des Cloud-Verlaufs wird erstellt…"}},"es":{"stringUnit":{"state":"translated","value":"Creando una instantánea coherente del historial de la nube…"}},"fr":{"stringUnit":{"state":"translated","value":"Création d’un instantané cohérent de l’historique cloud…"}},"it":{"stringUnit":{"state":"translated","value":"Creazione di un’istantanea coerente della cronologia cloud…"}},"pt-PT":{"stringUnit":{"state":"translated","value":"A criar um instantâneo consistente do histórico da nuvem…"}},"ru":{"stringUnit":{"state":"translated","value":"Создание согласованного снимка истории из облака…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在创建一致的云端历史记录快照…"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"正在建立一致的雲端歷史記錄快照…"}}}},
     "Exporting cloud history: %1$lld of %2$lld objects, %3$@ of %4$@.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Cloud-Verlauf wird exportiert: %1$lld von %2$lld Objekten, %3$@ von %4$@."}},"es":{"stringUnit":{"state":"translated","value":"Exportando historial de la nube: %1$lld de %2$lld objetos, %3$@ de %4$@."}},"fr":{"stringUnit":{"state":"translated","value":"Exportation de l’historique cloud : %1$lld objets sur %2$lld, %3$@ sur %4$@."}},"it":{"stringUnit":{"state":"translated","value":"Esportazione della cronologia cloud: %1$lld di %2$lld oggetti, %3$@ di %4$@."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A exportar o histórico da nuvem: %1$lld de %2$lld objetos, %3$@ de %4$@."}},"ru":{"stringUnit":{"state":"translated","value":"Экспорт истории из облака: %1$lld из %2$lld объектов, %3$@ из %4$@."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在导出云端历史记录：%1$lld/%2$lld 个对象，%3$@/%4$@。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"正在匯出雲端歷史記錄：%1$lld/%2$lld 個物件，%3$@/%4$@。"}}}},
     "Exporting personal records: %1$lld of %2$lld objects.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Persönliche Datensätze werden exportiert: %1$lld von %2$lld Objekten."}},"es":{"stringUnit":{"state":"translated","value":"Exportando registros personales: %1$lld de %2$lld objetos."}},"fr":{"stringUnit":{"state":"translated","value":"Exportation des enregistrements personnels : %1$lld objets sur %2$lld."}},"it":{"stringUnit":{"state":"translated","value":"Esportazione dei record personali: %1$lld di %2$lld oggetti."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A exportar registos pessoais: %1$lld de %2$lld objetos."}},"ru":{"stringUnit":{"state":"translated","value":"Экспорт личных записей: %1$lld из %2$lld объектов."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在导出个人记录：%1$lld/%2$lld 个对象。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"正在匯出個人記錄：%1$lld/%2$lld 個物件。"}}}},
@@ -431,7 +431,7 @@
     "A cloud object failed its integrity check.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Die Integritätsprüfung eines Cloud-Objekts ist fehlgeschlagen."}},"es":{"stringUnit":{"state":"translated","value":"Un objeto de la nube no superó la comprobación de integridad."}},"fr":{"stringUnit":{"state":"translated","value":"Un objet cloud a échoué au contrôle d’intégrité."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Um objeto da nuvem falhou a verificação de integridade."}}}},
     "NOOP+ could not complete that request. Try again.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP+ konnte diese Anfrage nicht abschließen. Versuche es erneut."}},"es":{"stringUnit":{"state":"translated","value":"NOOP+ no pudo completar la solicitud. Inténtalo de nuevo."}},"fr":{"stringUnit":{"state":"translated","value":"NOOP+ n’a pas pu terminer cette demande. Réessayez."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O NOOP+ não conseguiu concluir este pedido. Tente novamente."}}}},
     "Enter a phone number with country code, for example +1 555 123 4567.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Gib eine Telefonnummer mit Ländervorwahl ein, zum Beispiel +49 151 23456789."}},"es":{"stringUnit":{"state":"translated","value":"Introduce un número de teléfono con prefijo internacional, por ejemplo +34 612 345 678."}},"fr":{"stringUnit":{"state":"translated","value":"Saisissez un numéro de téléphone avec l’indicatif du pays, par exemple +33 6 12 34 56 78."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Introduza um número de telefone com indicativo do país, por exemplo +351 912 345 678."}}}},
-    "Enter the verification code from the text message.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Gib den Bestätigungscode aus der SMS ein."}},"es":{"stringUnit":{"state":"translated","value":"Introduce el código de verificación del mensaje de texto."}},"fr":{"stringUnit":{"state":"translated","value":"Saisissez le code de vérification reçu par SMS."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Introduza o código de verificação da mensagem de texto."}}}},
+    "Enter the verification code from the text message.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Gib den Bestätigungscode aus der SMS ein."}},"es":{"stringUnit":{"state":"translated","value":"Introduce el código de verificación del mensaje de texto."}},"fr":{"stringUnit":{"state":"translated","value":"Saisissez le code de vérification reçu par SMS."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Introduza o código de verificação da mensagem de texto."}},"it":{"stringUnit":{"state":"translated","value":"Inserisci il codice di verifica ricevuto nel messaggio di testo."}},"ru":{"stringUnit":{"state":"translated","value":"Введите код подтверждения из SMS-сообщения."}},"zh-Hant":{"stringUnit":{"state":"translated","value":"輸入簡訊中的驗證碼。"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"输入短信中的验证码。"}}}},
     "Review and allow NOOP+ cloud backup before syncing.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Prüfe und erlaube das NOOP+ Cloud-Backup vor der Synchronisierung."}},"es":{"stringUnit":{"state":"translated","value":"Revisa y permite la copia en la nube de NOOP+ antes de sincronizar."}},"fr":{"stringUnit":{"state":"translated","value":"Vérifiez et autorisez la sauvegarde cloud NOOP+ avant la synchronisation."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Reveja e permita a cópia na nuvem do NOOP+ antes de sincronizar."}}}},
     "NOOP could not open the local data store.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP konnte den lokalen Datenspeicher nicht öffnen."}},"es":{"stringUnit":{"state":"translated","value":"NOOP no pudo abrir el almacén de datos local."}},"fr":{"stringUnit":{"state":"translated","value":"NOOP n’a pas pu ouvrir le stockage de données local."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O NOOP não conseguiu abrir o armazenamento de dados local."}}}},
     "This build contains conflicting NOOP+ identity configuration.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Dieser Build enthält widersprüchliche NOOP+ Identitätskonfigurationen."}},"es":{"stringUnit":{"state":"translated","value":"Esta versión contiene una configuración de identidad de NOOP+ incompatible."}},"fr":{"stringUnit":{"state":"translated","value":"Cette version contient une configuration d’identité NOOP+ contradictoire."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Esta versão contém uma configuração de identidade NOOP+ incompatível."}}}},
@@ -168505,202 +168505,6 @@
         }
       }
     },
-    "Leave this circle and delete your server profile?": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Diesen Kreis verlassen und Ihr Serverprofil löschen?"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "¿Salir de este círculo y borrar tu perfil de servidor?"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quitter ce cercle et supprimer votre profil de serveur ?"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sair deste círculo e eliminar o perfil do seu servidor?"
-          }
-        }
-      }
-    },
-    "Leave & delete server copy": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Serverkopie verlassen und löschen"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dejar y eliminar copia del servidor"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Laisser et supprimer la copie du serveur"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sair e eliminar cópia do servidor"
-          }
-        }
-      }
-    },
-    "Noop will remove your friendships, member credential, and dedicated Friends summary rows from this server. Your on-device health data and separate self-hosted backup stay intact.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Noop entfernt Ihre Freundschaften, Mitgliedszugangsdaten und dedizierten Freundeszusammenfassungszeilen von diesem Server. Ihre Gesundheitsdaten auf dem Gerät und Ihr separates, selbst gehostetes Backup bleiben erhalten."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Noop eliminará sus amistades, credenciales de miembro y filas de resumen de amigos dedicadas de este servidor. Los datos de salud de su dispositivo y la copia de seguridad autohospedada separada permanecen intactos."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Noop supprimera vos amitiés, vos informations d'identification de membre et les lignes récapitulatives dédiées des amis de ce serveur. Les données de santé de votre appareil et votre sauvegarde auto-hébergée séparée restent intactes."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Noop irá remover as suas amizades, credenciais de membro e linhas dedicadas de resumo de amigos deste servidor. Os dados de integridade do dispositivo e o backup auto-hospedado separado permanecem intactos."
-          }
-        }
-      }
-    },
-    "Host your private circle": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hosten Sie Ihren privaten Kreis"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aloja tu círculo privado"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hébergez votre cercle privé"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hospede o seu círculo privado"
-          }
-        }
-      }
-    },
-    "Friends lives on a Noop server you control. There is no Noop account or public profile.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Freunde leben auf einem Noop-Server, den Sie kontrollieren. Es gibt kein Noop-Konto oder öffentliches Profil."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Friends vive en un servidor Noop que tú controlas. No existe una cuenta Noop ni un perfil público."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Friends vit sur un serveur Noop que vous contrôlez. Il n’y a pas de compte Noop ou de profil public."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Friends reside num servidor Noop que controla. Não existe conta Noop nem perfil público."
-          }
-        }
-      }
-    },
-    "Set up your server": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Richten Sie Ihren Server ein"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Configura tu servidor"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Configurez votre serveur"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Configure o seu servidor"
-          }
-        }
-      }
-    },
-    "An invitation includes a server address and one-time code. You can join without receiving the server administrator key.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Eine Einladung enthält eine Serveradresse und einen Einmalcode. Sie können beitreten, ohne den Server-Administratorschlüssel zu erhalten."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Una invitación incluye una dirección de servidor y un código de un solo uso. Puede unirse sin recibir la clave de administrador del servidor."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Une invitation comprend une adresse de serveur et un code à usage unique. Vous pouvez vous inscrire sans recevoir la clé d'administrateur du serveur."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Um convite inclui um endereço de servidor e um código único. Pode aderir sem receber a chave de administrador do servidor."
-          }
-        }
-      }
-    },
     "Create your private profile": {
       "localizations": {
         "de": {
@@ -168725,34 +168529,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Crie o seu perfil privado"
-          }
-        }
-      }
-    },
-    "Your name is visible only to accepted friends on %@.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ihr Name ist nur für akzeptierte Freunde auf %@ sichtbar."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Su nombre sólo es visible para los amigos aceptados en %@."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Votre nom n'est visible que par les amis acceptés sur %@."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O seu nome só é visível para os amigos aceites no %@."
           }
         }
       }
@@ -168785,146 +168561,6 @@
         }
       }
     },
-    "The server administrator key is used once to issue a separate member token. That token stays in Keychain and cannot read raw server data. Friends is not end-to-end encrypted, so use a server operator you trust.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Der Serveradministratorschlüssel wird einmal verwendet, um ein separates Mitgliedstoken auszustellen. Dieses Token verbleibt im Schlüsselbund und kann keine rohen Serverdaten lesen. Friends ist nicht Ende-zu-Ende-verschlüsselt. Verwenden Sie daher einen Serverbetreiber, dem Sie vertrauen."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "La clave de administrador del servidor se utiliza una vez para emitir un token de miembro independiente. Ese token permanece en Keychain y no puede leer datos sin procesar del servidor. Friends no está cifrado de extremo a extremo, así que utilice un operador de servidor de confianza."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "La clé d'administrateur du serveur est utilisée une fois pour émettre un jeton de membre distinct. Ce jeton reste dans le trousseau et ne peut pas lire les données brutes du serveur. Friends n'est pas crypté de bout en bout, utilisez donc un opérateur de serveur en qui vous avez confiance."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "A chave de administrador do servidor é utilizada uma vez para emitir um token de membro separado. Este token permanece no Keychain e não consegue ler dados brutos do servidor. O Friends não é encriptado de ponta a ponta, por isso use um operador de servidor da sua confiança."
-          }
-        }
-      }
-    },
-    "YOUR CIRCLE": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "DEIN KREIS"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "TU CÍRCULO"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "VOTRE CERCLE"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O SEU CÍRCULO"
-          }
-        }
-      }
-    },
-    "+%lld": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "+%lld"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "+%lld"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "+%lld"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "+%lld"
-          }
-        }
-      }
-    },
-    "%lld people in your private circle": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld Personen in Ihrem privaten Umfeld"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld personas en tu círculo privado"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld personnes dans votre cercle privé"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld pessoas no seu círculo privado"
-          }
-        }
-      }
-    },
-    "Enter an invite code": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Geben Sie einen Einladungscode ein"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Introduce un código de invitación"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Entrez un code d'invitation"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Introduza um código de convite"
-          }
-        }
-      }
-    },
     "Requests": {
       "localizations": {
         "de": {
@@ -168949,34 +168585,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Solicitações"
-          }
-        }
-      }
-    },
-    "Wants to join your circle": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Möchte Ihrem Kreis beitreten"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quiere unirse a tu círculo"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Veut rejoindre votre cercle"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quer entrar no seu círculo"
           }
         }
       }
@@ -169037,34 +168645,7 @@
         }
       }
     },
-    "Accept %@": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Akzeptieren Sie %@"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aceptar %@"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Accepter %@"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aceite %@"
-          }
-        }
-      }
-    },
+    "Accept %@": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Akzeptieren Sie %@"}},"es":{"stringUnit":{"state":"translated","value":"Aceptar %@"}},"fr":{"stringUnit":{"state":"translated","value":"Accepter %@"}},"it":{"stringUnit":{"state":"translated","value":"Accetta %@"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Aceite %@"}},"ru":{"stringUnit":{"state":"translated","value":"Принять %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"接受 %@"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"接受 %@"}}}},
     "Your circle starts here": {
       "localizations": {
         "de": {
@@ -169089,34 +168670,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "O seu círculo começa aqui"
-          }
-        }
-      }
-    },
-    "Invite someone you trust. Their scores appear only after they join and you accept the request.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Laden Sie jemanden ein, dem Sie vertrauen. Ihre Punktzahlen werden erst angezeigt, nachdem sie beigetreten sind und Sie die Anfrage angenommen haben."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Invita a alguien de tu confianza. Sus puntuaciones aparecen sólo después de que se unen y usted acepta la solicitud."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Invitez quelqu'un en qui vous avez confiance. Leurs scores n'apparaissent qu'après leur inscription et que vous acceptez la demande."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Convide alguém em quem confie. As suas pontuações aparecem apenas depois de eles ingressarem e de aceitar a solicitação."
           }
         }
       }
@@ -169149,202 +168702,6 @@
         }
       }
     },
-    "Scores will appear after %@ uploads a daily summary.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Die Ergebnisse werden angezeigt, nachdem %@ eine tägliche Zusammenfassung hochgeladen hat."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Las puntuaciones aparecerán después de que %@ cargue un resumen diario."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Les scores apparaîtront après que %@ aura téléchargé un résumé quotidien."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "As pontuações aparecerão depois de %@ carregar um resumo diário."
-          }
-        }
-      }
-    },
-    "Summary-only by design": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nur Zusammenfassung von design"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Solo resumen por design"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Résumé uniquement par design"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Apenas resumo por design"
-          }
-        }
-      }
-    },
-    "Raw heart rate, R-R intervals, sleep stages, journals, workouts, routes, exports, and device identifiers never appear in Friends.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rohe Herzfrequenz, R-R-Intervalle, Schlafphasen, Tagebücher, Trainingseinheiten, Routen, Exporte und Gerätekennungen werden in „Freunde“ nie angezeigt."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "La frecuencia cardíaca sin procesar, los intervalos R-R, las etapas del sueño, los diarios, los entrenamientos, las rutas, las exportaciones y los identificadores de dispositivos nunca aparecen en Amigos."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "La fréquence cardiaque brute, les intervalles R-R, les phases de sommeil, les journaux, les entraînements, les itinéraires, les exportations et les identifiants d'appareil n'apparaissent jamais dans Friends."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "A frequência cardíaca bruta, os intervalos R-R, as fases do sono, os diários, os treinos, as rotas, as exportações e os identificadores de dispositivos nunca aparecem nos Amigos."
-          }
-        }
-      }
-    },
-    "Leave circle & delete server copy…": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kreis verlassen und Serverkopie löschen…"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dejar el círculo y eliminar la copia del servidor..."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quitter le cercle et supprimer la copie du serveur…"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Saia do círculo e apague a cópia do servidor…"
-          }
-        }
-      }
-    },
-    "Ready to share": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bereit zum Teilen"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Listo para compartir"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Prêt à partager"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pronto para partilhar"
-          }
-        }
-      }
-    },
-    "Join my private Noop circle": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Treten Sie meinem privaten Noop-Kreis bei"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Únase a mi círculo privado Noop"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rejoignez mon cercle privé Noop"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Junte-se ao meu círculo privado Noop"
-          }
-        }
-      }
-    },
-    "Open the Friends tab in Noop and enter the server address and one-time code.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Öffne in Noop den Tab „Freunde“ und gib die Serveradresse sowie den Einmalcode ein."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Abre la pestaña Amigos en Noop e introduce la dirección del servidor y el código de un solo uso."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ouvrez l’onglet Amis dans Noop, puis saisissez l’adresse du serveur et le code à usage unique."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Abra o separador Amigos no Noop e introduza o endereço do servidor e o código de utilização única."
-          }
-        }
-      }
-    },
     "Share invitation": {
       "localizations": {
         "de": {
@@ -169373,90 +168730,6 @@
         }
       }
     },
-    "The code expires within 72 hours and works once. Noop shares the server and code as plain text instead of putting the capability in a custom app link; the recipient enters both in Friends. Joining creates a request-you still decide whether to accept.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Der Code läuft innerhalb von 72 Stunden ab und funktioniert einmal. Noop teilt den Server und den Code als Klartext, anstatt die Funktion in einen benutzerdefinierten App-Link zu integrieren. Der Empfänger trägt beides in Freunde ein. Durch den Beitritt entsteht eine Anfrage – Sie entscheiden immer noch, ob Sie annehmen."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "El código caduca en 72 horas y funciona una vez. Noop comparte el servidor y el código como texto sin formato en lugar de colocar la capacidad en un enlace de aplicación personalizado; el destinatario ingresa ambos en Amigos. Unirse crea una solicitud; usted aún decide si la acepta."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Le code expire dans les 72 heures et fonctionne une fois. Noop partage le serveur et le code sous forme de texte brut au lieu de placer la fonctionnalité dans un lien d'application personnalisé ; le destinataire saisit les deux dans Amis. L'adhésion crée une demande : vous décidez toujours d'accepter ou non."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O código expira em 72 horas e funciona uma vez. Noop partilha o servidor e o código como texto simples em vez de colocar o recurso num link de aplicação personalizado; o destinatário introduz ambos em Amigos. A adesão cria um pedido – você ainda decide se aceita."
-          }
-        }
-      }
-    },
-    "Server address": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Serveradresse"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dirección del servidor"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Adresse du serveur"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Endereço do servidor"
-          }
-        }
-      }
-    },
-    "Use the complete address from the invitation, including HTTPS, port, and any base path.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Verwenden Sie die vollständige Adresse aus der Einladung, einschließlich HTTPS, Port und etwaigem Basispfad."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Utilice la dirección completa de la invitación, incluido HTTPS, el puerto y cualquier ruta base."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Utilisez l'adresse complète de l'invitation, y compris HTTPS, le port et tout chemin de base."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Utilize o endereço completo do convite, incluindo HTTPS, porta e qualquer caminho base."
-          }
-        }
-      }
-    },
     "Invite code": {
       "localizations": {
         "de": {
@@ -169481,90 +168754,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Código de convite"
-          }
-        }
-      }
-    },
-    "A code sends a request. No summary is uploaded until the inviter accepts it.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ein Code sendet eine Anfrage. Es wird keine Zusammenfassung hochgeladen, bis der Einladende sie akzeptiert."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Un código envía una solicitud. No se carga ningún resumen hasta que el invitante lo acepte."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Un code envoie une requête. Aucun résumé n'est téléchargé tant que l'invitant ne l'accepte pas."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Um código envia um pedido. Nenhum resumo é carregado até que o autor do convite o aceite."
-          }
-        }
-      }
-    },
-    "Trust the server operator": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vertrauen Sie dem Serverbetreiber"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Confía en el operador del servidor"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Faites confiance à l'opérateur du serveur"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Confie no operador do servidor"
-          }
-        }
-      }
-    },
-    "Friends is not end-to-end encrypted. After acceptance, the server operator can access the summary fields you choose to send, even though other members see only their per-friend allowlist.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Friends ist nicht Ende-zu-Ende-verschlüsselt. Nach der Annahme kann der Serverbetreiber auf die Zusammenfassungsfelder zugreifen, die Sie senden möchten, auch wenn andere Mitglieder nur ihre Zulassungsliste pro Freund sehen."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Friends no está cifrado de extremo a extremo. Después de la aceptación, el operador del servidor puede acceder a los campos de resumen que elija enviar, aunque otros miembros solo vean su lista de permitidos por amigo."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Friends n’est pas chiffré de bout en bout. Après acceptation, l'opérateur du serveur peut accéder aux champs récapitulatifs que vous choisissez d'envoyer, même si les autres membres ne voient que leur liste d'autorisation par ami."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Os amigos não são encriptados de ponta a ponta. Após a aceitação, o operador do servidor poderá aceder aos campos de resumo que decidir submeter, mesmo que os outros membros apenas vejam a sua lista de permissões por amigo."
           }
         }
       }
@@ -169625,258 +168814,7 @@
         }
       }
     },
-    "Private server": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Privater Server"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "servidor privado"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Serveur privé"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Servidor privado"
-          }
-        }
-      }
-    },
-    "Noop will not replace an existing circle with a different server. A mismatch is stopped and shown before anything is sent.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Noop ersetzt einen vorhandenen Kreis nicht durch einen anderen Server. Eine Nichtübereinstimmung wird gestoppt und angezeigt, bevor etwas gesendet wird."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Noop no reemplazará un círculo existente con un servidor diferente. Una discrepancia se detiene y se muestra antes de enviar algo."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Noop ne remplacera pas un cercle existant par un serveur différent. Une incompatibilité est arrêtée et affichée avant que quoi que ce soit ne soit envoyé."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Noop não substituirá um círculo existente por um servidor diferente. Uma incompatibilidade é interrompida e mostrada antes de qualquer coisa ser enviada."
-          }
-        }
-      }
-    },
-    "Sharing is directional and enforced by your server.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Die Freigabe erfolgt richtungsgebunden und wird von Ihrem Server erzwungen."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "El uso compartido es direccional y lo aplica su servidor."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Le partage est directionnel et appliqué par votre serveur."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "A partilha é direcional e imposta pelo seu servidor."
-          }
-        }
-      }
-    },
-    "Additional details": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Weitere Details"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Detalles adicionales"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Détails supplémentaires"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Detalhes adicionais"
-          }
-        }
-      }
-    },
-    "These stay off for every new friendship until you enable them here.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Diese bleiben für jede neue Freundschaft deaktiviert, bis Sie sie hier aktivieren."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Estos permanecen desactivados para cada nueva amistad hasta que los habilites aquí."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ceux-ci restent désactivés pour chaque nouvelle amitié jusqu'à ce que vous les activiez ici."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ficam desativados para cada nova amizade até que os ative aqui."
-          }
-        }
-      }
-    },
-    "Remove friend…": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Freund entfernen…"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Eliminar amigo..."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Supprimer un ami…"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remover amigo…"
-          }
-        }
-      }
-    },
-    "Removing a friend stops both directions of sharing immediately.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Durch das Entfernen eines Freundes werden beide Richtungen des Teilens sofort beendet."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Eliminar a un amigo detiene ambas direcciones de compartir inmediatamente."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "La suppression d'un ami arrête immédiatement le partage dans les deux sens."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "A remoção de um amigo interrompe imediatamente ambas as direções de partilha."
-          }
-        }
-      }
-    },
-    "Remove %@?": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ entfernen?"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "¿Quitar %@?"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Supprimer %@ ?"
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remover %@?"
-          }
-        }
-      }
-    },
-    "Neither of you will see the other’s scores. You can reconnect only with a new invite.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keiner von Ihnen wird die Ergebnisse des anderen sehen. Sie können die Verbindung nur mit einer neuen Einladung wiederherstellen."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ninguno de los dos verá las puntuaciones del otro. Puedes volver a conectarte solo con una nueva invitación."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aucun de vous ne verra les scores de l’autre. Vous ne pouvez vous reconnecter qu'avec une nouvelle invitation."
-          }
-        },
-        "pt-PT": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nenhum de vós verá as pontuações do outro. Só pode voltar a conectar-se com um novo convite."
-          }
-        }
-      }
-    },
+    "Remove %@?": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"%@ entfernen?"}},"es":{"stringUnit":{"state":"translated","value":"¿Quitar %@?"}},"fr":{"stringUnit":{"state":"translated","value":"Supprimer %@ ?"}},"it":{"stringUnit":{"state":"translated","value":"Rimuovere %@?"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Remover %@?"}},"ru":{"stringUnit":{"state":"translated","value":"Удалить %@?"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"要移除 %@ 吗？"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"要移除 %@ 嗎？"}}}},
     "Shared": {
       "localizations": {
         "de": {

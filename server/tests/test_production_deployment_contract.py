@@ -118,6 +118,13 @@ def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
     )[1]
     assert 'name  = "NOOP_SAFETY_WORKER_ENABLED"' in managed_lifecycle
     assert 'name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"' in managed_lifecycle
+    assert 'name  = "NOOP_MANAGED_SAFETY_REPEAT_ENABLED"' in managed_lifecycle
+    assert 'name  = "NOOP_MANAGED_SAFETY_REPEAT_INTERVAL_SECONDS"' in managed_lifecycle
+    assert 'name  = "NOOP_MANAGED_SAFETY_REPEAT_TTL_SECONDS"' in managed_lifecycle
+    assert 'name  = "NOOP_MANAGED_SAFETY_REPEAT_MAX_ROUNDS"' in managed_lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_ENABLED"\n          value = "true"'
+    ) in managed_lifecycle
     assert managed_lifecycle.index(
         'name  = "NOOP_SAFETY_WORKER_ENABLED"'
     ) < managed_lifecycle.index('name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"')
@@ -637,11 +644,35 @@ def test_gcp_managed_lifecycle_explicitly_bounds_safety_repeat_paging() -> None:
         'resource "google_cloud_run_v2_job_iam_member" "managed_lifecycle_scheduler"',
         maxsplit=1,
     )[0]
+    scheduler = runtime.split(
+        'resource "google_cloud_scheduler_job" "managed_lifecycle"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_job" "feedback_lifecycle"',
+        maxsplit=1,
+    )[0]
 
     assert 'name  = "NOOP_SAFETY_ESCALATION_ROUNDS"' in lifecycle
     assert 'name  = "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS"' in lifecycle
-    assert lifecycle.count('value = "4"') == 1
-    assert lifecycle.count('value = "900"') == 1
+    assert (
+        'name  = "NOOP_SAFETY_ESCALATION_ROUNDS"\n          value = "4"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS"\n          value = "900"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_ENABLED"\n          value = "true"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_INTERVAL_SECONDS"\n          value = "120"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_TTL_SECONDS"\n          value = "900"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_MAX_ROUNDS"\n          value = "4"'
+    ) in lifecycle
+    assert 'schedule         = "* * * * *"' in scheduler
 
 
 def test_gcp_managed_runtime_cannot_list_health_objects() -> None:

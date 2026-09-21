@@ -101,6 +101,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import java.time.ZoneId
 import kotlinx.coroutines.sync.withLock
+import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -623,6 +624,73 @@ internal enum class GattWriteAction {
     CANCELLED,
 }
 
+internal data class HistoryCompleteDecision(
+    val firstObservation: Boolean,
+    val finishNow: Boolean,
+    val pendingAcknowledgements: Int,
+)
+
+internal data class HistoryAckConfirmationDecision(
+    val matched: Boolean,
+    val finishNow: Boolean,
+    val pendingAcknowledgements: Int,
+)
+
+/**
+ * Tracks queued historical acknowledgements separately from confirmed progress.
+ *
+ * HISTORY_COMPLETE may arrive while the final confirmed write is still queued or in flight. The
+ * session may finish only after [confirmed] consumes every exact pending trim. Failed callbacks and
+ * write timeouts reset this gate through the normal connection teardown and never call [confirmed].
+ */
+internal class HistoricalAckCompletionGate {
+    private val pendingTrims = ArrayDeque<Long>()
+    private var historyCompleteObserved = false
+
+    @Synchronized
+    fun enqueued(trim: Long) {
+        pendingTrims.addLast(trim)
+    }
+
+    @Synchronized
+    fun observeHistoryComplete(): HistoryCompleteDecision {
+        val firstObservation = !historyCompleteObserved
+        historyCompleteObserved = true
+        return HistoryCompleteDecision(
+            firstObservation = firstObservation,
+            finishNow = pendingTrims.isEmpty(),
+            pendingAcknowledgements = pendingTrims.size,
+        )
+    }
+
+    @Synchronized
+    fun confirmed(trim: Long): HistoryAckConfirmationDecision {
+        val iterator = pendingTrims.iterator()
+        var matched = false
+        while (iterator.hasNext()) {
+            if (iterator.next() == trim) {
+                iterator.remove()
+                matched = true
+                break
+            }
+        }
+        return HistoryAckConfirmationDecision(
+            matched = matched,
+            finishNow = matched && historyCompleteObserved && pendingTrims.isEmpty(),
+            pendingAcknowledgements = pendingTrims.size,
+        )
+    }
+
+    @Synchronized
+    fun pendingCount(): Int = pendingTrims.size
+
+    @Synchronized
+    fun reset() {
+        pendingTrims.clear()
+        historyCompleteObserved = false
+    }
+}
+
 /**
  * Small, Android-free state machine shared by production and JVM tests. It makes a single-attempt
  * guarantee: once [begin] has admitted an item, [submitted] can only pace, await one callback, or fail
@@ -1061,7 +1129,7 @@ class WhoopBleClient(
         private const val INACTIVITY_LOOKBACK_S = 4 * 3600L
         /**
          * Idle watchdog: if no genuine offload frame arrives for this long mid-session, end the
-         * session (the durable strap_trim cursor means the next session resumes where we left off).
+         * session. Firmware-retained state decides what is offered again; local strap_trim is diagnostic.
          * Generous (60s, not 20s) because the type-43 raw flood eats BLE airtime between chunks.
          */
         private const val BACKFILL_IDLE_TIMEOUT_MS = 60_000L
@@ -2424,7 +2492,9 @@ class WhoopBleClient(
         repository = repository,
         deviceId = deviceId,
         cursorStore = cursorStore,
-        ackTrim = { trim, endData -> ackHistoricalChunk(trim, endData) },
+        ackTrim = { generation, trim, endData ->
+            ackHistoricalChunk(generation, trim, endData)
+        },
         onChunkCommitted = { committed -> onBackfillChunkCommitted(deviceId, committed) },
         onConsoleChunk = { consoleChunksThisSession += 1 },
         // #77/#91: archive undecodable frames before the ack. append() returns ok=true (written, or
@@ -3062,14 +3132,22 @@ class WhoopBleClient(
      * leaned on CoreBluetooth's internal queue; here we serialise writes ourselves. Each queued
      * item is the fully-framed byte array + its write type (with/without response).
      */
-    internal enum class WritePurpose { COMMAND, CLIENT_HELLO }
+    internal enum class WritePurpose { COMMAND, CLIENT_HELLO, HISTORY_ACK }
 
-    private data class PendingWrite(
+    internal data class PendingWrite(
         val frame: ByteArray,
         val withResponse: Boolean,
         val cmd: CommandNumber? = null,
         val purpose: WritePurpose = WritePurpose.COMMAND,
-    )
+        val historyAckTrim: Long? = null,
+    ) {
+        fun confirmedHistoryAckTrim(writeSucceeded: Boolean): Long? =
+            historyAckTrim.takeIf {
+                writeSucceeded &&
+                    purpose == WritePurpose.HISTORY_ACK &&
+                    cmd == CommandNumber.HISTORICAL_DATA_RESULT
+            }
+    }
     private val writeQueue = ConcurrentLinkedQueue<PendingWrite>()
     /**
      * One active submission per GATT connection. Unlike the old `writeInFlight + pendingRetry` pair, this
@@ -3077,6 +3155,7 @@ class WhoopBleClient(
      * transitions also cover API 26/27 callbacks that Android may deliver from a binder thread.
      */
     private val writeDeliveryGate = GattWriteDeliveryGate<PendingWrite>()
+    private val historicalAckCompletionGate = HistoricalAckCompletionGate()
 
     /** Named so callback/reset can cancel it and a timeout from an old connection cannot kill a new one. */
     private val writeDeliveryTimeoutRunnable = Runnable { onWriteDeliveryTimeout() }
@@ -3638,10 +3717,25 @@ class WhoopBleClient(
      * acked command use WITH response.
      */
     fun send(cmd: CommandNumber, payload: ByteArray = byteArrayOf(0), withResponse: Boolean = false) {
+        enqueueCommand(cmd, payload, withResponse)
+    }
+
+    private fun enqueueCommand(
+        cmd: CommandNumber,
+        payload: ByteArray,
+        withResponse: Boolean,
+        purpose: WritePurpose = WritePurpose.COMMAND,
+        historyAckTrim: Long? = null,
+        onEnqueued: (() -> Unit)? = null,
+    ): Boolean {
+        if ((purpose == WritePurpose.HISTORY_ACK) != (historyAckTrim != null)) {
+            log("send(${cmd.name}) ignored - invalid history-ack correlation")
+            return false
+        }
         val ch = cmdCharacteristic
         if (gatt == null || ch == null) {
             log("send(${cmd.name}) ignored - not connected")
-            return
+            return false
         }
         // WHOOP 5.0/MG uses puffin (CRC16) command framing, not the WHOOP4 frame. The realtime-HR toggle
         // is hardware-confirmed (issue #17 — a 5/MG owner saw live HR on v1.13), which proves the strap
@@ -3677,7 +3771,7 @@ class WhoopBleClient(
                 // Reversible; driven only by setBroadcastHr(). (#181)
                 !(cmd == CommandNumber.SET_DEVICE_CONFIG && puffinExperiment.broadcastHr)) {
                 log("send(${cmd.name}) skipped - no WHOOP 5/MG framing for this command yet")
-                return
+                return false
             }
             // WHOOP 5/MG haptics differ from WHOOP 4.0 on BOTH the opcode AND the payload (#48, decoded
             // from the working "maverick" app's binary). Opcode: 0x13, not RUN_HAPTICS_PATTERN=79 (a real-MG
@@ -3692,18 +3786,37 @@ class WhoopBleClient(
             val s = seq.incrementAndGet() and 0xFF
             val frame = Framing.puffinCommandFrame(cmd = puffinCmd, seq = s, payload = puffinPayload)
             val confirmed = requiresConfirmedGattWrite(cmd, withResponse)
-            enqueueWrite(PendingWrite(frame, confirmed, cmd))
+            onEnqueued?.invoke()
+            enqueueWrite(
+                PendingWrite(
+                    frame = frame,
+                    withResponse = confirmed,
+                    cmd = cmd,
+                    purpose = purpose,
+                    historyAckTrim = historyAckTrim,
+                ),
+            )
             val cmdNote = if (isHaptics) " cmd=0x13" else ""
             val deliveryNote = if (confirmed && !withResponse) ", confirmed for single-execution" else ""
             log("→ ${cmd.name} payload=${puffinPayload.toHex()} (puffin$cmdNote$deliveryNote)")
-            return
+            return true
         }
         val s = seq.incrementAndGet() and 0xFF
         val frame = Framing.buildCommand(cmd, payload, s)
         val confirmed = requiresConfirmedGattWrite(cmd, withResponse)
-        enqueueWrite(PendingWrite(frame, confirmed, cmd))
+        onEnqueued?.invoke()
+        enqueueWrite(
+            PendingWrite(
+                frame = frame,
+                withResponse = confirmed,
+                cmd = cmd,
+                purpose = purpose,
+                historyAckTrim = historyAckTrim,
+            ),
+        )
         val deliveryNote = if (confirmed && !withResponse) " (confirmed for single-execution)" else ""
         log("→ ${cmd.name} payload=${payload.toHex()}$deliveryNote")
+        return true
     }
 
     /**
@@ -5491,7 +5604,38 @@ class WhoopBleClient(
                 // one-shot physical effects remain single execution.
                 failClosedAfterWrite(completedWrite, "confirmed callback status=$status")
                 return
-            } else if (clientHelloAck) {
+            }
+
+            var finishHistoryAfterAck = false
+            if (completedWrite.purpose == WritePurpose.HISTORY_ACK) {
+                val trim = completedWrite.confirmedHistoryAckTrim(writeSucceeded = true)
+                if (trim == null) {
+                    failClosedAfterWrite(completedWrite, "history acknowledgement callback had no trim")
+                    return
+                }
+                val completion = historicalAckCompletionGate.confirmed(trim)
+                if (!completion.matched) {
+                    failClosedAfterWrite(
+                        completedWrite,
+                        "history acknowledgement callback did not match a pending trim",
+                    )
+                    return
+                }
+                val previousTrim = backfiller.lastAckedTrim
+                val confirmed = backfiller.confirmHistoricalAck(trim) {
+                    noteHistoricalAckConfirmed(trim, previousTrim)
+                }
+                if (!confirmed) {
+                    failClosedAfterWrite(
+                        completedWrite,
+                        "history acknowledgement callback had no staged durable chunk",
+                    )
+                    return
+                }
+                finishHistoryAfterAck = completion.finishNow
+            }
+
+            if (clientHelloAck) {
                 // EXPERIMENTAL (issue #17): the CLIENT_HELLO is now a confirmed write, so this ACK means
                 // just-works bonding completed. Now subscribe the puffin notify chars (realtime HR rides
                 // these as REALTIME_DATA — the strap rejected them on the unauthenticated link), then arm
@@ -5551,6 +5695,10 @@ class WhoopBleClient(
                 connectHandshakeDone = true
                 noteRebootReconnectIfNeeded()
                 runConnectHandshake()
+            }
+
+            if (finishHistoryAfterAck && backfilling) {
+                exitBackfilling("HISTORY_COMPLETE")
             }
 
             // Hold a tiny post-callback quarantine before the next command. A buggy vendor stack that
@@ -7105,6 +7253,16 @@ class WhoopBleClient(
             return
         }
         if (backfilling) return
+        val pendingGattAcks = historicalAckCompletionGate.pendingCount()
+        val pendingDurableAcks = backfiller.pendingHistoricalAckCount
+        if (pendingGattAcks > 0 || pendingDurableAcks > 0) {
+            log(
+                "Backfill: deferred - waiting for $pendingGattAcks queued and " +
+                    "$pendingDurableAcks durable history acknowledgement(s)",
+            )
+            return
+        }
+        historicalAckCompletionGate.reset()
         // #700: if GET_CLOCK never responded (Android has no explicit clockRef on the client — the
         // Backfiller defaults to identity), seed a rough correlation from the Data Range's newest-banked
         // timestamp. The offset is approximate but vastly better than identity (offset 0), which can
@@ -7287,12 +7445,36 @@ class WhoopBleClient(
                     }
                     // If the Backfiller consumed all historical data, exit the session cleanly.
                     if (backfilling && !backfiller.isBackfilling) {
-                        handler.post { exitBackfilling("HISTORY_COMPLETE") }
+                        handler.post { onHistoryCompleteObserved() }
                     }
                 }
             } finally {
                 if (ownsDrain) backfillDrain.release(lease)
             }
+        }
+    }
+
+    private fun onHistoryCompleteObserved() {
+        if (!backfilling) return
+        if (backfiller.persistStalled) {
+            log(
+                "Backfill: HISTORY_COMPLETE arrived after durable progress stalled; " +
+                    "not claiming a completed sync.",
+            )
+            exitBackfilling("durableProgressTimeout")
+            return
+        }
+        val decision = historicalAckCompletionGate.observeHistoryComplete()
+        if (!decision.firstObservation) return
+        val pendingDurableAcks = backfiller.pendingHistoricalAckCount
+        if (decision.finishNow && pendingDurableAcks == 0) {
+            exitBackfilling("HISTORY_COMPLETE")
+        } else {
+            log(
+                "Backfill: HISTORY_COMPLETE received; waiting for " +
+                    "${maxOf(decision.pendingAcknowledgements, pendingDurableAcks)} " +
+                    "confirmed history acknowledgement(s).",
+            )
         }
     }
 
@@ -7731,16 +7913,40 @@ class WhoopBleClient(
      * `[0x01] + end_data`, where end_data is the verbatim 8 bytes of the HISTORY_END
      * metadata.data[10:18]. Port of `BLEManager.ackHistoricalChunk`.
      */
-    private fun ackHistoricalChunk(trim: Long, endData: ByteArray) {
-        val trimAdvanced = HistorySyncDurableProgressPolicy.advances(
-            rows = 0,
-            trim = trim,
-            previousTrim = backfiller.lastAckedTrim,
-        )
+    private fun ackHistoricalChunk(
+        sessionGeneration: Long,
+        trim: Long,
+        endData: ByteArray,
+    ): Boolean = handler.post {
+        // Persistence runs on the IO scope and can finish after disconnect. Serialize the final
+        // generation check and command enqueue on the GATT looper so an old chunk cannot ACK through
+        // a replacement connection.
+        if (!backfilling || !backfiller.isCurrentSession(sessionGeneration)) return@post
         val payload = ByteArray(1 + endData.size)
         payload[0] = 0x01
         System.arraycopy(endData, 0, payload, 1, endData.size)
-        send(CommandNumber.HISTORICAL_DATA_RESULT, payload, withResponse = true)
+        val queued = enqueueCommand(
+            cmd = CommandNumber.HISTORICAL_DATA_RESULT,
+            payload = payload,
+            withResponse = true,
+            purpose = WritePurpose.HISTORY_ACK,
+            historyAckTrim = trim,
+            onEnqueued = { historicalAckCompletionGate.enqueued(trim) },
+        )
+        if (queued) {
+            log("Backfill: queued chunk acknowledgement trim=$trim")
+        } else {
+            backfiller.rejectHistoricalAck(sessionGeneration, trim)
+            log("Backfill: history acknowledgement could not be queued; preserving the band copy.")
+        }
+    }
+
+    private fun noteHistoricalAckConfirmed(trim: Long, previousTrim: Long?) {
+        val trimAdvanced = HistorySyncDurableProgressPolicy.advances(
+            rows = 0,
+            trim = trim,
+            previousTrim = previousTrim,
+        )
         // Progress signal for the "Syncing Noop Band history…" UI (#77). The per-session count remains
         // separate for outcome classification; the visible count spans auto-continue slices.
         ackedChunksThisSession += 1
@@ -7751,7 +7957,7 @@ class WhoopBleClient(
                 publishHistorySyncProgress()
             }
         }
-        log("Backfill: acked chunk trim=$trim")
+        log("Backfill: confirmed chunk acknowledgement trim=$trim")
     }
 
     // ====================================================================================
@@ -8087,6 +8293,9 @@ class WhoopBleClient(
         writeQueue.clear()
         cccdQueue.clear()
         writeDeliveryGate.reset()
+        historicalAckCompletionGate.reset()
+        backfiller.timeoutFired()
+        backfiller.clearPendingHistoricalAcks()
         // Cancel callback timeout/quarantine and descriptor retries so no old-connection runnable can
         // enter a replacement connection (#314 + ambiguous-delivery hardening).
         handler.removeCallbacks(writeDeliveryTimeoutRunnable)

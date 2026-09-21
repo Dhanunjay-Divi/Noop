@@ -168,6 +168,29 @@ class ManagedDocumentLifecycleContractTest {
     }
 
     @Test
+    fun managedHistoryImportIsReachableFromTheCloudSheet() {
+        val source = File(
+            managedTestRepositoryRoot(),
+            "android/app/src/main/java/com/noop/ui/ManagedCloudCard.kt",
+        ).readText()
+
+        assertTrue(source.contains("ActivityResultContracts.OpenDocument()"))
+        assertTrue(source.contains("service.importCompleteCloudHistory(uri)"))
+        assertTrue(source.contains("R.string.managed_cloud_import_history"))
+        assertTrue(source.contains("R.string.managed_cloud_import_alert_title"))
+        assertTrue(
+            source.contains(
+                "R.string.managed_cloud_import_alert_detail_android",
+            ),
+        )
+        assertTrue(
+            source.contains(
+                "historyImportLauncher.launch(arrayOf(\"application/zip\"))",
+            ),
+        )
+    }
+
+    @Test
     fun lifecycleDiagnosticsAreCategoricalAndPayloadFree() {
         val source = serviceSource()
         val runtime = source.section(

@@ -915,6 +915,8 @@ public actor WhoopManagedDocumentAdapter:
         payloadData: Data?,
         deleted: Bool
     ) async throws {
+        var preferencesDefaultsToApply: UserDefaults?
+        var verifiedPayloadData = payloadData
         if document.documentKind == .preferences, !deleted {
             guard let preferencesDefaults, let payloadData else {
                 throw ManagedStorageError.invalidResponse
@@ -925,28 +927,33 @@ public actor WhoopManagedDocumentAdapter:
                   try Self.equalJSON(normalized, payloadData) else {
                 throw ManagedStorageError.invalidResponse
             }
-            BackupSettings.apply(decoded, to: preferencesDefaults)
-            try await store.stageManagedPreferences(
-                normalized,
-                updatedAtMs: Self.nowMilliseconds()
-            )
+            preferencesDefaultsToApply = preferencesDefaults
+            verifiedPayloadData = normalized
         }
 
         do {
-            _ = try await store.applyManagedDocument(
+            let applyResult = try await store.applyManagedDocument(
                 accountScopeHash: accountScopeHash,
                 documentKind: document.documentKind.rawValue,
                 documentID: document.documentID.uuidString.lowercased(),
                 revision: document.revision,
                 contentSHA256: document.contentSHA256,
-                payloadJSON: payloadData,
+                payloadJSON: verifiedPayloadData,
                 deleted: deleted,
                 appliedAtMs: Self.nowMilliseconds()
             )
+            guard applyResult.acceptedRevision else { return }
         } catch ManagedDocumentStoreError.unacknowledgedLocalGeneration {
             throw ManagedStorageError.conflict
         } catch {
             throw ManagedStorageError.invalidResponse
+        }
+        if let preferencesDefaultsToApply,
+           let verifiedPayloadData {
+            BackupSettings.apply(
+                BackupSettings.decode(verifiedPayloadData),
+                to: preferencesDefaultsToApply
+            )
         }
     }
 

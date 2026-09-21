@@ -3,6 +3,7 @@ package com.noop.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -239,12 +241,26 @@ private fun ManagedCloudSetupSheet(
     var deletionCodeRequested by remember { mutableStateOf(false) }
     var confirmDeletion by remember { mutableStateOf(false) }
     var confirmHistoryExport by remember { mutableStateOf(false) }
+    var confirmHistoryImport by remember { mutableStateOf(false) }
     var pendingRevoke by remember { mutableStateOf<ManagedInstallation?>(null) }
     val historyExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
         if (uri != null) {
             scope.launch { service.exportCompleteCloudHistory(uri) }
+        }
+    }
+    val historyImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            scope.launch { service.importCompleteCloudHistory(uri) }
         }
     }
 
@@ -543,6 +559,14 @@ private fun ManagedCloudSetupSheet(
                         onClick = { confirmHistoryExport = true },
                     )
                     NoopButton(
+                        text = stringResource(R.string.managed_cloud_import_history),
+                        leadingIcon = Icons.Filled.UploadFile,
+                        kind = NoopButtonKind.Secondary,
+                        fullWidth = true,
+                        enabled = !state.busy,
+                        onClick = { confirmHistoryImport = true },
+                    )
+                    NoopButton(
                         text = stringResource(R.string.managed_cloud_disconnect_phone),
                         leadingIcon = Icons.AutoMirrored.Filled.Logout,
                         kind = NoopButtonKind.Secondary,
@@ -697,6 +721,31 @@ private fun ManagedCloudSetupSheet(
             },
             dismissButton = {
                 TextButton(onClick = { confirmHistoryExport = false }) {
+                    Text(stringResource(R.string.managed_cloud_cancel))
+                }
+            },
+        )
+    }
+    if (confirmHistoryImport) {
+        AlertDialog(
+            onDismissRequest = { confirmHistoryImport = false },
+            title = { Text(stringResource(R.string.managed_cloud_import_alert_title)) },
+            text = {
+                Text(stringResource(R.string.managed_cloud_import_alert_detail_android))
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !state.busy,
+                    onClick = {
+                        confirmHistoryImport = false
+                        historyImportLauncher.launch(arrayOf("application/zip"))
+                    },
+                ) {
+                    Text(stringResource(R.string.managed_cloud_choose_file))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmHistoryImport = false }) {
                     Text(stringResource(R.string.managed_cloud_cancel))
                 }
             },

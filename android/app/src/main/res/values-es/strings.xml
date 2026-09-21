@@ -2440,6 +2440,9 @@
     <string name="managed_cloud_sync_now">Sincronizar ahora</string>
     <string name="managed_cloud_preparing_export">Preparando exportación…</string>
     <string name="managed_cloud_export_history">Exportar todo el historial de la nube</string>
+    <string name="managed_cloud_import_history">Importar todo el historial de la nube</string>
+    <string name="managed_cloud_import_alert_title">¿Importar todo el historial de la nube?</string>
+    <string name="managed_cloud_import_alert_detail_android">Elige un ZIP del historial en la nube de NOOP exportado anteriormente desde esta cuenta. La importación valida el archivo, se reanuda de forma segura y puede sustituir registros locales coincidentes. Mantén NOOP abierto hasta que termine.</string>
     <string name="managed_cloud_disconnect_phone">Desconectar este teléfono</string>
     <string name="managed_cloud_delete_account">Eliminar la cuenta en la nube de NOOP</string>
     <string name="managed_cloud_fresh_code">Nuevo código de verificación</string>
@@ -2586,11 +2589,8 @@
     <string name="changelog_clearer_updates_and_reports_9_2_1">Actualizaciones más claras e informes que ayudan a corregir problemas</string>
     <string name="whats_new_welcome_version">Te damos la bienvenida a la versión %1$s</string>
     <string name="managed_friends_source_noop_plus">NOOP+</string>
-    <string name="managed_friends_source_self_hosted">Alojamiento propio</string>
     <string name="managed_friends_subtitle">Resúmenes privados con control mutuo.</string>
     <string name="managed_friends_refresh">Actualizar Amigos administrados</string>
-    <string name="managed_friends_two_options_title">Dos opciones privadas</string>
-    <string name="managed_friends_two_options_body">Amigos de NOOP+ requiere una cuenta NOOP+ activa. Amigos con alojamiento propio sigue disponible sin NOOP+.</string>
     <string name="managed_friends_create_title">Crea tu perfil administrado de Amigos</string>
     <string name="managed_friends_create_body">Se crea un ID de NOOP aleatorio de coincidencia exacta. No hay un directorio público.</string>
     <string name="managed_friends_create_action">Crear perfil privado</string>

@@ -862,6 +862,10 @@ class ManagedStorageClient(
             patch.hrv?.let { put("hrv", it) }
             patch.rhr?.let { put("rhr", it) }
             patch.pokeAllowed?.let { put("poke_allowed", it) }
+            patch.messagesAllowed?.let { put("messages_allowed", it) }
+            patch.photosAllowed?.let { put("photos_allowed", it) }
+            patch.audioCallsAllowed?.let { put("audio_calls_allowed", it) }
+            patch.videoCallsAllowed?.let { put("video_calls_allowed", it) }
         }
         parseSocialVisibility(
             executeJson(

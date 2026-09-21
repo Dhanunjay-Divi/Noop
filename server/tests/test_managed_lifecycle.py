@@ -234,12 +234,12 @@ class StaleMigrationPrimary:
         self.shutdown_called = True
 
 
-def test_managed_lifecycle_safety_delivery_requires_both_enable_flags() -> None:
+def test_managed_lifecycle_safety_delivery_uses_managed_retry_gate() -> None:
     source = inspect.getsource(managed_lifecycle._run)
     retry_gate = source.index("settings.managed_push_retry_enabled")
-    worker_gate = source.index("settings.safety_worker_enabled", retry_gate)
-    service = source.index("ManagedSafetyPushService(", worker_gate)
-    assert retry_gate < worker_gate < service
+    service = source.index("ManagedSafetyPushService(", retry_gate)
+    assert retry_gate < service
+    assert "settings.safety_worker_enabled" not in source[retry_gate:service]
 
 
 @pytest.mark.asyncio

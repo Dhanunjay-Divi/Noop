@@ -816,7 +816,7 @@ def test_fcm_payload_contains_only_generic_notification_and_opaque_reference() -
     assert "display_name" not in serialized.casefold()
     assert payload["message"]["android"]["ttl"] == "28800s"
     assert payload["message"]["android"]["priority"] == "HIGH"
-    assert "collapse_key" not in payload["message"]["android"]
+    assert payload["message"]["android"]["collapse_key"] == f"noop-safety-{incident_id}"
     assert "notification" not in payload["message"]
     assert "apns" not in payload["message"]
     assert payload["message"]["token"] == "fcm-token:ABC_def-1234567890"

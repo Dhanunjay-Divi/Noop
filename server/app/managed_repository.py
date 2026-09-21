@@ -4471,12 +4471,28 @@ class PostgresManagedRepository:
                                 account_id,
                                 now,
                             )
-                        else:
+                        elif job["requested_by_identity_id"] is not None:
                             await connection.execute(
                                 """
                                 UPDATE managed_accounts
                                 SET status = 'active',
                                     erasure_requested_at = NULL,
+                                    auth_valid_after = GREATEST(
+                                        auth_valid_after,
+                                        $2
+                                    ),
+                                    updated_at = $2
+                                WHERE account_id = $1
+                                  AND status = 'erasure_pending'
+                                """,
+                                account_id,
+                                now,
+                            )
+                        else:
+                            await connection.execute(
+                                """
+                                UPDATE managed_accounts
+                                SET status = 'erasure_pending',
                                     auth_valid_after = GREATEST(
                                         auth_valid_after,
                                         $2
@@ -9065,6 +9081,11 @@ class PostgresManagedRepository:
                                 "with existing state"
                             )
                         if existing["status"] == "completed":
+                            await self._claim_service_managed_erasure(
+                                connection,
+                                erasure_job_id=existing["erasure_job_id"],
+                                account_id=account_id,
+                            )
                             return ManagedErasureScheduleResult(
                                 outcome="already_completed"
                             )
@@ -9072,8 +9093,9 @@ class PostgresManagedRepository:
                             str(existing["status"])
                         )
                         if mapped_status in {"pending", "running"}:
-                            await self._prepare_service_managed_erasure(
+                            await self._claim_service_managed_erasure(
                                 connection,
+                                erasure_job_id=existing["erasure_job_id"],
                                 account_id=account_id,
                             )
                         return ManagedErasureScheduleResult(
@@ -9097,8 +9119,9 @@ class PostgresManagedRepository:
                         list(_MANAGED_ERASURE_LIVE_STATUSES),
                     )
                     if live is not None:
-                        await self._prepare_service_managed_erasure(
+                        await self._claim_service_managed_erasure(
                             connection,
+                            erasure_job_id=live["erasure_job_id"],
                             account_id=account_id,
                         )
                         return ManagedErasureScheduleResult(
@@ -9127,15 +9150,14 @@ class PostgresManagedRepository:
                             not_before,
                             verification_expires_at
                         ) VALUES (
-                            $1, $2, $3, $4, 'all_managed_data', 'queued',
-                            $5, $6, NULL, $7, $7,
-                            $7::timestamptz + interval '400 days'
+                            $1, $2, $3, NULL, 'all_managed_data', 'queued',
+                            $4, $5, NULL, $6, $6,
+                            $6::timestamptz + interval '400 days'
                         )
                         """,
                         job_id,
                         account_id,
                         request_key,
-                        identity["identity_id"],
                         self._tenant_replay_hash(account_id),
                         confirmation_sha256,
                         now,
@@ -9193,6 +9215,28 @@ class PostgresManagedRepository:
                     "managed erasure status is temporarily unavailable"
                 ) from None
             raise ManagedErasureTerminalError("managed erasure status failed") from None
+
+    async def _claim_service_managed_erasure(
+        self,
+        connection: Any,
+        *,
+        erasure_job_id: UUID,
+        account_id: UUID,
+    ) -> None:
+        # A service-owned job has no customer requester. The finalizer uses this
+        # durable marker to keep ownership-deletion accounts fenced.
+        await connection.execute(
+            """
+            UPDATE managed_erasure_jobs
+            SET requested_by_identity_id = NULL
+            WHERE erasure_job_id = $1
+            """,
+            erasure_job_id,
+        )
+        await self._prepare_service_managed_erasure(
+            connection,
+            account_id=account_id,
+        )
 
     async def _prepare_service_managed_erasure(
         self,
@@ -9365,6 +9409,7 @@ class PostgresManagedRepository:
                     existing is None
                     or existing["status"] != "cooling_off"
                     or existing["not_before"] <= now
+                    or existing["requested_by_identity_id"] is None
                 ):
                     raise ManagedConflictError(
                         "managed erasure can no longer be canceled"

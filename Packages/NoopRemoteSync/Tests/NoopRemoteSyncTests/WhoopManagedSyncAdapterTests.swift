@@ -255,6 +255,175 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
         XCTAssertTrue(destinationPending.isEmpty)
     }
 
+    func testRemotePreferencesApplyUpdatesDefaultsWithoutCreatingOutboxEcho() async throws {
+        let payload = try XCTUnwrap(
+            BackupSettings.encode(["units.system": "imperial"])
+        )
+        let key = try ManagedDocumentKey(
+            keyID: UUID(),
+            keyData: Data(repeating: 7, count: 32)
+        )
+        let keyJSON = try canonicalData([
+            "scope": .string("global"),
+        ])
+        let documentID = ManagedDocumentStableIdentifier.uuid(
+            documentKind: ManagedDocumentKind.preferences.rawValue,
+            tableName: "preferences",
+            keyJSON: keyJSON
+        )
+        let envelope = try ManagedDocumentEnvelope.seal(
+            payload,
+            key: key.keyData,
+            metadata: ManagedDocumentEnvelopeMetadata(
+                accountScopeHash: accountScopeHash,
+                documentKind: .preferences,
+                documentID: documentID,
+                revision: 1
+            )
+        )
+        let remote = ManagedDocument(
+            documentKind: .preferences,
+            documentID: documentID,
+            revision: 1,
+            originInstallationID: "ios-test",
+            contentMode: ManagedDocumentContentMode.clientEncrypted.rawValue,
+            clientKeyID: key.keyID,
+            contentSHA256: ManagedDigest.sha256(envelope),
+            payloadJSON: nil,
+            payloadCiphertextBase64: envelope.base64EncodedString(),
+            updatedAt: "2026-09-20T12:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+
+        let suiteName = "WhoopManagedSyncAdapterTests.preferences.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("metric", forKey: "units.system")
+        let inboxRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "managed-preference-\(UUID().uuidString)"
+            )
+        defer { try? FileManager.default.removeItem(at: inboxRoot) }
+
+        let destination = try await managedStore()
+        let adapter = try WhoopManagedDocumentAdapter(
+            store: destination,
+            accountScopeHash: accountScopeHash,
+            preferencesDefaults: defaults,
+            documentKeys: FixedManagedDocumentKeys(key: key),
+            ciphertextInbox: ManagedDocumentCiphertextInbox(root: inboxRoot)
+        )
+        try await adapter.apply(
+            document: remote,
+            change: documentChange(remote)
+        )
+
+        XCTAssertEqual(defaults.string(forKey: "units.system"), "imperial")
+        let pending = try await destination.pendingManagedDocuments(
+            accountScopeHash: accountScopeHash,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        XCTAssertTrue(pending.isEmpty)
+    }
+
+    func testStaleRemotePreferencesDoNotOverwriteAcceptedDefaults() async throws {
+        let key = try ManagedDocumentKey(
+            keyID: UUID(),
+            keyData: Data(repeating: 9, count: 32)
+        )
+        let keyJSON = try canonicalData([
+            "scope": .string("global"),
+        ])
+        let documentID = ManagedDocumentStableIdentifier.uuid(
+            documentKind: ManagedDocumentKind.preferences.rawValue,
+            tableName: "preferences",
+            keyJSON: keyJSON
+        )
+        func remotePreferences(
+            value: String,
+            revision: Int64
+        ) throws -> ManagedDocument {
+            let payload = try XCTUnwrap(
+                BackupSettings.encode(["units.system": value])
+            )
+            let envelope = try ManagedDocumentEnvelope.seal(
+                payload,
+                key: key.keyData,
+                metadata: ManagedDocumentEnvelopeMetadata(
+                    accountScopeHash: accountScopeHash,
+                    documentKind: .preferences,
+                    documentID: documentID,
+                    revision: revision
+                )
+            )
+            return ManagedDocument(
+                documentKind: .preferences,
+                documentID: documentID,
+                revision: revision,
+                originInstallationID: "ios-test",
+                contentMode: ManagedDocumentContentMode.clientEncrypted.rawValue,
+                clientKeyID: key.keyID,
+                contentSHA256: ManagedDigest.sha256(envelope),
+                payloadJSON: nil,
+                payloadCiphertextBase64: envelope.base64EncodedString(),
+                updatedAt: "2026-09-21T01:00:00.000Z",
+                deletedAt: nil,
+                duplicate: false
+            )
+        }
+
+        let suiteName = "WhoopManagedSyncAdapterTests.stale-preferences.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let inboxRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "managed-stale-preference-\(UUID().uuidString)"
+            )
+        defer { try? FileManager.default.removeItem(at: inboxRoot) }
+
+        let destination = try await managedStore()
+        let adapter = try WhoopManagedDocumentAdapter(
+            store: destination,
+            accountScopeHash: accountScopeHash,
+            preferencesDefaults: defaults,
+            documentKeys: FixedManagedDocumentKeys(key: key),
+            ciphertextInbox: ManagedDocumentCiphertextInbox(root: inboxRoot)
+        )
+        let accepted = try remotePreferences(value: "imperial", revision: 2)
+        try await adapter.apply(
+            document: accepted,
+            change: documentChange(accepted, sequence: 1)
+        )
+        let stale = try remotePreferences(value: "metric", revision: 1)
+        try await adapter.apply(
+            document: stale,
+            change: documentChange(stale, sequence: 2)
+        )
+
+        XCTAssertEqual(defaults.string(forKey: "units.system"), "imperial")
+        let state = try await destination.registryWriter.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT remoteRevision FROM managedDocumentState
+                    WHERE accountScopeHash = ?
+                      AND tableName = 'preferences'
+                      AND localKey = 'global'
+                    """,
+                arguments: [self.accountScopeHash]
+            )
+        }
+        XCTAssertEqual(state?["remoteRevision"] as Int64?, 2)
+        let pending = try await destination.pendingManagedDocuments(
+            accountScopeHash: accountScopeHash,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        XCTAssertTrue(pending.isEmpty)
+    }
+
     func testEncryptedDocumentFailsClosedBeforeLaterServerReadableDocument() async throws {
         let store = try await managedStore()
         let adapter = try WhoopManagedDocumentAdapter(
@@ -912,5 +1081,30 @@ private actor DocumentRestoreSpy: WhoopManagedDocumentRestoring {
 
     func operations() -> [String] {
         restoredOperations
+    }
+}
+
+private actor FixedManagedDocumentKeys: ManagedDocumentKeyProviding {
+    let key: ManagedDocumentKey
+
+    init(key: ManagedDocumentKey) {
+        self.key = key
+    }
+
+    func recoveryEnrollmentComplete(accountScopeHash _: String) -> Bool {
+        true
+    }
+
+    func activeDocumentKey(
+        accountScopeHash _: String
+    ) -> ManagedDocumentKey {
+        key
+    }
+
+    func documentKey(
+        accountScopeHash _: String,
+        keyID _: UUID
+    ) -> ManagedDocumentKey {
+        key
     }
 }

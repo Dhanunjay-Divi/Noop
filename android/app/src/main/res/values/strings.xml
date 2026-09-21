@@ -2641,6 +2641,9 @@
     <string name="managed_cloud_sync_now">Sync now</string>
     <string name="managed_cloud_preparing_export">Preparing export…</string>
     <string name="managed_cloud_export_history">Export complete cloud history</string>
+    <string name="managed_cloud_import_history">Import complete cloud history</string>
+    <string name="managed_cloud_import_alert_title">Import complete cloud history?</string>
+    <string name="managed_cloud_import_alert_detail_android">Choose a NOOP cloud-history ZIP previously exported from this account. Import validates the archive, resumes safely, and may replace matching local records. Keep NOOP open until it finishes.</string>
     <string name="managed_cloud_disconnect_phone">Disconnect this phone</string>
     <string name="managed_cloud_delete_account">Delete NOOP account</string>
     <string name="managed_cloud_fresh_code">Fresh verification code</string>
@@ -2817,7 +2820,6 @@
     <string name="changelog_clearer_updates_and_reports_9_2_1">Clearer updates and reports that help us fix problems</string>
     <string name="whats_new_welcome_version">Welcome to version %1$s</string>
     <string name="managed_friends_source_noop_plus">NOOP+</string>
-    <string name="managed_friends_source_self_hosted">Self-hosted</string>
     <string name="managed_friends_subtitle">Private summaries with mutual control.</string>
     <string name="managed_friends_account_title">Your private NOOP account</string>
     <string name="managed_friends_account_detail">Verify your phone to use NOOP-hosted Friends. This step does not enable cloud health backup or upload health data.</string>
@@ -2831,8 +2833,6 @@
     <string name="managed_friends_delete_account_detail">Friends, managed cloud data, and the NOOP account will be scheduled for deletion after a 24-hour cooling-off period. Local health data on this phone is not deleted.</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends and account services are paused during the 24-hour cooling-off period. Local health data remains on this phone.</string>
     <string name="managed_friends_refresh">Refresh Friends</string>
-    <string name="managed_friends_two_options_title">Two private options</string>
-    <string name="managed_friends_two_options_body">NOOP+ Friends needs an enrolled NOOP+ account. Self-hosted Friends remains available without NOOP+.</string>
     <string name="managed_friends_create_title">Create your Friends profile</string>
     <string name="managed_friends_create_body">A random exact-match NOOP ID is created. There is no public directory.</string>
     <string name="managed_friends_create_action">Create private profile</string>

@@ -757,6 +757,39 @@ struct ContinuousHrvSchedule {
 /// CoreBluetooth engine for the WHOOP 4.0: scan-by-service → connect → discover →
 /// BOND (one confirmed write) → subscribe → reassemble char-05 frames → FrameRouter.
 /// Cannot run in the simulator; verified manually on-device (Task C6).
+enum ConfirmedCommandWritePurpose: Equatable {
+    case command
+    case bond
+    case clientHello
+    case historicalAck(trim: UInt32, advances: Bool)
+
+    var isHistoricalAck: Bool {
+        if case .historicalAck = self { return true }
+        return false
+    }
+}
+
+struct ConfirmedCommandWriteLedger {
+    private var pending: [ConfirmedCommandWritePurpose] = []
+
+    var hasPendingHistoricalAck: Bool {
+        pending.contains(where: \.isHistoricalAck)
+    }
+
+    mutating func enqueue(_ purpose: ConfirmedCommandWritePurpose) {
+        pending.append(purpose)
+    }
+
+    mutating func completeNext() -> ConfirmedCommandWritePurpose? {
+        guard !pending.isEmpty else { return nil }
+        return pending.removeFirst()
+    }
+
+    mutating func reset() {
+        pending.removeAll(keepingCapacity: true)
+    }
+}
+
 @MainActor
 public final class BLEManager: NSObject, ObservableObject {
 
@@ -821,6 +854,13 @@ public final class BLEManager: NSObject, ObservableObject {
     /// Per-slice ACK count for transport outcome classification. The visible LiveState count spans an
     /// auto-continue burst, so it cannot answer whether this individual slice moved.
     private var acknowledgedBatchesThisSession = 0
+    /// CoreBluetooth reports confirmed command writes in submission order but does not return the frame
+    /// in its callback. Track every with-response purpose so a history trim advances only on its own
+    /// callback, never when writeValue merely queues it.
+    private var confirmedCommandWrites = ConfirmedCommandWriteLedger()
+    /// HISTORY_COMPLETE may arrive before the final confirmed-write callback. Hold the session boundary
+    /// until every queued historical acknowledgement has either succeeded or the link fails closed.
+    private var historyCompletionAwaitingAck = false
     /// Wall time of the most recent offload frame OR HISTORY_COMPLETE — drives the #174 deep-packet
     /// cooldown. A type-0x2F frame arriving just after a backfill ends (backfilling already flipped
     /// false) is a TRAILING historical frame, not the live R22 stream; it must not be miscounted as a
@@ -2080,6 +2120,20 @@ public final class BLEManager: NSObject, ObservableObject {
     ///     sites are unaffected. Pass `.withResponse` for acked commands (e.g. historicalDataResult).
     public func send(_ command: WhoopCommand, payload: [UInt8] = [0x00],
                      writeType: CBCharacteristicWriteType = .withoutResponse) {
+        send(
+            command,
+            payload: payload,
+            writeType: writeType,
+            confirmedPurpose: .command
+        )
+    }
+
+    private func send(
+        _ command: WhoopCommand,
+        payload: [UInt8],
+        writeType: CBCharacteristicWriteType,
+        confirmedPurpose: ConfirmedCommandWritePurpose
+    ) {
         // #314 parity: CoreBluetooth already covers both Android defects here — this `p.state == .connected`
         // guard makes a write a no-op once the radio powers off (no DeadObjectException to crash on), and
         // centralManagerDidUpdateState publishes state.connected = false on .poweredOff, so the iOS/macOS UI
@@ -2159,7 +2213,13 @@ public final class BLEManager: NSObject, ObservableObject {
             let puffinPayload: [UInt8] = isHaptics ? [0x01, 47, 152, 0, 0, 0, 0, 0, 0, 0, 0, 0] : payload
             seq = seq &+ 1
             let frame = puffinCommandFrame(cmd: puffinCmd, seq: seq, payload: puffinPayload)
-            p.writeValue(Data(frame), for: ch, type: writeType)
+            writeCommandValue(
+                Data(frame),
+                peripheral: p,
+                characteristic: ch,
+                type: writeType,
+                confirmedPurpose: confirmedPurpose
+            )
             let cmdNote = isHaptics ? " cmd=0x13" : ""
             if command == .historicalDataResult {
                 historicalAckLogCounter += 1
@@ -2173,8 +2233,27 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         seq = seq &+ 1
         let frame = command.frame(seq: seq, payload: payload)
-        p.writeValue(Data(frame), for: ch, type: writeType)
+        writeCommandValue(
+            Data(frame),
+            peripheral: p,
+            characteristic: ch,
+            type: writeType,
+            confirmedPurpose: confirmedPurpose
+        )
         log("→ \(command.label) payload=\(hex(payload))")
+    }
+
+    private func writeCommandValue(
+        _ value: Data,
+        peripheral: CBPeripheral,
+        characteristic: CBCharacteristic,
+        type: CBCharacteristicWriteType,
+        confirmedPurpose: ConfirmedCommandWritePurpose
+    ) {
+        if type == .withResponse {
+            confirmedCommandWrites.enqueue(confirmedPurpose)
+        }
+        peripheral.writeValue(value, for: characteristic, type: type)
     }
 
     /// Point the Collector's live decode at the selected family. For a 5/MG, also install an identity
@@ -2229,22 +2308,21 @@ public final class BLEManager: NSObject, ObservableObject {
     /// High-freq-sync ack form (matches re/sync_openwhoop.py, which pulled 762 type-47 records):
     /// HISTORICAL_DATA_RESULT(23) payload = `[0x01] + end_data`, where end_data is the verbatim
     /// 8 bytes of the HISTORY_END metadata.data[10:18] (trim u32 at [10:14] + next u32 at [14:18]).
-    /// The `trim` argument (= end_data first u32) is already persisted as the strap_trim cursor by
-    /// the Backfiller; it is passed here only for logging.
+    /// The `trim` argument (= end_data first u32) is already persisted as the local strap_trim
+    /// diagnostic watermark by the Backfiller. It is also retained here to correlate the confirmed
+    /// callback; firmware, not this local value, owns the next history range offered.
     func ackHistoricalChunk(trim: UInt32, endData: [UInt8]) {
         let trimAdvanced = HistorySyncDurableProgressPolicy.advances(
             rows: 0,
             trim: trim,
             previousTrim: backfiller?.lastAckedTrim
         )
-        send(.historicalDataResult, payload: [0x01] + endData, writeType: .withResponse)
-        acknowledgedBatchesThisSession += 1
-        if trimAdvanced {
-            // Live progress is coalesced to the first advancing ACK and every tenth after it. Repeated
-            // empty ENDs at one frozen cursor are not progress and cannot keep the watchdog alive.
-            state.noteAcknowledgedHistoryBatch()
-            armBackfillDurableProgressTimeout()
-        }
+        send(
+            .historicalDataResult,
+            payload: [0x01] + endData,
+            writeType: .withResponse,
+            confirmedPurpose: .historicalAck(trim: trim, advances: trimAdvanced)
+        )
     }
 
     // MARK: Backfill helpers
@@ -2303,6 +2381,10 @@ public final class BLEManager: NSObject, ObservableObject {
             log("Backfill: deferred - connect handshake not done yet")
             return false
         }
+        guard !confirmedCommandWrites.hasPendingHistoricalAck else {
+            log("Backfill: deferred - previous history acknowledgement is still awaiting its confirmed-write callback")
+            return false
+        }
         guard let backfiller else {
             // Store not built yet (bootstrapStore failed or hasn't run). Do NOT force live HR — the
             // type-47 backfill is the metric source. RE-ATTEMPT the bootstrap here so a transient
@@ -2324,6 +2406,7 @@ public final class BLEManager: NSObject, ObservableObject {
         finishHistorySyncDiagnostic(reason: "retry")
         backfiller.begin(family: selectedModel.deviceFamily, continuedAfterRows: continuingBurst)
         backfilling = true
+        historyCompletionAwaitingAck = false
         acknowledgedBatchesThisSession = 0
         beginHistorySyncDiagnostic(continuing: continuingBurst)
         state.beginHistorySync(continuing: continuingBurst)
@@ -2382,6 +2465,10 @@ public final class BLEManager: NSObject, ObservableObject {
     /// historical data (isBackfilling drops to false), exit the backfill session cleanly.
     private func afterBackfillIngest() {
         guard backfilling, backfiller?.isBackfilling == false else { return }
+        if confirmedCommandWrites.hasPendingHistoricalAck {
+            historyCompletionAwaitingAck = true
+            return
+        }
         exitBackfilling(reason: "HISTORY_COMPLETE")
     }
 
@@ -2404,8 +2491,9 @@ public final class BLEManager: NSObject, ObservableObject {
 
     /// Re-arm the idle watchdog. Called on every offload frame during backfill so the timer resets
     /// as long as the strap keeps sending HISTORY; if the strap goes silent the timer fires and we
-    /// exit the session (the durable strap_trim cursor means the next session resumes where we left
-    /// off). Timeout is generous (60 s, not 20 s): the unstoppable ~2/s type-43 raw flood eats BLE
+    /// exit the session. Unacknowledged history remains firmware-owned and is requested again next
+    /// session; the local strap_trim value is diagnostic only. Timeout is generous (60 s, not 20 s):
+    /// the unstoppable ~2/s type-43 raw flood eats BLE
     /// airtime, so genuine offload frames can arrive in bursts with multi-second lulls between chunks
     /// — a short watchdog cut sessions short mid-drain. Longer = more records drained per session.
     static let backfillIdleTimeoutSeconds = 60
@@ -2413,8 +2501,7 @@ public final class BLEManager: NSObject, ObservableObject {
         backfillTimeout?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.backfiller?.timeoutFired()
-            self.exitBackfilling(reason: "timeout")
+            self.endBackfillAfterWatchdog(reason: "timeout")
         }
         backfillTimeout = item
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(BLEManager.backfillIdleTimeoutSeconds), execute: item)
@@ -2438,8 +2525,7 @@ public final class BLEManager: NSObject, ObservableObject {
                 return
             }
             self.log("Backfill: durable progress stalled for 90s while frames may still be arriving - ending this attempt without acknowledging the held history.")
-            self.backfiller?.timeoutFired()
-            self.exitBackfilling(reason: "durableProgressTimeout")
+            self.endBackfillAfterWatchdog(reason: "durableProgressTimeout")
         }
         backfillDurableProgressTimeout = item
         DispatchQueue.main.asyncAfter(
@@ -2448,12 +2534,31 @@ public final class BLEManager: NSObject, ObservableObject {
         )
     }
 
+    /// End a watchdog-stalled attempt without allowing a delayed confirmed-write callback to be
+    /// credited to a replacement session. Durable rows remain local and firmware-retained state stays
+    /// authoritative. Reconnect when a historical acknowledgement was still in flight so CoreBluetooth
+    /// cannot carry that callback across the session boundary.
+    private func endBackfillAfterWatchdog(reason: String) {
+        backfiller?.timeoutFired()
+        let hadPendingHistoricalAck = confirmedCommandWrites.hasPendingHistoricalAck
+        if hadPendingHistoricalAck {
+            confirmedCommandWrites.reset()
+            historyCompletionAwaitingAck = false
+        }
+        exitBackfilling(reason: reason)
+        if hadPendingHistoricalAck, let peripheral {
+            log("Backfill: watchdog expired with a history acknowledgement in flight - reconnecting without crediting progress")
+            central?.cancelPeripheralConnection(peripheral)
+        }
+    }
+
     /// Tear down the backfill session. Does NOT auto-start live HR: the periodic type-47 backfill
     /// is the primary metric source now, mirroring how WHOOP syncs. Live HR is opt-in only (the
     /// manual "Start HR" button in LiveView). Between backfills the Collector sees only the live
     /// type-43 flood, which extractStreams ignores — the data comes from the next periodic offload.
     private func exitBackfilling(reason: String) {
         guard backfilling else { return }
+        historyCompletionAwaitingAck = false
         backfilling = false
         finishHistorySyncDiagnostic(reason: reason)
         state.finishHistorySyncProgress()
@@ -3971,6 +4076,8 @@ public final class BLEManager: NSObject, ObservableObject {
         disHwRev = nil
         whoop5NotifyCharacteristics.removeAll()
         whoop5ClientHelloWritePending = false
+        confirmedCommandWrites.reset()
+        historyCompletionAwaitingAck = false
         pendingNotificationRearms.removeAll()
     }
 
@@ -5063,6 +5170,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         realtimeArmedAt = nil   // cleared after the marginal-radio detector above read it (#80)
         // Reset backfill state so the next connect starts a fresh offload (incl. the syncing pill —
         // a dropped link mid-offload must not leave "Syncing strap history…" stuck on, #77).
+        backfiller?.timeoutFired()
         backfillStarted = false
         // #364: the auto-continue streak + spin-detector are per-connection — a fresh connection earns a
         // fresh budget of back-to-back re-kicks and starts its trim-advance comparison from scratch.
@@ -5460,7 +5568,13 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                     state: .started,
                     family: selectedModel.deviceFamily
                 )
-                peripheral.writeValue(Data(bondFrame), for: c, type: .withResponse)
+                writeCommandValue(
+                    Data(bondFrame),
+                    peripheral: peripheral,
+                    characteristic: c,
+                    type: .withResponse,
+                    confirmedPurpose: .bond
+                )
             case BLEManager.whoop5CmdWriteChar:
                 // EXPERIMENTAL WHOOP 5.0/MG: a 5/MG strap starts a session with the static CLIENT_HELLO
                 // frame, not the WHOOP4 GET_BATTERY_LEVEL bond frame. CLIENT_HELLO itself is a confirmed
@@ -5483,7 +5597,13 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                         state: .started,
                         family: selectedModel.deviceFamily
                     )
-                    peripheral.writeValue(Data(hello), for: c, type: .withResponse)
+                    writeCommandValue(
+                        Data(hello),
+                        peripheral: peripheral,
+                        characteristic: c,
+                        type: .withResponse,
+                        confirmedPurpose: .clientHello
+                    )
                 }
                 // The realtime-HR stream is armed POST-bond (in didWriteValueFor / startRealtime) with
                 // puffin framing — not here. Writing it pre-bond on an unauthenticated link did nothing.
@@ -5536,24 +5656,40 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral,
                            didWriteValueFor characteristic: CBCharacteristic,
                            error: Error?) {
+        let callbackMatchesCommandCharacteristic =
+            self.peripheral === peripheral && characteristic.uuid == cmdCharacteristic?.uuid
+        let confirmedPurpose = callbackMatchesCommandCharacteristic
+            ? confirmedCommandWrites.completeNext()
+            : nil
         let callbackMatchesHelloCharacteristic =
-            self.peripheral === peripheral && characteristic.uuid == BLEManager.whoop5CmdWriteChar
+            callbackMatchesCommandCharacteristic
+                && characteristic.uuid == BLEManager.whoop5CmdWriteChar
         let wasClientHelloWrite = Whoop5ClientHelloAck.shouldEstablishBond(
             family: selectedModel.deviceFamily,
             alreadyBonded: didBond,
-            helloPending: whoop5ClientHelloWritePending,
+            helloPending: confirmedPurpose == .clientHello || whoop5ClientHelloWritePending,
             callbackMatchesCommandCharacteristic: callbackMatchesHelloCharacteristic
         )
-        let wasBondWrite = !didBond && (
+        let wasBondWrite = confirmedPurpose == .bond || (!didBond && (
             wasClientHelloWrite
                 || (selectedModel.deviceFamily == .whoop4
                     && characteristic.uuid == BLEManager.cmdWriteChar)
-        )
+        ))
         if whoop5ClientHelloWritePending && callbackMatchesHelloCharacteristic {
             whoop5ClientHelloWritePending = false
         }
         if let error = error {
             log("Confirmed write failed reason=\(connErrorCategory(error))")
+            if confirmedPurpose?.isHistoricalAck == true {
+                // The rows and local diagnostic watermark are durable, but the band did not confirm the
+                // trim. Close this command session without crediting progress; the reconnect path asks
+                // the band to re-offer anything it retained.
+                historyCompletionAwaitingAck = false
+                backfiller?.timeoutFired()
+                confirmedCommandWrites.reset()
+                central?.cancelPeripheralConnection(peripheral)
+                return
+            }
             if wasBondWrite {
                 BandDiagnostics.recordReadiness(
                     .bond,
@@ -5632,6 +5768,22 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                    let working = lastBondedPeripheralUUID, working != pinned {
                     readoptWorkingStrap(working, awayFrom: pinned)
                 }
+            }
+            return
+        }
+        if case let .historicalAck(trim, trimAdvanced) = confirmedPurpose {
+            backfiller?.confirmAck(trim: trim)
+            acknowledgedBatchesThisSession += 1
+            if trimAdvanced {
+                // Visible progress and the durable-progress watchdog advance only after CoreBluetooth
+                // confirms that the band accepted this exact acknowledgement.
+                state.noteAcknowledgedHistoryBatch()
+                armBackfillDurableProgressTimeout()
+            }
+            if historyCompletionAwaitingAck,
+               !confirmedCommandWrites.hasPendingHistoricalAck {
+                historyCompletionAwaitingAck = false
+                exitBackfilling(reason: "HISTORY_COMPLETE")
             }
             return
         }

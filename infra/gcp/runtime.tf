@@ -1077,6 +1077,22 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value = "true"
         }
         env {
+          name  = "NOOP_MANAGED_SAFETY_REPEAT_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "NOOP_MANAGED_SAFETY_REPEAT_INTERVAL_SECONDS"
+          value = "120"
+        }
+        env {
+          name  = "NOOP_MANAGED_SAFETY_REPEAT_TTL_SECONDS"
+          value = "900"
+        }
+        env {
+          name  = "NOOP_MANAGED_SAFETY_REPEAT_MAX_ROUNDS"
+          value = "4"
+        }
+        env {
           name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"
           value = "5"
         }
@@ -1196,7 +1212,7 @@ resource "google_cloud_scheduler_job" "managed_lifecycle" {
   region           = var.region
   name             = "${local.prefix}-managed-lifecycle"
   description      = "Expire reservations and enforce managed object retention"
-  schedule         = "*/5 * * * *"
+  schedule         = "* * * * *"
   time_zone        = "Etc/UTC"
   attempt_deadline = "320s"
 

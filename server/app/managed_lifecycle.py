@@ -498,7 +498,7 @@ async def _run() -> ManagedLifecycleResult:
                 ticket_codec=identity_ticket_codec,
             )
             safety_push_service = None
-            if settings.managed_push_retry_enabled and settings.safety_worker_enabled:
+            if settings.managed_push_retry_enabled:
                 safety_push_service = ManagedSafetyPushService(
                     repository=safety_repository,
                     token_codec=ManagedPushTokenCodec(

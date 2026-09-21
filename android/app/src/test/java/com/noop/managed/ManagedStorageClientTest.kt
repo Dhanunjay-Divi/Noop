@@ -152,6 +152,67 @@ class ManagedStorageClientTest {
     }
 
     @Test
+    fun socialVisibilitySerializesCommunicationPermissions() = runTest {
+        var captured: Request? = null
+        val friendProfileId = UUID.fromString(
+            "b99b8a93-5e28-4ae7-ae39-4e659adad9f5",
+        )
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured = request
+                response(
+                    request,
+                    200,
+                    """
+                    {
+                      "sharing": {
+                        "charge": false,
+                        "effort": false,
+                        "rest": false,
+                        "sleep_duration": false,
+                        "hrv": false,
+                        "rhr": false,
+                        "poke_allowed": false,
+                        "messages_allowed": true,
+                        "photos_allowed": true,
+                        "audio_calls_allowed": false,
+                        "video_calls_allowed": true
+                      }
+                    }
+                    """.trimIndent(),
+                )
+            },
+        )
+
+        val sharing = client.updateSocialVisibility(
+            authorization,
+            friendProfileId,
+            ManagedSocialVisibilityPatch(
+                messagesAllowed = true,
+                photosAllowed = true,
+                audioCallsAllowed = false,
+                videoCallsAllowed = true,
+            ),
+        )
+
+        assertEquals(
+            "/v1/managed/social/friends/$friendProfileId/privacy",
+            captured!!.url.encodedPath,
+        )
+        val body = captured!!.jsonBody()
+        assertEquals(4, body.length())
+        assertTrue(body.getBoolean("messages_allowed"))
+        assertTrue(body.getBoolean("photos_allowed"))
+        assertFalse(body.getBoolean("audio_calls_allowed"))
+        assertTrue(body.getBoolean("video_calls_allowed"))
+        assertTrue(sharing.messagesAllowed)
+        assertTrue(sharing.photosAllowed)
+        assertFalse(sharing.audioCallsAllowed)
+        assertTrue(sharing.videoCallsAllowed)
+    }
+
+    @Test
     fun retryableServerResponsePreservesBoundedRetryAfter() = runTest {
         val client = ManagedStorageClient(
             config,

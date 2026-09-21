@@ -197,6 +197,52 @@ encrypted edge collector with a short-lived BLE/upload journal, bounded offline
 working cache, immediate Safety initiation, and enough current state for safe
 offline use.
 
+Do not interpret "cloud-authoritative" as "nothing may exist locally." A
+wearable collector must survive temporary network loss, process interruption,
+provider delay, and a Safety initiation while offline. The intended pipeline is:
+
+1. the authorized phone collects BLE and platform-health evidence into a
+   bounded local journal;
+2. deterministic chunks and versioned personal documents enter a durable local
+   outbox;
+3. the server acknowledges exact immutable objects only after validation and
+   durable persistence;
+4. server processors publish versioned canonical metrics with provenance,
+   confidence, and formula revision;
+5. clients restore and verify the acknowledged range before local pruning is
+   eligible;
+6. Today, Trends, recommendations, reminders, Friends projections, and Safety
+   read only an authority state that is explicit for that data class and
+   formula; and
+7. rollback can return authority to the client shadow without losing the
+   upload journal or user records.
+
+Current reviewed client retention keeps seven days of high-rate raw detail and
+30 days of essential time series only after exact clean-window validation.
+Compact summaries and user-authored records follow their separately reviewed
+retention contracts. Never blindly overwrite the newest row, age-evict an
+unacknowledged object, prune a dirty or changed window, or claim that a rolling
+cache is active in production without exact runtime evidence. Immutable cloud
+objects, idempotent natural keys, bounded manifests, tombstones, compaction,
+and deletion jobs are preferred to lossy in-place replacement.
+
+Treat disconnected-band history as a separate firmware and transport contract,
+not as phone or cloud retention. The production band must continue autonomous
+sampling without a connected phone and use a documented bounded circular flash
+history. When capacity is exhausted, firmware may overwrite only the oldest
+retained records while continuing to preserve the newest data. It must expose
+the effective capacity, oldest/newest retained bounds, cursor generation or
+equivalent wrap marker, and an explicit overflow/gap state so the app never
+mistakes overwritten history for a complete sync. The wrapper must resume from
+the last durably acknowledged range, commit idempotently before acknowledging
+the band, tolerate duplicate delivery, and surface an unrecoverable gap when
+the phone was absent longer than the measured capacity. Never claim this
+behavior from SDK documentation alone: verify full-flash wrap, multi-day phone
+absence, interrupted read/commit/ack, reconnect, duplicate replay, clock reset,
+firmware update, low battery, and power loss on every shipped model and
+firmware. Preserve the current WHOOP durable-before-trim path for comparison
+testing; do not make the server acknowledgment advance or erase band history.
+
 Be precise about the word `encrypted`: the current mobile databases rely on
 Apple file protection/platform disk encryption and Android device encryption.
 Neither database currently has proven application-level SQLCipher encryption.
@@ -217,6 +263,14 @@ managed documents require `client_encrypted`. Keep personal encrypted document
 upload/restore and personal key recovery gated until the recorded client
 encryption, recovery, security-review, migration, and physical-device gates
 pass. Do not weaken mode/schema validation or relabel legacy content.
+
+Friends follows D-060: it is one NOOP-hosted account service. No current
+Friends route may expose provider selection, a local-server address, an
+administrator key, or self-hosting. Do not confuse this with the separate
+decoded-data backup compatibility subsystem. Removing that subsystem requires
+an explicit existing-user migration, remote-data deletion/offboarding path,
+export continuity, rollback, and a durable decision; hiding it while a
+background uploader continues is not acceptable.
 
 Preserve WHOOP compatibility for comparison testing. Do not remove or rename
 working WHOOP transport, storage, import, model-resolution, fixtures, or tests
@@ -284,6 +338,30 @@ battery-sensitive cadence, network retries, process death, and low-storage
 behavior. Make performance changes only after identifying the actual boundary
 and preserving data correctness.
 
+Use representative small, medium, and large synthetic histories. Measure cold
+launch, first useful content, repeated Today/Trends/calendar scrolling,
+navigation return, sync catch-up, restore, export/import, and background-to-
+foreground recovery. Inspect query plans, main-thread work, recomposition/view
+invalidation, allocations, image decoding, pagination, and database file/WAL
+growth. A passing build or one smooth simulator gesture is not a zero-lag
+claim. Record thresholds, sample count, device/runtime class, variance, and
+the exact path exercised.
+
+Audit dead code separately from compatibility:
+
+- prove an app route, resource, worker, scheduler, API, migration, or model is
+  unreachable before removing it;
+- search generated configuration and platform entry points, not only direct
+  source references;
+- retain immutable migrations, wire compatibility, historical import/export
+  provenance, legal notices, rollback readers, and existing-user cleanup paths;
+- remove orphan presentation copy, disabled background work, duplicate
+  implementations, and obsolete feature flags only with focused ratchet tests;
+  and
+- run available compiler warnings, lint/static analysis, resource shrinking,
+  route contracts, and exact-reference inventories. Do not state "no dead code"
+  when only one language or build flavor was inspected.
+
 Every changed fallible boundary needs bounded evidence for success, rejection,
 stall, retry, and failure. Use:
 
@@ -335,6 +413,35 @@ enumerated round-owned generated resources after preserving durable evidence.
   status report while independent work remains.
 - Never enable production traffic or deploy a public service as part of this
   review.
+
+## 9A. End-To-End Customer And Intelligence Flow
+
+Trace one fictional user from install through account creation, ownership
+capability, permissions, band pairing, calibration, background collection,
+managed upload, canonical metric publication, Today/Trends/calendar display,
+workout and sleep review, recommendations, reminders, Friends sharing, Safety,
+export/import, diagnostics, sign-out, device replacement, and account erasure.
+
+At every transition verify:
+
+- loading, offline, stale, missing, conflict, retry, cancellation, and
+  destructive states;
+- exact data owner and authority: phone edge, managed object, canonical server
+  result, imported measurement, or user-authored record;
+- consent, revocation, retention, deletion, restore, and cross-device behavior;
+- Apple/Android semantic parity and intentional macOS/Watch/widget limits;
+- bounded diagnostics for success, rejection, stall, retry, and failure; and
+- the recommendation's evidence, freshness, cooldown, quiet hours,
+  explainability, opt-out, and non-medical wording.
+
+Review current official documentation and current public product behavior from
+major wearable and health platforms only to identify customer problems and
+interaction patterns such as calibration disclosure, recovery drivers,
+workout review, sleep planning, journal prompts, trend explanation, and
+notification controls. Date and cite every material research note. Never copy
+their assets, text, layouts, formulas, thresholds, private APIs, or inferred
+algorithms. Treat marketing claims and screenshots as hypotheses, and require
+NOOP-owned evidence before changing a metric or health claim.
 
 ## 10. Use Bounded Commands
 

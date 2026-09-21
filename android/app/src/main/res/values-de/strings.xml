@@ -2456,6 +2456,9 @@
     <string name="managed_cloud_sync_now">Jetzt synchronisieren</string>
     <string name="managed_cloud_preparing_export">Export wird vorbereitet…</string>
     <string name="managed_cloud_export_history">Vollständigen Cloud-Verlauf exportieren</string>
+    <string name="managed_cloud_import_history">Vollständigen Cloud-Verlauf importieren</string>
+    <string name="managed_cloud_import_alert_title">Vollständigen Cloud-Verlauf importieren?</string>
+    <string name="managed_cloud_import_alert_detail_android">Wähle eine NOOP-Cloud-Verlauf-ZIP-Datei, die zuvor aus diesem Konto exportiert wurde. Der Import prüft das Archiv, wird sicher fortgesetzt und kann passende lokale Datensätze ersetzen. Lass NOOP geöffnet, bis der Import abgeschlossen ist.</string>
     <string name="managed_cloud_disconnect_phone">Dieses Telefon trennen</string>
     <string name="managed_cloud_delete_account">NOOP Cloud-Konto löschen</string>
     <string name="managed_cloud_fresh_code">Neuer Bestätigungscode</string>
@@ -2602,11 +2605,8 @@
     <string name="changelog_clearer_updates_and_reports_9_2_1">Klarere Updates und Berichte, die bei der Fehlerbehebung helfen</string>
     <string name="whats_new_welcome_version">Willkommen bei Version %1$s</string>
     <string name="managed_friends_source_noop_plus">NOOP+</string>
-    <string name="managed_friends_source_self_hosted">Selbst gehostet</string>
     <string name="managed_friends_subtitle">Private Zusammenfassungen mit gegenseitiger Kontrolle.</string>
     <string name="managed_friends_refresh">Verwaltete Freunde aktualisieren</string>
-    <string name="managed_friends_two_options_title">Zwei private Optionen</string>
-    <string name="managed_friends_two_options_body">NOOP+ Freunde erfordert ein aktiviertes NOOP+ Konto. Selbst gehostete Freunde bleibt auch ohne NOOP+ verfügbar.</string>
     <string name="managed_friends_create_title">Verwaltetes Freunde-Profil erstellen</string>
     <string name="managed_friends_create_body">Eine zufällige NOOP-ID für exakte Treffer wird erstellt. Es gibt kein öffentliches Verzeichnis.</string>
     <string name="managed_friends_create_action">Privates Profil erstellen</string>

@@ -2042,7 +2042,11 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         )
         XCTAssertEqual(
             stale,
-            ManagedDocumentApplyResult(changedRows: 0, applied: true)
+            ManagedDocumentApplyResult(
+                changedRows: 0,
+                applied: true,
+                acceptedRevision: false
+            )
         )
         XCTAssertEqual(entries.map(\.amountML), [500])
         XCTAssertEqual(stateAfter, stateBefore)
@@ -2091,7 +2095,11 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         )
         XCTAssertEqual(
             stale,
-            ManagedDocumentApplyResult(changedRows: 0, applied: true)
+            ManagedDocumentApplyResult(
+                changedRows: 0,
+                applied: true,
+                acceptedRevision: false
+            )
         )
         XCTAssertEqual(entries.map(\.amountML), [500])
         XCTAssertEqual(stateAfter, stateBefore)
@@ -2151,7 +2159,11 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         )
         XCTAssertEqual(
             stale,
-            ManagedDocumentApplyResult(changedRows: 0, applied: true)
+            ManagedDocumentApplyResult(
+                changedRows: 0,
+                applied: true,
+                acceptedRevision: false
+            )
         )
         XCTAssertTrue(entries.isEmpty)
         XCTAssertEqual(stateAfter, stateBefore)
@@ -2255,7 +2267,11 @@ final class ManagedSyncDocumentsTests: XCTestCase {
 
         XCTAssertEqual(
             stale,
-            ManagedDocumentApplyResult(changedRows: 0, applied: true)
+            ManagedDocumentApplyResult(
+                changedRows: 0,
+                applied: true,
+                acceptedRevision: false
+            )
         )
         XCTAssertEqual(state?["remoteRevision"] as Int64?, 2)
         XCTAssertEqual(

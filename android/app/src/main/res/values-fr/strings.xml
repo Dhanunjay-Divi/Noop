@@ -2440,6 +2440,9 @@
     <string name="managed_cloud_sync_now">Synchroniser maintenant</string>
     <string name="managed_cloud_preparing_export">Préparation de l’export…</string>
     <string name="managed_cloud_export_history">Exporter tout l’historique cloud</string>
+    <string name="managed_cloud_import_history">Importer tout l’historique cloud</string>
+    <string name="managed_cloud_import_alert_title">Importer tout l’historique cloud ?</string>
+    <string name="managed_cloud_import_alert_detail_android">Choisissez un fichier ZIP d’historique cloud NOOP précédemment exporté depuis ce compte. L’importation valide l’archive, reprend en toute sécurité et peut remplacer les enregistrements locaux correspondants. Gardez NOOP ouvert jusqu’à la fin.</string>
     <string name="managed_cloud_disconnect_phone">Déconnecter ce téléphone</string>
     <string name="managed_cloud_delete_account">Supprimer le compte cloud NOOP</string>
     <string name="managed_cloud_fresh_code">Nouveau code de vérification</string>
@@ -2586,11 +2589,8 @@
     <string name="changelog_clearer_updates_and_reports_9_2_1">Des mises à jour plus claires et des rapports utiles au diagnostic</string>
     <string name="whats_new_welcome_version">Bienvenue dans la version %1$s</string>
     <string name="managed_friends_source_noop_plus">NOOP+</string>
-    <string name="managed_friends_source_self_hosted">Auto-hébergé</string>
     <string name="managed_friends_subtitle">Des résumés privés sous contrôle mutuel.</string>
     <string name="managed_friends_refresh">Actualiser les Amis gérés</string>
-    <string name="managed_friends_two_options_title">Deux options privées</string>
-    <string name="managed_friends_two_options_body">Les Amis NOOP+ nécessitent un compte NOOP+ actif. Les Amis auto-hébergés restent disponibles sans NOOP+.</string>
     <string name="managed_friends_create_title">Créer votre profil Amis géré</string>
     <string name="managed_friends_create_body">Un identifiant NOOP aléatoire à correspondance exacte est créé. Il n’existe aucun annuaire public.</string>
     <string name="managed_friends_create_action">Créer un profil privé</string>

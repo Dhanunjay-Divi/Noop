@@ -467,6 +467,103 @@ final class ManagedDocumentLifecycleContractTests: XCTestCase {
         }
     }
 
+    func testManagedAccountDeletionCopyIsLocalizedAcrossSupportedLocales()
+        throws
+    {
+        let catalog = try Data(
+            contentsOf: repoRoot.appendingPathComponent(
+                "Strand/Resources/Localizable.xcstrings"
+            )
+        )
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: catalog) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(root["strings"] as? [String: Any])
+        let locales = [
+            "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant",
+        ]
+        let keys = [
+            "Delete NOOP account?",
+            "Verification code",
+            "Send verification code",
+            "Cloud data and your NOOP account will be scheduled for deletion after a 24-hour cooling-off period. Data stored locally on this iPhone is not deleted.",
+            "NOOP+ verification code",
+            "Delete NOOP account…",
+            "Account deletion verification code",
+            "A verification code was sent.",
+            "Request a new verification code.",
+            "A fresh verification code was sent to %@.",
+            "Send a fresh verification code before deleting your NOOP account.",
+            "NOOP account deletion is scheduled after the 24-hour cooling-off period.",
+            "NOOP account deletion status: %@.",
+            "NOOP account deletion completed. Local NOOP data remains on this iPhone.",
+            "NOOP account deletion is processing in the cloud. Local NOOP data remains on this iPhone.",
+            "NOOP account deletion was canceled.",
+            "Enter the verification code from the text message.",
+        ]
+
+        for key in keys {
+            let entry = try XCTUnwrap(
+                strings[key] as? [String: Any],
+                "Missing managed-account deletion localization: \(key)"
+            )
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any]
+            )
+            for locale in locales {
+                let localization = try XCTUnwrap(
+                    localizations[locale] as? [String: Any],
+                    "Missing \(locale): \(key)"
+                )
+                let unit = try XCTUnwrap(
+                    localization["stringUnit"] as? [String: Any]
+                )
+                XCTAssertEqual(unit["state"] as? String, "translated")
+                XCTAssertFalse(
+                    (unit["value"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty ?? true,
+                    "\(locale): \(key)"
+                )
+            }
+        }
+    }
+
+    func testRetiredSelfHostedFriendsCatalogCopyIsAbsent() throws {
+        let catalog = try Data(
+            contentsOf: repoRoot.appendingPathComponent(
+                "Strand/Resources/Localizable.xcstrings"
+            )
+        )
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: catalog) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(root["strings"] as? [String: Any])
+        let retiredKeys = [
+            "Leave this circle and delete your server profile?",
+            "Leave & delete server copy",
+            "Host your private circle",
+            "Friends lives on a Noop server you control. There is no Noop account or public profile.",
+            "Set up your server",
+            "An invitation includes a server address and one-time code. You can join without receiving the server administrator key.",
+            "The server administrator key is used once to issue a separate member token. That token stays in Keychain and cannot read raw server data. Friends is not end-to-end encrypted, so use a server operator you trust.",
+            "%lld people in your private circle",
+            "Leave circle & delete server copy…",
+            "Join my private Noop circle",
+            "Open the Friends tab in Noop and enter the server address and one-time code.",
+            "Trust the server operator",
+            "Private server",
+            "Sharing is directional and enforced by your server.",
+        ]
+
+        for key in retiredKeys {
+            XCTAssertNil(
+                strings[key],
+                "Retired self-hosted Friends copy returned: \(key)"
+            )
+        }
+    }
+
     func testEnrollmentUsesProjectTenantBindingWithoutMovingLegacyData()
         throws
     {

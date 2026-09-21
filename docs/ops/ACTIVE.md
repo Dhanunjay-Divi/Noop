@@ -60,6 +60,31 @@ Last updated: **2026-09-21**
   skip and zero failures.
   Remaining blockers include live staging credential provisioning, the
   consolidated commit/push, hosted exact-SHA checks, and protected integration.
+- The September 21 final closeout additionally preserves the terminal
+  service-erasure account fence, makes managed import reachable on both phone
+  platforms, prevents restored Apple preferences from creating an outbox echo,
+  serializes all Android Friends communication permissions, completes
+  destructive-flow localization, and removes only proven unreferenced
+  self-hosted Friends presentation resources. Focused closeout evidence is
+  green: Apple 13/13, Android localization 6/6, Android retention 19/19, Swift
+  retention 6/6, managed-erasure unit 4 pass/3 PostgreSQL-gated skips, and
+  changed-server Ruff check/format. The separately recorded disposable
+  PostgreSQL terminal-fence test remains green.
+- The same closeout now makes history-chunk credit callback-confirmed on Apple
+  and Android, fences delayed persistence/callbacks across ended sessions, and
+  treats local `strap_trim` only as a diagnostic watermark. Apple reconnects
+  fail-closed if a watchdog expires with an acknowledgement in flight. The
+  Apple focused suite passes 23/23. Exact-current broad evidence is green:
+  `NoopRemoteSync` 190/190, `WhoopStore` 539/539, macOS 2,213 with one
+  intentional skip, iOS simulator 39 with one intentional skip, unsigned
+  Release iOS with embedded Watch/widget and zero compiler warnings/errors,
+  Android Full and Demo 4,972 each with seven intentional skips across 175
+  tasks, disposable PostgreSQL 784 with one intentional skip, and 20/20
+  plan-only OpenTofu tests. The repository tool wall passes 305 tests with one
+  intentional skip. Required-CI validates all ten contexts; the terminology
+  ratchet records 17,837 classified occurrences across 1,583 groups with zero
+  forbidden mappings. Remaining work is consolidated commit/push, hosted
+  exact-SHA verification, protected integration, and round-owned cleanup.
 - Initial hosted replacement commit `bec61a55c7e45fbb2b1563c891858e439049b9cb`
   reached run `35546684149`. Server source lint passed, but Ruff's format check
   identified seven files. Ruff 0.12.2 applied its canonical formatting to
@@ -69,18 +94,19 @@ Last updated: **2026-09-21**
   replacement push and hosted verification.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
-- Exact-current local evidence: `NoopRemoteSync` passes 188/188 and
+- Exact-current local evidence: `NoopRemoteSync` passes 190/190 and
   `WhoopStore` passes 539/539. The complete disposable-PostgreSQL server wall
-  passes 783 cases with one intentional skip and one warning. Android Full and
-  Demo each execute 4,964 tests with seven intentional skips and zero
+  passes 784 cases with one intentional skip and two framework deprecation
+  warnings. Android Full and Demo each execute 4,972 tests with seven intentional skips and zero
   failures/errors inside one 175-task compile, lint, APK, unit, and
   instrumentation-source wall; lint reports zero Error/Fatal findings. The
-  complete macOS wall passes 2,207 tests with one intentional skip and zero
+  complete macOS wall passes 2,213 tests with one intentional skip and zero
   failures. The unsigned Release iOS graph succeeds with zero compiler errors,
   zero `ManagedCloudService.swift` warnings, and its Watch, complications, and
-  widget extensions embedded. The final repository-tool wall passes 305 tests
-  plus 44 subtests, and the terminology inventory records 17,821 classified
-  occurrences across 1,581 groups with zero forbidden mappings. Thirteen
+  widget extensions embedded; the iOS simulator production shell passes 39
+  tests with one intentional skip. The final repository-tool wall passes 305 tests
+  plus 44 subtests, and the latest terminology inventory records 17,837
+  classified occurrences across 1,583 groups with zero forbidden mappings. Thirteen
   database-role tests, 22 production-deployment contracts, and 20 plan-only
   OpenTofu tests pass without apply. Exact replacement-candidate API 35
   execution remains a required hosted context because the required local x86
@@ -169,6 +195,7 @@ Last updated: **2026-09-21**
 
 Resume from:
 
+- [PR 16 final readiness closeout](rounds/2026-09-21-pr16-final-readiness-closeout.md)
 - [Cloud authority, Safety paging, and live surfaces](rounds/2026-09-19-cloud-authority-safety-live-surfaces.md)
 - [Current UI/cloud readiness review](rounds/2026-09-17-ui-cloud-readiness-review.md)
 - [NOOP-hosted Friends and communications](rounds/2026-09-20-noop-hosted-friends-communications.md)
@@ -199,11 +226,14 @@ Resume from:
 
 ## Immediate next actions
 
-1. Amend the consolidated replacement commit with the hosted Ruff formatting
-   correction.
-2. Push the corrected exact replacement head to protected pull request
-   `#16`.
-3. Require all ten hosted contexts before protected merge, then verify the
-   protected-main trusted result. Physical hardware, signing/store,
-   legal, carrier, credential, production-runtime, and elapsed soak gates
-   remain external.
+1. Run the final repository policy, localization, privacy, claims,
+   provenance, terminology, required-CI, trusted-control, operations-record,
+   and diff walls.
+2. Review the complete intended diff and amend the consolidated replacement
+   commit.
+3. Push the corrected exact replacement head once to pull request `#16`.
+4. Require all ten hosted contexts, resolve only source-proven review threads,
+   merge normally, and verify the protected-main trusted result.
+5. Remove exact round-owned logs, build outputs, and package caches after their
+   results are recorded. Physical hardware, signing/store, legal, carrier,
+   credential, production-runtime, and elapsed soak gates remain external.

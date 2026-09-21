@@ -74,10 +74,16 @@ public struct ManagedPendingCiphertextReference: Equatable, Sendable {
 public struct ManagedDocumentApplyResult: Equatable, Sendable {
     public let changedRows: Int
     public let applied: Bool
+    public let acceptedRevision: Bool
 
-    public init(changedRows: Int, applied: Bool) {
+    public init(
+        changedRows: Int,
+        applied: Bool,
+        acceptedRevision: Bool = true
+    ) {
         self.changedRows = changedRows
         self.applied = applied
+        self.acceptedRevision = acceptedRevision
     }
 }
 
@@ -1519,10 +1525,16 @@ extension WhoopStore {
                     ) {
                     case .apply:
                         break
-                    case .alreadyCurrent, .stale:
+                    case .alreadyCurrent:
                         return ManagedDocumentApplyResult(
                             changedRows: 0,
                             applied: true
+                        )
+                    case .stale:
+                        return ManagedDocumentApplyResult(
+                            changedRows: 0,
+                            applied: true,
+                            acceptedRevision: false
                         )
                     }
                 }
@@ -1614,10 +1626,16 @@ extension WhoopStore {
                 ) {
                 case .apply:
                     break
-                case .alreadyCurrent, .stale:
+                case .alreadyCurrent:
                     return ManagedDocumentApplyResult(
                         changedRows: 0,
                         applied: true
+                    )
+                case .stale:
+                    return ManagedDocumentApplyResult(
+                        changedRows: 0,
+                        applied: true,
+                        acceptedRevision: false
                     )
                 }
                 try Self.discardConflictingDirtyProfiles(
@@ -1795,10 +1813,16 @@ extension WhoopStore {
                 ) {
                 case .apply:
                     break
-                case .alreadyCurrent, .stale:
+                case .alreadyCurrent:
                     return ManagedDocumentApplyResult(
                         changedRows: 0,
                         applied: true
+                    )
+                case .stale:
+                    return ManagedDocumentApplyResult(
+                        changedRows: 0,
+                        applied: true,
+                        acceptedRevision: false
                     )
                 }
             }
