@@ -1,5 +1,7 @@
 import Foundation
 import NoopRemoteSync
+import StrandAnalytics
+import WhoopStore
 import XCTest
 @testable import Strand
 
@@ -242,6 +244,113 @@ final class FormulaPublicationGateTests: XCTestCase {
         XCTAssertEqual(
             RemoteSyncPreferences.completedFormulaReplayRevision(defaults: restarted),
             revision
+        )
+    }
+
+    @MainActor
+    func testFormulaTraversalRemovesUnrecomputablePriorScoresBeforeCompletion()
+        async throws
+    {
+        let sourceID = "my-whoop"
+        let computedID = sourceID + "-noop"
+        let store = try await WhoopStore.inMemory()
+        let repo = Repository(deviceId: sourceID)
+        repo.setStoreForTesting(store)
+        let engine = IntelligenceEngine(
+            repo: repo,
+            profile: ProfileStore(),
+            deviceId: sourceID
+        )
+        let now = Date()
+        let timeZone = TimeZone.current
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let firstObservation = Int(
+            calendar.startOfDay(for: now).timeIntervalSince1970
+        )
+        engine.setAnalysisTimeZoneTimelineForTesting(
+            AnalysisTimeZoneTimeline(
+                observations: [
+                    AnalysisTimeZoneObservation(
+                        observedAtSec: firstObservation,
+                        timeZoneIdentifier: timeZone.identifier,
+                        offsetSeconds: timeZone.secondsFromGMT(
+                            for: Date(
+                                timeIntervalSince1970:
+                                    TimeInterval(firstObservation)
+                            )
+                        )
+                    ),
+                ],
+                unresolvableBeforeTs: firstObservation
+            )
+        )
+
+        let day = Repository.localDayKey(now)
+        try await store.upsertDailyMetrics(
+            [
+                DailyMetric(
+                    day: day,
+                    totalSleepMin: 420,
+                    efficiency: 0.9,
+                    deepMin: 90,
+                    remMin: 100,
+                    lightMin: 230,
+                    disturbances: 2,
+                    restingHr: 52,
+                    avgHrv: 70,
+                    recovery: 0.42,
+                    strain: 8,
+                    exerciseCount: 0
+                ),
+            ],
+            deviceId: computedID
+        )
+        try await store.upsertMetricSeries(
+            [
+                MetricPoint(
+                    day: day,
+                    key: ScoreConfidence.sleepPerformanceSeriesKey,
+                    value: 72
+                ),
+            ],
+            deviceId: computedID
+        )
+
+        let runReceipt = await engine.analyzeRecent(
+            maxDays: 1,
+            force: true,
+            traverseResolvableHistory: true
+        )
+        let receipt = try XCTUnwrap(runReceipt)
+
+        XCTAssertTrue(receipt.completedResolvableHistory)
+        XCTAssertEqual(
+            RestFormulaUpgradeGate.progress(
+                receipt: receipt,
+                wasRequired: true,
+                traversalWasSelected: true
+            ),
+            .complete(revision: RestFormulaUpgradeGate.currentRevision)
+        )
+        let remainingScores = try await store.dailyMetrics(
+            deviceId: computedID,
+            from: day,
+            to: day
+        )
+        XCTAssertTrue(
+            remainingScores.isEmpty,
+            "A formula migration must invalidate a stale computed score when its raw HR is gone."
+        )
+        let remainingRestEvidence = try await store.metricSeries(
+            deviceId: computedID,
+            key: ScoreConfidence.sleepPerformanceSeriesKey,
+            from: day,
+            to: day
+        )
+        XCTAssertTrue(
+            remainingRestEvidence.isEmpty,
+            "Managed Rest evidence from the stale formula must be removed with the daily score."
         )
     }
 
