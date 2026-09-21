@@ -733,7 +733,7 @@ private struct StrengthNativeExerciseMediaView: View {
         .task(id: "\(sourceIdentity)-\(retry)") {
             await loader.load(sources: sources)
         }
-        .onChange(of: exerciseID) { _ in
+        .onChangeCompat(of: exerciseID) { _ in
             paused = reduceMotion
         }
         .sheet(isPresented: $showingGuide) {

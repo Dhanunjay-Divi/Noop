@@ -117,25 +117,37 @@ enum UnitPrefs {
     }
 
     /// Whether the live-HR Live Activity (Lock Screen + Dynamic Island) may show, iOS only (#336).
-    /// Defaults to ON. The user can turn it off in Notifications settings without digging into iOS
-    /// Settings — `liveActivityEnabled()` reads it default-true so an unset key keeps the old behaviour.
+    /// Missing preferences always migrate private/off. Existing explicit choices remain untouched;
+    /// completion of older onboarding is not consent to expose health values on system surfaces.
     static let liveActivityKey = "liveActivity.enabled"
-    static func liveActivityEnabled() -> Bool {
-        UserDefaults.standard.object(forKey: liveActivityKey) == nil
-            ? true : UserDefaults.standard.bool(forKey: liveActivityKey)
+    static let liveActivityPrivacyMigrationKey = "liveActivity.privacyOptInMigration.v1"
+
+    static func migrateLiveActivityPrivacyIfNeeded(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: liveActivityPrivacyMigrationKey) else { return }
+
+        for key in [liveActivityKey, liveActivityChargeKey, liveActivityEffortKey]
+        where defaults.object(forKey: key) == nil {
+            defaults.set(false, forKey: key)
+        }
+        defaults.set(true, forKey: liveActivityPrivacyMigrationKey)
     }
 
-    /// Independent indicators inside the live-HR Live Activity. Both default to ON to preserve the
-    /// pre-picker presentation; the user can now hide either one without losing Live HR or the other.
+    static func liveActivityEnabled(defaults: UserDefaults = .standard) -> Bool {
+        migrateLiveActivityPrivacyIfNeeded(defaults: defaults)
+        return defaults.bool(forKey: liveActivityKey)
+    }
+
+    /// Independent indicators inside the live-HR Live Activity. Every missing preference starts off;
+    /// users opt into each detail explicitly.
     static let liveActivityChargeKey = "liveActivity.showCharge"
     static let liveActivityEffortKey = "liveActivity.showEffort"
-    static func liveActivityShowsCharge() -> Bool {
-        UserDefaults.standard.object(forKey: liveActivityChargeKey) == nil
-            ? true : UserDefaults.standard.bool(forKey: liveActivityChargeKey)
+    static func liveActivityShowsCharge(defaults: UserDefaults = .standard) -> Bool {
+        migrateLiveActivityPrivacyIfNeeded(defaults: defaults)
+        return defaults.bool(forKey: liveActivityChargeKey)
     }
-    static func liveActivityShowsEffort() -> Bool {
-        UserDefaults.standard.object(forKey: liveActivityEffortKey) == nil
-            ? true : UserDefaults.standard.bool(forKey: liveActivityEffortKey)
+    static func liveActivityShowsEffort(defaults: UserDefaults = .standard) -> Bool {
+        migrateLiveActivityPrivacyIfNeeded(defaults: defaults)
+        return defaults.bool(forKey: liveActivityEffortKey)
     }
 
     /// Resolve the stored raw values into a concrete temperature unit, applying the

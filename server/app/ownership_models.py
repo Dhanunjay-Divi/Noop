@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import UTC, datetime
 from typing import Literal
@@ -15,6 +16,9 @@ OWNERSHIP_INSTALLATION_TOKEN_PATTERN = r"^noopo_[A-Za-z0-9_-]{43}$"
 OWNERSHIP_CHALLENGE_PATTERN = r"^[A-Za-z0-9_-]{43}$"
 POLICY_VERSION_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 LOCALE_PATTERN = r"^[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8}){0,2}$"
+OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256 = hashlib.sha256(
+    b"DELETE MY NOOP OWNERSHIP ACCOUNT"
+).hexdigest()
 
 
 class OwnershipChallengeRequest(StrictModel):
@@ -130,6 +134,24 @@ class OwnershipInstallationAuthorization(OwnershipPossessionSubmission):
 class OwnershipPlanSelection(StrictModel):
     request_id: UUID
     selection: Literal["noop", "noop_plus"]
+
+
+class OwnershipAccountDeletionRequest(StrictModel):
+    request_id: UUID
+    confirmation_sha256: str = Field(pattern=SHA256_PATTERN)
+    export_acknowledged: bool
+    retention_acknowledged: bool
+    policy_version: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=POLICY_VERSION_PATTERN,
+    )
+    policy_sha256: str = Field(pattern=SHA256_PATTERN)
+    locale: str = Field(
+        min_length=2,
+        max_length=32,
+        pattern=LOCALE_PATTERN,
+    )
 
 
 class OwnershipTermsManifest(StrictModel):

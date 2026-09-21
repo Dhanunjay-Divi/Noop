@@ -101,7 +101,23 @@ memory, swap, disk, mount, and open-file state before acting.
 - Run large builds and tests through `Tools/run-bounded-command.py` when the
   repository provides it. Use a normal disk-backed worktree and temporary
   directory; do not place a large worktree, DerivedData, Gradle home, database,
-  or simulator image on a RAM disk while memory is constrained.
+  or simulator image on a RAM disk while memory is constrained. The CLI
+  automatically refuses to start or continue below 10% free system memory or
+  10 GiB free space on the command's filesystem. A caller may lower either
+  floor only for a narrow, evidenced exception recorded in the active round;
+  `0` explicitly disables that one floor.
+- Pass `--log-file <round-owned-path>` and `--status-file <round-owned-path>` for
+  verbose builds. The runner keeps child stdout/stderr in a private `0600` file
+  while the terminal receives only bounded lifecycle heartbeats. Child output
+  is discarded when no log is supplied, so forgetting `--log-file` cannot flood
+  iTerm. Explicit logs default to a 128 MiB ceiling; exceeding it terminates the
+  complete process group with `resource-output` and truncates the file to that
+  ceiling. Increase the ceiling only for an evidenced need and never above the
+  runner's 1 GiB hard maximum. Inspect a short tail or filtered failure summary,
+  record the result, then exact-delete obsolete logs. Never stream raw
+  `xcodebuild`, Gradle, Docker, or full test-wall output into iTerm; sustained
+  terminal output, including a single extremely large line, is a proven
+  application-memory failure mode.
 - At a pressure stop, identify the exact owning process group and exact
   round-owned paths. Stop only known round-owned work and let the bounded runner
   perform its cleanup. Do not kill unrelated terminals, agents, applications,
@@ -127,7 +143,9 @@ memory, swap, disk, mount, and open-file state before acting.
   restarting heavy work.
 
 This is an in-session safety gate, not a background daemon. When no agent is
-running, Codex cannot monitor or clean the machine.
+running, Codex cannot monitor or clean the machine. It prevents the proven
+build-output recurrence only when heavy commands use the bounded runner; do not
+run verbose build or test walls directly in an interactive terminal.
 
 ## Handoff Contract
 

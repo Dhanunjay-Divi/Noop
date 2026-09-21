@@ -17,6 +17,18 @@ final class LiveHeartRateSurfacePolicyTests: XCTestCase {
         XCTAssertFalse(LiveHeartRateSurfacePolicy.isLive(
             connected: true, bpm: 68, observedAt: nil, now: now
         ))
+        XCTAssertTrue(LiveHeartRateSurfacePolicy.isLive(
+            connected: true, bpm: 30, observedAt: now, now: now
+        ))
+        XCTAssertTrue(LiveHeartRateSurfacePolicy.isLive(
+            connected: true, bpm: 220, observedAt: now, now: now
+        ))
+        XCTAssertFalse(LiveHeartRateSurfacePolicy.isLive(
+            connected: true, bpm: 29, observedAt: now, now: now
+        ))
+        XCTAssertFalse(LiveHeartRateSurfacePolicy.isLive(
+            connected: true, bpm: 221, observedAt: now, now: now
+        ))
     }
 
     func testReconnectCannotReviveStaleOrFuturePacket() {
@@ -37,5 +49,48 @@ final class LiveHeartRateSurfacePolicyTests: XCTestCase {
         XCTAssertEqual(LiveHeartRateSurfacePolicy.expiryDelay(
             observedAt: now.addingTimeInterval(-31), now: now
         ), 0)
+    }
+
+    func testPresentationStateDoesNotInventAReading() {
+        XCTAssertEqual(
+            LiveHeartRatePresentationState.resolve(
+                enabled: false,
+                connected: true,
+                bpm: 72,
+                observedAt: now,
+                now: now
+            ),
+            .hidden
+        )
+        XCTAssertEqual(
+            LiveHeartRatePresentationState.resolve(
+                enabled: true,
+                connected: true,
+                bpm: nil,
+                observedAt: nil,
+                now: now
+            ),
+            .waiting
+        )
+        XCTAssertEqual(
+            LiveHeartRatePresentationState.resolve(
+                enabled: true,
+                connected: true,
+                bpm: 72,
+                observedAt: now.addingTimeInterval(-31),
+                now: now
+            ),
+            .reconnecting
+        )
+        XCTAssertEqual(
+            LiveHeartRatePresentationState.resolve(
+                enabled: true,
+                connected: true,
+                bpm: 72,
+                observedAt: now,
+                now: now
+            ),
+            .live(72)
+        )
     }
 }

@@ -830,6 +830,7 @@ class WhoopRepository private constructor(
         dailyRows: List<DailyMetric>,
         managedRestKeys: Set<String>,
         restRows: List<MetricSeriesRow>,
+        allowEmptyReplacement: Boolean = false,
     ): Set<String> {
         require(deviceId.isNotBlank()) { "computed score device id is required" }
         require(
@@ -837,7 +838,9 @@ class WhoopRepository private constructor(
                 WhoopReferenceCalibration.validDay(toDay) &&
                 fromDay <= toDay
         ) { "invalid computed score day range" }
-        require(dailyRows.isNotEmpty()) { "computed score reconciliation requires daily rows" }
+        require(dailyRows.isNotEmpty() || allowEmptyReplacement) {
+            "computed score reconciliation requires daily rows"
+        }
 
         val orderedDailyRows = dailyRows.sortedBy(DailyMetric::day)
         val retainedDays = LinkedHashSet<String>(orderedDailyRows.size)
@@ -876,7 +879,9 @@ class WhoopRepository private constructor(
 
         transactor.run {
             dao.deleteDailyMetricsInRange(deviceId, fromDay, toDay)
-            dao.upsertDailyMetrics(orderedDailyRows)
+            if (orderedDailyRows.isNotEmpty()) {
+                dao.upsertDailyMetrics(orderedDailyRows)
+            }
             dao.replaceMetricSeriesRange(
                 deviceId = deviceId,
                 fromDay = fromDay,

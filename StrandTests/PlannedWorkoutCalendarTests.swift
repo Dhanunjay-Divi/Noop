@@ -74,8 +74,19 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         let behavior = try source("Strand/Data/BehaviorStore.swift")
         let windDown = try source("Strand/System/WindDownNudge.swift")
 
-        XCTAssertTrue(appModel.contains(
-            "publisher(for: ContextualInterventionInputs.didChange)"
+        let inputStart = try XCTUnwrap(
+            appModel.range(of: "for: ContextualInterventionInputs.didChange")
+        )
+        let inputEnd = try XCTUnwrap(
+            appModel.range(
+                of: "}.store(in: &hrCancellables)",
+                range: inputStart.upperBound..<appModel.endIndex
+            )
+        )
+        let inputSubscription =
+            appModel[inputStart.lowerBound..<inputEnd.upperBound]
+        XCTAssertTrue(inputSubscription.contains(
+            "scheduleContextualInterventionEvaluation()"
         ))
         XCTAssertTrue(behavior.contains("ContextualInterventionInputs.notifyChanged()"))
         XCTAssertTrue(windDown.contains("let wasExplicit = hasExplicitSleepNeed"))
@@ -534,26 +545,26 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
             )
         )
         let daysSubscription = source[daysStart.lowerBound..<daysEnd.upperBound]
+        XCTAssertTrue(daysSubscription.contains("self.operationalWorkStarted"))
         XCTAssertTrue(daysSubscription.contains(
-            "guard let self, self.operationalWorkStarted else { return }"
+            "self.runtimeRole.allowsLocalAnalysisAndGuidance"
         ))
 
         let scheduleStart = try XCTUnwrap(
             source.range(of: "private func scheduleContextualInterventionEvaluation()")
         )
         let scheduleTail = source[scheduleStart.lowerBound...]
-        let scheduleGate = try XCTUnwrap(
-            scheduleTail.range(
-                of: "guard operationalWorkStarted, !postSyncRoutineCoordinationActive else { return }"
-            )
-        )
         let scheduledTask = try XCTUnwrap(
-            scheduleTail.range(
-                of: "contextualEvaluationTask = Task",
-                range: scheduleGate.upperBound..<scheduleTail.endIndex
-            )
+            scheduleTail.range(of: "contextualEvaluationTask = Task")
         )
-        XCTAssertLessThan(scheduleGate.lowerBound, scheduledTask.lowerBound)
+        let scheduleGate = scheduleTail[..<scheduledTask.lowerBound]
+        XCTAssertTrue(scheduleGate.contains("guard operationalWorkStarted"))
+        XCTAssertTrue(scheduleGate.contains(
+            "runtimeRole.allowsLocalAnalysisAndGuidance"
+        ))
+        XCTAssertTrue(scheduleGate.contains(
+            "!postSyncRoutineCoordinationActive else { return }"
+        ))
 
         let evaluationStart = try XCTUnwrap(
             source.range(of: "private func evaluateAdaptiveDayGuidance")

@@ -131,19 +131,25 @@ change. Each successful step is evidence required by the next:
    `staging.auto.tfvars`, leave `runtime_image = null` and
    all runtime flags false, then review and apply. Cloud SQL has deletion
    protection, CMEK, encrypted connections, daily backups, and seven-day PITR.
-9. Create the runtime database user and first secret versions without putting
-   either value in OpenTofu state:
+9. With every migration/API/processor/lifecycle/feedback/ownership workload
+   disabled in the applied state, provision the migration owner and shared
+   non-database secrets without putting values in OpenTofu state:
 
    ```sh
-   ./scripts/configure-runtime-secrets.sh
+   ./scripts/configure-runtime-secrets.sh migration
    ```
 
+   The command preserves the existing `noop-staging-database-url` Secret Manager
+   container as migration-only, transfers any objects owned by the retired
+   `noop_runtime` principal to `noop_migration`, disables that legacy login, and
+   prints only the new secret version. Set that exact numeric version in
+   `migration_database_url_secret_version`; never select `latest`.
 10. Put the verified digest URI from step 6 in `migration_image`, leave
     `runtime_image` on the currently serving digest (or null for the first
     deployment), review, and apply. A digest-derived OpenTofu migration receipt
-    runs the guarded job and records success before the apply completes. Every
-    runtime workload depends on that receipt, so a failed migration stops the
-    rollout.
+    runs the guarded job with only the migration secret and records success
+    before the apply completes. Every runtime workload depends on that receipt,
+    so a failed migration stops the rollout.
 11. Use the guarded rerun only when an explicit retry is required. It refuses
     to execute unless the deployed job image and non-secret release marker
     match the configured immutable digest:
@@ -152,15 +158,49 @@ change. Each successful step is evidence required by the next:
     ./scripts/run-migration.sh
    ```
 
-12. After the migration succeeds, put the same digest in `runtime_image` and
-    clear `migration_image` back to null. Review and apply the runtime revision.
-    A deterministic non-secret release marker makes the image-to-revision
-    relationship visible without putting a project path or digest in logs.
-13. Set `enable_managed_runtime = true` on the first deployment, keep
+12. After the migration succeeds and while every runtime remains disabled, run
+    the post-migration least-privilege provisioning phase:
+
+    ```sh
+    ./scripts/configure-runtime-secrets.sh runtime
+    ```
+
+    It creates or rotates five non-owner principals and publishes five distinct
+    credentials only after each profile verifies:
+
+    - `noop_app_runtime` /
+      `noop-staging-runtime-database-url` /
+      `runtime_database_url_secret_version`;
+    - `noop_managed_api` /
+      `noop-staging-managed-api-database-url` /
+      `managed_api_database_url_secret_version`;
+    - `noop_managed_processor` /
+      `noop-staging-managed-processor-database-url` /
+      `managed_processor_database_url_secret_version`;
+    - `noop_managed_lifecycle` /
+      `noop-staging-managed-lifecycle-database-url` /
+      `managed_lifecycle_database_url_secret_version`; and
+    - `noop_feedback_lifecycle` /
+      `noop-staging-feedback-lifecycle-database-url` /
+      `feedback_lifecycle_database_url_secret_version`.
+
+    The provisioner removes inherited Cloud SQL role memberships, verifies the
+    exact release migration manifest, verifies that each principal owns no
+    object and has no database/schema create, role administration, replication,
+    bypass-RLS, trigger, truncate, or reference authority, then grants only the
+    profile's current table, sequence, and non-security-definer function
+    allowlist. Record every printed numeric version in its matching variable.
+    Rerun this phase after every migration and before the matching runtime
+    rollout; future objects receive no implicit runtime grant.
+13. Put the same digest in `runtime_image`, clear `migration_image` back to
+    null, and set `enable_managed_runtime = true` on the first deployment. Keep
     `enable_public_managed_api = false`, review, and apply. This creates the
     IAM-only managed API, processor, lifecycle, scheduler, and authenticated
     Pub/Sub push. Long-running services cannot run migrations, and no provider
     delivery is exercised until a signed client registers an approved target.
+    The migration service account can access only the migration secret; API,
+    processor, and lifecycle identities can access only their own separately
+    pinned runtime secret.
 
     Feedback cleanup has a separate `enable_feedback_lifecycle` switch. Enable
     it before accepting reports, and leave it enabled while

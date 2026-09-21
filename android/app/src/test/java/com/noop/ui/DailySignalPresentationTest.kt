@@ -2,27 +2,61 @@ package com.noop.ui
 
 import com.noop.R
 import com.noop.analytics.DailySignalStatus
+import com.noop.analytics.ReadinessEngine
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DailySignalPresentationTest {
     @Test
-    fun signalStatesUseTheirOwnVocabularyResources() {
+    fun signalPillMatchesReadinessVocabularyAndPolarity() {
         assertEquals(
-            R.string.appwide_daily_signal_status_aligned,
-            dailySignalStatusLabelRes(DailySignalStatus.STEADY),
+            DailySignalPillPresentation(
+                R.string.appwide_readiness_primed_headline,
+                DailySignalPillPolarity.POSITIVE,
+            ),
+            dailySignalPillPresentation(DailySignalStatus.STEADY, ReadinessEngine.Level.PRIMED),
         )
         assertEquals(
-            R.string.appwide_daily_signal_status_recheck,
-            dailySignalStatusLabelRes(DailySignalStatus.WATCH),
+            DailySignalPillPresentation(
+                R.string.appwide_readiness_balanced_headline,
+                DailySignalPillPolarity.POSITIVE,
+            ),
+            dailySignalPillPresentation(DailySignalStatus.STEADY, ReadinessEngine.Level.BALANCED),
         )
         assertEquals(
-            R.string.appwide_daily_signal_status_check_in,
-            dailySignalStatusLabelRes(DailySignalStatus.ALERT),
+            DailySignalPillPresentation(
+                R.string.appwide_readiness_strained_headline,
+                DailySignalPillPolarity.WARNING,
+            ),
+            dailySignalPillPresentation(DailySignalStatus.WATCH, ReadinessEngine.Level.STRAINED),
         )
         assertEquals(
-            R.string.appwide_daily_signal_status_building,
-            dailySignalStatusLabelRes(DailySignalStatus.BUILDING),
+            DailySignalPillPresentation(
+                R.string.appwide_readiness_rundown_headline,
+                DailySignalPillPolarity.CRITICAL,
+            ),
+            dailySignalPillPresentation(DailySignalStatus.WATCH, ReadinessEngine.Level.RUNDOWN),
+        )
+        assertEquals(
+            DailySignalPillPresentation(
+                R.string.appwide_daily_signal_status_recheck,
+                DailySignalPillPolarity.WARNING,
+            ),
+            dailySignalPillPresentation(DailySignalStatus.WATCH, ReadinessEngine.Level.BALANCED),
+        )
+        assertEquals(
+            DailySignalPillPresentation(
+                R.string.appwide_daily_signal_status_check_in,
+                DailySignalPillPolarity.CRITICAL,
+            ),
+            dailySignalPillPresentation(DailySignalStatus.ALERT, ReadinessEngine.Level.BALANCED),
+        )
+        assertEquals(
+            DailySignalPillPresentation(
+                R.string.appwide_daily_signal_status_building,
+                DailySignalPillPolarity.NEUTRAL,
+            ),
+            dailySignalPillPresentation(DailySignalStatus.BUILDING, ReadinessEngine.Level.PRIMED),
         )
     }
 

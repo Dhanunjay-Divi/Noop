@@ -1,6 +1,6 @@
 # NOOP first production release checklist
 
-- **Status date:** 2026-09-08
+- **Status date:** 2026-09-19
 - **Purpose:** one editable, ordered list of everything still required for the
   first public production release
 - **Confirmed market sequence:** India first, then the USA
@@ -425,6 +425,13 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] ACC-340 [ENG] Make account deletion erase personal data without exposing
   user-facing unpair: the v1 band must enter the approved retired, wiped, or
   operator-recovery state, and ownership lock must never block a deletion right.
+  Supplier-independent cooling-off request, status, cancellation, session
+  revocation, migration-045 durable per-target progress, restricted
+  `managed_cloud_data` erasure scheduling/monitoring, and Apple/Android flows
+  are implemented default-off. Provider identity erasure, ownership
+  control-plane final erasure, approved physical band retirement/wipe, and
+  operator/legal evidence remain open. (Evidence:
+  `ops/rounds/2026-09-17-ui-cloud-readiness-review.md`, 2026-09-19)
 - [ ] ACC-350 [ENG] Only after an eligible successor NOOP Band is released, add
   an upgrade flow that reauthenticates the owner, proves possession,
   permanently releases the old band, and records the release before another
@@ -733,6 +740,11 @@ position without changing its ID. This inbox intentionally starts empty.
   import for documented data classes.
 - [ ] DAT-170 [ENG] Complete managed-history export, resume, corruption
   rejection, expiry, and import.
+  V2 integrity, resumable export, complete prevalidation before mutation, and
+  resumable idempotent import are implemented on Apple and Android. Live
+  effective-expiry, large-account, cancellation/auth-refresh, cross-tenant,
+  low-storage, and physical process-death evidence remain open. (Evidence:
+  `ops/rounds/2026-09-18-managed-history-portability.md`, 2026-09-18)
 - [ ] DAT-180 [ENG] Verify existing local data survives every signed app
   upgrade and band replacement.
 

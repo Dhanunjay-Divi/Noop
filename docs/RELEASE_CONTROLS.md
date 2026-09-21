@@ -46,8 +46,73 @@ python3 -m unittest \
 
 The `Release Controls` workflow runs on every pull request and every push to
 `main`. The release workflow invokes the same gate before it mutates a version
-or creates a draft. Branch protection and reviewed GitHub environments are
-still owner-controlled settings and remain mandatory before production use.
+or creates a draft.
+
+## Protected merge contract
+
+Live GitHub settings were reverified on 2026-09-18. `main` is protected with
+strict up-to-date status checks, administrator enforcement, and linear history;
+force pushes and deletion are disabled. Repository release work is prepared on
+a branch and integrated through a protected pull request. Do not push release
+work directly to `main`.
+
+The machine-readable hosted contract is
+[`../release/required-ci.json`](../release/required-ci.json). Protected `main`
+requires these ten stable contexts, all owned by GitHub Actions application
+`15368`:
+
+1. `android-ci-required`
+2. `apple-ci-required`
+3. `health-claims`
+4. `i18n-coverage`
+5. `operations-record`
+6. `release-controls`
+7. `runtime-license-required`
+8. `server-ci-required`
+9. `swift-packages-required`
+10. `trusted-release-controls`
+
+Health claims, localization, operations records, release controls, and trusted
+release controls are universal pull-request checks. Android, Apple, runtime
+license, server, and Swift-package workflows publish always-present,
+fail-closed required results after their applicability jobs; expensive work may
+skip only when the reviewed applicability contract says it is irrelevant.
+
+`trusted-release-controls` is the release-authority trust root, not a duplicate
+product test:
+
+- On a pull request, `pull_request_target` executes only protected-base source
+  and checks out the candidate separately as untrusted data.
+- Changes to workflows or other enumerated release-authority paths require an
+  in-repository head whose exact `opened` or `synchronize` actor is the
+  repository owner. Other changes are checked against the protected base's
+  required-CI structure.
+- The workflow publishes one custom `trusted-release-controls` result to the
+  exact pull-request head. A failed, skipped, or canceled validation fails the
+  context. The independent `release-controls` context still validates the
+  candidate's release-policy semantics.
+- After merge, the same trusted workflow verifies the exact protected `main`
+  source and publishes a distinct `protected-main` result. Release publication
+  accepts only that scope; a successful pull-request-scoped result cannot
+  authorize a production release.
+
+The protected baseline
+`b688b3b725cd497e96a31b28540a219bf50446e1` had all ten exact-SHA contexts
+complete successfully when rechecked on 2026-09-18. That proves the repository
+merge contract for that commit only. Reviewed GitHub deployment environments,
+production credentials and rotation, signing identities, signed artifacts,
+supplier and physical-device evidence, legal/certification approvals, store
+records, production operations, and final go/no-go approval remain separate
+open gates.
+
+For the active September 17 branch, record these only after they exist:
+
+- candidate commit: `<pending exact 40-character SHA>`
+- pull request: `#16` currently points to superseded head `9d859d9a` and is
+  blocked; it is not evidence for the dirty replacement candidate
+- required contexts: `<pending 10/10 on the candidate SHA>`
+- merged protected-main commit: `<pending exact 40-character SHA>`
+- protected-main trusted result: `<pending>`
 
 Metric publication and rollback must also follow
 [`METRIC_REPROCESSING_AND_ROLLBACK.md`](METRIC_REPROCESSING_AND_ROLLBACK.md).
@@ -180,8 +245,8 @@ revision, and restore version.
 
 `Tools/release-evidence.py` generates:
 
-- one deterministic CycloneDX 1.5 SBOM covering the reviewed 213 runtime
-  libraries and three digest-pinned container inputs;
+- one deterministic CycloneDX 1.5 SBOM whose exact component and container-input
+  counts are derived from and recorded for the candidate commit;
 - one manifest tied to the full source commit and tree;
 - artifact records containing only basename, SHA-256, byte size, and media
   type;
@@ -197,29 +262,98 @@ Run the following on the exact candidate commit. Commands that need accounts,
 signing, devices, providers, or production systems remain explicit external
 gates rather than local substitutes.
 
+The command list below defines required payloads. Every payload that can run
+longer than one minute or emit verbose build/test output MUST be passed after
+`--` to `Tools/run-bounded-command.py`; do not invoke raw `xcodebuild`, Gradle,
+Swift package, full pytest, OpenTofu, Docker, or equivalent walls in an
+interactive terminal. Use a unique safe label plus round-owned private
+`--status-file` and `--log-file`. The CLI automatically stops below 10% free
+system memory, below 10 GiB free disk, after its deadline, or when the private
+log reaches 128 MiB. Lowering or disabling a floor requires a narrow evidenced
+exception in the active operations record.
+
+Example wrapper:
+
+```bash
+EVIDENCE_ROOT="$(mktemp -d)"
+python3 Tools/run-bounded-command.py \
+  --timeout-seconds 3600 \
+  --grace-seconds 30 \
+  --label apple-complete-wall \
+  --status-file "$EVIDENCE_ROOT/apple-complete-wall.status" \
+  --log-file "$EVIDENCE_ROOT/apple-complete-wall.log" \
+  -- \
+  xcodebuild -project Strand.xcodeproj -scheme Strand \
+    -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+```
+
 ```bash
 # Repository and policy
 python3 Tools/release-control-gate.py check
+python3 Tools/calibration-parity-audit.py check
+python3 Tools/terminology-audit.py check
+python3 Tools/required-ci-gate.py check
+python3 Tools/trusted-release-controls.py verify-self --root .
 python3 Tools/release-legal-gate.py distribution
 python3 Tools/check-private-data.py
 python3 Tools/health_claims_gate.py
+python3 Tools/i18n_audit.py --platform all --full
 python3 Tools/i18n_audit.py --ci HEAD
 python3 Tools/validate-ops-rounds.py --all .
 git diff --check
 
+# Nine Swift packages
+for package in \
+  Packages/WhoopProtocol \
+  Packages/OuraProtocol \
+  Packages/PolarProtocol \
+  Packages/WhoopStore \
+  Packages/StrandAnalytics \
+  Packages/StrandImport \
+  Packages/StrandDesign \
+  Packages/NoopLocalAccess \
+  Packages/NoopRemoteSync
+do
+  (cd "$package" && swift build && swift test)
+done
+
+# Standalone Swift verification harnesses
+for package in Tools/StudyHarness Tools/Backfill
+do
+  (cd "$package" && swift build && swift test)
+done
+
 # Server
 cd server
-python -m ruff check app tests
+python -m ruff check .
+python -m ruff format --check .
 pip-audit --requirement requirements.lock
 pip-audit --requirement requirements-dev.txt
+python -m pip check
 python -m pytest -q
 cd ..
 
-# Android
+# Android Full and Demo variants
 cd android
 ./gradlew --no-daemon \
-  assembleFullDebug testFullDebugUnitTest lintFullDebug \
-  compileFullDebugAndroidTestKotlin
+  assembleFullDebug assembleDemoDebug \
+  testFullDebugUnitTest testDemoDebugUnitTest \
+  lintFullDebug lintDemoDebug \
+  compileFullDebugAndroidTestKotlin compileDemoDebugAndroidTestKotlin
+
+# API 35 production-shell managed-device lane
+./gradlew --no-daemon --no-configuration-cache \
+  assembleFullDebug assembleFullDebugAndroidTest
+./gradlew --no-daemon --no-configuration-cache \
+  pixel2Api35FullDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest
+
+# API 35 fresh-process Review Sample managed-device lane
+./gradlew --no-daemon --no-configuration-cache cleanManagedDevices
+./gradlew --no-daemon --no-configuration-cache \
+  pixel2Api35FullDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
+  -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true
 cd ..
 
 # Apple source and simulator graph
@@ -248,13 +382,20 @@ python3 Tools/release-evidence.py verify \
   --artifact-directory "$OUT" --expect-ref HEAD
 ```
 
-The corresponding hosted workflows are `Release Controls`, `Apple Application
-Build`, `Android`, `Server`, `Swift Packages`, `Localization Coverage`, `Health
-Claims`, `Runtime License Inventory`, and `Operations Record`. Production
-branch/tag creation must require all applicable workflows on the exact source
-commit. Signed archives, physical-device matrices, hardware/firmware
-conformance, legal/certification approvals, store records, production
-operations, and final go/no-go remain separately required.
+The two API 35 commands mirror the required production-shell and fresh-process
+Review Sample lanes. The hosted workflow's classified one-time retry is
+permitted only when
+`Tools/android-managed-device-retry.py` proves that infrastructure failed
+before any test started.
+
+The corresponding protected contexts are the ten listed in the protected merge
+contract above. A pull request must pass all ten on its exact head before normal
+integration. Release and repair tooling then reverify the required workflow
+owner, GitHub Actions application, exact SHA, conclusion, and the
+`protected-main` trusted scope before any candidate publication. Signed
+archives, physical-device matrices, supplier hardware/firmware conformance,
+legal/certification approvals, store records, reviewed production environments,
+production operations, and final go/no-go remain separately required.
 
 ## Hotfixes
 

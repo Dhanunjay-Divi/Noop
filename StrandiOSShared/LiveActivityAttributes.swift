@@ -16,14 +16,18 @@ public struct NOOPActivityAttributes: ActivityAttributes {
         // Strap battery is optional for compatibility with activities created before this field existed
         // and while the band is still resolving its first battery packet.
         public var batteryPct: Int?
+        // Logical local day represented by Recovery/Effort. Optional preserves activities created by
+        // older builds while allowing the UI to label a carried prior-day score honestly.
+        public var scoreDay: String?
 
         public init(bpm: Int?, recovery: Int?, bonded: Bool, effort: Int? = nil,
-                    batteryPct: Int? = nil) {
+                    batteryPct: Int? = nil, scoreDay: String? = nil) {
             self.bpm = bpm
             self.recovery = recovery
             self.bonded = bonded
             self.effort = effort
             self.batteryPct = batteryPct
+            self.scoreDay = scoreDay
         }
     }
 

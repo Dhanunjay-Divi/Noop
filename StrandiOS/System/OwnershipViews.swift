@@ -14,6 +14,13 @@ struct OwnershipAccountView: View {
     @State private var selectedPlan = NoopProductPlan.stored()
     @State private var pendingRevocation: OwnershipInstallation?
     @State private var confirmsLocalReset = false
+    @State private var showsDeletionRequest = false
+    @State private var deletionPassword = ""
+    @State private var deletionConfirmation = ""
+    @State private var deletionExportAcknowledged = false
+    @State private var deletionRetentionAcknowledged = false
+    @State private var pendingDeletionPassword = ""
+    @State private var confirmsDeletionCancellation = false
 
     var body: some View {
         ScreenScaffold(
@@ -38,6 +45,8 @@ struct OwnershipAccountView: View {
                 )
             case .accountReady, .possessionUnavailable, .claimed, .complete:
                 account
+            case .deletionPending:
+                deletionPending
             case .claiming:
                 progress(
                     title: "Confirming band ownership",
@@ -85,6 +94,26 @@ struct OwnershipAccountView: View {
         } message: {
             Text(
                 "This removes only local ownership credentials and progress. Health data stays on this phone. Sign in to recover access; a claimed account must confirm its band again."
+            )
+        }
+        .confirmationDialog(
+            "Cancel ownership account deletion?",
+            isPresented: $confirmsDeletionCancellation,
+            titleVisibility: .visible
+        ) {
+            Button("Cancel deletion") {
+                let suppliedPassword = pendingDeletionPassword
+                pendingDeletionPassword = ""
+                Task {
+                    await service.cancelAccountDeletion(
+                        password: suppliedPassword
+                    )
+                }
+            }
+            Button("Keep deletion request", role: .cancel) {}
+        } message: {
+            Text(
+                "Cancellation keeps the ownership account, but this phone must sign in and reauthorize because active ownership sessions were already revoked."
             )
         }
     }
@@ -418,6 +447,7 @@ struct OwnershipAccountView: View {
 
             optionalPhone
             installations
+            accountDeletionRequest
 
             NoopButton(
                 service.isBusy ? "Refreshing..." : "Refresh account",
@@ -430,6 +460,297 @@ struct OwnershipAccountView: View {
             .disabled(service.isBusy)
 
             signOutButton
+        }
+    }
+
+    private var accountDeletionRequest: some View {
+        StrandCard(padding: 20) {
+            VStack(alignment: .leading, spacing: 14) {
+                header(
+                    symbol: "person.crop.circle.badge.minus",
+                    title: "Ownership account deletion",
+                    detail: "This deletes the ownership identity and control-plane account through a cooling-off workflow. It does not delete local health data from this iPhone."
+                )
+                if showsDeletionRequest {
+                    Text(
+                        "A claimed band is not released, transferred, or made resellable here. Retirement remains blocked until the approved hardware and operator policy allow it."
+                    )
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Text("Type this exact confirmation:")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Text(OwnershipService.accountDeletionConfirmation)
+                        .font(.system(.caption, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    TextField(
+                        "Deletion confirmation",
+                        text: $deletionConfirmation
+                    )
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(service.isBusy)
+                    .accessibilityIdentifier(
+                        "noop.ownership.deletion-confirmation"
+                    )
+
+                    SecureField(
+                        "Current password",
+                        text: $deletionPassword
+                    )
+                    .textContentType(.password)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(service.isBusy)
+                    .accessibilityIdentifier(
+                        "noop.ownership.deletion-password"
+                    )
+
+                    Toggle(isOn: $deletionExportAcknowledged) {
+                        Text(
+                            "I have exported anything I want to keep from account services. Local health data stays on this iPhone."
+                        )
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    }
+                    .toggleStyle(.noopSwitch)
+
+                    Toggle(isOn: $deletionRetentionAcknowledged) {
+                        Text(
+                            "I understand limited legal, security, and audit records may be retained as described in the current ownership policy."
+                        )
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    }
+                    .toggleStyle(.noopSwitch)
+
+                    NoopButton(
+                        service.isBusy
+                            ? "Requesting..."
+                            : "Request account deletion",
+                        systemImage: "trash",
+                        kind: .secondary,
+                        fullWidth: true
+                    ) {
+                        let suppliedPassword = deletionPassword
+                        deletionPassword = ""
+                        Task {
+                            await service.requestAccountDeletion(
+                                password: suppliedPassword,
+                                confirmation: deletionConfirmation,
+                                exportAcknowledged:
+                                    deletionExportAcknowledged,
+                                retentionAcknowledged:
+                                    deletionRetentionAcknowledged
+                            )
+                        }
+                    }
+                    .disabled(
+                        service.isBusy
+                            || deletionPassword.isEmpty
+                            || deletionConfirmation
+                                != OwnershipService
+                                    .accountDeletionConfirmation
+                            || !deletionExportAcknowledged
+                            || !deletionRetentionAcknowledged
+                    )
+                    .accessibilityIdentifier(
+                        "noop.ownership.request-deletion"
+                    )
+
+                    Button("Keep account") {
+                        deletionPassword = ""
+                        deletionConfirmation = ""
+                        deletionExportAcknowledged = false
+                        deletionRetentionAcknowledged = false
+                        showsDeletionRequest = false
+                    }
+                    .buttonStyle(.plain)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .disabled(service.isBusy)
+                } else {
+                    NoopButton(
+                        "Review account deletion",
+                        systemImage: "person.crop.circle.badge.minus",
+                        kind: .tertiary,
+                        fullWidth: true
+                    ) {
+                        showsDeletionRequest = true
+                    }
+                    .disabled(service.isBusy)
+                }
+            }
+        }
+    }
+
+    private var deletionPending: some View {
+        StrandCard(padding: 20) {
+            VStack(alignment: .leading, spacing: 14) {
+                header(
+                    symbol: "clock.badge.exclamationmark",
+                    title: "Account deletion in progress",
+                    detail: "Ownership sessions are revoked. Local health data remains on this iPhone while the server coordinates each account target."
+                )
+                if let deletion = service.accountDeletion {
+                    Group {
+                        if deletion.cancellationAllowed {
+                            Label {
+                                Text(
+                                    "Cooling-off ends \(ownershipRelativeTime(deletion.cancelBefore))."
+                                )
+                            } icon: {
+                                Image(systemName: "clock")
+                            }
+                        } else {
+                            Label(
+                                "Cooling-off has ended.",
+                                systemImage: "clock"
+                            )
+                        }
+                    }
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textSecondary)
+
+                    deletionTargetRow(
+                        title: "Managed cloud data",
+                        state: deletion.cloudDataState
+                    )
+                    deletionTargetRow(
+                        title: "Identity provider",
+                        state: deletion.identityState
+                    )
+                    deletionTargetRow(
+                        title: "Band retirement",
+                        state: deletion.bandRetirementState
+                    )
+                    deletionTargetRow(
+                        title: "Ownership control plane",
+                        state: deletion.controlPlaneState
+                    )
+
+                    Text(bandRetirementDetail(deletion))
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.statusWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if deletion.cancellationAllowed {
+                        NoopButton(
+                            "Cancel account deletion",
+                            systemImage: "arrow.uturn.backward.circle",
+                            kind: .secondary,
+                            fullWidth: true
+                        ) {
+                            confirmsDeletionCancellation = true
+                        }
+                        .disabled(
+                            service.isBusy || pendingDeletionPassword.isEmpty
+                        )
+                    }
+                } else {
+                    ProgressView()
+                        .tint(StrandPalette.accent)
+                }
+
+                SecureField(
+                    "Current account password",
+                    text: $pendingDeletionPassword
+                )
+                .textContentType(.password)
+                .textFieldStyle(.roundedBorder)
+                .disabled(service.isBusy)
+                .accessibilityIdentifier(
+                    "noop.ownership.pending-deletion-password"
+                )
+
+                Text(
+                    "Checking or canceling requires a fresh account verification. The password is sent only to the identity provider."
+                )
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                NoopButton(
+                    service.isBusy ? "Checking..." : "Check deletion status",
+                    systemImage: "arrow.clockwise",
+                    kind: .secondary,
+                    fullWidth: true
+                ) {
+                    let suppliedPassword = pendingDeletionPassword
+                    pendingDeletionPassword = ""
+                    Task {
+                        await service.refreshAccountDeletion(
+                            password: suppliedPassword
+                        )
+                    }
+                }
+                .disabled(
+                    service.isBusy || pendingDeletionPassword.isEmpty
+                )
+            }
+        }
+    }
+
+    private func deletionTargetRow(
+        title: LocalizedStringKey,
+        state: String
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(
+                systemName: state == "completed"
+                    ? "checkmark.circle.fill"
+                    : (state == "blocked"
+                        ? "exclamationmark.triangle.fill"
+                        : "clock.fill")
+            )
+            .foregroundStyle(
+                state == "completed"
+                    ? StrandPalette.statusPositive
+                    : (state == "blocked"
+                        ? StrandPalette.statusWarning
+                        : StrandPalette.textSecondary)
+            )
+            Text(title)
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Spacer(minLength: 8)
+            Text(deletionStateLabel(state))
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textSecondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func deletionStateLabel(_ state: String) -> String {
+        switch state {
+        case "scheduled": return String(localized: "Scheduled")
+        case "blocked": return String(localized: "Blocked")
+        case "not_required": return String(localized: "Not required")
+        case "canceled": return String(localized: "Canceled")
+        case "processing": return String(localized: "Processing")
+        case "completed": return String(localized: "Completed")
+        case "failed": return String(localized: "Needs attention")
+        default: return String(localized: "Pending")
+        }
+    }
+
+    private func bandRetirementDetail(
+        _ deletion: OwnershipAccountDeletion
+    ) -> LocalizedStringKey {
+        switch deletion.bandRetirementEligibility {
+        case "not_required":
+            return "No claimed band requires retirement."
+        case "blocked_hardware":
+            return "The band remains attached to the account because approved hardware retirement support is unavailable."
+        case "eligible_pending_operator":
+            return "The band is eligible for reviewed operator retirement. It is not released automatically."
+        default:
+            return "The band remains attached to the account under the current ownership policy. This flow does not unpair or transfer it."
         }
     }
 

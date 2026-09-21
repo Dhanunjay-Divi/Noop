@@ -38,7 +38,7 @@ struct RootTabView: View {
     @EnvironmentObject private var updateStore: UpdateStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .caption2) private var scaledTabLabelLineHeight: CGFloat = 13
+    @ScaledMetric(relativeTo: .footnote) private var scaledTabLabelLineHeight: CGFloat = 13
     @ObservedObject private var contextualActions = ContextualActionCenter.shared
 
     /// Which quick-action screen the centre FAB is presenting (nil = sheet closed).
@@ -224,13 +224,18 @@ struct RootTabView: View {
             // page swiping, so leave horizontal gestures to the content that owns them.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Color.clear
-                    .frame(height: visibleTabBarHeight)
+                    .frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))
                     .accessibilityHidden(true)
             }
-            if !keyboardVisible, dynamicTypeSize.isAccessibilitySize {
-                // At accessibility text sizes a single line can be taller than the floating rail. Keep
-                // the glass treatment, but give it an opaque reading boundary so active content never
-                // competes with persistent navigation. The safe-area inset above preserves reachability.
+            // At accessibility sizes, letting the floating rail overlap this viewport can split a
+            // sentence across persistent controls. Reserve the measured control footprint in layout
+            // instead of merely painting over the text. Ordinary sizes retain the floating treatment.
+            .padding(.bottom, tabContentBottomReservation)
+            if !keyboardVisible, dynamicTypeSize.isAccessibilitySize || tabBarCompact {
+                // Large text and compact navigation both move persistent controls farther over page
+                // content. Keep the glass treatment, but give the full control footprint an opaque
+                // reading boundary so body copy never competes with navigation. The safe-area inset
+                // above preserves reachability.
                 LinearGradient(
                     gradient: Gradient(stops: [
                         .init(color: StrandPalette.surfaceBase.opacity(0), location: 0),
@@ -240,14 +245,20 @@ struct RootTabView: View {
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: visibleTabBarHeight + 28)
+                .frame(
+                    height: visibleTabBarHeight +
+                        (tabBarCompact ? IPhonePrimaryTab.compactControlDimension : 28)
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
 
             if !keyboardVisible {
-                HStack(alignment: .center, spacing: 8) {
+                HStack(
+                    alignment: .center,
+                    spacing: dynamicTypeSize.isAccessibilitySize ? 4 : 8
+                ) {
                     FloatingTabBar(
                         selection: $selectedTab,
                         compact: tabBarCompact,
@@ -277,7 +288,7 @@ struct RootTabView: View {
                         withAnimation(Self.sheetEase) { quickAction = .menu }
                     }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 8 : 12)
                 .padding(.bottom, 8)
                 .background {
                     GeometryReader { geometry in
@@ -505,9 +516,14 @@ struct RootTabView: View {
             measuredTabBarHeight,
             FloatingTabBar.expandedBodyHeight(
                 labelLineHeight: scaledTabLabelLineHeight,
-                labelLineCount: dynamicTypeSize.isAccessibilitySize ? 2 : 1
+                labelLineCount: 1
             ) + 8
         )
+    }
+
+    private var tabContentBottomReservation: CGFloat {
+        guard !keyboardVisible, dynamicTypeSize.isAccessibilitySize else { return 0 }
+        return visibleTabBarHeight
     }
 
     private static func diagnosticTabName(_ rawValue: Int) -> String {
@@ -1864,7 +1880,7 @@ private struct FloatingTabBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.noopAppearanceMode) private var appearanceMode
-    @ScaledMetric(relativeTo: .caption2) private var scaledLabelLineHeight: CGFloat = 13
+    @ScaledMetric(relativeTo: .footnote) private var scaledLabelLineHeight: CGFloat = 13
     @Namespace private var navigationMorph
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
@@ -1876,16 +1892,17 @@ private struct FloatingTabBar: View {
         Item(title: "More", icon: "ellipsis", tag: IPhonePrimaryTab.more.rawValue),
     ]
 
-    /// Compaction is suppressed at accessibility text sizes. A sighted low-vision user who asked for larger
-    /// text is exactly the person who cannot afford an icon-only rail: they lose the one persistent cue for
-    /// which section they are in. The expanded rail grows with the semantic caption metric and gives labels
-    /// two lines at accessibility sizes; Large Content Viewer still exposes every full localized title.
+    private static let labelLineCount = 1
+    private static let labelMinimumScaleFactor: CGFloat = 0.56
+
+    /// Compaction is suppressed at accessibility text sizes. Sighted low-vision users retain the same
+    /// five persistent localized wayfinding labels; only this fixed navigation chrome receives a bounded
+    /// scale so the rail stays stable without clamping the user's text size anywhere else in the app.
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
-    private var labelLineCount: Int { dynamicTypeSize.isAccessibilitySize ? 2 : 1 }
     private var expandedHeight: CGFloat {
         Self.expandedBodyHeight(
             labelLineHeight: scaledLabelLineHeight,
-            labelLineCount: labelLineCount
+            labelLineCount: Self.labelLineCount
         )
     }
 
@@ -1893,8 +1910,19 @@ private struct FloatingTabBar: View {
         labelLineHeight: CGFloat,
         labelLineCount: Int
     ) -> CGFloat {
-        let labelHeight = max(1, labelLineHeight) * CGFloat(max(1, labelLineCount))
+        let labelHeight = boundedLabelLineHeight(labelLineHeight)
+            * CGFloat(max(1, labelLineCount))
         return max(48, 12 + 18 + 3 + labelHeight)
+    }
+
+    private static func boundedLabelLineHeight(_ scaledLineHeight: CGFloat) -> CGFloat {
+        let maximum = UIFontMetrics(forTextStyle: .footnote).scaledValue(
+            for: 13,
+            compatibleWith: UITraitCollection(
+                preferredContentSizeCategory: .extraExtraLarge
+            )
+        )
+        return min(max(1, scaledLineHeight), maximum)
     }
 
     private var currentItem: Item {
@@ -2024,10 +2052,10 @@ private struct FloatingTabBar: View {
     /// The full wayfinding state. The separate circular quick-action control is composed beside this
     /// island by RootTabView, so it remains app-wide in both expanded and compact presentations.
     private var expandedBar: some View {
-        HStack(spacing: IPhonePrimaryTab.itemSpacing) {
+        HStack(spacing: dynamicTypeSize.isAccessibilitySize ? 0 : IPhonePrimaryTab.itemSpacing) {
             ForEach(nav) { item in tabButton(item) }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 3 : 6)
         .frame(height: expandedHeight)
         .animation(
             reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.26),
@@ -2087,20 +2115,26 @@ private struct FloatingTabBar: View {
                     .scaleEffect(active ? 1.08 : 1)
                     .offset(y: active ? -1 : 0)
                 Text(visualTitle(for: item))
-                    // The visible label is the localized destination title. A semantic caption style
-                    // follows Dynamic Type through accessibility sizes. Two bounded lines avoid vertical
-                    // overlap; truncation and Large Content Viewer handle titles wider than one tab slot.
+                    // Fixed navigation remains one line like a native tab bar. The local Dynamic Type cap,
+                    // tightening and bounded scaling keep every shipped localized title whole; tail
+                    // truncation is only a defensive fallback for a future translation outside that bound.
                     .font(StrandFont.footnote.weight(active ? .semibold : .medium))
-                    .lineLimit(labelLineCount)
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .lineLimit(Self.labelLineCount)
+                    .minimumScaleFactor(Self.labelMinimumScaleFactor)
+                    .allowsTightening(true)
                     .truncationMode(.tail)
                     .multilineTextAlignment(.center)
-                    .frame(minHeight: scaledLabelLineHeight * CGFloat(labelLineCount))
+                    .frame(
+                        minHeight: Self.boundedLabelLineHeight(scaledLabelLineHeight)
+                            * CGFloat(Self.labelLineCount)
+                    )
             }
             .foregroundStyle(navigationInk(active: active))
             .frame(maxWidth: .infinity)
             .frame(minWidth: IPhonePrimaryTab.minimumTouchDimension)
             .frame(minHeight: IPhonePrimaryTab.minimumTouchDimension)
-            .padding(.horizontal, 2)
+            .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 0 : 2)
             .background {
                 if active {
                     Capsule(style: .continuous)

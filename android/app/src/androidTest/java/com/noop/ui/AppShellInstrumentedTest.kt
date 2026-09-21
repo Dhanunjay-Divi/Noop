@@ -185,11 +185,9 @@ class AppShellInstrumentedTest {
                     .isNotEmpty()
             }.getOrDefault(false)
         }
-        compose.onNodeWithTag("noop.friends.source.managed").performClick()
-        compose.onNodeWithTag("noop.friends.source.managed").assertIsSelected()
-        compose.onNodeWithTag("noop.friends.source.selfHosted").performClick()
-        compose.onNodeWithTag("noop.friends.source.selfHosted").assertIsSelected()
         compose.onNodeWithTag("noop.screen.friends").assertIsDisplayed()
+        compose.onNodeWithTag("noop.friends.source.managed").assertDoesNotExist()
+        compose.onNodeWithTag("noop.friends.source.selfHosted").assertDoesNotExist()
     }
 
     @Test
@@ -211,9 +209,7 @@ class AppShellInstrumentedTest {
 
     @Test
     fun appReportKeepsContextOptionalAndReviewsExactDefaultAttachments() {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync {
-            AppDiagnosticReportRequestBridge.request()
-        }
+        scenario.onActivity(MainActivity::requestAppDiagnosticReport)
         compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodesWithTag("noop.app-report.user-note")
                 .fetchSemanticsNodes()
@@ -260,9 +256,7 @@ class AppShellInstrumentedTest {
 
     @Test
     fun appReportCapturesAndReviewsScreenOnlyAfterExplicitOptIn() {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync {
-            AppDiagnosticReportRequestBridge.request()
-        }
+        scenario.onActivity(MainActivity::requestAppDiagnosticReport)
         compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodesWithTag("noop.app-report.include-screenshot")
                 .fetchSemanticsNodes()

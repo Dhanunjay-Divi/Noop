@@ -26,24 +26,6 @@ private enum ManualWorkoutSaveError: LocalizedError {
     }
 }
 
-/// Upgrade boundary for formula changes that do not alter raw-input fingerprints.
-///
-/// A revision string, rather than a one-shot boolean, makes every future Charge revision fail open into
-/// a full-history rescore. Completion is persisted only after `analyzeRecent` returns a receipt.
-enum ChargeFormulaUpgradeGate {
-    static let completedRevisionKey = "noop.analysis.completedChargeFormulaRevision"
-    static let historyDays = 4_000
-    static var currentRevision: String { NoopScoreAlgorithmRevision.charge }
-
-    static func needsRescore(completedRevision: String?) -> Bool {
-        completedRevision != currentRevision
-    }
-
-    static func revisionToPersist(passCompleted: Bool, wasRequired: Bool) -> String? {
-        passCompleted && wasRequired ? currentRevision : nil
-    }
-}
-
 /// Upgrade boundary for the persisted Active Minutes series.
 ///
 /// Existing installs may already have an unchanged raw-input watermark from a build that did not write
@@ -113,6 +95,10 @@ final class AppModel: ObservableObject {
     /// and the dashboard reads the UNION of the two, so the re-added strap's live data AND the canonical
     /// history both surface. `let` because nothing moves it.
     let deviceId = "my-whoop"
+    /// This process either owns the one supported phone collection session or is a managed viewer.
+    /// macOS is viewer-only for the first release and cannot activate any local BLE source.
+    let runtimeRole: AppRuntimeRole
+    var allowsLocalCollection: Bool { runtimeRole.allowsLocalCollection }
     /// Source id for imported Apple Health data (stored beside Whoop for per-source pages + consensus).
     let appleDeviceId = "apple-health"
     /// Observable snapshot driven by the BLE engine (connection, HR, battery, log).
@@ -371,7 +357,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    init(startOperationalWork: Bool = true) {
+    init(
+        startOperationalWork: Bool = true,
+        runtimeRole: AppRuntimeRole = .currentPlatform
+    ) {
         // A restore is validated/staged by the running app and consumed only on a cold launch. Apply it
         // synchronously before ProfileStore reads the restored settings and before BLE/Repository can
         // create either of the two live WhoopStore pools. PendingDatabaseRestore's per-process claim also
@@ -381,13 +370,15 @@ final class AppModel: ObservableObject {
         }
         let profile = ProfileStore()
         self.profile = profile
+        self.runtimeRole = runtimeRole
         self.lastAgeMetricProfileState = UserDefaults.standard.string(
             forKey: Self.ageMetricReconciledProfileStateKey)
         self.behavior = BehaviorStore()
         let live = LiveState()
         self.live = live
         self.weightScaleSource = WeightScaleSource(
-            resumeRememberedRuntimeAtLaunch: startOperationalWork
+            resumeRememberedRuntimeAtLaunch: startOperationalWork,
+            allowsBluetoothRuntime: runtimeRole.allowsLocalCollection
         )
         // SEED every subsystem with the same id (`deviceId`, "my-whoop" at launch). The store/registry
         // aren't open yet here, so the registry's active id can't be read synchronously; `bootstrapStore`
@@ -396,7 +387,8 @@ final class AppModel: ObservableObject {
         self.ble = BLEManager(
             state: live,
             deviceId: deviceId,
-            resumeRememberedRuntimeAtLaunch: startOperationalWork
+            resumeRememberedRuntimeAtLaunch: startOperationalWork,
+            allowsBluetoothRuntime: runtimeRole.allowsLocalCollection
         )
         self.repo = Repository(deviceId: deviceId)
         self.coach = AICoachEngine(repo: repo)
@@ -414,11 +406,13 @@ final class AppModel: ObservableObject {
         self.gpsRecorder.workoutsLog = { [live] line in live.append(log: line, domain: .workouts) }
         // Each bounded recorder checkpoint is folded into the same atomic recovery snapshot as HR. A
         // late callback after End is ignored; End forces and snapshots its own final checkpoint once.
-        self.gpsRecorder.checkpointSink = { [weak self] checkpoint in
-            guard let self, self.activeWorkoutGpsEnabled,
-                  self.activeWorkout?.endedAt == nil else { return }
-            self.activeWorkoutRouteCheckpoint = checkpoint
-            self.persistActiveWorkout()
+        if allowsLocalCollection {
+            self.gpsRecorder.checkpointSink = { [weak self] checkpoint in
+                guard let self, self.activeWorkoutGpsEnabled,
+                      self.activeWorkout?.endedAt == nil else { return }
+                self.activeWorkoutRouteCheckpoint = checkpoint
+                self.persistActiveWorkout()
+            }
         }
         // #961: give the read model the user's HRmax + sex so it can backfill a strap-native workout's
         // Effort on display when the stored value is nil (a live/manual session that ended with sparse HR).
@@ -448,186 +442,178 @@ final class AppModel: ObservableObject {
         // timestamp. Only the explicitly selected scale user (or a single-user packet with no user id)
         // may then project into ProfileStore; the shared freshness API prevents a stored backlog from
         // rolling the profile backwards.
-        weightScaleSource.$latestCapture
-            .compactMap { $0 }
-            .sink { [weak self] capture in
-                Task { [weak self] in await self?.ingestWeightScaleCapture(capture) }
-            }
-            .store(in: &hrCancellables)
-        // Smooth HR centrally so it's solid everywhere it's shown. Only an R-R publication may advance
-        // the stress detector: an HR-only callback can otherwise append the same cached R-R packet again
-        // and counterfeit the detector's distinct-window warm-up.
-        live.$heartRate.sink { [weak self] _ in
-            self?.ingestHR(shouldEvaluateStress: false)
-        }.store(in: &hrCancellables)
-        live.$rr.sink { [weak self] intervals in
-            self?.ingestHR(shouldEvaluateStress: true, rrPacket: intervals)
-        }.store(in: &hrCancellables)
-        // Mirror only the history-write edge onto Repository. Today/Sleep already observe Repository for
-        // data revisions, so this gives their first render a synchronous gate without making the heavy
-        // screen roots observe LiveState's sensor-rate publications.
-        live.$backfilling.removeDuplicates().sink { [weak self] active in
-            self?.repo.setHistoryWritesActive(active)
-        }.store(in: &hrCancellables)
-        // A natural history sync can publish the missing half of the stress evidence after the latest
-        // R-R packet. Re-evaluate the already-buffered R-R window without appending that packet again.
-        live.$recentWristMotionEvidence.dropFirst().sink { [weak self] _ in
-            // @Published emits before its backing value is committed. Defer one main-queue turn so the
-            // evaluator reads the newly-published evidence rather than the previous window.
-            DispatchQueue.main.async {
-                self?.evaluateStress()
-            }
-        }.store(in: &hrCancellables)
-        // Capture a workout point only for a genuine accepted HR packet. The LiveState event carries a
-        // monotonic identity + receipt timestamp, unlike @Published display state, so an R-R republish,
-        // timer tick, or cached BPM after disconnect cannot add duplicate/synthetic strain samples.
-        live.heartRateSamplePublisher.sink { [weak self] sample in
-            self?.captureWorkoutSample(sample)
-        }.store(in: &hrCancellables)
-        behavior.$zoneCoaching.dropFirst().sink { [weak self] enabled in
-            if !enabled {
-                self?.workoutCautionPolicy = nil
-            }
-        }.store(in: &hrCancellables)
-        NotificationCenter.default.publisher(for: NSNotification.Name.NSSystemTimeZoneDidChange)
+        if allowsLocalCollection {
+            weightScaleSource.$latestCapture
+                .compactMap { $0 }
+                .sink { [weak self] capture in
+                    Task { [weak self] in await self?.ingestWeightScaleCapture(capture) }
+                }
+                .store(in: &hrCancellables)
+            // Smooth HR centrally so it's solid everywhere it's shown. Only an R-R publication may advance
+            // the stress detector: an HR-only callback can otherwise append the same cached R-R packet again
+            // and counterfeit the detector's distinct-window warm-up.
+            live.$heartRate.sink { [weak self] _ in
+                self?.ingestHR(shouldEvaluateStress: false)
+            }.store(in: &hrCancellables)
+            live.$rr.sink { [weak self] intervals in
+                self?.ingestHR(shouldEvaluateStress: true, rrPacket: intervals)
+            }.store(in: &hrCancellables)
+            // Mirror only the history-write edge onto Repository. Today/Sleep already observe Repository for
+            // data revisions, so this gives their first render a synchronous gate without making the heavy
+            // screen roots observe LiveState's sensor-rate publications.
+            live.$backfilling.removeDuplicates().sink { [weak self] active in
+                self?.repo.setHistoryWritesActive(active)
+            }.store(in: &hrCancellables)
+            // A natural history sync can publish the missing half of the stress evidence after the latest
+            // R-R packet. Re-evaluate the already-buffered R-R window without appending that packet again.
+            live.$recentWristMotionEvidence.dropFirst().sink { [weak self] _ in
+                // @Published emits before its backing value is committed. Defer one main-queue turn so the
+                // evaluator reads the newly-published evidence rather than the previous window.
+                DispatchQueue.main.async {
+                    self?.evaluateStress()
+                }
+            }.store(in: &hrCancellables)
+            // Capture a workout point only for a genuine accepted HR packet. The LiveState event carries a
+            // monotonic identity + receipt timestamp, unlike @Published display state, so an R-R republish,
+            // timer tick, or cached BPM after disconnect cannot add duplicate/synthetic strain samples.
+            live.heartRateSamplePublisher.sink { [weak self] sample in
+                self?.captureWorkoutSample(sample)
+            }.store(in: &hrCancellables)
+            behavior.$zoneCoaching.dropFirst().sink { [weak self] enabled in
+                if !enabled {
+                    self?.workoutCautionPolicy = nil
+                }
+            }.store(in: &hrCancellables)
+        }
+        if runtimeRole.allowsLocalAnalysisAndGuidance {
+            NotificationCenter.default.publisher(
+                for: NSNotification.Name.NSSystemTimeZoneDidChange
+            )
             .sink { [weak self] _ in
                 guard let self else { return }
                 WindDownNudge.restoreScheduleIfAuthorized()
                 self.scheduleContextualInterventionEvaluation()
             }
             .store(in: &hrCancellables)
-        NotificationCenter.default.publisher(for: PlannedWorkoutCalendarStore.providerDidChange)
+            NotificationCenter.default.publisher(
+                for: PlannedWorkoutCalendarStore.providerDidChange
+            )
             .sink { [weak self] _ in
                 self?.scheduleContextualInterventionEvaluation()
             }
             .store(in: &hrCancellables)
-        NotificationCenter.default.publisher(for: ContextualInterventionInputs.didChange)
+            NotificationCenter.default.publisher(
+                for: ContextualInterventionInputs.didChange
+            )
             .sink { [weak self] _ in
                 self?.scheduleContextualInterventionEvaluation()
             }
             .store(in: &hrCancellables)
-
-        // Physical-input + wear hooks (fired live by FrameRouter).
-        live.onDoubleTap = { [weak self] in self?.handleDoubleTap() }
-        live.onWristChange = { [weak self] worn in self?.handleWristChange(worn) }
-        // Re-arm the next day's firmware alarm the moment the strap reports it fired (if/when the
-        // firmware pushes STRAP_DRIVEN_ALARM_EXECUTED). Gated on enabled inside applySmartAlarm.
-        live.onSmartAlarmFired = { [weak self] in
-            guard let self, self.behavior.smartAlarmEnabled else { return }
-            TapAutomationPreferences.armAlarmDismiss()
-            // PR #577 (iOS): mirror the strap's wake buzz to a local notification so a phone-in-pocket
-            // user still gets woken; no-op on macOS / when wrist alerts are off.
-            AppModel.postSmartAlarm()
-            if self.behavior.smartAlarmMode.usesDetectedSleep {
-                let target = Self.smartAlarmTargetMinutes(
-                    mode: self.behavior.smartAlarmMode,
-                    fixedMinutes: self.behavior.smartAlarmDurationMinutes,
-                    adaptiveMinutes: WindDownNudge.targetSleepMinutes
-                )
-                if self.behavior.smartAlarmArmedSessionStart > 0 {
-                    self.behavior.smartAlarmLastFiredSessionStart =
-                        self.behavior.smartAlarmArmedSessionStart
-                }
-                self.behavior.smartAlarmArmedSessionStart = 0
-                Self.cancelSmartAlarmBackupNotification()
-                self.smartAlarmRuntimeState = .durationReached(
-                    asleepMinutes: target,
-                    targetMinutes: target
-                )
-            } else {
-                self.applySmartAlarm()
-            }
         }
-        // Strap battery alerts (#368): low-battery warning + full-charge note. The notifier self-gates
-        // on the user's setting and the OS authorization, and carries its own persisted once-per-
-        // crossing state, so feeding it every battery reading is safe.
-        live.onBatteryUpdate = { [weak self] pct in
-            guard let self else { return }
-            BatteryNotifier.onBatteryUpdate(pct: Int(pct.rounded()),
-                                            charging: self.live.charging,
-                                            enabled: self.behavior.batteryAlerts)
-            // Predictive runtime alert: the same reading just banked into the SoC buffer, so
-            // batteryEstimate is fresh here. Nil estimate (no readings yet) is a no-op — the 15%
-            // alert above remains the safety net.
-            BatteryNotifier.onRuntimeEstimate(remainingHours: self.live.batteryEstimate?.remainingHours,
-                                              charging: self.live.charging,
-                                              enabled: self.behavior.batteryAlerts
-                                                    && self.behavior.batteryPredictiveAlerts)
+
+        if allowsLocalCollection {
+            // Physical-input + wear hooks (fired live by FrameRouter).
+            live.onDoubleTap = { [weak self] in self?.handleDoubleTap() }
+            live.onWristChange = { [weak self] worn in self?.handleWristChange(worn) }
+            // Re-arm the next day's firmware alarm the moment the strap reports it fired (if/when the
+            // firmware pushes STRAP_DRIVEN_ALARM_EXECUTED). Gated on enabled inside applySmartAlarm.
+            live.onSmartAlarmFired = { [weak self] in
+                guard let self, self.behavior.smartAlarmEnabled else { return }
+                TapAutomationPreferences.armAlarmDismiss()
+                // PR #577 (iOS): mirror the strap's wake buzz to a local notification so a phone-in-pocket
+                // user still gets woken; no-op on macOS / when wrist alerts are off.
+                AppModel.postSmartAlarm()
+                if self.behavior.smartAlarmMode.usesDetectedSleep {
+                    let target = Self.smartAlarmTargetMinutes(
+                        mode: self.behavior.smartAlarmMode,
+                        fixedMinutes: self.behavior.smartAlarmDurationMinutes,
+                        adaptiveMinutes: WindDownNudge.targetSleepMinutes
+                    )
+                    if self.behavior.smartAlarmArmedSessionStart > 0 {
+                        self.behavior.smartAlarmLastFiredSessionStart =
+                            self.behavior.smartAlarmArmedSessionStart
+                    }
+                    self.behavior.smartAlarmArmedSessionStart = 0
+                    Self.cancelSmartAlarmBackupNotification()
+                    self.smartAlarmRuntimeState = .durationReached(
+                        asleepMinutes: target,
+                        targetMinutes: target
+                    )
+                } else {
+                    self.applySmartAlarm()
+                }
+            }
+            // Strap battery alerts (#368): low-battery warning + full-charge note. The notifier self-gates
+            // on the user's setting and the OS authorization, and carries its own persisted once-per-
+            // crossing state, so feeding it every battery reading is safe.
+            live.onBatteryUpdate = { [weak self] pct in
+                guard let self else { return }
+                BatteryNotifier.onBatteryUpdate(pct: Int(pct.rounded()),
+                                                charging: self.live.charging,
+                                                enabled: self.behavior.batteryAlerts)
+                // Predictive runtime alert: the same reading just banked into the SoC buffer, so
+                // batteryEstimate is fresh here. Nil estimate (no readings yet) is a no-op — the 15%
+                // alert above remains the safety net.
+                BatteryNotifier.onRuntimeEstimate(
+                    remainingHours: self.live.batteryEstimate?.remainingHours,
+                    charging: self.live.charging,
+                    enabled: self.behavior.batteryAlerts
+                        && self.behavior.batteryPredictiveAlerts
+                )
+            }
         }
         // Illness/strain early-warning recomputes when the daily history changes.
         repo.$days.sink { [weak self] days in
-            guard let self, self.operationalWorkStarted else { return }
+            guard let self,
+                  self.operationalWorkStarted,
+                  self.runtimeRole.allowsLocalAnalysisAndGuidance else { return }
             self.evaluateIllness(days)
             self.evaluateStrainTarget()
             ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
             self.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         repo.$refreshSeq.dropFirst().sink { [weak self] _ in
-            guard let self, self.operationalWorkStarted else { return }
+            guard let self,
+                  self.operationalWorkStarted,
+                  self.runtimeRole.allowsLocalAnalysisAndGuidance else { return }
             ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
             self.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
-        // A newly-published detected session is the authoritative duration-alarm input. Reconcile after
-        // every real sleep-cache change; repeated analysis of the same session is deduplicated by onset.
-        repo.$sleeps.dropFirst().sink { [weak self] sessions in
-            guard let self else { return }
-            WindDownNudge.suppressIfAlreadyAsleep(sessions: sessions)
-            guard self.behavior.smartAlarmEnabled,
-                  self.behavior.smartAlarmMode == .sleepDuration else { return }
-            self.reconcileSleepDurationAlarm(sessions: sessions)
-        }.store(in: &hrCancellables)
-        // Re-arm the strap's firmware alarm once the connection has SETTLED — not the instant it (re)bonds.
-        // A smart-alarm time changed while the strap was away never reached it , the send is gated on bond
-        // , so the strap kept the OLD time and fired at it (#59).
-        //
-        // #34: keyed off `connectSettled` (a monotonic counter BLEManager bumps once the connect handshake
-        // has both run AND the cmd-notify characteristic has confirmed subscribed — see LiveState.swift /
-        // BLEManager.maybeSignalConnectSettled), NOT off raw `bonded`. `state.bonded` publishes from
-        // INSIDE BLEManager's connect-handshake continuation (the bonding-confirm write's
-        // didWriteValueFor), and Combine delivered to a `$bonded` sink SYNCHRONOUSLY on that same call
-        // stack — arming there nested the alarm's SET_CLOCK/SET_ALARM_TIME/GET_ALARM_TIME burst in the
-        // MIDDLE of the handshake, ahead of its own clock-set and before the cmd-notify channel was
-        // confirmed subscribed. A strap log (#34 v8.6.2) confirmed the result: the alarm's GET_ALARM_TIME
-        // readback got no reply at all — the strap's answer had nowhere confirmed-subscribed to land.
-        // `connectSettled` only bumps once that channel is confirmed live, so the readback (and the arm
-        // itself) always goes out on a link that's actually ready. `dropFirst()` skips the initial
-        // published value (0) at subscribe time, so this doesn't fire on app launch before any connection.
-        live.$connectSettled.dropFirst().sink { [weak self] _ in
-            guard let self, self.operationalWorkStarted,
-                  self.behavior.smartAlarmEnabled else { return }
-            self.applySmartAlarm()
-        }.store(in: &hrCancellables)
-        // The firmware alarm is a single absolute instant with no recurrence, and was re-armed ONLY on
-        // a (re)bond or a settings change. A strap that stays continuously bonded (a Mac in range) would
-        // fire once and never re-arm , silent from day two. Re-arm daily so an always-on session keeps
-        // waking the user.
-        // Re-apply "Continuous HRV capture" on every (re)bond: if on, the strap should hold the dense
-        // realtime stream armed even with no Live screen open, so it banks beat-to-beat R-R 24/7 for
-        // better overnight HRV/recovery/sleep. The BLE reconciler arms it on the off→on edge; pushing it
-        // here (and at the init tail) covers a fresh launch and every reconnect. (See PuffinExperiment.)
-        live.$bonded.removeDuplicates().sink { [weak self] _ in
-            guard let self, self.operationalWorkStarted else { return }
-            self.ble.setKeepRealtimeForData(PuffinExperiment.keepRealtimeForDataEnabled)
-            self.applyPowerSaving()
-        }.store(in: &hrCancellables)
-        // Newly inserted history has reached durable storage. This receipt is intentionally separate from
-        // `lastSyncedAt`: a session can save valid overnight chunks and then end on the idle watchdog or a
-        // disconnect before HISTORY_COMPLETE. Those rows still need scoring now, not at the next backstop.
-        //
-        // A resettable debounce starved this path when a deep offload committed about every 1.4 seconds:
-        // the two-second quiet edge never arrived, so rows accumulated for an hour while dashboard
-        // calibration appeared frozen. The revision worker gives the first commit a quick pass, coalesces
-        // continuous commits to a bounded cadence, serializes expensive reads/scoring, and still performs
-        // the final quiet-edge pass after the transfer stops.
-        persistedHistoryRefreshWorker = PersistedHistoryRefreshWorker { [weak self] in
-            await self?.refreshAfterPersistedHistory()
-        }
-        live.historyDataPublisher
-            .removeDuplicates()
-            .sink { [weak self] revision in
-                self?.persistedHistoryRefreshWorker?.noteCommit(revision: revision)
+        if allowsLocalCollection {
+            // A newly-published detected session is the authoritative duration-alarm input. Reconcile after
+            // every real sleep-cache change; repeated analysis of the same session is deduplicated by onset.
+            repo.$sleeps.dropFirst().sink { [weak self] sessions in
+                guard let self else { return }
+                WindDownNudge.suppressIfAlreadyAsleep(sessions: sessions)
+                guard self.behavior.smartAlarmEnabled,
+                      self.behavior.smartAlarmMode == .sleepDuration else { return }
+                self.reconcileSleepDurationAlarm(sessions: sessions)
+            }.store(in: &hrCancellables)
+            // Re-arm the strap's firmware alarm once the connection has SETTLED — not the instant it
+            // (re)bonds. A smart-alarm time changed while the strap was away never reached it, so the
+            // strap kept the old time and fired at it.
+            live.$connectSettled.dropFirst().sink { [weak self] _ in
+                guard let self, self.operationalWorkStarted,
+                      self.behavior.smartAlarmEnabled else { return }
+                self.applySmartAlarm()
+            }.store(in: &hrCancellables)
+            // Re-apply continuous HRV capture and power policy after every settled bond.
+            live.$bonded.removeDuplicates().sink { [weak self] _ in
+                guard let self, self.operationalWorkStarted else { return }
+                self.ble.setKeepRealtimeForData(PuffinExperiment.keepRealtimeForDataEnabled)
+                self.applyPowerSaving()
+            }.store(in: &hrCancellables)
+            // Serialize refreshes after durable history commits without starving continuous offloads.
+            persistedHistoryRefreshWorker = PersistedHistoryRefreshWorker { [weak self] in
+                await self?.refreshAfterPersistedHistory()
             }
-            .store(in: &hrCancellables)
+            live.historyDataPublisher
+                .removeDuplicates()
+                .sink { [weak self] revision in
+                    self?.persistedHistoryRefreshWorker?.noteCommit(revision: revision)
+                }
+                .store(in: &hrCancellables)
+        }
 
         moments = (UserDefaults.standard.array(forKey: "moments") as? [Double] ?? [])
             .map { Date(timeIntervalSince1970: $0) }
@@ -686,6 +672,14 @@ final class AppModel: ObservableObject {
                 includeResourceSnapshot: true
             )
         }
+        guard runtimeRole.canPresentOperationalShell else {
+            operationalWorkStarted = true
+            AppDiagnosticsRecorder.shared.record(
+                "runtime.viewer_transport",
+                fields: ["outcome": "unavailable"]
+            )
+            return
+        }
         let now = Date()
         let resumedAfterBlock = AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
             offsetSec: TimeZone.autoupdatingCurrent.secondsFromGMT(for: now),
@@ -701,20 +695,33 @@ final class AppModel: ObservableObject {
         AdaptiveDeliveredNotificationExpiryScheduler.reconcile(now: now)
 
         AppModel.shared = self   // publish for App Intents only after the launch gate is open
-        // An unfinished GPS workout resumes location + realtime hardware, so restoration belongs on the
-        // same authorized side of the boundary as Bluetooth rather than in the lightweight initializer.
-        rehydrateActiveWorkout()
-        Task { @MainActor in
-            await SafetySOSRuntime.shared.restoreLocationSharingIfNeeded()
-        }
-        scheduleDailySmartAlarmRearm()
+        if allowsLocalCollection {
+            // An unfinished GPS workout resumes location + realtime hardware, so restoration belongs on the
+            // same authorized side of the boundary as Bluetooth rather than in the lightweight initializer.
+            rehydrateActiveWorkout()
+            Task { @MainActor in
+                await SafetySOSRuntime.shared.restoreLocationSharingIfNeeded()
+            }
+            scheduleDailySmartAlarmRearm()
 
-        // Seed preferences before restoring the central so its first powered-on callback sees the final
-        // realtime/power-saving intent. Both calls and both resume paths are idempotent.
-        ble.setKeepRealtimeForData(PuffinExperiment.keepRealtimeForDataEnabled)
-        applyPowerSaving()
-        ble.resumeRememberedRuntimeAfterLaunchAccess()
-        weightScaleSource.resumePairedScale()
+            // Seed preferences before restoring the central so its first powered-on callback sees the final
+            // realtime/power-saving intent. Both calls and both resume paths are idempotent.
+            ble.setKeepRealtimeForData(PuffinExperiment.keepRealtimeForDataEnabled)
+            applyPowerSaving()
+            ble.resumeRememberedRuntimeAfterLaunchAccess()
+            weightScaleSource.resumePairedScale()
+        } else {
+            AppDiagnosticsRecorder.shared.record(
+                "runtime.collection_role",
+                fields: ["outcome": "viewer_only"]
+            )
+            Task(priority: .utility) { [weak self] in
+                guard let self else { return }
+                await self.repo.refresh()
+                _ = await self.wireDeviceRegistry()
+            }
+            return
+        }
 
         Task.detached { AppModel.purgeImportInbox(); AppModel.purgeImportTemp() }
 
@@ -766,7 +773,11 @@ final class AppModel: ObservableObject {
             _ = await self.intelligence.recomputeVitalityOnly()
             AppDiagnosticsRecorder.shared.endOperation(trace)
             #endif
-            await self.wireSourceCoordinator()                 // dormant unless a generic strap is active
+            if self.allowsLocalCollection {
+                await self.wireSourceCoordinator()             // dormant unless a generic strap is active
+            } else {
+                _ = await self.wireDeviceRegistry()             // viewer still needs source attribution
+            }
             #if DEBUG
             AppleDemoSeeder.applyLiveFixtureIfRequested(to: self.live)
             #endif
@@ -817,41 +828,132 @@ final class AppModel: ObservableObject {
                 // #836: the steady-state tick is a BACKSTOP, not a data-driven refresh. A formula-only app
                 // upgrade does not move the raw-input fingerprint, though, so its explicit revision marker
                 // overrides that skip exactly once. Use the full history before labeling any local/remote row
-                // Charge v2; a failed or overlapping pass returns nil and leaves the marker stale for retry.
+                // with a new Charge or Rest revision; a failed or overlapping pass returns nil and leaves
+                // the marker stale for retry.
                 let completedChargeRevision = UserDefaults.standard.string(
                     forKey: ChargeFormulaUpgradeGate.completedRevisionKey)
                 let chargeUpgradePending = ChargeFormulaUpgradeGate.needsRescore(
                     completedRevision: completedChargeRevision)
+                let completedRestRevision = UserDefaults.standard.string(
+                    forKey: RestFormulaUpgradeGate.completedRevisionKey)
+                let restUpgradePending = RestFormulaUpgradeGate.needsRescore(
+                    completedRevision: completedRestRevision)
                 let completedActiveZoneRevision = UserDefaults.standard.string(
                     forKey: ActiveZoneUpgradeGate.completedRevisionKey)
                 let activeZoneUpgradePending = ActiveZoneUpgradeGate.needsRescore(
                     completedRevision: completedActiveZoneRevision)
+                let formulaTraversalSelected =
+                    restUpgradePending || chargeUpgradePending
+                let storedRestAnchor: Int? =
+                    UserDefaults.standard.object(
+                        forKey: RestFormulaUpgradeGate.nextAnchorKey
+                    ) == nil
+                    ? nil
+                    : UserDefaults.standard.integer(
+                        forKey: RestFormulaUpgradeGate.nextAnchorKey
+                    )
+                let restTraversalAnchor =
+                    RestFormulaUpgradeGate.traversalAnchor(
+                        migrationRequired: formulaTraversalSelected,
+                        anchorRevision:
+                            UserDefaults.standard.string(
+                                forKey:
+                                    RestFormulaUpgradeGate
+                                        .anchorRevisionKey
+                            ),
+                        storedAnchor: storedRestAnchor
+                    )
                 operation = AppDiagnosticsRecorder.shared.beginOperation(
                     "analysis.recent",
                     fields: [
                         "charge_upgrade": chargeUpgradePending ? "true" : "false",
+                        "rest_upgrade": restUpgradePending ? "true" : "false",
+                        "rest_traversal":
+                            formulaTraversalSelected ? "true" : "false",
                         "active_zone_upgrade": activeZoneUpgradePending ? "true" : "false",
                     ]
                 )
                 let receipt = await self.intelligence.analyzeRecent(
-                    maxDays: chargeUpgradePending
-                        ? ChargeFormulaUpgradeGate.historyDays
+                    maxDays: chargeUpgradePending || restUpgradePending
+                        ? max(
+                            ChargeFormulaUpgradeGate.historyDays,
+                            RestFormulaUpgradeGate.historyDays
+                        )
                         : ActiveZoneUpgradeGate.historyDays,
-                    force: chargeUpgradePending || activeZoneUpgradePending)
+                    force: chargeUpgradePending || restUpgradePending
+                        || activeZoneUpgradePending,
+                    traverseResolvableHistory:
+                        formulaTraversalSelected,
+                    resolvableHistoryAnchor:
+                        restTraversalAnchor)
+                let restProgress =
+                    RestFormulaUpgradeGate.progress(
+                        receipt: receipt,
+                        wasRequired:
+                            restUpgradePending || chargeUpgradePending,
+                        traversalWasSelected:
+                            formulaTraversalSelected
+                    )
                 AppDiagnosticsRecorder.shared.endOperation(
                     operation,
                     outcome: receipt == nil ? "skipped_or_busy" : "completed",
+                    fields: [
+                        "rest_history_complete":
+                            receipt?.completedResolvableHistory == true
+                                ? "true"
+                                : "false",
+                        "rest_history_progress": {
+                            switch restProgress {
+                            case .retry:
+                                return "retry"
+                            case .advance:
+                                return "advance"
+                            case .complete:
+                                return "complete"
+                            }
+                        }(),
+                    ],
                     includeResourceSnapshot: true
                 )
-                if let revision = ChargeFormulaUpgradeGate.revisionToPersist(
-                    passCompleted: receipt != nil,
-                    wasRequired: chargeUpgradePending) {
+                switch restProgress {
+                case .retry:
+                    break
+                case .advance(let nextAnchor):
                     UserDefaults.standard.set(
-                        revision,
-                        forKey: ChargeFormulaUpgradeGate.completedRevisionKey)
+                        nextAnchor,
+                        forKey: RestFormulaUpgradeGate.nextAnchorKey
+                    )
+                    UserDefaults.standard.set(
+                        RestFormulaUpgradeGate.traversalRevision,
+                        forKey:
+                            RestFormulaUpgradeGate.anchorRevisionKey
+                    )
+                case .complete(let revision):
+                    if restUpgradePending {
+                        UserDefaults.standard.set(
+                            revision,
+                            forKey:
+                                RestFormulaUpgradeGate.completedRevisionKey
+                        )
+                    }
+                    if chargeUpgradePending {
+                        UserDefaults.standard.set(
+                            ChargeFormulaUpgradeGate.currentRevision,
+                            forKey:
+                                ChargeFormulaUpgradeGate.completedRevisionKey
+                        )
+                    }
+                    UserDefaults.standard.removeObject(
+                        forKey: RestFormulaUpgradeGate.nextAnchorKey
+                    )
+                    UserDefaults.standard.removeObject(
+                        forKey:
+                            RestFormulaUpgradeGate.anchorRevisionKey
+                    )
                 }
                 if let revision = ActiveZoneUpgradeGate.revisionToPersist(
-                    passCompleted: receipt != nil,
+                    passCompleted:
+                        receipt != nil && !formulaTraversalSelected,
                     wasRequired: activeZoneUpgradePending) {
                     UserDefaults.standard.set(
                         revision,
@@ -898,6 +1000,7 @@ final class AppModel: ObservableObject {
     /// after onboarding confirmation and whenever the app becomes active, which catches a birthday without
     /// polling or requiring the user to edit their date of birth.
     func refreshAgeMetricsIfProfileChanged() {
+        guard runtimeRole.allowsLocalAnalysisAndGuidance else { return }
         guard profile.ageMetricStateToken != lastAgeMetricProfileState else { return }
         scheduleAgeMetricRecompute()
     }
@@ -2789,13 +2892,15 @@ final class AppModel: ObservableObject {
     /// Re-run opt-in contextual checks after a settings change. Repository refreshes call the same
     /// coalesced path automatically when new wearable or HealthKit data lands.
     func reevaluateContextualInterventions() {
+        guard runtimeRole.allowsLocalAnalysisAndGuidance else { return }
         scheduleContextualInterventionEvaluation()
     }
 
     /// Background refreshes await this boundary so iOS cannot complete the BG task between enqueueing
     /// and evaluating newly imported sleep/vital evidence.
     func reevaluateContextualInterventionsNow() async {
-        guard operationalWorkStarted else { return }
+        guard operationalWorkStarted,
+              runtimeRole.allowsLocalAnalysisAndGuidance else { return }
         adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = nil
@@ -2803,7 +2908,9 @@ final class AppModel: ObservableObject {
     }
 
     private func scheduleContextualInterventionEvaluation() {
-        guard operationalWorkStarted, !postSyncRoutineCoordinationActive else { return }
+        guard operationalWorkStarted,
+              runtimeRole.allowsLocalAnalysisAndGuidance,
+              !postSyncRoutineCoordinationActive else { return }
         adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = Task { [weak self] in
@@ -2820,7 +2927,8 @@ final class AppModel: ObservableObject {
     private func evaluateContextualInterventions(
         notificationBudget: PostSyncRoutineNotificationBudget? = nil
     ) async {
-        guard operationalWorkStarted else { return }
+        guard operationalWorkStarted,
+              runtimeRole.allowsLocalAnalysisAndGuidance else { return }
         await evaluateAdaptiveDayGuidance(notificationBudget: notificationBudget)
 
         if ContextualInterventionSettings.vitalReviewEnabled {

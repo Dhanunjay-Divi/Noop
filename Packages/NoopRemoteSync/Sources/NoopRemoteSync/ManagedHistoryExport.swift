@@ -1,5 +1,14 @@
 import Foundation
 
+public enum ManagedHistoryTransferLimits {
+    public static let maximumObjectCount = 20_000
+    public static let maximumArchiveEntryCount = maximumObjectCount + 1
+    public static let maximumManifestBytes = 16 * 1_024 * 1_024
+    public static let maximumImportCheckpointBytes = 64 * 1_024
+    public static let maximumExportCheckpointBytes = 16 * 1_024 * 1_024
+    public static let maximumPathBytes = 512
+}
+
 public struct ManagedHistoryExportEntry: Equatable, Sendable {
     public enum Kind: String, Sendable {
         case chunk
@@ -14,6 +23,51 @@ public struct ManagedHistoryExportEntry: Equatable, Sendable {
         self.kind = kind
         self.path = path
         self.data = data
+    }
+}
+
+public enum ManagedHistoryExportStateError: Error, Equatable, Sendable {
+    case unusableStagedArchive
+}
+
+public enum ManagedHistoryStagedArchiveValidator {
+    public typealias EntryReader =
+        (_ path: String, _ maximumBytes: Int) throws -> Data
+
+    public static func validate(
+        manifest: ManagedHistoryExportManifest,
+        entryPaths: [String],
+        read: EntryReader
+    ) throws {
+        let expectedPaths =
+            manifest.chunks.map(\.path) + manifest.documents.map(\.path)
+        guard expectedPaths.count == manifest.exportedObjects,
+              Set(expectedPaths).count == expectedPaths.count,
+              entryPaths.count == expectedPaths.count,
+              Set(entryPaths) == Set(expectedPaths) else {
+            throw ManagedHistoryExportStateError.unusableStagedArchive
+        }
+
+        for chunk in manifest.chunks {
+            guard chunk.compressedBytes >= 0 else {
+                throw ManagedHistoryExportStateError.unusableStagedArchive
+            }
+            let data = try read(chunk.path, chunk.compressedBytes)
+            guard data.count == chunk.compressedBytes,
+                  ManagedDigest.sha256(data) == chunk.sha256 else {
+                throw ManagedHistoryExportStateError.unusableStagedArchive
+            }
+        }
+        for document in manifest.documents {
+            guard document.archiveBytes >= 0 else {
+                throw ManagedHistoryExportStateError.unusableStagedArchive
+            }
+            let data = try read(document.path, document.archiveBytes)
+            guard data.count == document.archiveBytes,
+                  ManagedDigest.sha256(data) == document.archiveSHA256 else {
+                throw ManagedHistoryExportStateError.unusableStagedArchive
+            }
+        }
     }
 }
 
@@ -47,6 +101,44 @@ public struct ManagedHistoryExportProgress: Equatable, Sendable {
 }
 
 public struct ManagedHistoryExportManifest: Codable, Equatable, Sendable {
+    public struct Integrity: Codable, Equatable, Sendable {
+        public let algorithm: String
+        public let entryCount: Int
+        public let entriesSHA256: String
+
+        private enum CodingKeys: String, CodingKey {
+            case algorithm
+            case entryCount
+            case entriesSHA256 = "entriesSha256"
+        }
+
+        public init(
+            algorithm: String,
+            entryCount: Int,
+            entriesSHA256: String
+        ) {
+            self.algorithm = algorithm
+            self.entryCount = entryCount
+            self.entriesSHA256 = entriesSHA256
+        }
+    }
+
+    public struct SnapshotCursor: Codable, Equatable, Sendable {
+        public let formatVersion: Int
+        public let snapshotAt: String
+        public let changeSequence: Int64
+
+        public init(
+            formatVersion: Int,
+            snapshotAt: String,
+            changeSequence: Int64
+        ) {
+            self.formatVersion = formatVersion
+            self.snapshotAt = snapshotAt
+            self.changeSequence = changeSequence
+        }
+    }
+
     public struct Chunk: Codable, Equatable, Sendable {
         public let path: String
         public let chunkID: UUID
@@ -61,6 +153,52 @@ public struct ManagedHistoryExportManifest: Codable, Equatable, Sendable {
         public let compressedBytes: Int
         public let uncompressedBytes: Int
         public let objectGeneration: Int64
+
+        private enum CodingKeys: String, CodingKey {
+            case path
+            case chunkID = "chunkId"
+            case sourceID = "sourceId"
+            case dataClass
+            case schemaVersion
+            case eventStart
+            case eventEnd
+            case compression
+            case contentType
+            case sha256
+            case compressedBytes
+            case uncompressedBytes
+            case objectGeneration
+        }
+
+        public init(
+            path: String,
+            chunkID: UUID,
+            sourceID: UUID,
+            dataClass: String,
+            schemaVersion: Int,
+            eventStart: String,
+            eventEnd: String,
+            compression: String,
+            contentType: String,
+            sha256: String,
+            compressedBytes: Int,
+            uncompressedBytes: Int,
+            objectGeneration: Int64
+        ) {
+            self.path = path
+            self.chunkID = chunkID
+            self.sourceID = sourceID
+            self.dataClass = dataClass
+            self.schemaVersion = schemaVersion
+            self.eventStart = eventStart
+            self.eventEnd = eventEnd
+            self.compression = compression
+            self.contentType = contentType
+            self.sha256 = sha256
+            self.compressedBytes = compressedBytes
+            self.uncompressedBytes = uncompressedBytes
+            self.objectGeneration = objectGeneration
+        }
     }
 
     public struct Document: Codable, Equatable, Sendable {
@@ -73,6 +211,40 @@ public struct ManagedHistoryExportManifest: Codable, Equatable, Sendable {
         public let archiveSHA256: String
         public let archiveBytes: Int
         public let updatedAt: String
+
+        private enum CodingKeys: String, CodingKey {
+            case path
+            case documentKind
+            case documentID = "documentId"
+            case revision
+            case contentMode
+            case contentSHA256 = "contentSha256"
+            case archiveSHA256 = "archiveSha256"
+            case archiveBytes
+            case updatedAt
+        }
+
+        public init(
+            path: String,
+            documentKind: ManagedDocumentKind,
+            documentID: UUID,
+            revision: Int64,
+            contentMode: String,
+            contentSHA256: String,
+            archiveSHA256: String,
+            archiveBytes: Int,
+            updatedAt: String
+        ) {
+            self.path = path
+            self.documentKind = documentKind
+            self.documentID = documentID
+            self.revision = revision
+            self.contentMode = contentMode
+            self.contentSHA256 = contentSHA256
+            self.archiveSHA256 = archiveSHA256
+            self.archiveBytes = archiveBytes
+            self.updatedAt = updatedAt
+        }
     }
 
     public let format: String
@@ -87,6 +259,8 @@ public struct ManagedHistoryExportManifest: Codable, Equatable, Sendable {
     public let exportedChunkBytes: Int64
     public let chunks: [Chunk]
     public let documents: [Document]
+    public let integrity: Integrity?
+    public let snapshotCursor: SnapshotCursor?
 
     public init(
         format: String,
@@ -100,7 +274,9 @@ public struct ManagedHistoryExportManifest: Codable, Equatable, Sendable {
         exportedObjects: Int,
         exportedChunkBytes: Int64,
         chunks: [Chunk],
-        documents: [Document]
+        documents: [Document],
+        integrity: Integrity? = nil,
+        snapshotCursor: SnapshotCursor? = nil
     ) {
         self.format = format
         self.formatVersion = formatVersion
@@ -110,6 +286,135 @@ public struct ManagedHistoryExportManifest: Codable, Equatable, Sendable {
         self.dataClasses = dataClasses
         self.selectedObjects = selectedObjects
         self.selectedChunkBytes = selectedChunkBytes
+        self.exportedObjects = exportedObjects
+        self.exportedChunkBytes = exportedChunkBytes
+        self.chunks = chunks
+        self.documents = documents
+        self.integrity = integrity
+        self.snapshotCursor = snapshotCursor
+    }
+
+    public func encoded() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        do {
+            let data = try encoder.encode(self)
+            guard data.count
+                    <= ManagedHistoryTransferLimits.maximumManifestBytes else {
+                throw ManagedStorageError.encoding
+            }
+            return data
+        } catch {
+            if let managed = error as? ManagedStorageError {
+                throw managed
+            }
+            throw ManagedStorageError.encoding
+        }
+    }
+
+    public static func decoded(from data: Data) throws -> Self {
+        guard data.count
+                <= ManagedHistoryTransferLimits.maximumManifestBytes else {
+            throw ManagedStorageError.decoding
+        }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            return try decoder.decode(Self.self, from: data)
+        } catch {
+            throw ManagedStorageError.decoding
+        }
+    }
+}
+
+public struct ManagedHistoryExportCheckpoint: Codable, Equatable, Sendable {
+    public static let currentFormatVersion = 1
+
+    public let format: String
+    public let formatVersion: Int
+    public let createdAt: String
+    public let requestID: UUID
+    public let restoreJobID: UUID
+    public let snapshotAt: String
+    public let changeSequence: Int64
+    public let expiresAt: String
+    public let dataClasses: [String]
+    public let pageSize: Int
+    public let selectedObjects: Int
+    public let selectedChunkBytes: Int64
+    public var dataClassIndex: Int
+    public var chunkCursor: ManagedChunkPage.Cursor?
+    public var documentCursor: ManagedDocumentPage.Cursor?
+    public var documentsComplete: Bool
+    public var serverCompleted: Bool
+    public var exportedObjects: Int
+    public var exportedChunkBytes: Int64
+    public var chunks: [ManagedHistoryExportManifest.Chunk]
+    public var documents: [ManagedHistoryExportManifest.Document]
+
+    private enum CodingKeys: String, CodingKey {
+        case format
+        case formatVersion
+        case createdAt
+        case requestID = "requestId"
+        case restoreJobID = "restoreJobId"
+        case snapshotAt
+        case changeSequence
+        case expiresAt
+        case dataClasses
+        case pageSize
+        case selectedObjects
+        case selectedChunkBytes
+        case dataClassIndex
+        case chunkCursor
+        case documentCursor
+        case documentsComplete
+        case serverCompleted
+        case exportedObjects
+        case exportedChunkBytes
+        case chunks
+        case documents
+    }
+
+    public init(
+        createdAt: String,
+        requestID: UUID,
+        restoreJobID: UUID,
+        snapshotAt: String,
+        changeSequence: Int64,
+        expiresAt: String,
+        dataClasses: [String],
+        pageSize: Int,
+        selectedObjects: Int,
+        selectedChunkBytes: Int64,
+        dataClassIndex: Int = 0,
+        chunkCursor: ManagedChunkPage.Cursor? = nil,
+        documentCursor: ManagedDocumentPage.Cursor? = nil,
+        documentsComplete: Bool = false,
+        serverCompleted: Bool = false,
+        exportedObjects: Int = 0,
+        exportedChunkBytes: Int64 = 0,
+        chunks: [ManagedHistoryExportManifest.Chunk] = [],
+        documents: [ManagedHistoryExportManifest.Document] = []
+    ) {
+        format = "noop_managed_history_export_checkpoint"
+        formatVersion = Self.currentFormatVersion
+        self.createdAt = createdAt
+        self.requestID = requestID
+        self.restoreJobID = restoreJobID
+        self.snapshotAt = snapshotAt
+        self.changeSequence = changeSequence
+        self.expiresAt = expiresAt
+        self.dataClasses = dataClasses
+        self.pageSize = pageSize
+        self.selectedObjects = selectedObjects
+        self.selectedChunkBytes = selectedChunkBytes
+        self.dataClassIndex = dataClassIndex
+        self.chunkCursor = chunkCursor
+        self.documentCursor = documentCursor
+        self.documentsComplete = documentsComplete
+        self.serverCompleted = serverCompleted
         self.exportedObjects = exportedObjects
         self.exportedChunkBytes = exportedChunkBytes
         self.chunks = chunks
@@ -126,6 +431,39 @@ public struct ManagedHistoryExportManifest: Codable, Equatable, Sendable {
             throw ManagedStorageError.encoding
         }
     }
+
+    public static func decoded(from data: Data) throws -> Self {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            return try decoder.decode(Self.self, from: data)
+        } catch {
+            throw ManagedStorageError.decoding
+        }
+    }
+}
+
+public enum ManagedHistoryArchiveIntegrity {
+    public static func entriesSHA256(
+        chunks: [ManagedHistoryExportManifest.Chunk],
+        documents: [ManagedHistoryExportManifest.Document]
+    ) -> String {
+        let entries =
+            chunks.map { ("chunk", $0.path, $0.sha256, $0.compressedBytes) }
+            + documents.map {
+                ("document", $0.path, $0.archiveSHA256, $0.archiveBytes)
+            }
+        let canonical = entries
+            .sorted {
+                if $0.1 != $1.1 { return $0.1 < $1.1 }
+                return $0.0 < $1.0
+            }
+            .map { kind, path, digest, bytes in
+                "\(kind)\0\(path)\0\(digest)\0\(bytes)\n"
+            }
+            .joined()
+        return ManagedDigest.sha256(Data(canonical.utf8))
+    }
 }
 
 public actor ManagedHistoryExporter {
@@ -135,6 +473,8 @@ public actor ManagedHistoryExporter {
         @Sendable (_ entry: ManagedHistoryExportEntry) async throws -> Void
     public typealias ProgressConsumer =
         @Sendable (_ progress: ManagedHistoryExportProgress) async -> Void
+    public typealias CheckpointConsumer =
+        @Sendable (_ checkpoint: ManagedHistoryExportCheckpoint) async throws -> Void
 
     private struct ExportedDocument: Codable {
         let documentKind: ManagedDocumentKind
@@ -148,6 +488,20 @@ public actor ManagedHistoryExporter {
         let payloadCiphertextBase64: String?
         let updatedAt: String
         let deletedAt: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case documentKind
+            case documentID = "documentId"
+            case revision
+            case originInstallationID = "originInstallationId"
+            case contentMode
+            case clientKeyID = "clientKeyId"
+            case contentSHA256 = "contentSha256"
+            case payloadJSON = "payloadJson"
+            case payloadCiphertextBase64
+            case updatedAt
+            case deletedAt
+        }
 
         init(_ document: ManagedDocument) {
             documentKind = document.documentKind
@@ -173,8 +527,11 @@ public actor ManagedHistoryExporter {
     public func export(
         dataClasses: [String] = ManagedSyncCoordinator.chunkDataClasses,
         pageSize: Int = 100,
+        resumeFrom resumeCheckpoint: ManagedHistoryExportCheckpoint? = nil,
         authorization: @escaping AuthorizationProvider,
         progress: ProgressConsumer? = nil,
+        saveCheckpoint: CheckpointConsumer? = nil,
+        now: @escaping @Sendable () -> Date = { Date() },
         consume: @escaping EntryConsumer
     ) async throws -> ManagedHistoryExportManifest {
         let classes = dataClasses.sorted()
@@ -190,7 +547,6 @@ public actor ManagedHistoryExporter {
             throw ManagedStorageError.invalidConfiguration
         }
 
-        let requestID = UUID()
         await report(
             .preparing,
             completedObjects: 0,
@@ -199,52 +555,83 @@ public actor ManagedHistoryExporter {
             totalBytes: 0,
             to: progress
         )
-        let restore = try await authorized(
-            using: authorization,
-            operation: { credential in
-                try await self.transport.createRestore(
-                    requestID: requestID,
-                    dataClasses: classes,
-                    includeDeletedDocuments: false,
-                    authorization: credential
-                )
+        var checkpoint: ManagedHistoryExportCheckpoint
+        if let resumeCheckpoint {
+            try Self.validate(
+                resumeCheckpoint,
+                dataClasses: classes,
+                pageSize: pageSize,
+                now: now()
+            )
+            checkpoint = resumeCheckpoint
+        } else {
+            let requestID = UUID()
+            let restore = try await authorized(
+                using: authorization,
+                operation: { credential in
+                    try await self.transport.createRestore(
+                        requestID: requestID,
+                        dataClasses: classes,
+                        includeDeletedDocuments: false,
+                        authorization: credential
+                    )
+                }
+            )
+            guard restore.status == "running",
+                  restore.selectedObjects >= 0,
+                  restore.selectedObjects
+                    <= ManagedHistoryTransferLimits.maximumObjectCount,
+                  restore.selectedBytes >= 0,
+                  restore.deliveredObjects == 0,
+                  restore.deliveredBytes == 0,
+                  ManagedTimestamp.milliseconds(iso8601: restore.snapshotAt) != nil,
+                  ManagedTimestamp.milliseconds(iso8601: restore.expiresAt) != nil else {
+                throw ManagedStorageError.invalidResponse
             }
-        )
-        guard restore.status == "running",
-              restore.selectedObjects >= 0,
-              restore.selectedBytes >= 0,
-              restore.deliveredObjects == 0,
-              restore.deliveredBytes == 0,
-              ManagedTimestamp.milliseconds(iso8601: restore.snapshotAt) != nil else {
-            throw ManagedStorageError.invalidResponse
+            checkpoint = ManagedHistoryExportCheckpoint(
+                createdAt: ManagedTimestamp.iso8601(
+                    milliseconds: Int64(
+                        (now().timeIntervalSince1970 * 1_000).rounded(.down)
+                    )
+                ),
+                requestID: requestID,
+                restoreJobID: restore.restoreJobID,
+                snapshotAt: restore.snapshotAt,
+                changeSequence: restore.changeSequence,
+                expiresAt: restore.expiresAt,
+                dataClasses: classes,
+                pageSize: pageSize,
+                selectedObjects: restore.selectedObjects,
+                selectedChunkBytes: restore.selectedBytes
+            )
+            try await saveCheckpoint?(checkpoint)
         }
 
-        var chunkRecords: [ManagedHistoryExportManifest.Chunk] = []
-        var documentRecords: [ManagedHistoryExportManifest.Document] = []
-        var entryPaths: Set<String> = []
-        var completedObjects = 0
-        var completedBytes: Int64 = 0
+        var entryPaths = Set(
+            checkpoint.chunks.map(\.path) + checkpoint.documents.map(\.path)
+        )
 
         await report(
             .chunks,
-            completedObjects: completedObjects,
-            totalObjects: restore.selectedObjects,
-            completedBytes: completedBytes,
-            totalBytes: restore.selectedBytes,
+            completedObjects: checkpoint.exportedObjects,
+            totalObjects: checkpoint.selectedObjects,
+            completedBytes: checkpoint.exportedChunkBytes,
+            totalBytes: checkpoint.selectedChunkBytes,
             to: progress
         )
 
-        for dataClass in classes {
-            var cursor: ManagedChunkPage.Cursor?
+        while checkpoint.dataClassIndex < classes.count {
+            let dataClass = classes[checkpoint.dataClassIndex]
             repeat {
                 try Task.checkCancellation()
-                let pageCursor = cursor
+                let pageCursor = checkpoint.chunkCursor
+                let snapshotAt = checkpoint.snapshotAt
                 let page = try await authorized(
                     using: authorization,
                     operation: { credential in
                         try await self.transport.availableChunks(
                             dataClass: dataClass,
-                            snapshotAt: restore.snapshotAt,
+                            snapshotAt: snapshotAt,
                             after: pageCursor,
                             limit: pageSize,
                             authorization: credential
@@ -256,6 +643,15 @@ public actor ManagedHistoryExporter {
                 }
                 for chunk in page.chunks {
                     try Task.checkCancellation()
+                    guard chunk.dataClass == dataClass,
+                          chunk.contentMode == "server_readable",
+                          chunk.state == "available",
+                          chunk.expectedCompressedBytes > 0,
+                          chunk.expectedUncompressedBytes > 0,
+                          Self.isSHA256(chunk.expectedSHA256) else {
+                        throw ManagedStorageError.invalidResponse
+                    }
+                    let restoreJobID = checkpoint.restoreJobID
                     let capability = try await authorized(
                         using: authorization,
                         operation: { credential in
@@ -265,7 +661,7 @@ public actor ManagedHistoryExporter {
                                     seed: Data(
                                         (
                                             "noop-managed-history-export-v1\0"
-                                            + restore.restoreJobID.uuidString.lowercased()
+                                            + restoreJobID.uuidString.lowercased()
                                             + "\0"
                                             + chunk.chunkID.uuidString.lowercased()
                                         ).utf8
@@ -291,7 +687,7 @@ public actor ManagedHistoryExporter {
                             data: data
                         )
                     )
-                    chunkRecords.append(
+                    checkpoint.chunks.append(
                         .init(
                             path: path,
                             chunkID: chunk.chunkID,
@@ -308,45 +704,61 @@ public actor ManagedHistoryExporter {
                             objectGeneration: chunk.objectGeneration
                         )
                     )
-                    completedObjects = try Self.add(completedObjects, 1)
-                    completedBytes = try Self.add(
-                        completedBytes,
+                    checkpoint.exportedObjects = try Self.add(
+                        checkpoint.exportedObjects,
+                        1
+                    )
+                    checkpoint.exportedChunkBytes = try Self.add(
+                        checkpoint.exportedChunkBytes,
                         Int64(chunk.expectedCompressedBytes)
                     )
-                    guard completedObjects <= restore.selectedObjects,
-                          completedBytes <= restore.selectedBytes else {
+                    checkpoint.chunkCursor = ManagedChunkPage.Cursor(
+                        afterEventStart: chunk.eventStart,
+                        afterChunkID: chunk.chunkID
+                    )
+                    guard checkpoint.exportedObjects <= checkpoint.selectedObjects,
+                          checkpoint.exportedChunkBytes
+                            <= checkpoint.selectedChunkBytes else {
                         throw ManagedStorageError.invalidResponse
                     }
                     await report(
                         .chunks,
-                        completedObjects: completedObjects,
-                        totalObjects: restore.selectedObjects,
-                        completedBytes: completedBytes,
-                        totalBytes: restore.selectedBytes,
+                        completedObjects: checkpoint.exportedObjects,
+                        totalObjects: checkpoint.selectedObjects,
+                        completedBytes: checkpoint.exportedChunkBytes,
+                        totalBytes: checkpoint.selectedChunkBytes,
                         to: progress
                     )
                 }
-                cursor = page.nextCursor
-            } while cursor != nil
+                if let nextCursor = page.nextCursor {
+                    guard checkpoint.chunkCursor == nextCursor else {
+                        throw ManagedStorageError.invalidResponse
+                    }
+                } else {
+                    checkpoint.dataClassIndex += 1
+                    checkpoint.chunkCursor = nil
+                }
+                try await saveCheckpoint?(checkpoint)
+            } while checkpoint.chunkCursor != nil
         }
 
         await report(
             .documents,
-            completedObjects: completedObjects,
-            totalObjects: restore.selectedObjects,
-            completedBytes: completedBytes,
-            totalBytes: restore.selectedBytes,
+            completedObjects: checkpoint.exportedObjects,
+            totalObjects: checkpoint.selectedObjects,
+            completedBytes: checkpoint.exportedChunkBytes,
+            totalBytes: checkpoint.selectedChunkBytes,
             to: progress
         )
-        var documentCursor: ManagedDocumentPage.Cursor?
-        repeat {
+        while !checkpoint.documentsComplete {
             try Task.checkCancellation()
-            let pageCursor = documentCursor
+            let pageCursor = checkpoint.documentCursor
+            let snapshotAt = checkpoint.snapshotAt
             let page = try await authorized(
                 using: authorization,
                 operation: { credential in
                     try await self.transport.documents(
-                        snapshotAt: restore.snapshotAt,
+                        snapshotAt: snapshotAt,
                         after: pageCursor,
                         limit: pageSize,
                         includeDeleted: false,
@@ -374,7 +786,7 @@ public actor ManagedHistoryExporter {
                         data: data
                     )
                 )
-                documentRecords.append(
+                checkpoint.documents.append(
                     .init(
                         path: path,
                         documentKind: document.documentKind,
@@ -387,75 +799,102 @@ public actor ManagedHistoryExporter {
                         updatedAt: document.updatedAt
                     )
                 )
-                completedObjects = try Self.add(completedObjects, 1)
-                guard completedObjects <= restore.selectedObjects else {
+                checkpoint.exportedObjects = try Self.add(
+                    checkpoint.exportedObjects,
+                    1
+                )
+                checkpoint.documentCursor = document.pageCursor
+                guard checkpoint.exportedObjects <= checkpoint.selectedObjects else {
                     throw ManagedStorageError.invalidResponse
                 }
                 await report(
                     .documents,
-                    completedObjects: completedObjects,
-                    totalObjects: restore.selectedObjects,
-                    completedBytes: completedBytes,
-                    totalBytes: restore.selectedBytes,
+                    completedObjects: checkpoint.exportedObjects,
+                    totalObjects: checkpoint.selectedObjects,
+                    completedBytes: checkpoint.exportedChunkBytes,
+                    totalBytes: checkpoint.selectedChunkBytes,
                     to: progress
                 )
             }
-            documentCursor = page.nextCursor
-        } while documentCursor != nil
+            if let nextCursor = page.nextCursor {
+                guard checkpoint.documentCursor == nextCursor else {
+                    throw ManagedStorageError.invalidResponse
+                }
+            } else {
+                checkpoint.documentCursor = nil
+                checkpoint.documentsComplete = true
+            }
+            try await saveCheckpoint?(checkpoint)
+        }
 
-        guard completedObjects == restore.selectedObjects,
-              completedBytes == restore.selectedBytes else {
+        guard checkpoint.exportedObjects == checkpoint.selectedObjects,
+              checkpoint.exportedChunkBytes == checkpoint.selectedChunkBytes else {
             throw ManagedStorageError.invalidResponse
         }
         await report(
             .finalizing,
-            completedObjects: completedObjects,
-            totalObjects: restore.selectedObjects,
-            completedBytes: completedBytes,
-            totalBytes: restore.selectedBytes,
+            completedObjects: checkpoint.exportedObjects,
+            totalObjects: checkpoint.selectedObjects,
+            completedBytes: checkpoint.exportedChunkBytes,
+            totalBytes: checkpoint.selectedChunkBytes,
             to: progress
         )
-        let deliveredObjects = completedObjects
-        let deliveredBytes = completedBytes
-        let completed = try await authorized(
-            using: authorization,
-            operation: { credential in
-                try await self.transport.completeRestore(
-                    restoreJobID: restore.restoreJobID,
-                    deliveredObjects: deliveredObjects,
-                    deliveredBytes: deliveredBytes,
-                    authorization: credential
-                )
+        if !checkpoint.serverCompleted {
+            let restoreJobID = checkpoint.restoreJobID
+            let deliveredObjects = checkpoint.exportedObjects
+            let deliveredBytes = checkpoint.exportedChunkBytes
+            let completed = try await authorized(
+                using: authorization,
+                operation: { credential in
+                    try await self.transport.completeRestore(
+                        restoreJobID: restoreJobID,
+                        deliveredObjects: deliveredObjects,
+                        deliveredBytes: deliveredBytes,
+                        authorization: credential
+                    )
+                }
+            )
+            guard completed.status == "completed",
+                  completed.restoreJobID == checkpoint.restoreJobID,
+                  completed.snapshotAt == checkpoint.snapshotAt,
+                  completed.changeSequence == checkpoint.changeSequence,
+                  completed.selectedObjects == checkpoint.selectedObjects,
+                  completed.selectedBytes == checkpoint.selectedChunkBytes,
+                  completed.deliveredObjects == checkpoint.exportedObjects,
+                  completed.deliveredBytes == checkpoint.exportedChunkBytes else {
+                throw ManagedStorageError.invalidResponse
             }
-        )
-        guard completed.status == "completed",
-              completed.restoreJobID == restore.restoreJobID,
-              completed.snapshotAt == restore.snapshotAt,
-              completed.changeSequence == restore.changeSequence,
-              completed.selectedObjects == restore.selectedObjects,
-              completed.selectedBytes == restore.selectedBytes,
-              completed.deliveredObjects == completedObjects,
-              completed.deliveredBytes == completedBytes else {
-            throw ManagedStorageError.invalidResponse
+            checkpoint.serverCompleted = true
+            try await saveCheckpoint?(checkpoint)
         }
 
+        let entriesSHA256 = ManagedHistoryArchiveIntegrity.entriesSHA256(
+            chunks: checkpoint.chunks,
+            documents: checkpoint.documents
+        )
         return ManagedHistoryExportManifest(
             format: "noop_managed_history",
-            formatVersion: 1,
-            createdAt: ManagedTimestamp.iso8601(
-                milliseconds: Int64(
-                    (Date().timeIntervalSince1970 * 1_000).rounded(.down)
-                )
-            ),
-            snapshotAt: restore.snapshotAt,
-            changeSequence: restore.changeSequence,
+            formatVersion: 2,
+            createdAt: checkpoint.createdAt,
+            snapshotAt: checkpoint.snapshotAt,
+            changeSequence: checkpoint.changeSequence,
             dataClasses: classes,
-            selectedObjects: restore.selectedObjects,
-            selectedChunkBytes: restore.selectedBytes,
-            exportedObjects: completedObjects,
-            exportedChunkBytes: completedBytes,
-            chunks: chunkRecords,
-            documents: documentRecords
+            selectedObjects: checkpoint.selectedObjects,
+            selectedChunkBytes: checkpoint.selectedChunkBytes,
+            exportedObjects: checkpoint.exportedObjects,
+            exportedChunkBytes: checkpoint.exportedChunkBytes,
+            chunks: checkpoint.chunks,
+            documents: checkpoint.documents,
+            integrity: .init(
+                algorithm: "sha256",
+                entryCount: checkpoint.exportedObjects,
+                entriesSHA256: entriesSHA256
+            ),
+            snapshotCursor: .init(
+                formatVersion: 1,
+                snapshotAt: checkpoint.snapshotAt,
+                changeSequence: checkpoint.changeSequence
+            )
         )
     }
 
@@ -518,6 +957,102 @@ public actor ManagedHistoryExporter {
         } catch {
             throw ManagedStorageError.encoding
         }
+    }
+
+    private static func validate(
+        _ checkpoint: ManagedHistoryExportCheckpoint,
+        dataClasses: [String],
+        pageSize: Int,
+        now: Date
+    ) throws {
+        let paths = checkpoint.chunks.map(\.path)
+            + checkpoint.documents.map(\.path)
+        let chunkBytes = try checkpoint.chunks.reduce(Int64(0)) {
+            try add($0, Int64($1.compressedBytes))
+        }
+        let expiresAt = ManagedTimestamp.milliseconds(
+            iso8601: checkpoint.expiresAt
+        )
+        guard checkpoint.format == "noop_managed_history_export_checkpoint",
+              checkpoint.formatVersion
+                == ManagedHistoryExportCheckpoint.currentFormatVersion,
+              checkpoint.dataClasses == dataClasses,
+              checkpoint.pageSize == pageSize,
+              checkpoint.changeSequence >= 0,
+              ManagedTimestamp.milliseconds(
+                  iso8601: checkpoint.createdAt
+              ) != nil,
+              ManagedTimestamp.milliseconds(
+                  iso8601: checkpoint.snapshotAt
+              ) != nil,
+              let expiresAt,
+              expiresAt > Int64(
+                  (now.timeIntervalSince1970 * 1_000).rounded(.down)
+              ),
+              checkpoint.selectedObjects >= 0,
+              checkpoint.selectedObjects
+                <= ManagedHistoryTransferLimits.maximumObjectCount,
+              checkpoint.selectedChunkBytes >= 0,
+              checkpoint.dataClassIndex >= 0,
+              checkpoint.dataClassIndex <= dataClasses.count,
+              checkpoint.exportedObjects
+                == checkpoint.chunks.count + checkpoint.documents.count,
+              checkpoint.exportedObjects <= checkpoint.selectedObjects,
+              checkpoint.exportedChunkBytes == chunkBytes,
+              checkpoint.exportedChunkBytes
+                <= checkpoint.selectedChunkBytes,
+              Set(paths).count == paths.count,
+              !checkpoint.serverCompleted
+                || (
+                    checkpoint.documentsComplete
+                        && checkpoint.exportedObjects
+                            == checkpoint.selectedObjects
+                        && checkpoint.exportedChunkBytes
+                            == checkpoint.selectedChunkBytes
+                ),
+              checkpoint.chunks.allSatisfy({
+                  Self.valid(path: $0.path)
+                      && Self.isSHA256($0.sha256)
+                      && $0.compressedBytes > 0
+                      && $0.uncompressedBytes > 0
+                      && dataClasses.contains($0.dataClass)
+              }),
+              checkpoint.documents.allSatisfy({
+                  Self.valid(path: $0.path)
+                      && Self.isSHA256($0.contentSHA256)
+                      && Self.isSHA256($0.archiveSHA256)
+                      && $0.archiveBytes > 0
+                      && $0.revision > 0
+              }) else {
+            if expiresAt.map({
+                $0 <= Int64(
+                    (now.timeIntervalSince1970 * 1_000).rounded(.down)
+                )
+            }) == true {
+                throw ManagedStorageError.cursorExpired(minimumSequence: nil)
+            }
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func valid(path: String) -> Bool {
+        !path.isEmpty
+            && path.utf8.count <= ManagedHistoryTransferLimits.maximumPathBytes
+            && !path.hasPrefix("/")
+            && !path.hasSuffix("/")
+            && !path.contains("\\")
+            && !path.contains("\0")
+            && path.split(
+                separator: "/",
+                omittingEmptySubsequences: false
+            ).allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+
+    private static func isSHA256(_ value: String) -> Bool {
+        value.range(
+            of: #"^[0-9a-f]{64}$"#,
+            options: .regularExpression
+        ) != nil
     }
 
     private static func add(_ left: Int, _ right: Int) throws -> Int {

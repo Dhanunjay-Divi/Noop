@@ -93,6 +93,14 @@ internal object ManagedSocialRuntime {
             hrv = friends.any { it.sharing.hrv },
             rhr = friends.any { it.sharing.rhr },
             pokeAllowed = friends.any { it.sharing.pokeAllowed },
+            messagesAllowed = friends.any { it.sharing.messagesAllowed },
+            photosAllowed = friends.any { it.sharing.photosAllowed },
+            audioCallsAllowed = friends.any {
+                it.sharing.audioCallsAllowed
+            },
+            videoCallsAllowed = friends.any {
+                it.sharing.videoCallsAllowed
+            },
         )
 
     fun value(raw: Double?, range: ClosedFloatingPointRange<Double>): Double? =

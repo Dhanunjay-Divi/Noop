@@ -7,6 +7,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.time.Instant
 import java.util.UUID
 
 class ManagedHistoryExporterTest {
@@ -55,7 +56,18 @@ class ManagedHistoryExporterTest {
         )
 
         assertEquals(4, manifest.exportedObjects)
+        assertEquals(2, manifest.formatVersion)
         assertEquals(23L, manifest.exportedChunkBytes)
+        assertEquals(
+            ManagedHistoryArchiveIntegrity.entriesSha256(
+                manifest.chunks,
+                manifest.documents,
+            ),
+            manifest.integrity?.entriesSha256,
+        )
+        assertEquals(4, manifest.integrity?.entryCount)
+        assertEquals(manifest.snapshotAt, manifest.snapshotCursor?.snapshotAt)
+        assertEquals(manifest.changeSequence, manifest.snapshotCursor?.changeSequence)
         assertEquals(listOf(first.chunkId, second.chunkId), manifest.chunks.map { it.chunkId })
         assertEquals(
             listOf(firstDocument.documentId, secondDocument.documentId),
@@ -72,6 +84,105 @@ class ManagedHistoryExporterTest {
             refreshes,
         )
         assertEquals(ManagedHistoryExportPhase.FINALIZING, progress.last().phase)
+    }
+
+    @Test
+    fun interruptedExportResumesSameSnapshotWithoutReplayingCommittedEntry() = runTest {
+        val firstData = "first-chunk".toByteArray()
+        val secondData = "second-chunk".toByteArray()
+        val first = chunk(
+            UUID.fromString("11000000-0000-5000-8000-000000000001"),
+            firstData,
+            "2026-09-01T00:00:00Z",
+        )
+        val second = chunk(
+            UUID.fromString("11000000-0000-5000-8000-000000000002"),
+            secondData,
+            "2026-09-01T01:00:00Z",
+        )
+        val transport = ExportTransport(
+            chunks = listOf(first, second),
+            chunkData = mapOf(first.chunkId to firstData, second.chunkId to secondData),
+            forcePageSize = 1,
+        )
+        val firstEntries = mutableListOf<ManagedHistoryExportEntry>()
+        var checkpoint: ManagedHistoryExportCheckpoint? = null
+
+        try {
+            ManagedHistoryExporter(transport).export(
+                dataClasses = listOf("essential_timeseries"),
+                pageSize = 25,
+                authorization = { authorization() },
+                saveCheckpoint = { value ->
+                    checkpoint = value
+                    if (value.exportedObjects == 1) throw ExportTestInterruption()
+                },
+                now = { Instant.parse("2026-09-04T12:00:00Z") },
+                consume = { firstEntries += it },
+            )
+            fail("Expected interruption")
+        } catch (_: ExportTestInterruption) {
+            // Expected.
+        }
+
+        val durable = requireNotNull(checkpoint)
+        assertEquals(1, durable.exportedObjects)
+        assertEquals(listOf(first.chunkId), durable.chunks.map { it.chunkId })
+        assertEquals(listOf(durable.chunks.single().path), firstEntries.map { it.path })
+
+        val resumedEntries = mutableListOf<ManagedHistoryExportEntry>()
+        val manifest = ManagedHistoryExporter(transport).export(
+            dataClasses = listOf("essential_timeseries"),
+            pageSize = 25,
+            resumeFrom = durable,
+            authorization = { authorization() },
+            saveCheckpoint = { checkpoint = it },
+            now = { Instant.parse("2026-09-04T12:01:00Z") },
+            consume = { resumedEntries += it },
+        )
+
+        assertEquals(listOf(first.chunkId, second.chunkId), manifest.chunks.map { it.chunkId })
+        assertEquals(listOf(manifest.chunks[1].path), resumedEntries.map { it.path })
+        assertEquals(1, transport.restoreCreations)
+        assertEquals(
+            ExportTransport.Completion(2, (firstData.size + secondData.size).toLong()),
+            transport.completion,
+        )
+    }
+
+    @Test
+    fun expiredExportCheckpointFailsBeforeNetworkUse() = runTest {
+        val transport = ExportTransport(chunks = emptyList(), chunkData = emptyMap())
+        val checkpoint = ManagedHistoryExportCheckpoint(
+            createdAt = "2026-09-04T12:00:00Z",
+            requestId = UUID.randomUUID(),
+            restoreJobId = UUID.randomUUID(),
+            snapshotAt = "2026-09-04T12:00:00Z",
+            changeSequence = 42,
+            expiresAt = "2026-09-05T00:00:00Z",
+            dataClasses = listOf("essential_timeseries"),
+            pageSize = 25,
+            selectedObjects = 0,
+            selectedChunkBytes = 0,
+            dataClassIndex = 1,
+            documentsComplete = true,
+        )
+
+        try {
+            ManagedHistoryExporter(transport).export(
+                dataClasses = listOf("essential_timeseries"),
+                pageSize = 25,
+                resumeFrom = checkpoint,
+                authorization = { authorization() },
+                now = { Instant.parse("2026-09-05T00:00:00Z") },
+                consume = {},
+            )
+            fail("Expected expired cursor")
+        } catch (_: ManagedStorageException.CursorExpired) {
+            // Expected.
+        }
+        assertEquals(0, transport.restoreCreations)
+        assertNull(transport.completion)
     }
 
     @Test
@@ -127,6 +238,33 @@ class ManagedHistoryExporterTest {
         } catch (_: ManagedStorageException.InvalidResponse) {
             // Expected.
         }
+        assertNull(transport.completion)
+    }
+
+    @Test
+    fun oversizedRestoreSelectionFailsBeforeCheckpointOrObjectDownload() = runTest {
+        val transport = ExportTransport(
+            chunks = emptyList(),
+            chunkData = emptyMap(),
+            selectedObjectDelta =
+                ManagedHistoryTransferLimits.MAXIMUM_OBJECT_COUNT + 1,
+        )
+        var checkpoint: ManagedHistoryExportCheckpoint? = null
+
+        try {
+            ManagedHistoryExporter(transport).export(
+                dataClasses = listOf("essential_timeseries"),
+                authorization = { authorization() },
+                saveCheckpoint = { checkpoint = it },
+                consume = {},
+            )
+            fail("Expected oversized restore selection rejection")
+        } catch (_: ManagedStorageException.InvalidResponse) {
+            // Expected.
+        }
+
+        assertNull(checkpoint)
+        assertTrue(transport.chunkStarts.isEmpty())
         assertNull(transport.completion)
     }
 
@@ -197,6 +335,8 @@ class ManagedHistoryExporterTest {
     )
 }
 
+private class ExportTestInterruption : RuntimeException()
+
 private class ExportTransport(
     private val chunks: List<ManagedAvailableChunk>,
     private val chunkData: Map<UUID, ByteArray>,
@@ -212,6 +352,7 @@ private class ExportTransport(
     val documentIncludeDeletedValues = mutableListOf<Boolean>()
     val restoreIncludeDeletedValues = mutableListOf<Boolean>()
     var completion: Completion? = null
+    var restoreCreations: Int = 0
     private val restoreId = UUID.fromString("50000000-0000-5000-8000-000000000001")
     private val snapshot = "2026-09-04T12:00:00Z"
 
@@ -250,6 +391,7 @@ private class ExportTransport(
         dataClasses: List<String>,
         includeDeletedDocuments: Boolean,
     ): ManagedRestoreJob {
+        restoreCreations += 1
         restoreIncludeDeletedValues += includeDeletedDocuments
         return restore("running", 0, 0)
     }

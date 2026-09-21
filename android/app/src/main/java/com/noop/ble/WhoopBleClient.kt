@@ -101,6 +101,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import java.time.ZoneId
 import kotlinx.coroutines.sync.withLock
+import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -110,6 +111,145 @@ import java.util.concurrent.atomic.AtomicInteger
  * peripheral addresses, and dynamic exception text can never enter the diagnostic event.
  */
 internal object BandDiagnostics {
+    class CandidateSessionDeduper {
+        private val seenFamilies = mutableSetOf<DeviceFamily>()
+
+        @Synchronized
+        fun reset() {
+            seenFamilies.clear()
+        }
+
+        @Synchronized
+        fun shouldRecord(family: DeviceFamily): Boolean = seenFamilies.add(family)
+    }
+
+    enum class ScanState(val wireValue: String) {
+        STARTED("started"),
+        UNAVAILABLE("unavailable"),
+        NO_RESULT("no_result"),
+        FALLBACK("fallback"),
+        STOPPED("stopped"),
+        CANDIDATE_FOUND("candidate_found"),
+        FAILED("failed"),
+    }
+
+    enum class ReadinessStage(val wireValue: String) {
+        TRANSPORT("transport"),
+        SERVICES("services"),
+        BOND("bond"),
+        NOTIFICATIONS("notifications"),
+    }
+
+    enum class ReadinessState(val wireValue: String) {
+        STARTED("started"),
+        READY("ready"),
+        FAILED("failed"),
+    }
+
+    enum class RetryState(val wireValue: String) {
+        SCHEDULED("scheduled"),
+        FIRED("fired"),
+        CANCELLED("cancelled"),
+        PAUSED("paused"),
+    }
+
+    private fun family(family: DeviceFamily): String =
+        if (family == DeviceFamily.WHOOP5) "modern" else "legacy"
+
+    private val allowedReasons = setOf(
+        "alternate_family", "ambiguous_service", "attribute_error", "authentication",
+        "available", "bond_loop", "command_missing", "connect_failure", "connection",
+        "disabled", "disconnect", "discovery_error", "intentional", "not_initialized",
+        "pairing_reset", "permission", "platform_error", "powered_off", "remote",
+        "resetting", "scan_fallback", "superseded", "timeout", "transport_error",
+        "unknown", "unavailable", "unsupported", "unsupported_service", "user_cancelled",
+        "user_discovery",
+    )
+    private val allowedChannels = setOf(
+        "battery", "command", "data", "event", "live_hr", "modern_custom", "other",
+    )
+
+    fun boundedReason(value: String): String =
+        if (value in allowedReasons) value else "other"
+
+    fun boundedChannel(value: String): String =
+        if (value in allowedChannels) value else "other"
+
+    fun familyForModel(model: WhoopModel): DeviceFamily = when (model) {
+        WhoopModel.WHOOP4 -> DeviceFamily.WHOOP4
+        WhoopModel.WHOOP5_MG -> DeviceFamily.WHOOP5
+    }
+
+    fun recordScan(
+        state: ScanState,
+        family: DeviceFamily,
+        reason: String? = null,
+        recorder: (String, Map<String, String>) -> Unit = { event, fields ->
+            AppDiagnosticsRecorder.record(event, fields)
+        },
+    ) {
+        recorder(
+            "band.scan",
+            buildMap {
+                put("state", state.wireValue)
+                put("family", family(family))
+                reason?.let { put("reason", boundedReason(it)) }
+            },
+        )
+    }
+
+    fun recordReadiness(
+        stage: ReadinessStage,
+        state: ReadinessState,
+        family: DeviceFamily,
+        channel: String? = null,
+        reason: String? = null,
+        recorder: (String, Map<String, String>) -> Unit = { event, fields ->
+            AppDiagnosticsRecorder.record(event, fields)
+        },
+    ) {
+        recorder(
+            "band.readiness",
+            buildMap {
+                put("stage", stage.wireValue)
+                put("state", state.wireValue)
+                put("family", family(family))
+                channel?.let { put("channel", boundedChannel(it)) }
+                reason?.let { put("reason", boundedReason(it)) }
+            },
+        )
+    }
+
+    fun recordRetry(
+        state: RetryState,
+        family: DeviceFamily,
+        reason: String,
+        recorder: (String, Map<String, String>) -> Unit = { event, fields ->
+            AppDiagnosticsRecorder.record(event, fields)
+        },
+    ) {
+        recorder(
+            "band.retry",
+            mapOf(
+                "state" to state.wireValue,
+                "family" to family(family),
+                "reason" to boundedReason(reason),
+            ),
+        )
+    }
+
+    fun serviceFailureReason(
+        supportedCustomServiceCount: Int,
+        hasRequiredCommandCharacteristic: Boolean? = null,
+        discoveryFailed: Boolean = false,
+    ): String? = when {
+        discoveryFailed -> "discovery_error"
+        supportedCustomServiceCount == 0 -> "unsupported_service"
+        supportedCustomServiceCount > 1 -> "ambiguous_service"
+        hasRequiredCommandCharacteristic == false -> "command_missing"
+        else -> null
+    }
+
     fun transportReason(
         intentional: Boolean,
         timedOut: Boolean,
@@ -482,6 +622,73 @@ internal enum class GattWriteAction {
     FAIL_CLOSED,
     /** The connection was already torn down while the submission call was executing. */
     CANCELLED,
+}
+
+internal data class HistoryCompleteDecision(
+    val firstObservation: Boolean,
+    val finishNow: Boolean,
+    val pendingAcknowledgements: Int,
+)
+
+internal data class HistoryAckConfirmationDecision(
+    val matched: Boolean,
+    val finishNow: Boolean,
+    val pendingAcknowledgements: Int,
+)
+
+/**
+ * Tracks queued historical acknowledgements separately from confirmed progress.
+ *
+ * HISTORY_COMPLETE may arrive while the final confirmed write is still queued or in flight. The
+ * session may finish only after [confirmed] consumes every exact pending trim. Failed callbacks and
+ * write timeouts reset this gate through the normal connection teardown and never call [confirmed].
+ */
+internal class HistoricalAckCompletionGate {
+    private val pendingTrims = ArrayDeque<Long>()
+    private var historyCompleteObserved = false
+
+    @Synchronized
+    fun enqueued(trim: Long) {
+        pendingTrims.addLast(trim)
+    }
+
+    @Synchronized
+    fun observeHistoryComplete(): HistoryCompleteDecision {
+        val firstObservation = !historyCompleteObserved
+        historyCompleteObserved = true
+        return HistoryCompleteDecision(
+            firstObservation = firstObservation,
+            finishNow = pendingTrims.isEmpty(),
+            pendingAcknowledgements = pendingTrims.size,
+        )
+    }
+
+    @Synchronized
+    fun confirmed(trim: Long): HistoryAckConfirmationDecision {
+        val iterator = pendingTrims.iterator()
+        var matched = false
+        while (iterator.hasNext()) {
+            if (iterator.next() == trim) {
+                iterator.remove()
+                matched = true
+                break
+            }
+        }
+        return HistoryAckConfirmationDecision(
+            matched = matched,
+            finishNow = matched && historyCompleteObserved && pendingTrims.isEmpty(),
+            pendingAcknowledgements = pendingTrims.size,
+        )
+    }
+
+    @Synchronized
+    fun pendingCount(): Int = pendingTrims.size
+
+    @Synchronized
+    fun reset() {
+        pendingTrims.clear()
+        historyCompleteObserved = false
+    }
 }
 
 /**
@@ -922,7 +1129,7 @@ class WhoopBleClient(
         private const val INACTIVITY_LOOKBACK_S = 4 * 3600L
         /**
          * Idle watchdog: if no genuine offload frame arrives for this long mid-session, end the
-         * session (the durable strap_trim cursor means the next session resumes where we left off).
+         * session. Firmware-retained state decides what is offered again; local strap_trim is diagnostic.
          * Generous (60s, not 20s) because the type-43 raw flood eats BLE airtime between chunks.
          */
         private const val BACKFILL_IDLE_TIMEOUT_MS = 60_000L
@@ -1841,6 +2048,7 @@ class WhoopBleClient(
      *  (scan lifecycle) and read in the GATT/scan callback — @Volatile for cross-thread visibility. */
     @Volatile
     private var scanningForList = false
+    private val presentScanDiagnosticDeduper = BandDiagnostics.CandidateSessionDeduper()
 
     /**
      * Multi-source seam (Phase 1B): publish a live HR/R-R reading that came from a NON-WHOOP source
@@ -2175,7 +2383,8 @@ class WhoopBleClient(
      *  [debugLogcat]. Android's `Log.d` isn't reachable by a normal user, which is why the in-app
      *  buffer + "Share strap log" exist (issues #17/#18). */
     private val logBuffer = ArrayDeque<String>()
-    private val logTimeFmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+    private var logBufferBytes = 0
+    private val logSessionStartElapsedMs = SystemClock.elapsedRealtime()
     // PII scrubbers for the shareable strap log (#445) live at file scope as [redactStrapLogPii]
     // so they're unit-testable without constructing this Android-only client (#421).
 
@@ -2183,6 +2392,11 @@ class WhoopBleClient(
     private val scanTimeoutRunnable = Runnable {
         if (scanning && !_state.value.connected) {
             stopScan()
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.NO_RESULT,
+                BandDiagnostics.familyForModel(selectedModel),
+                "timeout",
+            )
             log("No WHOOP strap found within ${SCAN_TIMEOUT_MS / 1000}s")
             _state.update { it.copy(
                 scanning = false,
@@ -2198,6 +2412,21 @@ class WhoopBleClient(
     private val scanFallbackRunnable = Runnable {
         if (scanning && !_state.value.connected) {
             val fallback = selectedModel.fallbackScanModel
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.NO_RESULT,
+                BandDiagnostics.familyForModel(selectedModel),
+                "timeout",
+            )
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.FALLBACK,
+                BandDiagnostics.familyForModel(fallback),
+                "alternate_family",
+            )
+            BandDiagnostics.recordRetry(
+                BandDiagnostics.RetryState.FIRED,
+                BandDiagnostics.familyForModel(fallback),
+                "scan_fallback",
+            )
             log("No ${selectedModel.transportName} found yet - trying ${fallback.transportName}")
             stopScan()   // clears the scanning flag + the LE scan; startScan re-arms both
             startScan(fallback, allowFallback = true)
@@ -2263,7 +2492,9 @@ class WhoopBleClient(
         repository = repository,
         deviceId = deviceId,
         cursorStore = cursorStore,
-        ackTrim = { trim, endData -> ackHistoricalChunk(trim, endData) },
+        ackTrim = { generation, trim, endData ->
+            ackHistoricalChunk(generation, trim, endData)
+        },
         onChunkCommitted = { committed -> onBackfillChunkCommitted(deviceId, committed) },
         onConsoleChunk = { consoleChunksThisSession += 1 },
         // #77/#91: archive undecodable frames before the ack. append() returns ok=true (written, or
@@ -2901,14 +3132,22 @@ class WhoopBleClient(
      * leaned on CoreBluetooth's internal queue; here we serialise writes ourselves. Each queued
      * item is the fully-framed byte array + its write type (with/without response).
      */
-    internal enum class WritePurpose { COMMAND, CLIENT_HELLO }
+    internal enum class WritePurpose { COMMAND, CLIENT_HELLO, HISTORY_ACK }
 
-    private data class PendingWrite(
+    internal data class PendingWrite(
         val frame: ByteArray,
         val withResponse: Boolean,
         val cmd: CommandNumber? = null,
         val purpose: WritePurpose = WritePurpose.COMMAND,
-    )
+        val historyAckTrim: Long? = null,
+    ) {
+        fun confirmedHistoryAckTrim(writeSucceeded: Boolean): Long? =
+            historyAckTrim.takeIf {
+                writeSucceeded &&
+                    purpose == WritePurpose.HISTORY_ACK &&
+                    cmd == CommandNumber.HISTORICAL_DATA_RESULT
+            }
+    }
     private val writeQueue = ConcurrentLinkedQueue<PendingWrite>()
     /**
      * One active submission per GATT connection. Unlike the old `writeInFlight + pendingRetry` pair, this
@@ -2916,6 +3155,7 @@ class WhoopBleClient(
      * transitions also cover API 26/27 callbacks that Android may deliver from a binder thread.
      */
     private val writeDeliveryGate = GattWriteDeliveryGate<PendingWrite>()
+    private val historicalAckCompletionGate = HistoricalAckCompletionGate()
 
     /** Named so callback/reset can cancel it and a timeout from an old connection cannot kill a new one. */
     private val writeDeliveryTimeoutRunnable = Runnable { onWriteDeliveryTimeout() }
@@ -2973,6 +3213,11 @@ class WhoopBleClient(
         // No Bluetooth LE hardware at all (most often an emulator / virtual device).
         if (adp == null || !context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
             log("No Bluetooth LE on this device")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.UNAVAILABLE,
+                BandDiagnostics.familyForModel(model),
+                "unsupported",
+            )
             _state.update { it.copy(
                 scanning = false,
                 statusNote = "This device has no Bluetooth LE. NOOP has to run on a real phone with " +
@@ -2981,6 +3226,11 @@ class WhoopBleClient(
         }
         if (!adp.isEnabled) {
             log("Bluetooth is off")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.UNAVAILABLE,
+                BandDiagnostics.familyForModel(model),
+                "powered_off",
+            )
             _state.update { it.copy(
                 scanning = false, statusNote = "Bluetooth is off. Turn it on, then tap Connect.") }
             return
@@ -2988,6 +3238,11 @@ class WhoopBleClient(
         val sc = scanner
         if (sc == null) {
             log("No BLE scanner available")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.UNAVAILABLE,
+                BandDiagnostics.familyForModel(model),
+                "unavailable",
+            )
             _state.update { it.copy(statusNote = "Bluetooth isn't ready yet. Try again in a moment.") }
             return
         }
@@ -3005,7 +3260,7 @@ class WhoopBleClient(
         val direct = getConnectedWhoopDevice() ?: bondedWhoopDevice()
         if (direct != null) {
             selectedModel = WhoopModel.WHOOP5_MG
-            log("Easy-connect: attaching directly to ${direct.name ?: "WHOOP"} (no scan needed)")
+            log("Easy-connect: attaching directly to a compatible band (no scan needed)")
             _state.update { it.copy(
                 scanning = false, whoop5Detected = false,
                 statusNote = "Connecting to your ${WhoopModel.WHOOP5_MG.displayName}…",
@@ -3034,6 +3289,11 @@ class WhoopBleClient(
         selectedModel = model
         val sc = scanner ?: run {
             log("No BLE scanner available")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.UNAVAILABLE,
+                BandDiagnostics.familyForModel(model),
+                "unavailable",
+            )
             _state.update { it.copy(scanning = false, statusNote = "Bluetooth isn't ready yet. Try again in a moment.") }
             return
         }
@@ -3058,6 +3318,11 @@ class WhoopBleClient(
             .setScanMode(scanMode)
             .build()
         log("Scanning for ${model.transportName}…")
+        BandDiagnostics.recordScan(
+            BandDiagnostics.ScanState.STARTED,
+            BandDiagnostics.familyForModel(model),
+            "connection",
+        )
         scanning = true
         _state.update { it.copy(scanning = true, whoop5Detected = false, statusNote = "Searching for your ${model.displayName}…") }
         try {
@@ -3065,7 +3330,12 @@ class WhoopBleClient(
         } catch (se: SecurityException) {
             // Android 12+: BLUETOOTH_SCAN/CONNECT not granted. This is the #1 reason connect fails.
             scanning = false
-            log("Scan blocked (permission): ${se.message}")
+            log("Scan blocked: permission")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.UNAVAILABLE,
+                BandDiagnostics.familyForModel(model),
+                "permission",
+            )
             _state.update { it.copy(
                 scanning = false,
                 statusNote = "NOOP needs the Nearby devices / Bluetooth permission. Allow it in " +
@@ -3073,8 +3343,13 @@ class WhoopBleClient(
             return
         } catch (t: Throwable) {
             scanning = false
-            log("Scan failed to start: ${t.message}")
-            _state.update { it.copy(scanning = false, statusNote = "Couldn't start scanning: ${t.message}") }
+            log("Scan failed to start")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.FAILED,
+                BandDiagnostics.familyForModel(model),
+                "platform_error",
+            )
+            _state.update { it.copy(scanning = false, statusNote = "Couldn't start scanning. Try again.") }
             return
         }
         // Stop and explain if nothing turns up in time.
@@ -3305,14 +3580,25 @@ class WhoopBleClient(
      */
     @SuppressLint("MissingPermission")
     fun scanForWhoops(model: WhoopModel) {
+        presentScanDiagnosticDeduper.reset()
         val adp = adapter
         if (adp == null || !adp.isEnabled) {
             log("Add-a-WHOOP scan: Bluetooth not ready")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.UNAVAILABLE,
+                BandDiagnostics.familyForModel(model),
+                if (adp == null) "unsupported" else "powered_off",
+            )
             return
         }
         val sc = scanner
         if (sc == null) {
             log("Add-a-WHOOP scan: no BLE scanner available")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.UNAVAILABLE,
+                BandDiagnostics.familyForModel(model),
+                "unavailable",
+            )
             return
         }
         // Cancel the auto-connect scan's not-found/fallback timers — neither should fire during a
@@ -3331,6 +3617,13 @@ class WhoopBleClient(
             _discoveredWhoops.value = listOf(
                 DiscoveredWhoop(address = d.address, name = n, rssi = 0, model = WhoopModel.WHOOP5_MG),
             )
+            if (presentScanDiagnosticDeduper.shouldRecord(DeviceFamily.WHOOP5)) {
+                BandDiagnostics.recordScan(
+                    BandDiagnostics.ScanState.CANDIDATE_FOUND,
+                    DeviceFamily.WHOOP5,
+                    "user_discovery",
+                )
+            }
         }
         // Product setup is generation-agnostic. Android treats multiple ScanFilters as OR, so one scan
         // finds every compatible Noop Band transport while the discovered row retains the actual family.
@@ -3344,15 +3637,30 @@ class WhoopBleClient(
         scanning = true
         try {
             sc.startScan(filters, settings, scanCallback)
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.STARTED,
+                BandDiagnostics.familyForModel(model),
+                "user_discovery",
+            )
             log("Add-a-WHOOP scan: presenting nearby ${model.transportName} straps")
         } catch (se: SecurityException) {
             scanning = false
             scanningForList = false
-            log("Add-a-WHOOP scan blocked (permission): ${se.message}")
+            log("Add-a-WHOOP scan blocked: permission")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.UNAVAILABLE,
+                BandDiagnostics.familyForModel(model),
+                "permission",
+            )
         } catch (t: Throwable) {
             scanning = false
             scanningForList = false
-            log("Add-a-WHOOP scan failed to start: ${t.message}")
+            log("Add-a-WHOOP scan failed to start")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.FAILED,
+                BandDiagnostics.familyForModel(model),
+                "platform_error",
+            )
         }
     }
 
@@ -3366,6 +3674,11 @@ class WhoopBleClient(
         if (!scanningForList) return
         scanningForList = false
         stopScan()
+        BandDiagnostics.recordScan(
+            BandDiagnostics.ScanState.STOPPED,
+            BandDiagnostics.familyForModel(selectedModel),
+            "user_cancelled",
+        )
         log("Add-a-WHOOP scan: stopped")
     }
 
@@ -3404,10 +3717,25 @@ class WhoopBleClient(
      * acked command use WITH response.
      */
     fun send(cmd: CommandNumber, payload: ByteArray = byteArrayOf(0), withResponse: Boolean = false) {
+        enqueueCommand(cmd, payload, withResponse)
+    }
+
+    private fun enqueueCommand(
+        cmd: CommandNumber,
+        payload: ByteArray,
+        withResponse: Boolean,
+        purpose: WritePurpose = WritePurpose.COMMAND,
+        historyAckTrim: Long? = null,
+        onEnqueued: (() -> Unit)? = null,
+    ): Boolean {
+        if ((purpose == WritePurpose.HISTORY_ACK) != (historyAckTrim != null)) {
+            log("send(${cmd.name}) ignored - invalid history-ack correlation")
+            return false
+        }
         val ch = cmdCharacteristic
         if (gatt == null || ch == null) {
             log("send(${cmd.name}) ignored - not connected")
-            return
+            return false
         }
         // WHOOP 5.0/MG uses puffin (CRC16) command framing, not the WHOOP4 frame. The realtime-HR toggle
         // is hardware-confirmed (issue #17 — a 5/MG owner saw live HR on v1.13), which proves the strap
@@ -3443,7 +3771,7 @@ class WhoopBleClient(
                 // Reversible; driven only by setBroadcastHr(). (#181)
                 !(cmd == CommandNumber.SET_DEVICE_CONFIG && puffinExperiment.broadcastHr)) {
                 log("send(${cmd.name}) skipped - no WHOOP 5/MG framing for this command yet")
-                return
+                return false
             }
             // WHOOP 5/MG haptics differ from WHOOP 4.0 on BOTH the opcode AND the payload (#48, decoded
             // from the working "maverick" app's binary). Opcode: 0x13, not RUN_HAPTICS_PATTERN=79 (a real-MG
@@ -3458,18 +3786,37 @@ class WhoopBleClient(
             val s = seq.incrementAndGet() and 0xFF
             val frame = Framing.puffinCommandFrame(cmd = puffinCmd, seq = s, payload = puffinPayload)
             val confirmed = requiresConfirmedGattWrite(cmd, withResponse)
-            enqueueWrite(PendingWrite(frame, confirmed, cmd))
+            onEnqueued?.invoke()
+            enqueueWrite(
+                PendingWrite(
+                    frame = frame,
+                    withResponse = confirmed,
+                    cmd = cmd,
+                    purpose = purpose,
+                    historyAckTrim = historyAckTrim,
+                ),
+            )
             val cmdNote = if (isHaptics) " cmd=0x13" else ""
             val deliveryNote = if (confirmed && !withResponse) ", confirmed for single-execution" else ""
             log("→ ${cmd.name} payload=${puffinPayload.toHex()} (puffin$cmdNote$deliveryNote)")
-            return
+            return true
         }
         val s = seq.incrementAndGet() and 0xFF
         val frame = Framing.buildCommand(cmd, payload, s)
         val confirmed = requiresConfirmedGattWrite(cmd, withResponse)
-        enqueueWrite(PendingWrite(frame, confirmed, cmd))
+        onEnqueued?.invoke()
+        enqueueWrite(
+            PendingWrite(
+                frame = frame,
+                withResponse = confirmed,
+                cmd = cmd,
+                purpose = purpose,
+                historyAckTrim = historyAckTrim,
+            ),
+        )
         val deliveryNote = if (confirmed && !withResponse) " (confirmed for single-execution)" else ""
         log("→ ${cmd.name} payload=${payload.toHex()}$deliveryNote")
+        return true
     }
 
     /**
@@ -4274,7 +4621,7 @@ class WhoopBleClient(
             scanner?.stopScan(scanCallback)
         } catch (t: Throwable) {
             // Adapter may have been turned off underneath us; nothing to clean up.
-            log("stopScan threw: ${t.message}")
+            log("stopScan failed")
         }
     }
 
@@ -4291,6 +4638,18 @@ class WhoopBleClient(
             // advertised, then return before the normal single-family auto-connect filter runs.
             if (scanningForList) {
                 val addr = device.address ?: return
+                val observedFamily = advertisedServiceUuids.asSequence()
+                    .mapNotNull {
+                        WhoopGattServiceFamily.forServiceUuidString(it)?.connectableDeviceFamily
+                    }
+                    .firstOrNull()
+                if (observedFamily == null) {
+                    log(
+                        "Add-a-band scan: compatible peripheral omitted service identity - " +
+                            "waiting for explicit family evidence",
+                    )
+                    return
+                }
                 val updated = mergeDiscoveredWhoop(
                     existing = _discoveredWhoops.value,
                     address = addr,
@@ -4299,22 +4658,26 @@ class WhoopBleClient(
                     advertisedServiceUuids = advertisedServiceUuids,
                 )
                 if (updated === _discoveredWhoops.value) return
-                advertisedServiceUuids.asSequence()
-                    .mapNotNull { WhoopGattServiceFamily.forServiceUuidString(it)?.connectableDeviceFamily }
-                    .firstOrNull()
-                    ?.let { reconcileRegistryModelFromServiceFamily(it, addr) }
+                reconcileRegistryModelFromServiceFamily(observedFamily, addr)
                 _discoveredWhoops.value = updated
+                if (presentScanDiagnosticDeduper.shouldRecord(observedFamily)) {
+                    BandDiagnostics.recordScan(
+                        BandDiagnostics.ScanState.CANDIDATE_FOUND,
+                        observedFamily,
+                        "user_discovery",
+                    )
+                }
                 return
             }
 
             val scanDecision = whoopGattScanDecision(selectedModel.service.toString(), advertisedServiceUuids)
             if (!scanDecision.shouldConnect) {
                 scanDecision.unsupportedFamily?.let { family ->
-                    log("Discovered $name (rssi ${result.rssi}) - ${family.diagnosticUnsupportedMessage}")
+                    log("Discovered an unsupported compatible-family advertisement - ${family.diagnosticUnsupportedMessage}")
                     _state.update { it.copy(statusNote = family.diagnosticUnsupportedMessage) }
                     return
                 }
-                log("Discovered $name (rssi ${result.rssi}) without ${selectedModel.transportName} service - ignoring")
+                log("Discovered a peripheral without the selected compatible service - ignoring")
                 return
             }
             // Stamp from the service ACTUALLY present in the advertisement, never from the picker or a
@@ -4330,10 +4693,15 @@ class WhoopBleClient(
             // discovered" path below is byte-for-byte unchanged.
             val preferred = preferredAddress
             if (preferred != null && !device.address.equals(preferred, ignoreCase = true)) {
-                log("Discovered $name (${device.address}) - not the preferred strap; ignoring")
+                log("Discovered a non-selected compatible band - ignoring")
                 return
             }
-            log("Discovered $name (rssi ${result.rssi}) - connecting")
+            log("Discovered selected compatible band - connecting")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.CANDIDATE_FOUND,
+                BandDiagnostics.familyForModel(selectedModel),
+                "connection",
+            )
             // Found it: cancel the not-found timeout AND the family-rotation fallback, then reflect
             // progress in the UI. (PR#195)
             handler.removeCallbacks(scanTimeoutRunnable)
@@ -4351,7 +4719,12 @@ class WhoopBleClient(
 
         override fun onScanFailed(errorCode: Int) {
             scanning = false
-            log("Scan failed: $errorCode")
+            log("Scan failed")
+            BandDiagnostics.recordScan(
+                BandDiagnostics.ScanState.FAILED,
+                BandDiagnostics.familyForModel(selectedModel),
+                "platform_error",
+            )
         }
     }
 
@@ -4454,20 +4827,55 @@ class WhoopBleClient(
         val r = Runnable {
             pendingReconnectRunnable = null
             // #78 hole-3: a timer in flight when the give-up trips must not fire an extra attempt.
-            if (intentionalDisconnect || autoReconnectPausedForBondLoop) return@Runnable
+            if (intentionalDisconnect || autoReconnectPausedForBondLoop) {
+                BandDiagnostics.recordRetry(
+                    if (autoReconnectPausedForBondLoop) {
+                        BandDiagnostics.RetryState.PAUSED
+                    } else {
+                        BandDiagnostics.RetryState.CANCELLED
+                    },
+                    connectedFamily,
+                    "disconnect",
+                )
+                return@Runnable
+            }
             // A reconnect that fires AFTER we've re-linked (user Connect / radio-on beat the timer) must
             // not reset+close the live connection or start a redundant scan. handleDisconnect nulls `gatt`
             // and sets connected=false BEFORE scheduling, so a genuinely-disconnected state still proceeds.
-            if (gatt != null || _state.value.connected) return@Runnable
+            if (gatt != null || _state.value.connected) {
+                BandDiagnostics.recordRetry(
+                    BandDiagnostics.RetryState.CANCELLED,
+                    connectedFamily,
+                    "superseded",
+                )
+                return@Runnable
+            }
+            BandDiagnostics.recordRetry(
+                BandDiagnostics.RetryState.FIRED,
+                connectedFamily,
+                "disconnect",
+            )
             action()
         }
         pendingReconnectRunnable = r
+        BandDiagnostics.recordRetry(
+            BandDiagnostics.RetryState.SCHEDULED,
+            connectedFamily,
+            "disconnect",
+        )
         handler.postDelayed(r, delayMs)
     }
 
     /** Cancel any pending involuntary reconnect — a real (re)connect superseded it. */
     private fun cancelPendingReconnect() {
-        pendingReconnectRunnable?.let { handler.removeCallbacks(it) }
+        pendingReconnectRunnable?.let {
+            handler.removeCallbacks(it)
+            BandDiagnostics.recordRetry(
+                BandDiagnostics.RetryState.CANCELLED,
+                connectedFamily,
+                "superseded",
+            )
+        }
         pendingReconnectRunnable = null
     }
 
@@ -4780,6 +5188,11 @@ class WhoopBleClient(
 
     @SuppressLint("MissingPermission")
     private fun connectToDevice(device: BluetoothDevice, autoConnect: Boolean = false) {
+        BandDiagnostics.recordReadiness(
+            BandDiagnostics.ReadinessStage.TRANSPORT,
+            BandDiagnostics.ReadinessState.STARTED,
+            BandDiagnostics.familyForModel(selectedModel),
+        )
         // Reset per-connection state (mirrors the Swift flags cleared on connect/disconnect).
         finishHistorySyncDiagnostic("disconnect")
         reset()
@@ -4817,6 +5230,16 @@ class WhoopBleClient(
                 device.connectGatt(context, autoConnect, gattCallback)
         }
         gattOps = gatt?.let { gattOpsFactory(it) }
+    }
+
+    private fun notificationDiagnosticChannel(uuid: UUID?): String = when (uuid) {
+        CMD_NOTIFY_CHAR -> "command"
+        EVENT_NOTIFY_CHAR -> "event"
+        DATA_NOTIFY_CHAR -> "data"
+        HEART_RATE_CHAR -> "live_hr"
+        BATTERY_CHAR -> "battery"
+        in WHOOP5_NOTIFY_CHARS -> "modern_custom"
+        else -> "other"
     }
 
     // ====================================================================================
@@ -4857,9 +5280,10 @@ class WhoopBleClient(
                         reconnectGuide = if (keepGuide) it.reconnectGuide else null,
                     ) }
                     connectGeneration += 1
+                    val attemptedFamily = BandDiagnostics.familyForModel(selectedModel)
                     val transportFields = buildMap {
                         put("state", "connected")
-                        put("family", if (connectedFamily == DeviceFamily.WHOOP5) "modern" else "legacy")
+                        put("family", if (attemptedFamily == DeviceFamily.WHOOP5) "modern" else "legacy")
                         connectAttemptStartedAtMs?.let {
                             put(
                                 "connect_duration_ms",
@@ -4868,6 +5292,16 @@ class WhoopBleClient(
                         }
                     }
                     AppDiagnosticsRecorder.record("band.transport", transportFields)
+                    BandDiagnostics.recordReadiness(
+                        BandDiagnostics.ReadinessStage.TRANSPORT,
+                        BandDiagnostics.ReadinessState.READY,
+                        attemptedFamily,
+                    )
+                    BandDiagnostics.recordReadiness(
+                        BandDiagnostics.ReadinessStage.SERVICES,
+                        BandDiagnostics.ReadinessState.STARTED,
+                        attemptedFamily,
+                    )
                     if (keepGuide) {
                         // Clear the guide only if the SAME continuous connection survives the window (a
                         // reconnect/loop cycle bumps connectGeneration, so a transient cycle-connect can't
@@ -4967,7 +5401,13 @@ class WhoopBleClient(
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                log("Service discovery failed: $status")
+                log("Service discovery failed reason=platform_error")
+                BandDiagnostics.recordReadiness(
+                    BandDiagnostics.ReadinessStage.SERVICES,
+                    BandDiagnostics.ReadinessState.FAILED,
+                    BandDiagnostics.familyForModel(selectedModel),
+                    reason = "discovery_error",
+                )
                 return
             }
             // Port of didDiscoverServices → didDiscoverCharacteristicsFor, collapsed: Android
@@ -4976,36 +5416,84 @@ class WhoopBleClient(
             // 1. Custom service: capture the cmd-write char, FIRE THE BOND, queue the notify subs.
             val whoop4 = g.getService(WHOOP4_SERVICE)
             val whoop5 = g.getService(WHOOP5_SERVICE)
-            if (whoop4 != null) {
+            val supportedCustomServiceCount = listOfNotNull(whoop4, whoop5).size
+            val serviceFailure = BandDiagnostics.serviceFailureReason(supportedCustomServiceCount)
+            var customServiceReady = false
+            if (serviceFailure != null) {
+                log("Custom service readiness failed reason=$serviceFailure")
+                BandDiagnostics.recordReadiness(
+                    BandDiagnostics.ReadinessStage.SERVICES,
+                    BandDiagnostics.ReadinessState.FAILED,
+                    BandDiagnostics.familyForModel(selectedModel),
+                    reason = serviceFailure,
+                )
+            } else if (whoop4 != null) {
                 // Verified WHOOP 4.0 path: capture the cmd-write char + queue the notify subscriptions.
                 // We do NOT fire the bond write here. Android allows only ONE outstanding GATT operation,
                 // so writing the bond frame now would race the CCCD descriptor writes below and the stack
                 // would reject every subscription — the strap bonds (the confirmed write succeeds) but no
                 // notifications ever enable, so HR/battery/events stay empty (issue #12). The bond write
                 // is deferred to startSession(), which runs once every notification is on.
-                connectedFamily = DeviceFamily.WHOOP4
-                familyEstablished = true
-                reconcileRegistryModelFromServiceFamily(DeviceFamily.WHOOP4, g.device.address)
-                cmdCharacteristic = whoop4.getCharacteristic(CMD_WRITE_CHAR)
-                whoop4.getCharacteristic(CMD_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
-                whoop4.getCharacteristic(EVENT_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
-                whoop4.getCharacteristic(DATA_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
+                val command = whoop4.getCharacteristic(CMD_WRITE_CHAR)
+                val commandFailure = BandDiagnostics.serviceFailureReason(
+                    supportedCustomServiceCount = 1,
+                    hasRequiredCommandCharacteristic = command != null,
+                )
+                if (commandFailure != null) {
+                    log("Custom service readiness failed reason=$commandFailure")
+                    BandDiagnostics.recordReadiness(
+                        BandDiagnostics.ReadinessStage.SERVICES,
+                        BandDiagnostics.ReadinessState.FAILED,
+                        DeviceFamily.WHOOP4,
+                        reason = commandFailure,
+                    )
+                } else {
+                    connectedFamily = DeviceFamily.WHOOP4
+                    familyEstablished = true
+                    reconcileRegistryModelFromServiceFamily(DeviceFamily.WHOOP4, g.device.address)
+                    cmdCharacteristic = command
+                    whoop4.getCharacteristic(CMD_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
+                    whoop4.getCharacteristic(EVENT_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
+                    whoop4.getCharacteristic(DATA_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
+                    customServiceReady = true
+                }
             } else if (whoop5 != null) {
                 // EXPERIMENTAL WHOOP 5.0/MG: opens with CLIENT_HELLO (sent in startSession, after the
                 // standard HR/battery notifications are enabled), not the WHOOP4 confirmed-write bond.
-                connectedFamily = DeviceFamily.WHOOP5
-                familyEstablished = true
-                reconcileRegistryModelFromServiceFamily(DeviceFamily.WHOOP5, g.device.address)
-                log("WHOOP 5/MG detected - will send CLIENT_HELLO after subscribing (experimental).")
-                _state.update { it.copy(
-                    whoop5Detected = true,
-                    statusNote = "Newer compatible band connected - experimental. After bonding, NOOP brings up live " +
-                        "heart rate from the band's realtime stream. Deeper metrics (recovery, strain, " +
-                        "sleep) are still being validated. Legacy compatible bands have full support today.",
-                ) }
-                cmdCharacteristic = whoop5.getCharacteristic(WHOOP5_CMD_WRITE_CHAR)
-            } else {
-                log("Custom WHOOP service not found on this peripheral")
+                val command = whoop5.getCharacteristic(WHOOP5_CMD_WRITE_CHAR)
+                val commandFailure = BandDiagnostics.serviceFailureReason(
+                    supportedCustomServiceCount = 1,
+                    hasRequiredCommandCharacteristic = command != null,
+                )
+                if (commandFailure != null) {
+                    log("Custom service readiness failed reason=$commandFailure")
+                    BandDiagnostics.recordReadiness(
+                        BandDiagnostics.ReadinessStage.SERVICES,
+                        BandDiagnostics.ReadinessState.FAILED,
+                        DeviceFamily.WHOOP5,
+                        reason = commandFailure,
+                    )
+                } else {
+                    connectedFamily = DeviceFamily.WHOOP5
+                    familyEstablished = true
+                    reconcileRegistryModelFromServiceFamily(DeviceFamily.WHOOP5, g.device.address)
+                    log("WHOOP 5/MG detected - will send CLIENT_HELLO after subscribing (experimental).")
+                    _state.update { it.copy(
+                        whoop5Detected = true,
+                        statusNote = "Newer compatible band connected - experimental. After bonding, NOOP brings up live " +
+                            "heart rate from the band's realtime stream. Deeper metrics (recovery, strain, " +
+                            "sleep) are still being validated. Legacy compatible bands have full support today.",
+                    ) }
+                    cmdCharacteristic = command
+                    customServiceReady = true
+                }
+            }
+            if (customServiceReady) {
+                BandDiagnostics.recordReadiness(
+                    BandDiagnostics.ReadinessStage.SERVICES,
+                    BandDiagnostics.ReadinessState.READY,
+                    connectedFamily,
+                )
             }
             // The reassembler frames per family — 5/MG uses a different length encoding (declLen @[2..4],
             // total +8) than WHOOP4 (length @[1..3], total +4), so it must match the connected strap.
@@ -5071,6 +5559,13 @@ class WhoopBleClient(
             // Port of didWriteValueFor: a CONFIRMED-write completion (no error) == bonding succeeded.
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 log("Confirmed write failed: command=${completedWrite.cmd?.name ?: "session-open"} status=$status")
+                if (!didBond) {
+                    BandDiagnostics.recordReadiness(
+                        BandDiagnostics.ReadinessStage.BOND,
+                        BandDiagnostics.ReadinessState.FAILED,
+                        connectedFamily,
+                    )
+                }
                 // Multi-WHOOP stale-pin recovery (#52). A status of INSUFFICIENT_AUTHENTICATION (5) /
                 // INSUFFICIENT_ENCRYPTION (15) on the bond write == the strap refused the encrypted bond
                 // (the Android twin of the iOS "Encryption/Authentication is insufficient" error). When a
@@ -5109,12 +5604,48 @@ class WhoopBleClient(
                 // one-shot physical effects remain single execution.
                 failClosedAfterWrite(completedWrite, "confirmed callback status=$status")
                 return
-            } else if (clientHelloAck) {
+            }
+
+            var finishHistoryAfterAck = false
+            if (completedWrite.purpose == WritePurpose.HISTORY_ACK) {
+                val trim = completedWrite.confirmedHistoryAckTrim(writeSucceeded = true)
+                if (trim == null) {
+                    failClosedAfterWrite(completedWrite, "history acknowledgement callback had no trim")
+                    return
+                }
+                val completion = historicalAckCompletionGate.confirmed(trim)
+                if (!completion.matched) {
+                    failClosedAfterWrite(
+                        completedWrite,
+                        "history acknowledgement callback did not match a pending trim",
+                    )
+                    return
+                }
+                val previousTrim = backfiller.lastAckedTrim
+                val confirmed = backfiller.confirmHistoricalAck(trim) {
+                    noteHistoricalAckConfirmed(trim, previousTrim)
+                }
+                if (!confirmed) {
+                    failClosedAfterWrite(
+                        completedWrite,
+                        "history acknowledgement callback had no staged durable chunk",
+                    )
+                    return
+                }
+                finishHistoryAfterAck = completion.finishNow
+            }
+
+            if (clientHelloAck) {
                 // EXPERIMENTAL (issue #17): the CLIENT_HELLO is now a confirmed write, so this ACK means
                 // just-works bonding completed. Now subscribe the puffin notify chars (realtime HR rides
                 // these as REALTIME_DATA — the strap rejected them on the unauthenticated link), then arm
                 // realtime HR with puffin framing. Mirrors the macOS post-bond flow.
                 didBond = true
+                BandDiagnostics.recordReadiness(
+                    BandDiagnostics.ReadinessStage.BOND,
+                    BandDiagnostics.ReadinessState.READY,
+                    connectedFamily,
+                )
                 cancelBondWatchdog()          // genuine bond reached — the handshake watchdog stands down (#50)
                 noteGenuineBond(g.device.address)   // #52: this strap bonds fine; clears any pin-refusal streak
                 clearPairingHint()            // #78: a genuine bond means the pairing guidance no longer applies
@@ -5142,6 +5673,11 @@ class WhoopBleClient(
                 if (realtimeWantNow) { realtimeArmed = true; send(CommandNumber.TOGGLE_REALTIME_HR, byteArrayOf(1)) }
             } else if (!didBond && connectedFamily == DeviceFamily.WHOOP4) {
                 didBond = true
+                BandDiagnostics.recordReadiness(
+                    BandDiagnostics.ReadinessStage.BOND,
+                    BandDiagnostics.ReadinessState.READY,
+                    connectedFamily,
+                )
                 cancelBondWatchdog()          // secure handshake completed — stand the watchdog down (#50)
                 noteGenuineBond(g.device.address)   // #52: this strap bonds fine; clears any pin-refusal streak
                 clearPairingHint()            // #78: a genuine bond means the pairing guidance no longer applies
@@ -5161,6 +5697,10 @@ class WhoopBleClient(
                 runConnectHandshake()
             }
 
+            if (finishHistoryAfterAck && backfilling) {
+                exitBackfilling("HISTORY_COMPLETE")
+            }
+
             // Hold a tiny post-callback quarantine before the next command. A buggy vendor stack that
             // duplicates this callback will hit the gate's non-callback state and be ignored instead of
             // completing a later command that happens to use the same characteristic.
@@ -5174,9 +5714,22 @@ class WhoopBleClient(
             status: Int,
         ) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                log("Notify enable failed for ${descriptor.characteristic?.uuid}: status=$status")
+                log("Notify enable failed")
+                BandDiagnostics.recordReadiness(
+                    BandDiagnostics.ReadinessStage.NOTIFICATIONS,
+                    BandDiagnostics.ReadinessState.FAILED,
+                    connectedFamily,
+                    notificationDiagnosticChannel(descriptor.characteristic?.uuid),
+                    "platform_error",
+                )
             } else {
-                log("Subscribed ${descriptor.characteristic?.uuid}")
+                log("Notification subscription active")
+                BandDiagnostics.recordReadiness(
+                    BandDiagnostics.ReadinessStage.NOTIFICATIONS,
+                    BandDiagnostics.ReadinessState.READY,
+                    connectedFamily,
+                    notificationDiagnosticChannel(descriptor.characteristic?.uuid),
+                )
                 // A subscribe landed — replenish the shared BUSY-retry budget so a transient stall on
                 // one characteristic can't starve the others' retries (the counter is global).
                 cccdRetries = 0
@@ -6442,8 +6995,18 @@ class WhoopBleClient(
         val cmd = cmdCharacteristic
         if (cmd == null) {
             log("Subscribed, but no command characteristic - cannot open a session")
+            BandDiagnostics.recordReadiness(
+                BandDiagnostics.ReadinessStage.BOND,
+                BandDiagnostics.ReadinessState.FAILED,
+                connectedFamily,
+            )
             return
         }
+        BandDiagnostics.recordReadiness(
+            BandDiagnostics.ReadinessStage.BOND,
+            BandDiagnostics.ReadinessState.STARTED,
+            connectedFamily,
+        )
         when (connectedFamily) {
             DeviceFamily.WHOOP4 -> writeBondFrame(g, cmd)
             DeviceFamily.WHOOP5 -> writeClientHello(g, cmd)
@@ -6495,6 +7058,12 @@ class WhoopBleClient(
         }
         val ops = gattOps ?: return
         cccdInFlight = true
+        BandDiagnostics.recordReadiness(
+            BandDiagnostics.ReadinessStage.NOTIFICATIONS,
+            BandDiagnostics.ReadinessState.STARTED,
+            connectedFamily,
+            notificationDiagnosticChannel(ch.uuid),
+        )
 
         // Tell the local stack to surface notifications, then write the CCCD so the remote starts
         // sending them. CoreBluetooth's setNotifyValue(true) does both implicitly. Both are routed
@@ -6505,7 +7074,13 @@ class WhoopBleClient(
         if (!notifyOk && gatt == null) return   // safeGatt tore down — link is gone
         val cccd = ch.getDescriptor(CCCD)
         if (cccd == null) {
-            log("No CCCD on ${ch.uuid}; skipping")
+            log("No CCCD on channel=${notificationDiagnosticChannel(ch.uuid)}; skipping")
+            BandDiagnostics.recordReadiness(
+                BandDiagnostics.ReadinessStage.NOTIFICATIONS,
+                BandDiagnostics.ReadinessState.FAILED,
+                connectedFamily,
+                notificationDiagnosticChannel(ch.uuid),
+            )
             cccdInFlight = false
             drainCccdQueue(g)
             return
@@ -6526,7 +7101,16 @@ class WhoopBleClient(
                 cccdQueue.add(ch)
                 handler.postDelayed(drainCccdRetryRunnable, CCCD_RETRY_DELAY_MS)
             } else {
-                log("writeDescriptor rejected for ${ch.uuid} (gave up after $MAX_CCCD_RETRIES retries)")
+                log(
+                    "writeDescriptor rejected for channel=${notificationDiagnosticChannel(ch.uuid)} " +
+                        "(gave up after $MAX_CCCD_RETRIES retries)",
+                )
+                BandDiagnostics.recordReadiness(
+                    BandDiagnostics.ReadinessStage.NOTIFICATIONS,
+                    BandDiagnostics.ReadinessState.FAILED,
+                    connectedFamily,
+                    notificationDiagnosticChannel(ch.uuid),
+                )
                 drainCccdQueue(g)
             }
         }
@@ -6669,6 +7253,16 @@ class WhoopBleClient(
             return
         }
         if (backfilling) return
+        val pendingGattAcks = historicalAckCompletionGate.pendingCount()
+        val pendingDurableAcks = backfiller.pendingHistoricalAckCount
+        if (pendingGattAcks > 0 || pendingDurableAcks > 0) {
+            log(
+                "Backfill: deferred - waiting for $pendingGattAcks queued and " +
+                    "$pendingDurableAcks durable history acknowledgement(s)",
+            )
+            return
+        }
+        historicalAckCompletionGate.reset()
         // #700: if GET_CLOCK never responded (Android has no explicit clockRef on the client — the
         // Backfiller defaults to identity), seed a rough correlation from the Data Range's newest-banked
         // timestamp. The offset is approximate but vastly better than identity (offset 0), which can
@@ -6851,12 +7445,36 @@ class WhoopBleClient(
                     }
                     // If the Backfiller consumed all historical data, exit the session cleanly.
                     if (backfilling && !backfiller.isBackfilling) {
-                        handler.post { exitBackfilling("HISTORY_COMPLETE") }
+                        handler.post { onHistoryCompleteObserved() }
                     }
                 }
             } finally {
                 if (ownsDrain) backfillDrain.release(lease)
             }
+        }
+    }
+
+    private fun onHistoryCompleteObserved() {
+        if (!backfilling) return
+        if (backfiller.persistStalled) {
+            log(
+                "Backfill: HISTORY_COMPLETE arrived after durable progress stalled; " +
+                    "not claiming a completed sync.",
+            )
+            exitBackfilling("durableProgressTimeout")
+            return
+        }
+        val decision = historicalAckCompletionGate.observeHistoryComplete()
+        if (!decision.firstObservation) return
+        val pendingDurableAcks = backfiller.pendingHistoricalAckCount
+        if (decision.finishNow && pendingDurableAcks == 0) {
+            exitBackfilling("HISTORY_COMPLETE")
+        } else {
+            log(
+                "Backfill: HISTORY_COMPLETE received; waiting for " +
+                    "${maxOf(decision.pendingAcknowledgements, pendingDurableAcks)} " +
+                    "confirmed history acknowledgement(s).",
+            )
         }
     }
 
@@ -7295,16 +7913,40 @@ class WhoopBleClient(
      * `[0x01] + end_data`, where end_data is the verbatim 8 bytes of the HISTORY_END
      * metadata.data[10:18]. Port of `BLEManager.ackHistoricalChunk`.
      */
-    private fun ackHistoricalChunk(trim: Long, endData: ByteArray) {
-        val trimAdvanced = HistorySyncDurableProgressPolicy.advances(
-            rows = 0,
-            trim = trim,
-            previousTrim = backfiller.lastAckedTrim,
-        )
+    private fun ackHistoricalChunk(
+        sessionGeneration: Long,
+        trim: Long,
+        endData: ByteArray,
+    ): Boolean = handler.post {
+        // Persistence runs on the IO scope and can finish after disconnect. Serialize the final
+        // generation check and command enqueue on the GATT looper so an old chunk cannot ACK through
+        // a replacement connection.
+        if (!backfilling || !backfiller.isCurrentSession(sessionGeneration)) return@post
         val payload = ByteArray(1 + endData.size)
         payload[0] = 0x01
         System.arraycopy(endData, 0, payload, 1, endData.size)
-        send(CommandNumber.HISTORICAL_DATA_RESULT, payload, withResponse = true)
+        val queued = enqueueCommand(
+            cmd = CommandNumber.HISTORICAL_DATA_RESULT,
+            payload = payload,
+            withResponse = true,
+            purpose = WritePurpose.HISTORY_ACK,
+            historyAckTrim = trim,
+            onEnqueued = { historicalAckCompletionGate.enqueued(trim) },
+        )
+        if (queued) {
+            log("Backfill: queued chunk acknowledgement trim=$trim")
+        } else {
+            backfiller.rejectHistoricalAck(sessionGeneration, trim)
+            log("Backfill: history acknowledgement could not be queued; preserving the band copy.")
+        }
+    }
+
+    private fun noteHistoricalAckConfirmed(trim: Long, previousTrim: Long?) {
+        val trimAdvanced = HistorySyncDurableProgressPolicy.advances(
+            rows = 0,
+            trim = trim,
+            previousTrim = previousTrim,
+        )
         // Progress signal for the "Syncing Noop Band history…" UI (#77). The per-session count remains
         // separate for outcome classification; the visible count spans auto-continue slices.
         ackedChunksThisSession += 1
@@ -7315,7 +7957,7 @@ class WhoopBleClient(
                 publishHistorySyncProgress()
             }
         }
-        log("Backfill: acked chunk trim=$trim")
+        log("Backfill: confirmed chunk acknowledgement trim=$trim")
     }
 
     // ====================================================================================
@@ -7651,6 +8293,9 @@ class WhoopBleClient(
         writeQueue.clear()
         cccdQueue.clear()
         writeDeliveryGate.reset()
+        historicalAckCompletionGate.reset()
+        backfiller.timeoutFired()
+        backfiller.clearPendingHistoricalAcks()
         // Cancel callback timeout/quarantine and descriptor retries so no old-connection runnable can
         // enter a replacement connection (#314 + ambiguous-delivery hardening).
         handler.removeCallbacks(writeDeliveryTimeoutRunnable)
@@ -7933,35 +8578,58 @@ class WhoopBleClient(
         // in here may propagate. (The regex bug itself is also fixed; this guarantees the class can't
         // recur.)
         try {
-            // Scrub personal identifiers FIRST so a user can safely share the strap log (#445), THEN
-            // apply the optional Test Centre domain tag in front of the already-safe line.
-            val safe = taggedStrapLogLine(CustomerFacingBrand.text(redactPii(s)), domain)
+            // Derive privacy-minimized Test Centre progress before redaction, then discard the raw values.
+            // Only a validated day token is persisted, and only while that domain is explicitly active.
+            val tagged = taggedStrapLogLine(CustomerFacingBrand.text(s), domain)
+            domain?.takeIf(testCentre::active)?.let { activeDomain ->
+                com.noop.testcentre.CaptureAccumulator
+                    .capturedDayKey(activeDomain, tagged, 0L) { unixSeconds ->
+                        if (unixSeconds in 0..(Long.MAX_VALUE / 1_000L)) {
+                            (
+                                java.util.TimeZone.getDefault()
+                                    .getOffset(unixSeconds * 1_000L) / 1_000
+                            ).toLong()
+                        } else {
+                            0L
+                        }
+                    }
+                    ?.let { testCentre.noteCapturedDay(activeDomain, it) }
+            }
+            val safe = redactPii(tagged)
             // logcat is opt-in (Settings → Strap → "Debug logging"); default OFF so normal users don't
             // emit the strap log to the system log. The in-app ring buffer below always records.
             if (debugLogcat) Log.d(TAG, safe)
-            // Mirror into the in-app ring buffer (format under the lock — SimpleDateFormat isn't
-            // thread-safe and log() is called from both the GATT binder thread and the main looper).
+            // Keep only a relative process-session duration. Exact wall-clock event times are not
+            // needed to diagnose ordering and must not enter a user-shareable report.
             synchronized(logBuffer) {
-                logBuffer.addLast("${logTimeFmt.format(System.currentTimeMillis())}  $safe")
-                while (logBuffer.size > LOG_BUFFER_MAX) logBuffer.removeFirst()
+                val elapsedSeconds =
+                    ((SystemClock.elapsedRealtime() - logSessionStartElapsedMs)
+                        .coerceAtLeast(0L)) / 1_000L
+                appendBoundedLogLine("[+$elapsedSeconds s] $safe")
             }
         } catch (t: Throwable) {
             // Last resort: note that a log line failed, without risking another throw. Never rethrow.
             runCatching {
                 synchronized(logBuffer) {
-                    logBuffer.addLast("[log error: ${t.javaClass.simpleName}]")
-                    while (logBuffer.size > LOG_BUFFER_MAX) logBuffer.removeFirst()
+                    appendBoundedLogLine("[log error: ${t.javaClass.simpleName}]")
                 }
             }
         }
     }
 
-    /** Scrub personal identifiers from a strap-log line so it's safe to share publicly (#445, @maddognik):
-     *  BLE MAC addresses are masked to their first + last byte, and the WHOOP's SERIAL — carried in its
-     *  device name ("WHOOP 4C1594026") and tied to the owner's account - is removed. Applied at the single
-     *  log sink so EVERY line is covered, including the generic-HR diagnostics. MACs require colons, so hex
-     *  command payloads (no colons) are untouched; the model names "WHOOP 4.0"/"5.0" (dotted, short) don't
-     *  match the serial pattern. */
+    private fun appendBoundedLogLine(line: String) {
+        val bounded = boundedStrapLogLine(line)
+        val lineBytes = bounded.toByteArray(Charsets.UTF_8).size + 1
+        logBuffer.addLast(bounded)
+        logBufferBytes += lineBytes
+        while (logBuffer.size > LOG_BUFFER_MAX || logBufferBytes > STRAP_LOG_MAX_BYTES) {
+            val removed = logBuffer.removeFirst()
+            logBufferBytes -= removed.toByteArray(Charsets.UTF_8).size + 1
+        }
+    }
+
+    /** Scrub identifiers, signal/health values, timestamps, raw failures, and frame bytes from a strap-log
+     *  line before it enters the shareable ring. */
     private fun redactPii(s: String): String = redactStrapLogPii(s)
 
     /**
@@ -7995,17 +8663,56 @@ internal object ManagedSocialHapticPolicy {
 // PII scrubbers for the shareable strap log (#445). Kept at FILE scope (not inside WhoopBleClient) so
 // they're unit-testable without constructing the Android-only BLE client.
 //
-//   • MAC: keep the first + LAST octet, mask the four unique middle octets. The regex captures exactly
-//     TWO groups — group 1 (first octet) and group 2 (last octet) — so the replacement must reference
-//     $1 and $2. (#421: this previously referenced `$3`, which doesn't exist, so the moment any RAW MAC
-//     was logged — e.g. a generic-HR strap's `device.address` in StandardHrSource.connectToDevice — the
-//     replace() threw IndexOutOfBoundsException("No group 3"), and the thrown exception aborted that
-//     strap's activation. The WHOOP path never hit it because it only ever logs "WHOOP <serial>", never
-//     a raw MAC, so the bug was invisible until a Polar H10 / other 0x180D strap was used.)
+//   • MAC: remove the complete address. (#421: the older partial-mask replacement referenced a nonexistent
+//     capture group, so logging any raw generic-HR address threw and aborted source activation.)
 //   • WHOOP serial: the device name carries it ("WHOOP 4C1594026"); the dotted model names ("WHOOP 4.0")
 //     are too short / dotted to match.
-private val PII_MAC_RE = Regex("([0-9A-Fa-f]{2}):[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:([0-9A-Fa-f]{2})")
+private val PII_MAC_RE = Regex("[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}")
 private val PII_WHOOP_SERIAL_RE = Regex("WHOOP (\\d[0-9A-Za-z]{5,})")
+private val PII_UUID_RE = Regex(
+    "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
+)
+private val PII_NAMED_DEVICE_RE = Regex(
+    "(?i)\\b(?:advertising|device|band)\\s+name\\s*[:=]\\s*[^,;]+",
+)
+private val PII_DEVICE_NAME_RE = Regex(
+    "(?i)\\b(found|discovered)\\s+.+?(?=\\s+\\((?:<uuid>|<address>)\\)|" +
+        "\\s+(?:<uuid>|<address>)(?:\\s|$)|\\s+rssi\\s*[=:])",
+)
+private val PII_RSSI_RE = Regex("(?i)\\brssi\\s*[=:()]?\\s*-?\\d+")
+private val PII_STATUS_RE = Regex("(?i)\\bstatus\\s*[=:]\\s*-?\\d+")
+private val PII_HEALTH_VALUE_RE = Regex(
+    "(?i)\\b(bpm|hrv|rmssd|spo2|vo2|max|soc|battery|heart[ _-]?rate|rr)" +
+        "\\s*[=:]?\\s*-?\\d+(?:\\.\\d+)?(?:%|ms|bpm)?",
+)
+private val PII_CLOCK_TIME_RE = Regex(
+    "(?i)\\b(?:[01]?\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d)?(?:\\s?[AP]M)?\\b",
+)
+private val PII_NUMERIC_TOKEN_RE = Regex(
+    "(?<![A-Za-z0-9_])[-+]?\\d+(?:\\.\\d+)?(?:%|ms|s|bpm)?(?![A-Za-z0-9_])",
+    RegexOption.IGNORE_CASE,
+)
+private val PII_UNIX_TIME_RE = Regex("\\b[12]\\d{9}(?!\\d)")
+private val PII_ISO_TIME_RE = Regex("\\b20\\d{2}-\\d{2}-\\d{2}[ T][0-9:.+\\-Z]+")
+private val PII_DAY_KEY_RE = Regex("\\bday=20\\d{2}-\\d{2}-\\d{2}\\b")
+private val PII_DYNAMIC_ID_RE = Regex(
+    "(?i)\\b(readId|writeActiveId|sourceId|deviceId|installationId|memberId|contactId)=\\S+",
+)
+private val PII_RAW_BYTES_RE = Regex(
+    "(?i)\\b(payload|frame|hex)\\s*[:=]\\s*(?:0x)?[0-9a-f][0-9a-f\\s,:-]*",
+)
+private val PII_LONG_HEX_RE = Regex(
+    "(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[\\s,:-]?){8,}(?![0-9a-f])",
+)
+private val PII_RAW_FAILURE_RE = Regex(
+    "(?i)\\b(error|exception|failed|failure|threw|couldn't|could not)\\b.*$",
+)
+private val SAFE_TAGGED_BATTERY_EVIDENCE_RE = Regex(
+    "^\\[battery] bank soc=(?:100(?:\\.0+)?|[0-9]{1,2}(?:\\.[0-9]+)?) t=[0-9]+s$",
+)
+private val SAFE_TAGGED_CONNECTION_EVIDENCE_RE = Regex(
+    "^\\[connection] connect up gen=[0-9]+ latencyMs=(?:[0-9]+|\\?) uptimeStart=[0-9]+$",
+)
 
 /**
  * Builds the 9-byte WHOOP 4.0 SET_ALARM_TIME (cmd 66) payload.
@@ -8114,10 +8821,74 @@ internal fun alarmReadbackLocalTime(epochSec: Long): String =
  *  line or crashing the caller (#453). The MAC regex captures exactly two groups (first + last octet),
  *  so the replacement references $1/$2 only. */
 internal fun redactStrapLogPii(s: String): String = try {
-    s.replace(PII_MAC_RE, "$1:••:••:••:••:$2")
-        .replace(PII_WHOOP_SERIAL_RE, "Band <serial>")
+    when {
+        SAFE_TAGGED_BATTERY_EVIDENCE_RE.matches(s) ->
+            "[battery] bank sample recorded"
+        SAFE_TAGGED_CONNECTION_EVIDENCE_RE.matches(s) ->
+            "[connection] connect up observed"
+        else ->
+            s.replace(PII_MAC_RE, "<address>")
+            .replace(PII_WHOOP_SERIAL_RE, "Band <serial>")
+            .replace(PII_UUID_RE, "<uuid>")
+            .replace(PII_NAMED_DEVICE_RE, "band name=<redacted>")
+            .replace(PII_DEVICE_NAME_RE, "$1 <device>")
+            .replace(PII_RSSI_RE, "rssi=<redacted>")
+            .replace(PII_STATUS_RE, "status=<redacted>")
+            .replace(PII_HEALTH_VALUE_RE, "$1=<health>")
+            .replace(PII_CLOCK_TIME_RE, "<time>")
+            .replace(PII_UNIX_TIME_RE, "<timestamp>")
+            .replace(PII_ISO_TIME_RE, "<timestamp>")
+            .replace(PII_DAY_KEY_RE, "day=<redacted>")
+            .replace(PII_DYNAMIC_ID_RE, "$1=<redacted>")
+            .replace(PII_RAW_BYTES_RE, "$1=<redacted>")
+            .replace(PII_LONG_HEX_RE, "<raw-bytes>")
+            .replace(PII_RAW_FAILURE_RE, "$1=<redacted>")
+            .replace(PII_NUMERIC_TOKEN_RE, "<value>")
+    }
 } catch (t: Throwable) {
     "[redaction error - line withheld]"
+}
+
+internal const val STRAP_LOG_MAX_BYTES = 1_048_576
+internal const val STRAP_LOG_MAX_LINE_BYTES = 1_024
+private const val STRAP_LOG_TRUNCATION_SUFFIX = " [truncated]"
+
+internal fun boundedStrapLogLine(
+    line: String,
+    maxBytes: Int = STRAP_LOG_MAX_LINE_BYTES,
+): String {
+    if (maxBytes <= 0) return ""
+    if (line.toByteArray(Charsets.UTF_8).size <= maxBytes) return line
+    val suffixBytes = STRAP_LOG_TRUNCATION_SUFFIX.toByteArray(Charsets.UTF_8).size
+    if (suffixBytes >= maxBytes) {
+        return STRAP_LOG_TRUNCATION_SUFFIX
+            .take(maxBytes)
+            .takeWhile { it.code < 128 }
+    }
+    val contentBudget = maxBytes - suffixBytes
+    var low = 0
+    var high = line.length
+    while (low < high) {
+        val mid = (low + high + 1) / 2
+        val safeMid =
+            if (mid < line.length && mid > 0 &&
+                Character.isHighSurrogate(line[mid - 1]) &&
+                Character.isLowSurrogate(line[mid])
+            ) {
+                mid - 1
+            } else {
+                mid
+            }
+        if (line.substring(0, safeMid).toByteArray(Charsets.UTF_8).size <= contentBudget) {
+            low = safeMid
+            if (safeMid < mid) high = mid - 1
+        } else {
+            high = mid - 1
+        }
+    }
+    var end = low
+    if (end > 0 && Character.isHighSurrogate(line[end - 1])) end -= 1
+    return line.substring(0, end) + STRAP_LOG_TRUNCATION_SUFFIX
 }
 
 /** Prefix a compact, parseable domain marker onto an already-redacted strap-log line, or return it

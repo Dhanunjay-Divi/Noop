@@ -76,6 +76,41 @@ public struct ManagedAuthorization: Equatable, Sendable {
 public enum ManagedStoragePlatform: String, Codable, Sendable {
     case iOS = "ios"
     case android
+    case macOS = "macos"
+}
+
+public struct ManagedAccountEnrollmentRequest: Codable, Equatable, Sendable {
+    public let installationID: String
+    public let installationToken: String
+    public let platform: ManagedStoragePlatform
+    public let enrollmentRequestID: UUID
+    public let deviceKeyFingerprint: String?
+
+    public init(
+        installationID: String,
+        installationToken: String,
+        platform: ManagedStoragePlatform,
+        enrollmentRequestID: UUID,
+        deviceKeyFingerprint: String? = nil
+    ) {
+        self.installationID = installationID
+        self.installationToken = installationToken
+        self.platform = platform
+        self.enrollmentRequestID = enrollmentRequestID
+        self.deviceKeyFingerprint = deviceKeyFingerprint
+    }
+}
+
+public struct ManagedAccountEnrollmentResponse: Codable, Sendable {
+    public struct ProductBoundary: Codable, Equatable, Sendable {
+        public let accountReady: Bool
+        public let healthDataConsentGranted: Bool
+        public let healthDataUploaded: Bool
+        public let edgeCollectionRequired: Bool
+    }
+
+    public let created: Bool
+    public let productBoundary: ProductBoundary
 }
 
 public struct ManagedEnrollmentRequest: Codable, Equatable, Sendable {
@@ -427,6 +462,7 @@ public struct ManagedChangeFeed: Codable, Sendable {
 public struct ManagedRestoreRequest: Codable, Equatable, Sendable {
     public let requestID: UUID
     public let dataClasses: [String]
+    public let chunkContentMode: String
     public let documentKinds: [ManagedDocumentKind]
     public let includeDocuments: Bool
     public let includeDeletedDocuments: Bool
@@ -436,6 +472,7 @@ public struct ManagedRestoreRequest: Codable, Equatable, Sendable {
     public init(
         requestID: UUID,
         dataClasses: [String],
+        chunkContentMode: String = "server_readable",
         documentKinds: [ManagedDocumentKind] = [],
         includeDocuments: Bool = false,
         includeDeletedDocuments: Bool = false,
@@ -444,6 +481,7 @@ public struct ManagedRestoreRequest: Codable, Equatable, Sendable {
     ) {
         self.requestID = requestID
         self.dataClasses = dataClasses
+        self.chunkContentMode = chunkContentMode
         self.documentKinds = documentKinds
         self.includeDocuments = includeDocuments
         self.includeDeletedDocuments = includeDeletedDocuments
@@ -753,6 +791,207 @@ public struct ManagedDocumentPage: Codable, Sendable {
     public let nextCursor: Cursor?
 }
 
+public enum ManagedWrappedKeyKind: String, Codable, Sendable {
+    case accountMaster = "account_master"
+    case document
+}
+
+public enum ManagedWrappedKeyAlgorithm: String, Codable, Sendable {
+    case a256GCM = "A256GCM"
+}
+
+public enum ManagedWrappedKeyRecoveryMethod: String, Codable, Sendable {
+    case recoveryKey = "recovery_key"
+    case deviceTransfer = "device_transfer"
+    case platformEscrow = "platform_escrow"
+}
+
+public enum ManagedWrappedKeyStatus: String, Codable, Sendable {
+    case active
+    case retired
+    case revoked
+}
+
+public struct ManagedWrappedKeyMutation: Codable, Equatable, Sendable {
+    public let keyKind: ManagedWrappedKeyKind
+    public let wrappingKeyID: UUID?
+    public let wrappingRevision: Int
+    public let algorithm: ManagedWrappedKeyAlgorithm
+    public let wrappedKeyBase64: String
+    public let wrappedKeySHA256: String
+    public let masterKeyConfirmationHMACSHA256: String?
+    public let recoveryMethod: ManagedWrappedKeyRecoveryMethod?
+
+    public init(
+        keyKind: ManagedWrappedKeyKind,
+        wrappingKeyID: UUID?,
+        wrappingRevision: Int,
+        wrappedKey: Data,
+        masterKeyConfirmationHMACSHA256: String? = nil,
+        recoveryMethod: ManagedWrappedKeyRecoveryMethod? = nil
+    ) throws {
+        guard (1...1_000_000).contains(wrappingRevision),
+              (40...16_384).contains(wrappedKey.count) else {
+            throw ManagedStorageError.invalidConfiguration
+        }
+        switch keyKind {
+        case .accountMaster:
+            guard wrappingKeyID == nil,
+                  masterKeyConfirmationHMACSHA256?.range(
+                      of: #"^[0-9a-f]{64}$"#,
+                      options: .regularExpression
+                  ) != nil,
+                  recoveryMethod != nil else {
+                throw ManagedStorageError.invalidConfiguration
+            }
+        case .document:
+            guard wrappingKeyID != nil,
+                  wrappedKey.count == 72,
+                  masterKeyConfirmationHMACSHA256 == nil,
+                  recoveryMethod == nil else {
+                throw ManagedStorageError.invalidConfiguration
+            }
+        }
+        self.keyKind = keyKind
+        self.wrappingKeyID = wrappingKeyID
+        self.wrappingRevision = wrappingRevision
+        self.algorithm = .a256GCM
+        self.wrappedKeyBase64 = wrappedKey.base64EncodedString()
+        self.wrappedKeySHA256 = ManagedDigest.sha256(wrappedKey)
+        self.masterKeyConfirmationHMACSHA256 =
+            masterKeyConfirmationHMACSHA256
+        self.recoveryMethod = recoveryMethod
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case keyKind
+        case wrappingKeyID = "wrappingKeyId"
+        case wrappingRevision
+        case algorithm
+        case wrappedKeyBase64
+        case wrappedKeySHA256 = "wrappedKeySha256"
+        case masterKeyConfirmationHMACSHA256 =
+            "masterKeyConfirmationHmacSha256"
+        case recoveryMethod
+    }
+}
+
+public struct ManagedWrappedKeyRotation: Codable, Equatable, Sendable {
+    public let keyKind: ManagedWrappedKeyKind
+    public let wrappingKeyID: UUID?
+    public let wrappingRevision: Int
+    public let algorithm: ManagedWrappedKeyAlgorithm
+    public let wrappedKeyBase64: String
+    public let wrappedKeySHA256: String
+    public let masterKeyConfirmationHMACSHA256: String?
+    public let recoveryMethod: ManagedWrappedKeyRecoveryMethod?
+    public let expectedWrappingRevision: Int
+
+    public init(
+        mutation: ManagedWrappedKeyMutation,
+        expectedWrappingRevision: Int
+    ) throws {
+        guard mutation.keyKind == .document,
+              (1..<1_000_000).contains(expectedWrappingRevision),
+              mutation.wrappingRevision == expectedWrappingRevision + 1 else {
+            throw ManagedStorageError.invalidConfiguration
+        }
+        self.keyKind = mutation.keyKind
+        self.wrappingKeyID = mutation.wrappingKeyID
+        self.wrappingRevision = mutation.wrappingRevision
+        self.algorithm = mutation.algorithm
+        self.wrappedKeyBase64 = mutation.wrappedKeyBase64
+        self.wrappedKeySHA256 = mutation.wrappedKeySHA256
+        self.masterKeyConfirmationHMACSHA256 =
+            mutation.masterKeyConfirmationHMACSHA256
+        self.recoveryMethod = mutation.recoveryMethod
+        self.expectedWrappingRevision = expectedWrappingRevision
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case keyKind
+        case wrappingKeyID = "wrappingKeyId"
+        case wrappingRevision
+        case algorithm
+        case wrappedKeyBase64
+        case wrappedKeySHA256 = "wrappedKeySha256"
+        case masterKeyConfirmationHMACSHA256 =
+            "masterKeyConfirmationHmacSha256"
+        case recoveryMethod
+        case expectedWrappingRevision
+    }
+}
+
+public struct ManagedWrappedKeyRecord: Codable, Equatable, Sendable {
+    public let keyID: UUID
+    public let keyKind: ManagedWrappedKeyKind
+    public let wrappingKeyID: UUID?
+    public let wrappingRevision: Int
+    public let algorithm: ManagedWrappedKeyAlgorithm
+    public let wrappedKeyBase64: String
+    public let wrappedKeySHA256: String
+    public let masterKeyConfirmationHMACSHA256: String?
+    public let recoveryMethod: ManagedWrappedKeyRecoveryMethod?
+    public let status: ManagedWrappedKeyStatus
+    public let successorKeyID: UUID?
+    public let createdAt: String
+    public let updatedAt: String
+    public let revokedAt: String?
+
+    public var wrappedKey: Data? {
+        Data(base64Encoded: wrappedKeyBase64)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case keyID = "keyId"
+        case keyKind
+        case wrappingKeyID = "wrappingKeyId"
+        case wrappingRevision
+        case algorithm
+        case wrappedKeyBase64
+        case wrappedKeySHA256 = "wrappedKeySha256"
+        case masterKeyConfirmationHMACSHA256 =
+            "masterKeyConfirmationHmacSha256"
+        case recoveryMethod
+        case status
+        case successorKeyID = "successorKeyId"
+        case createdAt
+        case updatedAt
+        case revokedAt
+    }
+}
+
+public struct ManagedWrappedKeyVersion: Codable, Equatable, Sendable {
+    public let keyID: UUID
+    public let keyKind: ManagedWrappedKeyKind
+    public let wrappingKeyID: UUID?
+    public let wrappingRevision: Int
+    public let algorithm: ManagedWrappedKeyAlgorithm
+    public let wrappedKeyBase64: String
+    public let wrappedKeySHA256: String
+    public let masterKeyConfirmationHMACSHA256: String?
+    public let recoveryMethod: ManagedWrappedKeyRecoveryMethod?
+    public let createdAt: String
+
+    public var wrappedKey: Data? {
+        Data(base64Encoded: wrappedKeyBase64)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case keyID = "keyId"
+        case keyKind
+        case wrappingKeyID = "wrappingKeyId"
+        case wrappingRevision
+        case algorithm
+        case wrappedKeyBase64
+        case wrappedKeySHA256 = "wrappedKeySha256"
+        case masterKeyConfirmationHMACSHA256 =
+            "masterKeyConfirmationHmacSha256"
+        case recoveryMethod
+        case createdAt
+    }
+}
+
 extension ManagedDocument {
     var changeMetadata: ManagedChangeFeed.Change {
         ManagedChangeFeed.Change(
@@ -903,7 +1142,7 @@ public enum ManagedStorageError: Error, Equatable, LocalizedError {
     case cursorExpired(minimumSequence: Int64?)
     case quotaExceeded
     case conflict
-    case server(status: Int)
+    case server(status: Int, retryAfter: TimeInterval? = nil)
     case digestMismatch
 
     public var errorDescription: String? {

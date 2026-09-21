@@ -1,25 +1,38 @@
 # NOOP cloud architecture
 
-**Status:** synthetic IAM-only staging deployed; mobile clients disconnected
+**Status:** synthetic IAM-only staging was previously deployed; current runtime
+state requires drift verification before use; mobile clients remain disconnected
 **Primary staging region:** Google Cloud Mumbai (`asia-south1`)
 
-Firebase Identity Platform, App Check, Cloud SQL, managed API, processor,
-lifecycle scheduler, KMS, Pub/Sub, and object storage are deployed for
-synthetic testing. The managed API has no public invoker, no released mobile
-configuration points to it, and no real health data is permitted in staging.
+The last recorded synthetic-staging deployment included Firebase Identity
+Platform, App Check, Cloud SQL, managed API, processor, lifecycle scheduler,
+KMS, Pub/Sub, and object storage. This document does not establish their
+current runtime or drift state. Before any reuse, verify the live project,
+deployed digests, IAM, secrets, scheduler state, database migrations, and
+default-off controls. The intended staging contract has no public invoker, no
+released mobile configuration pointing to it, and no permission for real
+health data.
 
 ## Product boundary
 
-NOOP remains local-first:
+NOOP currently ships a local-authoritative compatible-device path. The
+first-party target in D-059 is a staged cloud-authoritative account model for
+durable history, canonical metric publication, recommendations, and
+cross-device state. That target does not remove the edge responsibilities
+needed for reliable collection and safe offline use:
 
 - The current compatible-device path and app exploration/import path work
   without an account.
 - A first-party NOOP Band release requires one network-backed ownership claim.
-  After activation, BLE collection, local SQLite history, scoring, export, and
-  supported local device control work without NOOP+, payment, subscription, or
-  continuous network.
+  After activation, BLE collection, a short-lived encrypted upload journal,
+  bounded offline working data, immediate Safety initiation, export, and
+  supported local device control continue without a continuously available
+  network.
 - Existing users are never silently enrolled or uploaded.
-- Core metrics are not a subscription entitlement.
+- Core metrics are not a subscription entitlement. During migration the phone
+  and server dual-run each formula until versioned parity, provenance, restore,
+  rollback, performance, security, and physical-device gates authorize that
+  metric's server publication as canonical.
 - Self-hosted Sync remains available for a destination the user controls.
 - NOOP+ is a separate, explicit managed-sync consent and trust boundary.
 
@@ -29,9 +42,9 @@ and gives foreground catch-up somewhere durable to land. iOS and Android
 background execution remain best effort, so both clients still need bounded
 local buffering, resumable transfer, visible freshness, and foreground catch-up.
 
-## Current staging
+## Last recorded staging design
 
-OpenTofu in `infra/gcp/` manages:
+OpenTofu in `infra/gcp/` defines:
 
 - protected remote state and a USD 50 monthly budget alert;
 - a regional immutable Artifact Registry and dedicated build identity;
@@ -43,19 +56,22 @@ OpenTofu in `infra/gcp/` manages:
 - an optional deletion-protected PostgreSQL 16 Cloud SQL instance;
 - a one-shot Cloud Run migration job and an internal-ingress private API.
 
-The private and managed APIs use a digest-pinned image, IAM, Secret Manager, the
-Cloud SQL connector, scale-to-zero, and `/readyz` as the startup gate. Neither
-has a public invoker. The Safety worker is disabled. The managed processor,
-lifecycle job, scheduler, phone identity, and enforced Authentication App Check
-are deployed. No real health data belongs in this environment.
+The recorded design uses digest-pinned images, IAM, Secret Manager, the Cloud
+SQL connector, scale-to-zero, and `/readyz` as the startup gate. It defines no
+public invoker and keeps the Safety worker disabled. The last deployment record
+included the managed processor, lifecycle job, scheduler, phone identity, and
+enforced Authentication App Check, but those facts must be reverified against
+the live project before use. No real health data belongs in this environment.
 
 ## Target data plane
 
 The current server still accepts row-oriented v1 sync for self-hosting. The
 separate managed implementation now uses:
 
-1. The phone writes measurements locally first and computes all user-facing
-   metrics locally.
+1. The phone durably accepts wearable measurements into an encrypted bounded
+   edge journal before acknowledging transport progress. Current clients still
+   compute user-facing metrics locally while the server implementation is built
+   and dual-run; authority changes only per data class and per formula.
 2. A durable mobile outbox groups bounded time windows into compressed,
    checksummed chunks with schema version, source provenance, event-time range,
    and an idempotency identifier.
@@ -67,19 +83,31 @@ separate managed implementation now uses:
    decompression limits, schema, tenant ownership, and provenance before writing
    only indexes and derived/queryable rows to PostgreSQL.
 6. PostgreSQL stores identity/control state, object manifests, sync cursors,
-   daily aggregates, sleep/workout summaries, deletion state, and social
-   projections. It should not duplicate every high-rate raw sample indefinitely.
+   versioned aggregate provenance, canonical daily aggregates, sleep/workout
+   summaries, deletion state, and social projections. It should not duplicate
+   every high-rate raw sample indefinitely.
 7. BigQuery receives nothing until a separate purpose, minimization, consent,
    retention, and deletion review approves a derived dataset.
 
 The Swift, Kotlin, FastAPI, PostgreSQL, Cloud Storage, processor, restore,
-export, erasure, and lifecycle code for this path is implemented and locally
-tested. Native Apple and Android clients can use the restore snapshot as a
-consistent export anchor, page every retained managed data class and current
-personal record, verify object digests plus snapshot totals, and write a
-manifest-backed ZIP that includes cloud-only history. This path is distinct
-from `/exports`, which stores a client-produced encrypted archive. Neither path
-is a production claim until the live synthetic and physical gates pass.
+export, erasure, and lifecycle code for this bounded path is implemented and
+locally tested. Native Apple and Android clients can use the restore snapshot
+as a consistent export anchor, page selected retained managed data classes plus
+`day_ownership`, the only managed document currently in scope, verify object
+digests plus snapshot totals, and write a manifest-backed ZIP that includes
+cloud-only history. This is not every personal or user-authored record. The path
+is distinct from `/exports`, which stores a client-produced encrypted archive.
+Neither path is a production claim until the live synthetic and physical gates
+pass.
+
+The server currently validates server-readable chunks but does not yet publish
+canonical health formulas. Existing aggregate/provenance tables are the target
+write model, not evidence that server scoring is complete. A formula moves only
+with one named algorithm revision, deterministic cross-language fixtures,
+missing-input equivalence, bounded-change rules where applicable, shadow
+comparison, supersession/rollback, and approved validation data. Until then the
+client result remains authoritative and no local history is pruned on the
+strength of a server shadow result.
 
 Raw backup and server-readable sync are different products. A true private
 backup should use client-side encryption with a user-recoverable key, making its
@@ -88,13 +116,14 @@ separately disclosed server-readable subset. Do not describe one as the other.
 
 ## Identity and authorization
 
-Private synthetic staging currently uses phone OTP, restricted to reviewed SMS
-regions. The first-party release target changes the base ownership account to
-verified email/password with an optional linked phone verified by OTP. Passwords
-remain inside the managed identity provider; NOOP applications and services
-must never receive or store plaintext credentials. App Attest on iOS and Play
-Integrity on Android remain the selected App Check providers. The apps
-initialize Firebase only when every ignored environment value is present.
+The last recorded private synthetic staging configuration used phone OTP,
+restricted to reviewed SMS regions. Its present runtime and drift state have not
+been reverified. The first-party release target changes the base ownership
+account to verified email/password with an optional linked phone verified by
+OTP. Passwords remain inside the managed identity provider; NOOP applications
+and services must never receive or store plaintext credentials. App Attest on
+iOS and Play Integrity on Android remain the selected App Check providers. The
+apps initialize Firebase only when every ignored environment value is present.
 
 Band ownership identity and NOOP+ health-data consent are separate. A verified
 ownership account can claim only after fresh app attestation and
@@ -105,9 +134,10 @@ payment/entitlement state.
 
 The source implements reauthentication for account erasure, per-installation
 credentials, device revocation, a 24-hour deletion cooling-off/cancel path, and
-account-scoped restore. Identity and App Check resources are deployed for
-synthetic staging. Public rollout remains blocked until signed-device
-attestation is proven and enrollment abuse, recovery, lost-device,
+account-scoped restore. A prior deployment record included Identity and App
+Check resources for synthetic staging; their current existence, configuration,
+and drift have not been reverified. Public rollout remains blocked until
+signed-device attestation is proven and enrollment abuse, recovery, lost-device,
 support-access, and erasure operations pass review.
 
 Identity Provider authentication is only the first boundary. Every database row,
@@ -149,8 +179,10 @@ the unit for approved refurbishment, reprovisioning, or destruction.
 
 ## Managed Friends boundary
 
-Managed Friends is an optional social projection inside NOOP+, not a public
-social network and not a dependency of core NOOP or self-hosted Friends:
+Friends is one NOOP-hosted account service, not a public social network and not
+a dependency of local band collection. Customer apps do not expose provider
+selection, local-server setup, or self-hosting. Product packaging remains a
+separate later decision and does not weaken the service's privacy boundary:
 
 - Each enrolled account may separately create one managed Friends profile. The
   service assigns a random, rotatable exact-match NOOP ID; there is no browseable
@@ -163,6 +195,9 @@ social network and not a dependency of core NOOP or self-hosted Friends:
   friend access to any subset of Charge, Effort, Rest, sleep duration, HRV, and
   resting heart rate. Raw streams, locations, journals, stages, workouts,
   routes, and device identifiers are not part of the projection.
+- Each owner separately controls whether a specific friend may message, send
+  photos, start audio calls, or start video calls. All four permissions default
+  false. A friendship alone grants none of them.
 - Badges acknowledge connection or the presence of seven/30 projected days.
   They do not rank health values, compare users, or affect a wellness metric.
 - Pokes require the recipient's global opt-in and per-friend permission, and
@@ -174,11 +209,15 @@ social network and not a dependency of core NOOP or self-hosted Friends:
   app therefore does not receive an immediate poke. Any future wake path must
   use a minimal opaque payload, avoid health/profile content, support token
   deletion and rotation, and pass privacy and physical-device review.
+- Message, photo, and call transports are not implemented. They remain hidden
+  until E2EE and key recovery, reporting and moderation, retention and deletion,
+  encrypted media, opaque push, authenticated ephemeral signaling, TURN,
+  CallKit/Telecom, abuse controls, and physical-device evidence pass.
 
 PostgreSQL holds this bounded control and six-field projection state. Expired
 invites, requests, pokes, summaries, and revoked aliases are lifecycle-managed;
 deleting a managed Friends profile cascades its social state without deleting
-the NOOP+ backup account or on-device data.
+cloud backup history or on-device data.
 
 ## Retention and deletion
 

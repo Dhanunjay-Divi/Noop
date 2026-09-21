@@ -142,8 +142,11 @@ jobs:
             --grace-seconds 30 \
             --label production-shell-preparation \
             --status-file app/build/noop-managed-device-status/production-shell-preparation.status \
+            --log-file app/build/noop-managed-device-status/production-shell-preparation.log \
+            --max-log-mib 16 \
             -- \
             ./gradlew assembleFullDebug assembleFullDebugAndroidTest \
+            -Pkotlin.compiler.execution.strategy=in-process \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
@@ -157,9 +160,14 @@ jobs:
             --grace-seconds 30 \
             --label production-shell-instrumentation \
             --status-file app/build/noop-managed-device-status/production-shell-instrumentation.status \
+            --log-file app/build/noop-managed-device-status/production-shell-instrumentation.log \
+            --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
+            "-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8" \
+            --max-workers=1 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
@@ -187,6 +195,9 @@ jobs:
             --grace-seconds 15 \
             --label production-shell-reset \
             --status-file app/build/noop-managed-device-status/production-shell-reset.status \
+            --log-file app/build/noop-managed-device-status/production-shell-reset.log \
+            --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew cleanManagedDevices \
             --no-daemon \
@@ -205,22 +216,44 @@ jobs:
             --grace-seconds 30 \
             --label production-shell-infrastructure-retry \
             --status-file app/build/noop-managed-device-status/production-shell-infrastructure-retry.status \
+            --log-file app/build/noop-managed-device-status/production-shell-infrastructure-retry.log \
+            --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
+            "-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8" \
+            --max-workers=1 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
 
-      - name: Retain production-shell diagnostics
+      - name: Retain production-shell test evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, pinned 2026-04-10
         with:
-          name: android-production-shell-diagnostics
+          name: android-production-shell-evidence
           path: |
             android/app/build/reports/androidTests/managedDevice/
             android/app/build/outputs/androidTest-results/managedDevice/
-            android/app/build/noop-managed-device-status/
+            android/app/build/noop-managed-device-status/*.status
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Retain production-shell failure logs
+        if: >-
+          ${{
+            always() &&
+            (
+              steps.production_shell_first.outcome == 'failure' ||
+              failure() ||
+              cancelled()
+            )
+          }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, pinned 2026-04-10
+        with:
+          name: android-production-shell-failure-logs
+          path: android/app/build/noop-managed-device-status/*.log
           if-no-files-found: warn
           retention-days: 14
 
@@ -264,8 +297,11 @@ jobs:
             --grace-seconds 30 \
             --label review-sample-preparation \
             --status-file app/build/noop-managed-device-status/review-sample-preparation.status \
+            --log-file app/build/noop-managed-device-status/review-sample-preparation.log \
+            --max-log-mib 16 \
             -- \
             ./gradlew assembleFullDebug assembleFullDebugAndroidTest \
+            -Pkotlin.compiler.execution.strategy=in-process \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
@@ -279,10 +315,15 @@ jobs:
             --grace-seconds 30 \
             --label review-sample-fresh-process \
             --status-file app/build/noop-managed-device-status/review-sample-fresh-process.status \
+            --log-file app/build/noop-managed-device-status/review-sample-fresh-process.log \
+            --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
+            "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" \
+            --max-workers=2 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
@@ -309,6 +350,9 @@ jobs:
             --grace-seconds 15 \
             --label review-sample-reset \
             --status-file app/build/noop-managed-device-status/review-sample-reset.status \
+            --log-file app/build/noop-managed-device-status/review-sample-reset.log \
+            --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew cleanManagedDevices \
             --no-daemon \
@@ -327,23 +371,45 @@ jobs:
             --grace-seconds 30 \
             --label review-sample-infrastructure-retry \
             --status-file app/build/noop-managed-device-status/review-sample-infrastructure-retry.status \
+            --log-file app/build/noop-managed-device-status/review-sample-infrastructure-retry.log \
+            --max-log-mib 16 \
+            --min-free-disk-gib 4 \
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
+            "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" \
+            --max-workers=2 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
 
-      - name: Retain Review Sample diagnostics
+      - name: Retain Review Sample test evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, pinned 2026-04-10
         with:
-          name: android-review-sample-diagnostics
+          name: android-review-sample-evidence
           path: |
             android/app/build/reports/androidTests/managedDevice/
             android/app/build/outputs/androidTest-results/managedDevice/
-            android/app/build/noop-managed-device-status/
+            android/app/build/noop-managed-device-status/*.status
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Retain Review Sample failure logs
+        if: >-
+          ${{
+            always() &&
+            (
+              steps.review_sample_first.outcome == 'failure' ||
+              failure() ||
+              cancelled()
+            )
+          }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, pinned 2026-04-10
+        with:
+          name: android-review-sample-failure-logs
+          path: android/app/build/noop-managed-device-status/*.log
           if-no-files-found: warn
           retention-days: 14
 

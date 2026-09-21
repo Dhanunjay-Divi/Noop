@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="managed_safety_presentation_title">Alertas de Safety</string>
+    <string name="managed_safety_presentation_blurb">Alertas privadas entre apps de contactos aceptados. NOOP no contacta con servicios de emergencia.</string>
+    <string name="managed_safety_urgent_sound_title">Sonido urgente de Safety</string>
+    <string name="managed_safety_urgent_sound_detail">Usa un sonido de alta prioridad, vibración y luz exclusivos. Desactivado de forma predeterminada. Se respetan el sonido y No molestar de Android; NOOP nunca abre una alerta a pantalla completa.</string>
+    <string name="managed_safety_urgent_channel_name">Contactos de NOOP Safety · sonido urgente</string>
+    <string name="managed_safety_urgent_channel_description">Sonido urgente opcional, vibración y luz para alertas privadas de NOOP Safety.</string>
+    <string name="managed_safety_open_notification_settings">Abrir ajustes de alertas de Safety</string>
+    <string name="live_heart_rate_notification_title">Frecuencia cardiaca en la notificación de fondo</string>
+    <string name="live_heart_rate_notification_detail">Muestra una frecuencia cardiaca reciente en la notificación de fondo existente. Se actualiza como máximo cada 15 segundos para limitar el consumo; no activa la captura continua.</string>
+    <string name="live_heart_rate_notification_accessibility">Frecuencia cardiaca en la notificación de fondo. No inicia la captura continua de frecuencia cardiaca.</string>
+    <string name="live_heart_rate_notification_value">Frecuencia cardiaca %1$d lpm</string>
+</resources>

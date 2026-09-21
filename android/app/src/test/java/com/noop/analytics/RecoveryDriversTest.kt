@@ -31,7 +31,7 @@ class RecoveryDriversTest {
         )
         // All five present terms produce one row each (order is biggest-mover-first, asserted below).
         assertEquals(
-            setOf("Heart rate variability", "Resting heart rate", "Respiratory rate", "Sleep quality", "Skin temperature"),
+            setOf("Heart rate variability", "Resting heart rate", "Respiratory rate", "Sleep Score", "Skin temperature"),
             drivers.map { it.label }.toSet(),
         )
         // Rows are sorted biggest-mover-first, matching the Swift twin.
@@ -64,7 +64,7 @@ class RecoveryDriversTest {
         )
         val labels = drivers.map { it.label }
         assertTrue(labels.contains("Heart rate variability"))
-        assertTrue(labels.contains("Sleep quality"))
+        assertTrue(labels.contains("Sleep Score"))
         assertFalse(labels.contains("Resting heart rate"))
         assertFalse(labels.contains("Respiratory rate"))
         assertFalse(labels.contains("Skin temperature"))
@@ -76,18 +76,18 @@ class RecoveryDriversTest {
             hrvBaseline = baseline(50.0, 6.0),
             rhrBaseline = null, respBaseline = null,
             sleepPerf = 0.95, restQualityBaseline = null,
-        ).first { it.label == "Sleep quality" }
+        ).first { it.label == "Sleep Score" }
         val limiting = RecoveryDrivers.chargeDrivers(
             hrv = 55.0, rhr = 55.0, resp = null,
             hrvBaseline = baseline(50.0, 6.0),
             rhrBaseline = null, respBaseline = null,
             sleepPerf = 0.50, restQualityBaseline = null,
-        ).first { it.label == "Sleep quality" }
+        ).first { it.label == "Sleep Score" }
 
         assertNull(supportive.baseline)
-        assertEquals("sleep quality supported recovery", supportive.verdict)
+        assertEquals("Sleep Score supported recovery", supportive.verdict)
         assertNull(limiting.baseline)
-        assertEquals("sleep quality limited recovery", limiting.verdict)
+        assertEquals("Sleep Score limited recovery", limiting.verdict)
         assertFalse(supportive.verdict.contains("baseline"))
         assertFalse(limiting.verdict.contains("baseline"))
     }
@@ -99,7 +99,7 @@ class RecoveryDriversTest {
             rhrBaseline = null, respBaseline = null,
             sleepPerf = 0.90,
             restQualityBaseline = baseline(0.80, 0.05),
-        ).first { it.label == "Sleep quality" }
+        ).first { it.label == "Sleep Score" }
 
         assertEquals(80.0, sleep.baseline!!, 0.0)
         assertEquals(ChargeDriverValueFormat.PERCENT, sleep.valueFormat)

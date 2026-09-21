@@ -80,6 +80,27 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(managed.contains("Local NOOP and folder backup continue to work."))
     }
 
+    func testManagedHistoryImportIsReachableFromEnrolledNoopPlusUI()
+        throws
+    {
+        let managed = try sourceText(
+            "StrandiOS/System/ManagedCloudViews.swift"
+        )
+
+        XCTAssertTrue(managed.contains("Import complete cloud history"))
+        XCTAssertTrue(managed.contains("confirmHistoryImport = true"))
+        XCTAssertTrue(managed.contains(".fileImporter("))
+        XCTAssertTrue(managed.contains("allowedContentTypes: [.zip]"))
+        XCTAssertTrue(
+            managed.contains("service.importCompleteCloudHistory(")
+        )
+        XCTAssertTrue(
+            managed.contains(
+                #".accessibilityIdentifier("noop.noop-plus.import-history")"#
+            )
+        )
+    }
+
     // MARK: - M5 gate (S1 grouping): every destination stays reachable after grouping
 
     /// The S1 macOS sidebar grouping (#805) folds the flat `NavItem` cases into collapsible
@@ -148,15 +169,23 @@ final class MoreListParityTests: XCTestCase {
             1,
             "The measured custom-bar clearance must be reserved exactly once as a safe-area inset."
         )
-        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight)"))
         XCTAssertFalse(shell.contains(
             ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
         ), "A scroll-content margin still permits large text to render under the floating controls.")
-        XCTAssertFalse(shell.contains(".padding(.bottom, visibleTabBarHeight)"),
-                       "Outer padding creates an opaque band behind the floating controls.")
-        XCTAssertTrue(shell.contains("if !keyboardVisible, dynamicTypeSize.isAccessibilitySize"))
-        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight + 28)"),
-                      "Accessibility text sizes need an opaque reading boundary above the glass rail.")
+        XCTAssertTrue(shell.contains(".padding(.bottom, tabContentBottomReservation)"),
+                      "Accessibility text needs a viewport that physically ends above persistent controls.")
+        XCTAssertTrue(shell.contains(
+            ".frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))"
+        ), "Ordinary sizes must retain the floating inset without double-reserving accessibility space.")
+        XCTAssertTrue(shell.contains(
+            "guard !keyboardVisible, dynamicTypeSize.isAccessibilitySize else { return 0 }"
+        ), "Only accessibility navigation should trade overlap for a separate reading region.")
+        XCTAssertTrue(shell.contains(
+            "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize || tabBarCompact"
+        ))
+        XCTAssertTrue(shell.contains(
+            "(tabBarCompact ? IPhonePrimaryTab.compactControlDimension : 28)"
+        ), "Large text and compact navigation need an opaque reading boundary above the glass rail.")
         XCTAssertFalse(shell.contains(".mask(alignment: .bottom)"),
                        "A shell mask washes out the final visible row before it reaches the reserved strip.")
         XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.94 : 0.90"),
@@ -221,7 +250,7 @@ final class MoreListParityTests: XCTestCase {
         )
         let accessibilityBoundary = try XCTUnwrap(
             shell.range(
-                of: "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize",
+                of: "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize || tabBarCompact",
                 range: safeAreaStart.upperBound..<shell.endIndex
             )
         )
@@ -327,27 +356,45 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(shell.contains("accessibilityReduceTransparency"),
                       "The glass island needs an opaque accessibility fallback.")
         XCTAssertTrue(shell.contains("compact && !dynamicTypeSize.isAccessibilitySize"),
-                      "Accessibility Dynamic Type must retain visible labels.")
-        XCTAssertTrue(shell.contains("@ScaledMetric(relativeTo: .caption2)"),
-                      "Tab labels must use a scaled semantic metric through accessibility sizes.")
-        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ? 2 : 1"),
-                      "Accessibility sizes must receive a second bounded label line.")
-        XCTAssertFalse(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxxLarge)"),
-                       "The custom tab bar must not clamp the user's accessibility text size.")
+                      "Accessibility Dynamic Type must retain the expanded five-destination rail.")
+        XCTAssertTrue(shell.contains("@ScaledMetric(relativeTo: .footnote)"),
+                      "Tab-label clearance must follow the same semantic metric as the visible label.")
+        XCTAssertTrue(shell.contains("private static let labelLineCount = 1"),
+                      "Fixed navigation labels must remain on one line so the system cannot hyphenate them.")
+        XCTAssertFalse(shell.contains("dynamicTypeSize.isAccessibilitySize ? 2 : 1"),
+                       "Accessibility navigation must scale locally instead of wrapping or hyphenating.")
+        XCTAssertTrue(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxLarge)"),
+                      "Only fixed navigation labels need a local cap to keep all five destinations visible.")
+        XCTAssertTrue(shell.contains("private static func boundedLabelLineHeight"),
+                      "The reserved bar height must use the same navigation-only scale bound.")
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ? 8 : 12"),
+                      "The smallest accessibility rail needs compact native-like outer spacing.")
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ? 3 : 6"),
+                      "The accessibility rail must dedicate its interior width to complete labels.")
+        XCTAssertFalse(shell.contains("showsVisualLabels"),
+                       "Accessibility sizes must never hide the persistent visual destination labels.")
         XCTAssertTrue(shell.contains(".font(StrandFont.footnote.weight("),
                       "Tab labels must use semantic Dynamic Type rather than a fixed point size.")
         XCTAssertFalse(shell.contains(".font(.system(size: 11,"),
                        "The custom tab bar must not bypass Dynamic Type with a fixed label size.")
         // The rail used to shorten Workouts to a hard-coded "Train". That literal had no String Catalog
         // entry, so it rendered untranslated in all nine locales; it was removed. The rail now draws the
-        // LOCALIZED title and stays whole via lineLimit + minimumScaleFactor. Pin that, and pin the
+        // LOCALIZED title and stays whole via one-line bounded scaling. Pin that, and pin the
         // absence of the bare literal so the untranslated shortening cannot quietly return.
         XCTAssertTrue(shell.contains("Text(visualTitle(for: item))"),
                       "The rail label must go through visualTitle(for:).")
+        XCTAssertTrue(shell.contains(".lineLimit(Self.labelLineCount)"),
+                      "Navigation titles must stay on one line without system-inserted hyphenation.")
         XCTAssertTrue(shell.contains(".truncationMode(.tail)"),
-                      "Long localized titles must truncate cleanly rather than overlap adjacent tabs.")
+                      "A future out-of-bound localization must be contained rather than overlap another tab.")
+        XCTAssertTrue(shell.contains(
+            "private static let labelMinimumScaleFactor: CGFloat = 0.56"
+        ), "The shipped longest localization needs a readable final scale bound.")
+        XCTAssertTrue(shell.contains(
+            ".minimumScaleFactor(Self.labelMinimumScaleFactor)"
+        ), "Localized navigation labels need bounded one-line fitting before fallback containment.")
         XCTAssertTrue(shell.contains("accessibilityShowsLargeContentViewer"),
-                      "Truncated visual labels must expose their full title through Large Content Viewer.")
+                      "Every visual label must expose its full title through Large Content Viewer.")
         XCTAssertTrue(shell.contains(".accessibilityAddTraits(active ? .isSelected : [])"),
                       "The active tab must add its selected trait on the persistent accessibility node.")
         XCTAssertTrue(shell.contains(".accessibilityRemoveTraits(active ? [] : .isSelected)"),

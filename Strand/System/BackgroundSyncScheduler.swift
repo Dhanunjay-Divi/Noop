@@ -32,6 +32,17 @@ enum BackgroundSyncPolicy {
         return now.timeIntervalSince(lastAttempt) >= duplicateAttemptFloor
     }
 
+    static func requestedWakeAfterRun(
+        consumedWake: Date?,
+        currentWake: Date?,
+        now: Date,
+        succeeded: Bool
+    ) -> Date? {
+        guard !succeeded, consumedWake != nil else { return currentWake }
+        let retryWake = now.addingTimeInterval(60)
+        return currentWake.map { min($0, retryWake) } ?? retryWake
+    }
+
     /// A wake is successful when the bounded maintenance pipeline reaches its end. Optional work such
     /// as asking an already-connected band for history may be unavailable without making the wake fail.
     static func completedMaintenance(
@@ -184,6 +195,7 @@ enum BackgroundSyncScheduler {
     private static var operation: (@MainActor () async -> Bool)?
     private static var activeWork: Task<Void, Never>?
     private static var activeGeneration: UUID?
+    private static var activeConsumedWake: Date?
 
     static var lastCompletedAt: Date? {
         date(forKey: Key.lastCompleted)
@@ -262,12 +274,14 @@ enum BackgroundSyncScheduler {
             return
         }
 
-        if requestedWakeDue {
+        let consumedWake = requestedWakeDue ? date(forKey: Key.requestedWake) : nil
+        if consumedWake != nil {
             clearRequestedWake()
         }
         UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Key.lastAttempt)
         let generation = UUID()
         activeGeneration = generation
+        activeConsumedWake = consumedWake
         let work = Task { @MainActor in
             let success = await operation()
             guard !Task.isCancelled else { return }
@@ -295,10 +309,26 @@ enum BackgroundSyncScheduler {
         guard activeGeneration == generation else { return }
         activeGeneration = nil
         activeWork = nil
-        if success {
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Key.lastCompleted)
+        let now = Date()
+        let requestedWake = BackgroundSyncPolicy.requestedWakeAfterRun(
+            consumedWake: activeConsumedWake,
+            currentWake: date(forKey: Key.requestedWake),
+            now: now,
+            succeeded: success
+        )
+        activeConsumedWake = nil
+        if let requestedWake {
+            UserDefaults.standard.set(
+                requestedWake.timeIntervalSince1970,
+                forKey: Key.requestedWake
+            )
+        } else {
+            clearRequestedWake()
         }
-        scheduleNext(afterSuccess: success)
+        if success {
+            UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Key.lastCompleted)
+        }
+        scheduleNext(afterSuccess: success, now: now)
         backgroundTask.setTaskCompleted(success: success)
     }
 

@@ -3,11 +3,11 @@ package com.noop.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import java.time.Instant
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -45,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,9 +70,15 @@ import com.noop.managed.ManagedCloudService
 import com.noop.managed.ManagedInstallation
 import com.noop.managed.ManagedLocalRetentionPolicy
 import java.text.SimpleDateFormat
-import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun NoopPlusScreen() {
@@ -236,13 +244,40 @@ private fun ManagedCloudSetupSheet(
     var deletionCodeRequested by remember { mutableStateOf(false) }
     var confirmDeletion by remember { mutableStateOf(false) }
     var confirmHistoryExport by remember { mutableStateOf(false) }
+    var confirmHistoryImport by remember { mutableStateOf(false) }
     var pendingRevoke by remember { mutableStateOf<ManagedInstallation?>(null) }
+    var historyImportJob by remember { mutableStateOf<Job?>(null) }
     val historyExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
         if (uri != null) {
             scope.launch { service.exportCompleteCloudHistory(uri) }
         }
+    }
+    val historyImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            val job = scope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    service.importCompleteCloudHistory(uri)
+                } finally {
+                    historyImportJob = null
+                }
+            }
+            historyImportJob = job
+            job.start()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { historyImportJob?.cancel() }
     }
 
     LaunchedEffect(state.phase) {
@@ -540,6 +575,28 @@ private fun ManagedCloudSetupSheet(
                         onClick = { confirmHistoryExport = true },
                     )
                     NoopButton(
+                        text = stringResource(
+                            if (historyImportJob != null) {
+                                R.string.managed_cloud_cancel_import
+                            } else {
+                                R.string.managed_cloud_import_history
+                            },
+                        ),
+                        leadingIcon = if (historyImportJob != null) {
+                            Icons.Filled.CancelScheduleSend
+                        } else {
+                            Icons.Filled.UploadFile
+                        },
+                        kind = NoopButtonKind.Secondary,
+                        fullWidth = true,
+                        enabled = historyImportJob != null || !state.busy,
+                        modifier = Modifier.testTag("noop.noop-plus.import-history"),
+                        onClick = {
+                            historyImportJob?.cancel()
+                                ?: run { confirmHistoryImport = true }
+                        },
+                    )
+                    NoopButton(
                         text = stringResource(R.string.managed_cloud_disconnect_phone),
                         leadingIcon = Icons.AutoMirrored.Filled.Logout,
                         kind = NoopButtonKind.Secondary,
@@ -594,9 +651,17 @@ private fun ManagedCloudSetupSheet(
                         title = stringResource(R.string.managed_cloud_deletion_scheduled_title),
                         detail = stringResource(R.string.managed_cloud_deletion_scheduled_detail),
                     )
-                    state.deletionNotBefore?.let {
+                    state.deletionNotBefore?.let { raw ->
+                        val formatted = managedDeletionEligibilityTime(raw)
                         Text(
-                            stringResource(R.string.managed_cloud_deletion_after, it),
+                            formatted?.let {
+                                stringResource(
+                                    R.string.managed_cloud_deletion_after,
+                                    it,
+                                )
+                            } ?: stringResource(
+                                R.string.managed_cloud_deletion_time_unavailable,
+                            ),
                             style = NoopType.footnote,
                             color = Palette.textSecondary,
                         )
@@ -686,6 +751,31 @@ private fun ManagedCloudSetupSheet(
             },
             dismissButton = {
                 TextButton(onClick = { confirmHistoryExport = false }) {
+                    Text(stringResource(R.string.managed_cloud_cancel))
+                }
+            },
+        )
+    }
+    if (confirmHistoryImport) {
+        AlertDialog(
+            onDismissRequest = { confirmHistoryImport = false },
+            title = { Text(stringResource(R.string.managed_cloud_import_alert_title)) },
+            text = {
+                Text(stringResource(R.string.managed_cloud_import_alert_detail_android))
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !state.busy,
+                    onClick = {
+                        confirmHistoryImport = false
+                        historyImportLauncher.launch(arrayOf("application/zip"))
+                    },
+                ) {
+                    Text(stringResource(R.string.managed_cloud_choose_file))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmHistoryImport = false }) {
                     Text(stringResource(R.string.managed_cloud_cancel))
                 }
             },
@@ -859,6 +949,17 @@ private fun managedRelativeTime(value: String): String {
         DateUtils.getRelativeTimeSpanString(Instant.parse(value).toEpochMilli()).toString()
     }.getOrDefault(fallback)
 }
+
+internal fun managedDeletionEligibilityTime(
+    value: String,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+    locale: Locale = Locale.getDefault(),
+): String? = runCatching {
+    DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+        .withLocale(locale)
+        .withZone(zoneId)
+        .format(Instant.parse(value))
+}.getOrNull()
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this

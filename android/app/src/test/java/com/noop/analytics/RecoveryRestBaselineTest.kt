@@ -105,4 +105,5 @@ class RecoveryRestBaselineTest {
 
         assertEquals(score(0.001), score(0.2), 1e-9)
     }
+
 }

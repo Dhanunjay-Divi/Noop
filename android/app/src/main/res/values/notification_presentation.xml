@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="managed_safety_presentation_title">Safety pages</string>
+    <string name="managed_safety_presentation_blurb">Private app-to-app pages from accepted contacts. NOOP does not contact emergency services.</string>
+    <string name="managed_safety_urgent_sound_title">Urgent Safety sound</string>
+    <string name="managed_safety_urgent_sound_detail">Use a dedicated high-priority sound, vibration and light for Safety pages. Off by default. Android sound and Do Not Disturb settings still apply; NOOP never opens a full-screen alert.</string>
+    <string name="managed_safety_urgent_channel_name">NOOP Safety contacts · urgent sound</string>
+    <string name="managed_safety_urgent_channel_description">Opt-in urgent sound, vibration and light for private NOOP Safety pages.</string>
+    <string name="managed_safety_open_notification_settings">Open Safety notification settings</string>
+    <string name="live_heart_rate_notification_title">Heart rate in background notification</string>
+    <string name="live_heart_rate_notification_detail">Show a fresh live heart rate in the existing background notification. Updates at most every 15 seconds to limit battery use; this does not turn on continuous heart-rate capture.</string>
+    <string name="live_heart_rate_notification_accessibility">Heart rate in background notification. Does not start continuous heart-rate capture.</string>
+    <string name="live_heart_rate_notification_value">Heart rate %1$d bpm</string>
+</resources>

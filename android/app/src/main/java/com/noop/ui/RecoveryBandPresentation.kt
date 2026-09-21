@@ -40,6 +40,11 @@ internal object RecoveryBandPresentation {
         RecoveryBandLevel.STEADY -> Palette.statusWarning
         RecoveryBandLevel.STRONG -> Palette.statusPositive
     }
+
+    fun gaugeColors(score: Double): Pair<Color, Color> {
+        val color = color(score)
+        return color.copy(alpha = 0.68f) to color
+    }
 }
 
 @Composable

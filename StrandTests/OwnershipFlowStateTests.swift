@@ -140,6 +140,95 @@ final class OwnershipFlowStateTests: XCTestCase {
         )
     }
 
+    func testPendingDeletionHasARecoverableDedicatedPhase() {
+        for stage in OwnershipAccountStage.allCases {
+            XCTAssertEqual(
+                ownershipPhaseForOverview(
+                    accountState: "deletion_pending",
+                    bandState: "claimed",
+                    checkpointStage: stage,
+                    possessionAvailable: true
+                ),
+                .deletionPending,
+                "\(stage)"
+            )
+        }
+    }
+
+    func testInactiveOwnershipAccountsFailClosedBeforeBandStateResolution() {
+        for accountState in ["retired", "unknown"] {
+            for stage in OwnershipAccountStage.allCases {
+                XCTAssertEqual(
+                    ownershipPhaseForOverview(
+                        accountState: accountState,
+                        bandState: "claimed",
+                        checkpointStage: stage,
+                        possessionAvailable: true
+                    ),
+                    .unavailable,
+                    "\(accountState) \(stage)"
+                )
+            }
+        }
+    }
+
+    func testActiveOwnershipAccountsPreserveExpectedPhaseResolution() {
+        XCTAssertEqual(
+            ownershipPhaseForOverview(
+                accountState: "active",
+                bandState: "unclaimed",
+                checkpointStage: .accountReady,
+                possessionAvailable: true
+            ),
+            .accountReady
+        )
+        XCTAssertEqual(
+            ownershipPhaseForOverview(
+                accountState: "active",
+                bandState: "unclaimed",
+                checkpointStage: .accountReady,
+                possessionAvailable: false
+            ),
+            .possessionUnavailable
+        )
+        XCTAssertEqual(
+            ownershipPhaseForOverview(
+                accountState: "active",
+                bandState: "claimed",
+                checkpointStage: .claimed,
+                possessionAvailable: true
+            ),
+            .claimed
+        )
+        XCTAssertEqual(
+            ownershipPhaseForOverview(
+                accountState: "active",
+                bandState: "claimed",
+                checkpointStage: .complete,
+                possessionAvailable: true
+            ),
+            .complete
+        )
+        XCTAssertEqual(
+            ownershipPhaseForOverview(
+                accountState: "active",
+                bandState: "claimed",
+                checkpointStage: .replacementRequired,
+                possessionAvailable: true
+            ),
+            .replacementRequired
+        )
+        XCTAssertEqual(
+            ownershipPhaseForOverview(
+                accountState: "active",
+                bandState: "claimed",
+                checkpointStage: .replacementPending,
+                possessionAvailable: true
+            ),
+            .authorizingReplacement
+        )
+    }
+
     func testOnboardingReconcilesAllPostClaimPagesAndFinalCompletion() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -158,10 +247,25 @@ final class OwnershipFlowStateTests: XCTestCase {
         )
         XCTAssertTrue(source.contains("if !ownershipAllows(step) {"))
         XCTAssertTrue(source.contains("guard ownershipAllows(.done) else {"))
-        XCTAssertTrue(source.contains("if ownershipAllows(next) {"))
+        XCTAssertTrue(
+            source.contains(
+                "guard let destination = ownershipDestination(for: next) else"
+            )
+        )
+        XCTAssertTrue(
+            source.contains(
+                "guard reconciliationComplete else {\n" +
+                    "            return nil"
+            )
+        )
         XCTAssertTrue(
             source.contains(
                 ".onChange(of: ownershipService.phase) { _, _ in"
+            )
+        )
+        XCTAssertTrue(
+            source.contains(
+                ".onChange(of: ownershipService.isBusy) { _, _ in"
             )
         )
         XCTAssertTrue(source.contains("reconcileOwnershipRequirement()"))
@@ -997,6 +1101,7 @@ private extension OwnershipServicePhase {
         .claiming,
         .claimed,
         .complete,
+        .deletionPending,
         .replacementRequired,
         .authorizingReplacement,
     ]
@@ -1012,6 +1117,7 @@ private extension OwnershipServicePhase {
         .claiming,
         .claimed,
         .complete,
+        .deletionPending,
         .replacementRequired,
     ]
 }

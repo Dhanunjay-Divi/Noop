@@ -231,6 +231,124 @@ data class ManagedDocumentPage(
     val nextCursor: ManagedDocumentCursor?,
 )
 
+enum class ManagedWrappedKeyKind(val wireValue: String) {
+    ACCOUNT_MASTER("account_master"),
+    DOCUMENT("document");
+
+    companion object {
+        fun fromWire(value: String): ManagedWrappedKeyKind =
+            entries.firstOrNull { it.wireValue == value }
+                ?: throw ManagedStorageException.InvalidResponse()
+    }
+}
+
+enum class ManagedWrappedKeyAlgorithm(val wireValue: String) {
+    A256_GCM("A256GCM");
+
+    companion object {
+        fun fromWire(value: String): ManagedWrappedKeyAlgorithm =
+            entries.firstOrNull { it.wireValue == value }
+                ?: throw ManagedStorageException.InvalidResponse()
+    }
+}
+
+enum class ManagedWrappedKeyRecoveryMethod(val wireValue: String) {
+    RECOVERY_KEY("recovery_key"),
+    DEVICE_TRANSFER("device_transfer"),
+    PLATFORM_ESCROW("platform_escrow");
+
+    companion object {
+        fun fromWire(value: String): ManagedWrappedKeyRecoveryMethod =
+            entries.firstOrNull { it.wireValue == value }
+                ?: throw ManagedStorageException.InvalidResponse()
+    }
+}
+
+enum class ManagedWrappedKeyStatus(val wireValue: String) {
+    ACTIVE("active"),
+    RETIRED("retired"),
+    REVOKED("revoked");
+
+    companion object {
+        fun fromWire(value: String): ManagedWrappedKeyStatus =
+            entries.firstOrNull { it.wireValue == value }
+                ?: throw ManagedStorageException.InvalidResponse()
+    }
+}
+
+data class ManagedWrappedKeyMutation(
+    val keyKind: ManagedWrappedKeyKind,
+    val wrappingKeyId: UUID?,
+    val wrappingRevision: Int,
+    val wrappedKey: ByteArray,
+    val masterKeyConfirmationHmacSha256: String? = null,
+    val recoveryMethod: ManagedWrappedKeyRecoveryMethod? = null,
+    val algorithm: ManagedWrappedKeyAlgorithm = ManagedWrappedKeyAlgorithm.A256_GCM,
+) {
+    init {
+        require(wrappingRevision in 1..1_000_000)
+        require(wrappedKey.size in 40..16_384)
+        when (keyKind) {
+            ManagedWrappedKeyKind.ACCOUNT_MASTER -> {
+                require(wrappingKeyId == null)
+                require(masterKeyConfirmationHmacSha256?.matches(SHA256) == true)
+                require(recoveryMethod != null)
+            }
+            ManagedWrappedKeyKind.DOCUMENT -> {
+                require(wrappingKeyId != null)
+                require(wrappedKey.size == 72)
+                require(masterKeyConfirmationHmacSha256 == null)
+                require(recoveryMethod == null)
+            }
+        }
+    }
+
+    private companion object {
+        val SHA256 = Regex("^[0-9a-f]{64}$")
+    }
+}
+
+data class ManagedWrappedKeyRotation(
+    val mutation: ManagedWrappedKeyMutation,
+    val expectedWrappingRevision: Int,
+) {
+    init {
+        require(mutation.keyKind == ManagedWrappedKeyKind.DOCUMENT)
+        require(expectedWrappingRevision in 1 until 1_000_000)
+        require(mutation.wrappingRevision == expectedWrappingRevision + 1)
+    }
+}
+
+data class ManagedWrappedKeyRecord(
+    val keyId: UUID,
+    val keyKind: ManagedWrappedKeyKind,
+    val wrappingKeyId: UUID?,
+    val wrappingRevision: Int,
+    val algorithm: ManagedWrappedKeyAlgorithm,
+    val wrappedKey: ByteArray,
+    val wrappedKeySha256: String,
+    val masterKeyConfirmationHmacSha256: String?,
+    val recoveryMethod: ManagedWrappedKeyRecoveryMethod?,
+    val status: ManagedWrappedKeyStatus,
+    val successorKeyId: UUID?,
+    val createdAt: String,
+    val updatedAt: String,
+    val revokedAt: String?,
+)
+
+data class ManagedWrappedKeyVersion(
+    val keyId: UUID,
+    val keyKind: ManagedWrappedKeyKind,
+    val wrappingKeyId: UUID?,
+    val wrappingRevision: Int,
+    val algorithm: ManagedWrappedKeyAlgorithm,
+    val wrappedKey: ByteArray,
+    val wrappedKeySha256: String,
+    val masterKeyConfirmationHmacSha256: String?,
+    val recoveryMethod: ManagedWrappedKeyRecoveryMethod?,
+    val createdAt: String,
+)
+
 data class ManagedChangeFeed(
     val changes: List<ManagedChange>,
     val minimumSequence: Long,
@@ -363,7 +481,10 @@ sealed class ManagedStorageException(message: String, cause: Throwable? = null) 
     class NotFound : ManagedStorageException("The requested NOOP+ resource no longer exists.")
     class QuotaExceeded : ManagedStorageException("This NOOP+ storage allowance is full.")
     class Conflict : ManagedStorageException("NOOP+ rejected conflicting sync state.")
-    class Server(val statusCode: Int) :
+    class Server(
+        val statusCode: Int,
+        val retryAfterMillis: Long? = null,
+    ) :
         ManagedStorageException("NOOP+ is temporarily unavailable.")
     class DigestMismatch : ManagedStorageException("A cloud object failed its integrity check.")
 }

@@ -174,6 +174,7 @@ class AnalysisTimeZoneHistoryTest {
             AnalysisTimeZoneHistory.Uncertainty.RECORDED_ZONE_BOUNDARY,
             plan.terminalUnknownRange?.reason,
         )
+        assertFalse(plan.resolvableHistorySatisfied)
         assertTrue(boundaryClaim.latestAffectedTs!! in plan.terminalUnknownRange!!)
         assertTrue(
             epoch(LocalDate.of(2026, 6, 5), LocalTime.NOON, newYork) in
@@ -355,5 +356,91 @@ class AnalysisTimeZoneHistoryTest {
         assertTrue(plan.civilDayWindows.all {
             it.provenanceStartTs == null && it.provenanceEndTs == null
         })
+    }
+
+    @Test
+    fun `rest formula traversal covers every resolvable timezone segment`() {
+        val history = AnalysisTimeZoneHistory.forTesting(MemoryPersistence())
+        val utc = ZoneId.of("UTC")
+        val gmt = ZoneId.of("GMT")
+        val etcGmt = ZoneId.of("Etc/GMT")
+        val firstStart = epoch(LocalDate.of(2026, 9, 1), LocalTime.MIDNIGHT, utc)
+        val firstEnd = epoch(LocalDate.of(2026, 9, 2), LocalTime.MAX, utc)
+        val secondStart = epoch(LocalDate.of(2026, 9, 4), LocalTime.MIDNIGHT, gmt)
+        val secondEnd = epoch(LocalDate.of(2026, 9, 5), LocalTime.MAX, gmt)
+        val latestStart = epoch(LocalDate.of(2026, 9, 7), LocalTime.MIDNIGHT, etcGmt)
+        val now = epoch(LocalDate.of(2026, 9, 8), LocalTime.NOON, etcGmt)
+        history.observe(firstStart, utc)
+        history.observe(firstEnd, utc)
+        history.observe(secondStart, gmt)
+        history.observe(secondEnd, gmt)
+        history.observe(latestStart, etcGmt)
+        val snapshot = history.observe(now, etcGmt)!!
+
+        val latest = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 4_000,
+            claims = emptyList(),
+            nowSeconds = now,
+            force = true,
+            timeZoneHistory = snapshot,
+            traverseResolvableHistory = true,
+        )
+        val middle = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 4_000,
+            claims = emptyList(),
+            nowSeconds = now,
+            force = true,
+            timeZoneHistory = snapshot,
+            traverseResolvableHistory = true,
+            resolvableHistoryAnchor = latest.nextResolvableHistoryAnchor!!,
+        )
+        val oldest = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 4_000,
+            claims = emptyList(),
+            nowSeconds = now,
+            force = true,
+            timeZoneHistory = snapshot,
+            traverseResolvableHistory = true,
+            resolvableHistoryAnchor = middle.nextResolvableHistoryAnchor!!,
+        )
+
+        assertEquals(etcGmt, latest.timeZone)
+        assertEquals(gmt, middle.timeZone)
+        assertEquals(utc, oldest.timeZone)
+        assertEquals(2, latest.civilDayWindows.size)
+        assertEquals(2, middle.civilDayWindows.size)
+        assertEquals(2, oldest.civilDayWindows.size)
+        assertFalse(latest.resolvableHistorySatisfied)
+        assertFalse(middle.resolvableHistorySatisfied)
+        assertTrue(oldest.resolvableHistorySatisfied)
+        assertNull(oldest.nextResolvableHistoryAnchor)
+    }
+
+    @Test
+    fun `rest formula traversal keeps true truncation pending`() {
+        val history = AnalysisTimeZoneHistory.forTesting(MemoryPersistence())
+        val utc = ZoneId.of("UTC")
+        val start = epoch(LocalDate.of(2026, 9, 1), LocalTime.MIDNIGHT, utc)
+        val now = epoch(LocalDate.of(2026, 9, 5), LocalTime.NOON, utc)
+        history.observe(start, utc)
+        val snapshot = history.observe(now, utc)!!
+
+        val first = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays = 2,
+            claims = emptyList(),
+            nowSeconds = now,
+            force = true,
+            timeZoneHistory = snapshot,
+            traverseResolvableHistory = true,
+        )
+
+        assertEquals(2, first.civilDayWindows.size)
+        assertTrue(first.requestedWindowSatisfied)
+        assertFalse(first.resolvableHistorySatisfied)
+        assertNotNull(first.nextResolvableHistoryAnchor)
+        assertTrue(
+            first.nextResolvableHistoryAnchor!! <
+                first.civilDayWindows.last().startTs,
+        )
     }
 }

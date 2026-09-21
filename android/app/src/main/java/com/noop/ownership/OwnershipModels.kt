@@ -50,6 +50,7 @@ enum class OwnershipPhase {
     CLAIMING,
     CLAIMED,
     COMPLETE,
+    DELETION_PENDING,
     REPLACEMENT_REQUIRED,
     AUTHORIZING_REPLACEMENT,
 }
@@ -149,6 +150,26 @@ data class OwnershipAccountOverview(
     val noopPlusEntitled: Boolean,
 )
 
+internal fun ownershipPhaseForOverview(
+    accountState: String,
+    bandState: String,
+    checkpointStage: OwnershipCheckpointStage,
+    possessionAvailable: Boolean,
+): OwnershipPhase = when {
+    accountState == "deletion_pending" -> OwnershipPhase.DELETION_PENDING
+    accountState != "active" -> OwnershipPhase.UNAVAILABLE
+    checkpointStage == OwnershipCheckpointStage.REPLACEMENT_REQUIRED ->
+        OwnershipPhase.REPLACEMENT_REQUIRED
+    checkpointStage == OwnershipCheckpointStage.REPLACEMENT_PENDING ->
+        OwnershipPhase.AUTHORIZING_REPLACEMENT
+    bandState != "claimed" && possessionAvailable ->
+        OwnershipPhase.ACCOUNT_READY
+    bandState != "claimed" -> OwnershipPhase.POSSESSION_UNAVAILABLE
+    checkpointStage == OwnershipCheckpointStage.COMPLETE ->
+        OwnershipPhase.COMPLETE
+    else -> OwnershipPhase.CLAIMED
+}
+
 internal fun OwnershipCheckpoint.completeRegistration(
     overview: OwnershipAccountOverview,
 ): OwnershipCheckpoint {
@@ -176,6 +197,31 @@ data class OwnershipInstallation(
     val lastSeenAt: String,
 )
 
+data class OwnershipAccountDeletion(
+    val id: UUID,
+    val state: String,
+    val accountState: String,
+    val requestedAt: String,
+    val cancelBefore: String,
+    val canceledAt: String?,
+    val cancellationAllowed: Boolean,
+    val policyVersion: String,
+    val sessionsRevoked: Boolean,
+    val revokedSessionCount: Int,
+    val cloudDataState: String,
+    val cloudDataNotBefore: String,
+    val identityState: String,
+    val identityBlocker: String?,
+    val bandRetirementRequired: Boolean,
+    val bandRetirementEligibility: String,
+    val bandRetirementState: String,
+    val bandRetirementBlocker: String?,
+    val bandRetirementPolicyVersion: String?,
+    val bandHardwareCapabilityVersion: String?,
+    val controlPlaneState: String,
+    val controlPlaneBlocker: String?,
+)
+
 data class OwnershipState(
     val phase: OwnershipPhase,
     val busy: Boolean = false,
@@ -183,6 +229,7 @@ data class OwnershipState(
     val terms: OwnershipTermsDocument? = null,
     val overview: OwnershipAccountOverview? = null,
     val installations: List<OwnershipInstallation> = emptyList(),
+    val accountDeletion: OwnershipAccountDeletion? = null,
     val maskedEmail: String = "",
 )
 
@@ -463,6 +510,10 @@ sealed class OwnershipException(message: String) : Exception(message) {
     data object InvalidPhone : OwnershipException("Invalid phone")
     data object InvalidCode : OwnershipException("Invalid code")
     data object PhoneCodeRequired : OwnershipException("Phone code required")
+    data object DeletionConfirmationRequired :
+        OwnershipException("Deletion confirmation required")
+    data object DeletionAcknowledgementsRequired :
+        OwnershipException("Deletion acknowledgements required")
     data object NotSignedIn : OwnershipException("Not signed in")
     data object Authentication : OwnershipException("Authentication failed")
     data object ChallengeInactive : OwnershipException("Confirmation is no longer active")

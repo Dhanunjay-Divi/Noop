@@ -43,6 +43,31 @@ struct OwnershipInstallation: Identifiable, Equatable {
     let lastSeenAt: String
 }
 
+struct OwnershipAccountDeletion: Equatable {
+    let id: UUID
+    let state: String
+    let accountState: String
+    let requestedAt: String
+    let cancelBefore: String
+    let canceledAt: String?
+    let cancellationAllowed: Bool
+    let policyVersion: String
+    let sessionsRevoked: Bool
+    let revokedSessionCount: Int
+    let cloudDataState: String
+    let cloudDataNotBefore: String
+    let identityState: String
+    let identityBlocker: String?
+    let bandRetirementRequired: Bool
+    let bandRetirementEligibility: String
+    let bandRetirementState: String
+    let bandRetirementBlocker: String?
+    let bandRetirementPolicyVersion: String?
+    let bandHardwareCapabilityVersion: String?
+    let controlPlaneState: String
+    let controlPlaneBlocker: String?
+}
+
 @MainActor
 final class OwnershipService: ObservableObject {
     static let shared = OwnershipService()
@@ -53,9 +78,12 @@ final class OwnershipService: ObservableObject {
     @Published private(set) var terms: OwnershipTermsDocument?
     @Published private(set) var overview: OwnershipAccountOverview?
     @Published private(set) var installations: [OwnershipInstallation] = []
+    @Published private(set) var accountDeletion: OwnershipAccountDeletion?
 
     var isAvailable: Bool { configuration != nil }
     var possessionAvailable: Bool { possessionProvider.isAvailable }
+    static let accountDeletionConfirmation =
+        "DELETE MY NOOP OWNERSHIP ACCOUNT"
     var maskedEmail: String {
         guard let value = try? runtime().auth.currentUser?.email else { return "" }
         return Self.maskedEmail(value)
@@ -97,6 +125,7 @@ final class OwnershipService: ObservableObject {
             let runtime = try runtime()
             guard let user = runtime.auth.currentUser else {
                 phase = .signedOut
+                accountDeletion = nil
                 return
             }
             let checkpoint = try checkpoint(for: user)
@@ -823,6 +852,210 @@ final class OwnershipService: ObservableObject {
         }
     }
 
+    func requestAccountDeletion(
+        password: String,
+        confirmation: String,
+        exportAcknowledged: Bool,
+        retentionAcknowledged: Bool
+    ) async {
+        guard !isBusy else { return }
+        isBusy = true
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "ownership.account_deletion.request"
+        )
+        defer { isBusy = false }
+        do {
+            guard confirmation == Self.accountDeletionConfirmation else {
+                throw OwnershipClientError.deletionConfirmationRequired
+            }
+            guard exportAcknowledged, retentionAcknowledged else {
+                throw OwnershipClientError.deletionAcknowledgementsRequired
+            }
+            let runtime = try runtime()
+            let user = try currentUser(runtime)
+            try await reauthenticateWithPassword(user, password: password)
+            let checkpoint = try self.checkpoint(for: user)
+            guard let policyVersion = checkpoint.acceptedPolicyVersion,
+                  let policySHA256 = checkpoint.acceptedPolicySHA256,
+                  let locale = checkpoint.acceptedLocale else {
+                throw OwnershipClientError.termsRequired
+            }
+            let scope = try accountScope(for: user)
+            let requestID = try secureStore.readAccountDeletionAttemptID(
+                scope: scope
+            ) ?? UUID()
+            try secureStore.writeAccountDeletionAttemptID(
+                requestID,
+                scope: scope
+            )
+            let deletion = try await client().requestAccountDeletion(
+                requestID: requestID,
+                confirmationSHA256: ownershipSHA256(
+                    Data(Self.accountDeletionConfirmation.utf8)
+                ),
+                exportAcknowledged: exportAcknowledged,
+                retentionAcknowledged: retentionAcknowledged,
+                policyVersion: policyVersion,
+                policySHA256: policySHA256,
+                locale: locale,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            accountDeletion = deletion
+            overview = nil
+            installations = []
+            phase = .deletionPending
+            do {
+                try secureStore.writeAccountDeletionRequestID(
+                    deletion.id,
+                    scope: scope
+                )
+                let cleanupCompleted =
+                    secureStore.deleteAccountDeletionAttemptID(scope: scope)
+                status = String(
+                    localized: "Ownership account deletion is in its cooling-off period. Local health data remains on this iPhone."
+                )
+                AppDiagnosticsRecorder.shared.endOperation(
+                    diagnostic,
+                    outcome: "accepted",
+                    fields: [
+                        "deletion_state": deletion.state,
+                        "band_retirement": deletion.bandRetirementEligibility,
+                        "cleanup_outcome": cleanupCompleted
+                            ? "completed"
+                            : "deferred",
+                    ]
+                )
+            } catch {
+                status = String(
+                    localized: "Deletion was requested, but this phone could not save the status reference. Keep this screen open and contact support before signing out."
+                )
+                AppDiagnosticsRecorder.shared.endOperation(
+                    diagnostic,
+                    outcome: "partial",
+                    fields: [
+                        "failure_kind": "secure_storage",
+                        "deletion_state": deletion.state,
+                    ]
+                )
+            }
+        } catch {
+            if finishCanceledOperation(error, diagnostic: diagnostic) {
+                return
+            }
+            let reportedError = reconcileChangedTerms(error)
+            phase = ownershipFailureRecoveryPhase(
+                phase,
+                termsChanged: Self.isTermsChanged(reportedError),
+                secureStorageFailed: Self.isSecureStorage(reportedError)
+            )
+            status = Self.userMessage(for: reportedError)
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOutcome(reportedError),
+                fields: [
+                    "failure_kind": Self.diagnosticFailureKind(reportedError)
+                ]
+            )
+        }
+    }
+
+    func refreshAccountDeletion(password: String) async {
+        guard !isBusy else { return }
+        isBusy = true
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "ownership.account_deletion.refresh"
+        )
+        defer { isBusy = false }
+        do {
+            let user = try currentUser(try runtime())
+            try await reauthenticateWithPassword(user, password: password)
+            let scope = try accountScope(for: user)
+            let requestID: UUID?
+            if let activeRequestID = accountDeletion?.id {
+                requestID = activeRequestID
+            } else {
+                requestID = try secureStore.readAccountDeletionRequestID(scope: scope)
+            }
+            guard let requestID else {
+                throw OwnershipClientError.invalidState
+            }
+            let deletion = try await client().accountDeletion(
+                requestID,
+                authorization: try await authorization(forceRefresh: false)
+            )
+            let cleanupOutcome = try applyAccountDeletion(
+                deletion,
+                scope: scope
+            )
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: deletion.state,
+                fields: [
+                    "deletion_state": deletion.state,
+                    "band_retirement": deletion.bandRetirementEligibility,
+                    "cleanup_outcome": cleanupOutcome,
+                ]
+            )
+        } catch {
+            if finishCanceledOperation(error, diagnostic: diagnostic) {
+                return
+            }
+            status = Self.userMessage(for: error)
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOutcome(error),
+                fields: ["failure_kind": Self.diagnosticFailureKind(error)]
+            )
+        }
+    }
+
+    func cancelAccountDeletion(password: String) async {
+        guard !isBusy else { return }
+        isBusy = true
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "ownership.account_deletion.cancel"
+        )
+        defer { isBusy = false }
+        do {
+            let runtime = try runtime()
+            let user = try currentUser(runtime)
+            try await reauthenticateWithPassword(user, password: password)
+            let scope = try accountScope(for: user)
+            let requestID: UUID?
+            if let activeRequestID = accountDeletion?.id {
+                requestID = activeRequestID
+            } else {
+                requestID = try secureStore.readAccountDeletionRequestID(scope: scope)
+            }
+            guard let requestID else {
+                throw OwnershipClientError.invalidState
+            }
+            let deletion = try await client().cancelAccountDeletion(
+                requestID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            let cleanupOutcome = try applyAccountDeletion(
+                deletion,
+                scope: scope
+            )
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: deletion.state,
+                fields: ["cleanup_outcome": cleanupOutcome]
+            )
+        } catch {
+            if finishCanceledOperation(error, diagnostic: diagnostic) {
+                return
+            }
+            status = Self.userMessage(for: error)
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOutcome(error),
+                fields: ["failure_kind": Self.diagnosticFailureKind(error)]
+            )
+        }
+    }
+
     private func loadOverview(
         forceRefresh: Bool,
         generation: UInt64? = nil
@@ -895,6 +1128,7 @@ final class OwnershipService: ObservableObject {
             terms = nil
             overview = nil
             installations = []
+            accountDeletion = nil
             verificationID = nil
             status = String(localized: "Signed out of band ownership.")
             let cleanupOutcome: String
@@ -941,6 +1175,7 @@ final class OwnershipService: ObservableObject {
             terms = nil
             overview = nil
             installations = []
+            accountDeletion = nil
             verificationID = nil
             phase = .signedOut
             status = String(
@@ -1010,6 +1245,11 @@ final class OwnershipService: ObservableObject {
         user: User,
         checkpoint: OwnershipAccountCheckpoint
     ) {
+        if let scope = try? accountScope(for: user),
+           (try? secureStore.readAccountDeletionRequestID(scope: scope)) != nil {
+            phase = .deletionPending
+            return
+        }
         guard user.isEmailVerified else {
             phase = .emailVerification
             return
@@ -1040,6 +1280,46 @@ final class OwnershipService: ObservableObject {
         case .replacementPending:
             phase = .authorizingReplacement
         }
+    }
+
+    private func applyAccountDeletion(
+        _ deletion: OwnershipAccountDeletion,
+        scope: String
+    ) throws -> String {
+        overview = nil
+        installations = []
+        if deletion.state == "canceled" {
+            let requestReferenceDeleted =
+                secureStore.deleteAccountDeletionRequestID(scope: scope)
+            let attemptReferenceDeleted =
+                secureStore.deleteAccountDeletionAttemptID(scope: scope)
+            let cleanupCompleted =
+                requestReferenceDeleted && attemptReferenceDeleted
+            invalidateBootstrapReconciliation()
+            try runtime().auth.signOut()
+            accountDeletion = nil
+            terms = nil
+            phase = .signedOut
+            status = cleanupCompleted
+                ? String(
+                    localized: "Ownership account deletion was canceled. Sign in again to reauthorize this phone; local health data was not changed."
+                )
+                : String(
+                    localized: "Ownership account deletion was canceled and this phone signed out. Its saved status reference could not be removed; local health data was not changed."
+                )
+            return cleanupCompleted ? "completed" : "deferred"
+        }
+        accountDeletion = deletion
+        _ = secureStore.deleteAccountDeletionAttemptID(scope: scope)
+        phase = .deletionPending
+        status = deletion.cancellationAllowed
+            ? String(
+                localized: "Ownership account deletion is in its cooling-off period. Local health data remains on this iPhone."
+            )
+            : String(
+                localized: "Ownership account deletion is being coordinated. Local health data remains on this iPhone."
+            )
+        return "not_needed"
     }
 
     private func reconcileRemote(user: User) async {
@@ -1092,6 +1372,21 @@ final class OwnershipService: ObservableObject {
                 AppDiagnosticsRecorder.shared.endOperation(
                     diagnostic,
                     outcome: "completed"
+                )
+                return
+            }
+            let scope = try accountScope(for: user)
+            if let deletionRequestID =
+                try secureStore.readAccountDeletionRequestID(scope: scope) {
+                let deletion = try await client().accountDeletion(
+                    deletionRequestID,
+                    authorization: try await authorization(forceRefresh: false)
+                )
+                _ = try applyAccountDeletion(deletion, scope: scope)
+                AppDiagnosticsRecorder.shared.endOperation(
+                    diagnostic,
+                    outcome: "completed",
+                    fields: ["reconciled_state": "account_deletion"]
                 )
                 return
             }
@@ -1644,19 +1939,12 @@ final class OwnershipService: ObservableObject {
         for overview: OwnershipAccountOverview,
         checkpoint: OwnershipAccountCheckpoint
     ) -> OwnershipServicePhase {
-        switch checkpoint.stage {
-        case .replacementRequired:
-            return .replacementRequired
-        case .replacementPending:
-            return .authorizingReplacement
-        default:
-            guard overview.bandState == "claimed" else {
-                return possessionProvider.isAvailable
-                    ? .accountReady
-                    : .possessionUnavailable
-            }
-            return checkpoint.stage == .complete ? .complete : .claimed
-        }
+        ownershipPhaseForOverview(
+            accountState: overview.accountState,
+            bandState: overview.bandState,
+            checkpointStage: checkpoint.stage,
+            possessionAvailable: possessionProvider.isAvailable
+        )
     }
 
     private static func isTermsChanged(_ error: Error) -> Bool {
@@ -1789,6 +2077,21 @@ final class OwnershipService: ObservableObject {
         return user
     }
 
+    private func reauthenticateWithPassword(
+        _ user: User,
+        password: String
+    ) async throws {
+        guard !password.isEmpty, password.count <= 128,
+              let email = user.email, !email.isEmpty else {
+            throw OwnershipClientError.invalidCredentials
+        }
+        let credential = EmailAuthProvider.credential(
+            withEmail: email,
+            password: password
+        )
+        _ = try await user.reauthenticate(with: credential)
+    }
+
     private func accountScope() throws -> String {
         try accountScope(for: try currentUser(try runtime()))
     }
@@ -1919,6 +2222,14 @@ final class OwnershipService: ObservableObject {
                 )
             case .invalidCode, .phoneCodeRequired:
                 return String(localized: "Enter the current six-digit code.")
+            case .deletionConfirmationRequired:
+                return String(
+                    localized: "Type the full ownership account deletion confirmation exactly as shown."
+                )
+            case .deletionAcknowledgementsRequired:
+                return String(
+                    localized: "Confirm both the export and retention acknowledgements before continuing."
+                )
             case .notSignedIn, .authentication:
                 return String(localized: "Sign in again to continue.")
             case .challengeInactive:
@@ -1973,7 +2284,8 @@ final class OwnershipService: ObservableObject {
                     .invalidCode, .emailVerificationRequired, .termsRequired,
                     .termsChanged, .notSignedIn, .authentication,
                     .challengeInactive, .possessionRejected, .alreadyClaimed,
-                    .phoneCodeRequired:
+                    .phoneCodeRequired, .deletionConfirmationRequired,
+                    .deletionAcknowledgementsRequired:
                 return "rejected"
             case .unavailable, .serviceUnavailable, .possessionUnavailable:
                 return "unavailable"
@@ -2019,6 +2331,10 @@ final class OwnershipService: ObservableObject {
             case .invalidPhone: return "phone_format"
             case .invalidCode: return "code_format"
             case .phoneCodeRequired: return "verification_state"
+            case .deletionConfirmationRequired:
+                return "deletion_confirmation"
+            case .deletionAcknowledgementsRequired:
+                return "deletion_acknowledgements"
             case .notSignedIn: return "identity_missing"
             case .authentication: return "authentication"
             case .challengeInactive: return "challenge_inactive"
@@ -2607,6 +2923,64 @@ private final class OwnershipAPIClient {
         )
     }
 
+    func requestAccountDeletion(
+        requestID: UUID,
+        confirmationSHA256: String,
+        exportAcknowledged: Bool,
+        retentionAcknowledged: Bool,
+        policyVersion: String,
+        policySHA256: String,
+        locale: String,
+        authorization: OwnershipAuthorization
+    ) async throws -> OwnershipAccountDeletion {
+        let data = try await execute(
+            path: "v1/ownership/account/deletion-requests",
+            method: "POST",
+            routeGroup: "account_deletion_request",
+            authorization: authorization,
+            body: [
+                "request_id": requestID.uuidString.lowercased(),
+                "confirmation_sha256": confirmationSHA256,
+                "export_acknowledged": exportAcknowledged,
+                "retention_acknowledged": retentionAcknowledged,
+                "policy_version": policyVersion,
+                "policy_sha256": policySHA256,
+                "locale": locale,
+            ]
+        )
+        return try parseAccountDeletion(data)
+    }
+
+    func accountDeletion(
+        _ requestID: UUID,
+        authorization: OwnershipAuthorization
+    ) async throws -> OwnershipAccountDeletion {
+        let data = try await execute(
+            path: "v1/ownership/account/deletion-requests/"
+                + requestID.uuidString.lowercased(),
+            method: "GET",
+            routeGroup: "account_deletion_status",
+            authorization: authorization,
+            includeInstallation: false
+        )
+        return try parseAccountDeletion(data)
+    }
+
+    func cancelAccountDeletion(
+        _ requestID: UUID,
+        authorization: OwnershipAuthorization
+    ) async throws -> OwnershipAccountDeletion {
+        let data = try await execute(
+            path: "v1/ownership/account/deletion-requests/"
+                + requestID.uuidString.lowercased()
+                + "/cancel",
+            method: "POST",
+            routeGroup: "account_deletion_cancel",
+            authorization: authorization
+        )
+        return try parseAccountDeletion(data)
+    }
+
     func selectPlan(
         _ plan: NoopProductPlan,
         requestID: UUID,
@@ -2655,6 +3029,222 @@ private final class OwnershipAPIClient {
             plan: plan,
             noopPlusEntitled: entitled
         )
+    }
+
+    private func parseAccountDeletion(
+        _ data: Data
+    ) throws -> OwnershipAccountDeletion {
+        let object = try jsonObject(data)
+        guard let value = object["deletion"] as? [String: Any],
+              let idRaw = value["deletion_request_id"] as? String,
+              let id = UUID(uuidString: idRaw),
+              let state = value["state"] as? String,
+              ["cooling_off", "scheduled", "blocked", "canceled"].contains(
+                  state
+              ),
+              let accountState = value["account_state"] as? String,
+              ["active", "deletion_pending", "retired"].contains(accountState),
+              let requestedAt = value["requested_at"] as? String,
+              Self.isDeletionTimestamp(requestedAt),
+              let cancelBefore = value["cancel_before"] as? String,
+              Self.isDeletionTimestamp(cancelBefore),
+              let cancellationAllowed =
+                value["cancellation_allowed"] as? Bool,
+              let policyVersion = value["policy_version"] as? String,
+              Self.isDeletionPolicyVersion(policyVersion),
+              let sessionsRevoked = value["sessions_revoked"] as? Bool,
+              sessionsRevoked,
+              let revokedSessionCount =
+                value["revoked_session_count"] as? Int,
+              (1...10).contains(revokedSessionCount),
+              value["export_acknowledged"] as? Bool == true,
+              value["retention_acknowledged"] as? Bool == true,
+              value["reauthorization_required"] as? Bool == true,
+              value["destructive_completion_claimed"] as? Bool == false,
+              value["duplicate"] is Bool,
+              let cloud = value["cloud_data_deletion"] as? [String: Any],
+              let cloudState = Self.deletionWorkState(cloud["state"]),
+              let cloudNotBefore = cloud["not_before"] as? String,
+              Self.isDeletionTimestamp(cloudNotBefore),
+              let identity = value["identity_deletion"] as? [String: Any],
+              let identityState = Self.deletionWorkState(identity["state"]),
+              let band = value["band_retirement"] as? [String: Any],
+              let bandRequired = band["required"] as? Bool,
+              let bandEligibility = band["eligibility"] as? String,
+              [
+                  "not_required",
+                  "blocked_hardware",
+                  "eligible_pending_operator",
+                  "blocked_policy",
+              ].contains(bandEligibility),
+              let bandState = Self.deletionWorkState(band["work_state"]),
+              let control = value[
+                  "control_plane_deletion"
+              ] as? [String: Any],
+              let controlState = Self.deletionWorkState(control["state"]) else {
+            throw OwnershipClientError.invalidResponse
+        }
+        let canceledAt = try Self.requiredNullableDeletionTimestamp(
+            value,
+            key: "canceled_at"
+        )
+        let identityBlocker = try Self.requiredNullableDeletionToken(
+            identity,
+            key: "blocker"
+        )
+        let bandBlocker = try Self.requiredNullableDeletionToken(
+            band,
+            key: "blocker"
+        )
+        let controlBlocker = try Self.requiredNullableDeletionToken(
+            control,
+            key: "blocker"
+        )
+        let bandPolicyVersion = try Self.requiredNullableDeletionPolicyVersion(
+            band,
+            key: "policy_version"
+        )
+        let bandHardwareVersion = try Self.requiredNullableDeletionPolicyVersion(
+            band,
+            key: "hardware_capability_version"
+        )
+        guard canceledAt.map(Self.isDeletionTimestamp) ?? true,
+              (state == "canceled") == (canceledAt != nil),
+              cancellationAllowed == (
+                  state == "cooling_off" && canceledAt == nil
+              ),
+              bandRequired == (bandEligibility != "not_required"),
+              Self.deletionBlockerIsConsistent(
+                  identityState,
+                  blocker: identityBlocker
+              ),
+              Self.deletionBlockerIsConsistent(
+                  bandState,
+                  blocker: bandBlocker
+              ),
+              Self.deletionBlockerIsConsistent(
+                  controlState,
+                  blocker: controlBlocker
+              )
+        else {
+            throw OwnershipClientError.invalidResponse
+        }
+        return OwnershipAccountDeletion(
+            id: id,
+            state: state,
+            accountState: accountState,
+            requestedAt: requestedAt,
+            cancelBefore: cancelBefore,
+            canceledAt: canceledAt,
+            cancellationAllowed: cancellationAllowed,
+            policyVersion: policyVersion,
+            sessionsRevoked: sessionsRevoked,
+            revokedSessionCount: revokedSessionCount,
+            cloudDataState: cloudState,
+            cloudDataNotBefore: cloudNotBefore,
+            identityState: identityState,
+            identityBlocker: identityBlocker,
+            bandRetirementRequired: bandRequired,
+            bandRetirementEligibility: bandEligibility,
+            bandRetirementState: bandState,
+            bandRetirementBlocker: bandBlocker,
+            bandRetirementPolicyVersion: bandPolicyVersion,
+            bandHardwareCapabilityVersion: bandHardwareVersion,
+            controlPlaneState: controlState,
+            controlPlaneBlocker: controlBlocker
+        )
+    }
+
+    private static func deletionWorkState(_ value: Any?) -> String? {
+        guard let value = value as? String,
+              [
+                  "scheduled",
+                  "blocked",
+                  "not_required",
+                  "canceled",
+                  "processing",
+                  "completed",
+                  "failed",
+              ].contains(value) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func requiredNullableDeletionToken(
+        _ object: [String: Any],
+        key: String
+    ) throws -> String? {
+        guard object.keys.contains(key) else {
+            throw OwnershipClientError.invalidResponse
+        }
+        let raw = object[key]
+        guard !(raw is NSNull) else { return nil }
+        guard let value = raw as? String,
+              value.range(
+                  of: #"^[a-z][a-z0-9_]{0,63}$"#,
+                  options: .regularExpression
+              ) != nil else {
+            throw OwnershipClientError.invalidResponse
+        }
+        return value
+    }
+
+    private static func requiredNullableDeletionTimestamp(
+        _ object: [String: Any],
+        key: String
+    ) throws -> String? {
+        guard object.keys.contains(key) else {
+            throw OwnershipClientError.invalidResponse
+        }
+        let raw = object[key]
+        guard !(raw is NSNull) else { return nil }
+        guard let value = raw as? String,
+              isDeletionTimestamp(value) else {
+            throw OwnershipClientError.invalidResponse
+        }
+        return value
+    }
+
+    private static func requiredNullableDeletionPolicyVersion(
+        _ object: [String: Any],
+        key: String
+    ) throws -> String? {
+        guard object.keys.contains(key) else {
+            throw OwnershipClientError.invalidResponse
+        }
+        let raw = object[key]
+        guard !(raw is NSNull) else { return nil }
+        guard let value = raw as? String,
+              isDeletionPolicyVersion(value) else {
+            throw OwnershipClientError.invalidResponse
+        }
+        return value
+    }
+
+    private static func deletionBlockerIsConsistent(
+        _ state: String,
+        blocker: String?
+    ) -> Bool {
+        (state == "blocked") == (blocker != nil)
+    }
+
+    private static func isDeletionPolicyVersion(_ value: String) -> Bool {
+        value.range(
+            of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func isDeletionTimestamp(_ value: String) -> Bool {
+        guard value.utf8.count <= 64 else { return false }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [
+            .withInternetDateTime,
+            .withFractionalSeconds,
+        ]
+        return fractional.date(from: value) != nil
+            || ISO8601DateFormatter().date(from: value) != nil
     }
 
     private func execute(
@@ -2761,6 +3351,7 @@ private final class OwnershipAPIClient {
                 case 412:
                     throw [
                         "account",
+                        "account_deletion_request",
                         "claim",
                         "installation_authorize",
                         "overview",
@@ -2964,6 +3555,64 @@ final class OwnershipSecureStore {
         )
     }
 
+    func readAccountDeletionRequestID(scope: String) throws -> UUID? {
+        guard let data = try read(account: "account-deletion-\(scope)") else {
+            return nil
+        }
+        guard data.count <= 64,
+              let value = String(data: data, encoding: .utf8),
+              let requestID = UUID(uuidString: value) else {
+            throw OwnershipClientError.secureStorage
+        }
+        return requestID
+    }
+
+    func readAccountDeletionAttemptID(scope: String) throws -> UUID? {
+        guard let data = try read(
+            account: "account-deletion-attempt-\(scope)"
+        ) else {
+            return nil
+        }
+        guard data.count <= 64,
+              let value = String(data: data, encoding: .utf8),
+              let requestID = UUID(uuidString: value) else {
+            throw OwnershipClientError.secureStorage
+        }
+        return requestID
+    }
+
+    func writeAccountDeletionRequestID(_ value: UUID, scope: String) throws {
+        try write(
+            Data(value.uuidString.lowercased().utf8),
+            account: "account-deletion-\(scope)"
+        )
+    }
+
+    func writeAccountDeletionAttemptID(_ value: UUID, scope: String) throws {
+        try write(
+            Data(value.uuidString.lowercased().utf8),
+            account: "account-deletion-attempt-\(scope)"
+        )
+    }
+
+    @discardableResult
+    func deleteAccountDeletionRequestID(scope: String) -> Bool {
+        let status = SecItemDelete(
+            query(account: "account-deletion-\(scope)") as CFDictionary
+        )
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+
+    @discardableResult
+    func deleteAccountDeletionAttemptID(scope: String) -> Bool {
+        let status = SecItemDelete(
+            query(
+                account: "account-deletion-attempt-\(scope)"
+            ) as CFDictionary
+        )
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+
     @discardableResult
     func deletePhoneVerificationID(scope: String) -> Bool {
         let status = SecItemDelete(
@@ -2978,6 +3627,8 @@ final class OwnershipSecureStore {
             "installation-\(scope)",
             "checkpoint-\(scope)",
             "phone-verification-\(scope)",
+            "account-deletion-\(scope)",
+            "account-deletion-attempt-\(scope)",
         ] {
             let status = SecItemDelete(
                 query(account: account) as CFDictionary
@@ -3049,6 +3700,8 @@ enum OwnershipClientError: Error, Equatable {
     case invalidPhone
     case invalidCode
     case phoneCodeRequired
+    case deletionConfirmationRequired
+    case deletionAcknowledgementsRequired
     case notSignedIn
     case authentication
     case challengeInactive

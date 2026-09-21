@@ -90,6 +90,8 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "--cipher-algo AES256" in backup
     assert "passphrase-file" in backup
     assert "sha256sum" in backup
+    assert "--no-privileges" not in backup
+    assert "--no-privileges" not in restore
     assert backup.index("gpg ") < backup.index('mv "$encrypted_partial"')
     assert restore.index("sha256sum --check") < restore.index("pg_restore \\")
     assert restore.index("pg_restore --list") < restore.index("timescaledb_pre_restore")
@@ -141,6 +143,8 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     )
     assert "--file=- <<'SQL'" in smoke_script
     assert "btrim(checksum) = :'checksum'" in smoke_script
+    assert "NOOP_RESTORE_APPLICATION_SMOKE_SQL" in smoke_script
+    assert '--file="$smoke_sql"' in smoke_script
     assert (
         '--command="SELECT count(*) FROM noop_schema_migrations\n' not in smoke_script
     )
@@ -229,7 +233,13 @@ def test_restore_smoke_requires_feedback_tombstone_schema_contract() -> None:
     )
     assert "feedback_report_compatibility" in smoke
     assert "feedback_report_retire_idempotency" in smoke
-    assert "feedback report runtime trigger is missing or disabled" in smoke
+    assert "noop_feedback_report_compatibility" in smoke
+    assert "noop_feedback_report_retire_idempotency" in smoke
+    assert "23::smallint" in smoke
+    assert "11::smallint" in smoke
+    assert "trigger_row.tgconstraint IS DISTINCT FROM 0::oid" in smoke
+    assert "trigger_row.tgattr IS DISTINCT FROM ''::int2vector" in smoke
+    assert "feedback report runtime trigger binding or shape is invalid" in smoke
     for index_name in (
         "feedback_reports_retention_idx",
         "feedback_reports_status_idx",
@@ -242,6 +252,33 @@ def test_restore_smoke_requires_feedback_tombstone_schema_contract() -> None:
     assert "index_row.relnamespace = 'public'::regnamespace" in smoke
     assert "feedback report runtime index is missing or invalid" in smoke
     assert "to_regclass('public.feedback_idempotency_tombstones')" in smoke
+    assert "044_feedback_idempotency_duration.sql" in smoke
+    assert "045_ownership_account_deletion_progress.sql" in smoke
+    assert "ownership_account_deletion_target_progress" in smoke
+    assert "ownership_account_deletion_progress_due_idx" in smoke
+    for constraint_name in (
+        "ownership_account_deletion_target_progress_pkey",
+        "ownership_account_deletion_progress_target_fk",
+        "ownership_account_deletion_progress_managed_job_fk",
+        "ownership_account_deletion_progress_state",
+        "ownership_account_deletion_progress_blocker",
+        "ownership_account_deletion_progress_state_blocker",
+        "ownership_account_deletion_progress_attempts",
+        "ownership_account_deletion_progress_version",
+        "ownership_account_deletion_progress_lease_pair",
+        "ownership_account_deletion_progress_retry_state",
+        "ownership_account_deletion_progress_managed_target",
+        "ownership_account_deletion_progress_failure_kind",
+        "ownership_account_deletion_progress_completion_state",
+    ):
+        assert constraint_name in smoke
+    assert "ownership_account_deletion_progress_guard" in smoke
+    assert "noop_ownership_account_deletion_progress_guard" in smoke
+    assert "ownership_account_deletion_progress_seed" in smoke
+    assert "noop_ownership_account_deletion_progress_seed" in smoke
+    assert "aclexplode(" in smoke
+    assert "privilege.grantee = 0" in smoke
+    assert "ownership deletion target progress is incomplete or orphaned" in smoke
     assert "JOIN pg_attribute column_state" in smoke
     assert "column_state.attnotnull" in smoke
     assert "('reserved_at', 'timestamp with time zone')" in smoke
@@ -255,6 +292,19 @@ def test_restore_smoke_requires_feedback_tombstone_schema_contract() -> None:
     ):
         assert constraint_name in smoke
     assert "feedback_idempotency_tombstones_pkey" in smoke
+    assert "feedback_tombstone_normalize_expiry" in smoke
+    assert "noop_feedback_tombstone_normalize_expiry" in smoke
+    assert "noop_feedback_report_retire_idempotency" in smoke
+    assert "trigger_row.tgtype = 23" in smoke
+    assert "trigger_row.tgconstraint = 0::oid" in smoke
+    assert "trigger_row.tgnargs = 0" in smoke
+    assert "trigger_row.tgqual IS NULL" in smoke
+    assert "trigger_row.tgoldtable IS NULL" in smoke
+    assert "trigger_row.tgnewtable IS NULL" in smoke
+    assert "trigger_row.tgattr::smallint[]" in smoke
+    assert "ARRAY['reserved_at', 'expires_at']" in smoke
+    assert "position('1080 hours' IN function_row.prosrc) > 0" in smoke
+    assert "position('45 days' IN function_row.prosrc) = 0" in smoke
     assert (
         "PRIMARY KEY (client_app_id, principal_hash_version, principal_hash, "
         "idempotency_hash)"
@@ -270,7 +320,7 @@ def test_restore_smoke_requires_feedback_tombstone_schema_contract() -> None:
         "CHECK (principal_hash_version = ANY (ARRAY[0, 1]))",
         "CHECK (principal_hash ~ '^[0-9a-f]{64}$'::text)",
         "CHECK (idempotency_hash ~ '^[0-9a-f]{64}$'::text)",
-        "CHECK (expires_at = (reserved_at + '45 days'::interval) "
+        "CHECK (expires_at = (reserved_at + '1080:00:00'::interval) "
         "AND expires_at > reserved_at)",
     ):
         assert expected_definition in smoke

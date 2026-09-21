@@ -1,6 +1,6 @@
 # NOOP Band supplier SDK assessment
 
-**Reviewed:** 2026-09-12
+**Reviewed:** 2026-09-12; read-only inventory revalidated 2026-09-19
 **Input:** owner-supplied HBand/Veepoo Android and iOS SDK package
 **Status:** usable as a candidate phone transport, not approved for production
 distribution or treated as proof of any hardware capability
@@ -43,6 +43,11 @@ collector-handoff feature may explicitly flush, disconnect, lease, and resume
 collection on another supported phone, but concurrent collectors are not
 allowed.
 
+The concrete app-integration contract is
+[`handoff/NOOP-SDK-WRAPPER-INTEGRATION.md`](handoff/NOOP-SDK-WRAPPER-INTEGRATION.md).
+The executable signed-device and hardware matrix is
+[`handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`](handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md).
+
 ## Repository boundary
 
 The NOOP-owned SDK contract now lives in the separate private
@@ -67,10 +72,21 @@ the repository.
 | Artifact | Reviewed identity |
 |---|---|
 | Android protocol AAR | `vpprotocol-2.3.81.15.aar`, SHA-256 `756514429b1b68328f2152d85126d1dccc9ae5f0ea2d398429bba01d53588c27` |
-| Android transport AAR | `vpbluetooth-1.20.aar` |
+| Android transport AAR | `vpbluetooth-1.20.aar`, SHA-256 `26d7037238d18a28ac373a511b7a2abdfac2a405e01564f90a89c926b5b48bd8` |
 | iOS framework | `VeepooBleSDK.framework` under `2.2.XX.15`, SHA-256 `22e9d0154c5fecddbd3a21ef309fb3d33d734ec5f8e671787fa9ee8564d13d35` |
 | iOS binary form | static archive, `arm64`, iPhoneOS only; no simulator, Catalyst, or macOS slice |
+| Owner-supplied Android ZIP snapshot | SHA-256 `e72615e48f7339b96dca26a10acc303b19be26a0bbf073a27c9eec7e7e9ed091` |
+| Owner-supplied iOS ZIP snapshot | SHA-256 `44be9299f8ec075091c84c3a843184128448438ea69bb694a30eb16405b665f5` |
 | Top-level license files | Apache License 2.0 text is present for Android and iOS |
+
+The 2026-09-19 read-only revalidation found 2,708 files, 20 Android AARs
+across required and optional chipset/DFU lanes, multiple iOS framework
+variants, JNI libraries, demos, generated API documentation, and zero
+`PrivacyInfo.xcprivacy` files. This is an inventory observation, not a complete
+SBOM or a statement that every component is required for the production band.
+The extracted directories contained no usable Git commit metadata, so the
+hashes above, the supplier contract, and a future restricted artifact manifest
+must identify the reviewed input.
 
 The Android README also says the SDK is available only to cooperative
 customers. The Apache files alone therefore do not establish that NOOP may
@@ -122,6 +138,15 @@ disconnect. It does not establish the retention depth, overflow policy,
 acknowledgement semantics, clock integrity, or off-phone collection behavior of
 the production band. Those must be measured on the exact model and firmware.
 
+The required production behavior is a bounded circular flash history: the band
+continues autonomous sampling while disconnected, retains as much recent data
+as its measured capacity permits, and overwrites only the oldest retained
+records after that capacity is full. The firmware or accepted SDK contract must
+expose oldest/newest retained bounds and a cursor generation, overflow marker,
+or equivalent signal. Without that signal NOOP cannot distinguish a complete
+catch-up from history that was overwritten while the phone was absent, so the
+model is not launch-eligible.
+
 ### Optional and custom capabilities
 
 The headers/docs contain project-specific raw PPG, accelerometer/IMU, GPS,
@@ -135,6 +160,37 @@ composition, and similar outputs. NOOP must not present those as sleep-apnea
 detection, diagnosis, validated body composition, or another medical result
 without an independently reviewed intended use and clinical evidence.
 Vendor naming is not validation.
+
+## Capability disposition
+
+| Surface seen in the package | Current disposition |
+|---|---|
+| Scan, connect, reconnect, confirmation, and four-digit password | Candidate transport input; physical behavior and recovery remain unproven |
+| Device number and printed-label discovery | Mapping is unknown; neither value is ownership proof |
+| Live and historical health/activity data | Candidate parser input; exact model support, units, quality, retention, and accuracy remain unproven |
+| Battery, charging, wear, haptic, alarm, weather, and settings | Capability-gated only; unsupported actions must fail closed |
+| Raw PPG, acceleration/IMU, GPS, and retransmission families | Project-specific; unavailable unless the exact production function report and supplier contract approve them |
+| Device confirmation and password | Defense in depth only; not the required challenge-bound possession proof |
+| OTA/DFU libraries and APIs | Disabled until image signing, board matching, anti-rollback, interruption, fallback, rescue, and artifact rights pass |
+| Vendor medical labels or analyses | Not exposed to product code or users without separate intended-use and validation approval |
+| Vendor database, weather, dial, and network helpers | Not adopted; NOOP owns persistence, policy, weather source, artifact delivery, and egress controls |
+
+## Firmware, wrapper, app, and cloud boundary
+
+- Firmware must own unique identity/key material, authenticated tap proof,
+  wear/autonomous sampling, off-wrist power behavior, flash history, device
+  time, command acknowledgement, secure boot, signed update, and recovery.
+- The supplier SDK may transport and parse only the exact accepted model
+  surface.
+- The NOOP wrapper serializes operations, rejects stale callbacks, negotiates
+  capabilities, normalizes units/provenance, and hands data to NOOP storage.
+- The phone app owns permissions, one active collector, activation UX,
+  freshness, durable receipt, bounded diagnostics, and the managed outbox.
+- The ownership service owns the atomic account claim. The managed service may
+  own durable account history and versioned canonical formulas only after each
+  D-059 gate passes.
+- No app or cloud workaround can prove or replace missing firmware retention,
+  possession, sensor, battery, or OTA behavior.
 
 ## Runtime and security findings
 
@@ -185,6 +241,12 @@ an untrusted transport/parser dependency, not an application architecture.
 11. Publish the neutral SDK from the separate private repository as pinned
     Apple and Android artifacts. The NOOP app repository consumes an exact
     version and digest; it does not host supplier source or binaries.
+12. Keep the existing WHOOP adapter selectable for controlled regression and
+    comparison until every applicable `PHY-*` supplier row passes. WHOOP and
+    supplier rows, cursors, diagnostics, and provenance must never be merged.
+13. Keep supplier binaries out of simulator, macOS, Watch, widget, pure Swift
+    package, Android Demo, and JVM-test targets. Those targets use a virtual
+    neutral transport.
 
 ## Bounded observability
 
@@ -216,11 +278,22 @@ hardware and firmware:
   behavior;
 - default-password rotation, replacement-phone recovery, return/RMA wipe, and
   wrong-account rejection;
-- actual history days, overflow, partial resume, duplicate delivery, clock
-  reset, timezone/DST, and multi-day phone absence;
+- actual history days, full-flash circular overwrite of oldest-only data,
+  retained oldest/newest bounds, explicit overflow/gap signaling, partial
+  resume, duplicate delivery, clock reset, timezone/DST, and multi-day phone
+  absence;
 - foreground, screen-off, background, process death, force-quit, reboot, low
   storage, Android OEM restriction, and iOS restoration behavior;
 - live plus catch-up sequencing under the one-command queue;
+- step-count ground truth on the exact firmware, including false-positive
+  stationary wrist-motion scenarios (bed/seated arm movement, typing, washing
+  dishes, brushing teeth, driving, and cycling) and true-positive walking
+  scenarios (slow/normal/fast pace, stairs, treadmill, carrying an object, both
+  wrists, and dominant/non-dominant wear). Compare firmware totals with
+  synchronized video/manual counts and a pre-approved error budget. The app
+  cannot reliably remove false steps after receiving only an aggregate
+  firmware total; a failing result requires supplier pedometer tuning or an
+  approved high-rate raw-IMU gait classifier;
 - battery, charging, off-wrist, haptics, alarms, raw PPG/IMU, and every claimed
   sensor;
 - OTA eligibility, interruption, resume, wrong image, rollback/recovery, and

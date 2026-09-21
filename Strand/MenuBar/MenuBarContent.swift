@@ -63,7 +63,10 @@ public struct MenuBarLabel: View {
                 .font(StrandFont.rounded(12, weight: .semibold))
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(displayHR.map { "Heart rate \($0) beats per minute" } ?? "Noop Band not connected")
+        .accessibilityLabel(
+            displayHR.map { Text("Heart rate \($0) beats per minute") }
+                ?? Text("Noop Band not connected")
+        )
     }
 }
 

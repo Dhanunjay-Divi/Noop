@@ -56,6 +56,9 @@ from app.managed_identity import (
     ManagedTokenVerifying,
 )
 from app.managed_identity_deletion import ManagedIdentityDeletionTicketCodec
+from app.managed_document_keys import PostgresManagedDocumentKeyRepository
+from app.managed_formula_executor import ManagedFormulaExecutor
+from app.managed_formula_repository import PostgresManagedFormulaRepository
 from app.managed_object_store import (
     GCSV4ObjectStore,
     IAMBlobSigner,
@@ -117,6 +120,9 @@ from app.repository import (
     SyncConflictError,
     SyncForbiddenError,
     SyncRetiredError,
+)
+from app.unified_identity_authority import (
+    PostgresUnifiedIdentityAuthorityRepository,
 )
 from app.safety_repository import (
     MemorySafetyRepository,
@@ -1072,6 +1078,14 @@ def create_app(
     ) = None,
     managed_safety_repository: (PostgresManagedSafetyRepository | None) = None,
     managed_safety_push_service: ManagedSafetyPushService | None = None,
+    managed_unified_identity_authority_repository: (
+        PostgresUnifiedIdentityAuthorityRepository | None
+    ) = None,
+    managed_formula_repository: PostgresManagedFormulaRepository | None = None,
+    managed_formula_executor: ManagedFormulaExecutor | None = None,
+    managed_document_key_repository: (
+        PostgresManagedDocumentKeyRepository | None
+    ) = None,
     feedback_repository: FeedbackRepository | None = None,
     feedback_object_store: ManagedObjectStoring | None = None,
     feedback_capability_codec: FeedbackCapabilityCodec | None = None,
@@ -1120,6 +1134,12 @@ def create_app(
     )
     runtime_managed_safety_repository = managed_safety_repository
     runtime_managed_safety_push_service = managed_safety_push_service
+    runtime_managed_unified_identity_authority_repository = (
+        managed_unified_identity_authority_repository
+    )
+    runtime_managed_formula_repository = managed_formula_repository
+    runtime_managed_formula_executor = managed_formula_executor
+    runtime_managed_document_key_repository = managed_document_key_repository
     runtime_feedback_repository = feedback_repository
     runtime_feedback_object_store = feedback_object_store
     runtime_feedback_capability_codec = feedback_capability_codec
@@ -1139,8 +1159,34 @@ def create_app(
                 default_plan_code=runtime_settings.managed_default_plan_code,
                 default_plan_revision=(runtime_settings.managed_default_plan_revision),
                 consent_policy_kind=(runtime_settings.managed_consent_policy_kind),
+                account_max_installations=(
+                    runtime_settings.managed_account_max_installations
+                ),
                 entitlement_mode=runtime_settings.managed_entitlement_mode,
                 replay_secret=runtime_settings.managed_replay_secret or "",
+            )
+        if runtime_managed_unified_identity_authority_repository is None and isinstance(
+            runtime_repository, PostgresRepository
+        ):
+            runtime_managed_unified_identity_authority_repository = (
+                PostgresUnifiedIdentityAuthorityRepository(runtime_repository)
+            )
+        if runtime_managed_formula_repository is None and isinstance(
+            runtime_repository, PostgresRepository
+        ):
+            runtime_managed_formula_repository = PostgresManagedFormulaRepository(
+                runtime_repository
+            )
+        if runtime_managed_formula_executor is None:
+            runtime_managed_formula_executor = ManagedFormulaExecutor()
+        if runtime_managed_document_key_repository is None and isinstance(
+            runtime_repository, PostgresRepository
+        ):
+            runtime_managed_document_key_repository = (
+                PostgresManagedDocumentKeyRepository(
+                    runtime_repository,
+                    enabled=(runtime_settings.managed_document_key_recovery_enabled),
+                )
             )
         if runtime_managed_token_verifier is None:
             runtime_managed_token_verifier = IdentityToolkitTokenVerifier(
@@ -1152,12 +1198,7 @@ def create_app(
         if runtime_managed_app_check_verifier is None:
             runtime_managed_app_check_verifier = FirebaseAppCheckTokenVerifier(
                 project_number=runtime_settings.managed_project_number or "",
-                allowed_app_ids=frozenset(
-                    {
-                        runtime_settings.managed_apple_app_id or "",
-                        runtime_settings.managed_android_app_id or "",
-                    }
-                ),
+                allowed_app_ids=runtime_settings.managed_app_check_app_ids(),
                 jwks_cache_seconds=(runtime_settings.managed_app_check_cache_seconds),
             )
         if runtime_managed_object_store is None:
@@ -3929,6 +3970,12 @@ def create_app(
                 ),
                 safety_repository=runtime_managed_safety_repository,
                 safety_push_service=runtime_managed_safety_push_service,
+                unified_identity_authority_repository=(
+                    runtime_managed_unified_identity_authority_repository
+                ),
+                formula_repository=runtime_managed_formula_repository,
+                formula_executor=runtime_managed_formula_executor,
+                document_key_repository=(runtime_managed_document_key_repository),
             )
         )
     if (

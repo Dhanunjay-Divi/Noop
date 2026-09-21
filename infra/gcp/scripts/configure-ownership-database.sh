@@ -40,6 +40,7 @@ if [[ "${ownership_runtime}" != "null" ]]; then
 fi
 
 "${python}" "${SCRIPT_DIR}/configure-ownership-database.py" \
+  --role-kind="api" \
   --project="${project_id}" \
   --region="${region}" \
   --instance="${instance}" \

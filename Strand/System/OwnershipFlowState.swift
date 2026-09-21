@@ -21,6 +21,7 @@ enum OwnershipServicePhase: Equatable {
     case claiming
     case claimed
     case complete
+    case deletionPending
     case replacementRequired
     case authorizingReplacement
 }
@@ -89,6 +90,33 @@ func ownershipCanAccessPostClaimOnboarding(
     phase: OwnershipServicePhase
 ) -> Bool {
     !isAvailable || phase == .claimed || phase == .complete
+}
+
+func ownershipPhaseForOverview(
+    accountState: String,
+    bandState: String,
+    checkpointStage: OwnershipAccountStage,
+    possessionAvailable: Bool
+) -> OwnershipServicePhase {
+    if accountState == "deletion_pending" {
+        return .deletionPending
+    }
+    guard accountState == "active" else {
+        return .unavailable
+    }
+    switch checkpointStage {
+    case .replacementRequired:
+        return .replacementRequired
+    case .replacementPending:
+        return .authorizingReplacement
+    default:
+        guard bandState == "claimed" else {
+            return possessionAvailable
+                ? .accountReady
+                : .possessionUnavailable
+        }
+        return checkpointStage == .complete ? .complete : .claimed
+    }
 }
 
 enum NoopProductPlan: String, CaseIterable, Codable, Sendable {

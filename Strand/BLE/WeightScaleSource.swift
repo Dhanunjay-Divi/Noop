@@ -41,6 +41,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
     private static let profileUserPeripheralKey = "noop.weightScale.profileUserPeripheralID"
 
     private let defaults: UserDefaults
+    private let allowsBluetoothRuntime: Bool
     private var lifecycle = WeightScaleLifecycle()
     /// Constructed lazily on iOS so merely creating AppModel on a fresh install cannot trigger the
     /// system Bluetooth permission sheet before NOOP has shown its own rationale. A remembered scale is
@@ -58,9 +59,11 @@ final class WeightScaleSource: NSObject, ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
-        resumeRememberedRuntimeAtLaunch: Bool = true
+        resumeRememberedRuntimeAtLaunch: Bool = true,
+        allowsBluetoothRuntime: Bool = true
     ) {
         self.defaults = defaults
+        self.allowsBluetoothRuntime = allowsBluetoothRuntime
         let restoredPeripheralID = defaults.string(forKey: Self.pairedIDKey).flatMap(UUID.init(uuidString:))
         pairedPeripheralID = restoredPeripheralID
         pairedName = defaults.string(forKey: Self.pairedNameKey)
@@ -76,7 +79,9 @@ final class WeightScaleSource: NSObject, ObservableObject {
             activateCentralIfNeeded()
         }
         #else
-        central = CBCentralManager(delegate: self, queue: .main)
+        if allowsBluetoothRuntime {
+            central = CBCentralManager(delegate: self, queue: .main)
+        }
         #endif
     }
 
@@ -85,6 +90,10 @@ final class WeightScaleSource: NSObject, ObservableObject {
 
     /// Explicit foreground discovery. The scan is service-filtered and bounded to 15 seconds.
     func scan() {
+        guard allowsBluetoothRuntime else {
+            statusText = "Available on the collector phone"
+            return
+        }
         activateCentralIfNeeded()
         userStopped = false
         wantsResume = false
@@ -109,6 +118,10 @@ final class WeightScaleSource: NSObject, ObservableObject {
 
     /// Pair/listen to a scale the user explicitly selected from this scan.
     func connect(_ id: UUID) {
+        guard allowsBluetoothRuntime else {
+            statusText = "Available on the collector phone"
+            return
+        }
         activateCentralIfNeeded()
         userStopped = false
         wantsResume = false
@@ -131,6 +144,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
 
     /// Resume only a scale the user previously paired. Called at app startup; never starts an open scan.
     func resumePairedScale() {
+        guard allowsBluetoothRuntime else { return }
         guard pairedPeripheralID != nil else { return }
         activateCentralIfNeeded()
         userStopped = false
@@ -199,6 +213,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
     /// resuming an exact peripheral identifier the user paired previously; a fresh unpaired launch never
     /// reaches here. macOS retains its existing eager construction in `init`.
     private func activateCentralIfNeeded() {
+        guard allowsBluetoothRuntime else { return }
         guard central == nil else { return }
         #if os(iOS)
         central = CBCentralManager(

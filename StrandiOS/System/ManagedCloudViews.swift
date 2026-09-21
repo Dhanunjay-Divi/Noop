@@ -2,6 +2,7 @@
 import NoopRemoteSync
 import SwiftUI
 import StrandDesign
+import UniformTypeIdentifiers
 
 struct NoopPlusView: View {
     @EnvironmentObject private var model: AppModel
@@ -163,6 +164,8 @@ private struct ManagedCloudSetupSheet: View {
     @State private var deletionCodeRequested = false
     @State private var confirmDeletion = false
     @State private var confirmHistoryExport = false
+    @State private var confirmHistoryImport = false
+    @State private var showHistoryImporter = false
     @State private var pendingRevoke: ManagedInstallation?
     @FocusState private var focusedAuthenticationField: AuthenticationField?
 
@@ -209,7 +212,7 @@ private struct ManagedCloudSetupSheet: View {
         .interactiveDismissDisabled(service.isBusy)
         .presentationDragIndicator(.visible)
         .presentationDetents([.large])
-        .alert("Delete NOOP+ cloud account?", isPresented: $confirmDeletion) {
+        .alert("Delete NOOP account?", isPresented: $confirmDeletion) {
             Button("Send verification code", role: .destructive) {
                 deletionCodeRequested = true
                 Task { await service.sendDeletionCode() }
@@ -217,7 +220,7 @@ private struct ManagedCloudSetupSheet: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(
-                "Cloud data and the NOOP+ managed account will be scheduled for deletion after a 24-hour cooling-off period. Data stored locally on this iPhone is not deleted."
+                "Cloud data and your NOOP account will be scheduled for deletion after a 24-hour cooling-off period. Data stored locally on this iPhone is not deleted."
             )
         }
         .alert(
@@ -238,6 +241,35 @@ private struct ManagedCloudSetupSheet: View {
             Text(
                 "NOOP will first finish backing up current phone data, then download every cloud chunk and personal record, including history no longer stored on this iPhone. The ZIP contains readable sensitive health data and may be large. Keep NOOP open until the share sheet appears."
             )
+        }
+        .alert(
+            "Import complete cloud history?",
+            isPresented: $confirmHistoryImport
+        ) {
+            Button("Choose archive") {
+                showHistoryImporter = true
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Choose a complete NOOP+ cloud-history ZIP. NOOP validates the full archive before applying it, resumes from a durable checkpoint when possible, and keeps existing local data if the import cannot complete."
+            )
+        }
+        .fileImporter(
+            isPresented: $showHistoryImporter,
+            allowedContentTypes: [.zip],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result,
+                  let url = urls.first else {
+                return
+            }
+            Task {
+                _ = await service.importCompleteCloudHistory(
+                    from: url,
+                    repo: repo
+                )
+            }
         }
         .alert(item: $pendingRevoke) { installation in
             Alert(
@@ -475,7 +507,13 @@ private struct ManagedCloudSetupSheet: View {
             status
 
             NoopButton(
-                service.isBusy ? "Syncing…" : "Sync now",
+                service.isImportingCloudHistory
+                    ? "Importing…"
+                    : service.isExportingCloudHistory
+                        ? "Exporting…"
+                        : service.isBusy
+                            ? "Working…"
+                            : "Sync now",
                 systemImage: "arrow.triangle.2.circlepath",
                 kind: .primary,
                 fullWidth: true
@@ -486,8 +524,8 @@ private struct ManagedCloudSetupSheet: View {
             .accessibilityIdentifier("noop.noop-plus.sync")
 
             NoopButton(
-                service.isBusy
-                    ? "Preparing export…"
+                service.isExportingCloudHistory
+                    ? "Exporting…"
                     : "Export complete cloud history",
                 systemImage: "square.and.arrow.up",
                 kind: .secondary,
@@ -496,6 +534,27 @@ private struct ManagedCloudSetupSheet: View {
                 confirmHistoryExport = true
             }
             .disabled(service.isBusy)
+
+            NoopButton(
+                service.isImportingCloudHistory
+                    ? "Cancel cloud-history import"
+                    : "Import complete cloud history",
+                systemImage: service.isImportingCloudHistory
+                    ? "xmark.circle"
+                    : "square.and.arrow.down",
+                kind: .secondary,
+                fullWidth: true
+            ) {
+                if service.isImportingCloudHistory {
+                    service.cancelCompleteCloudHistoryImport()
+                } else {
+                    confirmHistoryImport = true
+                }
+            }
+            .disabled(
+                service.isBusy && !service.isImportingCloudHistory
+            )
+            .accessibilityIdentifier("noop.noop-plus.import-history")
 
             NoopButton(
                 "Disconnect this iPhone",
@@ -508,7 +567,7 @@ private struct ManagedCloudSetupSheet: View {
             .disabled(service.isBusy)
             .accessibilityIdentifier("noop.noop-plus.sign-out")
 
-            Button("Delete NOOP+ cloud account…") {
+            Button("Delete NOOP account…") {
                 confirmDeletion = true
             }
             .buttonStyle(.plain)
@@ -548,7 +607,9 @@ private struct ManagedCloudSetupSheet: View {
                 detail: "Cloud backup is stopped. NOOP will retain the managed account only through its 24-hour cooling-off period."
             )
             if let notBefore = service.deletionNotBefore {
-                Text("Deletion can begin after \(notBefore).")
+                Text(
+                    "Deletion can begin after \(managedDeletionEligibilityText(notBefore))."
+                )
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -726,11 +787,22 @@ private func managedPlatformName(_ platform: String) -> String {
     }
 }
 
-private func managedRelativeTime(_ value: String) -> String {
+private func managedISO8601Date(_ value: String) -> Date? {
     let fractional = ISO8601DateFormatter()
     fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    guard let date = fractional.date(from: value)
-        ?? ISO8601DateFormatter().date(from: value) else {
+    return fractional.date(from: value)
+        ?? ISO8601DateFormatter().date(from: value)
+}
+
+func managedDeletionEligibilityText(_ value: String) -> String {
+    guard let date = managedISO8601Date(value) else {
+        return String(localized: "Deletion time unavailable.")
+    }
+    return date.formatted(date: .abbreviated, time: .shortened)
+}
+
+private func managedRelativeTime(_ value: String) -> String {
+    guard let date = managedISO8601Date(value) else {
         return String(localized: "recently")
     }
     return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())

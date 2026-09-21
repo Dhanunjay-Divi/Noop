@@ -164,7 +164,7 @@ class RecoveryDriversUiTest {
         val expected = mapOf(
             "Heart rate variability" to R.string.appwide_day_overview_hrv,
             "Resting heart rate" to R.string.appwide_day_overview_resting_heart_rate,
-            "Sleep quality" to R.string.appwide_day_overview_sleep,
+            "Sleep Score" to R.string.appwide_day_overview_sleep,
             "Respiratory rate" to R.string.appwide_day_overview_respiratory_rate,
             "Skin temperature" to R.string.appwide_day_overview_skin_temperature,
         )
@@ -187,11 +187,11 @@ class RecoveryDriversUiTest {
             "above baseline, limiting recovery" to
                 R.string.ui_audit_recovery_driver_verdict_above_limiting,
             "a typical night" to R.string.ui_audit_recovery_driver_verdict_typical_night,
-            "sleep quality supported recovery" to
+            "Sleep Score supported recovery" to
                 R.string.ui_audit_recovery_driver_verdict_sleep_supported,
-            "sleep quality was neutral" to
+            "Sleep Score was neutral" to
                 R.string.ui_audit_recovery_driver_verdict_sleep_neutral,
-            "sleep quality limited recovery" to
+            "Sleep Score limited recovery" to
                 R.string.ui_audit_recovery_driver_verdict_sleep_limited,
             "near baseline" to R.string.ui_audit_recovery_driver_verdict_near_baseline,
             "warmer than baseline, limiting recovery" to

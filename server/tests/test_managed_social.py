@@ -486,6 +486,15 @@ async def test_managed_social_consent_isolation_poke_and_lifecycle() -> None:
         empty_friends = await repository.list_social_friends(principal=first)
         assert empty_friends[0]["latest"] is None
         assert not any(empty_friends[0]["shared_with_me"].values())
+        assert not any(
+            empty_friends[0]["sharing"][field]
+            for field in (
+                "messages_allowed",
+                "photos_allowed",
+                "audio_calls_allowed",
+                "video_calls_allowed",
+            )
+        )
 
         await repository.update_social_visibility(
             principal=second,
@@ -493,8 +502,15 @@ async def test_managed_social_consent_isolation_poke_and_lifecycle() -> None:
             patch=ManagedSocialVisibilityPatch(
                 charge=True,
                 sleep_duration=True,
+                messages_allowed=True,
+                photos_allowed=True,
             ),
         )
+        communication = await repository.list_social_friends(principal=second)
+        assert communication[0]["sharing"]["messages_allowed"] is True
+        assert communication[0]["sharing"]["photos_allowed"] is True
+        assert communication[0]["sharing"]["audio_calls_allowed"] is False
+        assert communication[0]["sharing"]["video_calls_allowed"] is False
         summary_request_id = uuid4()
         summary = await repository.put_social_summary(
             principal=second,

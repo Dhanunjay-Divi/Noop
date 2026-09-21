@@ -1,7 +1,7 @@
 # NOOP platform architecture
 
 **Status:** principal design and release contract
-**Reviewed:** 2026-09-12
+**Reviewed:** 2026-09-18
 **Scope:** native clients, day guidance, managed storage, and 1K-to-1M growth
 
 This document works backward from the customer experience. It is both a target
@@ -32,10 +32,17 @@ The product contract is:
    guarantee of an outcome.
 7. A user can export local data without paying. NOOP+ restricts managed storage,
    restore, and multi-device history only, not metrics or coaching.
-8. A user can disconnect, revoke a device, and erase the managed account
-   without deleting the local app database. Apple and Android can assemble a
-   snapshot-bound ZIP containing every currently retained managed chunk and
-   personal record, including history no longer present on that phone.
+8. A NOOP+ user can disconnect, revoke an installation, and request managed
+   data/account erasure without deleting the local app database. This is
+   separate from the first-party band ownership account: ownership deletion
+   must place the band in an approved retired, wiped, or operator-recovery
+   state. Supplier-independent request, cooling-off, status, cancellation, and
+   target coordination exist, while identity-provider erasure and physical band
+   retirement remain fail-closed pending approved integrations. Apple and
+   Android can resume a snapshot-bound ZIP export of selected retained managed
+   chunks and the only managed document currently included by that exporter
+   (`day_ownership`), including cloud-only chunks no longer present on that
+   phone, and can validate and resume import before local mutation.
 9. Band ownership identity and NOOP+ health-data consent are separate. A plan
    downgrade or payment failure cannot deactivate a band or remove core local
    capability.
@@ -46,13 +53,16 @@ The product contract is:
 These are architecture constraints, not marketing copy.
 
 The current source implements local export, managed snapshot/incremental
-restore, complete managed-history ZIP export, device revocation, and managed
-erasure. The native export intentionally uses the snapshot restore/list/download
-APIs so it includes cloud-only history; it does not use the separate server
-`/exports` contract, which accepts and verifies a client-produced encrypted
-archive. The managed-history ZIP is locally verified source, not a deployed
-production claim, and an importer plus interrupted-export resume remain future
-portability work.
+restore, installation revocation, NOOP+ managed-data erasure, resumable
+managed-history export, and two-pass resumable managed-history import. The
+exporter uses the restore, list, and download APIs for selected chunk classes
+and the only managed document currently included by that exporter
+(`day_ownership`), so it can include cloud-only chunks. It does not use the
+separate server `/exports` contract, which accepts and verifies a
+client-produced encrypted archive. Live effective-expiry, large-account,
+cross-tenant, low-storage, and physical process-death evidence remain open.
+First-party ownership-account deletion has supplier-independent coordination,
+but provider identity erasure and approved band retirement/wipe remain blocked.
 
 ## 2. Work backward from a day
 
@@ -104,36 +114,48 @@ action:
 |---|---|---|
 | Local BLE capture and durable SQLite | Implemented on Apple and Android | Physical-device reconnect, suspension, battery, and upgrade matrix remains |
 | Owner-supplied first-party candidate SDK | Android and iPhone packages were statically assessed on 2026-09-12; they expose confirmation/password, model-gated live/history, reconnect, haptic, weather, and OTA surfaces | Exact band project/capability report, distribution authority, neutral adapters, network quarantine, signed physical behavior, firmware possession proof, and security review remain |
-| First-party band ownership account | Supplier-independent schema, isolated runtime, verified email/password flow, optional phone linking, atomic claim, replacement-installation authorization, revocation, and matched mobile state machines are implemented default-off; possession always returns unavailable | Supplier printed-label mapping, approved cryptographic possession provider, owner-key provisioning, controlled release, physical validation, production identity/abuse operations, and India/USA legal review |
+| First-party band ownership account | Supplier-independent schema, isolated runtime, verified email/password flow, optional phone linking, atomic claim, replacement-installation authorization, revocation, cooling-off deletion coordination, migration-045 durable target progress, restricted `managed_cloud_data` erasure scheduling/monitoring, and matched mobile state machines are implemented default-off; possession always returns unavailable and band retirement fails closed | Provider identity erasure, ownership control-plane final erasure, approved band retirement/quarantine and wipe (`ACC-340`), supplier printed-label mapping, cryptographic possession, owner-key provisioning, controlled release, physical validation, production identity/abuse operations, and India/USA legal review |
 | Remote terms and returns | Digest-verified no-cache terms fetch, exact acceptance metadata, and static mobile rendering are implemented default-off; no approved document is published and return duration remains undecided between 14 and 30 days | Immutable signed publication and historical availability, approved return clock, objective condition grades, lawful refund deductions, appeals, and operator-only wipe/release |
 | Local scoring and source provenance | Implemented with pure Swift/Kotlin engines and explicit missing-data behavior | Held-out accuracy and subgroup validation remains metric-specific |
 | Stress breathing cue | Local, opt-in, freshness/corroboration/cooldown/quiet-hour gated | Physical delivery and false-interruption evidence remains |
 | Morning Sleep and evening Journal prompts | Local, opt-in, private copy, completion aware | One shared cross-domain arbiter is not yet implemented |
 | Hydration, wind-down, workout caution, adaptive sleep/routine/travel | Implemented as bounded local policies and compact in-app actions | Cross-family fatigue budget and outcome learning remain |
 | Contextual action center | Implemented on Apple and Android with expiry, deduplication, dismiss, and completion | A shared candidate/outcome event schema remains |
-| NOOP+ phone OTP and App Check clients | Implemented; Firebase Identity Platform and enforced Authentication App Check are deployed in synthetic Mumbai staging | Migrate release identity to the approved email/password ownership account with optional linked phone while preserving separate NOOP+ consent, then prove signed physical clients, recovery, and abuse controls |
-| Immutable managed chunk upload/restore | Implemented and passed private synthetic upload, processing, duplicate, tenant-isolation, restore, retention, and erasure smoke against one scanned digest | Signed physical clients, recovery/load evidence, and public launch gates |
-| Complete managed-history ZIP export | Apple and Android finish pending phone backup, pin a server snapshot, page every retained chunk and current personal record, verify digests/counts/bytes, and finalize a manifest-backed archive | Live large-account/expiry/interruption tests, resumable continuation, and a documented importer remain |
+| NOOP+ phone OTP and App Check clients | Implemented in source; a prior round recorded Firebase Identity Platform and enforced Authentication App Check in private synthetic Mumbai staging, but that runtime was not reverified for this review | Migrate release identity to the approved email/password ownership account with optional linked phone while preserving separate NOOP+ consent, then prove signed physical clients, recovery, and abuse controls |
+| Immutable managed chunk upload/restore | Implemented in source; prior private synthetic evidence recorded upload, processing, duplicate, tenant-isolation, restore, retention, and erasure smoke against one scanned digest | Reverify the retained private environment, then prove signed physical clients, recovery/load evidence, and every public launch gate |
+| Managed-history portability | Apple and Android prepare pending phone data, pin a server snapshot, resume selected retained chunk classes plus `day_ownership`, verify v2 manifest/object/aggregate integrity, and import through a complete prevalidation pass with resumable idempotent application. | `DAT-170`: live effective-expiry, large-account, cancellation/auth-refresh, cross-tenant, low-storage, and physical process-death evidence before a production round-trip portability claim |
 | Optional seven-day raw and 30-day essential local window after validated backup | Implemented, default off | Physical storage-pressure and interrupted-prune validation |
-| GCP managed runtime | Identity, App Check, Cloud SQL, API, processor, lifecycle, scheduler, KMS, Pub/Sub, and storage are deployed IAM-only; migration/lifecycle, private smoke, and zero drift pass | Recovery/load evidence and every public-ingress gate |
+| GCP managed runtime | Prior operations records describe an IAM-only private synthetic deployment of identity, App Check, Cloud SQL, API, processor, lifecycle, scheduler, KMS, Pub/Sub, and storage; the active review did not reverify runtime state | Reverify retained resources and drift before use; recovery/load evidence and every public-ingress gate remain open |
 | Outcome-based personalization | Existing actions record local completion/dismissal in feature-specific stores | No general learning policy ships; experimental design and consent are required |
 
 ## 4. Architectural principles
 
-### 4.1 Local authority
+### 4.1 Staged authority
 
-The phone is authoritative for:
+The phone remains the authoritative edge collector for:
 
 - BLE session state and durable receipt of wearable history;
 - current freshness and data-quality assessment;
-- immediate user-facing metrics;
+- immediate safe offline state and the currently verified metric
+  implementation while a formula is still in dual-run;
 - active workout and breathing interactions;
 - notification eligibility and quiet hours;
 - the final decision to present any cloud-originated suggestion.
 
-The cloud must never be required to render today's core experience. A server
-result may enrich a long-horizon trend, but it cannot make a stale local signal
-fresh or silently override a local safety/privacy gate.
+The D-059 target makes the managed service authoritative for durable account
+history, versioned canonical metric publication, recommendations, and
+cross-device state. This is a per-data-class and per-formula migration, not one
+global switch. A server result cannot make a stale local signal fresh or
+silently override an edge safety/privacy gate. The phone keeps enough encrypted
+working state to collect, explain freshness, initiate Safety, and operate safely
+through a bounded network outage.
+
+Each authority transition requires explicit consent and migration, deterministic
+Swift/Kotlin/server parity fixtures, shadow comparison on representative data,
+source and formula provenance, restore and deletion evidence, rollback,
+performance, security, and signed physical-device validation. Until a metric
+passes those gates, the current client implementation remains authoritative and
+the server output is shadow-only.
 
 #### One collector, multiple viewers
 
@@ -421,8 +443,10 @@ decompression.
 - Incremental changes resume after the snapshot high-water mark.
 - Applied changes are idempotent and recorded before advancing the local
   sequence.
-- Authoritative replacement chunks supersede only the exact source, data class,
-  and time window.
+- Within an explicitly enabled NOOP+ restore, a validated replacement chunk
+  supersedes only the matching managed replica's exact source, data class, and
+  time window. It does not make the cloud authoritative for current local
+  collection or scoring.
 - Source provenance is never collapsed merely because two devices show the same
   day.
 
@@ -562,11 +586,15 @@ Before pilot:
 - KMS, database, bucket, and service identities use least-purpose roles.
 - Support access is default-deny, reason-bound, time-limited, approved, and
   audited before production support can inspect server-readable data.
-- The managed-history exporter covers every selected immutable object
-  generation, derived-summary chunk, current personal record, and provenance
-  manifest in one consistent restore snapshot. Erasure state machines exist.
-  Live large-account export, resumable continuation, archive import, and
-  documented backup-deletion timelines remain launch gates.
+- The managed-history exporter covers each selected immutable chunk generation
+  and the current supported `day_ownership` document in one consistent restore
+  snapshot with a v2 provenance manifest. Export and import resume from
+  account-scoped private checkpoints, and import validates the complete archive
+  before local mutation. It does not cover every user-authored record. NOOP+
+  managed-data erasure and ownership-account deletion coordination exist;
+  provider identity erasure and approved physical band retirement do not. Live
+  large-account, expiry, cross-tenant, low-storage, physical process-death, and
+  documented deletion timelines remain launch gates.
 - BigQuery receives no raw health data by default.
 - App diagnostics use value-free reason tokens and a user-initiated export.
 
@@ -613,22 +641,29 @@ insights.
 
 ## 13. Delivery sequence
 
-### Phase 0: current code completion
+### Phase 0: current code and retained-staging completion
 
 - Keep the implemented first-party ownership foundation disabled until an
   approved supplier possession provider replaces the fail-closed unavailable
   provider; then prove its virtual-band and physical-band claim matrices.
 - Finish NOOP+ source review and full local test/build matrix.
-- Accept Firebase terms and deploy identity/App Check to synthetic staging.
-- Generate ignored environment configuration and register debug attestation.
-- Deploy the managed API, processor, and lifecycle service IAM-only.
-- Run synthetic upload, duplicate, reconnect, restore, isolation, and erasure
-  tests.
+- Reverify the historically recorded private synthetic identity/App Check,
+  managed API, processor, lifecycle, configuration, debug attestation, drift,
+  and resource inventory before relying on that environment.
+- Rerun synthetic upload, duplicate, reconnect, restore, isolation, and erasure
+  tests against one reviewed digest without real health data.
 - Prove the implemented managed-history export against live synthetic
   cloud-only history, large accounts, token refresh, cancellation, snapshot
   expiry, and interrupted transfer before any public launch.
-- Add resumable continuation and a documented archive importer before claiming
-  round-trip account portability.
+- Prove the implemented resumable importer against live corruption,
+  cross-tenant, low-storage, and interrupted physical-device scenarios before
+  claiming production round-trip account portability.
+- Integrate provider identity erasure, ownership control-plane final erasure,
+  and an approved retired, wiped, or operator-recovery band state before
+  closing `ACC-340` or claiming complete first-party ownership-account
+  deletion. The existing managed-data target already uses a separate exact
+  least-privilege lifecycle database role and remains disabled without its
+  explicit secret-backed configuration.
 
 ### Phase 1: private physical-device pilot
 
@@ -683,15 +718,16 @@ The product is not launch-ready until all of these work end to end:
    and keeps summaries, user records, dirty windows, and unvalidated data.
 8. Revoking a device stops its managed access without deleting its local data
    or the account backup.
-9. Account erasure requires recent authentication, honors cooling-off/cancel,
-   and completes every documented data-class timeline.
+9. NOOP+ managed-account erasure requires recent authentication, honors
+   cooling-off/cancel, and completes every documented data-class timeline.
 10. A cloud outage leaves the app interactive and local collection durable.
 11. A replacement phone signed into the same account proves possession and
     reconnects without changing ownership; a different account learns no owner
     identity and cannot claim the band.
-12. Return, RMA, recovery, deletion, verified dispute, and eligible-upgrade
-    release revoke owner credentials and wipe personal band state before any
-    new account can claim it.
+12. Return, RMA, recovery, ownership-account deletion, verified dispute, and
+    eligible-upgrade release revoke owner credentials and wipe personal band
+    state before any new account can claim it. This is an acceptance target,
+    not implemented behavior.
 13. A new claim cannot proceed with missing or altered remote terms; the app
     stores no full terms copy, while the server can reproduce the exact accepted
     version and an already-activated band remains locally usable during a terms
@@ -699,7 +735,7 @@ The product is not launch-ready until all of these work end to end:
 14. An eligible return follows the approved 14- or 30-day clock, receives a
     repeatable condition grade and itemized lawful refund decision, permits an
     appeal, and finishes with operator-only wipe, unlink, and quarantine.
-10. Several simultaneous wellness candidates result in one explainable action,
+15. Several simultaneous wellness candidates result in one explainable action,
     while a separate explicit SOS remains unsuppressed.
 
 Passing builds and unit tests are necessary evidence, but physical behavior,

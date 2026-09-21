@@ -43,6 +43,18 @@ OWNERSHIP_TABLE_PRIVILEGES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "ownership_plan_selection_requests",
         ("SELECT", "INSERT"),
     ),
+    (
+        "ownership_account_deletion_requests",
+        ("SELECT", "INSERT"),
+    ),
+    (
+        "ownership_account_deletion_targets",
+        ("SELECT", "INSERT"),
+    ),
+    (
+        "ownership_account_deletion_target_progress",
+        ("SELECT",),
+    ),
     ("ownership_events", ("INSERT",)),
 )
 
@@ -86,7 +98,146 @@ OWNERSHIP_COLUMN_PRIVILEGES: tuple[
         "UPDATE",
         ("selection", "request_id", "updated_at"),
     ),
+    (
+        "ownership_accounts",
+        "UPDATE",
+        (
+            "status",
+            "auth_valid_after",
+            "updated_at",
+            "deletion_requested_at",
+        ),
+    ),
+    (
+        "ownership_account_deletion_requests",
+        "UPDATE",
+        ("canceled_at",),
+    ),
 )
+
+OWNERSHIP_DELETION_LIFECYCLE_TABLE_PRIVILEGES: tuple[
+    tuple[str, tuple[str, ...]],
+    ...,
+] = (
+    ("ownership_account_deletion_target_progress", ("SELECT",)),
+    ("ownership_account_deletion_requests", ("SELECT",)),
+    ("ownership_external_identities", ("SELECT",)),
+)
+
+OWNERSHIP_DELETION_LIFECYCLE_COLUMN_PRIVILEGES: tuple[
+    tuple[str, str, tuple[str, ...]],
+    ...,
+] = (
+    (
+        "ownership_account_deletion_target_progress",
+        "UPDATE",
+        (
+            "current_state",
+            "blocker",
+            "progress_version",
+            "attempt_count",
+            "lease_owner",
+            "lease_expires_at",
+            "retry_after",
+            "managed_erasure_job_id",
+            "last_error_kind",
+            "updated_at",
+            "completed_at",
+        ),
+    ),
+)
+
+
+@dataclass(frozen=True)
+class ProvisioningProfile:
+    role_kind: str
+    default_user: str
+    default_secret: str
+    secret_purpose: str
+    table_privileges: tuple[tuple[str, tuple[str, ...]], ...]
+    column_privileges: tuple[tuple[str, str, tuple[str, ...]], ...]
+    function_signatures: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+
+OWNERSHIP_API_PROFILE = ProvisioningProfile(
+    role_kind="api",
+    default_user="noop_ownership",
+    default_secret="noop-staging-ownership-database-url",
+    secret_purpose="ownership",
+    table_privileges=OWNERSHIP_TABLE_PRIVILEGES,
+    column_privileges=OWNERSHIP_COLUMN_PRIVILEGES,
+    function_signatures=(
+        (
+            "noop_ownership_lock_unified_principal",
+            ("text", "text", "text"),
+        ),
+    ),
+)
+OWNERSHIP_DELETION_LIFECYCLE_PROFILE = ProvisioningProfile(
+    role_kind="deletion-lifecycle",
+    default_user="noop_ownership_lifecycle",
+    default_secret="noop-staging-ownership-lifecycle-database-url",
+    secret_purpose="ownership-lifecycle",
+    table_privileges=OWNERSHIP_DELETION_LIFECYCLE_TABLE_PRIVILEGES,
+    column_privileges=OWNERSHIP_DELETION_LIFECYCLE_COLUMN_PRIVILEGES,
+)
+PROVISIONING_PROFILES = {
+    profile.role_kind: profile
+    for profile in (
+        OWNERSHIP_API_PROFILE,
+        OWNERSHIP_DELETION_LIFECYCLE_PROFILE,
+    )
+}
+OWNERSHIP_PRINCIPAL_LOCK_FUNCTION_BODY = " ".join(
+    """
+    WITH locked_principal AS MATERIALIZED (
+        SELECT
+            principal.principal_id,
+            principal.issuer,
+            principal.provider_tenant,
+            principal.subject_hash,
+            principal.status
+        FROM public.unified_account_principals AS principal
+        WHERE principal.issuer = requested_issuer
+          AND principal.provider_tenant = requested_provider_tenant
+          AND principal.subject_hash =
+              requested_subject_hash::character(64)
+        FOR UPDATE
+    ),
+    linked_ownership AS (
+        INSERT INTO public.unified_ownership_account_links (
+            principal_id,
+            ownership_account_id,
+            ownership_identity_id,
+            issuer,
+            provider_tenant,
+            subject_hash
+        )
+        SELECT
+            principal.principal_id,
+            identity.account_id,
+            identity.identity_id,
+            principal.issuer,
+            principal.provider_tenant,
+            principal.subject_hash
+        FROM locked_principal AS principal
+        JOIN public.ownership_external_identities AS identity
+          ON identity.issuer = principal.issuer
+         AND identity.provider_tenant = principal.provider_tenant
+         AND identity.subject_hash = principal.subject_hash
+        JOIN public.ownership_accounts AS account
+          ON account.account_id = identity.account_id
+        WHERE principal.status = 'active'
+          AND identity.status = 'active'
+          AND account.status = 'active'
+        ON CONFLICT DO NOTHING
+        RETURNING principal_id
+    )
+    SELECT status
+    FROM locked_principal
+    """.split()
+)
+OWNERSHIP_PRINCIPAL_LOCK_FUNCTION_CONFIG = ("search_path=pg_catalog, pg_temp",)
 
 OWNERSHIP_TABLE_PRIVILEGE_PAIRS = frozenset(
     (table, privilege)
@@ -181,7 +332,11 @@ def build_database_url(
     )
 
 
-def exact_grant_statements(role: str) -> tuple[str, ...]:
+def exact_grant_statements(
+    role: str,
+    *,
+    profile: ProvisioningProfile = OWNERSHIP_API_PROFILE,
+) -> tuple[str, ...]:
     quoted_role = quote_identifier(role)
     table_grants = tuple(
         "GRANT "
@@ -190,7 +345,7 @@ def exact_grant_statements(role: str) -> tuple[str, ...]:
         + quote_identifier(table)
         + " TO "
         + quoted_role
-        for table, privileges in OWNERSHIP_TABLE_PRIVILEGES
+        for table, privileges in profile.table_privileges
     )
     column_grants = tuple(
         "GRANT "
@@ -201,9 +356,18 @@ def exact_grant_statements(role: str) -> tuple[str, ...]:
         + quote_identifier(table)
         + " TO "
         + quoted_role
-        for table, privilege, columns in OWNERSHIP_COLUMN_PRIVILEGES
+        for table, privilege, columns in profile.column_privileges
     )
-    return table_grants + column_grants
+    function_grants = tuple(
+        "GRANT EXECUTE ON FUNCTION public."
+        + quote_identifier(function)
+        + "("
+        + ", ".join(argument_types)
+        + ") TO "
+        + quoted_role
+        for function, argument_types in profile.function_signatures
+    )
+    return table_grants + column_grants + function_grants
 
 
 def google_token() -> str:
@@ -275,6 +439,7 @@ def ensure_secret(
     project: str,
     region: str,
     secret_id: str,
+    purpose: str,
 ) -> None:
     project_path = urllib.parse.quote(project, safe="")
     secret_path = urllib.parse.quote(secret_id, safe="")
@@ -302,7 +467,7 @@ def ensure_secret(
             "labels": {
                 "app": "noop",
                 "environment": "staging",
-                "purpose": "ownership",
+                "purpose": purpose,
             },
         },
     )
@@ -454,6 +619,10 @@ async def assert_role_owns_no_objects(
             SELECT 1
             FROM pg_database
             WHERE datdba = (SELECT oid FROM pg_roles WHERE rolname = $1)
+            UNION ALL
+            SELECT 1
+            FROM pg_proc
+            WHERE proowner = (SELECT oid FROM pg_roles WHERE rolname = $1)
         )
         """,
         role,
@@ -526,8 +695,9 @@ async def provision_role(
     *,
     role: str,
     database: str,
+    profile: ProvisioningProfile = OWNERSHIP_API_PROFILE,
 ) -> None:
-    required_tables = {table for table, _ in OWNERSHIP_TABLE_PRIVILEGES}
+    required_tables = {table for table, _ in profile.table_privileges}
     present_tables = await connection.fetch(
         """
         SELECT table_name
@@ -542,6 +712,15 @@ async def provision_role(
         raise ProvisioningError(
             "Ownership migration is incomplete; run the migration job first"
         )
+    for function, argument_types in profile.function_signatures:
+        signature = "public." + function + "(" + ",".join(argument_types) + ")"
+        if not await connection.fetchval(
+            "SELECT to_regprocedure($1) IS NOT NULL",
+            signature,
+        ):
+            raise ProvisioningError(
+                "Ownership migration is incomplete; run the migration job first"
+            )
 
     quoted_role = quote_identifier(role)
     quoted_database = quote_identifier(database)
@@ -569,6 +748,9 @@ async def provision_role(
         await remove_column_privileges(connection, role)
         await connection.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
         await connection.execute(
+            f"REVOKE TEMPORARY ON DATABASE {quoted_database} FROM PUBLIC"
+        )
+        await connection.execute(
             f"REVOKE ALL PRIVILEGES ON DATABASE {quoted_database} FROM {quoted_role}"
         )
         await connection.execute(
@@ -586,6 +768,10 @@ async def provision_role(
             + quoted_role
         )
         await connection.execute(
+            "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM "
+            + quoted_role
+        )
+        await connection.execute(
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
             "REVOKE ALL PRIVILEGES ON TABLES FROM " + quoted_role
         )
@@ -593,11 +779,19 @@ async def provision_role(
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
             "REVOKE ALL PRIVILEGES ON SEQUENCES FROM " + quoted_role
         )
-        for statement in exact_grant_statements(role):
+        await connection.execute(
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+            "REVOKE ALL PRIVILEGES ON FUNCTIONS FROM " + quoted_role
+        )
+        for statement in exact_grant_statements(role, profile=profile):
             await connection.execute(statement)
 
 
-async def verify_role(connection: asyncpg.Connection) -> None:
+async def verify_role(
+    connection: asyncpg.Connection,
+    *,
+    profile: ProvisioningProfile = OWNERSHIP_API_PROFILE,
+) -> None:
     role_is_bounded = await connection.fetchval(
         """
         SELECT EXISTS (
@@ -622,6 +816,7 @@ async def verify_role(connection: asyncpg.Connection) -> None:
         AND NOT has_schema_privilege('public', 'CREATE')
         AND has_database_privilege(current_database(), 'CONNECT')
         AND NOT has_database_privilege(current_database(), 'CREATE')
+        AND NOT has_database_privilege(current_database(), 'TEMPORARY')
         AND NOT EXISTS (
             SELECT 1
             FROM pg_class
@@ -646,6 +841,14 @@ async def verify_role(connection: asyncpg.Connection) -> None:
                 FROM pg_roles
                 WHERE rolname = current_user
             )
+            UNION ALL
+            SELECT 1
+            FROM pg_proc
+            WHERE proowner = (
+                SELECT oid
+                FROM pg_roles
+                WHERE rolname = current_user
+            )
         )
         """
     )
@@ -664,10 +867,10 @@ async def verify_role(connection: asyncpg.Connection) -> None:
         ORDER BY namespace.nspname, candidate.relname
         """
     )
-    expected_tables = dict(OWNERSHIP_TABLE_PRIVILEGES)
+    expected_tables = dict(profile.table_privileges)
     expected_columns = {
         (table, privilege): frozenset(columns)
-        for table, privilege, columns in OWNERSHIP_COLUMN_PRIVILEGES
+        for table, privilege, columns in profile.column_privileges
     }
     for relation in relations:
         schema = relation["nspname"]
@@ -741,31 +944,128 @@ async def verify_role(connection: asyncpg.Connection) -> None:
                     "Ownership database role has an unexpected sequence privilege"
                 )
 
-    executable_security_definer = await connection.fetchval(
+    executable_security_definers = await connection.fetch(
         """
-        SELECT EXISTS (
-            SELECT 1
-            FROM pg_proc candidate
-            JOIN pg_namespace namespace
-              ON namespace.oid = candidate.pronamespace
-            WHERE candidate.prosecdef
-              AND namespace.nspname <> 'information_schema'
-              AND namespace.nspname !~ '^pg_'
-              AND has_function_privilege(candidate.oid, 'EXECUTE')
-        )
+        SELECT namespace.nspname,
+               candidate.proname,
+               oidvectortypes(candidate.proargtypes) AS arguments,
+               format_type(candidate.prorettype, NULL) AS result_type,
+               language.lanname AS language_name,
+               candidate.provolatile::text AS provolatile,
+               candidate.proconfig,
+               candidate.prosrc,
+               owner.rolname AS owner_name,
+               owner.rolname = current_user AS runtime_is_owner,
+               candidate.proowner = (
+                   SELECT relation.relowner
+                   FROM pg_class relation
+                   JOIN pg_namespace relation_namespace
+                     ON relation_namespace.oid = relation.relnamespace
+                   WHERE relation_namespace.nspname = 'public'
+                     AND relation.relname = 'unified_account_principals'
+                     AND relation.relkind IN ('r', 'p')
+               ) AS owner_matches_principal_table,
+               EXISTS (
+                   SELECT 1
+                   FROM aclexplode(
+                       COALESCE(
+                           candidate.proacl,
+                           acldefault('f', candidate.proowner)
+                       )
+                   ) AS permission
+                   WHERE permission.grantee = (
+                       SELECT oid
+                       FROM pg_roles
+                       WHERE rolname = current_user
+                   )
+                     AND permission.privilege_type = 'EXECUTE'
+                     AND NOT permission.is_grantable
+               ) AS runtime_execute_exact,
+               NOT EXISTS (
+                   SELECT 1
+                   FROM aclexplode(
+                       COALESCE(
+                           candidate.proacl,
+                           acldefault('f', candidate.proowner)
+                       )
+                   ) AS permission
+                   WHERE permission.privilege_type = 'EXECUTE'
+                     AND (
+                         permission.grantee NOT IN (
+                             candidate.proowner,
+                             (
+                                 SELECT oid
+                                 FROM pg_roles
+                                 WHERE rolname = current_user
+                             )
+                         )
+                         OR (
+                             permission.grantee = (
+                                 SELECT oid
+                                 FROM pg_roles
+                                 WHERE rolname = current_user
+                             )
+                             AND permission.is_grantable
+                         )
+                     )
+               ) AS execute_acl_exact
+        FROM pg_proc candidate
+        JOIN pg_namespace namespace
+          ON namespace.oid = candidate.pronamespace
+        JOIN pg_language language
+          ON language.oid = candidate.prolang
+        JOIN pg_roles owner
+          ON owner.oid = candidate.proowner
+        WHERE candidate.prosecdef
+          AND namespace.nspname <> 'information_schema'
+          AND namespace.nspname !~ '^pg_'
+          AND has_function_privilege(candidate.oid, 'EXECUTE')
         """
     )
-    if executable_security_definer:
-        raise ProvisioningError(
-            "Ownership database role can execute a security-definer routine"
+    expected_security_definers = {
+        ("public", function, ", ".join(argument_types))
+        for function, argument_types in profile.function_signatures
+    }
+    actual_security_definers = {
+        (
+            str(row["nspname"]),
+            str(row["proname"]),
+            str(row["arguments"]),
         )
+        for row in executable_security_definers
+    }
+    if actual_security_definers != expected_security_definers:
+        raise ProvisioningError(
+            "Ownership database role has unexpected security-definer access"
+        )
+    for row in executable_security_definers:
+        if (
+            str(row["result_type"]) != "text"
+            or str(row["language_name"]) != "sql"
+            or str(row["provolatile"]) != "v"
+            or tuple(row["proconfig"] or ()) != OWNERSHIP_PRINCIPAL_LOCK_FUNCTION_CONFIG
+            or " ".join(str(row["prosrc"]).split())
+            != OWNERSHIP_PRINCIPAL_LOCK_FUNCTION_BODY
+            or bool(row["runtime_is_owner"])
+            or not bool(row["owner_matches_principal_table"])
+            or not bool(row["runtime_execute_exact"])
+            or not bool(row["execute_acl_exact"])
+        ):
+            raise ProvisioningError(
+                "Ownership database security-definer contract is not exact"
+            )
 
 
 async def configure(args: argparse.Namespace) -> str:
+    profile = PROVISIONING_PROFILES[args.role_kind]
     project = require_match(args.project, PROJECT_IDENTIFIER, "project")
     region = require_match(args.region, REGION_IDENTIFIER, "region")
     instance = require_match(args.instance, INSTANCE_IDENTIFIER, "instance")
-    role = require_match(args.user, ROLE_IDENTIFIER, "database user")
+    role = require_match(
+        args.user or profile.default_user,
+        ROLE_IDENTIFIER,
+        "database user",
+    )
     database = require_match(args.database, ROLE_IDENTIFIER, "database")
     source_secret = require_match(
         args.bootstrap_secret,
@@ -773,7 +1073,7 @@ async def configure(args: argparse.Namespace) -> str:
         "bootstrap secret",
     )
     destination_secret = require_match(
-        args.secret,
+        args.secret or profile.default_secret,
         RESOURCE_IDENTIFIER,
         "ownership secret",
     )
@@ -802,6 +1102,7 @@ async def configure(args: argparse.Namespace) -> str:
                 admin_connection,
                 role=role,
                 database=database,
+                profile=profile,
             )
         finally:
             await admin_connection.close()
@@ -824,7 +1125,7 @@ async def configure(args: argparse.Namespace) -> str:
             process=proxy,
         )
         try:
-            await verify_role(target_connection)
+            await verify_role(target_connection, profile=profile)
         finally:
             await target_connection.close()
 
@@ -833,6 +1134,7 @@ async def configure(args: argparse.Namespace) -> str:
         project=project,
         region=region,
         secret_id=destination_secret,
+        purpose=profile.secret_purpose,
     )
     database_url = build_database_url(
         user=role,
@@ -853,19 +1155,23 @@ async def configure(args: argparse.Namespace) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--role-kind",
+        choices=tuple(PROVISIONING_PROFILES),
+        default="api",
+    )
     parser.add_argument("--project", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--instance", required=True)
     parser.add_argument("--connection-name", required=True)
     parser.add_argument("--database", default="noop")
-    parser.add_argument("--user", default="noop_ownership")
+    parser.add_argument("--user")
     parser.add_argument(
         "--bootstrap-secret",
         default="noop-staging-database-url",
     )
     parser.add_argument(
         "--secret",
-        default="noop-staging-ownership-database-url",
     )
     parser.add_argument("--proxy-binary", default="cloud-sql-proxy")
     parser.add_argument(
@@ -887,7 +1193,7 @@ def main() -> int:
             "Verify the proxy, migration, IAM, and Secret Manager access.\n",
         )
     print(
-        "Configured the least-privilege ownership database credential as "
+        "Configured the least-privilege ownership database credential profile as "
         f"secret version {version}."
     )
     return 0

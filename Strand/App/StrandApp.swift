@@ -57,7 +57,8 @@ struct StrandApp: App {
                     model.setRealtimeForeground(
                         acceptedTermsVersion == Terms.currentVersion && scenePhase == .active
                     )
-                    if acceptedTermsVersion == Terms.currentVersion,
+                    if model.runtimeRole.allowsLocalAnalysisAndGuidance,
+                       acceptedTermsVersion == Terms.currentVersion,
                        scenePhase == .active {
                         DailyReviewNotifications.restoreScheduleIfAuthorized()
                         HydrationReminders.restoreScheduleIfAuthorized()
@@ -88,31 +89,20 @@ struct StrandApp: App {
                     }
                     model.setRealtimeForeground(phase == .active)
                     if phase == .active {
-                        DailyReviewNotifications.restoreScheduleIfAuthorized()
-                        HydrationReminders.restoreScheduleIfAuthorized()
-                        WindDownNudge.restoreScheduleIfAuthorized()
-                        model.refreshAgeMetricsIfProfileChanged()
-                        model.reevaluateContextualInterventions()
-                        model.ble.requestSync(.foreground)
-                        Task { await FriendsService.catchUpIfDue(repo: model.repo) }
+                        if model.allowsLocalCollection {
+                            DailyReviewNotifications.restoreScheduleIfAuthorized()
+                            HydrationReminders.restoreScheduleIfAuthorized()
+                            WindDownNudge.restoreScheduleIfAuthorized()
+                            model.refreshAgeMetricsIfProfileChanged()
+                            model.reevaluateContextualInterventions()
+                            model.ble.requestSync(.foreground)
+                            Task { await FriendsService.catchUpIfDue(repo: model.repo) }
+                        }
                     }
                 }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 820)
 
-        // Menu-bar extra: glanceable live HR + a compact popover.
-        MenuBarExtra {
-            MenuBarContent()
-                .environmentObject(model)
-                .environmentObject(model.repo)
-                .environmentObject(model.live)
-        } label: {
-            MenuBarLabel()
-                .environmentObject(model)
-                .environmentObject(model.repo)
-                .environmentObject(model.live)
-        }
-        .menuBarExtraStyle(.window)
     }
 }

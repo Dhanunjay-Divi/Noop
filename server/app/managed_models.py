@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import json
+import math
 import re
 import unicodedata
 from datetime import UTC, date, datetime, timedelta
@@ -13,6 +17,8 @@ from app.models import INSTALLATION_ID_PATTERN, StrictModel
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 MANAGED_KEY_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 MANAGED_INSTALLATION_TOKEN_PATTERN = r"^noopm_[A-Za-z0-9_-]{43}$"
+MANAGED_FORMULA_VALUE_ABS_MAX = 1e308
+ManagedClientPlatform = Literal["ios", "android", "macos"]
 MANAGED_SOCIAL_ALIAS_PATTERN = (
     r"^NOOP-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-"
     r"[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$"
@@ -34,22 +40,15 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-class ManagedEnrollment(StrictModel):
+class ManagedAccountEnrollment(StrictModel):
     installation_id: str = Field(
         min_length=1,
         max_length=64,
         pattern=INSTALLATION_ID_PATTERN,
     )
-    platform: Literal["ios", "android"]
+    platform: ManagedClientPlatform
     installation_token: SecretStr
     enrollment_request_id: UUID
-    policy_version: str = Field(
-        min_length=1,
-        max_length=64,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
-    )
-    policy_sha256: str = Field(pattern=SHA256_PATTERN)
-    data_classes: list[str] = Field(min_length=1, max_length=32)
     device_key_fingerprint: str | None = Field(
         default=None,
         pattern=SHA256_PATTERN,
@@ -68,6 +67,16 @@ class ManagedEnrollment(StrictModel):
             raise ValueError("installation_token is invalid")
         return value
 
+
+class ManagedEnrollment(ManagedAccountEnrollment):
+    policy_version: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+    )
+    policy_sha256: str = Field(pattern=SHA256_PATTERN)
+    data_classes: list[str] = Field(min_length=1, max_length=32)
+
     @field_validator("data_classes")
     @classmethod
     def valid_data_classes(cls, values: list[str]) -> list[str]:
@@ -76,6 +85,178 @@ class ManagedEnrollment(StrictModel):
         if any(re.fullmatch(MANAGED_KEY_PATTERN, value) is None for value in values):
             raise ValueError("data_classes contains an invalid identifier")
         return sorted(values)
+
+
+class ManagedAuthorityOptOutRequest(StrictModel):
+    request_id: UUID
+
+
+class ManagedAuthorityReconsentRequest(StrictModel):
+    request_id: UUID
+    policy_version: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+    )
+    policy_sha256: str = Field(pattern=SHA256_PATTERN)
+
+
+class ManagedFormulaProvenanceInput(StrictModel):
+    source_kind: str = Field(
+        min_length=2,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9_]{1,63}$",
+    )
+    source_revision: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
+    input_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
+    calibration_revision: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
+
+
+class ManagedFormulaClientObservationInput(StrictModel):
+    status: Literal["present", "missing", "not_supplied"] = "not_supplied"
+    formula_revision: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
+    value: float | None = None
+
+    @model_validator(mode="after")
+    def coherent_value(self) -> "ManagedFormulaClientObservationInput":
+        if self.status == "not_supplied":
+            if self.formula_revision is not None or self.value is not None:
+                raise ValueError(
+                    "an omitted formula observation cannot carry result fields"
+                )
+            return self
+        if self.formula_revision is None:
+            raise ValueError("formula_revision is required for a compared observation")
+        if self.status == "missing":
+            if self.value is not None:
+                raise ValueError("a missing formula observation cannot carry a value")
+            return self
+        if self.value is None:
+            raise ValueError("a present formula observation requires a value")
+        if (
+            not math.isfinite(self.value)
+            or not -MANAGED_FORMULA_VALUE_ABS_MAX
+            <= self.value
+            <= MANAGED_FORMULA_VALUE_ABS_MAX
+        ):
+            raise ValueError(
+                "a present formula observation requires a finite value "
+                "within the persistence range"
+            )
+        return self
+
+
+class ManagedFormulaShadowRequest(StrictModel):
+    request_id: UUID
+    local_day: date
+    timezone_name: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_+.-]+(?:/[A-Za-z0-9_+.-]+)*$",
+    )
+    inputs: dict[str, Any] = Field(min_length=1, max_length=32)
+    provenance: ManagedFormulaProvenanceInput
+    client_observation: ManagedFormulaClientObservationInput = Field(
+        default_factory=ManagedFormulaClientObservationInput
+    )
+
+    @field_validator("inputs")
+    @classmethod
+    def bounded_formula_inputs(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if any(re.fullmatch(MANAGED_KEY_PATTERN, key) is None for key in value):
+            raise ValueError("formula inputs contain an invalid key")
+        try:
+            encoded = json.dumps(
+                value,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("ascii")
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "formula inputs must contain finite JSON values"
+            ) from error
+        if len(encoded) > 256 * 1024:
+            raise ValueError("formula inputs cannot exceed 262144 bytes")
+        return value
+
+
+class ManagedWrappedDocumentKeyMutation(StrictModel):
+    key_kind: Literal["account_master", "document"]
+    wrapping_key_id: UUID | None = None
+    wrapping_revision: int = Field(ge=1, le=1_000_000)
+    algorithm: Literal["A256GCM"] = "A256GCM"
+    wrapped_key_base64: SecretStr
+    wrapped_key_sha256: str = Field(pattern=SHA256_PATTERN)
+    master_key_confirmation_hmac_sha256: str | None = Field(
+        default=None,
+        pattern=SHA256_PATTERN,
+    )
+    recovery_method: (
+        Literal["recovery_key", "device_transfer", "platform_escrow"] | None
+    ) = None
+
+    @field_validator("wrapped_key_base64")
+    @classmethod
+    def valid_wrapped_key(cls, value: SecretStr) -> SecretStr:
+        try:
+            decoded = base64.b64decode(
+                value.get_secret_value(),
+                validate=True,
+            )
+        except (ValueError, binascii.Error) as error:
+            raise ValueError("wrapped_key_base64 is invalid") from error
+        if not 40 <= len(decoded) <= 16_384:
+            raise ValueError("wrapped_key_base64 size is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def coherent_key_hierarchy(self) -> "ManagedWrappedDocumentKeyMutation":
+        decoded = base64.b64decode(
+            self.wrapped_key_base64.get_secret_value(),
+            validate=True,
+        )
+        if self.key_kind == "account_master":
+            if (
+                self.wrapping_key_id is not None
+                or self.recovery_method is None
+                or self.master_key_confirmation_hmac_sha256 is None
+            ):
+                raise ValueError(
+                    "account master keys require recovery wrapping and confirmation"
+                )
+            return self
+        if (
+            self.wrapping_key_id is None
+            or self.recovery_method is not None
+            or self.master_key_confirmation_hmac_sha256 is not None
+            or len(decoded) != 72
+        ):
+            raise ValueError("document keys require an account master wrapping key")
+        return self
+
+
+class ManagedWrappedDocumentKeyRotation(ManagedWrappedDocumentKeyMutation):
+    expected_wrapping_revision: int = Field(ge=1, le=1_000_000)
+
+
+class ManagedWrappedDocumentKeyRevocation(StrictModel):
+    successor_key_id: UUID | None = None
 
 
 class ManagedSourceRegistration(StrictModel):
@@ -423,6 +604,9 @@ class ManagedRestoreRequest(StrictModel):
     request_id: UUID
     snapshot_at: datetime | None = None
     data_classes: list[str] = Field(default_factory=list, max_length=32)
+    chunk_content_mode: Literal["server_readable", "client_encrypted"] = (
+        "server_readable"
+    )
     document_kinds: list[ManagedDocumentKind] = Field(
         default_factory=list,
         max_length=16,
@@ -591,6 +775,10 @@ class ManagedSocialVisibilityPatch(StrictModel):
     hrv: bool | None = None
     rhr: bool | None = None
     poke_allowed: bool | None = None
+    messages_allowed: bool | None = None
+    photos_allowed: bool | None = None
+    audio_calls_allowed: bool | None = None
+    video_calls_allowed: bool | None = None
 
     @model_validator(mode="after")
     def has_change(self) -> "ManagedSocialVisibilityPatch":

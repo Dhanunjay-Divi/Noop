@@ -24,6 +24,7 @@ import com.google.firebase.auth.PhoneAuthProvider.ForceResendingToken
 import com.google.firebase.messaging.FirebaseMessaging
 import com.noop.NoopApplication
 import com.noop.R
+import com.noop.analytics.FormulaPublicationGate
 import com.noop.ble.WhoopConnectionService
 import com.noop.data.BackupSettingsBridge
 import com.noop.data.WhoopDatabase
@@ -31,6 +32,7 @@ import com.noop.data.WhoopRepository
 import com.noop.notif.ManagedSafetyNotifier
 import com.noop.notif.ManagedSocialPokeNotifier
 import com.noop.safety.SafetyLocation
+import com.noop.ui.NoopPrefs
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.ZoneId
@@ -54,6 +56,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 enum class ManagedCloudPhase {
     UNAVAILABLE,
@@ -72,6 +75,7 @@ sealed interface ManagedSafetyBandSosOutcome {
 
 data class ManagedCloudState(
     val phase: ManagedCloudPhase,
+    val accountAccessReady: Boolean = false,
     val busy: Boolean = false,
     val status: String = "",
     val lastSuccessMs: Long = 0L,
@@ -105,6 +109,41 @@ data class ManagedCloudSyncSummary(
     val prunedWindows: Int,
     val prunedRows: Int,
 )
+
+internal enum class ManagedHistoryExportFailureBoundary {
+    STAGED_STATE,
+    LOCAL_ARCHIVE_OUTPUT,
+}
+
+internal class ManagedHistoryExportStateException(
+    cause: Throwable,
+) : RuntimeException(cause)
+
+internal fun managedHistoryExportNeedsReset(
+    error: Throwable,
+    boundary: ManagedHistoryExportFailureBoundary =
+        ManagedHistoryExportFailureBoundary.STAGED_STATE,
+): Boolean {
+    if (boundary == ManagedHistoryExportFailureBoundary.LOCAL_ARCHIVE_OUTPUT) {
+        return false
+    }
+    return error is ManagedHistoryExportStateException ||
+        error is ManagedStorageException.InvalidResponse ||
+        error is ManagedStorageException.CursorExpired ||
+        error is ManagedStorageException.NotFound ||
+        error is ManagedStorageException.Conflict ||
+        error is ManagedStorageException.DigestMismatch
+}
+
+internal fun applyManagedHistoryExportRecovery(
+    error: Throwable,
+    boundary: ManagedHistoryExportFailureBoundary,
+    clearExport: () -> Unit,
+): Boolean {
+    val needsReset = managedHistoryExportNeedsReset(error, boundary)
+    if (needsReset) clearExport()
+    return needsReset
+}
 
 /**
  * Process owner for optional NOOP+ identity and managed storage.
@@ -193,10 +232,6 @@ class ManagedCloudService private constructor(context: Context) {
         }
         runCatching {
             runtime()
-            if (managedDeletionDeadlinePassed(preferences.erasureNotBefore)) {
-                completeLocalDeletionHandoff()
-                return
-            }
             reconcileAuthenticatedState()
         }.onFailure { error ->
             replaceState {
@@ -337,6 +372,54 @@ class ManagedCloudService private constructor(context: Context) {
         }
     }
 
+    suspend fun enrollAccount() {
+        if (!beginBusy()) return
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "managed_account_enrollment",
+        )
+        try {
+            client().enrollAccount(
+                authorization = authorization(forceRefresh = true),
+                requestId = preferences.accountEnrollmentRequestId(),
+            )
+            val binding = accountScopeBinding(
+                user = currentUser(),
+                persistLegacyBinding = false,
+            )
+            preferences.completeAccountAccess(binding)
+            replaceState {
+                it.copy(
+                    accountAccessReady = true,
+                    socialStatus = text(
+                        R.string.managed_friends_status_account_ready,
+                    ),
+                )
+            }
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "completed",
+            )
+        } catch (error: CancellationException) {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "canceled",
+                fields = mapOf("failure_kind" to "canceled"),
+            )
+            throw error
+        } catch (error: Throwable) {
+            setSocialStatus(userMessage(error))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = diagnosticOperationOutcome(error),
+                fields = mapOf(
+                    "failure_kind" to diagnosticSyncFailureKind(error),
+                ),
+            )
+        } finally {
+            endBusy()
+        }
+    }
+
     suspend fun enroll() {
         if (!beginBusy()) return
         val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
@@ -350,11 +433,17 @@ class ManagedCloudService private constructor(context: Context) {
                 requestId = preferences.enrollmentRequestId(),
                 dataClasses = ManagedSyncCoordinator.DATA_CLASSES,
             )
+            val binding = accountScopeBinding(
+                user = currentUser(),
+                persistLegacyBinding = false,
+            )
             preferences.completeEnrollment(
-                accountScopeHash = accountScopeHash(),
+                binding = binding,
                 policyVersion = config.storage.policyVersion,
             )
+            preferences.completeAccountAccess(binding)
             setPhase(ManagedCloudPhase.ENROLLED)
+            replaceState { it.copy(accountAccessReady = true) }
             scheduleManagedSafetyBootstrap()
             setStatus(text(R.string.managed_cloud_status_enabled))
             ManagedCloudScheduler.reconcile(appContext)
@@ -423,6 +512,9 @@ class ManagedCloudService private constructor(context: Context) {
                     ),
                 )
             }
+            // A manual core pass cannot prove that an earlier Friends or
+            // Safety retry has recovered. The background pass attempts every
+            // enabled scope together and owns clearing the shared retry state.
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -434,37 +526,52 @@ class ManagedCloudService private constructor(context: Context) {
 
     suspend fun exportCompleteCloudHistory(destination: Uri) {
         if (!beginBusy()) return
-        var writer: ManagedHistorySafArchiveWriter? = null
+        var transferStore: ManagedHistoryTransferStore? = null
+        var failureBoundary = ManagedHistoryExportFailureBoundary.STAGED_STATE
         val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("managed_export")
         try {
             withContext(Dispatchers.IO) {
-                for (pass in 1..MAXIMUM_EXPORT_PREPARATION_PASSES) {
-                    coroutineContext.ensureActive()
-                    setStatus(
-                        text(
-                            R.string.managed_cloud_status_export_preparing_pass,
-                            pass,
-                        ),
-                    )
-                    val summary = performSync(SyncMode.EXPORT_PREPARATION)
-                    if (!summary.hasMore) break
-                    if (pass == MAXIMUM_EXPORT_PREPARATION_PASSES) {
-                        throw ManagedCloudException.ExportPreparationIncomplete
+                val transfer = ManagedHistoryTransferStore(
+                    appContext,
+                    accountScopeHash(),
+                )
+                transferStore = transfer
+                val checkpoint = transfer.loadExportCheckpoint()
+                val resumed = checkpoint != null
+                if (checkpoint == null) {
+                    transfer.clearExport()
+                    for (pass in 1..MAXIMUM_EXPORT_PREPARATION_PASSES) {
+                        coroutineContext.ensureActive()
+                        setStatus(
+                            text(
+                                R.string.managed_cloud_status_export_preparing_pass,
+                                pass,
+                            ),
+                        )
+                        val summary = performSync(SyncMode.EXPORT_PREPARATION)
+                        if (!summary.hasMore) break
+                        if (pass == MAXIMUM_EXPORT_PREPARATION_PASSES) {
+                            throw ManagedCloudException.ExportPreparationIncomplete
+                        }
                     }
                 }
 
-                val archiveWriter = ManagedHistorySafArchiveWriter(
-                    appContext,
-                    destination,
-                )
-                writer = archiveWriter
                 val manifest = ManagedHistoryExporter(client()).export(
+                    resumeFrom = checkpoint,
                     authorization = ::authorization,
                     progress = ::setExportStatus,
-                    consume = archiveWriter::add,
+                    saveCheckpoint = transfer::saveExportCheckpoint,
+                    consume = transfer::add,
                 )
-                archiveWriter.finish(manifest)
-                writer = null
+                try {
+                    transfer.publishExport(destination, manifest)
+                } catch (error: ManagedHistoryExportStateException) {
+                    throw error
+                } catch (error: Throwable) {
+                    failureBoundary =
+                        ManagedHistoryExportFailureBoundary.LOCAL_ARCHIVE_OUTPUT
+                    throw error
+                }
                 setStatus(text(R.string.managed_cloud_status_export_saved))
                 com.noop.AppDiagnosticsRecorder.endOperation(
                     diagnostic,
@@ -472,13 +579,13 @@ class ManagedCloudService private constructor(context: Context) {
                     fields = mapOf(
                         "objects" to manifest.exportedObjects.toString(),
                         "chunk_bytes" to manifest.exportedChunkBytes.toString(),
+                        "resumed" to resumed.toString(),
                     ),
                     includeResourceSnapshot = true,
                 )
             }
         } catch (error: CancellationException) {
-            writer?.abort()
-                ?: ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
+            ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
             setStatus(text(R.string.managed_cloud_status_export_canceled))
             com.noop.AppDiagnosticsRecorder.endOperation(
                 diagnostic,
@@ -487,17 +594,117 @@ class ManagedCloudService private constructor(context: Context) {
             )
             throw error
         } catch (error: Throwable) {
-            writer?.abort()
-                ?: ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
-            setStatus(userMessage(error))
+            ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
+            val resetApplied = transferStore?.let { transfer ->
+                applyManagedHistoryExportRecovery(
+                    error = error,
+                    boundary = failureBoundary,
+                    clearExport = transfer::clearExport,
+                )
+            } ?: false
+            val surfacedError =
+                (error as? ManagedHistoryExportStateException)?.cause ?: error
+            setStatus(userMessage(surfacedError))
             com.noop.AppDiagnosticsRecorder.endOperation(
                 diagnostic,
                 outcome = "failed",
+                fields = mapOf(
+                    "failure_kind" to diagnosticSyncFailureKind(surfacedError),
+                    "retry_state" to if (resetApplied) "reset" else "preserved",
+                ),
+                includeResourceSnapshot = true,
+            )
+        } finally {
+            endBusy()
+        }
+    }
+
+    suspend fun importCompleteCloudHistory(
+        source: Uri,
+    ): ManagedHistoryImportSummary? {
+        if (!beginBusy()) return null
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("managed_import")
+        return try {
+            syncMutex.withLock {
+                if (managedDisconnecting) {
+                    throw CancellationException(
+                        "managed account disconnect is in progress",
+                    )
+                }
+                withContext(Dispatchers.IO) {
+                    val scopeHash = accountScopeHash()
+                    val operationValidator: suspend () -> Unit = {
+                        coroutineContext.ensureActive()
+                        val scopeStillMatches = runCatching {
+                            accountScopeHash() == scopeHash
+                        }.getOrDefault(false)
+                        if (managedDisconnecting ||
+                            state.value.phase != ManagedCloudPhase.ENROLLED ||
+                            !scopeStillMatches
+                        ) {
+                            throw CancellationException(
+                                "managed history account boundary changed",
+                            )
+                        }
+                    }
+                    operationValidator()
+                    val transfer = ManagedHistoryTransferStore(
+                        appContext,
+                        scopeHash,
+                    )
+                    val reader = transfer.stageImport(source)
+                    operationValidator()
+                    bindManagedDocumentProfile(scopeHash)
+                    operationValidator()
+                    val documents = managedDocumentRuntime(scopeHash)
+                    val restore = RoomManagedRestoreApplier(
+                        database = database,
+                        documentRestore = documents,
+                    )
+                    val summary = ManagedHistoryImporter().importArchive(
+                        manifestData = reader.manifestData(),
+                        entryPaths = reader.entryPaths(),
+                        resumeFrom = transfer.loadImportCheckpoint(),
+                        restore = restore,
+                        saveCheckpoint = transfer::saveImportCheckpoint,
+                        operationValidator = operationValidator,
+                        read = reader::data,
+                    )
+                    operationValidator()
+                    transfer.clearImport()
+                    com.noop.AppDiagnosticsRecorder.endOperation(
+                        diagnostic,
+                        outcome = "completed",
+                        fields = mapOf(
+                            "objects" to summary.importedObjects.toString(),
+                            "chunk_bytes" to
+                                summary.importedChunkBytes.toString(),
+                            "resumed" to summary.resumed.toString(),
+                        ),
+                        includeResourceSnapshot = true,
+                    )
+                    summary
+                }
+            }
+        } catch (error: CancellationException) {
+            setStatus(text(R.string.managed_cloud_status_import_canceled))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "canceled",
+                includeResourceSnapshot = true,
+            )
+            throw error
+        } catch (error: Throwable) {
+            setStatus(userMessage(error))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = diagnosticOperationOutcome(error),
                 fields = mapOf(
                     "failure_kind" to diagnosticSyncFailureKind(error),
                 ),
                 includeResourceSnapshot = true,
             )
+            null
         } finally {
             endBusy()
         }
@@ -508,13 +715,17 @@ class ManagedCloudService private constructor(context: Context) {
 
     internal suspend fun socialCatchUpForWorker(
         nowMs: Long = System.currentTimeMillis(),
+        force: Boolean = false,
     ): Boolean {
-        if (state.value.phase != ManagedCloudPhase.ENROLLED ||
+        if (!state.value.accountAccessReady ||
             !preferences.socialEnabled ||
-            !ManagedSocialRuntime.isCatchUpDue(
-                preferences.socialLastAttemptMs,
-                nowMs,
-            )
+            (
+                !force &&
+                    !ManagedSocialRuntime.isCatchUpDue(
+                        preferences.socialLastAttemptMs,
+                        nowMs,
+                    )
+                )
         ) {
             return false
         }
@@ -538,16 +749,23 @@ class ManagedCloudService private constructor(context: Context) {
 
     internal suspend fun safetyCatchUpForWorker(
         nowMs: Long = System.currentTimeMillis(),
+        force: Boolean = false,
     ): Boolean {
         if (state.value.phase != ManagedCloudPhase.ENROLLED ||
             !preferences.safetyEnabled
         ) {
             return false
         }
-        val previousAttempt = preferences.beginSafetyAttempt(
-            nowMs,
-            SAFETY_CATCH_UP_INTERVAL_MS,
-        ) ?: return false
+        val previousAttempt = if (force) {
+            preferences.safetyLastAttemptMs.also {
+                preferences.safetyLastAttemptMs = nowMs
+            }
+        } else {
+            preferences.beginSafetyAttempt(
+                nowMs,
+                SAFETY_CATCH_UP_INTERVAL_MS,
+            ) ?: return false
+        }
         return try {
             refreshSafetyData()
             true
@@ -1657,12 +1875,16 @@ class ManagedCloudService private constructor(context: Context) {
                         setStatus(userMessage(it))
                         return
                     }
-                preferences.disconnect()
-                preferences.clearSocialState()
-                preferences.clearSafetyState()
+                preferences.clearEnrollment(preserveLegacyScope = true)
+                preferences.clearAccountAccess()
                 clearSocialPresentation()
                 clearSafetyPresentation()
-                setPhase(ManagedCloudPhase.SIGNED_OUT)
+                replaceState {
+                    it.copy(
+                        phase = ManagedCloudPhase.SIGNED_OUT,
+                        accountAccessReady = false,
+                    )
+                }
                 setStatus(text(R.string.managed_cloud_status_disconnected))
                 ManagedCloudScheduler.reconcile(appContext)
             }
@@ -1737,31 +1959,48 @@ class ManagedCloudService private constructor(context: Context) {
         }
     }
 
-    private suspend fun scheduleAccountDeletion() {
-        val job = client().requestErasure(
-            authorization = authorization(forceRefresh = true),
-            requestId = UUID.randomUUID(),
-            confirmationSha256 = ACCOUNT_DELETION_CONFIRMATION_SHA256,
-        )
-        preferences.erasureJobId = job.jobId
-        preferences.erasureNotBefore = job.notBefore
-        preferences.automatic = false
-        replaceState {
-            it.copy(
-                phase = ManagedCloudPhase.DELETION_SCHEDULED,
-                deletionNotBefore = job.notBefore,
+    private suspend fun scheduleAccountDeletion() =
+        socialMutex.withLock {
+            val job = client().requestErasure(
+                authorization = authorization(forceRefresh = true),
+                requestId = UUID.randomUUID(),
+                confirmationSha256 = ACCOUNT_DELETION_CONFIRMATION_SHA256,
             )
+            preferences.erasureJobId = job.jobId
+            preferences.erasureNotBefore = job.notBefore
+            preferences.automatic = false
+            preferences.clearSocialState(preserveEnabled = true)
+            preferences.clearSafetyState()
+            replaceState {
+                it.copy(
+                    phase = ManagedCloudPhase.DELETION_SCHEDULED,
+                    accountAccessReady = false,
+                    deletionNotBefore = job.notBefore,
+                    socialProfile = null,
+                    socialFriends = emptyList(),
+                    socialBlockedProfiles = emptyList(),
+                    socialRequests = emptyList(),
+                    socialFeed = emptyList(),
+                    socialLookup = null,
+                    socialInvite = null,
+                    socialStatus = "",
+                    safetyContacts = null,
+                    safetyRequests = emptyList(),
+                    safetyIncidents = emptyList(),
+                    safetyInvite = null,
+                    safetyStatus = "",
+                )
+            }
+            setStatus(text(R.string.managed_cloud_status_deletion_scheduled))
+            ManagedCloudScheduler.reconcile(appContext)
         }
-        setStatus(text(R.string.managed_cloud_status_deletion_scheduled))
-        ManagedCloudScheduler.reconcile(appContext)
-    }
 
     suspend fun refreshDeletionStatus() {
         val jobId = preferences.erasureJobId ?: return
         if (!beginBusy()) return
         try {
-            val job = client().erasure(
-                authorization = authorization(forceRefresh = false),
+            val job = client().erasureReceipt(
+                authorization = erasureReceiptAuthorization(),
                 jobId = jobId,
             )
             preferences.erasureNotBefore = job.notBefore
@@ -1779,16 +2018,18 @@ class ManagedCloudService private constructor(context: Context) {
                     )
                 }
             }
-        } catch (error: ManagedStorageException.NotFound) {
-            completeLocalErasureState()
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            if (managedDeletionDeadlinePassed(preferences.erasureNotBefore)) {
-                completeLocalDeletionHandoff()
-            } else {
-                setStatus(userMessage(error))
-            }
+            setPhase(ManagedCloudPhase.DELETION_SCHEDULED)
+            setStatus(userMessage(error))
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_deletion.verification",
+                fields = mapOf(
+                    "outcome" to "pending_retry",
+                    "failure_kind" to diagnosticSyncFailureKind(error),
+                ),
+            )
         } finally {
             endBusy()
         }
@@ -1816,26 +2057,35 @@ class ManagedCloudService private constructor(context: Context) {
     internal fun shouldSchedule(): Boolean {
         val config = configuration ?: return false
         val user = runCatching { runtime().auth.currentUser }.getOrNull() ?: return false
-        val scopeHash = accountScopeHash(user)
+        val binding = runCatching { accountScopeBinding(user) }
+            .getOrNull() ?: return false
+        val storageEnrolled =
+            preferences.isEnrolled(binding, config.storage.policyVersion)
+        val accountReady =
+            storageEnrolled || preferences.isAccountAccessReady(binding)
         return preferences.erasureJobId == null &&
-            preferences.isEnrolled(scopeHash, config.storage.policyVersion) &&
             (
-                preferences.automatic ||
-                    preferences.socialEnabled ||
-                    preferences.safetyEnabled
+                (storageEnrolled && preferences.automatic) ||
+                    (accountReady && preferences.socialEnabled) ||
+                    (storageEnrolled && preferences.safetyEnabled)
                 )
     }
 
-    internal fun shouldSyncForWorker(): Boolean = preferences.automatic
+    internal fun shouldSyncForWorker(): Boolean =
+        state.value.phase == ManagedCloudPhase.ENROLLED &&
+            preferences.automatic
 
-    internal fun shouldRunSocialForWorker(): Boolean = preferences.socialEnabled
+    internal fun shouldRunSocialForWorker(): Boolean =
+        state.value.accountAccessReady && preferences.socialEnabled
 
-    internal fun shouldRunSafetyForWorker(): Boolean = preferences.safetyEnabled
+    internal fun shouldRunSafetyForWorker(): Boolean =
+        state.value.phase == ManagedCloudPhase.ENROLLED &&
+            preferences.safetyEnabled
 
     internal fun schedulerLastAttemptMs(): Long = buildList {
-        if (preferences.automatic) add(preferences.lastAttemptMs)
-        if (preferences.socialEnabled) add(preferences.socialLastAttemptMs)
-        if (preferences.safetyEnabled) add(preferences.safetyLastAttemptMs)
+        if (shouldSyncForWorker()) add(preferences.lastAttemptMs)
+        if (shouldRunSocialForWorker()) add(preferences.socialLastAttemptMs)
+        if (shouldRunSafetyForWorker()) add(preferences.safetyLastAttemptMs)
     }.minOrNull() ?: 0L
 
     private fun beginSafetyAction(): Boolean = synchronized(stateLock) {
@@ -2217,7 +2467,7 @@ class ManagedCloudService private constructor(context: Context) {
                 )
 
     private fun beginSocialAction(): Boolean = synchronized(stateLock) {
-        if (mutableState.value.phase != ManagedCloudPhase.ENROLLED ||
+        if (!mutableState.value.accountAccessReady ||
             mutableState.value.busy ||
             socialRunning
         ) {
@@ -2276,7 +2526,7 @@ class ManagedCloudService private constructor(context: Context) {
 
     private suspend fun refreshSocialData(deliverPokes: Boolean) =
         socialMutex.withLock {
-            if (state.value.phase != ManagedCloudPhase.ENROLLED) {
+            if (!state.value.accountAccessReady) {
                 throw ManagedCloudException.ConsentRequired
             }
             socialRunning = true
@@ -2415,6 +2665,33 @@ class ManagedCloudService private constructor(context: Context) {
         }
 
     private suspend fun uploadChangedSocialSummaries(
+        friends: List<ManagedSocialFriend>,
+        managedClient: ManagedStorageClient,
+        authorization: ManagedAuthorization,
+    ): Int {
+        val computedDerivedReady = FormulaPublicationGate.computedDerivedReady(
+            NoopPrefs.of(appContext),
+        )
+        val uploaded = FormulaPublicationGate.publishSocialSummariesIfReady(
+            computedDerivedReady,
+        ) {
+            uploadReadySocialSummaries(
+                friends,
+                managedClient,
+                authorization,
+            )
+        }
+        if (uploaded == null) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "formula_publication",
+                fields = FormulaPublicationGate.DEFERRED_DIAGNOSTIC_FIELDS,
+            )
+            return 0
+        }
+        return uploaded
+    }
+
+    private suspend fun uploadReadySocialSummaries(
         friends: List<ManagedSocialFriend>,
         managedClient: ManagedStorageClient,
         authorization: ManagedAuthorization,
@@ -2577,8 +2854,9 @@ class ManagedCloudService private constructor(context: Context) {
                 try {
                     val config = configuration ?: throw ManagedCloudException.Unavailable
                     val user = currentUser()
-                    val scopeHash = accountScopeHash(user)
-                    if (!preferences.isEnrolled(scopeHash, config.storage.policyVersion) ||
+                    val binding = accountScopeBinding(user)
+                    val scopeHash = binding.dataScopeHash
+                    if (!preferences.isEnrolled(binding, config.storage.policyVersion) ||
                         preferences.erasureJobId != null
                     ) {
                         throw ManagedCloudException.ConsentRequired
@@ -2776,11 +3054,7 @@ class ManagedCloudService private constructor(context: Context) {
         scopeHash: String,
         authorization: ManagedAuthorization,
     ): ManagedCloudSyncSummary {
-        val documentAdapter = RoomManagedDocumentAdapter(
-            database = database,
-            accountScopeHash = scopeHash,
-            context = appContext,
-        )
+        val documentAdapter = managedDocumentRuntime(scopeHash)
         documentAdapter.stagePreferences(BackupSettingsBridge.snapshotJson(appContext))
         val coordinator = ManagedSyncCoordinator(
             transport = client(),
@@ -2796,6 +3070,19 @@ class ManagedCloudService private constructor(context: Context) {
             documents = documentAdapter,
         )
         val sources = sourceDescriptors(authorization.installationId)
+        val computedDerivedReady = FormulaPublicationGate.computedDerivedReady(
+            NoopPrefs.of(appContext),
+        )
+        if (!computedDerivedReady &&
+            sources.any {
+                it.sourceKind == FormulaPublicationGate.COMPUTED_SOURCE_KIND
+            }
+        ) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "formula_publication",
+                fields = FormulaPublicationGate.DEFERRED_DIAGNOSTIC_FIELDS,
+            )
+        }
         var uploadedChunks = 0
         var uploadedBytes = 0L
         var uploadedDocuments = 0
@@ -2850,10 +3137,15 @@ class ManagedCloudService private constructor(context: Context) {
             )
         }
         sources.forEachIndexed { index, source ->
+            val dataClasses = FormulaPublicationGate.managedDataClasses(
+                sourceKind = source.sourceKind,
+                available = ManagedSyncCoordinator.DATA_CLASSES,
+                computedDerivedReady = computedDerivedReady,
+            )
             val result = coordinator.sync(
                 source = source,
                 authorization = authorization,
-                dataClasses = ManagedSyncCoordinator.DATA_CLASSES,
+                dataClasses = dataClasses,
                 maxForwardWindowsPerClass = limits.forward,
                 maxDirtyWindowsPerClass = limits.dirty,
                 maxChangePages = if (index == 0) limits.changes else 0,
@@ -2927,31 +3219,214 @@ class ManagedCloudService private constructor(context: Context) {
             scheduleManagedDocumentProfileBinding(null)
             clearSocialPresentation()
             clearSafetyPresentation()
-            setPhase(ManagedCloudPhase.SIGNED_OUT)
+            ManagedCloudRetryStore(appContext).clearAll()
+            replaceState {
+                it.copy(
+                    phase = ManagedCloudPhase.SIGNED_OUT,
+                    accountAccessReady = false,
+                )
+            }
             return
         }
-        scheduleManagedDocumentProfileBinding(accountScopeHash(user))
+        val binding = runCatching {
+            accountScopeBinding(user)
+        }.getOrElse {
+            scheduleManagedDocumentProfileBinding(null)
+            clearSocialPresentation()
+            clearSafetyPresentation()
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_account.scope_binding",
+                fields = mapOf(
+                    "outcome" to "failed",
+                    "failure_kind" to "binding_invalid",
+                ),
+            )
+            replaceState {
+                it.copy(
+                    phase = ManagedCloudPhase.CONSENT_REQUIRED,
+                    accountAccessReady = false,
+                )
+            }
+            return
+        }
+        scheduleManagedDocumentProfileBinding(binding.dataScopeHash)
         val enrolled = preferences.isEnrolled(
-            accountScopeHash(user),
+            binding,
             config.storage.policyVersion,
         )
-        setPhase(
-            when {
-                enrolled && preferences.erasureJobId != null ->
+        val accountReady =
+            enrolled || preferences.isAccountAccessReady(binding)
+        val deletionScheduled =
+            accountReady && preferences.erasureJobId != null
+        replaceState {
+            it.copy(
+                accountAccessReady = accountReady && !deletionScheduled,
+                phase = when {
+                deletionScheduled ->
                     ManagedCloudPhase.DELETION_SCHEDULED
                 enrolled -> ManagedCloudPhase.ENROLLED
                 else -> ManagedCloudPhase.CONSENT_REQUIRED
-            },
-        )
-        if (!enrolled) {
+                },
+            )
+        }
+        if (!accountReady) {
             clearSocialPresentation()
+        }
+        if (!enrolled) {
             clearSafetyPresentation()
         } else if (state.value.phase == ManagedCloudPhase.ENROLLED) {
             scheduleManagedSafetyBootstrap()
         }
     }
 
+    private fun managedDocumentRuntime(
+        accountScopeHash: String,
+    ): RoomManagedDocumentAdapter {
+        val storage: AndroidManagedDocumentKeyVaultStorage
+        val vault: ManagedDocumentKeyVault
+        val recoveryComplete: Boolean
+        try {
+            storage = AndroidManagedDocumentKeyVaultStorage(appContext)
+            val persisted = storage.load(accountScopeHash)
+            if (persisted == null) {
+                com.noop.AppDiagnosticsRecorder.record(
+                    "managed_documents.runtime",
+                    fields = mapOf(
+                        "outcome" to "deferred",
+                        "mode" to "server_readable",
+                        "recovery_state" to "not_enrolled",
+                    ),
+                )
+                return RoomManagedDocumentAdapter(
+                    database = database,
+                    accountScopeHash = accountScopeHash,
+                    context = appContext,
+                )
+            }
+            if (!hasDurableManagedDocumentRecoveryEnrollment(persisted)) {
+                com.noop.AppDiagnosticsRecorder.record(
+                    "managed_documents.runtime",
+                    fields = mapOf(
+                        "outcome" to "failed",
+                        "mode" to "server_readable",
+                        "failure_kind" to "recovery_state",
+                    ),
+                )
+                throw ManagedStorageException.InvalidResponse()
+            }
+            vault = ManagedDocumentKeyVault(storage)
+            recoveryComplete =
+                vault.recoveryEnrollmentComplete(accountScopeHash)
+        } catch (_: Exception) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_documents.runtime",
+                fields = mapOf(
+                    "outcome" to "failed",
+                    "mode" to "server_readable",
+                    "failure_kind" to "recovery_state",
+                ),
+            )
+            throw ManagedStorageException.InvalidResponse()
+        }
+
+        if (!recoveryComplete) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_documents.runtime",
+                fields = mapOf(
+                    "outcome" to "failed",
+                    "mode" to "server_readable",
+                    "failure_kind" to "recovery_state",
+                ),
+            )
+            throw ManagedStorageException.InvalidResponse()
+        }
+
+        val inbox = ManagedDocumentCiphertextInbox(appContext)
+        val inboxMaintenance = try {
+            inbox.startupMaintenance(accountScopeHash)
+        } catch (_: Exception) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_documents.ciphertext_staging",
+                fields = mapOf(
+                    "outcome" to "failed",
+                    "failure_kind" to "startup_maintenance",
+                ),
+            )
+            throw ManagedStorageException.InvalidResponse()
+        }
+        com.noop.AppDiagnosticsRecorder.record(
+            "managed_documents.ciphertext_staging",
+            fields = mapOf(
+                "outcome" to "completed",
+                "legacy_state" to
+                    inboxMaintenance.legacyDisposition.diagnosticValue,
+                "sweep_state" to
+                    inboxMaintenance.sweepDisposition.diagnosticValue,
+            ),
+        )
+        com.noop.AppDiagnosticsRecorder.record(
+            "managed_documents.runtime",
+            fields = mapOf(
+                "outcome" to "ready",
+                "mode" to "client_encrypted",
+                "recovery_state" to "complete",
+            ),
+        )
+        return RoomManagedDocumentAdapter(
+            database = database,
+            accountScopeHash = accountScopeHash,
+            context = appContext,
+            documentKeys = vault,
+            ciphertextInbox = inbox,
+        )
+    }
+
+    private fun hasDurableManagedDocumentRecoveryEnrollment(
+        persisted: String,
+    ): Boolean = runCatching {
+        val value = JSONObject(persisted)
+        val recovery = value.optJSONObject("recovery_enrollment")
+            ?: return@runCatching false
+        val wrappedKey = java.util.Base64.getDecoder().decode(
+            recovery.getString("wrapped_key_base64"),
+        )
+        val receipt = ManagedAccountMasterKeyReceipt(
+            version = recovery.getInt("version"),
+            keyId = UUID.fromString(recovery.getString("key_id")),
+            wrappingRevision = recovery.getInt("wrapping_revision"),
+            algorithm = recovery.getString("algorithm"),
+            wrappedKey = wrappedKey,
+            masterKeyConfirmationHmacSha256 = recovery.getString(
+                "master_key_confirmation_hmac_sha256",
+            ),
+            recoveryMethod = recovery.getString("recovery_method"),
+            status = recovery.getString("status"),
+        )
+        val activeMasterKeyId =
+            UUID.fromString(value.getString("active_master_key_id"))
+        val masterKey = java.util.Base64.getDecoder().decode(
+            value.getString("master_key_base64"),
+        )
+        value.optInt("version") == 3 &&
+            receipt.wrappedKeySha256 ==
+                recovery.getString("wrapped_key_sha256") &&
+            activeMasterKeyId == receipt.keyId &&
+            masterKey.size == 32 &&
+            ManagedAccountMasterKeyBinding.matches(
+                masterKey = masterKey,
+                accountScopeHash = accountScopeHash(),
+                receipt = receipt,
+            ) &&
+            value.getInt("master_wrapping_revision") ==
+                receipt.wrappingRevision
+    }.getOrDefault(false)
+
     private fun completeLocalErasureState() {
+        if (!purgeManagedDocumentLocalState()) {
+            setPhase(ManagedCloudPhase.DELETION_SCHEDULED)
+            setStatus(text(R.string.managed_cloud_error_generic))
+            return
+        }
         safetyBootstrapJob?.cancel()
         safetyBootstrapJob = null
         safetyBootstrapRunning = false
@@ -2959,9 +3434,11 @@ class ManagedCloudService private constructor(context: Context) {
         runCatching { runtime().auth.signOut() }
         scheduleManagedDocumentProfileBinding(null)
         preferences.clearEnrollment()
+        preferences.clearAccountAccess()
         replaceState {
             it.copy(
                 phase = ManagedCloudPhase.SIGNED_OUT,
+                accountAccessReady = false,
                 deletionNotBefore = null,
                 overview = null,
                 installations = emptyList(),
@@ -2987,53 +3464,68 @@ class ManagedCloudService private constructor(context: Context) {
         ManagedCloudScheduler.reconcile(appContext)
     }
 
-    private fun completeLocalDeletionHandoff() {
-        safetyBootstrapJob?.cancel()
-        safetyBootstrapJob = null
-        safetyBootstrapRunning = false
-        disableManagedMessagingLocally()
-        runCatching { runtime().auth.signOut() }
-        scheduleManagedDocumentProfileBinding(null)
-        preferences.clearEnrollment()
-        replaceState {
-            it.copy(
-                phase = ManagedCloudPhase.SIGNED_OUT,
-                deletionNotBefore = null,
-                overview = null,
-                installations = emptyList(),
-                socialProfile = null,
-                socialFriends = emptyList(),
-                socialBlockedProfiles = emptyList(),
-                socialRequests = emptyList(),
-                socialFeed = emptyList(),
-                socialLookup = null,
-                socialInvite = null,
-                socialStatus = "",
-                hasPendingSocialInvite = false,
-                pendingSocialNoopId = null,
-                safetyContacts = null,
-                safetyRequests = emptyList(),
-                safetyIncidents = emptyList(),
-                safetyInvite = null,
-                safetyStatus = "",
-                hasPendingSafetyInvite = false,
-            )
+    private fun purgeManagedDocumentLocalState(): Boolean {
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "managed_documents.account_delete_purge",
+        )
+        val scopeHash =
+            preferences.enrolledScopeHash
+                ?: preferences.accountAccessScopeHash
+        var keyMaterial =
+            if (scopeHash == null) "scope_unavailable" else "not_present"
+        var ciphertextInbox =
+            if (scopeHash == null) "scope_unavailable" else "not_present"
+        if (scopeHash != null) {
+            ciphertextInbox = try {
+                ManagedDocumentCiphertextInbox(appContext)
+                    .purgeAccount(scopeHash)
+                    .diagnosticValue
+            } catch (_: Exception) {
+                "failed"
+            }
+            if (ciphertextInbox != "failed") {
+                keyMaterial = try {
+                    val storage =
+                        AndroidManagedDocumentKeyVaultStorage(appContext)
+                    if (storage.load(scopeHash) == null) {
+                        "not_present"
+                    } else {
+                        ManagedDocumentKeyVault(storage)
+                            .removeAccount(scopeHash)
+                        "removed"
+                    }
+                } catch (_: Exception) {
+                    "failed"
+                }
+            } else {
+                keyMaterial = "preserved"
+            }
         }
-        setStatus(text(R.string.managed_cloud_status_deletion_processing))
-        ManagedCloudScheduler.reconcile(appContext)
+
+        val completed =
+            scopeHash != null &&
+                keyMaterial != "failed" &&
+                ciphertextInbox != "failed"
+        com.noop.AppDiagnosticsRecorder.endOperation(
+            diagnostic,
+            outcome = if (completed) "completed" else "failed",
+            fields = mapOf(
+                "key_material" to keyMaterial,
+                "ciphertext_inbox" to ciphertextInbox,
+            ),
+        )
+        return completed
     }
 
     private fun restoreAfterCanceledErasure() {
         preferences.erasureJobId = null
         preferences.erasureNotBefore = null
-        preferences.automatic = true
-        replaceState {
-            it.copy(
-                phase = ManagedCloudPhase.ENROLLED,
-                deletionNotBefore = null,
-            )
+        preferences.automatic = preferences.enrolledScopeHash != null
+        reconcileAuthenticatedState()
+        replaceState { it.copy(deletionNotBefore = null) }
+        if (state.value.phase == ManagedCloudPhase.ENROLLED) {
+            scheduleManagedSafetyBootstrap()
         }
-        scheduleManagedSafetyBootstrap()
         setStatus(text(R.string.managed_cloud_status_deletion_canceled))
         ManagedCloudScheduler.reconcile(appContext)
     }
@@ -3113,6 +3605,26 @@ class ManagedCloudService private constructor(context: Context) {
         )
     }
 
+    private suspend fun erasureReceiptAuthorization(): ManagedAuthorization {
+        val runtime = runtime()
+        val scopeHash =
+            preferences.enrolledScopeHash
+                ?: preferences.accountAccessScopeHash
+            ?: throw ManagedStorageException.Authentication()
+        val appCheck = runtime.appCheck.getAppCheckToken(false).awaitManaged().token
+            .takeIf(String::isNotBlank)
+            ?: throw ManagedStorageException.Authentication()
+        return ManagedAuthorization(
+            identityToken = "erasure-receipt",
+            appCheckToken = appCheck,
+            installationId = ManagedAccountIdentifier.installationId(
+                preferences.installationId,
+                scopeHash,
+            ),
+            installationToken = preferences.installationToken(scopeHash),
+        )
+    }
+
     private fun client(): ManagedStorageClient =
         ManagedStorageClient(
             configuration =
@@ -3140,12 +3652,71 @@ class ManagedCloudService private constructor(context: Context) {
     private fun currentUser(): FirebaseUser =
         runtime().auth.currentUser ?: throw ManagedCloudException.NotSignedIn
 
-    private fun accountScopeHash(): String = accountScopeHash(currentUser())
+    private fun accountScopeHash(): String =
+        accountScopeBinding(currentUser()).dataScopeHash
 
     private fun accountScopeHash(user: FirebaseUser): String =
-        ManagedDigest.sha256(
-            "noop-managed-account-v1\u0000${user.uid}".toByteArray(StandardCharsets.UTF_8),
+        accountScopeBinding(user).dataScopeHash
+
+    private fun accountScopeBinding(
+        user: FirebaseUser,
+        persistLegacyBinding: Boolean = true,
+    ): ManagedAccountScopeBinding {
+        val config = configuration ?: throw ManagedCloudException.Unavailable
+        val authTenant = runtime().auth.tenantId
+        if (authTenant != user.tenantId) {
+            throw ManagedStorageException.Authentication()
+        }
+        val schema = preferences.enrolledBindingSchema
+        val identityScope = preferences.enrolledIdentityScopeHash
+        val dataScopeVersion = preferences.enrolledDataScopeVersion
+        val hasAnyBindingMetadata =
+            schema != null || identityScope != null || dataScopeVersion != null
+        if (hasAnyBindingMetadata &&
+            schema != ManagedAccountScope.BINDING_SCHEMA_VERSION
+        ) {
+            throw ManagedAccountScopeException.InvalidPersistedBinding
+        }
+        val binding = ManagedAccountScope.resolve(
+            projectId = config.projectId,
+            tenantId = user.tenantId,
+            uid = user.uid,
+            enrolledDataScopeHash = preferences.enrolledScopeHash
+                ?: preferences.retainedLegacyDataScopeHash(
+                    ManagedAccountScope.identity(
+                        config.projectId,
+                        user.tenantId,
+                        user.uid,
+                    ),
+                ),
+            persistedIdentityScopeHash = identityScope,
+            persistedDataScopeVersion = dataScopeVersion,
         )
+        if (persistLegacyBinding &&
+            preferences.enrolledScopeHash != null &&
+            binding.requiresPersistence
+        ) {
+            if (!preferences.persistAccountScopeBinding(binding)) {
+                com.noop.AppDiagnosticsRecorder.record(
+                    "managed_account.scope_binding",
+                    fields = mapOf(
+                        "outcome" to "deferred",
+                        "failure_kind" to "persistence_failed",
+                    ),
+                )
+            } else {
+                com.noop.AppDiagnosticsRecorder.record(
+                    "managed_account.scope_binding",
+                    fields = mapOf(
+                        "outcome" to "migrated",
+                        "data_scope_version" to
+                            binding.dataScopeVersion.toString(),
+                    ),
+                )
+            }
+        }
+        return binding
+    }
 
     private suspend fun bindManagedDocumentProfile(accountScopeHash: String) {
         updateManagedDocumentProfileBinding(accountScopeHash)
@@ -3590,9 +4161,12 @@ internal object ManagedSafetyNotificationPermission {
         val appContext = context.applicationContext
         ManagedSafetyNotifier.prepare(appContext)
         val channelImportance = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE)
-                as NotificationManager
-            manager.getNotificationChannel(ManagedSafetyNotifier.CHANNEL_ID)?.importance
+            val readiness = ManagedSafetyNotifier.channelReadiness(appContext)
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_safety.channel_readiness",
+                fields = mapOf("state" to readiness.diagnosticValue),
+            )
+            ManagedSafetyNotifier.registrationChannelImportance(appContext)
         } else {
             null
         }
@@ -3694,16 +4268,6 @@ internal fun managedSafetyLocationCanUpload(
     locationReady &&
         location?.isUsable(nowUnix) == true &&
         location.hasUsableHorizontalAccuracy
-
-internal fun managedDeletionDeadlinePassed(
-    value: String?,
-    now: Instant = Instant.now(),
-): Boolean {
-    if (value == null) return false
-    val deadline = runCatching { Instant.parse(value) }.getOrNull()
-        ?: return false
-    return deadline <= now
-}
 
 private sealed class ManagedCloudException(message: String) : Exception(message) {
     data object InvalidPhone : ManagedCloudException("Invalid phone number")

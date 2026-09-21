@@ -5,17 +5,15 @@ import org.junit.Test
 
 /**
  * Kotlin parity for StrandAnalytics/CaptureAccumulatorTests.swift (#965): each active mode's captured-day
- * count is the number of DISTINCT days that mode produced its own trace on, read off the shareable log, so
- * Sleep / Battery / Steps accumulate INDEPENDENTLY rather than sharing one elapsed-clock number. Same
- * vectors + expectations as the Swift twin.
+ * count is the number of DISTINCT days that mode produced its own trace on. Production persists only the
+ * extracted day tokens in bounded Test Centre state; these pure vectors pin the extraction/parity logic.
  */
 class CaptureAccumulatorTest {
 
     private val report = """
-        [sleep] gate run=0 spanS=1163 DROPPED gate=minSleepMin spanMin=19 minSleepMin=60
-        sleep day=2026-07-02 totalSleepMin=131 matched=3 source=computed
-        sleep day=2026-07-01 totalSleepMin=331 matched=1 source=computed
-        sleep day=2026-06-30 totalSleepMin=381 matched=1 source=computed
+        [sleep] gate run=0 day=2026-07-02 spanS=1163 DROPPED gate=minSleepMin
+        [sleep] gate run=1 day=2026-07-01 spanS=25000 KEPT gate=accepted
+        [sleep] gate run=2 day=2026-06-30 spanS=26000 KEPT gate=accepted
         [steps] stepsRaw day=2026-07-02 counterSamples=29248 firstCounter=65046 lastCounter=5336
         [steps] stepsRaw day=2026-07-01 counterSamples=1000
         [battery] bank soc=26.0 t=1782957600s
@@ -68,7 +66,7 @@ class CaptureAccumulatorTest {
     fun dayKeyDoesNotLeakAcrossModes() {
         val cross =
             "[workouts] autoDetect day=2026-07-05 windows=1\n" +
-                "sleep day=2026-07-02 totalSleepMin=100 matched=1 source=computed"
+                "[sleep] gate run=1 day=2026-07-02 KEPT"
         assertEquals(1, CaptureAccumulator.capturedDays(TestDomain.SLEEP, cross, 0L))
     }
 
@@ -78,5 +76,54 @@ class CaptureAccumulatorTest {
         val one = "[battery] bank soc=40.0 t=1782957600s"
         assertEquals(setOf("2026-07-02"), CaptureAccumulator.capturedDayKeys(TestDomain.BATTERY, one, 0L))
         assertEquals(setOf("2026-07-01"), CaptureAccumulator.capturedDayKeys(TestDomain.BATTERY, one, -32400L))
+    }
+
+    @Test
+    fun batteryUsesTheOffsetAtTheHistoricalSampleRatherThanTodaysOffset() {
+        // 2026-07-02 04:30 UTC is July 2 at UTC-4 but July 1 at UTC-5. The event-time
+        // offset therefore decides the captured day near midnight.
+        val eventUnix = 1_782_966_600L
+        val observedEpochs = mutableListOf<Long>()
+        assertEquals(
+            "2026-07-02",
+            CaptureAccumulator.capturedDayKey(
+                TestDomain.BATTERY,
+                "[battery] bank soc=40.0 t=${eventUnix}s",
+                tzOffsetSeconds = -18_000L,
+                offsetForEpoch = { epoch ->
+                    observedEpochs += epoch
+                    -14_400L
+                },
+            ),
+        )
+        assertEquals(listOf(eventUnix), observedEpochs)
+    }
+
+    @Test
+    fun extractsOneValidatedTokenWithoutRetainingTheTrace() {
+        assertEquals(
+            "2026-07-02",
+            CaptureAccumulator.capturedDayKey(
+                TestDomain.SLEEP,
+                "[sleep] gate run=1 day=2026-07-02 KEPT",
+                0L,
+            ),
+        )
+        assertEquals(
+            "2026-07-01",
+            CaptureAccumulator.capturedDayKey(
+                TestDomain.BATTERY,
+                "[battery] bank soc=40.0 t=1782957600s",
+                -32400L,
+            ),
+        )
+        assertEquals(
+            null,
+            CaptureAccumulator.capturedDayKey(
+                TestDomain.SLEEP,
+                "[battery] bank soc=40.0 t=1782957600s",
+                0L,
+            ),
+        )
     }
 }

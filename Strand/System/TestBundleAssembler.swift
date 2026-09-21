@@ -60,9 +60,9 @@ enum TestBundleAssembler {
     /// whole-bundle UUID scrub (`LiveState.redactPii`) masks it only when it is a CANONICAL dashed
     /// `uuidString`; a dashless or truncated id would leak verbatim into a bundle the user shares. For these
     /// sidecars we ALSO mask the `deviceId` VALUE by field name — format-independent, so any id shape is
-    /// covered, and (unlike broadening the UUID regex to dashless hex) it CANNOT touch the raw `hex` capture
-    /// field, which a greedier rule would shred. Scoped to the sidecars so a non-PII logical `deviceId`
-    /// (e.g. "my-whoop") elsewhere in the bundle stays readable. NORMALIZED names (ring id already dropped).
+    /// covered. The general report scrub independently removes raw frame bytes from `hex`; this field-aware
+    /// rule stays scoped to the identifier so it cannot create a new leak or corrupt unrelated text.
+    /// NORMALIZED names (ring id already dropped).
     static let ouraSidecarNames: Set<String> = [
         "oura-raw.jsonl", "oura-ibihr.jsonl", "oura-activity.jsonl",
     ]
@@ -77,8 +77,9 @@ enum TestBundleAssembler {
             var scrubbed = CustomerFacingBrand.text(LiveState.redactPii(text))
             // #572 follow-up: field-aware deviceId mask for the Oura sidecars (see `ouraSidecarNames`). Runs
             // AFTER redactPii, so it catches a non-canonical id that the dash-anchored UUID rule misses; on an
-            // already-canonical id redactPii turned into `<device>`, this is a no-op. Key-anchored to
-            // "deviceId", so it never touches the raw `hex` field. `[^"]*` stops at the value's closing quote.
+            // already-canonical id redactPii turned into `<uuid>`, this is a no-op. Key-anchored to
+            // "deviceId"; the generic redactor separately replaces raw frame bytes. `[^"]*` stops at the
+            // value's closing quote.
             if ouraSidecarNames.contains(entry.name) {
                 scrubbed = scrubbed.replacingOccurrences(
                     of: "(\"deviceId\"\\s*:\\s*\")[^\"]*(\")",

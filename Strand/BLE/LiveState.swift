@@ -835,7 +835,7 @@ public final class LiveState: ObservableObject {
     /// main-actor instance can read it.
     nonisolated public static func persistedLogTail() -> [String] {
         ((UserDefaults.standard.array(forKey: tailKey) as? [String]) ?? [])
-            .map(CustomerFacingBrand.text)
+            .map { redactPii(CustomerFacingBrand.text($0)) }
     }
 
     /// A shareable strap-log body sourced from the DURABLE tail, for a background / scheduled export that
@@ -856,29 +856,68 @@ public final class LiveState: ObservableObject {
         return header + persistedLogTail().joined(separator: "\n")
     }
 
-    /// Scrub personal identifiers from a strap-log line so it's safe to share publicly (#445): BLE MAC
-    /// addresses are masked to their first + last byte, the WHOOP's SERIAL — carried in its device
-    /// name ("WHOOP 4C1594026") and tied to the owner's account - is removed, and the CoreBluetooth
-    /// peripheral identifier (a per-install random UUID iOS/macOS print in "Discovered …(<uuid>)" lines)
-    /// is masked. Applied at the single log sink (BLEManager + the generic-HR diagnostics both feed it).
-    /// MACs require colons, so hex command payloads are untouched; the dotted model names ("WHOOP
-    /// 4.0"/"5.0") don't match the serial pattern. The UUID rule deliberately KEEPS standard-BLE-base
-    /// UUIDs (…-0000-1000-8000-00805f9b34fb, e.g. the 0x2A37 HR characteristic) and the WHOOP vendor
-    /// service base (…-8d6d-82b8-614a-1c8cb0f8dcc6) — those are public, identical on every strap, and
-    /// are exactly the GATT diagnostics a shared log needs to be useful (#421). Thanks @ujix (#447) for
-    /// catching the peripheral-UUID leak; this is a targeted form so we don't redact the service UUIDs.
+    /// Scrub identifiers and health values at the single Test Centre/report transcript sink.
+    /// BLE lifecycle evidence uses fixed categories, so reports do not need names, addresses, serials,
+    /// UUIDs, RSSI, raw errors, or biometric values to diagnose connection readiness.
     nonisolated static func redactPii(_ s: String) -> String {
+        // Two exact Test Centre formats intentionally carry bounded local operational evidence consumed
+        // by their readouts. The full-line anchors prevent a tagged line with any extra content from
+        // bypassing the generic health/timestamp scrub below.
+        if isSafeTaggedTestCentreEvidence(s) { return s }
         var out = s
         out = out.replacingOccurrences(
-            of: "([0-9A-Fa-f]{2}):[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:([0-9A-Fa-f]{2})",
-            with: "$1:••:••:••:••:$2", options: .regularExpression)
+            of: "[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}",
+            with: "<address>", options: .regularExpression)
         out = out.replacingOccurrences(
             of: "WHOOP (\\d[0-9A-Za-z]{5,})", with: "Band <serial>", options: .regularExpression)
-        // Mask a CoreBluetooth peripheral UUID, but NOT a standard-BLE / WHOOP-vendor service UUID.
         out = out.replacingOccurrences(
-            of: "(?![0-9A-Fa-f]{8}-(?:0000-1000-8000-00805f9b34fb|8d6d-82b8-614a-1c8cb0f8dcc6))[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
-            with: "<device>", options: [.regularExpression, .caseInsensitive])
+            of: "(?i)\\b(?:advertising|device|band)\\s+name\\s*[:=]\\s*[^,;]+",
+            with: "band name=<redacted>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "(?i)\\bserial(?:prefix)?\\s*[:=]\\s*[^,;\\s]+",
+            with: "serial=<redacted>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
+            with: "<uuid>", options: [.regularExpression, .caseInsensitive])
+        out = out.replacingOccurrences(
+            of: "(?i)\\b(found|discovered)\\s+.+?(?=\\s+\\((?:<uuid>|<address>)\\)|\\s+(?:<uuid>|<address>)(?:\\s|$)|\\s+rssi\\s*[=:])",
+            with: "$1 <device>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "(?i)\\brssi\\s*[=:()]?\\s*-?\\d+",
+            with: "rssi=<redacted>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "(?i)\\bstate\\s*[=:]\\s*-?\\d+",
+            with: "state=<redacted>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "(?i)\\bcb(?:att)?error-?\\d+\\b",
+            with: "coreBluetooth=platform_error", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "(?i)\\b(bpm|hrv|rmssd|spo2|vo2|max|soc|battery|heart[ _-]?rate|rr)\\s*[=:]?\\s*-?\\d+(?:\\.\\d+)?(?:%|ms|bpm)?",
+            with: "$1=<health>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "\\b[12]\\d{9}(?!\\d)",
+            with: "<timestamp>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "\\b20\\d{2}-\\d{2}-\\d{2}[ T][0-9:.+\\-Z]+",
+            with: "<timestamp>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "(?i)\\b(payload|frame|hex)\\s*[:=]\\s*(?:0x)?[0-9a-f][0-9a-f\\s,:-]*",
+            with: "$1=<redacted>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[\\s,:-]?){8,}(?![0-9a-f])",
+            with: "<raw-bytes>", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: "(?i)\\b(error|exception|failed|failure|threw|couldn't|could not)\\b.*$",
+            with: "$1=<redacted>", options: .regularExpression)
         return out
+    }
+
+    nonisolated private static func isSafeTaggedTestCentreEvidence(_ line: String) -> Bool {
+        let battery = "^\\[battery\\] bank soc=(?:100(?:\\.0+)?|[0-9]{1,2}(?:\\.[0-9]+)?) t=[0-9]+s$"
+        let connection =
+            "^\\[connection\\] connect up gen=[0-9]+ latencyMs=(?:[0-9]+|\\?) uptimeStart=[0-9]+$"
+        return line.range(of: battery, options: .regularExpression) != nil
+            || line.range(of: connection, options: .regularExpression) != nil
     }
 
     /// The full, shareable strap log for a bug report (issue #17): a header carrying the app version,

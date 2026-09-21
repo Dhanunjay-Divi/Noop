@@ -21,6 +21,9 @@ from app.managed_api import managed_router
 from app.managed_app_check import FirebaseAppCheckTokenVerifier
 from app.managed_identity import IdentityToolkitTokenVerifier
 from app.managed_identity_deletion import ManagedIdentityDeletionTicketCodec
+from app.managed_document_keys import PostgresManagedDocumentKeyRepository
+from app.managed_formula_executor import ManagedFormulaExecutor
+from app.managed_formula_repository import PostgresManagedFormulaRepository
 from app.managed_object_store import GCSV4ObjectStore, IAMBlobSigner
 from app.managed_push import (
     FirebaseCloudMessagingProvider,
@@ -37,6 +40,9 @@ from app.observability import (
     internal_server_error_response,
 )
 from app.repository import PostgresRepository
+from app.unified_identity_authority import (
+    PostgresUnifiedIdentityAuthorityRepository,
+)
 
 
 def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
@@ -56,6 +62,7 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
         default_plan_code=runtime_settings.managed_default_plan_code,
         default_plan_revision=runtime_settings.managed_default_plan_revision,
         consent_policy_kind=runtime_settings.managed_consent_policy_kind,
+        account_max_installations=(runtime_settings.managed_account_max_installations),
         entitlement_mode=runtime_settings.managed_entitlement_mode,
         replay_secret=runtime_settings.managed_replay_secret or "",
     )
@@ -67,12 +74,7 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
     )
     app_check_verifier = FirebaseAppCheckTokenVerifier(
         project_number=runtime_settings.managed_project_number or "",
-        allowed_app_ids=frozenset(
-            {
-                runtime_settings.managed_apple_app_id or "",
-                runtime_settings.managed_android_app_id or "",
-            }
-        ),
+        allowed_app_ids=runtime_settings.managed_app_check_app_ids(),
         jwks_cache_seconds=runtime_settings.managed_app_check_cache_seconds,
     )
     object_store = GCSV4ObjectStore(
@@ -107,6 +109,15 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
         runtime_settings.managed_replay_secret or ""
     )
     safety_repository = PostgresManagedSafetyRepository(primary)
+    unified_identity_authority_repository = PostgresUnifiedIdentityAuthorityRepository(
+        primary
+    )
+    formula_repository = PostgresManagedFormulaRepository(primary)
+    formula_executor = ManagedFormulaExecutor()
+    document_key_repository = PostgresManagedDocumentKeyRepository(
+        primary,
+        enabled=runtime_settings.managed_document_key_recovery_enabled,
+    )
     safety_push_service = None
     if runtime_settings.managed_push_token_secret:
         token_codec = ManagedPushTokenCodec(
@@ -193,6 +204,20 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
             ),
         )
 
+    @app.middleware("http")
+    async def privacy_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        )
+        if request.url.path.startswith("/v1"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.get("/healthz")
     async def health() -> dict[str, str]:
         return {"status": "ok", "service": "noop-managed-storage"}
@@ -221,6 +246,12 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
             identity_deletion_ticket_codec=identity_deletion_ticket_codec,
             safety_repository=safety_repository,
             safety_push_service=safety_push_service,
+            unified_identity_authority_repository=(
+                unified_identity_authority_repository
+            ),
+            formula_repository=formula_repository,
+            formula_executor=formula_executor,
+            document_key_repository=document_key_repository,
         )
     )
     if runtime_settings.feedback_enabled and feedback_capability_codec is not None:

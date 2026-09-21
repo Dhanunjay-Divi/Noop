@@ -1312,7 +1312,10 @@ class ManagedSyncCoordinator(
     )
 
     companion object {
-        const val CHANGE_FEED_CAPABILITY_VERSION = 1
+        // Version 2 makes complete-history restore totals server-readable-only.
+        // Replace older checkpoints before resuming because their totals may
+        // include client-encrypted chunks.
+        const val CHANGE_FEED_CAPABILITY_VERSION = 2
         val DATA_CLASSES = listOf(
             "essential_timeseries",
             "raw_auxiliary",

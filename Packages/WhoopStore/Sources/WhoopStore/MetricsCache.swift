@@ -165,7 +165,6 @@ public struct DailyMetric: Equatable, Codable, Sendable {
 public enum ComputedScoreReconciliationError: Error, Equatable, Sendable {
     case missingDeviceIdentifier
     case invalidDayRange
-    case missingDailyRows
     case invalidDailyRow
     case duplicateDailyDay
     case missingManagedMetricKeys
@@ -484,8 +483,9 @@ extension WhoopStore {
     ///
     /// Validation occurs before the transaction. Once the write starts, range deletion, daily upsert,
     /// and managed-series replacement commit together, so readers never observe a partial score window
-    /// and a late failure preserves the prior complete state. The returned day set is a post-commit
-    /// receipt suitable for provenance-gated comparison.
+    /// and a late failure preserves the prior complete state. An empty replacement is valid and removes
+    /// stale computed rows only for the selected device, day window, and managed metric keys. The returned
+    /// day set is a post-commit receipt suitable for provenance-gated comparison.
     public func reconcileComputedScoreRange(
         deviceId: String,
         from: String,
@@ -540,9 +540,6 @@ extension WhoopStore {
         }
         guard Self.validComputedDay(from), Self.validComputedDay(to), from <= to else {
             throw ComputedScoreReconciliationError.invalidDayRange
-        }
-        guard !dailyRows.isEmpty else {
-            throw ComputedScoreReconciliationError.missingDailyRows
         }
 
         let orderedDailyRows = dailyRows.sorted { $0.day < $1.day }

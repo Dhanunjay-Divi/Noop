@@ -194,6 +194,24 @@ capabilities. Provider identifiers are not returned to consumer clients.
 
 ## Staging release gate
 
+Before using any provider or physical phone, run the deterministic synthetic
+transport smoke:
+
+```sh
+python3 ../Tools/safety-paging-smoke.py
+```
+
+It passes preselected dummy iOS and Android registrations through the production
+token codec, managed push service, and FCM payload builder. The capture includes
+a test-only owner confirmation plus two dummy emergency-contact roles, makes
+zero network requests, and fails if names, health values, or location enter the
+push payload. It does not prove contact acceptance or location persistence:
+those require the PostgreSQL accepted-contact/revocation and location-lifecycle
+tests. A real incident does not make the owner their own responder: the owner
+sees the active incident and delivery state in the app, while accepted contacts
+receive the remote page. The synthetic owner delivery exists only to preview
+and validate the user's confirmation notification.
+
 Run transport tests only against a number controlled by the tester:
 
 ```sh

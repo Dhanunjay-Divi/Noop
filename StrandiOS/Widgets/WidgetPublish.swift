@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import StrandAnalytics
 import WidgetKit
 
 extension WidgetSnapshot {
@@ -45,8 +46,34 @@ extension WidgetSnapshot {
             let anchorIsToday = day.day == Repository.localDayKey(now)
             restScore = restByDay[day.day] ?? (anchorIsToday ? restSeries.last?.value : nil)
         }
+        let recovery = day?.recovery.map { Int($0.rounded()) }
+        let effort = day?.strain.map { Int($0.rounded()) }
+        let rest = restScore.map { Int($0.rounded()) }
+        let logicalKey = Repository.logicalDayKey(now)
+        let localKey = Repository.localDayKey(now)
+        let today = Repository.resolveToday(
+            days: days,
+            logicalKey: logicalKey,
+            localKey: localKey
+        )
+        let recoveryCalibration = RecoveryScorer.calibrationNights(
+            nightlyHrv: days.map(\.avgHrv),
+            dayKeys: days.map(\.day),
+            before: today?.day ?? logicalKey,
+            hasRecovery: today?.recovery != nil
+        )
+        let recoveryState: WidgetScoreState = recovery != nil
+            ? .measured
+            : (recoveryCalibration == nil ? .missing : .calibrating)
+        let effortState: WidgetScoreState = effort == nil ? .missing : .measured
+        let restState: WidgetScoreState = rest == nil ? .missing : .measured
+        // A cold-start user can have explicit Recovery calibration evidence before any scored anchor
+        // exists. Bind that state to the real current day so the widget may present it without inventing
+        // Effort or Sleep calibration.
+        let scoreDay = day?.day
+            ?? (recoveryCalibration == nil ? nil : (today?.day ?? logicalKey))
         let snap = WidgetSnapshot(
-            recovery: day?.recovery.map { Int($0.rounded()) },
+            recovery: recovery,
             bpm: model.bpm ?? model.live.heartRate,
             batteryPct: model.live.batteryPct.map { Int($0.rounded()) },
             bonded: model.live.bonded,
@@ -54,8 +81,8 @@ extension WidgetSnapshot {
             // Effort is stored on NOOP's 0–100 axis (the same value the Today Effort tile reads), so it
             // publishes as a whole number without the WHOOP-0–21 toggle the main app applies — the widget
             // extension can't reach UnitFormatter/UnitPrefs, and 0–100 is the default scale.
-            effort: day?.strain.map { Int($0.rounded()) },
-            rest: restScore.map { Int($0.rounded()) },
+            effort: effort,
+            rest: rest,
             hrv: day?.avgHrv.map { Int($0.rounded()) },
             restingHr: day?.restingHr,
             sleepMinutes: day?.totalSleepMin.map { Int($0.rounded()) },
@@ -63,7 +90,10 @@ extension WidgetSnapshot {
             // Use the transport event's real receipt time. Scene/battery/background republishes can happen
             // much later and must never renew a held BPM's "Live" lifetime.
             heartRateObservedAt: model.live.heartRateSample?.receivedAt,
-            scoreDay: day?.day
+            scoreDay: scoreDay,
+            recoveryState: recoveryState,
+            effortState: effortState,
+            restState: restState
         )
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()

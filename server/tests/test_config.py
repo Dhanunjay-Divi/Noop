@@ -30,6 +30,27 @@ def test_database_engine_rejects_unknown_values(
         Settings.from_env()
 
 
+def test_ownership_deletion_coordination_is_explicit_and_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL",
+        "postgresql://ownership-lifecycle.invalid/noop",
+    )
+
+    settings = Settings.from_env()
+
+    assert settings.ownership_deletion_coordination_enabled is True
+    assert (
+        settings.ownership_lifecycle_database_url
+        == "postgresql://ownership-lifecycle.invalid/noop"
+    )
+
+
 def test_managed_entitlement_accepts_scoped_pilot_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -68,6 +89,15 @@ def test_managed_storage_requires_project_bound_app_check_ids() -> None:
 
     settings.validate_for_startup(needs_database=True)
 
+    Settings(
+        **{
+            field: getattr(settings, field)
+            for field in settings.__dataclass_fields__
+            if field != "managed_macos_app_id"
+        },
+        managed_macos_app_id=f"1:{project_number}:ios:89abcdef01234567",
+    ).validate_for_startup(needs_database=True)
+
     with pytest.raises(RuntimeError, match="APPLE_APP_ID"):
         Settings(
             **{
@@ -77,6 +107,62 @@ def test_managed_storage_requires_project_bound_app_check_ids() -> None:
             },
             managed_apple_app_id=(f"1:{project_number}:android:0123456789abcdef"),
         ).validate_for_startup(needs_database=True)
+
+    with pytest.raises(RuntimeError, match="MACOS_APP_ID"):
+        Settings(
+            **{
+                field: getattr(settings, field)
+                for field in settings.__dataclass_fields__
+                if field != "managed_macos_app_id"
+            },
+            managed_macos_app_id=(f"1:{project_number}:android:89abcdef01234567"),
+        ).validate_for_startup(needs_database=True)
+
+    with pytest.raises(RuntimeError, match="distinct Firebase app"):
+        Settings(
+            **{
+                field: getattr(settings, field)
+                for field in settings.__dataclass_fields__
+                if field != "managed_macos_app_id"
+            },
+            managed_macos_app_id=settings.managed_apple_app_id,
+        ).validate_for_startup(needs_database=True)
+
+
+def test_managed_macos_app_check_is_default_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NOOP_MANAGED_MACOS_APP_ID", raising=False)
+
+    assert Settings.from_env().managed_macos_app_id is None
+
+
+def test_managed_app_check_ids_include_only_configured_apps() -> None:
+    settings = Settings(
+        api_token=None,
+        database_url=None,
+        managed_apple_app_id="1:123456789012:ios:0123456789abcdef",
+        managed_android_app_id="1:123456789012:android:0123456789abcdef",
+        managed_macos_app_id="1:123456789012:ios:89abcdef01234567",
+    )
+    assert settings.managed_app_check_app_ids() == frozenset(
+        {
+            "1:123456789012:ios:0123456789abcdef",
+            "1:123456789012:android:0123456789abcdef",
+            "1:123456789012:ios:89abcdef01234567",
+        }
+    )
+    assert Settings(
+        api_token=None,
+        database_url=None,
+        managed_apple_app_id=settings.managed_apple_app_id,
+        managed_android_app_id=settings.managed_android_app_id,
+    ).managed_app_check_app_ids() == frozenset(
+        {
+            settings.managed_apple_app_id,
+            settings.managed_android_app_id,
+        }
+    )
 
 
 def test_managed_push_retry_can_run_in_private_lifecycle_job() -> None:
@@ -104,6 +190,30 @@ def test_managed_push_retry_can_run_in_private_lifecycle_job() -> None:
             needs_database=True,
             needs_api_token=False,
         )
+
+
+def test_managed_cloud_authority_features_default_off_and_require_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NOOP_MANAGED_FORMULA_SHADOW_ENABLED", raising=False)
+    monkeypatch.delenv(
+        "NOOP_MANAGED_DOCUMENT_KEY_RECOVERY_ENABLED",
+        raising=False,
+    )
+    defaults = Settings.from_env()
+    assert not defaults.managed_formula_shadow_enabled
+    assert not defaults.managed_document_key_recovery_enabled
+
+    for field in (
+        "managed_formula_shadow_enabled",
+        "managed_document_key_recovery_enabled",
+    ):
+        with pytest.raises(RuntimeError, match="requires managed storage"):
+            Settings(
+                api_token="a" * 32,
+                database_url=None,
+                **{field: True},
+            ).validate_for_startup(needs_database=False)
 
     with pytest.raises(RuntimeError, match="must differ"):
         Settings(

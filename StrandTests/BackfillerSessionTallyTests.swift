@@ -9,6 +9,23 @@ import WhoopStore
 /// "Backfill: session persisted N rows (M with motion) across K night(s)" line.
 final class BackfillerSessionTallyTests: XCTestCase {
 
+    func testConfirmedWriteLedgerKeepsHistoryAckCorrelationInFIFOOrder() {
+        var ledger = ConfirmedCommandWriteLedger()
+        ledger.enqueue(.command)
+        ledger.enqueue(.historicalAck(trim: 42, advances: true))
+        ledger.enqueue(.command)
+
+        XCTAssertTrue(ledger.hasPendingHistoricalAck)
+        XCTAssertEqual(ledger.completeNext(), .command)
+        XCTAssertEqual(
+            ledger.completeNext(),
+            .historicalAck(trim: 42, advances: true)
+        )
+        XCTAssertFalse(ledger.hasPendingHistoricalAck)
+        XCTAssertEqual(ledger.completeNext(), .command)
+        XCTAssertNil(ledger.completeNext())
+    }
+
     // Rows include every score-bearing stream. Wrist events can change sleep/wear interpretation;
     // battery is transport housekeeping and must not inflate the count.
     func testChunkTallySumsScoreBearingRowsAndGravityOnly() {
@@ -279,6 +296,27 @@ final class BackfillerSessionTallyTests: XCTestCase {
         XCTAssertTrue(joined.contains("fully charge it"))
     }
 
+    @MainActor func testHistoricalTrimAdvancesOnlyAfterConfirmedWriteCallback() async {
+        var requestedTrims: [UInt32] = []
+        let backfiller = Backfiller(
+            store: TallyStore(),
+            deviceId: "test",
+            ackTrim: { trim, _ in requestedTrims.append(trim) }
+        )
+        backfiller.begin(family: .whoop4)
+
+        await backfiller.ingest(historyEndFrame(trim: 1234))
+
+        XCTAssertEqual(requestedTrims, [1234])
+        XCTAssertNil(
+            backfiller.lastAckedTrim,
+            "queueing a with-response write is not confirmation that the band accepted it"
+        )
+
+        backfiller.confirmAck(trim: 1234)
+        XCTAssertEqual(backfiller.lastAckedTrim, 1234)
+    }
+
     /// The watchdog can tear down a session while its final `store.insert` is suspended. The durable
     /// completion must still publish the rows so overnight calibration is not left at 0/4.
     @MainActor func testPersistedRowsCallbackSurvivesTimeoutDuringDelayedFinalInsert() async {
@@ -286,10 +324,11 @@ final class BackfillerSessionTallyTests: XCTestCase {
         let insertStarted = expectation(description: "insert suspended")
         store.insertStarted = { insertStarted.fulfill() }
         var receipts: [BackfillPersistedRowsReceipt] = []
+        var acknowledgedTrims: [UInt32] = []
         let backfiller = Backfiller(
             store: store,
             deviceId: "test",
-            ackTrim: { _, _ in },
+            ackTrim: { trim, _ in acknowledgedTrims.append(trim) },
             onRowsPersisted: { receipts.append($0) })
         backfiller.begin(family: .whoop4)
         for frame in v25RecordFrames {
@@ -321,5 +360,9 @@ final class BackfillerSessionTallyTests: XCTestCase {
             "teardown must not hide rows that commit after its snapshot"
         )
         XCTAssertEqual(backfiller.sessionRowsPersisted, 3)
+        XCTAssertTrue(
+            acknowledgedTrims.isEmpty,
+            "a chunk that finishes persistence after timeout must not ACK through a later connection"
+        )
     }
 }

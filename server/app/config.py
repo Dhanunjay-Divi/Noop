@@ -94,6 +94,7 @@ class Settings:
     managed_identity_api_key: str | None = None
     managed_apple_app_id: str | None = None
     managed_android_app_id: str | None = None
+    managed_macos_app_id: str | None = None
     managed_raw_bucket: str | None = None
     managed_signer_email: str | None = None
     managed_replay_secret: str | None = None
@@ -101,6 +102,7 @@ class Settings:
     managed_residency_policy_version: str = "staging-v1"
     managed_default_plan_code: str = "noop_plus_staging"
     managed_default_plan_revision: int = 1
+    managed_account_max_installations: int = 5
     managed_consent_policy_kind: str = "managed_storage"
     managed_consent_policy_version: str | None = None
     managed_consent_policy_sha256: str | None = None
@@ -111,6 +113,8 @@ class Settings:
     managed_app_check_cache_seconds: int = 6 * 60 * 60
     managed_push_enabled: bool = False
     managed_push_retry_enabled: bool = False
+    managed_formula_shadow_enabled: bool = False
+    managed_document_key_recovery_enabled: bool = False
     managed_push_token_secret: str | None = None
     managed_push_token_previous_secret: str | None = None
     managed_push_token_write_version: str = "v1"
@@ -150,6 +154,8 @@ class Settings:
     ownership_app_check_cache_seconds: int = 6 * 60 * 60
     ownership_challenge_ttl_seconds: int = 3 * 60
     ownership_fresh_auth_seconds: int = 10 * 60
+    ownership_deletion_coordination_enabled: bool = False
+    ownership_lifecycle_database_url: str | None = None
     public_base_url: str | None = None
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
@@ -251,6 +257,7 @@ class Settings:
             managed_identity_api_key=os.getenv("NOOP_MANAGED_IDENTITY_API_KEY"),
             managed_apple_app_id=os.getenv("NOOP_MANAGED_APPLE_APP_ID"),
             managed_android_app_id=os.getenv("NOOP_MANAGED_ANDROID_APP_ID"),
+            managed_macos_app_id=os.getenv("NOOP_MANAGED_MACOS_APP_ID"),
             managed_raw_bucket=os.getenv("NOOP_MANAGED_RAW_BUCKET"),
             managed_signer_email=os.getenv("NOOP_MANAGED_SIGNER_EMAIL"),
             managed_replay_secret=os.getenv("NOOP_MANAGED_REPLAY_SECRET"),
@@ -269,6 +276,10 @@ class Settings:
             managed_default_plan_revision=_positive_int(
                 "NOOP_MANAGED_DEFAULT_PLAN_REVISION",
                 1,
+            ),
+            managed_account_max_installations=_positive_int(
+                "NOOP_MANAGED_ACCOUNT_MAX_INSTALLATIONS",
+                5,
             ),
             managed_consent_policy_kind=os.getenv(
                 "NOOP_MANAGED_CONSENT_POLICY_KIND",
@@ -306,6 +317,14 @@ class Settings:
             ),
             managed_push_retry_enabled=_boolean(
                 "NOOP_MANAGED_PUSH_RETRY_ENABLED",
+                False,
+            ),
+            managed_formula_shadow_enabled=_boolean(
+                "NOOP_MANAGED_FORMULA_SHADOW_ENABLED",
+                False,
+            ),
+            managed_document_key_recovery_enabled=_boolean(
+                "NOOP_MANAGED_DOCUMENT_KEY_RECOVERY_ENABLED",
                 False,
             ),
             managed_push_token_secret=os.getenv("NOOP_MANAGED_PUSH_TOKEN_SECRET"),
@@ -435,6 +454,13 @@ class Settings:
                 "NOOP_OWNERSHIP_FRESH_AUTH_SECONDS",
                 10 * 60,
             ),
+            ownership_deletion_coordination_enabled=_boolean(
+                "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED",
+                False,
+            ),
+            ownership_lifecycle_database_url=os.getenv(
+                "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL"
+            ),
             public_base_url=os.getenv("NOOP_PUBLIC_BASE_URL"),
             twilio_account_sid=os.getenv("NOOP_TWILIO_ACCOUNT_SID"),
             twilio_auth_token=os.getenv("NOOP_TWILIO_AUTH_TOKEN"),
@@ -518,6 +544,17 @@ class Settings:
                 self.twilio_status_callback_secret,
                 self.safety_capability_secret,
             )
+        )
+
+    def managed_app_check_app_ids(self) -> frozenset[str]:
+        return frozenset(
+            app_id
+            for app_id in (
+                self.managed_apple_app_id,
+                self.managed_android_app_id,
+                self.managed_macos_app_id,
+            )
+            if app_id
         )
 
     def validate_for_startup(
@@ -627,6 +664,20 @@ class Settings:
                     raise RuntimeError(
                         f"{name} must belong to the configured project and platform"
                     )
+            if self.managed_macos_app_id:
+                if not re.fullmatch(
+                    rf"{re.escape(expected_app_prefix)}ios:[0-9a-f]{{8,64}}",
+                    self.managed_macos_app_id,
+                ):
+                    raise RuntimeError(
+                        "NOOP_MANAGED_MACOS_APP_ID must belong to the configured "
+                        "project and Apple platform"
+                    )
+                if self.managed_macos_app_id == self.managed_apple_app_id:
+                    raise RuntimeError(
+                        "NOOP_MANAGED_MACOS_APP_ID must identify a distinct "
+                        "Firebase app"
+                    )
             if not re.fullmatch(
                 r"[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]",
                 self.managed_raw_bucket or "",
@@ -682,6 +733,10 @@ class Settings:
                     "NOOP_MANAGED_CONSENT_POLICY_SHA256 must be a lowercase "
                     "SHA-256 digest"
                 )
+            if not 1 <= self.managed_account_max_installations <= 100:
+                raise RuntimeError(
+                    "NOOP_MANAGED_ACCOUNT_MAX_INSTALLATIONS must be between 1 and 100"
+                )
             if not 60 <= self.managed_upload_ttl_seconds <= 3600:
                 raise RuntimeError(
                     "NOOP_MANAGED_UPLOAD_TTL_SECONDS must be between 60 and 3600"
@@ -712,8 +767,18 @@ class Settings:
                 raise RuntimeError(
                     "NOOP_MANAGED_PUSH_MAX_CONCURRENCY must be between 1 and 20"
                 )
-        elif self.managed_push_enabled:
-            raise RuntimeError("NOOP_MANAGED_PUSH_ENABLED requires managed storage")
+        else:
+            if self.managed_push_enabled:
+                raise RuntimeError("NOOP_MANAGED_PUSH_ENABLED requires managed storage")
+            if self.managed_formula_shadow_enabled:
+                raise RuntimeError(
+                    "NOOP_MANAGED_FORMULA_SHADOW_ENABLED requires managed storage"
+                )
+            if self.managed_document_key_recovery_enabled:
+                raise RuntimeError(
+                    "NOOP_MANAGED_DOCUMENT_KEY_RECOVERY_ENABLED requires "
+                    "managed storage"
+                )
         if self.feedback_accepting_reservations and not self.feedback_enabled:
             raise RuntimeError(
                 "NOOP_FEEDBACK_ACCEPTING_RESERVATIONS requires NOOP_FEEDBACK_ENABLED"

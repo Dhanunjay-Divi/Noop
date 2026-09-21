@@ -2234,6 +2234,7 @@ fun TodayScreen(
                                 Column {
                                     DailySignalHeader(
                                         status = dailySignalStatus,
+                                        readiness = dailyActionReadiness,
                                         sourceLabel = heroSourceLabel,
                                         viewModel = viewModel,
                                         onOpen = onOpenHealth,
@@ -5010,20 +5011,87 @@ internal fun dailySignalStatusLabelRes(status: DailySignalStatus): Int = when (s
     DailySignalStatus.BUILDING -> R.string.appwide_daily_signal_status_building
 }
 
+internal enum class DailySignalPillPolarity {
+    POSITIVE,
+    NEUTRAL,
+    WARNING,
+    CRITICAL,
+}
+
+internal data class DailySignalPillPresentation(
+    @StringRes val labelRes: Int,
+    val polarity: DailySignalPillPolarity,
+)
+
+/**
+ * Preserve the readiness level's exact vocabulary instead of collapsing balanced/primed into one
+ * positive word or strained/rundown into one warning word. A wellness-only override keeps the bounded
+ * Daily Signal language; a building state never becomes reassuring.
+ */
+internal fun dailySignalPillPresentation(
+    status: DailySignalStatus,
+    readinessLevel: ReadinessEngine.Level,
+): DailySignalPillPresentation = when (status) {
+    DailySignalStatus.BUILDING -> DailySignalPillPresentation(
+        dailySignalStatusLabelRes(status),
+        DailySignalPillPolarity.NEUTRAL,
+    )
+    DailySignalStatus.ALERT -> DailySignalPillPresentation(
+        dailySignalStatusLabelRes(status),
+        DailySignalPillPolarity.CRITICAL,
+    )
+    DailySignalStatus.STEADY -> when (readinessLevel) {
+        ReadinessEngine.Level.PRIMED -> DailySignalPillPresentation(
+            R.string.appwide_readiness_primed_headline,
+            DailySignalPillPolarity.POSITIVE,
+        )
+        ReadinessEngine.Level.BALANCED -> DailySignalPillPresentation(
+            R.string.appwide_readiness_balanced_headline,
+            DailySignalPillPolarity.POSITIVE,
+        )
+        ReadinessEngine.Level.STRAINED,
+        ReadinessEngine.Level.RUNDOWN,
+        ReadinessEngine.Level.INSUFFICIENT,
+        -> DailySignalPillPresentation(
+            dailySignalStatusLabelRes(DailySignalStatus.BUILDING),
+            DailySignalPillPolarity.NEUTRAL,
+        )
+    }
+    DailySignalStatus.WATCH -> when (readinessLevel) {
+        ReadinessEngine.Level.STRAINED -> DailySignalPillPresentation(
+            R.string.appwide_readiness_strained_headline,
+            DailySignalPillPolarity.WARNING,
+        )
+        ReadinessEngine.Level.RUNDOWN -> DailySignalPillPresentation(
+            R.string.appwide_readiness_rundown_headline,
+            DailySignalPillPolarity.CRITICAL,
+        )
+        ReadinessEngine.Level.PRIMED,
+        ReadinessEngine.Level.BALANCED,
+        ReadinessEngine.Level.INSUFFICIENT,
+        -> DailySignalPillPresentation(
+            dailySignalStatusLabelRes(status),
+            DailySignalPillPolarity.WARNING,
+        )
+    }
+}
+
 @Composable
 private fun DailySignalHeader(
     status: DailySignalStatus,
+    readiness: ReadinessEngine.Readiness,
     sourceLabel: String?,
     viewModel: AppViewModel,
     onOpen: () -> Unit,
 ) {
-    val tint = when (status) {
-        DailySignalStatus.STEADY -> Palette.statusPositive
-        DailySignalStatus.WATCH -> Palette.statusWarning
-        DailySignalStatus.ALERT -> DAILY_SIGNAL_ALERT_TINT
-        DailySignalStatus.BUILDING -> Palette.onDarkSecondary.copy(alpha = 0.72f)
+    val presentation = dailySignalPillPresentation(status, readiness.level)
+    val tint = when (presentation.polarity) {
+        DailySignalPillPolarity.POSITIVE -> Palette.statusPositive
+        DailySignalPillPolarity.NEUTRAL -> Palette.onDarkSecondary.copy(alpha = 0.72f)
+        DailySignalPillPolarity.WARNING -> Palette.statusWarning
+        DailySignalPillPolarity.CRITICAL -> DAILY_SIGNAL_ALERT_TINT
     }
-    val label = uiString(dailySignalStatusLabelRes(status))
+    val label = uiString(presentation.labelRes)
 
     BoxWithConstraints(
         modifier = Modifier
@@ -5404,9 +5472,7 @@ private fun ScoreHeroRow(
         calibrationNights = recoveryCalibration,
     )
     val recoveryCaption = when {
-        recovery != null -> Palette.recoveryState(recovery)
-            .lowercase(Locale.getDefault())
-            .replaceFirstChar { it.titlecase(Locale.getDefault()) }
+        recovery != null -> recoveryBandLabel(recovery)
         recoveryCalibration != null ->
             "Calibrating $recoveryCalibration of ${Baselines.minNightsSeed}"
         else -> "No data"
@@ -5499,7 +5565,8 @@ internal fun todayRecoveryHeroColors(
     recovery: Double?,
     calibrationNights: Int?,
 ): Pair<Color, Color> = when (todayRecoveryHeroTone(recovery, calibrationNights)) {
-    TodayRecoveryHeroTone.RECOVERY -> Palette.recoveryGaugeColors(requireNotNull(recovery))
+    TodayRecoveryHeroTone.RECOVERY ->
+        RecoveryBandPresentation.gaugeColors(requireNotNull(recovery))
     TodayRecoveryHeroTone.BASELINE_READY -> Palette.chargeColor to Palette.chargeBright
     TodayRecoveryHeroTone.LEARNING ->
         Palette.onDarkSecondary.copy(alpha = 0.64f) to
@@ -6615,7 +6682,7 @@ private fun sleepSourceSubtitle(card: DashboardCard, day: DailyMetric?): String?
     if (card != DashboardCard.SLEEP) return null
     val d = day ?: return null
     if (d.totalSleepMin == null) return null
-    val source = daySourceBadge(d.deviceId).first
+    val source = uiString(daySourceBadge(d.deviceId).first)
     return "$source · last night"
 }
 
@@ -7707,7 +7774,7 @@ internal fun recoveryDriverValueFormatRes(valueFormat: ChargeDriverValueFormat):
 internal fun recoveryDriverLabelRes(label: String): Int? = when (label) {
     "Heart rate variability" -> R.string.appwide_day_overview_hrv
     "Resting heart rate" -> R.string.appwide_day_overview_resting_heart_rate
-    "Sleep quality" -> R.string.appwide_day_overview_sleep
+    "Sleep Score" -> R.string.appwide_day_overview_sleep
     "Respiratory rate" -> R.string.appwide_day_overview_respiratory_rate
     "Skin temperature" -> R.string.appwide_day_overview_skin_temperature
     else -> null
@@ -7725,11 +7792,11 @@ internal fun recoveryDriverVerdictRes(verdict: String): Int? = when (verdict) {
     "above baseline, limiting recovery" ->
         R.string.ui_audit_recovery_driver_verdict_above_limiting
     "a typical night" -> R.string.ui_audit_recovery_driver_verdict_typical_night
-    "sleep quality supported recovery" ->
+    "Sleep Score supported recovery" ->
         R.string.ui_audit_recovery_driver_verdict_sleep_supported
-    "sleep quality was neutral" ->
+    "Sleep Score was neutral" ->
         R.string.ui_audit_recovery_driver_verdict_sleep_neutral
-    "sleep quality limited recovery" ->
+    "Sleep Score limited recovery" ->
         R.string.ui_audit_recovery_driver_verdict_sleep_limited
     "near baseline" -> R.string.ui_audit_recovery_driver_verdict_near_baseline
     "warmer than baseline, limiting recovery" ->

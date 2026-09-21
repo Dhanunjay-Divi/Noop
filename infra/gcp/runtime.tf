@@ -130,8 +130,8 @@ resource "google_cloud_run_v2_job" "migrate" {
           name = "NOOP_DATABASE_URL"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.database_url.secret_id
-              version = "latest"
+              secret  = google_secret_manager_secret.migration_database_url.secret_id
+              version = var.migration_database_url_secret_version
             }
           }
         }
@@ -255,8 +255,8 @@ resource "google_cloud_run_v2_service" "api" {
         name = "NOOP_DATABASE_URL"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.database_url.secret_id
-            version = "latest"
+            secret  = google_secret_manager_secret.runtime_database_url.secret_id
+            version = var.runtime_database_url_secret_version
           }
         }
       }
@@ -398,6 +398,14 @@ resource "google_cloud_run_v2_service" "managed_api" {
         value = "true"
       }
       env {
+        name  = "NOOP_MANAGED_FORMULA_SHADOW_ENABLED"
+        value = "false"
+      }
+      env {
+        name  = "NOOP_MANAGED_DOCUMENT_KEY_RECOVERY_ENABLED"
+        value = "false"
+      }
+      env {
         name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"
         value = "5"
       }
@@ -428,6 +436,13 @@ resource "google_cloud_run_v2_service" "managed_api" {
       env {
         name  = "NOOP_MANAGED_ANDROID_APP_ID"
         value = google_firebase_android_app.staging[0].app_id
+      }
+      dynamic "env" {
+        for_each = var.managed_macos_app_id == null ? [] : [var.managed_macos_app_id]
+        content {
+          name  = "NOOP_MANAGED_MACOS_APP_ID"
+          value = env.value
+        }
       }
       env {
         name  = "NOOP_MANAGED_APP_CHECK_CACHE_SECONDS"
@@ -542,6 +557,10 @@ resource "google_cloud_run_v2_service" "managed_api" {
         value = "1"
       }
       env {
+        name  = "NOOP_MANAGED_ACCOUNT_MAX_INSTALLATIONS"
+        value = "5"
+      }
+      env {
         name  = "NOOP_MANAGED_CONSENT_POLICY_KIND"
         value = "managed_storage"
       }
@@ -557,8 +576,8 @@ resource "google_cloud_run_v2_service" "managed_api" {
         name = "NOOP_DATABASE_URL"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.database_url.secret_id
-            version = "latest"
+            secret  = google_secret_manager_secret.managed_api_database_url.secret_id
+            version = var.managed_api_database_url_secret_version
           }
         }
       }
@@ -919,8 +938,8 @@ resource "google_cloud_run_v2_service" "managed_processor" {
         name = "NOOP_DATABASE_URL"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.database_url.secret_id
-            version = "latest"
+            secret  = google_secret_manager_secret.managed_processor_database_url.secret_id
+            version = var.managed_processor_database_url_secret_version
           }
         }
       }
@@ -1026,6 +1045,14 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value = "false"
         }
         env {
+          name  = "NOOP_SAFETY_ESCALATION_ROUNDS"
+          value = "4"
+        }
+        env {
+          name  = "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS"
+          value = "900"
+        }
+        env {
           name  = "NOOP_DB_POOL_MIN_SIZE"
           value = "1"
         }
@@ -1050,6 +1077,22 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value = "true"
         }
         env {
+          name  = "NOOP_MANAGED_SAFETY_REPEAT_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "NOOP_MANAGED_SAFETY_REPEAT_INTERVAL_SECONDS"
+          value = "120"
+        }
+        env {
+          name  = "NOOP_MANAGED_SAFETY_REPEAT_TTL_SECONDS"
+          value = "900"
+        }
+        env {
+          name  = "NOOP_MANAGED_SAFETY_REPEAT_MAX_ROUNDS"
+          value = "4"
+        }
+        env {
           name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"
           value = "5"
         }
@@ -1065,8 +1108,29 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           name = "NOOP_DATABASE_URL"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.database_url.secret_id
-              version = "latest"
+              secret  = google_secret_manager_secret.managed_lifecycle_database_url.secret_id
+              version = var.managed_lifecycle_database_url_secret_version
+            }
+          }
+        }
+        dynamic "env" {
+          for_each = var.enable_ownership_deletion_coordination ? [true] : []
+
+          content {
+            name  = "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED"
+            value = "true"
+          }
+        }
+        dynamic "env" {
+          for_each = var.enable_ownership_deletion_coordination ? [true] : []
+
+          content {
+            name = "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL"
+            value_source {
+              secret_key_ref {
+                secret  = data.google_secret_manager_secret.ownership_deletion_lifecycle_database_url[0].secret_id
+                version = "latest"
+              }
             }
           }
         }
@@ -1121,6 +1185,7 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
     terraform_data.migration_execution,
     google_project_iam_member.managed_lifecycle_cloud_sql_client,
     google_secret_manager_secret_iam_member.managed_lifecycle_database_url,
+    google_secret_manager_secret_iam_member.managed_lifecycle_ownership_database_url,
     google_secret_manager_secret_iam_member.managed_lifecycle_push_token_secret,
     google_secret_manager_secret_iam_member.managed_lifecycle_push_token_previous_secret,
     google_secret_manager_secret_iam_member.managed_lifecycle_replay_secret,
@@ -1147,7 +1212,7 @@ resource "google_cloud_scheduler_job" "managed_lifecycle" {
   region           = var.region
   name             = "${local.prefix}-managed-lifecycle"
   description      = "Expire reservations and enforce managed object retention"
-  schedule         = "*/5 * * * *"
+  schedule         = "* * * * *"
   time_zone        = "Etc/UTC"
   attempt_deadline = "320s"
 
@@ -1260,8 +1325,8 @@ resource "google_cloud_run_v2_job" "feedback_lifecycle" {
           name = "NOOP_DATABASE_URL"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.database_url.secret_id
-              version = "latest"
+              secret  = google_secret_manager_secret.feedback_lifecycle_database_url.secret_id
+              version = var.feedback_lifecycle_database_url_secret_version
             }
           }
         }

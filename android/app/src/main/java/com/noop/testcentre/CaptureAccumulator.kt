@@ -12,14 +12,15 @@ import com.noop.analytics.AnalyticsEngine
  * trace on. A shared clock also meant the three modes could never diverge - one number drove them all.
  *
  * This is the honest replacement: for a given domain, count the DISTINCT local calendar days that domain's
- * own tagged trace lines carry, so each active mode INDEPENDENTLY accumulates its own count off the
- * shareable strap log. Sleep counts nights (its `sleep day=` / `gate run=` lines), Battery counts days
+ * own tagged trace lines carry, so each active mode INDEPENDENTLY accumulates its own count. Sleep counts
+ * nights from its explicit `gate run=` test trace, Battery counts days
  * (its `bank soc=... t=<unix>s` samples, folded to a local day), Steps counts days (`stepsRaw day=`), and
  * the universal `dayOwner day=` line accumulates once per scored day for the universal row.
  *
- * Pure + side-effect-free: it takes the domain, the already-redacted report text and a timezone offset and
- * returns an Int. No IO, no live clock, no PII. Byte-aligned with the Swift twin's day-token map + fold,
- * pinned by a parity test. No em-dashes.
+ * Pure + side-effect-free: it takes the domain, a trace line/report, and a timezone offset and returns
+ * validated day tokens. Production records only those tokens in the bounded Test Centre preference state;
+ * the shareable diagnostic log is separately redacted and is not the progress store. No IO or live clock.
+ * Byte-aligned with the Swift twin's day-token map + fold, pinned by a parity test. No em-dashes.
  */
 object CaptureAccumulator {
 
@@ -41,7 +42,7 @@ object CaptureAccumulator {
      * domain absent from the map accumulates 0 (no day-bearing trace).
      */
     val markers: Map<TestDomain, DayMarker> = linkedMapOf(
-        TestDomain.SLEEP to DayMarker.DayKey(listOf("sleep day=", "gate run=")),
+        TestDomain.SLEEP to DayMarker.DayKey(listOf("gate run=")),
         TestDomain.STEPS to DayMarker.DayKey(listOf("stepsRaw", "stepsEst day=")),
         TestDomain.RECOVERY to DayMarker.DayKey(listOf("charge ")),
         TestDomain.BATTERY to DayMarker.Epoch(listOf("bank soc=")),
@@ -60,21 +61,31 @@ object CaptureAccumulator {
     fun capturedDays(domain: TestDomain, reportText: String, tzOffsetSeconds: Long): Int =
         capturedDayKeys(domain, reportText, tzOffsetSeconds).size
 
+    /** Extract one validated captured-day token from a single domain trace line. */
+    fun capturedDayKey(
+        domain: TestDomain,
+        line: String,
+        tzOffsetSeconds: Long,
+        offsetForEpoch: (Long) -> Long = { tzOffsetSeconds },
+    ): String? {
+        val marker = markers[domain] ?: return null
+        if (marker.tokens.none { line.contains(it) }) return null
+        return when (marker) {
+            is DayMarker.DayKey ->
+                dayKeyRegex.find(line)?.groupValues?.get(1)
+            is DayMarker.Epoch ->
+                epochRegex.find(line)?.groupValues?.get(1)?.toLongOrNull()?.let { unix ->
+                    AnalyticsEngine.dayString(unix, offsetForEpoch(unix))
+                }
+        }
+    }
+
     /** The SET of distinct local day keys [domain] captured (yyyy-MM-dd). Empty when the mode has no
      *  day-bearing trace / captured none. */
     fun capturedDayKeys(domain: TestDomain, reportText: String, tzOffsetSeconds: Long): Set<String> {
-        val marker = markers[domain] ?: return emptySet()
         val days = HashSet<String>()
         for (line in reportText.split("\n")) {
-            if (marker.tokens.none { line.contains(it) }) continue
-            when (marker) {
-                is DayMarker.DayKey ->
-                    dayKeyRegex.find(line)?.groupValues?.get(1)?.let { days.add(it) }
-                is DayMarker.Epoch ->
-                    epochRegex.find(line)?.groupValues?.get(1)?.toLongOrNull()?.let { unix ->
-                        days.add(AnalyticsEngine.dayString(unix, tzOffsetSeconds))
-                    }
-            }
+            capturedDayKey(domain, line, tzOffsetSeconds)?.let(days::add)
         }
         return days
     }

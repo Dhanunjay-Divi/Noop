@@ -1,6 +1,7 @@
 package com.noop.sync
 
 import com.noop.analytics.DetailedSleepStagePublication
+import com.noop.analytics.FormulaPublicationGate
 import com.noop.analytics.SleepStageTotals
 import com.noop.data.AppleDaily
 import com.noop.data.DailyMetric
@@ -22,9 +23,9 @@ import kotlin.math.roundToInt
 internal object RemoteNoopAlgorithmRevision {
     const val CHARGE = "noop-charge-v2"
     const val EFFORT = "noop-effort-v2"
-    const val REST = "noop-rest-v1"
+    const val REST = "noop-rest-v2"
     const val METADATA = "$CHARGE+$EFFORT+$REST"
-    const val ID_SUFFIX = "cer-v2"
+    const val ID_SUFFIX = "cer-v3"
 }
 
 data class RemoteNamespace(
@@ -70,6 +71,7 @@ class RemoteSyncCoordinator(
         retainDerivedCompletion: Boolean = false,
         limitPerStream: Int = 2_000,
         maxBatches: Int = 6,
+        computedDerivedReady: Boolean = true,
     ): RemoteSyncRunResult {
         val batchLimit = maxBatches.coerceIn(1, 50)
         val window = derivedWindow ?: RemoteDerivedWindow.endingAt(now, derivedHistoryDays)
@@ -81,7 +83,10 @@ class RemoteSyncCoordinator(
         var rawCount = 0
         var batches = 0
         var lastAck: RemoteSyncAck? = null
-        var sendDerived = namespace.includeDerived
+        val computedDerivedDeferred =
+            namespace.role == FormulaPublicationGate.COMPUTED_SOURCE_KIND &&
+                !computedDerivedReady
+        var sendDerived = namespace.includeDerived && !computedDerivedDeferred
         var derivedCursor = if (sendDerived) {
             cursors.derivedCursor(namespace.remoteDeviceId)
         } else {
@@ -185,6 +190,8 @@ class RemoteSyncCoordinator(
             uploadedRawRows = rawCount,
             uploadedBatches = batches,
             hasMoreRawRows = namespace.includeRaw && store.hasPending(namespace.localDeviceId),
+            // A formula migration is not network backlog. The service keeps replay state durable
+            // while deferred; returning pending here would make WorkManager retry indefinitely.
             hasMoreDerivedRows = namespace.includeDerived && sendDerived,
             lastAck = lastAck,
         )

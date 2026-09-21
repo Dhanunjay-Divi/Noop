@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import re
 import shutil
 import tempfile
 import unittest
@@ -37,9 +38,7 @@ class RequiredCIGateTests(unittest.TestCase):
                     else {}
                 ),
             }
-            for index, context in enumerate(
-                self.config["requiredContexts"], start=1
-            )
+            for index, context in enumerate(self.config["requiredContexts"], start=1)
         ]
 
     def test_repository_required_workflows_fail_closed(self) -> None:
@@ -67,9 +66,7 @@ class RequiredCIGateTests(unittest.TestCase):
                     with self.assertRaisesRegex(
                         GATE.GateError, "reviewed source contract"
                     ):
-                        GATE._require_reviewed_source_digest(
-                            root, relative_path
-                        )
+                        GATE._require_reviewed_source_digest(root, relative_path)
 
     def test_release_build_uses_only_exact_green_main_source(self) -> None:
         GATE.check_release_workflow(ROOT)
@@ -130,9 +127,7 @@ class RequiredCIGateTests(unittest.TestCase):
                 ROOT / ".github" / "workflows",
                 root / ".github" / "workflows",
             )
-            workflow = (
-                root / ".github" / "workflows" / "release-controls.yml"
-            )
+            workflow = root / ".github" / "workflows" / "release-controls.yml"
             source = workflow.read_text(encoding="utf-8")
             source = source.replace(
                 "jobs:\n",
@@ -280,9 +275,7 @@ class RequiredCIGateTests(unittest.TestCase):
                         GATE.GateError,
                         "must use canonical property key syntax",
                     ):
-                        GATE.check_required_context_ownership(
-                            root, self.config
-                        )
+                        GATE.check_required_context_ownership(root, self.config)
 
     def test_universal_required_workflow_cannot_be_path_filtered(self) -> None:
         workflow = self.config["universalWorkflows"][2]
@@ -315,15 +308,11 @@ class RequiredCIGateTests(unittest.TestCase):
             path = root / workflow["path"]
             path.parent.mkdir(parents=True)
             path.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(
-                GATE.GateError, "event-level path filters"
-            ):
+            with self.assertRaisesRegex(GATE.GateError, "event-level path filters"):
                 GATE.check_workflow(root, workflow)
 
     def test_apple_scope_covers_every_xcode_target_and_lock_input(self) -> None:
-        text = (ROOT / ".github/workflows/app-build.yml").read_text(
-            encoding="utf-8"
-        )
+        text = (ROOT / ".github/workflows/app-build.yml").read_text(encoding="utf-8")
         for marker in (
             "NOOPWatch|NOOPWatchComplications",
             "Strand\\.xcodeproj/project\\.xcworkspace/xcshareddata/swiftpm/"
@@ -347,9 +336,7 @@ class RequiredCIGateTests(unittest.TestCase):
             )
 
     def test_release_dispatch_is_bound_to_the_verified_source_sha(self) -> None:
-        workflow = (ROOT / ".github/workflows/release.yml").read_text(
-            encoding="utf-8"
-        )
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         dispatcher = (ROOT / "Tools/release.sh").read_text(encoding="utf-8")
         self.assertIn("release_sha:", workflow)
         self.assertIn(
@@ -365,9 +352,9 @@ class RequiredCIGateTests(unittest.TestCase):
             "uses: ./.github/workflows/altstore-source.yml",
             workflow,
         )
-        altstore = (
-            ROOT / ".github/workflows/altstore-source.yml"
-        ).read_text(encoding="utf-8")
+        altstore = (ROOT / ".github/workflows/altstore-source.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("workflow_call:", altstore)
         self.assertNotIn("workflow_dispatch:", altstore)
 
@@ -390,18 +377,12 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertIn('select(.name == "altstore-source.previous.json")', text)
         self.assertIn('elif [ "$SOURCE_ASSET_COUNT" = "0" ] &&', text)
         self.assertIn('BASE_SOURCE="backup"', text)
-        backup_upload = text.index(
-            'gh release upload "$CHANNEL_TAG" "$BACKUP"'
-        )
-        source_upload = text.index(
-            'gh release upload "$CHANNEL_TAG" "$MANIFEST"'
-        )
+        backup_upload = text.index('gh release upload "$CHANNEL_TAG" "$BACKUP"')
+        source_upload = text.index('gh release upload "$CHANNEL_TAG" "$MANIFEST"')
         self.assertLess(backup_upload, source_upload)
 
     def test_homebrew_opt_in_reaches_a_retryable_verified_workflow(self) -> None:
-        release = (ROOT / ".github/workflows/release.yml").read_text(
-            encoding="utf-8"
-        )
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         dispatcher = (ROOT / "Tools/release.sh").read_text(encoding="utf-8")
         homebrew = (ROOT / ".github/workflows/homebrew-cask.yml").read_text(
             encoding="utf-8"
@@ -426,26 +407,20 @@ class RequiredCIGateTests(unittest.TestCase):
             "secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}",
             homebrew,
         )
-        helper = (ROOT / "Tools/update-homebrew-cask.sh").read_text(
-            encoding="utf-8"
-        )
+        helper = (ROOT / "Tools/update-homebrew-cask.sh").read_text(encoding="utf-8")
         self.assertIn("Tools/homebrew-version-gate.py", helper)
         self.assertIn("http.lowSpeedLimit=1024", helper)
         self.assertIn("run_git_bounded", helper)
 
     def test_release_history_excludes_nonproduction_before_limit(self) -> None:
-        release = (ROOT / ".github/workflows/release.yml").read_text(
-            encoding="utf-8"
-        )
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("--exclude-drafts --exclude-pre-releases --limit 1", release)
         self.assertEqual(release.count("gh release list"), 1)
         self.assertIn('PREV="$PREV_TAG"', release)
         self.assertNotIn("map(select(.isPrerelease", release)
 
     def test_forgejo_opt_in_reaches_a_retryable_verified_workflow(self) -> None:
-        release = (ROOT / ".github/workflows/release.yml").read_text(
-            encoding="utf-8"
-        )
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         dispatcher = (ROOT / "Tools/release.sh").read_text(encoding="utf-8")
         forgejo = (ROOT / ".github/workflows/forgejo-release.yml").read_text(
             encoding="utf-8"
@@ -485,9 +460,9 @@ class RequiredCIGateTests(unittest.TestCase):
         )
 
     def test_release_shell_validation_is_required(self) -> None:
-        source = (
-            ROOT / ".github/workflows/release-controls.yml"
-        ).read_text(encoding="utf-8")
+        source = (ROOT / ".github/workflows/release-controls.yml").read_text(
+            encoding="utf-8"
+        )
         for command in (
             "bash -n Tools/release.sh Tools/publish-testing-snapshot.sh",
             "shellcheck Tools/release.sh Tools/publish-testing-snapshot.sh",
@@ -501,15 +476,11 @@ class RequiredCIGateTests(unittest.TestCase):
                         source.replace(command, "echo skipped", 1),
                         encoding="utf-8",
                     )
-                    with self.assertRaisesRegex(
-                        GATE.GateError, "does not run"
-                    ):
+                    with self.assertRaisesRegex(GATE.GateError, "does not run"):
                         GATE.check_release_control_test_suite(root)
 
     def test_release_workflow_can_only_record_the_exact_draft(self) -> None:
-        source = (ROOT / ".github/workflows/release.yml").read_text(
-            encoding="utf-8"
-        )
+        source = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         ready = GATE._job_section(source, "ready")
         checks_step = GATE._named_step(
             ready, "Reverify required checks for exact candidate"
@@ -518,7 +489,7 @@ class RequiredCIGateTests(unittest.TestCase):
             GATE._folded_run_command(
                 checks_step, "Reverify required checks for exact candidate"
             ),
-            'python3 Tools/required-ci-gate.py verify-github '
+            "python3 Tools/required-ci-gate.py verify-github "
             '--repository "$GITHUB_REPOSITORY" '
             '--sha "$RELEASE_SHA"',
         )
@@ -533,10 +504,8 @@ class RequiredCIGateTests(unittest.TestCase):
         )
         draft_step = GATE._named_step(ready, "Record exact release draft")
         self.assertEqual(
-            GATE._folded_run_command(
-                draft_step, "Record exact release draft"
-            ),
-            'python3 Tools/github-release-publish.py '
+            GATE._folded_run_command(draft_step, "Record exact release draft"),
+            "python3 Tools/github-release-publish.py "
             '--repository "$GITHUB_REPOSITORY" '
             '--tag "$TAG" '
             '--version "$VER" '
@@ -544,15 +513,13 @@ class RequiredCIGateTests(unittest.TestCase):
             '--expected-name "NOOP $VER" '
             '--expected-body-sha256 "$BODY_SHA" '
             '--expected-target "$RELEASE_SHA" '
-            '--verify-draft-only '
+            "--verify-draft-only "
             '--write-manifest "$RUNNER_TEMP/release-candidate.json" '
             '--run-id "$GITHUB_RUN_ID" '
             '--run-attempt "$GITHUB_RUN_ATTEMPT"',
         )
         self.assertEqual(
-            GATE._step_environment(
-                draft_step, "Record exact release draft"
-            ),
+            GATE._step_environment(draft_step, "Record exact release draft"),
             {
                 "GH_TOKEN": "${{ github.token }}",
                 "TAG": "${{ needs.bump.outputs.tag }}",
@@ -574,9 +541,7 @@ class RequiredCIGateTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(
-                GATE.GateError, "exact draft verifier"
-            ):
+            with self.assertRaisesRegex(GATE.GateError, "exact draft verifier"):
                 GATE.check_release_workflow(root)
 
         for step_name, command in (
@@ -630,8 +595,7 @@ class RequiredCIGateTests(unittest.TestCase):
                         "  ready:\n"
                         "    name: release-candidate-ready\n"
                         "    needs: [bump, android, macos, ios]\n"
-                        "    runs-on: ubuntu-latest\n"
-                        + property_line,
+                        "    runs-on: ubuntu-latest\n" + property_line,
                         1,
                     ),
                     encoding="utf-8",
@@ -642,9 +606,7 @@ class RequiredCIGateTests(unittest.TestCase):
                     GATE.check_release_workflow(root)
 
     def test_release_workflow_rejects_an_extra_write_capable_job(self) -> None:
-        source = (ROOT / ".github/workflows/release.yml").read_text(
-            encoding="utf-8"
-        )
+        source = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         source = source.replace(
             "jobs:\n",
             "jobs:\n"
@@ -662,15 +624,11 @@ class RequiredCIGateTests(unittest.TestCase):
             path = root / ".github/workflows/release.yml"
             path.parent.mkdir(parents=True)
             path.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(
-                GATE.GateError, "exact allowlist"
-            ):
+            with self.assertRaisesRegex(GATE.GateError, "exact allowlist"):
                 GATE.check_release_workflow(root)
 
     def test_release_signing_secrets_are_environment_scoped(self) -> None:
-        source = (ROOT / ".github/workflows/release.yml").read_text(
-            encoding="utf-8"
-        )
+        source = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         bump = GATE._job_section(source, "bump")
         android = GATE._job_section(source, "android")
         self.assertNotIn("ANDROID_STAGING_KEYSTORE_BASE64", bump)
@@ -697,9 +655,7 @@ class RequiredCIGateTests(unittest.TestCase):
                 GATE.check_release_workflow(root)
 
     def test_release_workflow_rejects_direct_release_api_mutation(self) -> None:
-        source = (ROOT / ".github/workflows/release.yml").read_text(
-            encoding="utf-8"
-        )
+        source = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         source = source.replace(
             "\n  android_tests:\n",
             "      - name: Direct publication bypass\n"
@@ -746,8 +702,8 @@ class RequiredCIGateTests(unittest.TestCase):
                 ".github/workflows/release.yml",
                 "\n  android_tests:\n",
                 "      - name: Obfuscated publication bypass\n"
-                "        run: g\"\"h api -X PATCH "
-                "repos/example/project/releases/1 -f draf\"\"t=false\n"
+                '        run: g""h api -X PATCH '
+                'repos/example/project/releases/1 -f draf""t=false\n'
                 "\n  android_tests:\n",
                 GATE.check_release_workflow,
             ),
@@ -755,8 +711,8 @@ class RequiredCIGateTests(unittest.TestCase):
                 ".github/workflows/testing-build.yml",
                 "\n  android:\n",
                 "      - name: Obfuscated publication bypass\n"
-                "        run: g\"\"h api -X PATCH "
-                "repos/example/project/releases/1 -f draf\"\"t=false\n"
+                '        run: g""h api -X PATCH '
+                'repos/example/project/releases/1 -f draf""t=false\n'
                 "\n  android:\n",
                 GATE.check_testing_release_workflow,
             ),
@@ -782,7 +738,7 @@ class RequiredCIGateTests(unittest.TestCase):
             "\n  cleanup:\n",
             "\n  cleanup:\n"
             "    # Synthetic unrelated release mutation.\n"
-            "    # gh release delete v9.1.1 --repo \"$GITHUB_REPOSITORY\" --yes\n",
+            '    # gh release delete v9.1.1 --repo "$GITHUB_REPOSITORY" --yes\n',
             1,
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -790,9 +746,7 @@ class RequiredCIGateTests(unittest.TestCase):
             path = root / relative_path
             path.parent.mkdir(parents=True)
             path.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(
-                GATE.GateError, "reviewed source contract"
-            ):
+            with self.assertRaisesRegex(GATE.GateError, "reviewed source contract"):
                 GATE.check_testing_release_workflow(root)
 
     def test_required_job_cannot_ignore_a_heavy_job(self) -> None:
@@ -812,7 +766,11 @@ class RequiredCIGateTests(unittest.TestCase):
                 GATE.check_workflow(root, workflow)
 
     def test_android_infrastructure_retry_is_bounded_and_fail_closed(self) -> None:
-        source = (ROOT / ".github/workflows/android.yml").read_text(
+        source = (ROOT / ".github/workflows/android.yml").read_text(encoding="utf-8")
+        gradle_properties = (ROOT / "android/gradle.properties").read_text(
+            encoding="utf-8"
+        )
+        bounded_runner = (ROOT / "Tools/run-bounded-command.py").read_text(
             encoding="utf-8"
         )
         self.assertEqual(source.count("timeout-minutes: 50"), 2)
@@ -824,7 +782,35 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertEqual(source.count("--timeout-seconds 600"), 2)
         self.assertEqual(source.count("--timeout-seconds 180"), 2)
         self.assertEqual(source.count("--status-file "), 8)
-        self.assertEqual(source.count("app/build/noop-managed-device-status/"), 12)
+        self.assertEqual(source.count("--log-file "), 8)
+        self.assertEqual(source.count("--max-log-mib 16"), 8)
+        self.assertEqual(source.count("--min-free-disk-gib 4"), 6)
+        self.assertNotIn("--min-free-memory-percent", source)
+        self.assertEqual(
+            gradle_properties.count(
+                "org.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8"
+            ),
+            1,
+        )
+        self.assertIn(
+            "DEFAULT_MIN_FREE_MEMORY_PERCENT = 10.0",
+            bounded_runner,
+        )
+        self.assertEqual(
+            source.count(
+                '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
+            ),
+            2,
+        )
+        self.assertEqual(
+            source.count(
+                '"-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8"'
+            ),
+            2,
+        )
+        self.assertEqual(source.count("--max-workers=2"), 2)
+        self.assertEqual(source.count("--max-workers=1"), 2)
+        self.assertEqual(source.count("app/build/noop-managed-device-status/"), 22)
         self.assertEqual(source.count("--no-daemon"), 8)
         self.assertEqual(source.count("--no-configuration-cache"), 8)
         self.assertIn("test_run_bounded_command.py", source)
@@ -832,6 +818,10 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertNotIn("Prepare managed-device artifacts", source)
         self.assertEqual(source.count("without starting an emulator"), 2)
         self.assertEqual(source.count("assembleFullDebugAndroidTest"), 2)
+        self.assertEqual(
+            source.count("-Pkotlin.compiler.execution.strategy=in-process"),
+            2,
+        )
         self.assertNotIn("pixel2Api35Setup", source)
         self.assertIn("cleanManagedDevices", source)
         self.assertEqual(source.count("--bounded-status-file "), 2)
@@ -840,8 +830,98 @@ class RequiredCIGateTests(unittest.TestCase):
             source,
         )
         self.assertIn("review-sample-shell:", source)
-        self.assertIn("android-production-shell-diagnostics", source)
-        self.assertIn("android-review-sample-diagnostics", source)
+        self.assertIn("android-production-shell-evidence", source)
+        self.assertIn("android-review-sample-evidence", source)
+        self.assertIn("android-production-shell-failure-logs", source)
+        self.assertIn("android-review-sample-failure-logs", source)
+        self.assertEqual(
+            source.count("app/build/noop-managed-device-status/*.log"),
+            2,
+        )
+        self.assertEqual(
+            source.count("app/build/noop-managed-device-status/*.status"),
+            2,
+        )
+        bounded_steps = [
+            "Prepare production-shell APKs without starting an emulator",
+            "Run production-shell instrumentation tests",
+            "Reset production-shell managed device before the approved retry",
+            "Retry production-shell once on proven infrastructure loss",
+            "Prepare Review Sample APKs without starting an emulator",
+            "Prove Review Sample worker isolation in a fresh process",
+            "Reset managed device before the approved retry",
+            "Retry Review Sample isolation once on proven infrastructure loss",
+        ]
+        for step_name in bounded_steps:
+            marker = f"      - name: {step_name}\n"
+            start = source.index(marker)
+            end = source.find("\n      - name:", start + len(marker))
+            block = source[start : end if end >= 0 else len(source)]
+            self.assertEqual(block.count("Tools/run-bounded-command.py"), 1)
+            self.assertEqual(block.count("--status-file "), 1)
+            self.assertEqual(block.count("--log-file "), 1)
+            expected_disk_floor_count = (
+                0 if "without starting an emulator" in step_name else 1
+            )
+            production_shell_test = (
+                "Run production-shell instrumentation tests" in step_name
+                or "Retry production-shell once" in step_name
+            )
+            review_sample_test = (
+                "Prove Review Sample worker isolation" in step_name
+                or "Retry Review Sample isolation once" in step_name
+            )
+            self.assertEqual(
+                block.count("--min-free-disk-gib 4"),
+                expected_disk_floor_count,
+            )
+            self.assertEqual(
+                block.count(
+                    '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
+                ),
+                1 if review_sample_test else 0,
+            )
+            self.assertEqual(
+                block.count(
+                    '"-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8"'
+                ),
+                1 if production_shell_test else 0,
+            )
+            self.assertEqual(
+                block.count("--max-workers=2"),
+                1 if review_sample_test else 0,
+            )
+            self.assertEqual(
+                block.count("--max-workers=1"),
+                1 if production_shell_test else 0,
+            )
+            self.assertEqual(block.count("--max-log-mib 16"), 1)
+            status_path = re.search(r"--status-file ([^ \\\\\n]+)", block)
+            log_path = re.search(r"--log-file ([^ \\\\\n]+)", block)
+            self.assertIsNotNone(status_path, step_name)
+            self.assertIsNotNone(log_path, step_name)
+            self.assertNotEqual(
+                status_path.group(1),
+                log_path.group(1),
+                step_name,
+            )
+            if "Prepare " in step_name:
+                self.assertIn(
+                    "-Pkotlin.compiler.execution.strategy=in-process",
+                    block,
+                    step_name,
+                )
+        for first_step in (
+            "production_shell_first",
+            "review_sample_first",
+        ):
+            self.assertIn(
+                f"steps.{first_step}.outcome == 'failure' ||",
+                source,
+            )
+        self.assertEqual(source.count("always() &&"), 2)
+        self.assertEqual(source.count("failure() ||"), 2)
+        self.assertEqual(source.count("cancelled()"), 2)
         self.assertIn(
             "android.testInstrumentationRunnerArguments.notClass="
             "com.noop.ui.ReviewSampleInstrumentedTest",
@@ -888,9 +968,7 @@ class RequiredCIGateTests(unittest.TestCase):
 
     def test_same_named_check_from_another_app_is_rejected(self) -> None:
         runs = self.green_runs()
-        runs = [
-            run for run in runs if run["name"] != "release-controls"
-        ]
+        runs = [run for run in runs if run["name"] != "release-controls"]
         runs.append(
             {
                 "id": 1000,
@@ -900,9 +978,7 @@ class RequiredCIGateTests(unittest.TestCase):
                 "app": {"id": 1},
             }
         )
-        with self.assertRaisesRegex(
-            GATE.GateError, "release-controls=missing"
-        ):
+        with self.assertRaisesRegex(GATE.GateError, "release-controls=missing"):
             GATE.evaluate_check_runs(self.config, runs)
 
     def test_required_check_from_another_workflow_is_rejected(self) -> None:
@@ -952,25 +1028,17 @@ class RequiredCIGateTests(unittest.TestCase):
     ) -> None:
         sha = "a" * 40
         check = {
-            "details_url": (
-                "https://github.com/Dhanunjay-Divi/Noop/actions/runs/123"
-            ),
-            "external_id": (
-                f"trusted-release-controls:pull-request:123:2:{sha}"
-            ),
+            "details_url": ("https://github.com/Dhanunjay-Divi/Noop/actions/runs/123"),
+            "external_id": (f"trusted-release-controls:pull-request:123:2:{sha}"),
         }
         self.assertEqual(
-            GATE._trusted_workflow_run_identity(
-                check, "Dhanunjay-Divi/Noop", sha
-            ),
+            GATE._trusted_workflow_run_identity(check, "Dhanunjay-Divi/Noop", sha),
             ("pull-request", 123, 2),
         )
         canonical_check = {
             **check,
             "id": 789,
-            "details_url": (
-                "https://github.com/Dhanunjay-Divi/Noop/runs/789"
-            ),
+            "details_url": ("https://github.com/Dhanunjay-Divi/Noop/runs/789"),
         }
         self.assertEqual(
             GATE._trusted_workflow_run_identity(
@@ -1001,38 +1069,30 @@ class RequiredCIGateTests(unittest.TestCase):
             {
                 **check,
                 "external_id": (
-                    "trusted-release-controls:pull-request:123:2:"
-                    + "b" * 40
+                    "trusted-release-controls:pull-request:123:2:" + "b" * 40
                 ),
             },
             {
                 **check,
                 "details_url": (
-                    "https://github.com/Dhanunjay-Divi/Noop/"
-                    "actions/runs/124"
+                    "https://github.com/Dhanunjay-Divi/Noop/actions/runs/124"
                 ),
             },
             {
                 **canonical_check,
-                "details_url": (
-                    "https://github.com/Dhanunjay-Divi/Noop/runs/790"
-                ),
+                "details_url": ("https://github.com/Dhanunjay-Divi/Noop/runs/790"),
             },
         ):
             with self.assertRaises(GATE.GateError):
-                GATE._trusted_workflow_run_identity(
-                    invalid, "Dhanunjay-Divi/Noop", sha
-                )
+                GATE._trusted_workflow_run_identity(invalid, "Dhanunjay-Divi/Noop", sha)
 
     def test_trusted_workflow_has_no_branch_dispatch_bypass(self) -> None:
-        source = (
-            ROOT / ".github/workflows/trusted-release-controls.yml"
-        ).read_text(encoding="utf-8")
+        source = (ROOT / ".github/workflows/trusted-release-controls.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn("workflow_dispatch:", source)
         self.assertIn("checks: write", source)
-        self.assertIn(
-            "Tools/trusted-release-controls.py report-check", source
-        )
+        self.assertIn("Tools/trusted-release-controls.py report-check", source)
         self.assertNotIn("\n    name: trusted-release-controls\n", source)
         GATE.check_trusted_release_workflow(ROOT)
 
@@ -1107,25 +1167,18 @@ class RequiredCIGateTests(unittest.TestCase):
                     else {}
                 ),
             }
-            for index, context in enumerate(
-                self.config["requiredContexts"], start=1
-            )
+            for index, context in enumerate(self.config["requiredContexts"], start=1)
         ]
-        with self.assertRaisesRegex(
-            GATE.GateError, "trusted-release-controls=missing"
-        ):
+        with self.assertRaisesRegex(GATE.GateError, "trusted-release-controls=missing"):
             GATE.evaluate_check_runs(self.config, runs)
         runs[-1]["trustedScope"] = "protected-main"
         GATE.evaluate_check_runs(self.config, runs)
 
     def test_release_workflow_cannot_push_directly_to_main(self) -> None:
-        source = (ROOT / ".github/workflows/release.yml").read_text(
-            encoding="utf-8"
-        )
+        source = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         source = source.replace(
             "name: Community release build\n",
-            "name: Community release build\n"
-            "# git push origin HEAD:refs/heads/main\n",
+            "name: Community release build\n# git push origin HEAD:refs/heads/main\n",
             1,
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -1133,9 +1186,7 @@ class RequiredCIGateTests(unittest.TestCase):
             path = root / ".github/workflows/release.yml"
             path.parent.mkdir(parents=True)
             path.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(
-                GATE.GateError, "cannot push directly to main"
-            ):
+            with self.assertRaisesRegex(GATE.GateError, "cannot push directly to main"):
                 GATE.check_release_workflow(root)
 
     def test_local_release_entrypoint_cannot_bypass_the_publisher(self) -> None:
@@ -1146,9 +1197,7 @@ class RequiredCIGateTests(unittest.TestCase):
             path = root / "Tools/release.sh"
             path.parent.mkdir(parents=True)
             path.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(
-                GATE.GateError, "retains direct publication"
-            ):
+            with self.assertRaisesRegex(GATE.GateError, "retains direct publication"):
                 GATE.check_local_release_entrypoint(root)
 
     def test_owner_entrypoints_reject_raw_release_api_mutation(self) -> None:
@@ -1194,8 +1243,8 @@ class RequiredCIGateTests(unittest.TestCase):
             with self.subTest(path=relative_path):
                 source = (ROOT / relative_path).read_text(encoding="utf-8")
                 source += (
-                    "\ng\"\"h api -X PATCH "
-                    "repos/example/project/releases/1 -f draf\"\"t=false\n"
+                    '\ng""h api -X PATCH '
+                    'repos/example/project/releases/1 -f draf""t=false\n'
                 )
                 with tempfile.TemporaryDirectory() as temporary:
                     root = Path(temporary)

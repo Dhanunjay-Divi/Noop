@@ -117,6 +117,7 @@ import com.noop.ingest.WhoopCsvImporter
 import com.noop.notif.DailyReviewReminders
 import com.noop.NoopApplication
 import com.noop.ownership.NoopProductPlan
+import com.noop.ownership.OwnershipConfiguration
 import com.noop.ownership.OwnershipPhase
 import com.noop.ownership.OwnershipService
 import com.noop.ownership.ownershipCanAccessPostClaimOnboarding
@@ -143,19 +144,20 @@ import kotlin.math.roundToInt
 fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember(context) { NoopPrefs.of(context) }
+    val ownershipConfigured = remember { OwnershipConfiguration.load() != null }
+    val accountMode = onboardingAccountMode(ownershipConfigured)
+    val accountCopy = onboardingAccountCopy(accountMode)
     val ownership = remember(context) {
         (context.applicationContext as? NoopApplication)?.ownership
             ?: OwnershipService.get(context)
     }
     val ownershipState by ownership.state.collectAsState()
     val postClaimOwnershipReady = ownershipCanAccessPostClaimOnboarding(
-        isAvailable = ownership.isAvailable,
+        isAvailable = ownershipConfigured,
         phase = ownershipState.phase,
     )
-    val pages = remember(ownership.isAvailable) {
-        OnboardingPage.entries.filter {
-            it != OnboardingPage.Ownership || ownership.isAvailable
-        }
+    val pages = remember(ownershipConfigured) {
+        onboardingPages(ownershipConfigured)
     }
     // rememberSaveable so a config change (rotation, dark-mode, font-scale, locale,
     // multi-window) doesn't recreate the Activity and throw the user back to page 1.
@@ -163,9 +165,10 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     var pageIndex by rememberSaveable {
         val restored = prefs.getString(ONBOARDING_PROGRESS_KEY, null)
         mutableIntStateOf(
-            pages.indexOfFirst { it.storageValue == restored }
-                .takeIf { it >= 0 }
-                ?: 0,
+            restoredOnboardingPageIndex(
+                storedPage = restored,
+                pages = pages,
+            ),
         )
     }
     val page = pages[pageIndex]
@@ -186,14 +189,12 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     fun moveTo(target: Int, direction: String) {
         if (!pages.indices.contains(target)) return
         val requested = pages[target]
-        val next = if (
-            requested.requiresCurrentOwnershipClaim &&
-            !postClaimOwnershipReady
-        ) {
-            OnboardingPage.Ownership
-        } else {
-            requested
-        }
+        val next = resolvedOnboardingOwnershipDestination(
+            requested = requested,
+            ownershipConfigured = ownershipConfigured,
+            reconciliationComplete = !ownershipState.busy,
+            phase = ownershipState.phase,
+        ) ?: return
         val destination = pages.indexOf(next)
         if (destination < 0) return
         val effectiveDirection = if (next == requested) {
@@ -224,7 +225,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     }
     LaunchedEffect(
         page,
-        ownership.isAvailable,
+        ownershipConfigured,
         ownershipState.phase,
         ownershipState.busy,
     ) {
@@ -291,7 +292,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
             OnboardingPage.Plan -> {
                 if (
                     !ownershipCanAccessPostClaimOnboarding(
-                        isAvailable = ownership.isAvailable,
+                        isAvailable = ownershipConfigured,
                         phase = ownership.state.value.phase,
                     )
                 ) {
@@ -308,7 +309,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     if (
                         saved &&
                         ownershipCanAccessPostClaimOnboarding(
-                            isAvailable = ownership.isAvailable,
+                            isAvailable = ownershipConfigured,
                             phase = ownership.state.value.phase,
                         ) &&
                         pageIndex == submittedPage &&
@@ -319,7 +320,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                         pageIndex == submittedPage &&
                         pages.getOrNull(pageIndex) == OnboardingPage.Plan &&
                         !ownershipCanAccessPostClaimOnboarding(
-                            isAvailable = ownership.isAvailable,
+                            isAvailable = ownershipConfigured,
                             phase = ownership.state.value.phase,
                         )
                     ) {
@@ -338,17 +339,20 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                 if (!granted) { bleAdvanceLauncher.launch(blePerms); return }
             }
             OnboardingPage.Connect -> {
-                // No strap bonded → skip the celebration and go straight to Profile.
+                // No strap bonded in offline exploration mode: skip the false celebration but
+                // still show the informational account step before Profile.
                 if (!live.bonded) {
-                    if (ownership.isAvailable) return
-                    moveTo(pages.indexOf(OnboardingPage.Profile), "forward")
+                    if (ownershipConfigured) return
+                    moveTo(pages.indexOf(OnboardingPage.Ownership), "forward")
                     return
                 }
             }
             OnboardingPage.Ownership -> {
-                if (
-                    ownershipState.phase != OwnershipPhase.CLAIMED &&
-                    ownershipState.phase != OwnershipPhase.COMPLETE
+                if (!ownershipStepCanContinue(
+                        ownershipConfigured = ownershipConfigured,
+                        reconciliationComplete = !ownershipState.busy,
+                        phase = ownershipState.phase,
+                    )
                 ) {
                     return
                 }
@@ -414,7 +418,10 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                         .widthIn(max = 620.dp),
                     label = onboardingPageLabel,
                 ) { targetPage ->
-                    if (targetPage == OnboardingPage.Ownership) {
+                    if (
+                        targetPage == OnboardingPage.Ownership &&
+                        accountMode == OnboardingAccountMode.CONFIGURED
+                    ) {
                         OwnershipAccountScreen()
                     } else {
                         Column(
@@ -426,13 +433,13 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                         ) {
                             when (targetPage) {
                             OnboardingPage.Welcome -> WelcomeStep()
-                            OnboardingPage.WhatItDoes -> WhatItDoesStep()
+                            OnboardingPage.WhatItDoes -> WhatItDoesStep(accountCopy)
                             OnboardingPage.Expectations -> ExpectationsStep()
-                            OnboardingPage.Bluetooth -> BluetoothStep()
+                            OnboardingPage.Bluetooth -> BluetoothStep(accountCopy)
                             OnboardingPage.Wear -> WearStep()
                             OnboardingPage.Connect -> ConnectStep(viewModel)
                             OnboardingPage.Bonded -> BondedStep(viewModel)
-                            OnboardingPage.Ownership -> Unit
+                            OnboardingPage.Ownership -> OwnershipAvailabilityStep()
                             OnboardingPage.Profile -> ProfileStep()
                             OnboardingPage.Import -> ImportStep(viewModel)
                             OnboardingPage.Notifications -> NotificationsStep(
@@ -466,21 +473,40 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                         ownershipState.phase == OwnershipPhase.COMPLETE
                 val primaryEnabled = when (page) {
                     OnboardingPage.Connect ->
-                        !ownership.isAvailable || live.bonded
-                    OnboardingPage.Ownership -> ownershipClaimed
+                        !ownershipConfigured || live.bonded
+                    OnboardingPage.Ownership ->
+                        ownershipStepCanContinue(
+                            ownershipConfigured = ownershipConfigured,
+                            reconciliationComplete = !ownershipState.busy,
+                            phase = ownershipState.phase,
+                        )
                     OnboardingPage.Plan ->
                         !ownershipState.busy && postClaimOwnershipReady
                     else ->
-                        !page.requiresCurrentOwnershipClaim ||
-                            postClaimOwnershipReady
+                        resolvedOnboardingOwnershipDestination(
+                            requested = page,
+                            ownershipConfigured = ownershipConfigured,
+                            reconciliationComplete = !ownershipState.busy,
+                            phase = ownershipState.phase,
+                        ) == page
                 }
                 OnboardingFooter(
                     progress = if (pages.size <= 1) 1f else pageIndex.toFloat() / pages.lastIndex.toFloat(),
                     cta = when {
                         page == OnboardingPage.Plan && ownershipState.busy ->
                             stringResource(R.string.ownership_plan_saving)
-                        page == OnboardingPage.Ownership && !ownershipClaimed ->
+                        page == OnboardingPage.Ownership &&
+                            ownershipConfigured &&
+                            !ownershipClaimed ->
                             stringResource(R.string.ownership_onboarding_continue_locked)
+                        page == OnboardingPage.Connect &&
+                            onboardingContinuesWithoutBand(
+                                ownershipConfigured = ownershipConfigured,
+                                bonded = live.bonded,
+                            ) ->
+                            stringResource(
+                                R.string.appwide_onboarding_continue_without_band,
+                            )
                         page != OnboardingPage.Plan -> page.cta
                         selectedPlan == NoopProductPlan.NOOP ->
                             stringResource(R.string.ownership_plan_continue_noop)
@@ -500,7 +526,100 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     }
 }
 
-private enum class OnboardingPage(val cta: String) {
+internal fun onboardingPages(
+    ownershipConfigured: Boolean,
+): List<OnboardingPage> = OnboardingPage.entries
+
+internal fun onboardingContinuesWithoutBand(
+    ownershipConfigured: Boolean,
+    bonded: Boolean,
+): Boolean = !ownershipConfigured && !bonded
+
+internal enum class OnboardingAccountMode {
+    CONFIGURED,
+    EXPLORATION,
+}
+
+internal data class OnboardingAccountCopy(
+    val dataBoundaryTitle: Int,
+    val dataBoundaryBody: Int,
+    val bluetoothBoundaryBody: Int,
+)
+
+internal fun onboardingAccountMode(
+    ownershipConfigured: Boolean,
+): OnboardingAccountMode = if (ownershipConfigured) {
+    OnboardingAccountMode.CONFIGURED
+} else {
+    OnboardingAccountMode.EXPLORATION
+}
+
+internal fun onboardingAccountCopy(
+    mode: OnboardingAccountMode,
+): OnboardingAccountCopy = when (mode) {
+    OnboardingAccountMode.CONFIGURED -> OnboardingAccountCopy(
+        dataBoundaryTitle = R.string.onboarding_data_boundary_configured_title,
+        dataBoundaryBody = R.string.onboarding_data_boundary_configured_body,
+        bluetoothBoundaryBody = R.string.onboarding_bluetooth_boundary_configured,
+    )
+    OnboardingAccountMode.EXPLORATION -> OnboardingAccountCopy(
+        dataBoundaryTitle = R.string.onboarding_data_boundary_exploration_title,
+        dataBoundaryBody = R.string.onboarding_data_boundary_exploration_body,
+        bluetoothBoundaryBody = R.string.onboarding_bluetooth_boundary_exploration,
+    )
+}
+
+internal fun ownershipStepCanContinue(
+    ownershipConfigured: Boolean,
+    reconciliationComplete: Boolean,
+    phase: OwnershipPhase,
+): Boolean {
+    if (!ownershipConfigured) return true
+    return reconciliationComplete &&
+        ownershipCanAccessPostClaimOnboarding(
+            isAvailable = true,
+            phase = phase,
+        )
+}
+
+internal fun resolvedOnboardingOwnershipDestination(
+    requested: OnboardingPage,
+    ownershipConfigured: Boolean,
+    reconciliationComplete: Boolean,
+    phase: OwnershipPhase,
+): OnboardingPage? {
+    if (!ownershipConfigured || !requested.requiresCurrentOwnershipClaim) {
+        return requested
+    }
+    if (!reconciliationComplete) {
+        return null
+    }
+    return if (
+        ownershipCanAccessPostClaimOnboarding(
+            isAvailable = true,
+            phase = phase,
+        )
+    ) {
+        requested
+    } else {
+        OnboardingPage.Ownership
+    }
+}
+
+internal fun restoredOnboardingPageIndex(
+    storedPage: String?,
+    pages: List<OnboardingPage>,
+): Int {
+    val restoredPage = OnboardingPage.entries.firstOrNull {
+        it.storageValue == storedPage
+    } ?: return pages.indexOf(OnboardingPage.Welcome).coerceAtLeast(0)
+    val restoredIndex = pages.indexOf(restoredPage)
+    if (restoredIndex >= 0) return restoredIndex
+    return pages.indexOf(OnboardingPage.Profile).takeIf { it >= 0 }
+        ?: pages.indexOf(OnboardingPage.Welcome).coerceAtLeast(0)
+}
+
+internal enum class OnboardingPage(val cta: String) {
     Welcome("Get Started"),
     WhatItDoes("Continue"),
     Expectations("I understand"),
@@ -543,6 +662,56 @@ private enum class OnboardingPage(val cta: String) {
 }
 
 private const val ONBOARDING_PROGRESS_KEY = "noop.onboarding.progress.v1"
+
+@Composable
+private fun OwnershipAvailabilityStep() {
+    val boundary = stringResource(
+        R.string.ownership_onboarding_unconfigured_boundary,
+    )
+    StepShell {
+        Spacer(Modifier.height(12.dp))
+        Text(
+            stringResource(R.string.ownership_onboarding_exploration_title),
+            style = NoopType.title1,
+            color = Palette.textPrimary,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            stringResource(R.string.ownership_onboarding_exploration_detail),
+            style = NoopType.body,
+            color = Palette.textSecondary,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        InfoCard(
+            icon = Icons.Filled.Smartphone,
+            tint = Palette.accent,
+            title = stringResource(R.string.ownership_onboarding_local_mode_title),
+            message = stringResource(R.string.ownership_onboarding_local_mode_detail),
+        )
+        InfoCard(
+            icon = Icons.Filled.Lock,
+            tint = Palette.statusPositive,
+            title = stringResource(
+                R.string.ownership_onboarding_unavailable_features_title,
+            ),
+            message = stringResource(
+                R.string.ownership_onboarding_unavailable_features_detail,
+            ),
+        )
+        Text(
+            boundary,
+            style = NoopType.caption,
+            color = Palette.textTertiary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .widthIn(max = 460.dp)
+                .semantics {
+                    contentDescription = boundary
+                },
+        )
+    }
+}
 
 @Composable
 private fun ProductPlanStep(
@@ -942,7 +1111,7 @@ private fun WelcomeStep() {
 }
 
 @Composable
-private fun WhatItDoesStep() {
+private fun WhatItDoesStep(accountCopy: OnboardingAccountCopy) {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_what_noop_does_b25b362d),
         subtitle = "Three quiet promises.",
@@ -963,8 +1132,8 @@ private fun WhatItDoesStep() {
             FeatureRow(
                 icon = Icons.Filled.Lock,
                 tint = Palette.statusPositive,
-                title = uiString(R.string.l10n_onboarding_screen_own_your_data_offline_997fe15e),
-                body = "Everything starts on this phone. No account or cloud is required. Data leaves only when you explicitly share it, use Coach, or enable your own self-hosted sync.",
+                title = stringResource(accountCopy.dataBoundaryTitle),
+                body = stringResource(accountCopy.dataBoundaryBody),
             )
         }
     }
@@ -985,7 +1154,7 @@ private fun ExpectationsStep() {
 }
 
 @Composable
-private fun BluetoothStep() {
+private fun BluetoothStep(accountCopy: OnboardingAccountCopy) {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_a_quick_word_before_you_connect_5a29015a),
         subtitle = "Android will ask for Bluetooth in a moment.",
@@ -1000,7 +1169,7 @@ private fun BluetoothStep() {
                 icon = Icons.Filled.Lock,
                 tint = Palette.statusPositive,
                 title = stringResource(R.string.onboarding_direct_local_bluetooth),
-                message = "NOOP talks straight to Noop Band over Bluetooth Low Energy, with no project server in the middle. Readings stay on this phone unless you later enable an optional destination such as your own self-hosted server.",
+                message = stringResource(accountCopy.bluetoothBoundaryBody),
             )
             Text(
                 stringResource(R.string.onboarding_bluetooth_permission_prompt),

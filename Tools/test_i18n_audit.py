@@ -186,6 +186,25 @@ class AppleFormatCoverage(unittest.TestCase):
         self.assertEqual(ia.apple_format_gaps(cat, "de"), [])
 
 
+class AppleCatalogRouting(unittest.TestCase):
+    def test_widget_sources_use_the_widget_owned_catalog(self):
+        widget_root = ia.ROOT / "StrandiOSWidgets"
+        widget_catalog = widget_root / "Localizable.xcstrings"
+        app_catalog = ia.ROOT / "Strand/Resources/Localizable.xcstrings"
+
+        routed_catalogs = [
+            catalog
+            for roots, catalog in ia.CATALOGS
+            if widget_root in roots
+        ]
+
+        self.assertEqual(routed_catalogs, [widget_catalog])
+        self.assertNotIn(
+            widget_root,
+            next(roots for roots, catalog in ia.CATALOGS if catalog == app_catalog),
+        )
+
+
 class CustomerFacingBrandAudit(unittest.TestCase):
     def test_legacy_catalog_key_is_safe_with_neutral_english_override(self):
         cat = {

@@ -69,7 +69,7 @@ class ReportCompletenessParityTest {
         // computed, so a valid capture must NOT read INCOMPLETE just because the deeper trace didn't re-run.
         val report = buildString {
             appendLine("dayOwner day=2026-07-09 readId=my-whoop writeActiveId=my-whoop hrRows=27001 provenance=measured")
-            appendLine("sleep day=2026-07-09 totalSleepMin=426 matched=1 source=computed")
+            appendLine("analysis.sleep_scored source=computed sessions=1 stages=present efficiency=present hrv=present hrv_window=deep")
             // NOTE: no `gate run=` in this capture — exactly the #127 report.
         }
         val s = ReportCompleteness.statuses(report, active = setOf(TestDomain.SLEEP))
@@ -81,16 +81,16 @@ class ReportCompletenessParityTest {
         // the absent killer trace — `present (gate run=)` over an evidence-only match sent a maintainer
         // hunting for gate lines the report never contained.
         assertTrue("an evidence-only match must be labelled `via <evidence>`",
-            section.contains("sleep: present (via sleep day=)"))
+            section.contains("sleep: present (via analysis.sleep_scored)"))
     }
 
     @Test fun matchedTokenPrefersTheKillerTraceOverTheEvidenceLine() {
         // When BOTH are present the deeper killer trace is the one named — `via` is reserved for the
         // rescue path, so its appearance always means "the killer trace is genuinely absent".
-        val both = "[sleep] gate run=1 KEPT\nsleep day=2026-07-09 totalSleepMin=426 matched=1 source=computed"
+        val both = "[sleep] gate run=1 KEPT\nanalysis.sleep_scored source=computed sessions=1 stages=present efficiency=present hrv=present hrv_window=deep"
         assertEquals("gate run=", ReportCompleteness.matchedToken(both, TestDomain.SLEEP))
-        val evidenceOnly = "sleep day=2026-07-09 totalSleepMin=426 matched=1 source=computed"
-        assertEquals("sleep day=", ReportCompleteness.matchedToken(evidenceOnly, TestDomain.SLEEP))
+        val evidenceOnly = "analysis.sleep_scored source=computed sessions=1 stages=present efficiency=present hrv=present hrv_window=deep"
+        assertEquals("analysis.sleep_scored", ReportCompleteness.matchedToken(evidenceOnly, TestDomain.SLEEP))
         assertEquals(null, ReportCompleteness.matchedToken("nothing sleepy here", TestDomain.SLEEP))
     }
 

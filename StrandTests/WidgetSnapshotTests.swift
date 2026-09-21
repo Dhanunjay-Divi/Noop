@@ -73,6 +73,11 @@ final class WidgetSnapshotTests: XCTestCase {
                      "An older snapshot must never invent a heart-rate observation time")
         XCTAssertNil(snapshot.sleepMinutes)
         XCTAssertNil(snapshot.scoreDay)
+        XCTAssertNil(snapshot.recoveryState)
+        XCTAssertNil(snapshot.effortState)
+        XCTAssertNil(snapshot.restState)
+        XCTAssertEqual(snapshot.recoveryPresentationState, .measured)
+        XCTAssertEqual(snapshot.effortPresentationState, .missing)
     }
 
     func testFreshnessUsesPublicationTimeWithoutRemovingDailyScores() {
@@ -139,6 +144,123 @@ final class WidgetSnapshotTests: XCTestCase {
 
         XCTAssertEqual(snapshot.liveHeartRateExpiresAt,
                        observed.addingTimeInterval(WidgetSnapshot.liveHeartRateMaxAge))
+    }
+
+    func testMateriallyFuturePublicationIsUnavailable() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var snapshot = WidgetSnapshot.placeholder
+        snapshot.updated = now.addingTimeInterval(
+            WidgetSnapshot.maximumFutureClockSkew + 1
+        )
+
+        XCTAssertEqual(snapshot.freshness(at: now), .unavailable)
+        XCTAssertFalse(snapshot.hasCurrentConnection(at: now))
+        XCTAssertEqual(snapshot.presented(at: now), .unavailable)
+    }
+
+    func testMateriallyFutureHeartRateIsNotLive() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var snapshot = WidgetSnapshot.placeholder
+        snapshot.updated = now
+        snapshot.heartRateObservedAt = now.addingTimeInterval(
+            WidgetSnapshot.maximumFutureClockSkew + 1
+        )
+
+        XCTAssertEqual(snapshot.heartRateFreshness(at: now), .unavailable)
+        XCTAssertFalse(snapshot.hasLiveHeartRate(at: now))
+        XCTAssertNil(snapshot.presented(at: now).bpm)
+    }
+
+    func testPresentationWithholdsLegacyValuesWithoutObservationOrScoreDay() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let snapshot = WidgetSnapshot(
+            recovery: 72,
+            bpm: 58,
+            batteryPct: 84,
+            bonded: true,
+            updated: now,
+            effort: 42,
+            rest: 81,
+            hrv: 64,
+            restingHr: 52,
+            sleepMinutes: 462,
+            connected: true,
+            heartRateObservedAt: nil,
+            scoreDay: nil
+        )
+
+        let presented = snapshot.presented(at: now)
+
+        XCTAssertNil(presented.recovery)
+        XCTAssertNil(presented.effort)
+        XCTAssertNil(presented.rest)
+        XCTAssertNil(presented.hrv)
+        XCTAssertNil(presented.restingHr)
+        XCTAssertNil(presented.sleepMinutes)
+        XCTAssertNil(presented.bpm)
+        XCTAssertNil(presented.heartRateObservedAt)
+        XCTAssertEqual(presented.recoveryPresentationState, .missing)
+        XCTAssertEqual(presented.effortPresentationState, .missing)
+        XCTAssertEqual(presented.restPresentationState, .missing)
+    }
+
+    func testPresentationKeepsDayBoundScoresButWithholdsStaleHeartRate() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var snapshot = WidgetSnapshot.placeholder
+        snapshot.updated = now.addingTimeInterval(-3 * 60 * 60)
+        snapshot.heartRateObservedAt = now.addingTimeInterval(-3 * 60 * 60)
+        snapshot.scoreDay = "1970-01-01"
+
+        let presented = snapshot.presented(at: now)
+
+        XCTAssertEqual(presented.recovery, snapshot.recovery)
+        XCTAssertEqual(presented.effort, snapshot.effort)
+        XCTAssertEqual(presented.rest, snapshot.rest)
+        XCTAssertNil(presented.bpm)
+        XCTAssertNil(presented.heartRateObservedAt)
+        XCTAssertEqual(presented.connected, false)
+    }
+
+    func testPresentationPreservesExplicitCalibrationWithoutFabricatingValues() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let snapshot = WidgetSnapshot(
+            recovery: nil,
+            bpm: nil,
+            batteryPct: nil,
+            bonded: true,
+            updated: now,
+            effort: 31,
+            rest: nil,
+            scoreDay: "1970-01-01",
+            recoveryState: .calibrating,
+            effortState: .calibrating,
+            restState: .missing
+        )
+
+        let presented = snapshot.presented(at: now)
+
+        XCTAssertNil(presented.recovery)
+        XCTAssertEqual(presented.effort, 31)
+        XCTAssertNil(presented.rest)
+        XCTAssertEqual(presented.recoveryPresentationState, .calibrating)
+        XCTAssertEqual(presented.effortPresentationState, .measured,
+                       "A real score must override inconsistent persisted state")
+        XCTAssertEqual(presented.restPresentationState, .missing)
+        XCTAssertTrue(presented.hasDailySignal)
+    }
+
+    func testPresentationKeepsRecentHeartRateAsHistoricalNotLive() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var snapshot = WidgetSnapshot.placeholder
+        snapshot.updated = now
+        snapshot.heartRateObservedAt = now.addingTimeInterval(-5 * 60)
+
+        let presented = snapshot.presented(at: now)
+
+        XCTAssertEqual(presented.bpm, snapshot.bpm)
+        XCTAssertEqual(presented.heartRateObservedAt, snapshot.heartRateObservedAt)
+        XCTAssertFalse(presented.hasLiveHeartRate(at: now))
+        XCTAssertEqual(presented.heartRateFreshness(at: now), .recent)
     }
 
     func testWidgetDestinationURLsRoundTrip() {

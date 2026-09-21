@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="managed_safety_presentation_title">Safety-Alarmierungen</string>
+    <string name="managed_safety_presentation_blurb">Private App-Alarmierungen von angenommenen Kontakten. NOOP kontaktiert keine Rettungsdienste.</string>
+    <string name="managed_safety_urgent_sound_title">Dringender Safety-Ton</string>
+    <string name="managed_safety_urgent_sound_detail">Verwendet einen eigenen Ton hoher Priorität sowie Vibration und Licht. Standardmäßig aus. Android-Ton und „Nicht stören“ gelten weiterhin; NOOP öffnet keinen Vollbildalarm.</string>
+    <string name="managed_safety_urgent_channel_name">NOOP Safety-Kontakte · dringender Ton</string>
+    <string name="managed_safety_urgent_channel_description">Optionaler dringender Ton, Vibration und Licht für private NOOP Safety-Alarmierungen.</string>
+    <string name="managed_safety_open_notification_settings">Safety-Benachrichtigungen öffnen</string>
+    <string name="live_heart_rate_notification_title">Herzfrequenz in der Hintergrundmeldung</string>
+    <string name="live_heart_rate_notification_detail">Zeigt eine aktuelle Live-Herzfrequenz in der vorhandenen Hintergrundmeldung. Höchstens alle 15 Sekunden aktualisiert; die kontinuierliche Erfassung wird dadurch nicht aktiviert.</string>
+    <string name="live_heart_rate_notification_accessibility">Herzfrequenz in der Hintergrundmeldung. Startet keine kontinuierliche Herzfrequenzerfassung.</string>
+    <string name="live_heart_rate_notification_value">Herzfrequenz %1$d bpm</string>
+</resources>

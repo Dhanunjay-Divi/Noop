@@ -54,9 +54,23 @@ final class ManagedHistoryExportTests: XCTestCase {
 
         XCTAssertEqual(manifest.selectedObjects, 4)
         XCTAssertEqual(manifest.exportedObjects, 4)
+        XCTAssertEqual(manifest.formatVersion, 2)
         XCTAssertEqual(
             manifest.exportedChunkBytes,
             Int64(firstData.count + secondData.count)
+        )
+        XCTAssertEqual(
+            manifest.integrity?.entriesSHA256,
+            ManagedHistoryArchiveIntegrity.entriesSHA256(
+                chunks: manifest.chunks,
+                documents: manifest.documents
+            )
+        )
+        XCTAssertEqual(manifest.integrity?.entryCount, 4)
+        XCTAssertEqual(manifest.snapshotCursor?.snapshotAt, manifest.snapshotAt)
+        XCTAssertEqual(
+            manifest.snapshotCursor?.changeSequence,
+            manifest.changeSequence
         )
         XCTAssertEqual(manifest.chunks.map(\.chunkID), [first.chunkID, second.chunkID])
         XCTAssertEqual(
@@ -85,6 +99,297 @@ final class ManagedHistoryExportTests: XCTestCase {
         )
         XCTAssertEqual(reportedProgress.last?.phase, .finalizing)
         XCTAssertEqual(reportedProgress.last?.completedObjects, 4)
+    }
+
+    func testInterruptedExportResumesSameSnapshotWithoutReplayingCommittedEntry() async throws {
+        let firstData = Data("first-chunk".utf8)
+        let secondData = Data("second-chunk".utf8)
+        let first = makeChunk(
+            id: UUID(uuidString: "11000000-0000-5000-8000-000000000001")!,
+            data: firstData,
+            start: "2026-09-01T00:00:00Z"
+        )
+        let second = makeChunk(
+            id: UUID(uuidString: "11000000-0000-5000-8000-000000000002")!,
+            data: secondData,
+            start: "2026-09-01T01:00:00Z"
+        )
+        let transport = ExportTransport(
+            chunks: [first, second],
+            chunkData: [
+                first.chunkID: firstData,
+                second.chunkID: secondData,
+            ],
+            forcePageSize: 1
+        )
+        let checkpoints = ExportCheckpointRecorder()
+        let firstEntries = ExportEntryRecorder()
+
+        do {
+            _ = try await ManagedHistoryExporter(transport: transport).export(
+                dataClasses: ["essential_timeseries"],
+                pageSize: 25,
+                authorization: { _ in try Self.authorization() },
+                saveCheckpoint: { checkpoint in
+                    try await checkpoints.saveAndInterruptAfterFirst(checkpoint)
+                },
+                now: { Self.date("2026-09-04T12:00:00Z") },
+                consume: { entry in await firstEntries.append(entry) }
+            )
+            XCTFail("Expected interruption")
+        } catch {
+            XCTAssertTrue(error is ExportTestInterruption)
+        }
+
+        let storedCheckpoint = await checkpoints.latest()
+        let checkpoint = try XCTUnwrap(storedCheckpoint)
+        let firstPaths = await firstEntries.values().map(\.path)
+        XCTAssertEqual(checkpoint.exportedObjects, 1)
+        XCTAssertEqual(checkpoint.chunks.map(\.chunkID), [first.chunkID])
+        XCTAssertEqual(firstPaths, [
+            checkpoint.chunks[0].path,
+        ])
+
+        let resumedEntries = ExportEntryRecorder()
+        let manifest = try await ManagedHistoryExporter(transport: transport).export(
+            dataClasses: ["essential_timeseries"],
+            pageSize: 25,
+            resumeFrom: checkpoint,
+            authorization: { _ in try Self.authorization() },
+            saveCheckpoint: { value in await checkpoints.save(value) },
+            now: { Self.date("2026-09-04T12:01:00Z") },
+            consume: { entry in await resumedEntries.append(entry) }
+        )
+
+        XCTAssertEqual(manifest.chunks.map(\.chunkID), [first.chunkID, second.chunkID])
+        let resumedPaths = await resumedEntries.values().map(\.path)
+        let restoreCreations = await transport.restoreCreationCount()
+        let completion = await transport.completedValues()
+        XCTAssertEqual(resumedPaths, [
+            manifest.chunks[1].path,
+        ])
+        XCTAssertEqual(restoreCreations, 1)
+        XCTAssertEqual(
+            completion,
+            .init(objects: 2, bytes: Int64(firstData.count + secondData.count))
+        )
+    }
+
+    func testExpiredExportCheckpointFailsBeforeNetworkUse() async throws {
+        let transport = ExportTransport(chunks: [], chunkData: [:])
+        let checkpoint = ManagedHistoryExportCheckpoint(
+            createdAt: "2026-09-04T12:00:00Z",
+            requestID: UUID(),
+            restoreJobID: UUID(),
+            snapshotAt: "2026-09-04T12:00:00Z",
+            changeSequence: 42,
+            expiresAt: "2026-09-05T00:00:00Z",
+            dataClasses: ["essential_timeseries"],
+            pageSize: 25,
+            selectedObjects: 0,
+            selectedChunkBytes: 0,
+            dataClassIndex: 1,
+            documentsComplete: true
+        )
+
+        do {
+            _ = try await ManagedHistoryExporter(transport: transport).export(
+                dataClasses: ["essential_timeseries"],
+                pageSize: 25,
+                resumeFrom: checkpoint,
+                authorization: { _ in try Self.authorization() },
+                now: { Self.date("2026-09-05T00:00:00Z") },
+                consume: { _ in }
+            )
+            XCTFail("Expected expired cursor")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedStorageError,
+                .cursorExpired(minimumSequence: nil)
+            )
+        }
+        let restoreCreations = await transport.restoreCreationCount()
+        let completion = await transport.completedValues()
+        XCTAssertEqual(restoreCreations, 0)
+        XCTAssertNil(completion)
+    }
+
+    func testCheckpointChunkByteOverflowFailsClosedBeforeNetworkUse()
+        async throws
+    {
+        try await assertCheckpointChunkByteTotalRejected(
+            compressedBytes: Int.max
+        )
+    }
+
+    func testCheckpointChunkByteUnderflowFailsClosedBeforeNetworkUse()
+        async throws
+    {
+        try await assertCheckpointChunkByteTotalRejected(
+            compressedBytes: Int.min
+        )
+    }
+
+    func testStagedArchiveValidatorAcceptsMatchingEntries() throws {
+        let data = Data("staged-entry".utf8)
+        let manifest = stagedManifest(data: data)
+
+        XCTAssertNoThrow(
+            try ManagedHistoryStagedArchiveValidator.validate(
+                manifest: manifest,
+                entryPaths: manifest.chunks.map(\.path),
+                read: { path, maximumBytes in
+                    XCTAssertEqual(path, manifest.chunks[0].path)
+                    XCTAssertEqual(maximumBytes, data.count)
+                    return data
+                }
+            )
+        )
+    }
+
+    func testStagedArchiveValidatorClassifiesCorruptionAsUnusableState() {
+        let data = Data("staged-entry".utf8)
+        let manifest = stagedManifest(data: data)
+
+        XCTAssertThrowsError(
+            try ManagedHistoryStagedArchiveValidator.validate(
+                manifest: manifest,
+                entryPaths: manifest.chunks.map(\.path),
+                read: { _, _ in Data("corrupt".utf8) }
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ManagedHistoryExportStateError,
+                .unusableStagedArchive
+            )
+        }
+    }
+
+    func testStagedArchiveValidatorPreservesFilesystemFailureClassification() {
+        let data = Data("staged-entry".utf8)
+        let manifest = stagedManifest(data: data)
+
+        XCTAssertThrowsError(
+            try ManagedHistoryStagedArchiveValidator.validate(
+                manifest: manifest,
+                entryPaths: manifest.chunks.map(\.path),
+                read: { _, _ in throw StagedArchiveReadFailure.transient }
+            )
+        ) { error in
+            XCTAssertEqual(error as? StagedArchiveReadFailure, .transient)
+        }
+    }
+
+    private func assertCheckpointChunkByteTotalRejected(
+        compressedBytes: Int
+    ) async throws {
+        let data = Data("checkpoint".utf8)
+        let available = makeChunk(
+            id: UUID(uuidString: "12000000-0000-5000-8000-000000000001")!,
+            data: data,
+            start: "2026-09-01T00:00:00Z"
+        )
+        let chunks = (1...2).map { index in
+            ManagedHistoryExportManifest.Chunk(
+                path:
+                    "chunks/essential_timeseries/"
+                    + "12000000-0000-5000-8000-"
+                    + String(format: "%012d", index)
+                    + ".json",
+                chunkID: UUID(
+                    uuidString:
+                        "12000000-0000-5000-8000-"
+                        + String(format: "%012d", index)
+                )!,
+                sourceID: available.sourceID,
+                dataClass: available.dataClass,
+                schemaVersion: available.schemaVersion,
+                eventStart: available.eventStart,
+                eventEnd: available.eventEnd,
+                compression: available.compression,
+                contentType: available.contentType,
+                sha256: available.expectedSHA256,
+                compressedBytes: compressedBytes,
+                uncompressedBytes: available.expectedUncompressedBytes,
+                objectGeneration: available.objectGeneration
+            )
+        }
+        let checkpoint = ManagedHistoryExportCheckpoint(
+            createdAt: "2026-09-04T12:00:00Z",
+            requestID: UUID(),
+            restoreJobID: UUID(),
+            snapshotAt: "2026-09-04T12:00:00Z",
+            changeSequence: 42,
+            expiresAt: "2026-09-05T00:00:00Z",
+            dataClasses: ["essential_timeseries"],
+            pageSize: 25,
+            selectedObjects: chunks.count,
+            selectedChunkBytes: Int64.max,
+            exportedObjects: chunks.count,
+            exportedChunkBytes: Int64.max,
+            chunks: chunks
+        )
+        let transport = ExportTransport(chunks: [], chunkData: [:])
+
+        do {
+            _ = try await ManagedHistoryExporter(transport: transport).export(
+                dataClasses: ["essential_timeseries"],
+                pageSize: 25,
+                resumeFrom: checkpoint,
+                authorization: { _ in try Self.authorization() },
+                now: { Self.date("2026-09-04T12:01:00Z") },
+                consume: { _ in }
+            )
+            XCTFail("Expected byte-total overflow rejection")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let restoreCreations = await transport.restoreCreationCount()
+        let completion = await transport.completedValues()
+        XCTAssertEqual(restoreCreations, 0)
+        XCTAssertNil(completion)
+    }
+
+    private func stagedManifest(
+        data: Data
+    ) -> ManagedHistoryExportManifest {
+        let path =
+            "chunks/essential_timeseries/"
+            + "13000000-0000-5000-8000-000000000001.json"
+        let chunk = ManagedHistoryExportManifest.Chunk(
+            path: path,
+            chunkID: UUID(
+                uuidString: "13000000-0000-5000-8000-000000000001"
+            )!,
+            sourceID: UUID(
+                uuidString: "13000000-0000-5000-8000-000000000002"
+            )!,
+            dataClass: "essential_timeseries",
+            schemaVersion: 1,
+            eventStart: "2026-09-01T00:00:00Z",
+            eventEnd: "2026-09-01T00:01:00Z",
+            compression: "none",
+            contentType: "application/vnd.noop.chunk+json",
+            sha256: ManagedDigest.sha256(data),
+            compressedBytes: data.count,
+            uncompressedBytes: data.count,
+            objectGeneration: 1
+        )
+        return ManagedHistoryExportManifest(
+            format: "noop_managed_history",
+            formatVersion: 2,
+            createdAt: "2026-09-04T12:00:00Z",
+            snapshotAt: "2026-09-04T11:59:00Z",
+            changeSequence: 42,
+            dataClasses: ["essential_timeseries"],
+            selectedObjects: 1,
+            selectedChunkBytes: Int64(data.count),
+            exportedObjects: 1,
+            exportedChunkBytes: Int64(data.count),
+            chunks: [chunk],
+            documents: []
+        )
     }
 
     func testDigestMismatchFailsBeforePublishingEntryOrCompletingSnapshot() async throws {
@@ -145,6 +450,37 @@ final class ManagedHistoryExportTests: XCTestCase {
         XCTAssertNil(completion)
     }
 
+    func testOversizedRestoreSelectionFailsBeforeCheckpointOrObjectDownload()
+        async throws
+    {
+        let transport = ExportTransport(
+            chunks: [],
+            chunkData: [:],
+            selectedObjectDelta:
+                ManagedHistoryTransferLimits.maximumObjectCount + 1
+        )
+        let checkpoints = ExportCheckpointRecorder()
+
+        do {
+            _ = try await ManagedHistoryExporter(transport: transport).export(
+                dataClasses: ["essential_timeseries"],
+                authorization: { _ in try Self.authorization() },
+                saveCheckpoint: { value in await checkpoints.save(value) },
+                consume: { _ in }
+            )
+            XCTFail("Expected oversized selection rejection")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let storedCheckpoint = await checkpoints.latest()
+        let chunkPageStarts = await transport.chunkPageStarts()
+        let completion = await transport.completedValues()
+        XCTAssertNil(storedCheckpoint)
+        XCTAssertEqual(chunkPageStarts, [])
+        XCTAssertNil(completion)
+    }
+
     func testManifestEncodingUsesPortableSnakeCaseKeys() throws {
         let manifest = ManagedHistoryExportManifest(
             format: "noop_managed_history",
@@ -170,6 +506,159 @@ final class ManagedHistoryExportTests: XCTestCase {
         XCTAssertNil(object["formatVersion"])
     }
 
+    func testManifestAndCheckpointPortableAcronymKeysRoundTrip() throws {
+        let chunk = ManagedHistoryExportManifest.Chunk(
+            path:
+                "chunks/essential_timeseries/"
+                + "10000000-0000-5000-8000-000000000001.json",
+            chunkID: UUID(
+                uuidString: "10000000-0000-5000-8000-000000000001"
+            )!,
+            sourceID: UUID(
+                uuidString: "20000000-0000-5000-8000-000000000001"
+            )!,
+            dataClass: "essential_timeseries",
+            schemaVersion: 1,
+            eventStart: "2026-09-04T11:00:00Z",
+            eventEnd: "2026-09-04T11:01:00Z",
+            compression: "none",
+            contentType: "application/vnd.noop.chunk+json",
+            sha256: String(repeating: "a", count: 64),
+            compressedBytes: 12,
+            uncompressedBytes: 12,
+            objectGeneration: 1
+        )
+        let manifest = ManagedHistoryExportManifest(
+            format: "noop_managed_history",
+            formatVersion: 2,
+            createdAt: "2026-09-04T12:00:00Z",
+            snapshotAt: "2026-09-04T11:59:00Z",
+            changeSequence: 42,
+            dataClasses: ["essential_timeseries"],
+            selectedObjects: 1,
+            selectedChunkBytes: 12,
+            exportedObjects: 1,
+            exportedChunkBytes: 12,
+            chunks: [chunk],
+            documents: [],
+            integrity: .init(
+                algorithm: "sha256",
+                entryCount: 1,
+                entriesSHA256: String(repeating: "b", count: 64)
+            ),
+            snapshotCursor: .init(
+                formatVersion: 1,
+                snapshotAt: "2026-09-04T11:59:00Z",
+                changeSequence: 42
+            )
+        )
+
+        let manifestData = try manifest.encoded()
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: manifestData)
+                as? [String: Any]
+        )
+        let encodedChunk = try XCTUnwrap(
+            (object["chunks"] as? [[String: Any]])?.first
+        )
+        let integrity = try XCTUnwrap(
+            object["integrity"] as? [String: Any]
+        )
+        XCTAssertEqual(encodedChunk["chunk_id"] as? String, chunk.chunkID.uuidString)
+        XCTAssertEqual(encodedChunk["source_id"] as? String, chunk.sourceID.uuidString)
+        XCTAssertEqual(
+            integrity["entries_sha256"] as? String,
+            String(repeating: "b", count: 64)
+        )
+        XCTAssertEqual(
+            try ManagedHistoryExportManifest.decoded(from: manifestData),
+            manifest
+        )
+
+        let checkpoint = ManagedHistoryImportCheckpoint(
+            archiveSHA256: String(repeating: "c", count: 64),
+            nextObjectIndex: 1,
+            importedObjects: 1,
+            importedChunkBytes: 12
+        )
+        let checkpointData = try checkpoint.encoded()
+        let checkpointObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: checkpointData)
+                as? [String: Any]
+        )
+        XCTAssertEqual(
+            checkpointObject["archive_sha256"] as? String,
+            String(repeating: "c", count: 64)
+        )
+        XCTAssertEqual(
+            try ManagedHistoryImportCheckpoint.decoded(from: checkpointData),
+            checkpoint
+        )
+    }
+
+    func testMaximumObjectManifestFitsSharedCeilingAndRoundTrips()
+        throws
+    {
+        let sourceID = UUID()
+        let chunks = (0..<ManagedHistoryTransferLimits.maximumObjectCount)
+            .map { index in
+                ManagedHistoryExportManifest.Chunk(
+                    path: String(
+                        format: "chunks/essential_timeseries/%05d.json",
+                        index
+                    ),
+                    chunkID: UUID(),
+                    sourceID: sourceID,
+                    dataClass: "essential_timeseries",
+                    schemaVersion: 1,
+                    eventStart: "2026-09-20T12:00:00.000Z",
+                    eventEnd: "2026-09-20T12:00:01.000Z",
+                    compression: "none",
+                    contentType: "application/vnd.noop.chunk+json",
+                    sha256: String(repeating: "a", count: 64),
+                    compressedBytes: 1,
+                    uncompressedBytes: 1,
+                    objectGeneration: 1
+                )
+            }
+        let manifest = ManagedHistoryExportManifest(
+            format: "noop_managed_history",
+            formatVersion: 2,
+            createdAt: "2026-09-20T12:00:00.000Z",
+            snapshotAt: "2026-09-20T11:59:59.000Z",
+            changeSequence: 1,
+            dataClasses: ["essential_timeseries"],
+            selectedObjects: chunks.count,
+            selectedChunkBytes: Int64(chunks.count),
+            exportedObjects: chunks.count,
+            exportedChunkBytes: Int64(chunks.count),
+            chunks: chunks,
+            documents: [],
+            integrity: .init(
+                algorithm: "sha256",
+                entryCount: chunks.count,
+                entriesSHA256: String(repeating: "b", count: 64)
+            ),
+            snapshotCursor: .init(
+                formatVersion: 1,
+                snapshotAt: "2026-09-20T11:59:59.000Z",
+                changeSequence: 1
+            )
+        )
+
+        let data = try manifest.encoded()
+
+        XCTAssertGreaterThan(data.count, 8 * 1_024 * 1_024)
+        XCTAssertLessThanOrEqual(
+            data.count,
+            ManagedHistoryTransferLimits.maximumManifestBytes
+        )
+        XCTAssertEqual(
+            try ManagedHistoryExportManifest.decoded(from: data),
+            manifest
+        )
+    }
+
     private static func authorization() throws -> ManagedAuthorization {
         try ManagedAuthorization(
             identityToken: "identity",
@@ -177,6 +666,10 @@ final class ManagedHistoryExportTests: XCTestCase {
             installationID: "ios-installation",
             installationToken: "noopm_" + String(repeating: "a", count: 43)
         )
+    }
+
+    private static func date(_ value: String) -> Date {
+        ISO8601DateFormatter().date(from: value)!
     }
 
     private func makeChunk(
@@ -224,6 +717,10 @@ final class ManagedHistoryExportTests: XCTestCase {
     }
 }
 
+private enum StagedArchiveReadFailure: Error {
+    case transient
+}
+
 private actor ExportEntryRecorder {
     private var entries: [ManagedHistoryExportEntry] = []
 
@@ -245,6 +742,33 @@ private actor ExportProgressRecorder {
 
     func values() -> [ManagedHistoryExportProgress] {
         progress
+    }
+}
+
+private enum ExportTestInterruption: Error {
+    case afterFirstObject
+}
+
+private actor ExportCheckpointRecorder {
+    private var checkpoint: ManagedHistoryExportCheckpoint?
+    private var shouldInterrupt = true
+
+    func saveAndInterruptAfterFirst(
+        _ value: ManagedHistoryExportCheckpoint
+    ) throws {
+        checkpoint = value
+        if shouldInterrupt, value.exportedObjects == 1 {
+            shouldInterrupt = false
+            throw ExportTestInterruption.afterFirstObject
+        }
+    }
+
+    func save(_ value: ManagedHistoryExportCheckpoint) {
+        checkpoint = value
+    }
+
+    func latest() -> ManagedHistoryExportCheckpoint? {
+        checkpoint
     }
 }
 
@@ -283,6 +807,7 @@ private actor ExportTransport: ManagedStorageTransport {
     private var documentDeletionSelections: [Bool] = []
     private var restoreDeletionSelections: [Bool] = []
     private var completion: Completion?
+    private var restoreCreations = 0
     private let restoreID = UUID(uuidString: "50000000-0000-5000-8000-000000000001")!
     private let snapshot = "2026-09-04T12:00:00Z"
 
@@ -345,6 +870,7 @@ private actor ExportTransport: ManagedStorageTransport {
         includeDeletedDocuments: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
+        restoreCreations += 1
         restoreDeletionSelections.append(includeDeletedDocuments)
         return restore(
             status: "running",
@@ -481,6 +1007,10 @@ private actor ExportTransport: ManagedStorageTransport {
 
     func restoreIncludeDeletedValues() -> [Bool] {
         restoreDeletionSelections
+    }
+
+    func restoreCreationCount() -> Int {
+        restoreCreations
     }
 
     private func restore(

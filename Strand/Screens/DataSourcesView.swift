@@ -661,7 +661,7 @@ struct DataSourcesView: View {
         wearableImporting = true
         wearableSummary = nil
         wearableFailed = false
-        Task {
+        Task { [live] in
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {

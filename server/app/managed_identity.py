@@ -44,6 +44,17 @@ class ManagedIdentityClaims:
         return hashlib.sha256(self.subject.encode("utf-8")).hexdigest()
 
 
+def unified_identity_lock_key(claims: ManagedIdentityClaims) -> str:
+    digest = hashlib.sha256(
+        json.dumps(
+            [claims.issuer, claims.provider_tenant, claims.subject_hash],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"noop-unified-principal:{digest}"
+
+
 class ManagedTokenVerifying(Protocol):
     async def verify(
         self,

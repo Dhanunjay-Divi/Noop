@@ -112,6 +112,22 @@ def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
     )[0]
     assert 'name  = "NOOP_SAFETY_WORKER_ENABLED"' in migration
     assert 'value = "false"' in migration
+    managed_lifecycle = runtime.split(
+        'resource "google_cloud_run_v2_job" "managed_lifecycle"',
+        maxsplit=1,
+    )[1]
+    assert 'name  = "NOOP_SAFETY_WORKER_ENABLED"' in managed_lifecycle
+    assert 'name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"' in managed_lifecycle
+    assert 'name  = "NOOP_MANAGED_SAFETY_REPEAT_ENABLED"' in managed_lifecycle
+    assert 'name  = "NOOP_MANAGED_SAFETY_REPEAT_INTERVAL_SECONDS"' in managed_lifecycle
+    assert 'name  = "NOOP_MANAGED_SAFETY_REPEAT_TTL_SECONDS"' in managed_lifecycle
+    assert 'name  = "NOOP_MANAGED_SAFETY_REPEAT_MAX_ROUNDS"' in managed_lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_ENABLED"\n          value = "true"'
+    ) in managed_lifecycle
+    assert managed_lifecycle.index(
+        'name  = "NOOP_SAFETY_WORKER_ENABLED"'
+    ) < managed_lifecycle.index('name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"')
     assert 'name  = "NOOP_RUN_MIGRATIONS"' in runtime
     assert 'value = "false"' in runtime
     assert 'path = "/readyz"' in runtime
@@ -139,6 +155,86 @@ def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
     assert "var.enable_managed_runtime" in runtime
     assert "var.enable_managed_runtime" in variables
     assert "var.enable_public_managed_api" in runtime
+
+
+def test_gcp_database_credentials_are_separate_pinned_and_least_privilege() -> None:
+    iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    variables = (REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf").read_text(
+        encoding="utf-8"
+    )
+    provisioner = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "configure-database-secret.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'resource "google_secret_manager_secret" "migration_database_url"' in iam
+    assert 'resource "google_secret_manager_secret" "runtime_database_url"' in iam
+    assert 'resource "google_secret_manager_secret" "managed_api_database_url"' in iam
+    assert (
+        'resource "google_secret_manager_secret" "managed_processor_database_url"'
+        in iam
+    )
+    assert (
+        'resource "google_secret_manager_secret" "managed_lifecycle_database_url"'
+        in iam
+    )
+    assert (
+        'resource "google_secret_manager_secret" "feedback_lifecycle_database_url"'
+        in iam
+    )
+    assert '"${local.prefix}-database-url"' in iam
+    assert '"${local.prefix}-runtime-database-url"' in iam
+    assert '"${local.prefix}-managed-api-database-url"' in iam
+    assert '"${local.prefix}-managed-processor-database-url"' in iam
+    assert '"${local.prefix}-managed-lifecycle-database-url"' in iam
+    assert '"${local.prefix}-feedback-lifecycle-database-url"' in iam
+    assert (
+        iam.count("google_secret_manager_secret.migration_database_url.secret_id") == 1
+    )
+    runtime_secret_resources = (
+        "runtime_database_url",
+        "managed_api_database_url",
+        "managed_processor_database_url",
+        "managed_lifecycle_database_url",
+        "feedback_lifecycle_database_url",
+    )
+    for resource in runtime_secret_resources:
+        assert iam.count(f"google_secret_manager_secret.{resource}.secret_id") == 1
+        assert (
+            runtime.count(
+                f"secret  = google_secret_manager_secret.{resource}.secret_id"
+            )
+            == 1
+        )
+    assert (
+        runtime.count(
+            "secret  = google_secret_manager_secret.migration_database_url.secret_id"
+        )
+        == 1
+    )
+    assert runtime.count("version = var.migration_database_url_secret_version") == 1
+    secret_version_variables = (
+        "migration_database_url_secret_version",
+        "runtime_database_url_secret_version",
+        "managed_api_database_url_secret_version",
+        "managed_processor_database_url_secret_version",
+        "managed_lifecycle_database_url_secret_version",
+        "feedback_lifecycle_database_url_secret_version",
+    )
+    for variable in secret_version_variables:
+        assert runtime.count(f"version = var.{variable}") == 1
+        assert f'variable "{variable}"' in variables
+    assert "AND NOT rolcreaterole" in provisioner
+    assert "AND NOT rolcreatedb" in provisioner
+    assert "NOT has_schema_privilege('public', 'CREATE')" in provisioner
+    assert "Runtime role owns database objects" in provisioner
+    assert "RUNTIME_PROFILE_USERS" in provisioner
+    assert "RUNTIME_PROFILE_SECRETS" in provisioner
+    assert "require_exact_migration_manifest" in provisioner
+    assert "--confirm-runtime-disabled" in provisioner
+    assert "--confirm-migrations-complete" in provisioner
 
 
 def test_gcp_managed_identity_is_attested_and_uses_restricted_keys() -> None:
@@ -184,6 +280,10 @@ def test_gcp_managed_identity_is_attested_and_uses_restricted_keys() -> None:
     assert "value = google_firebase_apple_app.staging[0].app_id" in runtime
     assert 'name  = "NOOP_MANAGED_ANDROID_APP_ID"' in runtime
     assert "value = google_firebase_android_app.staging[0].app_id" in runtime
+    assert 'variable "managed_macos_app_id"' in variables
+    assert "This stack does not provision the macOS Firebase app." in variables
+    assert 'name  = "NOOP_MANAGED_MACOS_APP_ID"' in runtime
+    assert "for_each = var.managed_macos_app_id == null" in runtime
 
 
 def test_gcp_feedback_lifecycle_is_independent_and_retention_bounded() -> None:
@@ -268,6 +368,11 @@ def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
     assert "managed_lifecycle_push_token_previous_secret" in iam
     assert 'name  = "NOOP_MANAGED_PUSH_ENABLED"' in runtime
     assert 'name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"' in runtime
+    assert 'name  = "NOOP_MANAGED_FORMULA_SHADOW_ENABLED"' in runtime
+    assert 'name  = "NOOP_MANAGED_DOCUMENT_KEY_RECOVERY_ENABLED"' in runtime
+    assert runtime.index(
+        'name  = "NOOP_MANAGED_FORMULA_SHADOW_ENABLED"'
+    ) < runtime.index('name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"')
     assert 'name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"' in runtime
     assert 'name = "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"' in runtime
     assert runtime.count('name  = "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION"') == 2
@@ -459,6 +564,115 @@ def test_gcp_lifecycle_identity_can_only_delete_firebase_users() -> None:
     assert "roles/firebaseauth.admin" not in iam
     assert 'name  = "NOOP_MANAGED_PROJECT_ID"' in runtime
     assert "google_project_iam_member.managed_lifecycle_identity_deleter" in (runtime)
+
+
+def test_gcp_ownership_deletion_coordination_uses_a_distinct_bounded_secret() -> None:
+    iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    variables = (REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf").read_text(
+        encoding="utf-8"
+    )
+    staging = (REPOSITORY_ROOT / "infra" / "gcp" / "staging.tfvars.example").read_text(
+        encoding="utf-8"
+    )
+    lifecycle = runtime.split(
+        'resource "google_cloud_run_v2_job" "managed_lifecycle"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_job_iam_member" "managed_lifecycle_scheduler"',
+        maxsplit=1,
+    )[0]
+
+    assert 'variable "enable_ownership_deletion_coordination"' in variables
+    assert 'variable "ownership_deletion_lifecycle_database_url_secret_id"' in variables
+    assert "var.enable_managed_runtime" in variables
+    assert "var.enable_ownership_runtime" in variables
+    assert (
+        "var.ownership_deletion_lifecycle_database_url_secret_id != null" in variables
+    )
+    assert (
+        'data "google_secret_manager_secret" '
+        '"ownership_deletion_lifecycle_database_url"'
+    ) in iam
+    assert (
+        'resource "google_secret_manager_secret_iam_member" '
+        '"managed_lifecycle_ownership_database_url"'
+    ) in iam
+    lifecycle_secret_access = iam.split(
+        'resource "google_secret_manager_secret_iam_member" '
+        '"managed_lifecycle_ownership_database_url"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_secret_manager_secret_iam_member" '
+        '"managed_api_replay_secret"',
+        maxsplit=1,
+    )[0]
+    assert "var.enable_ownership_deletion_coordination ? 1 : 0" in (
+        lifecycle_secret_access
+    )
+    assert "google_service_account.managed_lifecycle.email" in lifecycle_secret_access
+    assert "google_service_account.ownership_api" not in lifecycle_secret_access
+    assert 'name  = "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED"' in lifecycle
+    assert 'value = "true"' in lifecycle
+    assert 'name = "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL"' in lifecycle
+    assert (
+        "data.google_secret_manager_secret."
+        "ownership_deletion_lifecycle_database_url[0].secret_id"
+    ) in lifecycle
+    assert (
+        "google_secret_manager_secret_iam_member."
+        "managed_lifecycle_ownership_database_url"
+    ) in lifecycle
+    assert (
+        lifecycle.count('name  = "NOOP_OWNERSHIP_DELETION_COORDINATION_ENABLED"') == 1
+    )
+    assert lifecycle.count('name = "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL"') == 1
+    assert "ownership_deletion_lifecycle_database_url_secret_id   = null" in staging
+    assert "enable_ownership_deletion_coordination                = false" in staging
+
+
+def test_gcp_managed_lifecycle_explicitly_bounds_safety_repeat_paging() -> None:
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    lifecycle = runtime.split(
+        'resource "google_cloud_run_v2_job" "managed_lifecycle"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_job_iam_member" "managed_lifecycle_scheduler"',
+        maxsplit=1,
+    )[0]
+    scheduler = runtime.split(
+        'resource "google_cloud_scheduler_job" "managed_lifecycle"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_job" "feedback_lifecycle"',
+        maxsplit=1,
+    )[0]
+
+    assert 'name  = "NOOP_SAFETY_ESCALATION_ROUNDS"' in lifecycle
+    assert 'name  = "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS"' in lifecycle
+    assert (
+        'name  = "NOOP_SAFETY_ESCALATION_ROUNDS"\n          value = "4"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS"\n          value = "900"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_ENABLED"\n          value = "true"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_INTERVAL_SECONDS"\n          value = "120"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_TTL_SECONDS"\n          value = "900"'
+    ) in lifecycle
+    assert (
+        'name  = "NOOP_MANAGED_SAFETY_REPEAT_MAX_ROUNDS"\n          value = "4"'
+    ) in lifecycle
+    assert 'schedule         = "* * * * *"' in scheduler
 
 
 def test_gcp_managed_runtime_cannot_list_health_objects() -> None:

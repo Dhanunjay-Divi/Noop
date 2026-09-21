@@ -809,11 +809,11 @@ struct ManagedSafetyView: View {
         let initialLocation = shareLocation
             ? locationProvider.location
             : nil
-        guard let incident = await service.createSafetyIncident(
+        guard await service.createSafetyIncident(
             durationHours: durationHours == 12 ? 12 : 8,
             shareLocation: shareLocation,
             initialLocation: initialLocation
-        ) else {
+        ) != nil else {
             return
         }
         if initialLocation != nil {

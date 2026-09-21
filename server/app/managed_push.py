@@ -324,6 +324,7 @@ class FirebaseCloudMessagingProvider:
             # FirebaseMessagingService always creates the incident-specific
             # immutable PendingIntent, including while the app is backgrounded.
             message["android"] = {
+                "collapse_key": collapse_id,
                 "priority": "HIGH",
                 "ttl": f"{remaining_seconds}s",
             }

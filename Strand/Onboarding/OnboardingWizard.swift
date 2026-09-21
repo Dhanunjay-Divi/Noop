@@ -20,7 +20,7 @@ import UIKit
 //  5 Wear & wake       - put your strap on, make sure it is charged
 //  6 Scan              - radar sweep; auto-scans, Scan retries via model.scan()
 //  7 Bonding           - celebration when live.bonded
-//  8 Ownership         - first-party builds only; claim must finish before profile
+//  8 Ownership         - always visible; configured builds require claim before profile
 //  9 Profile           - age / sex / weight / height bound to ProfileStore
 // 10 Import (optional) - wearable / Apple Health history
 // 11 Notifications     - explicit, default-off daily guidance choice
@@ -39,15 +39,17 @@ public struct OnboardingWizard: View {
 
     public init(onFinished: @escaping () -> Void) {
         self.onFinished = onFinished
-        var initialStep = Step.welcome
-        if let stored = UserDefaults.standard.string(
-            forKey: Self.progressStorageKey
-        ),
-           let restored = Step.allCases.first(where: {
-               $0.storageValue == stored
-           }) {
-            initialStep = restored
-        }
+        let isOwnershipConfigured = Self.ownershipConfiguredForCurrentBuild
+        ownershipConfigured = isOwnershipConfigured
+        _ownershipBootstrapComplete = State(
+            initialValue: !isOwnershipConfigured
+        )
+        var initialStep = Self.restoredOnboardingStep(
+            storedValue: UserDefaults.standard.string(
+                forKey: Self.progressStorageKey
+            ),
+            ownershipConfigured: isOwnershipConfigured
+        )
         #if DEBUG
         let args = CommandLine.arguments
         if let index = args.firstIndex(of: "--demo-onboarding-page"),
@@ -63,6 +65,10 @@ public struct OnboardingWizard: View {
             initialStep = requestedStep
         }
         #endif
+        initialStep = Self.normalizedOnboardingStep(
+            initialStep,
+            ownershipConfigured: isOwnershipConfigured
+        )
         _step = State(initialValue: initialStep)
     }
 
@@ -71,7 +77,7 @@ public struct OnboardingWizard: View {
     // caused flicker. Child steps observe what they need; a hidden BondWatcher (below)
     // handles the bond→celebration transition without re-rendering the root.
 
-    private enum Step: Int, CaseIterable {
+    enum Step: Int, CaseIterable {
         case welcome, what, expectations, bluetooth, wear, scan, bonded,
              ownership, profile, importData, notifications, safetyContacts,
              appearance, dailyRhythm, plan, done
@@ -101,8 +107,68 @@ public struct OnboardingWizard: View {
         }
     }
 
+    static func onboardingSteps(ownershipConfigured _: Bool) -> [Step] {
+        Step.allCases
+    }
+
+    static func restoredOnboardingStep(
+        storedValue: String?,
+        ownershipConfigured: Bool
+    ) -> Step {
+        let restored = Step.allCases.first {
+            $0.storageValue == storedValue
+        } ?? .welcome
+        return normalizedOnboardingStep(
+            restored,
+            ownershipConfigured: ownershipConfigured
+        )
+    }
+
+    static func normalizedOnboardingStep(
+        _ candidate: Step,
+        ownershipConfigured: Bool
+    ) -> Step {
+        let steps = onboardingSteps(
+            ownershipConfigured: ownershipConfigured
+        )
+        if steps.contains(candidate) {
+            return candidate
+        }
+        return steps.contains(.profile) ? .profile : .welcome
+    }
+
+    static func ownershipDestination(
+        for candidate: Step,
+        ownershipConfigured: Bool,
+        reconciliationComplete: Bool,
+        phase: OwnershipServicePhase
+    ) -> Step? {
+        guard ownershipConfigured,
+              candidate.rawValue > Step.ownership.rawValue else {
+            return candidate
+        }
+        guard reconciliationComplete else {
+            return nil
+        }
+        return ownershipCanAccessPostClaimOnboarding(
+            isAvailable: true,
+            phase: phase
+        ) ? candidate : .ownership
+    }
+
+    private static var ownershipConfiguredForCurrentBuild: Bool {
+        #if os(iOS)
+        return OwnershipConfiguration.load(bundle: .main) != nil
+        #else
+        return false
+        #endif
+    }
+
     private static let progressStorageKey = "noop.onboarding.progress.v1"
+    private let ownershipConfigured: Bool
     @State private var step: Step = .welcome
+    @State private var ownershipBootstrapRequested = false
+    @State private var ownershipBootstrapComplete: Bool
     @State private var glow = false
     @State private var profileEditing = false
     @State private var bandBonded = false
@@ -139,9 +205,13 @@ public struct OnboardingWizard: View {
                     case .bonded:     BondedStep()
                     case .ownership:
                         #if os(iOS)
-                        OwnershipAccountView()
+                        if ownershipConfigured {
+                            OwnershipAccountView()
+                        } else {
+                            OwnershipAvailabilityStep()
+                        }
                         #else
-                        EmptyView()
+                        OwnershipAvailabilityStep()
                         #endif
                     case .profile:    ProfileStep(isEditing: $profileEditing)
                     case .importData: ImportStep()
@@ -194,8 +264,14 @@ public struct OnboardingWizard: View {
         // without subscribing the whole wizard to per-tick updates.
         .background(BondWatcher(onBondState: handleBondState))
         #if os(iOS)
+        .task {
+            bootstrapOwnershipIfNeeded()
+        }
         .onChange(of: ownershipService.phase) { _, _ in
             reconcileOwnershipRequirement()
+        }
+        .onChange(of: ownershipService.isBusy) { _, _ in
+            completeOwnershipBootstrapIfSettled()
         }
         #endif
     }
@@ -301,9 +377,16 @@ public struct OnboardingWizard: View {
         case .expectations: return String(localized: "I understand")
         case .bluetooth:  return String(localized: "Continue")
         case .wear:       return String(localized: "I'm wearing it")
-        case .scan:       return String(localized: "Continue")
+        case .scan:
+            return Self.scanCTATitle(
+                ownershipConfigured: ownershipConfigured,
+                bandBonded: bandBonded
+            )
         case .bonded:     return String(localized: "Continue")
         case .ownership:
+            guard ownershipConfigured else {
+                return String(localized: "Continue")
+            }
             return ownershipClaimed
                 ? String(localized: "Continue")
                 : String(localized: "Claim band to continue")
@@ -324,8 +407,24 @@ public struct OnboardingWizard: View {
         }
     }
 
+    static func scanCTATitle(
+        ownershipConfigured: Bool,
+        bandBonded: Bool
+    ) -> String {
+        if !ownershipConfigured && !bandBonded {
+            return String(localized: "appwide.onboarding.continue_without_band")
+        }
+        return String(localized: "Continue")
+    }
+
     private var primaryActionEnabled: Bool {
-        if step == .ownership { return ownershipClaimed }
+        if step == .ownership {
+            return Self.ownershipStepCanContinue(
+                ownershipConfigured: ownershipConfigured,
+                claimed: ownershipClaimed,
+                reconciliationComplete: ownershipReconciliationComplete
+            )
+        }
         if step == .scan && ownershipRequired { return bandBonded }
         if step == .plan {
             return !planSubmissionBusy && postClaimOwnershipReady
@@ -356,6 +455,10 @@ public struct OnboardingWizard: View {
     /// its own: only "Enable & Continue" calls the scheduler, which requests the OS permission if needed.
     /// Denial does not block onboarding and the same control remains available under Automations.
     private func advance() {
+        if step == .scan && !bandBonded && !ownershipConfigured {
+            move(to: .ownership, direction: "forward")
+            return
+        }
         if step == .plan {
             planSubmissionAttempted = true
             #if os(iOS)
@@ -438,7 +541,7 @@ public struct OnboardingWizard: View {
     }
 
     private var activeSteps: [Step] {
-        Step.allCases.filter { $0 != .ownership || ownershipRequired }
+        Self.onboardingSteps(ownershipConfigured: ownershipConfigured)
     }
 
     private var currentStepIndex: Int {
@@ -446,11 +549,15 @@ public struct OnboardingWizard: View {
     }
 
     private var ownershipRequired: Bool {
-        #if os(iOS)
-        return ownershipService.isAvailable
-        #else
-        return false
-        #endif
+        ownershipConfigured
+    }
+
+    static func ownershipStepCanContinue(
+        ownershipConfigured: Bool,
+        claimed: Bool,
+        reconciliationComplete: Bool
+    ) -> Bool {
+        !ownershipConfigured || (claimed && reconciliationComplete)
     }
 
     private var ownershipClaimed: Bool {
@@ -473,9 +580,17 @@ public struct OnboardingWizard: View {
     private var postClaimOwnershipReady: Bool {
         #if os(iOS)
         return ownershipCanAccessPostClaimOnboarding(
-            isAvailable: ownershipService.isAvailable,
+            isAvailable: ownershipConfigured,
             phase: ownershipService.phase
         )
+        #else
+        return true
+        #endif
+    }
+
+    private var ownershipReconciliationComplete: Bool {
+        #if os(iOS)
+        return ownershipBootstrapComplete && !ownershipService.isBusy
         #else
         return true
         #endif
@@ -501,36 +616,45 @@ public struct OnboardingWizard: View {
         move(to: .profile, direction: "reconciled")
     }
 
+    private func ownershipDestination(for candidate: Step) -> Step? {
+        #if os(iOS)
+        let phase = ownershipService.phase
+        #else
+        let phase = OwnershipServicePhase.unavailable
+        #endif
+        return Self.ownershipDestination(
+            for: candidate,
+            ownershipConfigured: ownershipConfigured,
+            reconciliationComplete: ownershipReconciliationComplete,
+            phase: phase
+        )
+    }
+
     private func ownershipAllows(_ candidate: Step) -> Bool {
-        guard candidate.rawValue > Step.ownership.rawValue else {
-            return true
+        guard let destination = ownershipDestination(for: candidate) else {
+            return false
         }
-        return postClaimOwnershipReady
+        return destination == candidate
     }
 
     private func reconcileOwnershipRequirement() {
         #if os(iOS)
-        guard !ownershipAllows(step),
-              ownershipService.isAvailable else {
+        guard let destination = ownershipDestination(for: step),
+              destination == .ownership,
+              destination != step else {
             return
         }
-        guard let ownershipIndex = activeSteps.firstIndex(of: .ownership) else {
-            return
-        }
-        move(to: activeSteps[ownershipIndex], direction: "reconciled")
+        move(to: destination, direction: "reconciled")
         #endif
     }
 
     private func move(to next: Step, direction: String) {
-        let destination: Step
-        let effectiveDirection: String
-        if ownershipAllows(next) {
-            destination = next
-            effectiveDirection = direction
-        } else {
-            destination = .ownership
-            effectiveDirection = "reconciled"
+        guard let destination = ownershipDestination(for: next) else {
+            return
         }
+        let effectiveDirection = destination == next
+            ? direction
+            : "reconciled"
         UserDefaults.standard.set(
             destination.storageValue,
             forKey: Self.progressStorageKey
@@ -551,11 +675,69 @@ public struct OnboardingWizard: View {
         }
     }
 
+    private func bootstrapOwnershipIfNeeded() {
+        #if os(iOS)
+        guard ownershipConfigured else { return }
+        guard !ownershipBootstrapRequested else {
+            completeOwnershipBootstrapIfSettled()
+            return
+        }
+        ownershipBootstrapRequested = true
+        ownershipService.bootstrap()
+        completeOwnershipBootstrapIfSettled()
+        #endif
+    }
+
+    private func completeOwnershipBootstrapIfSettled() {
+        #if os(iOS)
+        guard ownershipConfigured,
+              ownershipBootstrapRequested,
+              !ownershipService.isBusy else {
+            return
+        }
+        ownershipBootstrapComplete = true
+        reconcileOwnershipRequirement()
+        #endif
+    }
+
     private var stepTransition: AnyTransition {
         .asymmetric(
             insertion: .move(edge: .trailing).combined(with: .opacity),
             removal: .move(edge: .leading).combined(with: .opacity)
         )
+    }
+}
+
+private struct OwnershipAvailabilityStep: View {
+    var body: some View {
+        StepShell(
+            title: String(localized: "Band Account"),
+            subtitle: String(localized: "Band ownership is not enabled")
+        ) {
+            VStack(spacing: 12) {
+                InfoCard(
+                    icon: "person.badge.plus",
+                    tint: StrandPalette.accent,
+                    title: String(localized: "Create ownership account"),
+                    message: String(localized: "This build keeps the future account flow dormant. Core local NOOP remains available without an account.")
+                )
+                InfoCard(
+                    icon: "person.crop.circle.badge.checkmark",
+                    tint: StrandPalette.statusPositive,
+                    title: String(localized: "Sign in"),
+                    message: String(localized: "Activation will be enabled only after the approved band SDK can provide fresh, cryptographic possession proof.")
+                )
+                Text(
+                    "Account actions stay off in this build. Continuing does not create an account or upload data."
+                )
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 460)
+                .accessibilityIdentifier("noop.onboarding.account-unconfigured")
+            }
+        }
     }
 }
 

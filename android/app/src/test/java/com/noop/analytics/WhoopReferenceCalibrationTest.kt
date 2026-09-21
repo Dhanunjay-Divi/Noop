@@ -40,7 +40,7 @@ class WhoopReferenceCalibrationTest {
     fun currentAlgorithmRevisionsMatchAppleContract() {
         assertEquals("noop-charge-v2", NoopScoreAlgorithmRevision.CHARGE)
         assertEquals("noop-effort-v2", NoopScoreAlgorithmRevision.EFFORT)
-        assertEquals("noop-rest-v1", NoopScoreAlgorithmRevision.REST)
+        assertEquals("noop-rest-v2", NoopScoreAlgorithmRevision.REST)
     }
 
     @Test

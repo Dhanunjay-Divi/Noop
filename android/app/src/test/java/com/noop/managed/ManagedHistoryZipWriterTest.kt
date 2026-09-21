@@ -6,6 +6,8 @@ import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.zip.ZipInputStream
 
 class ManagedHistoryZipWriterTest {
@@ -63,6 +65,44 @@ class ManagedHistoryZipWriterTest {
             // Expected.
         } finally {
             writer.abort()
+        }
+    }
+
+    @Test
+    fun fileReaderReturnsExactEntriesAndEnforcesReadLimit() {
+        val file = kotlin.io.path.createTempFile(
+            "noop-managed-history-",
+            ".zip",
+        ).toFile()
+        try {
+            val chunk = ManagedHistoryExportEntry(
+                kind = ManagedHistoryExportEntryKind.CHUNK,
+                path = "chunks/essential_timeseries/chunk.json",
+                data = "canonical".toByteArray(),
+            )
+            FileOutputStream(file).use { output ->
+                val writer = ManagedHistoryZipWriter(output)
+                writer.add(chunk)
+                writer.finish(manifest())
+            }
+
+            val reader = ManagedHistoryFileArchiveReader(file)
+            assertEquals(
+                setOf(chunk.path, "manifest.json"),
+                reader.entryPaths().toSet(),
+            )
+            assertArrayEquals(
+                chunk.data,
+                reader.data(chunk.path, chunk.data.size),
+            )
+            try {
+                reader.data(chunk.path, chunk.data.size - 1)
+                fail("Expected bounded read rejection")
+            } catch (_: IOException) {
+                // Expected.
+            }
+        } finally {
+            file.delete()
         }
     }
 

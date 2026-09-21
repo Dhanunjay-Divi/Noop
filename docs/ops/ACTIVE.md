@@ -1,376 +1,370 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-17**
+Last updated: **2026-09-21**
 
 ## Authoritative context
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`
-- Active worktree: this dedicated audit checkout
-- Active branch: `codex/product-safety-quality-audit-20260911`
-- Current committed and remote pull-request head before the final local
-  corrections:
-  `4afdb35fff5ed6ef628306ff2f99a32fcab67e7d`
-- Final implementation commit:
-  `6e09acd0dd4cc364a10a5eee856ede7a97e28632`
-- Local state at this update: the final committed slice gives Apple and
-  Android scoring bounded local-only timezone provenance, exact 23-hour and
-  25-hour civil days, an unresolved interval across a recorded travel-zone
-  change, and a fail-closed boundary after retained history is truncated.
-  Apple stores that history in one bounded atomic, file-protected, no-backup
-  JSON document rather than preferences; Android uses atomic no-backup storage.
-  The first observed named zone supports complete civil windows only from that
-  observation forward; earlier history and the first partial day are withheld
-  rather than being silently rebucketed.
-  Legacy hydration rows converge automatically only when their retired scalar
-  projection is equal or lower. A higher scalar is ambiguous because retired
-  add and edit/delete paths committed in opposite orders, so both
-  representations remain untouched until Hydration presents one explicit
-  `Keep daily total` or `Use drink list` choice. A scalar-only historical total
-  becomes one deterministic, visibly labelled aggregate row whose provenance
-  survives later edits. Canonical hydration rows must agree with their scalar,
-  retire an interrupted legacy payload only after a committed migration, and
-  recover idempotently if the process stops between those steps. A local v63
-  evidence table binds an explicit higher-scalar resolution to SHA-256 digests
-  of the exact legacy and replacement rows, so an unrelated later payload
-  cannot reuse interrupted-cleanup state. The shared schema oracle records this
-  table as iOS-only because Android never held the retired Apple
-  `UserDefaults` representation. The detail
-  screen detects this state before it publishes editable controls. Empty
-  ownerless legacy lists now use the same managed ownership/deletion
-  classification inside the write transaction; a signed-in profile defers
-  without clearing its scalar or deleting the ownerless preference.
-  Habitual midsleep uses the scoring window's historical timezone,
-  reminder restoration has a behavioral suspended-authorization opt-out race
-  regression, Android feedback scheduling retains its reviewed continuity
-  protections, and one pre-collector diagnostic-report request is retained
-  exactly once. Managed-document restore is revision-monotonic: stale state is
-  an idempotent no-op, equal-revision divergence fails closed, and legacy
-  nullable deletion state may be enriched exactly once. Independent review
-  also made Android's lighter-options sheet scrollable and correctly
-  dismissible, added equivalent macOS presentation, made civil-day bound
-  validation explicit on both platforms, and completed the Apple
-  hydration-warning translations.
-  The final unresolved review threads are corrected locally: Apple rejects a
-  wall-clock rollback before its durable timezone tail, Apple and Android
-  invalidate historical ownership days across the full supported timezone
-  envelope, restored/imported weight history cannot unlock target guidance
-  before profile confirmation, and an unassigned Apple multi-user scale
-  reading cannot expose BMI against the current profile.
-  Exact-current Swift-package, macOS app, Android Full/Demo, API 35, local
-  PostgreSQL server, and localization walls are green after the September 17
-  Safety replay, diagnostics-lifecycle, navigation-layout, and operations-skill
-  corrections. The final post-localization iPhone 17 Pro simulator shell is
-  green: 39 UI tests executed, 38 passed, one private-pilot case was
-  intentionally skipped, and none failed. Repository static-policy and
-  release-control gates pass after documentation and generated terminology
-  stabilized.
-  Finalized result bundles and reports are preserved privately. Commit-bound
-  release evidence for the implementation commit passed all nine release
-  controls, generated a deterministic 233-component SBOM, and verified its
-  manifest. A final Android hydration
-  reboot/time-change regression was found and corrected: its receiver,
-  scheduler, chained scheduling, and worker now reject absent or stale Terms
-  before WorkManager access. Completed NOOP Xcode/SwiftPM caches, old
-  round-owned temporary files, the API 35 emulator, and its RAM disk were
-  removed after evidence capture. Android build output was regenerated for the
-  final variant wall and removed after evidence capture. The final
-  localization-sensitive iOS Release refresh also passed on a temporary RAM
-  volume, which was ejected afterward. Its resolved graph retains reviewed App
-  Check 11.3.2 for the token-TTL suspension fix with unchanged Apache-2.0
-  licensing and regenerated notices. Final review also made precise Safety
-  location an explicit current-authorization opt-in, rejects stale or unusable
-  fixes across both clients and the server, and hardens the local bounded
-  command runner against atomic-status, probe, deadline, and interruption
-  races. Its fork-free `posix_spawn` supervisor now uses a parent release gate,
-  dynamic descriptor mapping, target process-group tracking, deadline-bound
-  creation, and final-state cleanup before any terminal result. Its reviewed
-  digest and the regenerated terminology inventory are pinned by the required
-  CI trust root, and terminology, required-CI, and protected-control
-  self-checks pass. The complete product walls, exact-current phone simulator
-  runtimes, 281-case repository-tool wall, static checks, privacy and claims
-  gates, and 12 mocked infrastructure plans were green before the final four
-  source corrections. Their complete product reruns are green with updated
-  counts below, and a fresh independent diff review reported no P0-P2 finding.
-  The post-correction repository-tool wall passes all 281 cases. The regenerated
-  terminology inventory records 17,703 classified occurrences across 1,564
-  path/category groups, its reviewed digest is repinned, and every standalone
-  policy, localization, privacy, claims, static, operations, and mocked
-  infrastructure gate below passes. The commit containing this record is the
-  bounded local final-review commit. Commit-bound release evidence is generated
-  after commit creation; one consolidated push, hosted checks, protected
-  integration, immediate privacy restoration, and cleanup remain ordered
-  closeout work.
-- Protected integration record: pull request `#15`
-- Repository visibility: public during this audit; it must return to private
-  immediately after protected integration
+- Active worktree: dedicated UI/cloud-readiness review checkout
+- Active branch: `codex/ui-cloud-readiness-20260917`
+- Branch base against protected `main`:
+  `b688b3b725cd497e96a31b28540a219bf50446e1`
+- Current round implementation resumed from:
+  `9d859d9aa6788a936be75bdfeac93603c9fd0ae8`
+- Current state: supplier-independent implementation and applicable local
+  platform verification are green. Pull request `#16` candidate `e9b3a380`
+  passed 32 hosted jobs, including every Android job (Review Sample,
+  production shell, and build-and-test), policy, trust, server, Swift packages,
+  and the macOS build/tests. The iOS build passed; its production shell
+  completed 37 tests, skipped one intentional private case, and failed only
+  `testTodayScrollPerformance`. The first timed scroll round trip completed,
+  then XCTest invoked the simulator measurement closure for extra calibration
+  gestures and its event-loop observer stopped becoming idle. The correction
+  makes the simulator path execute exactly one wall-clock-bounded round trip
+  while retaining Apple's five-iteration scrolling/deceleration metric on real
+  devices. The corrected simulator test passed once and then 3/3 repeated
+  iterations locally through the bounded runner. The exact Android command
+  shape and 65 focused CI tests pass. After the test-only correction, 66
+  focused terminology/required-CI/trust tests and the complete 305-test tool
+  wall pass with one intentional skip. The reviewed active terminology
+  allowlist is unchanged and the historical inventory has zero forbidden
+  mappings. The exact Python 3.14 release-policy matrix is green; replacement
+  commit/push, hosted exact-SHA checks, protected merge, and protected-main
+  verification remain pending.
+- Fresh September 20 independent Apple/Android and server/infrastructure review
+  found no P0, but the replacement candidate is not yet release-ready. Local
+  fixes now quiesce Friends work around account deletion, preserve scheduling
+  after cancellation, reconcile Android encrypted outbox generations, restore
+  `noop-charge-v2` reproducibility, bind installations to platform/plan limits,
+  return truthful account privacy state, fail closed on migration-058 schema
+  drift, bound deletion-worker lock attempts, verify real Friends account
+  erasure, bind mobile App Check enrollment to platform, and emit bounded
+  enrollment outcomes. Focused Android Full-debug tests, 29 Swift Recovery
+  tests, 305 Tools tests with one intentional skip, 50 i18n tests, required-CI
+  validation, 38 consolidated PostgreSQL cases, and 4 focused enrollment API
+  cases pass. The GCP source now separates pinned migration authority from five
+  workload-specific restricted runtime identities and database secrets; 13
+  provisioning tests, 22 production-deployment contracts, and 20 plan-only
+  OpenTofu tests pass. Failed secret publication or verification restores the
+  previous password or quarantines a first-time runtime role. The final Friends
+  localization/accessibility wall also passes on Android and Apple, the
+  unreachable Apple/Android self-hosted Friends presentation has been removed,
+  account-deletion copy is plan-neutral, and 33 focused Apple tests plus the
+  29-task Android managed-only Friends build pass. The exact-current unsigned
+  Release iOS graph builds with its embedded Watch app and widget validated.
+  `NoopRemoteSync` passes 188/188 after a fail-safe legacy communication-field
+  decoder correction, `WhoopStore` passes 539/539, and the complete Tools wall
+  passes 305 tests plus 44 subtests with zero forbidden terminology mappings.
+  The exact-current complete macOS wall passes 2,207 tests with one intentional
+  skip and zero failures.
+  Remaining blockers include live staging credential provisioning, the
+  consolidated commit/push, hosted exact-SHA checks, and protected integration.
+- The September 21 final closeout additionally preserves the terminal
+  service-erasure account fence, makes managed import reachable on both phone
+  platforms, prevents restored Apple preferences from creating an outbox echo,
+  serializes all Android Friends communication permissions, completes
+  destructive-flow localization, and removes only proven unreferenced
+  self-hosted Friends presentation resources. Focused closeout evidence is
+  green: Apple 13/13, Android localization 6/6, Android retention 19/19, Swift
+  retention 6/6, managed-erasure unit 4 pass/3 PostgreSQL-gated skips, and
+  changed-server Ruff check/format. The separately recorded disposable
+  PostgreSQL terminal-fence test remains green.
+- The same closeout now makes history-chunk credit callback-confirmed on Apple
+  and Android, fences delayed persistence/callbacks across ended sessions, and
+  treats local `strap_trim` only as a diagnostic watermark. Apple reconnects
+  fail-closed if a watchdog expires with an acknowledgement in flight. The
+  Apple focused suite passes 23/23. Exact-current broad evidence is green:
+  `NoopRemoteSync` 191/191, `WhoopStore` 539/539, macOS 2,213 with one
+  intentional skip, iOS simulator 39 with one intentional skip, unsigned
+  Release iOS with embedded Watch/widget and zero compiler warnings/errors,
+  Android Full and Demo 4,972 each with seven intentional skips across 175
+  tasks, disposable PostgreSQL 784 with one intentional skip, and 20/20
+  plan-only OpenTofu tests. The repository tool wall passes 305 tests with one
+  intentional skip. Required-CI validates all ten contexts; the terminology
+  ratchet records 17,837 classified occurrences across 1,583 groups with zero
+  forbidden mappings. Remaining work is consolidated commit/push, hosted
+  exact-SHA verification, protected integration, and round-owned cleanup.
+- PR `#16` review remediation advanced the remote head to
+  `149843c109ef85093f62965ac977263180bcc796` with an Apple formula-migration
+  integration regression. The final local tree also omits unusable optional
+  formula baselines without changing `noop-charge-v2`, serializes
+  ownership-deletion claims with cancellation, removes the remaining
+  unreferenced Android self-hosted Friends view model and server-address invite
+  copy, and adds account-scope/localization/navigation regressions. Focused
+  evidence is green: server 39 unit/contract plus 4 disposable-PostgreSQL
+  cases, Apple 56 requested plus 10 archive and 10 formula cases, Android Full
+  and Demo 62/62 each with app and instrumentation-source compilation, and the
+  complete 305-test tool wall with one intentional skip. The terminology
+  snapshot now records 17,840 occurrences across 1,585 groups with zero
+  forbidden mappings. Final consolidated remediation commit/push, all ten
+  exact-SHA hosted contexts, remaining reviewed-thread resolution, protected
+  merge/main trust, and exact cleanup remain pending.
+- The consolidated PR `#16` remediation is now remote at
+  `1b61ebcac5c0803e6025c0491d1b36feb7aa7af1`. Two later Android review findings
+  were confirmed and corrected locally: complete-history import retains an
+  explicit cancel handle and localized canceled state, and an OS-disabled
+  preferred Safety channel is blocked rather than routed through the standard
+  channel. Full and Demo each passed 12/12 focused import/Safety cases while
+  compiling app and instrumentation sources; after adding all-locale copy and
+  its ratchet, each variant passed 18/18 focused cases. A narrow follow-up
+  commit/push, exact-SHA hosted contexts, thread resolution, protected merge,
+  protected-main verification, and cleanup remain.
+- The late Android follow-up is remote at
+  `ad936850d9094ac2c317095f979eebc3b26845ca`. The final two review findings are
+  corrected and verified locally alongside two additional review closures.
+  Formula civil-day UTC conversion rejects underflow/overflow through the
+  existing input contract. Forward migration 059 targets only links created by
+  migration 047 for identities/accounts already terminal at that timestamp,
+  removes dependent authority state, preserves active ownership roots including
+  a concurrent link, retires only true orphans, and restores ordinary guards.
+  Apple and Android defer mixed Friends summaries until formula migration is
+  complete, and complete-history restore/list paths explicitly select
+  `server_readable` chunks while retaining client-encrypted storage. The
+  canonical localization source and generated Apple/Android resources agree
+  after retiring the stale invite key. Hosted Android production-shell runs now
+  use a 1.5 GiB heap and one worker. The final migration repair also removes
+  the historical migration-versus-erasure deadlock, preserves
+  `deletion_pending` principals needed for cancellation, avoids global
+  ownership-table locks, and uses one schema-bound security-definer lock
+  function whose body, principal-table owner, search path, return type,
+  arguments, and exact execute ACL are verified before runtime credentials can
+  be published. Registration takes the principal lock before ownership writes
+  and reconciles the ownership link in the same transaction; the restored link
+  guard is schema-qualified so the hardened function search path cannot shadow
+  or hide its control-plane tables. A final independent database review also
+  unified registration/reconciliation/deletion on one privacy-safe advisory
+  key, restored only tombstone-proven pre-059 erasure principals whose
+  ownership roots predated retirement, and extended runtime verification to
+  helper volatility and `pg_proc` ownership. Current evidence: the complete
+  fresh-database server wall passed 800 tests with only the explicitly opt-in
+  Twilio staging test skipped across 801 collected tests; the final late
+  database/provisioning wall passes 19/19 after the earlier broad 21/21 wall;
+  migration 059 is pinned at
+  `f8fbc7171eaae23b6f5aa8c48c12613189a4ad2567e22c9807eea84c2e8ea1cd`;
+  Ruff check and format pass on the seven final review files after the earlier
+  101-file release-scoped wall; `NoopRemoteSync` passes 192/192; Apple formula
+  contracts pass 12/12; and Android Full/Demo each pass 64/64 focused final
+  cases. The final
+  terminology snapshot records 17,846 occurrences across 1,585 groups with
+  zero forbidden mappings; the complete repository wall passes 355 tests plus
+  44 subtests, and required-CI, release, legal, private-data, health-claims,
+  localization, operations, calibration, trusted-control, and diff gates are
+  green. A final review then confirmed one Android-only parity gap: an empty
+  formula-traversal segment could preserve prior-revision computed scores while
+  recording migration completion. The local follow-up now threads traversal
+  intent into Android scoring and atomically clears only that computed
+  daily/managed-Rest window when no raw or imported evidence remains; ordinary
+  transient empty passes still preserve the last complete scores. Its focused
+  JVM regression passes 3/3 and the Full-debug app plus instrumentation source
+  compile succeeds. The first 1.5 GiB local compile was bounded and stopped on
+  Kotlin heap exhaustion; the repository-standard 4 GiB local rerun passed.
+  Only the final narrow commit/push, exact-SHA hosted verification,
+  review-thread resolution, protected merge/main trust, and exact cleanup
+  remain.
+- Initial hosted replacement commit `bec61a55c7e45fbb2b1563c891858e439049b9cb`
+  reached run `35546684149`. Server source lint passed, but Ruff's format check
+  identified seven files. Ruff 0.12.2 applied its canonical formatting to
+  exactly those files; the complete server source check and format check now
+  pass locally. The correction is formatting-only and does not invalidate the
+  recorded server behavior wall. The corrected exact head still requires one
+  replacement push and hosted verification.
+- Exact PR head `825d015cd404433ac28f67ec7182520b123d48d5`
+  passed every required Apple, server, package, policy, release, trust, and
+  Android build wall. Its API 35 production shell passed the new eight-case
+  stale-formula Room regression but failed two existing app-report tests before
+  their sheets opened. The process-global report channel could hand a request
+  to a retiring Activity collector. The local correction removes that mailbox
+  and routes Test Centre through a compiler-required callback owned by the
+  current `MainActivity`; shake and demo requests retain their direct
+  controller path. Fixed-category `report.request` outcomes make the boundary
+  observable without identifiers or payloads. The 4 GiB one-worker Full app,
+  focused JVM test, and complete Full instrumentation-source compile pass; a
+  deliberate 1.5 GiB local attempt stopped at the known Compose compiler heap
+  boundary. One narrow commit/push, replacement exact-SHA checks, protected
+  merge/main verification, and cleanup remain.
+- Replacement PR head
+  `e1eaa4deafbc1b986e933037acaaec3d4e7367da` proves that correction in the
+  hosted API 35 production shell. Android production shell, Review Sample,
+  build-and-test, and its required aggregate pass; iOS, macOS, server, Swift
+  packages, operations, localization, health-claims, runtime-license, and trust
+  checks also pass. The sole failure is the release-control terminology
+  snapshot ratchet: source and operations edits moved existing line numbers and
+  digests while occurrence count, category totals, and the active customer/core
+  allowlist remained unchanged. The reviewed scan records 17,846 occurrences
+  across 1,585 groups and zero forbidden mappings. The inventory has now been
+  regenerated and its exact digest repinned; the 191-case release-control wall,
+  standalone 9-check report, required-CI ten-context check, trusted self-check,
+  shell entrypoints, calibration parity, distribution provenance, private-data
+  guard, operations validation, terminology ratchet, and diff hygiene pass
+  locally. One evidence-only push, final exact-SHA hosted verification,
+  protected merge/main trust, and cleanup remain.
+- The next exact-head review identified four P2 contract defects. Watch live-HR
+  selection is remote at `3b69ee07`: freshness and plausible BPM are applied
+  before selecting the newest sample, with invalid-newest/valid-earlier and
+  no-valid-initial-batch ratchets. Local commits `e1e94c67` and `5778e2f0`
+  make Android selected-file staging cancellation responsive without replacing
+  prior durable import state, enforce the formula-shadow `+/-1e308` persistence
+  bound through 422 validation, and reject skipped civil days such as
+  `Pacific/Apia` 2011-12-30 before persistence. Focused evidence is green:
+  Watch source/XCTest type-checks and two policy checks; two Android deterministic
+  staging regressions by source review; 29 executor plus 9 model/API tests; and
+  Ruff check/format. The Android Gradle attempt was stopped before compilation
+  because free disk was 3.4-4.0 GiB with 8.7 GiB swap, below the unchanged
+  10 GiB floor. Superseded heavy GitHub runs were canceled, exact worker-created
+  Android/Watch outputs were removed, and the final combined push, exact-SHA
+  hosted walls, four-thread resolution, protected merge/main trust, and cleanup
+  remain.
+- Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
+  license blocker is resolved.
+- Earlier broad local evidence before the late-review follow-up:
+  `NoopRemoteSync` passed 191/191 and
+  `WhoopStore` passes 539/539. The complete disposable-PostgreSQL server wall
+  passes 784 cases with one intentional skip and two framework deprecation
+  warnings. Android Full and Demo each execute 4,972 tests with seven intentional skips and zero
+  failures/errors inside one 175-task compile, lint, APK, unit, and
+  instrumentation-source wall; lint reports zero Error/Fatal findings. The
+  complete macOS wall passed 2,213 tests with one intentional skip and zero
+  failures. The unsigned Release iOS graph succeeds with zero compiler errors,
+  zero `ManagedCloudService.swift` warnings, and its Watch, complications, and
+  widget extensions embedded; the iOS simulator production shell passes 39
+  tests with one intentional skip. That repository-tool wall passed 305 tests
+  plus 44 subtests, and its then-current terminology inventory recorded 17,837
+  classified occurrences across 1,583 groups with zero forbidden mappings. Thirteen
+  database-role tests, 22 production-deployment contracts, and 20 plan-only
+  OpenTofu tests pass without apply. Exact replacement-candidate API 35
+  execution remains a required hosted context because the required local x86
+  managed device is unavailable.
+- Deterministic Safety paging capture passes a test-only user confirmation and
+  two preselected dummy contact roles through the production token codec,
+  managed push service, and FCM payload builder with 3/3 installations and 2/2
+  contacts reached, zero provider traffic, and no sensitive payload values.
+  Accepted-contact selection/revocation and precise-location lifecycle are
+  separate PostgreSQL integration boundaries. The direct smoke test passes 1/1,
+  Ruff passes, three focused PostgreSQL tests pass, the Apple Safety contract
+  passes 51/51, and Android Full and Demo each pass 45/45 focused tests. The
+  disposable database and test environment were removed after evidence.
+- Execution safety now defaults bounded commands to discard unrequested child
+  output, cap explicit private logs at 128 MiB, enforce 10% free-memory and
+  10 GiB free-disk floors, and terminate runaway-output process groups. All 134
+  bounded-runner, required-CI, and trusted-control regression tests pass. This
+  directly guards the observed iTerm application-memory failure mode when
+  repository heavy commands use the runner; it does not control unrelated apps
+  or commands run outside that boundary.
+- The hosted-candidate correction passes 77/77 focused macOS tests, including
+  all 51 Safety contracts, and the exact Android Full app plus instrumentation
+  APK preparation graph with Kotlin in-process. Candidate `e9b3a380` proves
+  all three hosted Android jobs complete under the smaller execution heap and
+  unchanged host guards. It also exposed the iOS simulator's extra XCTest
+  measurement invocations; the corrected single-round-trip path passes four
+  local executions while physical devices retain the real performance metric.
+- The final policy wall passed all 301 tool tests with one intentional skip plus release, calibration, terminology, required-CI, trusted-control, provenance, privacy, medical-truth, localization, operations-record, and diff gates. The hosted disk-control and initial execution-memory corrections passed the complete 304-test wall with one intentional skip; the retry-hardening tree and corrected iOS simulator liveness path each pass the 305-test wall with one intentional skip. The exact 2 GiB daemon command, 65 focused Android CI tests, 66 focused terminology/required-CI/trust tests, and four iOS scroll executions also pass.
+- Exact cleanup manifest
+  `8080d7201bc9ec1ac940842c2aa8d0c0026b79fd8980275d8fe187f97583a62f`
+  removed three closed completed review-session files totaling
+  4,475,749,846 bytes. Manifest
+  `991d0340c6e0d4cf61856c0c41b8135dfe059dec471b0646aaed69e84bffbfca`
+  removed 62 exact round-owned `/private/tmp/noop-*` paths totaling
+  16,566,458 bytes after preserving their results. Current agent-session files
+  with open handles and the two cleanup manifests are deliberately retained.
+  Later verification outputs were removed by the final closeout cleanup
+  recorded below.
+- Replacement candidate SHA, hosted `10/10`, protected merge SHA, and
+  protected-main trusted result remain pending. No Docker image build,
+  production runtime, signing, legal, carrier, physiology, or physical
+  accessibility result is claimed without direct evidence.
+- Current production behavior remains local-first and account-free for
+  exploration. D-059 targets staged cloud authority for durable account
+  history, canonical formulas, recommendations, and cross-device state while
+  retaining the encrypted edge collector, bounded offline cache, immediate
+  Safety initiation, and explicit per-data-class rollback gates.
+- Managed portability now has v2 integrity, resumable export, complete
+  prevalidation, and resumable idempotent import for selected chunks plus
+  `day_ownership`. Ownership deletion now has cooling-off request, status,
+  cancellation, session revocation, migration-045 durable target progress,
+  restricted managed-data erasure coordination, and matched mobile flows.
+  `DAT-170` remains open for live scale/expiry/isolation/physical evidence;
+  `ACC-340` remains open for provider identity erasure, ownership control-plane
+  final erasure, approved physical band retirement/wipe, and legal/operator
+  evidence.
+- The September 20 managed-Friends slice now separates account-only background
+  work from health-backup and Safety enrollment, exposes account-only deletion
+  and cancellation on Apple and Android, and completes the corresponding
+  localized account lifecycle. Focused Apple tests pass 12/12; Android
+  scheduler/localization tests and resource processing pass; the latest iPhone
+  simulator graph builds with Watch and widgets validated; and the isolated
+  PostgreSQL managed-Friends suite passes 8/8. Current routed source and 33
+  focused Apple tests prove that macOS uses the managed read-only account
+  route; the historical self-hosted screenshot is stale and is not accepted as
+  current evidence. The legacy Apple/Android Friends presentation source is
+  now removed, and Android managed-resource contracts pass. See
+  [NOOP-hosted Friends and communications](rounds/2026-09-20-noop-hosted-friends-communications.md).
+- Cleanup manifest
+  `c302d957bcd169f7244512291cab3cbb9334690ee7d7d0baad5757b937d3ff09`
+  removed 23 exact September 20 round-owned temporary paths totaling 7.170 GiB
+  after evidence was recorded. Post-cleanup verification found no test
+  PostgreSQL listener or candidate app process, with 20 GiB free and iTerm at
+  approximately 330 MiB RSS.
+- Final pause cleanup manifest
+  `13f5560c7a39e340cd3c4d842a369fbd3dd979f0c01bec0868d7221d387c271c`
+  removed 30 additional exact round-owned paths after the complete macOS and
+  final policy evidence was recorded. No build or test process remained, 21
+  GiB was free, and the unrelated pre-existing Homebrew PostgreSQL service was
+  preserved.
+- Final closeout cleanup manifest
+  `a9380fba359496f22cf7ae977dbd95ee39b5eec420ff51876aecc5f17424e152`
+  removed five exact regeneratable paths containing 118,883 files and
+  approximately 6,111,817,728 bytes. Verification found no remaining build or
+  test process, 22 GiB free, and iTerm2 at approximately 310 MiB RSS.
 
-Resume work from:
+Resume from:
 
-- [Current PR 15 late review closeout](rounds/2026-09-14-pr15-late-review-closeout.md)
-- [Agent entry point](../../AGENTS.md)
-- [NOOP operations skill](../../.agents/skills/noop-ops/SKILL.md)
-- [Current iOS Today hosted CI stability](rounds/2026-09-14-ios-today-hosted-ci-stability.md)
-- [Current analysis and restore retry closeout](rounds/2026-09-14-analysis-restore-retry-closeout.md)
-- [Current Daily Plan rounding parity](rounds/2026-09-14-daily-plan-rounding-parity.md)
-- [Current daily-review backup parity](rounds/2026-09-14-daily-review-backup-parity.md)
-- [Current Android Review Sample terms gate](rounds/2026-09-14-android-review-sample-terms-gate.md)
-- [Current final-review remediation](rounds/2026-09-14-pr15-final-review-remediation.md)
-- [Current reference-guidance closeout](rounds/2026-09-14-reference-guidance-closeout.md)
-- [Current hosted-CI correction round](rounds/2026-09-14-ios-tab-selection-ci-stability.md)
-- [Current late-review round](rounds/2026-09-13-pr15-late-data-integrity-review.md)
-- [First production release plan](../FIRST_PRODUCTION_RELEASE_PLAN.md)
+- [PR 16 final readiness closeout](rounds/2026-09-21-pr16-final-readiness-closeout.md)
+- [Cloud authority, Safety paging, and live surfaces](rounds/2026-09-19-cloud-authority-safety-live-surfaces.md)
+- [Current UI/cloud readiness review](rounds/2026-09-17-ui-cloud-readiness-review.md)
+- [NOOP-hosted Friends and communications](rounds/2026-09-20-noop-hosted-friends-communications.md)
 - [First production release checklist](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md)
 - [Release blockers](../handoff/RELEASE-BLOCKERS.md)
-
-Old chats, screenshots, prior commits, and earlier green matrices are
-chronological evidence only. They do not establish the current worktree state.
+- [Band physical validation handoff](../handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md)
+- [Claude final production review prompt](../handoff/CLAUDE-FINAL-PRODUCTION-REVIEW-PROMPT.md)
+- [Agent entry point](../../AGENTS.md)
+- [NOOP operations skill](../../.agents/skills/noop-ops/SKILL.md)
 
 ## Current scope
 
-The active closeout covers the final source-verifiable findings on top of the
-broader supplier-independent PR:
-
-- a wall-clock rollback could extend Apple's previous open-ended timezone
-  segment and score current samples against stale civil-day rules;
-- historical day ownership invalidation used the phone's current timezone and
-  could anchor an edited day to an adjacent capture-zone day;
-- restored/imported weight history could bypass profile confirmation for
-  target guidance; and
-- an unassigned Apple multi-user scale reading could combine another person's
-  BMI with the current profile's age and height;
-- Apple and Android raw samples carry epoch time but not reliable capture-zone
-  provenance, so historical scoring could reuse the current zone, cross a
-  recorded travel boundary, or treat every civil day as 86,400 seconds;
-- legacy Apple hydration rows and their retired scalar projection can disagree
-  because old add and edit paths wrote them in opposite orders, while a
-  scalar-only historical total still needs one stable editable representation;
-- iOS scene activation did not restore daily-review and hydration schedules;
-- denied hydration permission erased intent, while an in-flight restore could
-  outlive a later opt-out;
-- Android feedback returned before WorkManager durably accepted initial,
-  retry, or cancellation work; and
-- a rejected Android enqueue could remain silently recoverable after the UI
-  said no work was queued; and
-- a hydration reboot/time-change receiver could initialize WorkManager before
-  current Terms acceptance; and
-- managed-document restore could mutate before consistently rejecting stale or
-  equal-revision divergent remote state; and
-- managed Safety location sharing could be silently downgraded without current
-  authorization, accept unusable accuracy, or retain a fix that was no longer
-  fresh at server receipt; and
-- the local bounded command guard could write a torn status, accumulate
-  timed-out probes, or lose a completion/interruption cleanup race.
-
-The local correction records only bounded first/latest observations in each
-same-zone run, opens support only for complete civil windows contained after
-the first observation, uses the named zone's exact civil-day rules, refuses to
-assign the gap between the last old-zone observation and first new-zone
-observation, and fails closed for history discarded by retention. Explicit
-legacy hydration rows atomically replace an equal or lower scalar projection;
-a higher scalar/list mismatch remains unchanged behind an explicit one-time
-choice, and ordinary add/edit/delete actions fail closed until it is resolved.
-An explicit empty row list clears its projection only after transactional
-managed ownership classification and scalar revalidation. A signed-in profile
-does not claim or apply an ownerless clear. A scalar-only zero remains cleared,
-and a positive scalar-only day becomes one deterministic
-`Older daily total`. Generation-bound reminder restoration and terminalized
-feedback scheduling retain mounted-toggle consistency and bounded categorical
-diagnostics. The hydration permission warning preserves a separately focusable
-Open Settings action. Android diagnostic-report requests retain one request
-across Activity collector startup without unbounded replay. Managed-document
-restore decides revision disposition before mutation, processes stale state as
-an idempotent no-op, rejects equal-revision divergence, and permits one legacy
-nullable-deletion enrichment.
-
-The supplied desktop, notification, and adaptive-day images remain private
-interaction references. NOOP may use their useful principles only through
-opt-in, evidence-gated, private, explainable guidance. It must not copy
-third-party branding, assets, categorical health judgments, performance
-promises, or silently change a workout.
-
-## Verification state
-
-The evidence below is exact-current unless an item explicitly identifies the
-intentionally last repository-control wall.
-
-- The exact worktree passed all 75 hydration app tests and a separate 181-case
-  Safety, wind-down, notification-lifecycle, hydration-reminder, and
-  accessibility matrix with zero failures or skips. The complete macOS app
-  suite executed 2,091 tests with 2,090 passes, one intentional Xiaomi-fixture
-  skip, and zero failures. After deterministic localization regenerated the
-  Apple catalog, the final iPhone 17 Pro shell executed 39 tests with 38
-  passes, one intentional private-pilot skip, and zero failures.
-- WhoopStore executed 537 tests with zero failures. NoopRemoteSync executed 131
-  tests with zero failures. StrandAnalytics executed 1,487 tests with 1,480
-  passes, seven documented fixture skips, and zero failures.
-- Exact-current serialized Android Full and Demo each executed 4,820 tests with
-  4,813 passes, seven intentional skips, and zero failures or errors. Compile,
-  lint, APK assembly, and instrumentation-source compilation passed for both;
-  each lint XML contained 77 hints and 1,171 warnings with no Error or Fatal
-  entry.
-- A clean native-arm API 35 emulator installed the exact-current Full app and
-  test APKs and executed 114 instrumentation tests: 112 passed, two
-  intentional private-pilot cases were skipped, and none failed or errored. A
-  stale managed-document test identifier found during compilation was
-  corrected to assert the new range endpoints. The disposable managed emulator
-  was removed afterward.
-- The exact-current pinned Python 3.12 server environment with PostgreSQL 16.15
-  executed 600 pytest cases after the final Safety freshness correction: 599
-  passed, the explicit real Twilio staging case was skipped, and none failed or
-  errored. Ruff check/format passed over 81 files, runtime and development
-  dependency audits found no known vulnerabilities, `pip check` passed, and
-  all six backup scripts passed syntax checks. The disposable virtual
-  environment and both fresh databases were removed; a fresh-shell check
-  confirmed the paths absent, PostgreSQL port 55437 free, and no retained
-  process.
-- App-wide generation produced 813 shared strings and 45 Android-only resources
-  across nine locales. Two complete ordered generator passes produced identical
-  SHA-256 manifests across 46 generated files; no localized value changed, and
-  the committed catalog order remains unchanged. Feedback generation covered
-  86 strings across nine locales; strict localization, 49 top-level audit
-  tests, and three feedback-localization tests passed.
-- The exact-current repository-tool suite executed 281 tests with zero
-  failures. The regenerated terminology inventory records 17,703 classified
-  occurrences across 1,564 path/category groups; the active-use allowlist is
-  unchanged, its reviewed inventory digest is repinned, and release-control,
-  required-CI, trusted-release, calibration-parity, terminology, legal,
-  distribution-provenance, private-data, health-claim, and strict localization
+- Reconcile the owner's September 19 cloud-authoritative direction through a
+  staged, versioned, dual-run migration. The phone remains the reliable edge
+  collector and offline cache until per-metric and per-data-class authority
   gates pass.
-- Static verification passed interpreter-matched syntax for all 27 tracked
-  shell scripts, ShellCheck for the 25 supported Bash/POSIX scripts, Actionlint
-  for every workflow, parsing for all 111 tracked JSON files, launch-gate
-  configuration validation, 12 mocked plan-only OpenTofu tests, the
-  high-confidence tracked-source secret-pattern scan, `git diff --check`, and
-  validation of all 73 operations records. The two Zsh visual-QA scripts were
-  checked by `zsh -n` because ShellCheck does not parse Zsh.
-- The exact-current fork-free bounded-command runner executes 57 tests with
-  zero failures on Python 3.14 and the system Python 3.9. It now gives
-  verification targets `/dev/null` stdin after a real failing Gradle command
-  demonstrated that inherited interactive input could stop the target process
-  group. It also invalidates stale terminal evidence when an atomic status write
-  fails and signals an owned process group before reaping its supervisor, so a
-  recycled PID or PGID is not targeted after ownership is released. The
-  corrected focused and complete Android runs exited with no retained runner,
-  Gradle wrapper, or daemon. Its reviewed digest is pinned and the combined
-  terminology, trusted-release, and required-CI checks pass.
+- Implement and verify bounded pager-grade app Safety, independent live-HR
+  presentation controls, managed Friends parity, macOS viewer foundations,
+  evidence-backed UI refinements, and the supplier wrapper handoff.
+- Preserve the current WHOOP compatibility path for physical regression
+  testing. The private `NoopBandSDK` repository currently contains a
+  binary-free scaffold and integration contract, not an executable supplier
+  adapter or firmware flasher. Implement the neutral core/virtual adapter in a
+  separate reviewed round before adding supplier artifacts; keep real
+  scanning, possession proof, history, haptics, OTA, and flashing behind the
+  supplier-artifact and physical-device gates.
+- Validate every material external finding against current source.
+- Inspect representative current and proposed renders directly.
+- Correct only evidence-backed formula explanation, terminology, loading,
+  accessibility, navigation, and account-journey defects.
+- Preserve Apple/Android meaning and identify intentional macOS/Watch
+  asymmetries.
+- Run bounded verification and report external release gates without converting
+  source checks into physical-device or production claims.
 
-Current September 17 continuation evidence:
+## Immediate next actions
 
-- Independent final review found that the server intentionally returns the
-  original accepted incident for every matching request-id replay without
-  mutating its initial location, while both clients accepted a missing location
-  only for terminal duplicates. Apple and Android now accept a missing
-  retry-supplied location for any server-marked duplicate and continue to reject
-  a new non-duplicate response that omits the accepted initial location.
-  Focused Apple and Android replay tests pass.
-- The final four unresolved review findings are corrected locally. Apple
-  rejects a wall-clock rollback before its durable timezone tail; Apple and
-  Android invalidate a historical ownership day across every supported
-  timezone offset; restored/imported weight history does not unlock target
-  guidance before profile confirmation; and an unassigned Apple scale reading
-  cannot expose BMI against the current profile. Focused tests pass, and a
-  fresh independent read-only diff review reported no P0-P2 finding.
-- The final post-localization iOS production shell ran on an iPhone 17 Pro
-  simulator:
-  39 UI tests executed, 38 passed, one private-pilot test was intentionally
-  skipped, and none failed. The Today scroll performance case reported a
-  68,913.360 kB peak application-memory metric. The first launch failed before
-  build because the SwiftPM user cache was a broken symlink to a removed
-  round-owned RAM volume; that exact symlink was replaced with a normal cache
-  directory and the same bounded command then passed.
-- The final native-arm API 35 managed-emulator run executed 114 instrumentation
-  tests with 112 passes, two intentional skips, and zero failures or errors.
-  One stale managed-document test identifier found during compilation was
-  corrected to assert the bounded ownership range. The emulator was deleted
-  after capture, leaving no retained virtual device.
-- The complete exact-current Android Full and Demo walls each executed 4,820
-  tests with 4,813 passes, seven intentional skips, and zero failures or
-  errors. WhoopStore executed 537 tests, NoopRemoteSync 131, StrandAnalytics
-  1,487 with seven documented skips, and the macOS app 2,091 with one
-  documented skip. The local PostgreSQL server and final iPhone simulator
-  walls also passed with the counts above.
-- The repository-owned and installed `noop-ops` skills now require live
-  memory/disk/process evidence, bounded heavy commands, normal-disk worktrees,
-  exact-owner cleanup, preservation of dirty/open sessions, and post-cleanup
-  verification. Both skill copies pass the Python 3.11 skill validator and are
-  byte-identical.
-- Resource cleanup removed 276 closed historical Codex logs totaling
-  121.75 GiB and eight completed, captured NOOP subagent logs totaling
-  6.35 GiB. The current goal, original crash-context session, active reviewer,
-  other open sessions, source, and rescue bundle were retained. Checksummed
-  local manifests record the exact deletion sets. Live preflight after cleanup
-  reported 57% system memory free and 129 GiB disk free; the old application
-  memory screenshot remains historical evidence only.
-
-## Pull request and integration
-
-Pull request `#15` is the protected integration record. Its current remote and
-baseline head is `4afdb35f`; the final review corrections and updated records
-are included in the local commit containing this record but are not yet on the
-remote branch. Earlier hosted results remain historical evidence. Seven review
-conversations remain unresolved until the replacement head proves their fixes:
-hydration merge bounds, capability-snapshot tombstones, ambiguous hydration
-migration, confirmed imported-weight guidance, clock rollback, historical
-ownership invalidation, and scale-user BMI ownership.
-
-Closeout order:
-
-1. Generate and verify commit-bound release evidence for the commit containing
-   this record.
-2. Push that HEAD once as one consolidated replacement.
-3. Wait for all required checks on that exact SHA.
-4. Resolve only the seven review threads proven by that SHA.
-5. Integrate through normal branch protection.
-6. Immediately restore private repository visibility.
-7. Synchronize canonical `main` and remove only round-owned temporary
-   resources.
-
-## Runtime and launch boundaries
-
-No public traffic, production deployment, real paging, real feedback
-ingestion, or participant health-data transfer is enabled by this round.
-
-Genuine external release gates remain:
-
-- supplier hardware, firmware, and final SDK;
-- representative physical iPhone and Android validation for BLE, history,
-  background/force-quit behavior, notifications, haptics, battery, accessibility,
-  and sensor accuracy;
-- legal, privacy, clinical, returns, and regulatory review;
-- carrier/DLT approval and delivery testing where applicable;
-- signing identities, store records, review, and distribution;
-- participant validation and media redistribution rights;
-- elapsed soak and operational evidence.
-
-The owner explicitly deferred supplier hardware, firmware, SDK loading,
-pairing, physical calibration, and representative-device work until the
-weekend. No supplier or band readiness is claimed by this closeout.
-
-Deferred engineering gates remain disabled until implemented and verified:
-public ingress, client encryption/key recovery, production monitoring and
-alerting, operator tooling/access controls, and abuse controls.
-
-The active architecture remains the reviewed hybrid in D-001 and D-036:
-bounded local storage and offline scoring are required for collection,
-resumability, and user control; NOOP+ may add explicit managed backup and
-server-readable derived features. Moving all formulas and state to the server,
-or retaining zero local state, is not implemented and would weaken offline
-operation, BLE durability, latency, and recovery. Any future server-authoritative
-model split requires a separate decision, migration, privacy review, and
-physical validation.
-
-Owner staffing, an approved on-call rotation, 24x7 operational coverage,
-incident-response ownership, and market/provider support remain external
-release gates that require named people and elapsed operational evidence.
-
-## Preservation and cleanup
-
-- Preserve `$HOME/Documents/NOOP-private-audit-2026-09-14`; it is the private
-  UI-audit and final local-verification evidence set.
-- Do not delete or reset unrelated dirty worktrees.
-- Do not remove the active worktree until protected integration and canonical
-  synchronization are complete.
-- Round-owned PostgreSQL, virtual-device runtime, build outputs, result bundles,
-  and temporary evidence may be removed only after their results are recorded
-  and no process still uses them.
+1. Review the complete intended diff and create the final late-review follow-up
+   commit.
+2. Push the corrected exact replacement head once to pull request `#16`.
+3. Require all ten hosted contexts, resolve only source-proven review threads,
+   merge normally, and verify the protected-main trusted result.
+4. Remove exact round-owned logs, build outputs, and package caches after their
+   results are recorded. Physical hardware, signing/store, legal, carrier,
+   credential, production-runtime, and elapsed soak gates remain external.
+5. Start the separate neutral SDK-boundary round only after protected `main` is
+   synchronized; preserve WHOOP as the default test transport until the
+   supplier adapter and firmware pass their physical acceptance matrix.

@@ -1504,11 +1504,11 @@ private fun MainSleepFooter(
     val reason = mainSleepReasonText(listOf(main) + naps, habitualMidsleepSec)
     // C4 - the real merge winner, the SAME wording the By-Day badge uses ("On-device" / "Whoop" /
     // "Apple Health"), keyed on the main block's source. Mirrors iOS SleepView.nightSource.
-    val (sourceText, sourceTint) = daySourceBadge(main.deviceId)
+    val (sourceLabelRes, sourceTint) = daySourceBadge(main.deviceId)
     var showWhy by remember(main.startTs) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space10)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SourceBadge(text = sourceText, tint = sourceTint)
+            SourceBadge(text = uiString(sourceLabelRes), tint = sourceTint)
             Spacer(Modifier.weight(1f))
             if (reason != null) {
                 Row(

@@ -46,8 +46,10 @@ accuracy, ownership, redistribution rights, or clinical validity.
 
 ## Product Invariants
 
-- Core NOOP stays local-first, account-free, fully useful offline, and
-  independent of NOOP+.
+- During the D-059 migration, one phone remains the encrypted edge collector
+  and safe offline working set while durable history and canonical formulas
+  move to the account cloud only after explicit per-data-class gates. NOOP+
+  cannot withhold protection, restore, export, or current safe offline use.
 - Apple and Android behavior and stored/derived contracts change together when
   the capability applies to both. Explain any intentional asymmetry.
 - Missing sensor input remains missing. Builds and simulators do not validate
@@ -146,10 +148,15 @@ the evidence in the round record.
 3. Run focused tests first, then every relevant full gate. App-target Swift
    requires an explicit Xcode build; Android app changes require Gradle compile,
    unit, and applicable lint/instrumentation gates.
-4. Run long or resource-heavy commands through the repository's bounded runner
-   when available. If live memory or disk pressure crosses its floor, stop and
-   follow the exact-owner cleanup procedure in verification and handoff before
-   continuing.
+4. Run every long or resource-heavy command through the repository's bounded
+   runner when available; never stream a verbose build or test wall directly
+   into an interactive terminal. Always provide a round-owned `--log-file` and
+   `--status-file`; child output without an explicit log is intentionally
+   discarded, and explicit logs stop the process group at the runner's bounded
+   size ceiling. Keep its automatic memory, disk, output, and deadline limits
+   enabled unless the active round records a narrow evidenced exception. If
+   live pressure crosses a floor, stop and follow the exact-owner cleanup
+   procedure in verification and handoff before continuing.
 5. For backend or infrastructure work, use synthetic identities/data, verify
    tenant isolation and IAM, pin deploys by digest, inspect drift, and remove
    temporary credentials, debug tokens, proxies, and test data.

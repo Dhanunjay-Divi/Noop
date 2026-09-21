@@ -30,6 +30,11 @@ final class ManagedCloudService: ObservableObject {
         case deletionScheduled
     }
 
+    enum ManagedHistoryActivity: Equatable {
+        case exporting
+        case importing
+    }
+
     struct SyncSummary: Equatable {
         let uploadedChunks: Int
         let uploadedBytes: Int
@@ -40,10 +45,18 @@ final class ManagedCloudService: ObservableObject {
         let prunedRows: Int
     }
 
+    private enum ManagedDocumentRuntimeMode: String {
+        case serverReadable = "server_readable"
+        case clientEncrypted = "client_encrypted"
+    }
+
     static let shared = ManagedCloudService()
 
     @Published private(set) var phase: Phase = .unavailable
+    @Published private(set) var accountAccessReady = false
     @Published private(set) var isBusy = false
+    @Published private(set) var managedHistoryActivity:
+        ManagedHistoryActivity?
     @Published private(set) var status = ""
     @Published private(set) var lastSuccessAt: Date?
     @Published private(set) var deletionNotBefore: String?
@@ -67,6 +80,12 @@ final class ManagedCloudService: ObservableObject {
     @Published private(set) var pendingSafetyInviteCapability: String?
 
     var isAvailable: Bool { configuration != nil }
+    var isExportingCloudHistory: Bool {
+        managedHistoryActivity == .exporting
+    }
+    var isImportingCloudHistory: Bool {
+        managedHistoryActivity == .importing
+    }
     var isEnrolled: Bool {
         phase == .enrolled || phase == .deletionScheduled
     }
@@ -125,6 +144,18 @@ final class ManagedCloudService: ObservableObject {
 
     private enum Key {
         static let enrolledScopeHash = "managedCloud.enrolledScopeHash.v1"
+        static let accountAccessScopeHash =
+            "managedCloud.accountAccessScopeHash.v1"
+        static let accountEnrollmentRequestID =
+            "managedCloud.accountEnrollmentRequestID.v1"
+        static let enrolledIdentityScopeHash =
+            "managedCloud.enrolledIdentityScopeHash.v1"
+        static let enrolledDataScopeVersion =
+            "managedCloud.enrolledDataScopeVersion.v1"
+        static let enrolledBindingSchema =
+            "managedCloud.enrolledBindingSchema.v1"
+        static let accountScopeRecoveryMapping =
+            "managedCloud.accountScopeRecoveryMapping.v1"
         static let enrolledPolicy = "managedCloud.enrolledPolicy.v1"
         static let automatic = "managedCloud.automatic.v1"
         static let optimizePhoneStorage = "managedCloud.optimizePhoneStorage.v1"
@@ -175,12 +206,24 @@ final class ManagedCloudService: ObservableObject {
     private var running = false
     private var socialRunning = false
     private var safetyRunning = false
+    private var managedSyncTask: Task<SyncSummary, Error>?
+    private var managedSyncMode: SyncMode?
+    private var managedHistoryImportTask:
+        Task<ManagedHistoryImportSummary?, Never>?
+    private var socialRefreshTask: Task<Void, Error>?
+    private var socialRefreshDeliversPokes = false
     private var safetyRefreshTask: Task<Void, Error>?
     private var safetyBootstrapTask: Task<Void, Never>?
     private let safetyIncidentGate = ManagedSafetyIncidentGate()
     private weak var managedRepository: Repository?
     private var managedDocumentProfileBindingTask: Task<Void, Never>?
     private var disconnecting = false
+    private var accountTransitioning = false
+    private var accountOperationGeneration = 0
+    private var accountTransitionWaiters:
+        [CheckedContinuation<Void, Never>] = []
+    private var observedAuthUID: String?
+    private var authStateListenerHandle: AuthStateDidChangeListenerHandle?
     private var managedPushRegistrationsInFlight = 0
     private var managedPushRegistrationWaiters:
         [CheckedContinuation<Void, Never>] = []
@@ -192,6 +235,12 @@ final class ManagedCloudService: ObservableObject {
     private var managedSafetyLocationIncidentID: UUID?
     private var managedSafetyLocationUpdateInFlight = false
     private var managedSafetyLocationExpiryTask: Task<Void, Never>?
+
+    private struct AccountOperationFence: Equatable {
+        let generation: Int
+        let dataScopeHash: String
+        let requiresStorage: Bool
+    }
 
     private init(bundle: Bundle = .main) {
         configuration = Self.loadConfiguration(bundle: bundle)
@@ -225,10 +274,6 @@ final class ManagedCloudService: ObservableObject {
         }
         do {
             try configureFirebaseIfNeeded()
-            if deletionDeadlineHasPassed() {
-                completeLocalDeletionHandoff()
-                return
-            }
             reconcileAuthenticatedState()
         } catch {
             phase = .unavailable
@@ -291,7 +336,7 @@ final class ManagedCloudService: ObservableObject {
             )
             _ = try await Auth.auth().signIn(with: credential)
             self.verificationID = nil
-            reconcileAuthenticatedState()
+            await handleAuthStateChange(Auth.auth().currentUser)
             if phase == .consentRequired {
                 setStatus(
                     String(localized:
@@ -307,6 +352,50 @@ final class ManagedCloudService: ObservableObject {
             )
         } catch {
             setStatus(Self.userMessage(for: error))
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOperationOutcome(error),
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+        }
+    }
+
+    func enrollAccount() async {
+        guard !isBusy, configuration != nil else { return }
+        isBusy = true
+        defer { isBusy = false }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_account_enrollment"
+        )
+        do {
+            let authorization = try await authorization(forceRefresh: true)
+            let response = try await client().enrollAccount(
+                platform: .iOS,
+                authorization: authorization,
+                requestID: accountEnrollmentRequestID()
+            )
+            guard response.productBoundary.accountReady,
+                  response.productBoundary.edgeCollectionRequired else {
+                throw ManagedStorageError.invalidResponse
+            }
+            let binding = try accountScopeBinding(for: currentUser())
+            defaults.set(
+                binding.dataScopeHash,
+                forKey: Key.accountAccessScopeHash
+            )
+            defaults.removeObject(forKey: Key.accountEnrollmentRequestID)
+            accountAccessReady = true
+            socialStatus = String(
+                localized: "Your NOOP account is ready."
+            )
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed"
+            )
+        } catch {
+            socialStatus = Self.userMessage(for: error)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
                 outcome: Self.diagnosticOperationOutcome(error),
@@ -339,14 +428,38 @@ final class ManagedCloudService: ObservableObject {
                   response.productBoundary.storageOnlyEntitlement else {
                 throw ManagedStorageError.invalidResponse
             }
-            let scope = try accountScopeHash()
-            defaults.set(scope, forKey: Key.enrolledScopeHash)
+            let binding = try accountScopeBinding(
+                for: currentUser(),
+                persistLegacyBinding: false
+            )
+            try preserveAccountScopeRecoveryBinding(binding)
+            defaults.set(
+                binding.dataScopeHash,
+                forKey: Key.enrolledScopeHash
+            )
+            defaults.set(
+                binding.dataScopeHash,
+                forKey: Key.accountAccessScopeHash
+            )
+            accountAccessReady = true
+            defaults.set(
+                binding.identityScopeHash,
+                forKey: Key.enrolledIdentityScopeHash
+            )
+            defaults.set(
+                binding.dataScopeVersion,
+                forKey: Key.enrolledDataScopeVersion
+            )
             defaults.set(configuration?.policyVersion, forKey: Key.enrolledPolicy)
+            defaults.set(
+                ManagedAccountScope.bindingSchemaVersion,
+                forKey: Key.enrolledBindingSchema
+            )
             defaults.set(true, forKey: Key.automatic)
             defaults.removeObject(forKey: Key.enrollmentRequestID)
             phase = .enrolled
             try await updateManagedDocumentProfileBinding(
-                accountScopeHash: scope,
+                accountScopeHash: binding.dataScopeHash,
                 repo: repo
             )
             scheduleManagedSafetyBootstrap()
@@ -357,6 +470,9 @@ final class ManagedCloudService: ObservableObject {
             )
             let summary = try await sync(repo: repo, mode: .manual)
             scheduleContinuationIfNeeded(summary)
+            // A manual core pass cannot prove that an earlier Friends or
+            // Safety retry has recovered. The automatic pass attempts every
+            // enabled scope together and owns clearing the shared retry state.
             try await refreshOverviewData()
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -385,6 +501,9 @@ final class ManagedCloudService: ObservableObject {
         do {
             let summary = try await sync(repo: repo, mode: .manual)
             scheduleContinuationIfNeeded(summary)
+            // A manual core pass cannot prove that an earlier Friends or
+            // Safety retry has recovered. The automatic pass attempts every
+            // enabled scope together and owns clearing the shared retry state.
             try await refreshOverviewData()
         } catch {
             setStatus(Self.userMessage(for: error))
@@ -394,46 +513,71 @@ final class ManagedCloudService: ObservableObject {
     func exportCompleteCloudHistory(repo: Repository) async -> URL? {
         guard !isBusy, phase == .enrolled else { return nil }
         isBusy = true
-        defer { isBusy = false }
-        var writer: ManagedHistoryArchiveWriter?
+        managedHistoryActivity = .exporting
+        defer {
+            managedHistoryActivity = nil
+            isBusy = false
+        }
+        var transferStore: ManagedHistoryTransferStore?
+        var failureBoundary = ManagedHistoryExportFailureBoundary.stagedState
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("managed_export")
         do {
-            for pass in 1...Self.maximumExportPreparationPasses {
-                try Task.checkCancellation()
-                setStatus(
-                    String(localized:
-                        "Preparing current phone data for export (pass \(pass))…"
+            let transfer = try ManagedHistoryTransferStore(
+                accountScopeHash: try accountScopeHash()
+            )
+            transferStore = transfer
+            var checkpoint = try await transfer.loadExportCheckpoint()
+            let resumed = checkpoint != nil
+            if checkpoint == nil {
+                await transfer.clearExport()
+                for pass in 1...Self.maximumExportPreparationPasses {
+                    try Task.checkCancellation()
+                    setStatus(
+                        String(localized:
+                            "Preparing current phone data for export (pass \(pass))…"
+                        )
                     )
-                )
-                let summary = try await sync(
-                    repo: repo,
-                    mode: .exportPreparation
-                )
-                if !summary.hasMore { break }
-                guard pass < Self.maximumExportPreparationPasses else {
-                    throw ManagedCloudError.exportPreparationIncomplete
+                    let summary = try await sync(
+                        repo: repo,
+                        mode: .exportPreparation
+                    )
+                    if !summary.hasMore { break }
+                    guard pass < Self.maximumExportPreparationPasses else {
+                        throw ManagedCloudError.exportPreparationIncomplete
+                    }
+                    await Task.yield()
                 }
-                await Task.yield()
+                checkpoint = nil
             }
 
-            let archiveWriter = try ManagedHistoryArchiveWriter(
-                destinationURL: Self.managedHistoryExportURL()
-            )
-            writer = archiveWriter
             let exporter = ManagedHistoryExporter(transport: try client())
             let manifest = try await exporter.export(
+                resumeFrom: checkpoint,
                 authorization: { [self] forceRefresh in
                     try await authorization(forceRefresh: forceRefresh)
                 },
                 progress: { [weak self] value in
                     await self?.setExportStatus(value)
                 },
+                saveCheckpoint: { value in
+                    try await transfer.saveExportCheckpoint(value)
+                },
                 consume: { entry in
-                    try await archiveWriter.add(entry)
+                    try await transfer.add(entry)
                 }
             )
-            let url = try await archiveWriter.finalize(manifest: manifest)
-            writer = nil
+            do {
+                _ = try await transfer.finalizeExport(manifest: manifest)
+            } catch let error as ManagedHistoryExportStateError {
+                throw error
+            } catch {
+                failureBoundary = .localArchiveOutput
+                throw error
+            }
+            failureBoundary = .localArchiveOutput
+            let url = try await transfer.publishExport(
+                to: Self.managedHistoryExportURL()
+            )
             setStatus(
                 String(localized:
                     "Complete cloud history is ready. Choose where to save the sensitive archive."
@@ -445,12 +589,12 @@ final class ManagedCloudService: ObservableObject {
                 fields: [
                     "objects": String(manifest.exportedObjects),
                     "chunk_bytes": String(manifest.exportedChunkBytes),
+                    "resumed": resumed ? "true" : "false",
                 ],
                 includeResourceSnapshot: true
             )
             return url
         } catch is CancellationError {
-            if let writer { await writer.cancel() }
             setStatus(String(localized: "Cloud-history export was canceled."))
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -459,11 +603,188 @@ final class ManagedCloudService: ObservableObject {
             )
             return nil
         } catch {
-            if let writer { await writer.cancel() }
+            var resetApplied = false
+            if let transferStore {
+                resetApplied = await applyManagedHistoryExportRecovery(
+                    after: error,
+                    at: failureBoundary,
+                    clearExport: {
+                        await transferStore.clearExport()
+                    }
+                )
+            }
             setStatus(Self.userMessage(for: error))
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
                 outcome: "failed",
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                    "retry_state": resetApplied ? "reset" : "preserved",
+                ],
+                includeResourceSnapshot: true
+            )
+            return nil
+        }
+    }
+
+    func importCompleteCloudHistory(
+        from sourceURL: URL,
+        repo: Repository
+    ) async -> ManagedHistoryImportSummary? {
+        guard !isBusy, phase == .enrolled else { return nil }
+        let fence: AccountOperationFence
+        do {
+            fence = try makeAccountOperationFence()
+        } catch {
+            return nil
+        }
+        isBusy = true
+        managedHistoryActivity = .importing
+        let task = Task<ManagedHistoryImportSummary?, Never> {
+            @MainActor [weak self] in
+            guard let self else { return nil }
+            return await self.performCompleteCloudHistoryImport(
+                from: sourceURL,
+                repo: repo,
+                fence: fence
+            )
+        }
+        managedHistoryImportTask = task
+        defer {
+            managedHistoryImportTask = nil
+            managedHistoryActivity = nil
+            isBusy = false
+        }
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    func cancelCompleteCloudHistoryImport() {
+        guard isImportingCloudHistory,
+              let managedHistoryImportTask else {
+            return
+        }
+        setStatus(String(localized: "Canceling cloud-history import…"))
+        managedHistoryImportTask.cancel()
+    }
+
+    private func performCompleteCloudHistoryImport(
+        from sourceURL: URL,
+        repo: Repository,
+        fence: AccountOperationFence
+    ) async -> ManagedHistoryImportSummary? {
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_import"
+        )
+        let securityScoped = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if securityScoped {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        do {
+            try validateAccountOperationFence(fence)
+            let scope = fence.dataScopeHash
+            let transfer = try ManagedHistoryTransferStore(
+                accountScopeHash: scope
+            )
+            let reader = try await transfer.stageImport(from: sourceURL)
+            try validateAccountOperationFence(fence)
+            guard let store = await repo.storeHandle() else {
+                throw ManagedCloudError.storeUnavailable
+            }
+            try await store.activateManagedDocumentProfile(
+                accountScopeHash: scope,
+                updatedAtMs: Self.managedNowMilliseconds()
+            )
+            let operationValidator: @Sendable () async throws -> Void = {
+                [self] in
+                try await MainActor.run {
+                    try self.validateAccountOperationFence(fence)
+                }
+            }
+            let preferenceCommitter:
+                @Sendable (Data) async throws -> Void = { [self] payload in
+                    try await MainActor.run {
+                        try self.validateAccountOperationFence(fence)
+                        let values = BackupSettings.decode(payload)
+                        guard !values.isEmpty else {
+                            throw ManagedStorageError.invalidResponse
+                        }
+                        BackupSettings.apply(values, to: self.defaults)
+                    }
+                }
+            let documents = try await managedDocumentRuntime(
+                store: store,
+                accountScopeHash: scope,
+                operationValidator: operationValidator,
+                preferenceCommitter: preferenceCommitter
+            )
+            let restore = WhoopManagedRestoreApplier(
+                store: store,
+                documentRestore: documents
+            )
+            let checkpoint = try await transfer.loadImportCheckpoint()
+            let summary = try await ManagedHistoryImporter().importArchive(
+                manifestData: try await reader.manifestData(),
+                entryPaths: try await reader.entryPaths(),
+                resumeFrom: checkpoint,
+                restore: restore,
+                progress: { [weak self] value in
+                    await self?.setImportStatus(value, fence: fence)
+                },
+                saveCheckpoint: { value in
+                    try await transfer.saveImportCheckpoint(value)
+                },
+                read: { path, maximumBytes in
+                    try await reader.data(
+                        for: path,
+                        maximumBytes: maximumBytes
+                    )
+                }
+            )
+            try validateAccountOperationFence(fence)
+            await repo.refresh()
+            try validateAccountOperationFence(fence)
+            await transfer.clearImport()
+            setStatus(
+                String(localized:
+                    "Complete cloud history was imported into this iPhone."
+                )
+            )
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: [
+                    "objects": String(summary.importedObjects),
+                    "chunk_bytes": String(summary.importedChunkBytes),
+                    "resumed": summary.resumed ? "true" : "false",
+                ],
+                includeResourceSnapshot: true
+            )
+            return summary
+        } catch is CancellationError {
+            if accountOperationFenceMatches(fence) {
+                setStatus(
+                    String(localized: "Cloud-history import was canceled.")
+                )
+            }
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "canceled",
+                includeResourceSnapshot: true
+            )
+            return nil
+        } catch {
+            if accountOperationFenceMatches(fence) {
+                setStatus(Self.userMessage(for: error))
+            }
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOperationOutcome(error),
                 fields: [
                     "failure_kind": Self.diagnosticSyncFailureKind(error),
                 ],
@@ -610,7 +931,11 @@ final class ManagedCloudService: ObservableObject {
     }
 
     private func beginManagedPushRegistration() -> Bool {
-        guard phase == .enrolled, !disconnecting else { return false }
+        guard phase == .enrolled,
+              !disconnecting,
+              !accountTransitioning else {
+            return false
+        }
         managedPushRegistrationsInFlight += 1
         return true
     }
@@ -636,17 +961,6 @@ final class ManagedCloudService: ObservableObject {
         }
     }
 
-    private func waitForManagedSyncCompletion() async {
-        guard running else { return }
-        await withCheckedContinuation { continuation in
-            if running {
-                managedSyncCompletionWaiters.append(continuation)
-            } else {
-                continuation.resume()
-            }
-        }
-    }
-
     private func finishManagedSync() {
         running = false
         let waiters = managedSyncCompletionWaiters
@@ -662,9 +976,7 @@ final class ManagedCloudService: ObservableObject {
         do {
             try configureFirebaseIfNeeded()
             let allowed = try await UNUserNotificationCenter.current()
-                .requestAuthorization(
-                    options: [.alert, .sound, .timeSensitive]
-                )
+                .requestAuthorization(options: [.alert, .sound])
             guard allowed else {
                 await retireManagedPushInstallationForNotificationSettings()
                 return false
@@ -1655,62 +1967,150 @@ final class ManagedCloudService: ObservableObject {
         if !firebaseConfigured {
             bootstrap(repo: repo)
         }
-        guard phase == .enrolled,
-              !disconnecting,
+        let storageEnrolled = phase == .enrolled
+        let socialEnabled =
+            accountAccessReady && defaults.bool(forKey: Key.socialEnabled)
+        let safetyEnabled =
+            storageEnrolled && defaults.bool(forKey: Key.safetyEnabled)
+        let coreEnabled = storageEnrolled && automatic
+        guard storageEnrolled || socialEnabled else { return true }
+        guard !disconnecting,
+              !accountTransitioning,
               !isBusy,
               !running,
               !socialRunning,
-              !safetyRunning,
-              automatic
-                || defaults.bool(forKey: Key.socialEnabled)
-                || defaults.bool(forKey: Key.safetyEnabled)
-        else { return true }
+              !safetyRunning
+        else { return false }
+        guard !Task.isCancelled else { return false }
+        if !coreEnabled {
+            ManagedCloudRetryScheduler.clear(.core)
+        }
+        if !socialEnabled {
+            ManagedCloudRetryScheduler.clear(.social)
+        }
+        if !safetyEnabled {
+            ManagedCloudRetryScheduler.clear(.safety)
+        }
+        guard coreEnabled || socialEnabled || safetyEnabled else {
+            return true
+        }
         let continuationPending = defaults.bool(
             forKey: Key.continuationPending
         )
         let lastAttempt = defaults.double(forKey: Key.lastAttempt)
-        let now = Date().timeIntervalSince1970
+        let nowDate = Date()
+        let now = nowDate.timeIntervalSince1970
         var completed = true
-        if automatic
+        let coreRetryPending =
+            ManagedCloudRetryScheduler.pendingRetry(for: .core) != nil
+        if coreEnabled
             && (
+                coreRetryPending
+                    ||
                 continuationPending
                     || now - lastAttempt >= Self.automaticInterval
+            )
+            && ManagedCloudRetryScheduler.shouldAttempt(
+                .core,
+                now: nowDate
             ) {
             do {
                 let summary = try await sync(repo: repo, mode: .automatic)
                 scheduleContinuationIfNeeded(summary)
+                ManagedCloudRetryScheduler.clear(.core)
                 completed = !summary.hasMore
             } catch {
+                if Self.isAutomaticCatchUpCancellation(error) { return false }
+                let failureKind = Self.diagnosticSyncFailureKind(error)
+                if Self.isAutomaticRetryable(error) {
+                    ManagedCloudRetryScheduler.recordFailure(
+                        scope: .core,
+                        retryAfter:
+                            (error as? ManagedStorageError)?.retryAfter,
+                        failureKind: failureKind,
+                        now: nowDate
+                    )
+                } else {
+                    ManagedCloudRetryScheduler.clear(.core)
+                }
                 setStatus(Self.userMessage(for: error))
                 completed = false
             }
         }
+        guard !Task.isCancelled else { return false }
         let socialLastAttempt = defaults.double(forKey: Key.socialLastAttempt)
-        if defaults.bool(forKey: Key.socialEnabled),
-           now - socialLastAttempt >= Self.socialAutomaticInterval {
+        let socialRetryPending =
+            ManagedCloudRetryScheduler.pendingRetry(for: .social) != nil
+        if socialEnabled,
+           (
+               socialRetryPending
+                   || now - socialLastAttempt >= Self.socialAutomaticInterval
+           ),
+           ManagedCloudRetryScheduler.shouldAttempt(
+               .social,
+               now: nowDate
+           ) {
             defaults.set(now, forKey: Key.socialLastAttempt)
             do {
                 try await refreshSocialData(repo: repo, deliverPokes: true)
+                ManagedCloudRetryScheduler.clear(.social)
             } catch {
+                if Self.isAutomaticCatchUpCancellation(error) { return false }
+                let failureKind = Self.diagnosticSyncFailureKind(error)
+                if Self.isAutomaticRetryable(error) {
+                    ManagedCloudRetryScheduler.recordFailure(
+                        scope: .social,
+                        retryAfter:
+                            (error as? ManagedStorageError)?.retryAfter,
+                        failureKind: failureKind,
+                        now: nowDate
+                    )
+                } else {
+                    ManagedCloudRetryScheduler.clear(.social)
+                }
                 AppDiagnosticsRecorder.shared.record(
                     "managed_social.catch_up",
                     fields: [
                         "outcome": "failed",
-                        "failure_kind": Self.diagnosticSyncFailureKind(error),
+                        "failure_kind": failureKind,
                     ]
                 )
                 completed = false
             }
         }
+        guard !Task.isCancelled else { return false }
         let safetyLastAttempt = defaults.double(
             forKey: Key.safetyLastAttempt
         )
-        if defaults.bool(forKey: Key.safetyEnabled),
-           now - safetyLastAttempt >= Self.safetyAutomaticInterval {
+        let safetyRetryPending =
+            ManagedCloudRetryScheduler.pendingRetry(for: .safety) != nil
+        if safetyEnabled,
+           (
+               safetyRetryPending
+                   || now - safetyLastAttempt >= Self.safetyAutomaticInterval
+           ),
+           ManagedCloudRetryScheduler.shouldAttempt(
+               .safety,
+               now: nowDate
+           ) {
             defaults.set(now, forKey: Key.safetyLastAttempt)
             do {
                 try await refreshSafetyData()
+                ManagedCloudRetryScheduler.clear(.safety)
             } catch {
+                if Self.isAutomaticCatchUpCancellation(error) { return false }
+                let failureKind = Self.diagnosticSyncFailureKind(error)
+                if Self.isAutomaticRetryable(error) {
+                    ManagedCloudRetryScheduler.recordFailure(
+                        scope: .safety,
+                        retryAfter:
+                            (error as? ManagedStorageError)?.retryAfter,
+                        failureKind: failureKind,
+                        now: nowDate
+                    )
+                } else {
+                    ManagedCloudRetryScheduler.clear(.safety)
+                }
                 if safetyLastAttempt > 0 {
                     defaults.set(
                         safetyLastAttempt,
@@ -1723,13 +2123,13 @@ final class ManagedCloudService: ObservableObject {
                     "managed_safety.catch_up",
                     fields: [
                         "outcome": "failed",
-                        "failure_kind":
-                            Self.diagnosticSyncFailureKind(error),
+                        "failure_kind": failureKind,
                     ]
                 )
                 completed = false
             }
         }
+        guard !Task.isCancelled else { return false }
         return completed
     }
 
@@ -1737,7 +2137,14 @@ final class ManagedCloudService: ObservableObject {
         guard !isBusy else { return }
         disconnecting = true
         isBusy = true
+        let syncWasInFlight = managedSyncTask != nil || running
+        let transitionGeneration = beginAccountBoundaryTransition(
+            reason: "disconnect_requested"
+        )
         defer {
+            finishAccountBoundaryTransition(
+                generation: transitionGeneration
+            )
             isBusy = false
             disconnecting = false
             if phase == .enrolled {
@@ -1745,19 +2152,11 @@ final class ManagedCloudService: ObservableObject {
                 scheduleManagedSafetyBootstrap()
             }
         }
-        safetyBootstrapTask?.cancel()
-        safetyBootstrapTask = nil
-        managedDocumentProfileBindingTask?.cancel()
-        if let profileBindingTask = managedDocumentProfileBindingTask {
-            await profileBindingTask.value
-        }
-        managedDocumentProfileBindingTask = nil
-        stopManagedSafetyLocationSharing(reason: "disconnect")
         let syncSerialization = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_sync.disconnect_serialization",
-            fields: ["sync_in_flight": running ? "true" : "false"]
+            fields: ["sync_in_flight": syncWasInFlight ? "true" : "false"]
         )
-        await waitForManagedSyncCompletion()
+        await cancelAndAwaitAccountOperations()
         AppDiagnosticsRecorder.shared.endOperation(
             syncSerialization,
             outcome: "completed"
@@ -1833,17 +2232,22 @@ final class ManagedCloudService: ObservableObject {
             try configureFirebaseIfNeeded()
             try Auth.auth().signOut()
         } catch {
+            if phase == .enrolled,
+               let repo = managedRepository,
+               let scopeHash = try? accountScopeHash() {
+                try? await updateManagedDocumentProfileBinding(
+                    accountScopeHash: scopeHash,
+                    repo: repo
+                )
+            }
             setStatus(Self.userMessage(for: error))
             return
         }
         verificationID = nil
         deletionVerificationID = nil
-        defaults.set(false, forKey: Key.automatic)
-        defaults.removeObject(forKey: Key.continuationPending)
-        overview = nil
-        installations = []
-        clearSocialPresentation()
-        clearSafetyPresentation()
+        clearEnrollment()
+        accountAccessReady = false
+        lastSuccessAt = nil
         phase = .signedOut
         setStatus(
             String(localized:
@@ -1892,7 +2296,7 @@ final class ManagedCloudService: ObservableObject {
     func requestAccountDeletion(code rawCode: String) async {
         guard !isBusy, let deletionVerificationID else {
             setStatus(
-                String(localized: "Send a fresh verification code before deleting NOOP+.")
+                String(localized: "Send a fresh verification code before deleting your NOOP account.")
             )
             return
         }
@@ -1907,6 +2311,17 @@ final class ManagedCloudService: ObservableObject {
             _ = try await user.reauthenticate(with: credential)
             self.deletionVerificationID = nil
 
+            let transitionGeneration = beginAccountBoundaryTransition(
+                reason: "deletion_requested"
+            )
+            await cancelAndAwaitAccountOperations()
+            defer {
+                if finishAccountBoundaryTransition(
+                    generation: transitionGeneration
+                ), phase == .enrolled {
+                    scheduleManagedSafetyBootstrap()
+                }
+            }
             let request = try ManagedErasureRequest(
                 requestID: UUID(),
                 scope: .account,
@@ -1920,10 +2335,13 @@ final class ManagedCloudService: ObservableObject {
             defaults.set(job.notBefore, forKey: Key.erasureNotBefore)
             defaults.set(false, forKey: Key.automatic)
             deletionNotBefore = job.notBefore
+            accountAccessReady = false
             phase = .deletionScheduled
+            clearSocialState(preservingEnabled: true)
+            clearSafetyState()
             setStatus(
                 String(localized:
-                    "NOOP+ account deletion is scheduled after the 24-hour cooling-off period."
+                    "NOOP account deletion is scheduled after the 24-hour cooling-off period."
                 )
             )
         } catch {
@@ -1938,9 +2356,9 @@ final class ManagedCloudService: ObservableObject {
         isBusy = true
         defer { isBusy = false }
         do {
-            let job = try await client().erasure(
+            let job = try await client().erasureReceipt(
                 jobID: jobID,
-                authorization: try await authorization(forceRefresh: false)
+                authorization: try await erasureReceiptAuthorization()
             )
             deletionNotBefore = job.notBefore
             defaults.set(job.notBefore, forKey: Key.erasureNotBefore)
@@ -1952,18 +2370,20 @@ final class ManagedCloudService: ObservableObject {
                 phase = .deletionScheduled
                 setStatus(
                     String(localized:
-                        "NOOP+ account deletion status: \(Self.erasureStatus(job.status))."
+                        "NOOP account deletion status: \(Self.erasureStatus(job.status))."
                     )
                 )
             }
-        } catch ManagedStorageError.notFound {
-            completeLocalErasureState()
         } catch {
-            if deletionDeadlineHasPassed() {
-                completeLocalDeletionHandoff()
-            } else {
-                setStatus(Self.userMessage(for: error))
-            }
+            phase = .deletionScheduled
+            setStatus(Self.userMessage(for: error))
+            AppDiagnosticsRecorder.shared.record(
+                "managed_deletion.verification",
+                fields: [
+                    "outcome": "pending_retry",
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
         }
     }
 
@@ -1989,7 +2409,12 @@ final class ManagedCloudService: ObservableObject {
     }
 
     private func beginSafetyAction() -> Bool {
-        guard phase == .enrolled, !isBusy, !safetyRunning else { return false }
+        guard phase == .enrolled,
+              !accountTransitioning,
+              !isBusy,
+              !safetyRunning else {
+            return false
+        }
         isBusy = true
         return true
     }
@@ -2040,9 +2465,10 @@ final class ManagedCloudService: ObservableObject {
                 await Task.yield()
             }
         }
+        let fence = try makeAccountOperationFence()
         let task = Task { @MainActor [weak self] in
             guard let self else { throw CancellationError() }
-            try await self.loadSafetyData()
+            try await self.loadSafetyData(fence: fence)
         }
         safetyRefreshTask = task
         defer { safetyRefreshTask = nil }
@@ -2050,10 +2476,10 @@ final class ManagedCloudService: ObservableObject {
         try Task.checkCancellation()
     }
 
-    private func loadSafetyData() async throws {
-        guard phase == .enrolled else {
-            throw ManagedCloudError.consentRequired
-        }
+    private func loadSafetyData(
+        fence: AccountOperationFence
+    ) async throws {
+        try validateAccountOperationFence(fence)
         safetyRunning = true
         defer { safetyRunning = false }
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
@@ -2076,6 +2502,7 @@ final class ManagedCloudService: ObservableObject {
                 loadedRequests,
                 loadedIncidents
             )
+            try validateAccountOperationFence(fence)
             defaults.set(true, forKey: Key.safetyEnabled)
             safetyContacts = contacts
             safetyRequests = requests
@@ -2103,6 +2530,7 @@ final class ManagedCloudService: ObservableObject {
                 ]
             )
         } catch ManagedStorageError.notFound {
+            try validateAccountOperationFence(fence)
             clearSafetyState(preservingPendingInvite: true)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -2435,7 +2863,7 @@ final class ManagedCloudService: ObservableObject {
              ManagedStorageError.policyChanged,
              ManagedStorageError.cursorExpired:
             return true
-        case ManagedStorageError.server(let status):
+        case ManagedStorageError.server(let status, _):
             return [401, 403, 404, 410].contains(status)
         default:
             return false
@@ -2496,7 +2924,11 @@ final class ManagedCloudService: ObservableObject {
     }
 
     private func beginSocialAction() -> Bool {
-        guard phase == .enrolled, !isBusy, !socialRunning else { return false }
+        guard accountAccessReady,
+              !accountTransitioning,
+              !isBusy,
+              !socialRunning,
+              socialRefreshTask == nil else { return false }
         isBusy = true
         return true
     }
@@ -2537,7 +2969,54 @@ final class ManagedCloudService: ObservableObject {
         repo: Repository,
         deliverPokes: Bool
     ) async throws {
-        guard phase == .enrolled else { throw ManagedCloudError.consentRequired }
+        if let socialRefreshTask {
+            let existingDeliversPokes = socialRefreshDeliversPokes
+            do {
+                try await socialRefreshTask.value
+                try Task.checkCancellation()
+                guard deliverPokes && !existingDeliversPokes else { return }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard deliverPokes && !existingDeliversPokes else {
+                    throw error
+                }
+            }
+            while self.socialRefreshTask != nil {
+                await Task.yield()
+                try Task.checkCancellation()
+            }
+            try await refreshSocialData(
+                repo: repo,
+                deliverPokes: true
+            )
+            return
+        }
+        let fence = try makeAccountOperationFence(requireStorage: false)
+        let task = Task { @MainActor [weak self, weak repo] in
+            guard let self, let repo else { throw CancellationError() }
+            try await self.loadSocialData(
+                repo: repo,
+                deliverPokes: deliverPokes,
+                fence: fence
+            )
+        }
+        socialRefreshDeliversPokes = deliverPokes
+        socialRefreshTask = task
+        defer {
+            socialRefreshTask = nil
+            socialRefreshDeliversPokes = false
+        }
+        try await task.value
+        try Task.checkCancellation()
+    }
+
+    private func loadSocialData(
+        repo: Repository,
+        deliverPokes: Bool,
+        fence: AccountOperationFence
+    ) async throws {
+        try validateAccountOperationFence(fence)
         guard !socialRunning else { return }
         socialRunning = true
         defer { socialRunning = false }
@@ -2549,12 +3028,14 @@ final class ManagedCloudService: ObservableObject {
         do {
             let managedClient = try client()
             let auth = try await authorization(forceRefresh: false)
+            try validateAccountOperationFence(fence)
             let profile: ManagedSocialProfile
             do {
                 profile = try await managedClient.socialProfile(
                     authorization: auth
                 )
             } catch ManagedStorageError.notFound {
+                try validateAccountOperationFence(fence)
                 defaults.set(false, forKey: Key.socialEnabled)
                 socialProfile = nil
                 socialFriends = []
@@ -2592,6 +3073,7 @@ final class ManagedCloudService: ObservableObject {
                 loadedBlocks,
                 loadedRequests
             )
+            try validateAccountOperationFence(fence)
             let feedDays = Self.socialSummaryDays(daysBack: 6)
             var feed: [ManagedSocialFeedDay] = []
             var feedOutcome = "empty_range"
@@ -2618,6 +3100,7 @@ final class ManagedCloudService: ObservableObject {
                     )
                 }
             }
+            try validateAccountOperationFence(fence)
             socialProfile = profile
             socialFriends = friends
             socialBlockedProfiles = blockedProfiles
@@ -2628,19 +3111,24 @@ final class ManagedCloudService: ObservableObject {
                 repo: repo,
                 friends: friends,
                 client: managedClient,
-                authorization: auth
+                authorization: auth,
+                fence: fence
             )
             if summariesUploaded > 0 {
-                socialProfile = try await managedClient.socialProfile(
+                let refreshedProfile = try await managedClient.socialProfile(
                     authorization: auth
                 )
+                try validateAccountOperationFence(fence)
+                socialProfile = refreshedProfile
             }
             let pokesClaimed = deliverPokes
                 ? try await deliverSocialPokes(
                     client: managedClient,
-                    authorization: auth
+                    authorization: auth,
+                    fence: fence
                 )
                 : 0
+            try validateAccountOperationFence(fence)
             if socialStatus.isEmpty {
                 socialStatus = String(
                     localized: "Managed Friends is up to date."
@@ -2676,11 +3164,45 @@ final class ManagedCloudService: ObservableObject {
         repo: Repository,
         friends: [ManagedSocialFriend],
         client: ManagedStorageClient,
-        authorization: ManagedAuthorization
+        authorization: ManagedAuthorization,
+        fence: AccountOperationFence
+    ) async throws -> Int {
+        try validateAccountOperationFence(fence)
+        let computedDerivedReady =
+            FormulaPublicationGate.computedDerivedReady()
+        let uploaded = try await FormulaPublicationGate
+            .publishSocialSummariesIfReady(
+                computedDerivedReady: computedDerivedReady
+            ) {
+                try await uploadReadySocialSummaries(
+                    repo: repo,
+                    friends: friends,
+                    client: client,
+                    authorization: authorization,
+                    fence: fence
+                )
+            }
+        guard let uploaded else {
+            AppDiagnosticsRecorder.shared.record(
+                "formula_publication",
+                fields: FormulaPublicationGate.deferredDiagnosticFields
+            )
+            return 0
+        }
+        return uploaded
+    }
+
+    private func uploadReadySocialSummaries(
+        repo: Repository,
+        friends: [ManagedSocialFriend],
+        client: ManagedStorageClient,
+        authorization: ManagedAuthorization,
+        fence: AccountOperationFence
     ) async throws -> Int {
         guard let store = await repo.storeHandle() else {
             throw ManagedCloudError.storeUnavailable
         }
+        try validateAccountOperationFence(fence)
         let days = Self.socialSummaryDays()
         guard let firstDay = days.first, let lastDay = days.last else { return 0 }
         var dailyByDay = Dictionary(
@@ -2762,6 +3284,7 @@ final class ManagedCloudService: ObservableObject {
         }
 
         let scope = try accountScopeHash()
+        try validateAccountOperationFence(fence)
         if defaults.string(forKey: Key.socialSummaryScope) != scope {
             defaults.set(scope, forKey: Key.socialSummaryScope)
             defaults.removeObject(forKey: Key.socialSummaryDigests)
@@ -2771,7 +3294,7 @@ final class ManagedCloudService: ObservableObject {
         ) as? [String: String] ?? [:]
         var uploaded = 0
         for day in days {
-            try Task.checkCancellation()
+            try validateAccountOperationFence(fence)
             let summary = dailyByDay[day] ?? ManagedSocialSummary()
             let digest = try Self.socialSummaryDigest(
                 day: day,
@@ -2794,6 +3317,7 @@ final class ManagedCloudService: ObservableObject {
                 requestID: requestID,
                 authorization: authorization
             )
+            try validateAccountOperationFence(fence)
             digests[day] = digest
             uploaded += 1
             let retained = Set(days)
@@ -2805,14 +3329,17 @@ final class ManagedCloudService: ObservableObject {
 
     private func deliverSocialPokes(
         client: ManagedStorageClient,
-        authorization: ManagedAuthorization
+        authorization: ManagedAuthorization,
+        fence: AccountOperationFence
     ) async throws -> Int {
+        try validateAccountOperationFence(fence)
         let claims = try await client.claimSocialPokes(
             limit: 3,
             authorization: authorization
         )
+        try validateAccountOperationFence(fence)
         for claim in claims {
-            try Task.checkCancellation()
+            try validateAccountOperationFence(fence)
             let existing = socialDeliveryReceipt(for: claim.pokeID)
             let notificationOutcome: String
             let hapticOutcome: String
@@ -2823,6 +3350,7 @@ final class ManagedCloudService: ObservableObject {
                 notificationOutcome = await scheduleSocialPokeNotification(
                     pokeID: claim.pokeID
                 )
+                try validateAccountOperationFence(fence)
                 hapticOutcome = socialPokeHaptic?() == true
                     ? "requested"
                     : "band_unavailable"
@@ -2841,6 +3369,7 @@ final class ManagedCloudService: ObservableObject {
                 ),
                 authorization: authorization
             )
+            try validateAccountOperationFence(fence)
         }
         if !claims.isEmpty {
             let scheduled = claims.filter {
@@ -3070,7 +3599,7 @@ final class ManagedCloudService: ObservableObject {
              .policyChanged,
              .conflict:
             return true
-        case let .server(status):
+        case let .server(status, _):
             return (400..<500).contains(status)
                 && ![408, 429].contains(status)
         default:
@@ -3088,7 +3617,19 @@ final class ManagedCloudService: ObservableObject {
             sleepDuration: friends.contains { $0.sharing.sleepDuration },
             hrv: friends.contains { $0.sharing.hrv },
             rhr: friends.contains { $0.sharing.rhr },
-            pokeAllowed: friends.contains { $0.sharing.pokeAllowed }
+            pokeAllowed: friends.contains { $0.sharing.pokeAllowed },
+            messagesAllowed: friends.contains {
+                $0.sharing.messagesAllowed
+            },
+            photosAllowed: friends.contains {
+                $0.sharing.photosAllowed
+            },
+            audioCallsAllowed: friends.contains {
+                $0.sharing.audioCallsAllowed
+            },
+            videoCallsAllowed: friends.contains {
+                $0.sharing.videoCallsAllowed
+            }
         )
     }
 
@@ -3163,7 +3704,7 @@ final class ManagedCloudService: ObservableObject {
 
     // MARK: - Sync composition
 
-    private enum SyncMode {
+    private enum SyncMode: Equatable {
         case manual
         case automatic
         case exportPreparation
@@ -3177,7 +3718,51 @@ final class ManagedCloudService: ObservableObject {
         }
     }
 
-    private func sync(repo: Repository, mode: SyncMode) async throws -> SyncSummary {
+    private func sync(
+        repo: Repository,
+        mode: SyncMode
+    ) async throws -> SyncSummary {
+        if let managedSyncTask {
+            let existingMode = managedSyncMode
+            do {
+                let result = try await managedSyncTask.value
+                try Task.checkCancellation()
+                guard existingMode != mode else { return result }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard existingMode != mode else { throw error }
+            }
+            while self.managedSyncTask != nil {
+                await Task.yield()
+                try Task.checkCancellation()
+            }
+            return try await sync(repo: repo, mode: mode)
+        }
+        let fence = try makeAccountOperationFence()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.performSync(
+                repo: repo,
+                mode: mode,
+                fence: fence
+            )
+        }
+        managedSyncMode = mode
+        managedSyncTask = task
+        defer {
+            managedSyncTask = nil
+            managedSyncMode = nil
+        }
+        return try await task.value
+    }
+
+    private func performSync(
+        repo: Repository,
+        mode: SyncMode,
+        fence: AccountOperationFence
+    ) async throws -> SyncSummary {
+        try validateAccountOperationFence(fence)
         guard phase == .enrolled else { throw ManagedCloudError.consentRequired }
         guard !disconnecting else { throw CancellationError() }
         guard !running else { return SyncSummary(
@@ -3209,7 +3794,7 @@ final class ManagedCloudService: ObservableObject {
             fields: ["mode": mode.diagnosticName]
         )
         do {
-            let scopeHash = try accountScopeHash()
+            let scopeHash = fence.dataScopeHash
             let summary = try await ManagedAuthenticationRetry.run(
                 authorization: { [self] forceRefresh in
                     if forceRefresh {
@@ -3218,19 +3803,26 @@ final class ManagedCloudService: ObservableObject {
                             fields: ["reason": "server_rejected_cached_token"]
                         )
                     }
-                    return try await authorization(forceRefresh: forceRefresh)
+                    let value = try await authorization(
+                        forceRefresh: forceRefresh
+                    )
+                    try validateAccountOperationFence(fence)
+                    return value
                 },
                 operation: { [self] authorization in
-                    try await syncPass(
+                    try validateAccountOperationFence(fence)
+                    return try await syncPass(
                         repo: repo,
                         store: store,
                         mode: mode,
                         scopeHash: scopeHash,
-                        authorization: authorization
+                        authorization: authorization,
+                        fence: fence
                     )
                 }
             )
 
+            try validateAccountOperationFence(fence)
             let now = Date()
             defaults.set(now.timeIntervalSince1970, forKey: Key.lastSuccess)
             defaults.set(summary.hasMore, forKey: Key.continuationPending)
@@ -3260,6 +3852,7 @@ final class ManagedCloudService: ObservableObject {
                 includeResourceSnapshot: true
             )
             if summary.appliedChanges > 0 {
+                try validateAccountOperationFence(fence)
                 await repo.refresh()
             }
             return summary
@@ -3348,7 +3941,7 @@ final class ManagedCloudService: ObservableObject {
                 return "quota_exceeded"
             case .conflict:
                 return "conflict"
-            case .server(let status):
+            case .server(let status, _):
                 return status >= 500 ? "server_5xx" : "server_rejected"
             case .digestMismatch:
                 return "integrity"
@@ -3392,13 +3985,38 @@ final class ManagedCloudService: ObservableObject {
         }
     }
 
+    nonisolated private static func isAutomaticCatchUpCancellation(
+        _ error: Error
+    ) -> Bool {
+        if error is CancellationError { return true }
+        return (error as? URLError)?.code == .cancelled
+    }
+
+    nonisolated private static func isAutomaticRetryable(
+        _ error: Error
+    ) -> Bool {
+        if isAutomaticCatchUpCancellation(error) { return false }
+        if let storage = error as? ManagedStorageError {
+            return storage.isAutomaticRetryable
+        }
+        if error is URLError { return true }
+        let nsError = error as NSError
+        guard nsError.domain == AuthErrors.domain,
+              let auth = AuthErrorCode(rawValue: nsError.code) else {
+            return false
+        }
+        return auth == .networkError || auth == .webNetworkRequestFailed
+    }
+
     private func syncPass(
         repo: Repository,
         store: WhoopStore,
         mode: SyncMode,
         scopeHash: String,
-        authorization: ManagedAuthorization
+        authorization: ManagedAuthorization,
+        fence: AccountOperationFence
     ) async throws -> SyncSummary {
+        try validateAccountOperationFence(fence)
         let state = try WhoopManagedSyncStateStore(
             store: store,
             accountScopeHash: scopeHash
@@ -3417,10 +4035,28 @@ final class ManagedCloudService: ObservableObject {
                 )
             )
         }
-        let documents = try WhoopManagedDocumentAdapter(
+        let operationValidator: @Sendable () async throws -> Void = {
+            [self] in
+            try await MainActor.run {
+                try self.validateAccountOperationFence(fence)
+            }
+        }
+        let preferenceCommitter:
+            @Sendable (Data) async throws -> Void = { [self] payload in
+                try await MainActor.run {
+                    try self.validateAccountOperationFence(fence)
+                    let values = BackupSettings.decode(payload)
+                    guard !values.isEmpty else {
+                        throw ManagedStorageError.invalidResponse
+                    }
+                    BackupSettings.apply(values, to: self.defaults)
+                }
+            }
+        let documents = try await managedDocumentRuntime(
             store: store,
             accountScopeHash: scopeHash,
-            preferencesDefaults: defaults
+            operationValidator: operationValidator,
+            preferenceCommitter: preferenceCommitter
         )
         let coordinator = ManagedSyncCoordinator(
             transport: try client(),
@@ -3430,13 +4066,25 @@ final class ManagedCloudService: ObservableObject {
                 store: store,
                 documentRestore: documents
             ),
-            documents: documents
+            documents: documents,
+            operationValidator: operationValidator
         )
         let sources = try await sourceDescriptors(
             repo: repo,
             store: store,
             installationID: authorization.installationID
         )
+        let computedDerivedReady =
+            FormulaPublicationGate.computedDerivedReady()
+        if !computedDerivedReady,
+           sources.contains(where: {
+               $0.sourceKind == FormulaPublicationGate.computedSourceKind
+           }) {
+            AppDiagnosticsRecorder.shared.record(
+                "formula_publication",
+                fields: FormulaPublicationGate.deferredDiagnosticFields
+            )
+        }
 
         var uploadedChunks = 0
         var uploadedBytes = 0
@@ -3466,11 +4114,16 @@ final class ManagedCloudService: ObservableObject {
             limits = (100, 100, 20, 200, 256 * 1_024 * 1_024, 100, 0)
         }
         for (index, source) in sources.enumerated() {
-            try Task.checkCancellation()
+            try validateAccountOperationFence(fence)
+            let dataClasses = FormulaPublicationGate.managedDataClasses(
+                sourceKind: source.sourceKind,
+                available: Self.enrollmentDataClasses,
+                computedDerivedReady: computedDerivedReady
+            )
             let result = try await coordinator.sync(
                 source: source,
                 authorization: authorization,
-                dataClasses: Self.enrollmentDataClasses,
+                dataClasses: dataClasses,
                 maxForwardWindowsPerClass: limits.forward,
                 maxDirtyWindowsPerClass: limits.dirty,
                 maxChangePages: index == 0 ? limits.changes : 0,
@@ -3481,6 +4134,7 @@ final class ManagedCloudService: ObservableObject {
                 localPruneNowMs: localPruneNowMs,
                 maxPruneWindowsPerClass: limits.prune
             )
+            try validateAccountOperationFence(fence)
             uploadedChunks += result.uploadedChunks
             uploadedBytes += result.uploadedBytes
             uploadedDocuments += result.uploadedDocuments
@@ -3571,11 +4225,32 @@ final class ManagedCloudService: ObservableObject {
     private func authorization(forceRefresh: Bool) async throws -> ManagedAuthorization {
         try configureFirebaseIfNeeded()
         let user = try currentUser()
-        let scopeHash = accountScopeHash(for: user)
+        let scopeHash = try accountScopeHash(for: user)
         async let identityToken = user.getIDToken(forcingRefresh: forceRefresh)
         async let appCheckToken = Self.appCheckToken(forceRefresh: forceRefresh)
         return try await ManagedAuthorization(
             identityToken: identityToken,
+            appCheckToken: appCheckToken,
+            installationID: ManagedAccountIdentifier.installationID(
+                baseInstallationID: ManagedCloudInstallationID.value(),
+                accountScopeHash: scopeHash
+            ),
+            installationToken: ManagedCloudInstallationToken.value(
+                accountScopeHash: scopeHash
+            )
+        )
+    }
+
+    private func erasureReceiptAuthorization() async throws -> ManagedAuthorization {
+        try configureFirebaseIfNeeded()
+        guard let scopeHash =
+            defaults.string(forKey: Key.enrolledScopeHash)
+                ?? defaults.string(forKey: Key.accountAccessScopeHash) else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+        let appCheckToken = try await Self.appCheckToken(forceRefresh: false)
+        return try ManagedAuthorization(
+            identityToken: "erasure-receipt",
             appCheckToken: appCheckToken,
             installationID: ManagedAccountIdentifier.installationID(
                 baseInstallationID: ManagedCloudInstallationID.value(),
@@ -3592,24 +4267,296 @@ final class ManagedCloudService: ObservableObject {
         return user
     }
 
-    private func accountScopeHash() throws -> String {
-        accountScopeHash(for: try currentUser())
+    private func makeAccountOperationFence(
+        requireStorage: Bool = true
+    ) throws -> AccountOperationFence {
+        guard (requireStorage ? phase == .enrolled : accountAccessReady),
+              !disconnecting,
+              !accountTransitioning else {
+            throw CancellationError()
+        }
+        return AccountOperationFence(
+            generation: accountOperationGeneration,
+            dataScopeHash: try accountScopeHash(),
+            requiresStorage: requireStorage
+        )
     }
 
-    private func accountScopeHash(for user: User) -> String {
-        ManagedDigest.sha256(Data("noop-managed-account-v1\0\(user.uid)".utf8))
+    private func validateAccountOperationFence(
+        _ fence: AccountOperationFence
+    ) throws {
+        try Task.checkCancellation()
+        guard accountOperationFenceMatches(fence) else {
+            throw CancellationError()
+        }
+    }
+
+    private func accountOperationFenceMatches(
+        _ fence: AccountOperationFence
+    ) -> Bool {
+        !disconnecting
+            && !accountTransitioning
+            && (
+                fence.requiresStorage
+                    ? phase == .enrolled
+                    : accountAccessReady
+            )
+            && accountOperationGeneration == fence.generation
+            && (try? accountScopeHash()) == fence.dataScopeHash
+    }
+
+    @discardableResult
+    private func beginAccountBoundaryTransition(reason: String) -> Int {
+        accountOperationGeneration &+= 1
+        accountTransitioning = true
+        managedSyncTask?.cancel()
+        managedSyncMode = nil
+        managedHistoryImportTask?.cancel()
+        socialRefreshTask?.cancel()
+        safetyRefreshTask?.cancel()
+        safetyBootstrapTask?.cancel()
+        safetyBootstrapTask = nil
+        managedDocumentProfileBindingTask?.cancel()
+        stopManagedSafetyLocationSharing(reason: "account_boundary")
+        clearSocialPresentation()
+        clearSafetyPresentation()
+        AppDiagnosticsRecorder.shared.record(
+            "managed_account.boundary",
+            fields: [
+                "outcome": "invalidated",
+                "reason": reason,
+            ]
+        )
+        return accountOperationGeneration
+    }
+
+    private func cancelAndAwaitAccountOperations() async {
+        let syncTask = managedSyncTask
+        let importTask = managedHistoryImportTask
+        let socialTask = socialRefreshTask
+        let safetyTask = safetyRefreshTask
+        let safetyBootstrap = safetyBootstrapTask
+        let profileBinding = managedDocumentProfileBindingTask
+        syncTask?.cancel()
+        importTask?.cancel()
+        socialTask?.cancel()
+        safetyTask?.cancel()
+        safetyBootstrap?.cancel()
+        profileBinding?.cancel()
+        if let syncTask {
+            _ = try? await syncTask.value
+        }
+        if let importTask {
+            _ = await importTask.value
+        }
+        if let socialTask {
+            _ = try? await socialTask.value
+        }
+        if let safetyTask {
+            _ = try? await safetyTask.value
+        }
+        if let safetyBootstrap {
+            await safetyBootstrap.value
+        }
+        if let profileBinding {
+            await profileBinding.value
+        }
+        managedSyncTask = nil
+        managedSyncMode = nil
+        managedHistoryImportTask = nil
+        socialRefreshTask = nil
+        safetyRefreshTask = nil
+        safetyBootstrapTask = nil
+        managedDocumentProfileBindingTask = nil
+    }
+
+    @discardableResult
+    private func finishAccountBoundaryTransition(
+        generation: Int
+    ) -> Bool {
+        guard generation == accountOperationGeneration else { return false }
+        accountTransitioning = false
+        let waiters = accountTransitionWaiters
+        accountTransitionWaiters.removeAll(keepingCapacity: true)
+        waiters.forEach { $0.resume() }
+        AppDiagnosticsRecorder.shared.record(
+            "managed_account.boundary",
+            fields: ["outcome": "quiesced"]
+        )
+        return true
+    }
+
+    private func waitForAccountBoundaryTransition() async {
+        guard accountTransitioning else { return }
+        await withCheckedContinuation {
+            (continuation: CheckedContinuation<Void, Never>) in
+            if accountTransitioning {
+                accountTransitionWaiters.append(continuation)
+            } else {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func installAuthStateListenerIfNeeded() {
+        guard authStateListenerHandle == nil else { return }
+        observedAuthUID = Auth.auth().currentUser?.uid
+        authStateListenerHandle = Auth.auth().addStateDidChangeListener {
+            [weak self] _, user in
+            Task { @MainActor [weak self] in
+                await self?.handleAuthStateChange(user)
+            }
+        }
+    }
+
+    private func handleAuthStateChange(_ user: User?) async {
+        let nextUID = user?.uid
+        guard nextUID != observedAuthUID else {
+            await waitForAccountBoundaryTransition()
+            return
+        }
+        observedAuthUID = nextUID
+        guard !disconnecting else { return }
+        let generation = beginAccountBoundaryTransition(
+            reason: user == nil ? "signed_out" : "identity_changed"
+        )
+        await cancelAndAwaitAccountOperations()
+        guard generation == accountOperationGeneration,
+              observedAuthUID == nextUID,
+              Auth.auth().currentUser?.uid == nextUID,
+              finishAccountBoundaryTransition(generation: generation) else {
+            return
+        }
+        reconcileAuthenticatedState()
+        if phase == .enrolled {
+            restoreManagedSafetyLocationSharingIfNeeded()
+            scheduleManagedSafetyBootstrap()
+        }
+    }
+
+    private func accountScopeHash() throws -> String {
+        try accountScopeHash(for: try currentUser())
+    }
+
+    private func accountScopeHash(for user: User) throws -> String {
+        try accountScopeBinding(for: user).dataScopeHash
+    }
+
+    private var accountScopeRecoveryStore: ManagedAccountScopeRecoveryStore {
+        ManagedAccountScopeRecoveryStore(
+            defaults: defaults,
+            key: Key.accountScopeRecoveryMapping
+        )
+    }
+
+    private func preserveAccountScopeRecoveryBinding(
+        _ binding: ManagedAccountScopeBinding
+    ) throws {
+        do {
+            if try accountScopeRecoveryStore.preserve(binding) {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_account.scope_binding",
+                    fields: [
+                        "outcome": "recovery_persisted",
+                        "data_scope_version":
+                            String(binding.dataScopeVersion),
+                    ]
+                )
+            }
+        } catch {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_account.scope_binding",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind": "recovery_persistence",
+                ]
+            )
+            throw error
+        }
+    }
+
+    private func accountScopeBinding(
+        for user: User,
+        persistLegacyBinding: Bool = true
+    ) throws -> ManagedAccountScopeBinding {
+        let authTenant = Auth.auth().tenantID
+        guard authTenant == user.tenantID else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+        let schema = (defaults.object(
+            forKey: Key.enrolledBindingSchema
+        ) as? NSNumber)?.intValue
+        let identityScope = defaults.string(
+            forKey: Key.enrolledIdentityScopeHash
+        )
+        let dataScopeVersion = (defaults.object(
+            forKey: Key.enrolledDataScopeVersion
+        ) as? NSNumber)?.intValue
+        let hasAnyBindingMetadata = schema != nil
+            || identityScope != nil
+            || dataScopeVersion != nil
+        if hasAnyBindingMetadata,
+           schema != ManagedAccountScope.bindingSchemaVersion {
+            throw ManagedAccountScopeError.invalidPersistedBinding
+        }
+        let recoveryMapping = try accountScopeRecoveryStore.load()
+        let binding = try ManagedAccountScope.resolve(
+            projectID: try Self.firebaseValues().projectID,
+            tenantID: user.tenantID,
+            uid: user.uid,
+            enrolledDataScopeHash: defaults.string(
+                forKey: Key.enrolledScopeHash
+            ),
+            persistedIdentityScopeHash: identityScope,
+            persistedDataScopeVersion: dataScopeVersion,
+            recoveryMapping: recoveryMapping
+        )
+        let hasActiveEnrollment =
+            defaults.string(forKey: Key.enrolledScopeHash) != nil
+        if hasActiveEnrollment {
+            try preserveAccountScopeRecoveryBinding(binding)
+        }
+        if persistLegacyBinding,
+           hasActiveEnrollment,
+           binding.requiresPersistence {
+            defaults.set(
+                binding.identityScopeHash,
+                forKey: Key.enrolledIdentityScopeHash
+            )
+            defaults.set(
+                binding.dataScopeVersion,
+                forKey: Key.enrolledDataScopeVersion
+            )
+            defaults.set(
+                ManagedAccountScope.bindingSchemaVersion,
+                forKey: Key.enrolledBindingSchema
+            )
+            AppDiagnosticsRecorder.shared.record(
+                "managed_account.scope_binding",
+                fields: [
+                    "outcome": "migrated",
+                    "data_scope_version":
+                        String(binding.dataScopeVersion),
+                ]
+            )
+        }
+        return binding
     }
 
     private func scheduleManagedDocumentProfileBinding(
         accountScopeHash: String?
     ) {
         guard let repo = managedRepository else { return }
-        guard accountScopeHash == nil || !disconnecting else { return }
+        guard !accountTransitioning,
+              accountScopeHash == nil || !disconnecting else {
+            return
+        }
         managedDocumentProfileBindingTask?.cancel()
         managedDocumentProfileBindingTask = Task { @MainActor [weak self, weak repo] in
             guard let self,
                   let repo,
                   !Task.isCancelled,
+                  !self.accountTransitioning,
                   accountScopeHash == nil || !self.disconnecting else {
                 return
             }
@@ -3669,6 +4616,179 @@ final class ManagedCloudService: ObservableObject {
         }
     }
 
+    private func managedDocumentRuntime(
+        store: WhoopStore,
+        accountScopeHash: String,
+        operationValidator:
+            @escaping @Sendable () async throws -> Void,
+        preferenceCommitter:
+            @escaping @Sendable (Data) async throws -> Void
+    ) async throws -> ManagedCloudDocumentAdapter {
+        let storage = KeychainManagedDocumentKeyVaultStorage()
+        let persistedState: Data?
+        do {
+            persistedState = try storage.load(
+                accountScopeHash: accountScopeHash
+            )
+        } catch {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_documents.runtime",
+                fields: [
+                    "outcome": "failed",
+                    "mode":
+                        ManagedDocumentRuntimeMode.serverReadable.rawValue,
+                    "failure_kind": "local_key_state",
+                ]
+            )
+            throw ManagedStorageError.invalidConfiguration
+        }
+
+        guard let persistedState else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_documents.runtime",
+                fields: [
+                    "outcome": "deferred",
+                    "mode":
+                        ManagedDocumentRuntimeMode.serverReadable.rawValue,
+                    "recovery_state": "not_enrolled",
+                ]
+            )
+            return try ManagedCloudDocumentAdapter(
+                store: store,
+                accountScopeHash: accountScopeHash,
+                operationValidator: operationValidator,
+                preferenceCommitter: preferenceCommitter
+            )
+        }
+
+        guard Self.hasDurableManagedDocumentRecoveryEnrollment(
+            persistedState,
+            accountScopeHash: accountScopeHash
+        ) else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_documents.runtime",
+                fields: [
+                    "outcome": "failed",
+                    "mode":
+                        ManagedDocumentRuntimeMode.serverReadable.rawValue,
+                    "failure_kind": "recovery_state",
+                ]
+            )
+            throw ManagedStorageError.invalidConfiguration
+        }
+
+        let vault = ManagedDocumentKeyVault(storage: storage)
+        let recoveryComplete: Bool
+        do {
+            recoveryComplete = try await vault.recoveryEnrollmentComplete(
+                accountScopeHash: accountScopeHash
+            )
+        } catch {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_documents.runtime",
+                fields: [
+                    "outcome": "failed",
+                    "mode":
+                        ManagedDocumentRuntimeMode.serverReadable.rawValue,
+                    "failure_kind": "recovery_state",
+                ]
+            )
+            throw ManagedStorageError.invalidConfiguration
+        }
+
+        guard recoveryComplete else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_documents.runtime",
+                fields: [
+                    "outcome": "failed",
+                    "mode":
+                        ManagedDocumentRuntimeMode.serverReadable.rawValue,
+                    "failure_kind": "recovery_state",
+                ]
+            )
+            throw ManagedStorageError.invalidConfiguration
+        }
+
+        let inbox = ManagedDocumentCiphertextInbox(
+            root: try Self.managedDocumentCiphertextInboxURL(),
+            accountScopeHash: accountScopeHash
+        )
+        let inboxMaintenance: ManagedDocumentCiphertextInboxMaintenanceResult
+        do {
+            inboxMaintenance = try await inbox.startupMaintenance()
+        } catch {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_documents.ciphertext_staging",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind": "startup_maintenance",
+                ]
+            )
+            throw ManagedStorageError.invalidConfiguration
+        }
+        AppDiagnosticsRecorder.shared.record(
+            "managed_documents.ciphertext_staging",
+            fields: [
+                "outcome": "completed",
+                "legacy_state":
+                    inboxMaintenance.legacyDisposition.rawValue,
+                "sweep_state":
+                    inboxMaintenance.sweepDisposition.rawValue,
+            ]
+        )
+        AppDiagnosticsRecorder.shared.record(
+            "managed_documents.runtime",
+            fields: [
+                "outcome": "ready",
+                "mode": ManagedDocumentRuntimeMode.clientEncrypted.rawValue,
+                "recovery_state": "complete",
+            ]
+        )
+        return try ManagedCloudDocumentAdapter(
+            store: store,
+            accountScopeHash: accountScopeHash,
+            documentKeys: vault,
+            ciphertextInbox: inbox,
+            operationValidator: operationValidator,
+            preferenceCommitter: preferenceCommitter
+        )
+    }
+
+    nonisolated private static func hasDurableManagedDocumentRecoveryEnrollment(
+        _ data: Data,
+        accountScopeHash: String
+    ) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let value = object as? [String: Any],
+              value["version"] as? Int == 3,
+              let recovery = value["recoveryEnrollment"]
+                as? [String: Any],
+              let recoveryData = try? JSONSerialization.data(
+                  withJSONObject: recovery
+              ),
+              let receipt = try? JSONDecoder().decode(
+                  ManagedAccountMasterKeyReceipt.self,
+                  from: recoveryData
+              ),
+              receipt.wrappedKey != nil,
+              let activeMasterKeyID =
+                value["activeMasterKeyID"] as? String,
+              UUID(uuidString: activeMasterKeyID) == receipt.keyID,
+              let masterKey = value["masterKeyBase64"] as? String,
+              let masterKeyData = Data(base64Encoded: masterKey),
+              masterKeyData.count == 32,
+              ManagedAccountMasterKeyBinding.matches(
+                  masterKey: masterKeyData,
+                  accountScopeHash: accountScopeHash,
+                  receipt: receipt
+              ),
+              value["masterWrappingRevision"] as? Int
+                == receipt.wrappingRevision else {
+            return false
+        }
+        return true
+    }
+
     nonisolated private static func managedNowMilliseconds() -> Int64 {
         max(
             0,
@@ -3689,30 +4809,90 @@ final class ManagedCloudService: ObservableObject {
         return requestID
     }
 
+    private func accountEnrollmentRequestID() -> UUID {
+        if let raw = defaults.string(
+            forKey: Key.accountEnrollmentRequestID
+        ),
+           let existing = UUID(uuidString: raw) {
+            return existing
+        }
+        let requestID = UUID()
+        defaults.set(
+            requestID.uuidString.lowercased(),
+            forKey: Key.accountEnrollmentRequestID
+        )
+        return requestID
+    }
+
     private func reconcileAuthenticatedState() {
-        guard Auth.auth().currentUser != nil else {
+        guard !accountTransitioning else { return }
+        guard let user = Auth.auth().currentUser else {
             stopManagedSafetyLocationSharing(reason: "signed_out")
+            ManagedCloudRetryScheduler.clearAll()
+            accountAccessReady = false
+            clearSocialPresentation()
             phase = .signedOut
             scheduleManagedDocumentProfileBinding(accountScopeHash: nil)
             return
         }
-        let scope = try? accountScopeHash()
-        let enrolled = scope == defaults.string(forKey: Key.enrolledScopeHash)
-            && configuration?.policyVersion == defaults.string(forKey: Key.enrolledPolicy)
-        if enrolled,
+        let binding: ManagedAccountScopeBinding
+        do {
+            binding = try accountScopeBinding(for: user)
+        } catch {
+            accountAccessReady = false
+            phase = .consentRequired
+            scheduleManagedDocumentProfileBinding(accountScopeHash: nil)
+            AppDiagnosticsRecorder.shared.record(
+                "managed_account.scope_binding",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind": "binding_invalid",
+                ]
+            )
+            return
+        }
+        let enrolled =
+            binding.dataScopeHash
+                == defaults.string(forKey: Key.enrolledScopeHash)
+            && binding.identityScopeHash
+                == defaults.string(
+                    forKey: Key.enrolledIdentityScopeHash
+                )
+            && binding.dataScopeVersion
+                == (defaults.object(
+                    forKey: Key.enrolledDataScopeVersion
+                ) as? NSNumber)?.intValue
+            && configuration?.policyVersion
+                == defaults.string(forKey: Key.enrolledPolicy)
+        accountAccessReady =
+            enrolled
+            || binding.dataScopeHash
+                == defaults.string(forKey: Key.accountAccessScopeHash)
+        if accountAccessReady,
            defaults.string(forKey: Key.erasureJobID) != nil {
             phase = .deletionScheduled
+            accountAccessReady = false
         } else {
             phase = enrolled ? .enrolled : .consentRequired
         }
-        scheduleManagedDocumentProfileBinding(accountScopeHash: scope)
+        scheduleManagedDocumentProfileBinding(
+            accountScopeHash: binding.dataScopeHash
+        )
     }
 
     private func clearEnrollment() {
+        // The independent account-scope recovery mapping survives ordinary
+        // disconnect so validated legacy accounts can reopen their retained keys.
         defaults.removeObject(forKey: Key.enrolledScopeHash)
+        defaults.removeObject(forKey: Key.enrolledIdentityScopeHash)
+        defaults.removeObject(forKey: Key.enrolledDataScopeVersion)
+        defaults.removeObject(forKey: Key.enrolledBindingSchema)
         defaults.removeObject(forKey: Key.enrolledPolicy)
         defaults.removeObject(forKey: Key.automatic)
         defaults.removeObject(forKey: Key.optimizePhoneStorage)
+        defaults.removeObject(forKey: Key.lastAttempt)
+        defaults.removeObject(forKey: Key.lastSuccess)
+        defaults.removeObject(forKey: Key.lastStatus)
         defaults.removeObject(forKey: Key.continuationPending)
         defaults.removeObject(forKey: Key.enrollmentRequestID)
         defaults.removeObject(forKey: Key.erasureJobID)
@@ -3731,6 +4911,7 @@ final class ManagedCloudService: ObservableObject {
         defaults.removeObject(forKey: Key.safetyContactRequest)
         defaults.removeObject(forKey: Key.safetyIncidentRequest)
         defaults.removeObject(forKey: Key.safetyLocationSequences)
+        ManagedCloudRetryScheduler.clearAll()
         ManagedCloudSocialInviteSecret.clearAll()
         ManagedCloudSafetyInviteSecret.clearAll()
         deletionNotBefore = nil
@@ -3753,14 +4934,18 @@ final class ManagedCloudService: ObservableObject {
         socialStatus = ""
     }
 
-    private func clearSocialState() {
+    private func clearSocialState(
+        preservingEnabled: Bool = false
+    ) {
         defaults.removeObject(forKey: Key.socialProfileRequestID)
         defaults.removeObject(forKey: Key.socialInviteRequestID)
         defaults.removeObject(forKey: Key.socialSummaryDigests)
         defaults.removeObject(forKey: Key.socialSummaryScope)
         defaults.removeObject(forKey: Key.socialLastAttempt)
         defaults.removeObject(forKey: Key.socialDeliveryReceipts)
-        defaults.removeObject(forKey: Key.socialEnabled)
+        if !preservingEnabled {
+            defaults.removeObject(forKey: Key.socialEnabled)
+        }
         defaults.removeObject(forKey: Key.socialPendingNOOPID)
         ManagedCloudSocialInviteSecret.clearAll()
         clearSocialPresentation()
@@ -3775,7 +4960,8 @@ final class ManagedCloudService: ObservableObject {
         defaults.removeObject(forKey: Key.safetyContactRequest)
         defaults.removeObject(forKey: Key.safetyIncidentRequest)
         defaults.removeObject(forKey: Key.safetyLocationSequences)
-        if let scope = try? accountScopeHash() {
+        if let scope = defaults.string(forKey: Key.enrolledScopeHash)
+            ?? (try? accountScopeHash()) {
             try? ManagedCloudSafetyInviteSecret.clear(
                 accountScopeHash: scope
             )
@@ -3800,70 +4986,168 @@ final class ManagedCloudService: ObservableObject {
     }
 
     private func completeLocalErasureState() {
+        guard purgeManagedDocumentLocalState() else {
+            phase = .deletionScheduled
+            setStatus(
+                String(localized:
+                    "NOOP+ could not complete that request. Try again."
+                )
+            )
+            return
+        }
         disableManagedMessagingLocally()
         try? Auth.auth().signOut()
         scheduleManagedDocumentProfileBinding(accountScopeHash: nil)
         clearEnrollment()
+        defaults.removeObject(forKey: Key.accountAccessScopeHash)
+        defaults.removeObject(forKey: Key.accountEnrollmentRequestID)
+        accountAccessReady = false
         phase = .signedOut
         setStatus(
             String(localized:
-                "NOOP+ cloud account deletion completed. Local NOOP data remains on this iPhone."
+                "NOOP account deletion completed. Local NOOP data remains on this iPhone."
             )
         )
     }
 
-    private func completeLocalDeletionHandoff() {
-        disableManagedMessagingLocally()
-        try? Auth.auth().signOut()
-        scheduleManagedDocumentProfileBinding(accountScopeHash: nil)
-        clearEnrollment()
-        phase = .signedOut
-        setStatus(
-            String(localized:
-                "NOOP+ account deletion is processing in the cloud. Local NOOP data remains on this iPhone."
-            )
+    private func purgeManagedDocumentLocalState() -> Bool {
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_documents.account_delete_purge"
         )
-    }
+        let scopeHash =
+            defaults.string(forKey: Key.enrolledScopeHash)
+                ?? defaults.string(forKey: Key.accountAccessScopeHash)
+        var scopeMapping = scopeHash == nil
+            ? "scope_unavailable"
+            : "not_present"
+        var scopeMappingValid = scopeHash != nil
+        if let scopeHash {
+            do {
+                if let mapping = try accountScopeRecoveryStore.load() {
+                    let activeIdentity = defaults.string(
+                        forKey: Key.enrolledIdentityScopeHash
+                    )
+                    let activeDataScopeVersion = (defaults.object(
+                        forKey: Key.enrolledDataScopeVersion
+                    ) as? NSNumber)?.intValue
+                    let identityMatches = activeIdentity == nil
+                        || activeIdentity == mapping.identityScopeHash
+                    let versionMatches = activeDataScopeVersion == nil
+                        || activeDataScopeVersion == mapping.dataScopeVersion
+                    if mapping.dataScopeHash == scopeHash,
+                       identityMatches,
+                       versionMatches {
+                        scopeMapping = "present"
+                    } else {
+                        scopeMapping = "mismatch"
+                        scopeMappingValid = false
+                    }
+                }
+            } catch {
+                scopeMapping = "invalid"
+                scopeMappingValid = false
+            }
+        }
+        var keyMaterial = scopeHash == nil
+            ? "scope_unavailable"
+            : "not_present"
+        var ciphertextInbox = scopeHash == nil
+            ? "scope_unavailable"
+            : "not_present"
+        if let scopeHash, scopeMappingValid {
+            do {
+                ciphertextInbox = try ManagedDocumentCiphertextInbox
+                    .purgeAccount(
+                        root: Self.managedDocumentCiphertextInboxURL(),
+                        accountScopeHash: scopeHash
+                    ).rawValue
+            } catch {
+                ciphertextInbox = "failed"
+            }
+            if ciphertextInbox != "failed" {
+                do {
+                    let storage =
+                        KeychainManagedDocumentKeyVaultStorage()
+                    if try storage.load(
+                        accountScopeHash: scopeHash
+                    ) == nil {
+                        keyMaterial = "not_present"
+                    } else {
+                        try storage.remove(
+                            accountScopeHash: scopeHash
+                        )
+                        keyMaterial = "removed"
+                    }
+                } catch {
+                    keyMaterial = "failed"
+                }
+            } else {
+                keyMaterial = "preserved"
+            }
+        } else if scopeHash != nil {
+            keyMaterial = "preserved"
+            ciphertextInbox = "preserved"
+        }
 
-    private func deletionDeadlineHasPassed(now: Date = Date()) -> Bool {
-        guard let value = defaults.string(forKey: Key.erasureNotBefore) else {
-            return false
+        let completed = scopeHash != nil
+            && scopeMappingValid
+            && keyMaterial != "failed"
+            && ciphertextInbox != "failed"
+        if completed {
+            accountScopeRecoveryStore.remove()
+            if scopeMapping == "present" {
+                scopeMapping = "removed"
+            }
         }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [
-            .withInternetDateTime,
-            .withFractionalSeconds
-        ]
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        guard let deadline = fractional.date(from: value)
-                ?? standard.date(from: value) else {
-            return false
-        }
-        return deadline <= now
+        AppDiagnosticsRecorder.shared.endOperation(
+            diagnostic,
+            outcome: completed ? "completed" : "failed",
+            fields: [
+                "key_material": keyMaterial,
+                "ciphertext_inbox": ciphertextInbox,
+                "scope_mapping": scopeMapping,
+            ]
+        )
+        return completed
     }
 
     private func restoreAfterCanceledErasure() {
         defaults.removeObject(forKey: Key.erasureJobID)
         defaults.removeObject(forKey: Key.erasureNotBefore)
-        defaults.set(true, forKey: Key.automatic)
+        let storageEnrolled =
+            defaults.string(forKey: Key.enrolledScopeHash) != nil
+        defaults.set(storageEnrolled, forKey: Key.automatic)
         deletionNotBefore = nil
-        phase = .enrolled
+        reconcileAuthenticatedState()
         scheduleManagedDocumentProfileBinding(
             accountScopeHash: try? accountScopeHash()
         )
-        scheduleManagedSafetyBootstrap()
-        setStatus(String(localized: "NOOP+ account deletion was canceled."))
+        if phase == .enrolled {
+            scheduleManagedSafetyBootstrap()
+        }
+        setStatus(String(localized: "NOOP account deletion was canceled."))
     }
 
     private func scheduleManagedSafetyBootstrap() {
-        guard phase == .enrolled, safetyBootstrapTask == nil else { return }
+        guard phase == .enrolled,
+              !accountTransitioning,
+              safetyBootstrapTask == nil else {
+            return
+        }
         safetyBootstrapTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.safetyBootstrapTask = nil }
-            guard !Task.isCancelled, self.phase == .enrolled else { return }
+            guard !Task.isCancelled,
+                  !self.accountTransitioning,
+                  self.phase == .enrolled else {
+                return
+            }
             await self.registerManagedSafetyIfAuthorized()
-            guard !Task.isCancelled, self.phase == .enrolled else { return }
+            guard !Task.isCancelled,
+                  !self.accountTransitioning,
+                  self.phase == .enrolled else {
+                return
+            }
             do {
                 try await self.refreshSafetyData()
             } catch {
@@ -3958,7 +5242,10 @@ final class ManagedCloudService: ObservableObject {
     }
 
     private func configureFirebaseIfNeeded() throws {
-        guard !firebaseConfigured else { return }
+        if firebaseConfigured {
+            installAuthStateListenerIfNeeded()
+            return
+        }
         guard let configuration else { throw ManagedStorageError.invalidConfiguration }
         let values = try Self.firebaseValues()
 
@@ -3989,6 +5276,7 @@ final class ManagedCloudService: ObservableObject {
             .configureManagedMessagingIfPossible()
         _ = configuration
         firebaseConfigured = true
+        installAuthStateListenerIfNeeded()
     }
 
     private func disableManagedMessagingLocally() {
@@ -4155,6 +5443,41 @@ final class ManagedCloudService: ObservableObject {
         }
     }
 
+    private func setImportStatus(
+        _ progress: ManagedHistoryImportProgress,
+        fence: AccountOperationFence
+    ) {
+        guard accountOperationFenceMatches(fence) else { return }
+        switch progress.phase {
+        case .validating:
+            setStatus(
+                String(localized:
+                    "Validating every object in the cloud-history archive…"
+                )
+            )
+        case .importing:
+            let bytes = ByteCountFormatter.string(
+                fromByteCount: progress.completedChunkBytes,
+                countStyle: .file
+            )
+            let total = ByteCountFormatter.string(
+                fromByteCount: progress.totalChunkBytes,
+                countStyle: .file
+            )
+            setStatus(
+                String(localized:
+                    "Importing cloud history: \(progress.completedObjects) of \(progress.totalObjects) objects, \(bytes) of \(total)."
+                )
+            )
+        case .finalizing:
+            setStatus(
+                String(localized:
+                    "Finalizing \(progress.completedObjects) imported objects…"
+                )
+            )
+        }
+    }
+
     private func scheduleContinuationIfNeeded(_ summary: SyncSummary) {
         guard summary.hasMore else { return }
         BackgroundSyncScheduler.scheduleNext(afterSuccess: false)
@@ -4284,6 +5607,23 @@ final class ManagedCloudService: ObservableObject {
     }
 
     private static let maximumExportPreparationPasses = 256
+
+    private static func managedDocumentCiphertextInboxURL(
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        guard let applicationSupport = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw ManagedStorageError.invalidConfiguration
+        }
+        return applicationSupport
+            .appendingPathComponent("OpenWhoop", isDirectory: true)
+            .appendingPathComponent(
+                "managed-document-ciphertext-v1",
+                isDirectory: true
+            )
+    }
 
     private static func managedHistoryExportURL(now: Date = Date()) -> URL {
         let formatter = DateFormatter()

@@ -114,7 +114,7 @@ enum MetricKnowledge {
             return item(
                 what: "Recovery is NOOP's 0–100 estimate of how ready your body appears for load today.",
                 why: "It turns several overnight recovery signals into one glanceable training-readiness trend.",
-                method: "Computed on device. HRV versus your personal baseline leads the score, with resting heart rate, Sleep Score, breathing rate, skin-temperature deviation and recent load contributing when available.",
+                method: "Computed on device. HRV versus your personal baseline leads the score, with resting heart rate, Sleep Score, breathing rate and skin-temperature deviation contributing when available.",
                 limits: "Recovery is a wellness model, not a measurement of health or proof that you should or should not train.",
                 influences: ["Training load", "Sleep quantity and timing", "Stress", "Alcohol", "Heat or dehydration", "Travel or illness"],
                 actions: ["Match today's training to how you feel as well as the score.", "Prioritize sleep, food and fluids after unusually hard load.", "Log likely contributors so NOOP can test them against future Recovery."],

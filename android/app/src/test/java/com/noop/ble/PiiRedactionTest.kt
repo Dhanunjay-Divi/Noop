@@ -8,18 +8,15 @@ import org.junit.Test
 /**
  * Strap-log PII redaction ([redactStrapLogPii]).
  *
- * Regression guard for #421: the MAC scrubber regex has exactly two capture groups (first + last
- * octet), so the replacement must reference $1/$2. A stray `$3` made `replace()` throw
- * IndexOutOfBoundsException("No group 3") the instant a raw MAC was logged — which happened the
- * moment a generic-HR strap (Polar H10 etc.) was activated, since StandardHrSource logs
- * `device.address`. The thrown exception aborted the strap's activation, so the strap never streamed.
+ * Regression guard for #421/#453: a scrubber bug must never expose the complete address or throw
+ * from the GATT callback path.
  */
 class PiiRedactionTest {
 
-    @Test fun masksMacKeepingFirstAndLastOctet() {
+    @Test fun removesCompleteMacAddress() {
         // The exact line that triggered #421 (a generic-HR strap's address being logged).
         val out = redactStrapLogPii("HR-strap: connecting to A1:B2:C3:D4:E5:F6")
-        assertEquals("HR-strap: connecting to A1:••:••:••:••:F6", out)
+        assertEquals("HR-strap: connecting to <address>", out)
     }
 
     @Test fun doesNotThrowOnAnyMac() {
@@ -31,14 +28,15 @@ class PiiRedactionTest {
     }
 
     @Test fun masksWhoopSerial() {
-        assertEquals("Discovered Band <serial> (rssi -63)",
+        assertEquals("Discovered Band <serial> (rssi=<redacted>)",
             redactStrapLogPii("Discovered WHOOP 4C1594026 (rssi -63)"))
     }
 
-    @Test fun leavesModelNamesAndPlainTextAlone() {
-        // "WHOOP 4.0" is a dotted model name, not a serial — must not be scrubbed.
-        assertEquals("Auto-reconnecting to your saved WHOOP 4.0…",
-            redactStrapLogPii("Auto-reconnecting to your saved WHOOP 4.0…"))
+    @Test fun leavesPlainTextAloneAndRedactsModelNumbers() {
+        assertEquals(
+            "Auto-reconnecting to your saved WHOOP <value>…",
+            redactStrapLogPii("Auto-reconnecting to your saved WHOOP 4.0…"),
+        )
         assertEquals("Backfill: session ended — reason=HISTORY_COMPLETE",
             redactStrapLogPii("Backfill: session ended — reason=HISTORY_COMPLETE"))
     }
@@ -49,7 +47,114 @@ class PiiRedactionTest {
      */
     @Test fun frameLineWithMacIsRedactedNotCrashed() {
         val out = redactStrapLogPii("handleFrame from AA:BB:CC:DD:EE:FF — 24 bytes")
-        assertEquals("handleFrame from AA:••:••:••:••:FF — 24 bytes", out)
+        assertEquals("handleFrame from <address> — <value> bytes", out)
+    }
+
+    @Test fun removesUuidSignalHealthTimestampAndRawFailureText() {
+        val out = redactStrapLogPii(
+            "device=A1B2C3D4-E5F6-7890-ABCD-EF0123456789 " +
+                "rssi=-71 bpm=137 hrv=42 soc=88.5% at 1789831200 error: private detail",
+        )
+        assertFalse(out.contains("A1B2C3D4-E5F6-7890-ABCD-EF0123456789"))
+        assertFalse(out.contains("-71"))
+        assertFalse(out.contains("137"))
+        assertFalse(out.contains("42"))
+        assertFalse(out.contains("88.5"))
+        assertFalse(out.contains("1789831200"))
+        assertFalse(out.contains("private detail"))
+        assertTrue(out.contains("<uuid>"))
+        assertTrue(out.contains("rssi=<redacted>"))
+        assertTrue(out.contains("bpm=<health>"))
+        assertTrue(out.contains("error=<redacted>"))
+    }
+
+    @Test fun removesArbitraryDeviceNamesStatusAndUnlabelledRawFrames() {
+        val out = redactStrapLogPii(
+            "Discovered Bedroom Band " +
+                "(A1B2C3D4-E5F6-7890-ABCD-EF0123456789) rssi=-57 status=133 " +
+                "candidate raw (12 B): 00112233445566778899aabb",
+        )
+        assertFalse(out.contains("Bedroom Band"))
+        assertFalse(out.contains("A1B2C3D4-E5F6-7890-ABCD-EF0123456789"))
+        assertFalse(out.contains("-57"))
+        assertFalse(out.contains("133"))
+        assertFalse(out.contains("00112233445566778899aabb"))
+        assertTrue(out.contains("Discovered <device>", ignoreCase = true))
+        assertTrue(out.contains("rssi=<redacted>"))
+        assertTrue(out.contains("status=<redacted>"))
+        assertTrue(out.contains("<raw-bytes>"))
+
+        val named = redactStrapLogPii(
+            "advertising name=Bedroom Band; frame=00112233445566778899aabb",
+        )
+        assertFalse(named.contains("Bedroom Band"))
+        assertFalse(named.contains("00112233445566778899aabb"))
+        assertTrue(named.contains("name=<redacted>"))
+        assertTrue(named.contains("frame=<redacted>"))
+    }
+
+    @Test fun taggedDeviceEvidenceIsReducedToBoundedCategoricalEvents() {
+        val battery = "[battery] bank soc=80.0 t=1789831200s"
+        val connection =
+            "[connection] connect up gen=7 latencyMs=420 uptimeStart=1789831200"
+
+        assertEquals("[battery] bank sample recorded", redactStrapLogPii(battery))
+        assertEquals("[connection] connect up observed", redactStrapLogPii(connection))
+
+        val untagged = redactStrapLogPii("bank soc=80.0 t=1789831200s")
+        assertFalse(untagged.contains("80.0"))
+        assertFalse(untagged.contains("1789831200"))
+        val taggedLookalike = redactStrapLogPii(
+            "[battery] bank soc=80.0 t=1789831200s owner=private",
+        )
+        assertFalse(taggedLookalike.contains("80.0"))
+        assertFalse(taggedLookalike.contains("1789831200"))
+    }
+
+    @Test fun dayKeysAndDynamicSourceIdentifiersNeverEnterTheShareableLog() {
+        val out = redactStrapLogPii(
+            "[universal] dayOwner day=2026-09-20 readId=band-private " +
+                "writeActiveId=account-private sourceId=source-private",
+        )
+        assertFalse(out.contains("2026-09-20"))
+        assertFalse(out.contains("band-private"))
+        assertFalse(out.contains("account-private"))
+        assertFalse(out.contains("source-private"))
+        assertTrue(out.contains("day=<redacted>"))
+        assertTrue(out.contains("readId=<redacted>"))
+        assertTrue(out.contains("writeActiveId=<redacted>"))
+        assertTrue(out.contains("sourceId=<redacted>"))
+    }
+
+    @Test fun metricTracesAndExactClockTimesAreFailClosed() {
+        val recovery = redactStrapLogPii(
+            "charge baseline hrv mean=58.42 spread=7.91 nValid=14 score=83",
+        )
+        val steps = redactStrapLogPii(
+            "stepsRaw day=2026-09-20 firstCounter=1234 lastCounter=2345 kept=17",
+        )
+        val moment = redactStrapLogPii("Moment marked @ 4:20 PM")
+
+        for (forbidden in listOf("58.42", "7.91", "14", "83")) {
+            assertFalse(recovery.contains(forbidden))
+        }
+        for (forbidden in listOf("2026-09-20", "1234", "2345", "17")) {
+            assertFalse(steps.contains(forbidden))
+        }
+        assertFalse(moment.contains("4:20 PM"))
+        assertTrue(recovery.contains("<value>"))
+        assertTrue(moment.contains("<time>"))
+    }
+
+    @Test fun exportedLinesAreBoundedByUtf8BytesWithoutSplittingSurrogates() {
+        val ascii = boundedStrapLogLine("x".repeat(20_000))
+        assertTrue(ascii.endsWith(" [truncated]"))
+        assertTrue(ascii.toByteArray(Charsets.UTF_8).size <= STRAP_LOG_MAX_LINE_BYTES)
+
+        val unicode = boundedStrapLogLine("heart \uD83D\uDC9A".repeat(2_000))
+        assertTrue(unicode.endsWith(" [truncated]"))
+        assertTrue(unicode.toByteArray(Charsets.UTF_8).size <= STRAP_LOG_MAX_LINE_BYTES)
+        assertFalse(unicode.dropLast(" [truncated]".length).last().isHighSurrogate())
     }
 
     /** Defense-in-depth (#453): redaction is TOTAL — it never throws, on any input, ever. */

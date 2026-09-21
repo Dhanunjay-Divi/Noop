@@ -59,14 +59,14 @@ object ReportCompleteness {
      * primary killer TRACE legitimately didn't re-emit in this capture (#127). SLEEP's `gate run=` only
      * fires when the sleep-stager gate actually (re-)runs under the SLEEP-gated trace sink; a night scored
      * on the backfill/post-sync pass, or already scored so `analyzeRecent(force=false)` skips the gate,
-     * won't re-emit it — yet the always-on per-day diagnostic line (`sleep day=… totalSleepMin=… source=…`)
-     * IS in the report and proves the sleep pipeline evaluated the day. Accepting it mirrors the Swift
+     * won't re-emit it, yet the bounded always-on `analysis.sleep_scored` evidence
+     * is in the report and proves the sleep pipeline evaluated data. Accepting it mirrors the Swift
      * twin's multi-token `.sleep` and the same "the mode worked, even if the strap had nothing" rule the
      * steps domain already uses, so a valid capture is no longer flagged INCOMPLETE for a trace that just
      * didn't re-run. `gate run=` stays the preferred (deeper) trace; this only rescues the legit gap.
      */
     val evidenceTokens: Map<TestDomain, String> = linkedMapOf(
-        TestDomain.SLEEP to "sleep day=",
+        TestDomain.SLEEP to "analysis.sleep_scored",
         // #141: the NIGHTLY HRV trace proves the HRV mode captured, even when the user never took a manual
         // (spot) reading — `hrv rmssd=` only fires on the Live-screen snapshot, but the overnight per-window
         // trace emits `hrv nightSummary …`. So a wear-overnight-and-export HRV capture reads complete.

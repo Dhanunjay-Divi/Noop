@@ -38,6 +38,18 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
 
     var id: String { rawValue }
 
+    /// Destinations that own or directly control local collection. The first-release
+    /// Mac app is a managed viewer, so these remain on the collector phone.
+    var requiresCollectorRole: Bool {
+        switch self {
+        case .live, .intervals, .appleHealth, .xiaomi, .dataSources,
+             .devices, .smartAlarm, .testCentre:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Localized sidebar label. Each case maps to a string literal so Xcode extracts
     /// it into the String Catalog as an English (US) base entry.
     var titleKey: LocalizedStringKey {
@@ -203,6 +215,7 @@ struct NavGroup: Identifiable {
 }
 
 struct RootView: View {
+    @EnvironmentObject var model: AppModel
     // Observe only Repository (changes on data refresh, not the ~1 Hz HR/frame stream). The live
     // status pill is isolated into SidebarStatus so HR/frame ticks don't re-render the whole
     // NavigationSplitView shell + sidebar list.
@@ -238,6 +251,14 @@ struct RootView: View {
     }
 
     var body: some View {
+        if model.runtimeRole.canPresentOperationalShell {
+            operationalShell
+        } else {
+            MacCollectorPhoneOnlyView()
+        }
+    }
+
+    private var operationalShell: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 // Fixed brand header — a real row above the list, NOT a `.safeAreaInset`: a macOS
@@ -285,7 +306,9 @@ struct RootView: View {
                 .searchable(text: $searchQuery, placement: .sidebar, prompt: "Search")
 
                 Divider().overlay(StrandPalette.hairline)
-                SidebarStatus().padding(.horizontal, 14).padding(.vertical, 12)
+                SidebarStatus(viewerOnly: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
             }
             // One continuous flat WHOOP-grey surface behind the brand header, the list rows, and the
             // status pill, no black-vs-vibrancy seam (Design Reset, 2026-06-23).
@@ -484,9 +507,10 @@ struct RootView: View {
     /// user-search semantics (case-insensitive, diacritic-insensitive, locale-aware) in one call.
     /// ALL groups filter, including single-item Today/Sleep; a group with no hits disappears entirely.
     private func visibleItems(in group: NavGroup) -> [NavItem] {
+        let viewerItems = group.items.filter { !$0.requiresCollectorRole }
         let query = trimmedQuery
-        guard !query.isEmpty else { return group.items }
-        return group.items.filter { $0.localizedTitle.localizedStandardContains(query) }
+        guard !query.isEmpty else { return viewerItems }
+        return viewerItems.filter { $0.localizedTitle.localizedStandardContains(query) }
     }
 
     /// One selectable destination row (same Label styling the flat list used), tagged for selection.
@@ -523,38 +547,43 @@ struct RootView: View {
     }
 
     @ViewBuilder private var detail: some View {
-        switch selection ?? .today {
-        case .today: todayDetail
-        case .friends: FriendsView()
-        case .intelligence: IntelligenceView()
-        case .insightsHub: InsightsHubView()
-        case .coach: CoachView()
-        case .live: liveDetail
-        case .breathe: BreathingView()
-        case .intervals: IntervalTimerView()
-        case .explore: MetricExplorerView()
-        case .compare: CompareView()
-        case .insights: InsightsView()
-        case .sleep: SleepView()
-        case .trends: TrendsView()
-        case .workouts: WorkoutsView()
-        case .nutrition: NutritionLogView()
-        case .health: HealthView()
-        case .stress: StressView()
-        case .labBook: LabBookView()
-        case .rhythm: RhythmHost()
-        case .appleHealth: AppleHealthView()
-        case .xiaomi: XiaomiBandView()
-        case .dataSources: DataSourcesView()
-        case .backupSync: BackupSyncView()
-        case .fusedRecord: FusedRecordHost()
-        case .devices: DevicesView()
-        case .notifications: NotificationSettingsView()
-        case .automation: AutomationsView()
-        case .smartAlarm: SmartAlarmView()
-        case .safety: SafetyCenterView()
-        case .settings: settingsDetail
-        case .testCentre: TestCentreView()
+        let selected = selection ?? .today
+        if selected.requiresCollectorRole {
+            MacCollectorPhoneOnlyView()
+        } else {
+            switch selected {
+            case .today: todayDetail
+            case .friends: FriendsView()
+            case .intelligence: IntelligenceView()
+            case .insightsHub: InsightsHubView()
+            case .coach: CoachView()
+            case .live: liveDetail
+            case .breathe: BreathingView()
+            case .intervals: IntervalTimerView()
+            case .explore: MetricExplorerView()
+            case .compare: CompareView()
+            case .insights: InsightsView()
+            case .sleep: SleepView()
+            case .trends: TrendsView()
+            case .workouts: WorkoutsView()
+            case .nutrition: NutritionLogView()
+            case .health: HealthView()
+            case .stress: StressView()
+            case .labBook: LabBookView()
+            case .rhythm: RhythmHost()
+            case .appleHealth: AppleHealthView()
+            case .xiaomi: XiaomiBandView()
+            case .dataSources: DataSourcesView()
+            case .backupSync: BackupSyncView()
+            case .fusedRecord: FusedRecordHost()
+            case .devices: DevicesView()
+            case .notifications: NotificationSettingsView()
+            case .automation: AutomationsView()
+            case .smartAlarm: SmartAlarmView()
+            case .safety: SafetyCenterView()
+            case .settings: settingsDetail
+            case .testCentre: TestCentreView()
+            }
         }
     }
 
@@ -715,6 +744,8 @@ private struct MacLighterWorkoutOptionsSheet: View {
 /// list + detail) does not re-render on the ~1 Hz HR / frame stream.
 private struct SidebarStatus: View {
     @EnvironmentObject var live: LiveState
+    let viewerOnly: Bool
+
     var body: some View {
         HStack(spacing: 9) {
             Circle()
@@ -725,7 +756,7 @@ private struct SidebarStatus: View {
                 Text(statusText)
                     .font(StrandFont.rounded(12, weight: .medium))
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text(live.batteryPct.map { String(localized: "Battery \(Int($0))%") } ?? String(localized: "Noop Band not connected"))
+                Text(detailText)
                     .font(StrandFont.rounded(11))
                     .foregroundStyle(StrandPalette.textTertiary)
             }
@@ -738,11 +769,42 @@ private struct SidebarStatus: View {
     // Shares LiveState.connectionStatus* with the Settings strap card so the two never disagree (#266):
     // a connected-but-unbonded 5/MG now reads "Connected" here too, not a misleading "Connecting…".
     private var statusColor: Color {
-        live.connectionStatusIsActive ? StrandPalette.statusPositive
+        if viewerOnly { return StrandPalette.statusWarning }
+        return live.connectionStatusIsActive ? StrandPalette.statusPositive
             : live.connectionStatusIsIdle ? StrandPalette.statusWarning
             : StrandPalette.statusCritical
     }
     private var statusText: String {
-        live.connectionStatusLabel
+        viewerOnly ? String(localized: "appwide.mac.viewer.title") : live.connectionStatusLabel
+    }
+
+    private var detailText: String {
+        if viewerOnly {
+            return String(localized: "appwide.mac.viewer.synced_detail")
+        }
+        return live.batteryPct.map { String(localized: "Battery \(Int($0))%") }
+            ?? String(localized: "Noop Band not connected")
+    }
+}
+
+private struct MacCollectorPhoneOnlyView: View {
+    var body: some View {
+        VStack(spacing: NoopMetrics.space3) {
+            Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(StrandPalette.metricCyan)
+                .accessibilityHidden(true)
+            Text("appwide.mac.viewer.phone_only_title")
+                .font(StrandFont.title2)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text("appwide.mac.viewer.phone_only_detail")
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 520)
+        }
+        .padding(NoopMetrics.screenPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(StrandPalette.surfaceBase)
     }
 }

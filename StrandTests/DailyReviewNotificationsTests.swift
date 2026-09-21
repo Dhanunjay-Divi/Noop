@@ -1805,7 +1805,7 @@ final class DailyReviewNotificationsTests: XCTestCase {
             )
         )
         let hydrationSceneStart = try XCTUnwrap(
-            hydrationView.range(of: ".onChange(of: scenePhase)")
+            hydrationView.range(of: ".onChangeCompat(of: scenePhase)")
         )
         let hydrationSceneHandler = String(
             hydrationView[hydrationSceneStart.lowerBound...]

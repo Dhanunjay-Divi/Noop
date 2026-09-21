@@ -20,7 +20,7 @@ final class WatchScoreSnapshotTests: XCTestCase {
             rest: 81,
             restCalibrating: false,
             hr: 58,
-            sleepSummary: "7h 12m · 81%",
+            sleepSummary: "7h 12m · 81% sleep efficiency",
             asOf: asOf
         )
 
@@ -32,7 +32,7 @@ final class WatchScoreSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.effort, 8.5)
         XCTAssertEqual(decoded.rest, 81)
         XCTAssertEqual(decoded.hr, 58)
-        XCTAssertEqual(decoded.sleepSummary, "7h 12m · 81%")
+        XCTAssertEqual(decoded.sleepSummary, "7h 12m · 81% sleep efficiency")
         XCTAssertEqual(decoded.asOf, asOf)
         XCTAssertFalse(decoded.chargeCalibrating)
         XCTAssertFalse(decoded.effortCalibrating)
@@ -85,7 +85,7 @@ final class WatchScoreSnapshotTests: XCTestCase {
             charge: 64, chargeCalibrating: false,
             effort: nil, effortCalibrating: true,
             rest: nil, restCalibrating: true,
-            hr: 61, sleepSummary: "6h 40m · 88%",
+            hr: 61, sleepSummary: "6h 40m · 88% sleep efficiency",
             asOf: Date(timeIntervalSince1970: 1_700_000_500)
         )
         snap.save(to: defaults)

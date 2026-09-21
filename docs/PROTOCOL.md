@@ -541,8 +541,9 @@ HISTORY_START ─▶ open chunk, accumulate type-47 records
    │       1. decode chunk  (extractHistoricalStreams, using ClockRef)
    │       2. await store.insert(decoded)            ── decoded durable
    │       3. [if raw enabled] await enqueueRawBatch ── raw durable
-   │       4. await setCursor("strap_trim", trim)    ── cursor durable
-   │       5. ackTrim → HISTORICAL_DATA_RESULT([0x01]+end_data, .withResponse)
+   │       4. await setCursor("strap_trim", trim)    ── diagnostic watermark durable
+   │       5. queue HISTORICAL_DATA_RESULT([0x01]+end_data, .withResponse)
+   │       6. platform callback confirms the exact acknowledgement
    │       (chunk cleared; chunkOpen stays TRUE — high-freq sends repeated ENDs)
    │
    └─ HISTORY_COMPLETE ─▶ isBackfilling = false, close session
@@ -560,21 +561,22 @@ A chunk is forgotten by the strap only after it is locally durable end-to-end. F
 `Backfiller.finishChunk(...)`:
 
 ```
-decode → await insert(decoded) → [await enqueueRawBatch] → await setCursor("strap_trim") → ackTrim
+decode → await insert(decoded) → [await enqueueRawBatch] → await setCursor("strap_trim")
+       → queue ackTrim → confirm from the platform write callback
 ```
 
 Any thrown error short-circuits before the ack, so an un-persisted chunk is never trimmed. The
 ack itself is the link-layer half: `HISTORICAL_DATA_RESULT(23)` with payload `[0x01] + end_data`
 written `.withResponse`, so the strap discards the chunk only once the write is confirmed. The
-`strap_trim` cursor is persisted, so the next session resumes where the last left off — never
-waiting on a network.
+firmware owns retained history and the next range it offers. `strap_trim` is persisted as a local
+diagnostic watermark; it does not select a firmware resume cursor and no network is involved.
 
 ### 7.5 Watchdog & liveness
 
 - **Idle watchdog** (`backfillIdleTimeoutSeconds = 60`): re-armed on every genuine offload frame
-  (47/48/49/50) and only those; if the strap goes silent the session exits and resumes next time
-  via the durable cursor. The live type-43 flood is dropped during offload so it cannot starve
-  chunk acks.
+  (47/48/49/50) and only those; if the strap goes silent the session exits, leaves unacknowledged
+  history firmware-retained, and requests history again next time. The live type-43 flood is
+  dropped during offload so it cannot starve chunk acks.
 - **Stuck detector** (`StuckStrapDetector`): after an offload, if the strap reports records newer
   than NOOP's frontier (from `GET_DATA_RANGE`, parsed by `dataRangeNewestUnix(from:)`) **and**
   that frontier has been frozen for the detector window, it flags `strapNeedsReboot` and attempts

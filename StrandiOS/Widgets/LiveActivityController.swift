@@ -2,6 +2,10 @@
 import Foundation
 import ActivityKit
 
+private enum LiveActivityPresentationPolicy {
+    static let failedStartRetryDelay: TimeInterval = 30
+}
+
 /// Starts, updates, and ends the live-HR Live Activity. The activity appears on the Lock Screen and
 /// in the Dynamic Island while the strap is bonded and streaming heart rate.
 @MainActor
@@ -37,6 +41,9 @@ final class LiveActivityController {
     private var endWaiters: [CheckedContinuation<Void, Never>] = []
     private var expiryTask: Task<Void, Never>?
     private var hydrationTask: Task<Void, Never>?
+    private var startRetryNotBefore = Date.distantPast
+    private var startFailurePending = false
+    private var recordedFirstUpdate = false
 
     private struct DesiredState {
         let generation: UInt64
@@ -46,6 +53,7 @@ final class LiveActivityController {
         let batteryPct: Int?
         let connected: Bool
         let observedAt: Date?
+        let scoreDay: String?
         let now: Date
 
         var hasFreshHeartRate: Bool {
@@ -59,12 +67,14 @@ final class LiveActivityController {
     /// live link, not the sticky "paired" flag) and a heart rate is present; ends the moment the link
     /// drops. Throttled to ~once every 2 s so we stay well under the Live Activity update budget.
     func update(bpm: Int?, recovery: Int?, connected: Bool, effort: Int? = nil,
-                batteryPct: Int? = nil, observedAt: Date?, now: Date = Date()) {
+                batteryPct: Int? = nil, observedAt: Date?, scoreDay: String? = nil,
+                now: Date = Date()) {
         stateGeneration &+= 1
         let desired = DesiredState(generation: stateGeneration,
                                    bpm: bpm, recovery: recovery, effort: effort,
                                    batteryPct: batteryPct,
-                                   connected: connected, observedAt: observedAt, now: now)
+                                   connected: connected, observedAt: observedAt,
+                                   scoreDay: scoreDay, now: now)
         latestState = desired
         pendingState = desired
         // A fresh observation supersedes an older sample's timer immediately, before a queued
@@ -77,9 +87,9 @@ final class LiveActivityController {
     /// emits. A disconnected, disabled, or freshly reinstalled app must not leave an orphaned heart
     /// pill that launches a surface iOS can no longer resolve.
     func reconcile(bpm: Int?, recovery: Int?, connected: Bool, effort: Int? = nil,
-                   batteryPct: Int? = nil, observedAt: Date?) {
+                   batteryPct: Int? = nil, observedAt: Date?, scoreDay: String? = nil) {
         update(bpm: bpm, recovery: recovery, connected: connected, effort: effort,
-               batteryPct: batteryPct, observedAt: observedAt)
+               batteryPct: batteryPct, observedAt: observedAt, scoreDay: scoreDay)
         // ActivityKit can hydrate surviving activities shortly after the app scene mounts. A second
         // reconciliation reaches those handles and either adopts or ends them; it cannot start from a
         // stale packet because the original observation timestamp is carried through unchanged.
@@ -150,7 +160,8 @@ final class LiveActivityController {
             recovery: desired.recovery,
             bonded: desired.connected,
             effort: desired.effort,
-            batteryPct: desired.batteryPct
+            batteryPct: desired.batteryPct,
+            scoreDay: desired.scoreDay
         )
         let staleDate = observedAt.addingTimeInterval(
             LiveHeartRateSurfacePolicy.maximumSampleAge
@@ -164,8 +175,12 @@ final class LiveActivityController {
             lastPush = desired.now
             await activity.update(ActivityContent(state: state, staleDate: staleDate))
             guard isCurrent(desired) else { return }
+            if !recordedFirstUpdate {
+                recordedFirstUpdate = true
+                recordLifecycle(operation: "update", outcome: "succeeded")
+            }
         } else {
-            guard !isStarting else { return }
+            guard !isStarting, desired.now >= startRetryNotBefore else { return }
             isStarting = true
             defer { isStarting = false }
             do {
@@ -176,8 +191,25 @@ final class LiveActivityController {
                 )
                 adopt(started)
                 lastPush = desired.now
+                startRetryNotBefore = .distantPast
+                recordLifecycle(
+                    operation: "start",
+                    outcome: startFailurePending ? "recovered" : "succeeded"
+                )
+                startFailurePending = false
             } catch {
                 activity = nil
+                startRetryNotBefore = desired.now.addingTimeInterval(
+                    LiveActivityPresentationPolicy.failedStartRetryDelay
+                )
+                if !startFailurePending {
+                    startFailurePending = true
+                    recordLifecycle(
+                        operation: "start",
+                        outcome: "failed",
+                        failureKind: "platform"
+                    )
+                }
             }
         }
         scheduleExpiry(observedAt: observedAt)
@@ -243,7 +275,8 @@ final class LiveActivityController {
                 self.update(bpm: latest.bpm, recovery: latest.recovery,
                             connected: latest.connected, effort: latest.effort,
                             batteryPct: latest.batteryPct,
-                            observedAt: latest.observedAt, now: Date())
+                            observedAt: latest.observedAt, scoreDay: latest.scoreDay,
+                            now: Date())
             } else {
                 await self.end(scheduleHydrationRepair: false)
             }
@@ -297,6 +330,32 @@ final class LiveActivityController {
         }
         activity = nil
         lastPush = .distantPast
+        recordedFirstUpdate = false
+        if !ended.isEmpty {
+            recordLifecycle(
+                operation: "end",
+                outcome: "succeeded",
+                count: ended.count == 1 ? "one" : "multiple"
+            )
+        }
+    }
+
+    private func recordLifecycle(
+        operation: String,
+        outcome: String,
+        failureKind: String? = nil,
+        count: String? = nil
+    ) {
+        var fields = [
+            "operation": operation,
+            "outcome": outcome,
+        ]
+        if let failureKind { fields["failure_kind"] = failureKind }
+        if let count { fields["activity_count"] = count }
+        AppDiagnosticsRecorder.shared.record(
+            "live_hr.live_activity",
+            fields: fields
+        )
     }
 }
 #endif

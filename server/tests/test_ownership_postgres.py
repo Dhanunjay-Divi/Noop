@@ -2,16 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import os
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import ModuleType
 from urllib.parse import quote, urlsplit, urlunsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
 
 from app.managed_identity import ManagedIdentityClaims
+from app.ownership_deletion import OwnershipBandRetirementEligibility
+from app.ownership_deletion_lifecycle import (
+    OwnershipManagedTargetTransition,
+    PostgresOwnershipDeletionProgressRepository,
+)
 from app.ownership_models import (
+    OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256,
+    OwnershipAccountDeletionRequest,
     OwnershipAccountRegistration,
     OwnershipInstallationAuthorization,
     OwnershipPlanSelection,
@@ -33,6 +44,21 @@ DATABASE_URL = os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL")
 APPLE_APP_ID = "1:123456789:ios:abcdef12"
 TERMS_SHA256 = "a" * 64
 BAND_IDENTITY_HASH = "b" * 64
+ROOT = Path(__file__).resolve().parents[2]
+OWNERSHIP_PROVISIONER = (
+    ROOT / "infra" / "gcp" / "scripts" / "configure-ownership-database.py"
+)
+
+
+def _load_ownership_provisioner() -> ModuleType:
+    module_name = "noop_test_configure_ownership_database"
+    spec = importlib.util.spec_from_file_location(module_name, OWNERSHIP_PROVISIONER)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -52,6 +78,9 @@ async def ownership_repository():
         """
         TRUNCATE TABLE
             ownership_events,
+            ownership_account_deletion_target_progress,
+            ownership_account_deletion_targets,
+            ownership_account_deletion_requests,
             ownership_releases,
             ownership_entitlements,
             ownership_plan_selection_requests,
@@ -94,14 +123,27 @@ async def ownership_repository():
         await primary.shutdown()
 
 
-def _claims(subject: str) -> ManagedIdentityClaims:
+async def _wait_for_lock_waiters(pool, *, minimum: int) -> None:
+    for _ in range(500):
+        waiting = await pool.fetchval("SELECT count(*) FROM pg_locks WHERE NOT granted")
+        if int(waiting) >= minimum:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"expected at least {minimum} lock waiters")
+
+
+def _claims(
+    subject: str,
+    *,
+    auth_time: datetime | None = None,
+) -> ManagedIdentityClaims:
     now = datetime.now(UTC)
     return ManagedIdentityClaims(
         issuer="https://securetoken.google.com/noop-test-project",
         subject=subject,
         provider_tenant="",
         issued_at=now,
-        auth_time=now - timedelta(seconds=5),
+        auth_time=auth_time or now - timedelta(seconds=5),
         expires_at=now + timedelta(hours=1),
         email_verified=True,
         phone_verified=False,
@@ -126,6 +168,22 @@ def _registration(
         locale="en",
         plan_selection=plan_selection,
         device_key_fingerprint=device_key_fingerprint,
+    )
+
+
+def _account_deletion_request(
+    *,
+    request_id=None,
+    policy_sha256: str = TERMS_SHA256,
+) -> OwnershipAccountDeletionRequest:
+    return OwnershipAccountDeletionRequest(
+        request_id=request_id or uuid4(),
+        confirmation_sha256=(OWNERSHIP_ACCOUNT_DELETION_CONFIRMATION_SHA256),
+        export_acknowledged=True,
+        retention_acknowledged=True,
+        policy_version="ownership-v1",
+        policy_sha256=policy_sha256,
+        locale="en",
     )
 
 
@@ -254,6 +312,64 @@ async def test_concurrent_cross_account_registration_rejects_installation_collis
         == 1
     )
     assert await primary._pool.fetchval("SELECT count(*) FROM ownership_accounts") == 1
+
+
+@pytest.mark.asyncio
+async def test_registration_rejects_retired_unified_principal_without_orphaning(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    claims = _claims(f"retired-unified-owner-{uuid4()}")
+    now = datetime.now(UTC)
+    assert primary._pool is not None
+    await primary._pool.execute(
+        """
+        INSERT INTO unified_account_principals (
+            principal_id,
+            issuer,
+            provider_tenant,
+            subject_hash,
+            status,
+            created_at,
+            updated_at,
+            retired_at
+        ) VALUES ($1, $2, $3, $4, 'retired', $5, $5, $5)
+        """,
+        uuid4(),
+        claims.issuer,
+        claims.provider_tenant,
+        claims.subject_hash,
+        now,
+    )
+
+    with pytest.raises(
+        OwnershipForbiddenError,
+        match="ownership account is unavailable",
+    ):
+        await repository.register_account(
+            claims=claims,
+            registration=_registration(
+                installation_id="ios-retired-unified-owner",
+                token_character="U",
+            ),
+        )
+
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT count(*)
+            FROM ownership_external_identities
+            WHERE issuer = $1
+              AND provider_tenant = $2
+              AND subject_hash = $3
+            """,
+            claims.issuer,
+            claims.provider_tenant,
+            claims.subject_hash,
+        )
+        == 0
+    )
+    assert await primary._pool.fetchval("SELECT count(*) FROM ownership_accounts") == 0
 
 
 @pytest.mark.asyncio
@@ -1911,6 +2027,768 @@ async def test_revoked_installation_cannot_claim_or_change_plan(
 
 
 @pytest.mark.asyncio
+async def test_account_deletion_revokes_sessions_schedules_work_and_cancels(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    subject = "account-deletion-owner"
+    claims, registration, principal = await _register(
+        repository,
+        subject=subject,
+        installation_id="ios-account-deletion-primary",
+        token_character="D",
+    )
+    await repository.register_account(
+        claims=claims,
+        registration=_registration(
+            installation_id="ios-account-deletion-secondary",
+            token_character="E",
+        ),
+    )
+    request = _account_deletion_request()
+    token_hash = hashlib.sha256(
+        registration.installation_token.get_secret_value().encode("ascii")
+    ).hexdigest()
+
+    created = await repository.request_account_deletion(
+        claims=claims,
+        installation_id=registration.installation_id,
+        installation_token_hash=token_hash,
+        expected_platform="ios",
+        request=request,
+        cooling_off=timedelta(hours=24),
+    )
+    replay = await repository.request_account_deletion(
+        claims=claims,
+        installation_id=registration.installation_id,
+        installation_token_hash=token_hash,
+        expected_platform="ios",
+        request=request,
+        cooling_off=timedelta(hours=24),
+    )
+
+    assert created["state"] == "cooling_off"
+    assert created["revoked_session_count"] == 2
+    assert created["cloud_data_deletion"]["state"] == "scheduled"
+    assert created["identity_deletion"] == {
+        "state": "blocked",
+        "blocker": "provider_credentials_unavailable",
+    }
+    assert created["band_retirement"]["eligibility"] == "not_required"
+    assert created["destructive_completion_claimed"] is False
+    assert replay["duplicate"] is True
+    assert replay["deletion_request_id"] == created["deletion_request_id"]
+    assert primary._pool is not None
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT count(*)
+            FROM ownership_installations
+            WHERE account_id = $1 AND status = 'active'
+            """,
+            principal.account_id,
+        )
+        == 0
+    )
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT count(*)
+            FROM ownership_events
+            WHERE account_id = $1
+              AND event_kind = 'account_deletion_requested'
+            """,
+            principal.account_id,
+        )
+        == 1
+    )
+
+    with pytest.raises(OwnershipConflictError):
+        await repository.request_account_deletion(
+            claims=claims,
+            installation_id=registration.installation_id,
+            installation_token_hash=token_hash,
+            expected_platform="ios",
+            request=_account_deletion_request(
+                request_id=request.request_id,
+                policy_sha256="f" * 64,
+            ),
+            cooling_off=timedelta(hours=24),
+        )
+
+    fresh_claims = _claims(
+        subject,
+        auth_time=datetime.now(UTC) + timedelta(seconds=1),
+    )
+    deletion_principal = await repository.principal_for_account_deletion(fresh_claims)
+    canceled = await repository.cancel_account_deletion(
+        principal=deletion_principal,
+        deletion_request_id=UUID(created["deletion_request_id"]),
+        installation_id=registration.installation_id,
+        installation_token_hash=token_hash,
+        expected_platform="ios",
+        identity_auth_time=fresh_claims.auth_time,
+    )
+    canceled_replay = await repository.cancel_account_deletion(
+        principal=deletion_principal,
+        deletion_request_id=UUID(created["deletion_request_id"]),
+        installation_id=registration.installation_id,
+        installation_token_hash=token_hash,
+        expected_platform="ios",
+        identity_auth_time=fresh_claims.auth_time,
+    )
+
+    assert canceled["state"] == "canceled"
+    assert canceled["account_state"] == "active"
+    assert canceled["cancellation_allowed"] is False
+    assert canceled["identity_deletion"] == {
+        "state": "canceled",
+        "blocker": None,
+    }
+    assert canceled["band_retirement"]["work_state"] == "not_required"
+    assert canceled["band_retirement"]["blocker"] is None
+    assert canceled["control_plane_deletion"] == {
+        "state": "canceled",
+        "blocker": None,
+    }
+    assert canceled_replay["duplicate"] is True
+    assert (
+        await primary._pool.fetchval(
+            "SELECT status FROM ownership_accounts WHERE account_id = $1",
+            principal.account_id,
+        )
+        == "active"
+    )
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT count(*)
+            FROM ownership_installations
+            WHERE account_id = $1 AND status = 'active'
+            """,
+            principal.account_id,
+        )
+        == 1
+    )
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT status
+            FROM ownership_installations
+            WHERE installation_id = $1
+            """,
+            "ios-account-deletion-secondary",
+        )
+        == "revoked"
+    )
+
+
+@pytest.mark.asyncio
+async def test_account_deletion_progress_is_seeded_reported_and_terminal(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    claims, registration, principal = await _register(
+        repository,
+        subject="account-deletion-progress-owner",
+        installation_id="ios-account-deletion-progress",
+        token_character="P",
+    )
+    created = await repository.request_account_deletion(
+        claims=claims,
+        installation_id=registration.installation_id,
+        installation_token_hash=hashlib.sha256(
+            registration.installation_token.get_secret_value().encode("ascii")
+        ).hexdigest(),
+        expected_platform="ios",
+        request=_account_deletion_request(),
+        cooling_off=timedelta(hours=24),
+    )
+
+    assert primary._pool is not None
+    rows = await primary._pool.fetch(
+        """
+        SELECT target_kind, current_state, blocker, attempt_count
+        FROM ownership_account_deletion_target_progress
+        WHERE deletion_request_id = $1
+        ORDER BY target_kind
+        """,
+        UUID(created["deletion_request_id"]),
+    )
+    assert [
+        (
+            str(row["target_kind"]),
+            str(row["current_state"]),
+            row["blocker"],
+            int(row["attempt_count"]),
+        )
+        for row in rows
+    ] == [
+        ("band_retirement", "not_required", None, 0),
+        (
+            "identity_provider",
+            "blocked",
+            "provider_credentials_unavailable",
+            0,
+        ),
+        ("managed_cloud_data", "scheduled", None, 0),
+        (
+            "ownership_control_plane",
+            "blocked",
+            "identity_provider_pending",
+            0,
+        ),
+    ]
+
+    lease_owner = uuid4()
+    await primary._pool.execute(
+        """
+        UPDATE ownership_account_deletion_target_progress
+        SET current_state = 'processing',
+            attempt_count = 1,
+            lease_owner = $2,
+            lease_expires_at = clock_timestamp() + interval '10 minutes',
+            updated_at = clock_timestamp()
+        WHERE deletion_request_id = $1
+          AND target_kind = 'managed_cloud_data'
+        """,
+        UUID(created["deletion_request_id"]),
+        lease_owner,
+    )
+    processing = await repository.get_account_deletion(
+        principal=principal,
+        deletion_request_id=UUID(created["deletion_request_id"]),
+    )
+    assert processing["cloud_data_deletion"]["state"] == "processing"
+
+    await primary._pool.execute(
+        """
+        UPDATE ownership_account_deletion_target_progress
+        SET current_state = 'not_required',
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = clock_timestamp(),
+            completed_at = clock_timestamp()
+        WHERE deletion_request_id = $1
+          AND target_kind = 'managed_cloud_data'
+        """,
+        UUID(created["deletion_request_id"]),
+    )
+    completed = await repository.get_account_deletion(
+        principal=principal,
+        deletion_request_id=UUID(created["deletion_request_id"]),
+    )
+    assert completed["cloud_data_deletion"]["state"] == "not_required"
+
+    with pytest.raises(asyncpg.CheckViolationError):
+        await primary._pool.execute(
+            """
+            UPDATE ownership_account_deletion_target_progress
+            SET current_state = 'scheduled',
+                completed_at = NULL,
+                updated_at = clock_timestamp()
+            WHERE deletion_request_id = $1
+              AND target_kind = 'managed_cloud_data'
+            """,
+            UUID(created["deletion_request_id"]),
+        )
+
+
+@pytest.mark.asyncio
+async def test_account_deletion_worker_claims_due_rows_with_cas_and_leases(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    _, _, principal = await _register(
+        repository,
+        subject="account-deletion-worker-owner",
+        installation_id="ios-account-deletion-worker",
+        token_character="W",
+    )
+    assert primary._pool is not None
+    identity_id = await primary._pool.fetchval(
+        """
+        SELECT identity_id
+        FROM ownership_external_identities
+        WHERE account_id = $1
+        """,
+        principal.account_id,
+    )
+    deletion_request_id = uuid4()
+    requested_at = datetime.now(UTC) - timedelta(hours=2)
+    cancel_before = requested_at + timedelta(hours=1)
+    await primary._pool.execute(
+        """
+        INSERT INTO ownership_account_deletion_requests (
+            deletion_request_id,
+            account_id,
+            request_id,
+            request_digest,
+            requester_identity_hash,
+            requester_installation_hash,
+            policy_version,
+            locale,
+            document_sha256,
+            export_acknowledged_at,
+            retention_acknowledged_at,
+            sessions_revoked_at,
+            sessions_revoked_count,
+            requested_at,
+            cancel_before
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, 'ownership-v1', 'en', $7,
+            $8, $8, $8, 1, $8, $9
+        )
+        """,
+        deletion_request_id,
+        principal.account_id,
+        uuid4(),
+        "d" * 64,
+        hashlib.sha256(str(identity_id).encode("utf-8")).hexdigest(),
+        "c" * 64,
+        TERMS_SHA256,
+        requested_at,
+        cancel_before,
+    )
+    await primary._pool.execute(
+        """
+        INSERT INTO ownership_account_deletion_targets (
+            deletion_request_id,
+            target_kind,
+            initial_state,
+            scheduled_at,
+            not_before
+        ) VALUES ($1, 'managed_cloud_data', 'scheduled', $2, $3)
+        """,
+        deletion_request_id,
+        requested_at,
+        cancel_before,
+    )
+
+    progress = PostgresOwnershipDeletionProgressRepository(primary)
+    first_owner = uuid4()
+    first = await progress.claim_due_managed_targets(
+        now=datetime.now(UTC),
+        lease_owner=first_owner,
+        lease_seconds=300,
+        limit=10,
+    )
+    assert len(first) == 1
+    assert first[0].deletion_request_id == deletion_request_id
+    assert first[0].progress_version == 1
+    assert first[0].attempt_count == 1
+
+    assert (
+        await progress.persist_managed_target_state(
+            target=first[0],
+            lease_owner=uuid4(),
+            transition=OwnershipManagedTargetTransition(
+                state="not_required",
+            ),
+            now=datetime.now(UTC),
+        )
+        is False
+    )
+    await primary._pool.execute(
+        """
+        UPDATE ownership_account_deletion_target_progress
+        SET lease_expires_at = clock_timestamp() - interval '1 second'
+        WHERE deletion_request_id = $1
+          AND target_kind = 'managed_cloud_data'
+        """,
+        deletion_request_id,
+    )
+    second_owner = uuid4()
+    reclaimed = await progress.claim_due_managed_targets(
+        now=datetime.now(UTC),
+        lease_owner=second_owner,
+        lease_seconds=300,
+        limit=10,
+    )
+    assert len(reclaimed) == 1
+    assert reclaimed[0].progress_version == 2
+    assert reclaimed[0].attempt_count == 2
+    assert (
+        await progress.persist_managed_target_state(
+            target=reclaimed[0],
+            lease_owner=second_owner,
+            transition=OwnershipManagedTargetTransition(
+                state="not_required",
+            ),
+            now=datetime.now(UTC),
+        )
+        is True
+    )
+    terminal = await primary._pool.fetchrow(
+        """
+        SELECT current_state,
+               progress_version,
+               attempt_count,
+               lease_owner,
+               completed_at
+        FROM ownership_account_deletion_target_progress
+        WHERE deletion_request_id = $1
+          AND target_kind = 'managed_cloud_data'
+        """,
+        deletion_request_id,
+    )
+    assert terminal["current_state"] == "not_required"
+    assert terminal["progress_version"] == 3
+    assert terminal["attempt_count"] == 2
+    assert terminal["lease_owner"] is None
+    assert terminal["completed_at"] is not None
+    assert (
+        await progress.persist_managed_target_state(
+            target=reclaimed[0],
+            lease_owner=second_owner,
+            transition=OwnershipManagedTargetTransition(
+                state="not_required",
+            ),
+            now=datetime.now(UTC),
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_pre_deadline_cancellation_fences_post_deadline_managed_claim(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    subject = "account-deletion-cancellation-race-owner"
+    _, registration, principal = await _register(
+        repository,
+        subject=subject,
+        installation_id="ios-account-deletion-cancellation-race",
+        token_character="R",
+    )
+    token_hash = hashlib.sha256(
+        registration.installation_token.get_secret_value().encode("ascii")
+    ).hexdigest()
+    deletion_request_id = uuid4()
+    requested_at = datetime.now(UTC)
+    cancel_before = requested_at + timedelta(seconds=4)
+    assert primary._pool is not None
+    async with primary._pool.acquire() as connection:
+        async with connection.transaction():
+            identity_id = await connection.fetchval(
+                """
+                SELECT identity_id
+                FROM ownership_external_identities
+                WHERE account_id = $1
+                """,
+                principal.account_id,
+            )
+            await connection.execute(
+                """
+                INSERT INTO ownership_account_deletion_requests (
+                    deletion_request_id,
+                    account_id,
+                    request_id,
+                    request_digest,
+                    requester_identity_hash,
+                    requester_installation_hash,
+                    policy_version,
+                    locale,
+                    document_sha256,
+                    export_acknowledged_at,
+                    retention_acknowledged_at,
+                    sessions_revoked_at,
+                    sessions_revoked_count,
+                    requested_at,
+                    cancel_before
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, 'ownership-v1', 'en', $7,
+                    $8, $8, $8, 1, $8, $9
+                )
+                """,
+                deletion_request_id,
+                principal.account_id,
+                uuid4(),
+                "d" * 64,
+                hashlib.sha256(str(identity_id).encode("utf-8")).hexdigest(),
+                hashlib.sha256(
+                    registration.installation_id.encode("utf-8")
+                ).hexdigest(),
+                TERMS_SHA256,
+                requested_at,
+                cancel_before,
+            )
+            await connection.executemany(
+                """
+                INSERT INTO ownership_account_deletion_targets (
+                    deletion_request_id,
+                    target_kind,
+                    initial_state,
+                    blocker,
+                    scheduled_at,
+                    not_before
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                [
+                    (
+                        deletion_request_id,
+                        "managed_cloud_data",
+                        "scheduled",
+                        None,
+                        requested_at,
+                        cancel_before,
+                    ),
+                    (
+                        deletion_request_id,
+                        "identity_provider",
+                        "blocked",
+                        "provider_credentials_unavailable",
+                        requested_at,
+                        cancel_before,
+                    ),
+                    (
+                        deletion_request_id,
+                        "band_retirement",
+                        "not_required",
+                        None,
+                        requested_at,
+                        cancel_before,
+                    ),
+                    (
+                        deletion_request_id,
+                        "ownership_control_plane",
+                        "blocked",
+                        "identity_provider_pending",
+                        requested_at,
+                        cancel_before,
+                    ),
+                ],
+            )
+            await connection.execute(
+                """
+                UPDATE ownership_installations
+                SET status = 'revoked',
+                    revoked_at = $3,
+                    last_seen_at = GREATEST(last_seen_at, $3)
+                WHERE account_id = $1 AND installation_id = $2
+                """,
+                principal.account_id,
+                registration.installation_id,
+                requested_at,
+            )
+            await connection.execute(
+                """
+                UPDATE ownership_accounts
+                SET status = 'deletion_pending',
+                    auth_valid_after = $2,
+                    deletion_requested_at = $2,
+                    updated_at = $2
+                WHERE account_id = $1
+                """,
+                principal.account_id,
+                requested_at,
+            )
+    fresh_claims = _claims(
+        subject,
+        auth_time=datetime.now(UTC) + timedelta(seconds=1),
+    )
+    deletion_principal = await repository.principal_for_account_deletion(fresh_claims)
+    progress = PostgresOwnershipDeletionProgressRepository(primary)
+
+    async with primary._pool.acquire() as blocker:
+        async with blocker.transaction():
+            await blocker.fetchval(
+                """
+                SELECT 1
+                FROM ownership_account_deletion_target_progress
+                WHERE deletion_request_id = $1
+                  AND target_kind = 'managed_cloud_data'
+                FOR UPDATE
+                """,
+                deletion_request_id,
+            )
+            cancel_task = asyncio.create_task(
+                repository.cancel_account_deletion(
+                    principal=deletion_principal,
+                    deletion_request_id=deletion_request_id,
+                    installation_id=registration.installation_id,
+                    installation_token_hash=token_hash,
+                    expected_platform="ios",
+                    identity_auth_time=fresh_claims.auth_time,
+                )
+            )
+            await _wait_for_lock_waiters(primary._pool, minimum=1)
+            assert datetime.now(UTC) < cancel_before
+            await asyncio.sleep(
+                max(
+                    0.0,
+                    (cancel_before - datetime.now(UTC)).total_seconds() + 0.1,
+                )
+            )
+
+            claimed = await asyncio.wait_for(
+                progress.claim_due_managed_targets(
+                    now=datetime.now(UTC),
+                    lease_owner=uuid4(),
+                    lease_seconds=300,
+                    limit=10,
+                ),
+                timeout=2,
+            )
+            assert claimed == []
+
+        canceled = await asyncio.wait_for(cancel_task, timeout=2)
+
+    assert canceled["state"] == "canceled"
+    state = await primary._pool.fetchrow(
+        """
+        SELECT request.canceled_at,
+               progress.current_state,
+               progress.attempt_count,
+               progress.managed_erasure_job_id
+        FROM ownership_account_deletion_requests request
+        JOIN ownership_account_deletion_target_progress progress
+          USING (deletion_request_id)
+        WHERE request.deletion_request_id = $1
+          AND progress.target_kind = 'managed_cloud_data'
+        """,
+        deletion_request_id,
+    )
+    assert state["canceled_at"] is not None
+    assert state["current_state"] == "scheduled"
+    assert state["attempt_count"] == 0
+    assert state["managed_erasure_job_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_account_deletion_band_retirement_is_fail_closed_and_tenant_scoped(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    await _provision_band(primary)
+    claims, registration, principal = await _register(
+        repository,
+        subject="account-deletion-band-owner",
+        installation_id="ios-account-deletion-band",
+        token_character="F",
+    )
+    _, submission, evidence = await _challenge_and_submission(repository)
+    await repository.claim_band(
+        principal=principal,
+        installation_id=registration.installation_id,
+        submission=submission,
+        evidence=evidence,
+        app_id=APPLE_APP_ID,
+        platform="ios",
+    )
+    request = _account_deletion_request()
+    created = await repository.request_account_deletion(
+        claims=claims,
+        installation_id=registration.installation_id,
+        installation_token_hash=hashlib.sha256(
+            registration.installation_token.get_secret_value().encode("ascii")
+        ).hexdigest(),
+        expected_platform="ios",
+        request=request,
+        cooling_off=timedelta(hours=24),
+    )
+
+    assert created["band_retirement"] == {
+        "required": True,
+        "eligibility": "blocked_policy",
+        "work_state": "blocked",
+        "blocker": "policy_unapproved",
+        "policy_version": None,
+        "hardware_capability_version": None,
+    }
+    assert primary._pool is not None
+    band = await primary._pool.fetchrow(
+        """
+        SELECT status, current_account_id, released_at
+        FROM ownership_bands
+        WHERE provisioned_identity_hash = $1
+        """,
+        BAND_IDENTITY_HASH,
+    )
+    assert band["status"] == "claimed"
+    assert band["current_account_id"] == principal.account_id
+    assert band["released_at"] is None
+    assert await primary._pool.fetchval("SELECT count(*) FROM ownership_releases") == 0
+
+    _, _, other_principal = await _register(
+        repository,
+        subject="account-deletion-other-owner",
+        installation_id="ios-account-deletion-other",
+        token_character="G",
+    )
+    with pytest.raises(OwnershipNotFoundError):
+        await repository.get_account_deletion(
+            principal=other_principal,
+            deletion_request_id=UUID(created["deletion_request_id"]),
+        )
+
+
+@pytest.mark.asyncio
+async def test_retirement_eligibility_never_claims_hardware_completion(
+    ownership_repository,
+) -> None:
+    _, primary = ownership_repository
+
+    class EligibleRetirementEvaluator:
+        def evaluate(self, **_: object) -> OwnershipBandRetirementEligibility:
+            return OwnershipBandRetirementEligibility(
+                state="eligible_pending_operator",
+                policy_version="india-deletion-v1",
+                hardware_capability_version="band-wipe-v1",
+            )
+
+    repository = PostgresOwnershipRepository(
+        primary,
+        retirement_evaluator=EligibleRetirementEvaluator(),
+    )
+    await _provision_band(primary)
+    claims, registration, principal = await _register(
+        repository,
+        subject="eligible-retirement-owner",
+        installation_id="ios-eligible-retirement",
+        token_character="H",
+    )
+    _, submission, evidence = await _challenge_and_submission(repository)
+    await repository.claim_band(
+        principal=principal,
+        installation_id=registration.installation_id,
+        submission=submission,
+        evidence=evidence,
+        app_id=APPLE_APP_ID,
+        platform="ios",
+    )
+    created = await repository.request_account_deletion(
+        claims=claims,
+        installation_id=registration.installation_id,
+        installation_token_hash=hashlib.sha256(
+            registration.installation_token.get_secret_value().encode("ascii")
+        ).hexdigest(),
+        expected_platform="ios",
+        request=_account_deletion_request(),
+        cooling_off=timedelta(hours=24),
+    )
+
+    assert created["band_retirement"]["eligibility"] == ("eligible_pending_operator")
+    assert created["band_retirement"]["work_state"] == "blocked"
+    assert created["band_retirement"]["blocker"] == "operator_approval_required"
+    assert created["destructive_completion_claimed"] is False
+    assert primary._pool is not None
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT status
+            FROM ownership_bands
+            WHERE current_account_id = $1
+            """,
+            principal.account_id,
+        )
+        == "claimed"
+    )
+    assert await primary._pool.fetchval("SELECT count(*) FROM ownership_releases") == 0
+
+
+@pytest.mark.asyncio
 async def test_ownership_terms_metadata_is_immutable_and_retirement_is_one_way(
     ownership_repository,
 ) -> None:
@@ -2290,21 +3168,15 @@ async def test_ownership_readiness_rejects_the_broad_migration_principal(
 
 
 @pytest.mark.asyncio
-async def test_ownership_readiness_accepts_only_a_restricted_principal(
+async def test_deletion_lifecycle_readiness_requires_exact_restricted_principal(
     ownership_repository,
 ) -> None:
     _, primary = ownership_repository
     assert DATABASE_URL is not None
     assert primary._pool is not None
-    role = f"noop_ownership_test_{uuid4().hex}"
-    inherited_role = f"noop_ownership_parent_{uuid4().hex}"
-    owned_schema = f"ownership_owned_{uuid4().hex}"
-    test_sequence = f"ownership_sequence_{uuid4().hex}"
+    role = f"noop_ownership_lifecycle_test_{uuid4().hex}"
     password = uuid4().hex + uuid4().hex
     quoted_role = f'"{role}"'
-    quoted_inherited_role = f'"{inherited_role}"'
-    quoted_owned_schema = f'"{owned_schema}"'
-    quoted_test_sequence = f'"{test_sequence}"'
     database_name = await primary._pool.fetchval("SELECT current_database()")
     quoted_database = '"' + str(database_name).replace('"', '""') + '"'
     await primary._pool.execute(
@@ -2320,6 +3192,156 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
     try:
         await primary._pool.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
         public_schema_create_revoked = True
+        await primary._pool.execute(
+            f"""
+            GRANT CONNECT ON DATABASE {quoted_database} TO {quoted_role};
+            GRANT USAGE ON SCHEMA public TO {quoted_role};
+            GRANT SELECT ON TABLE
+                ownership_account_deletion_target_progress,
+                ownership_account_deletion_requests,
+                ownership_external_identities
+            TO {quoted_role};
+            GRANT UPDATE (
+                current_state,
+                blocker,
+                progress_version,
+                attempt_count,
+                lease_owner,
+                lease_expires_at,
+                retry_after,
+                managed_erasure_job_id,
+                last_error_kind,
+                updated_at,
+                completed_at
+            ) ON TABLE ownership_account_deletion_target_progress
+            TO {quoted_role}
+            """
+        )
+        parsed = urlsplit(DATABASE_URL)
+        host = parsed.hostname or "127.0.0.1"
+        if ":" in host:
+            host = f"[{host}]"
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        restricted_url = urlunsplit(
+            (
+                parsed.scheme,
+                f"{quote(role)}:{quote(password)}@{host}",
+                parsed.path,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+        restricted = PostgresRepository(
+            restricted_url,
+            pool_min_size=1,
+            pool_max_size=1,
+            run_migrations=False,
+            database_engine="postgresql",
+        )
+        await restricted.startup()
+        scoped = PostgresOwnershipDeletionProgressRepository(restricted)
+
+        assert await scoped.configuration_ready() is True
+        assert (
+            await scoped.claim_due_managed_targets(
+                now=datetime.now(UTC),
+                lease_owner=uuid4(),
+                lease_seconds=300,
+                limit=1,
+            )
+            == []
+        )
+
+        await primary._pool.execute(
+            f"GRANT SELECT ON TABLE ownership_bands TO {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            f"REVOKE SELECT ON TABLE ownership_bands FROM {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "GRANT UPDATE (target_kind) ON TABLE "
+            f"ownership_account_deletion_target_progress TO {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            "REVOKE UPDATE (target_kind) ON TABLE "
+            f"ownership_account_deletion_target_progress FROM {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "REVOKE UPDATE (retry_after) ON TABLE "
+            f"ownership_account_deletion_target_progress FROM {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is False
+    finally:
+        if restricted is not None:
+            await restricted.shutdown()
+        await primary._pool.execute(f"DROP OWNED BY {quoted_role}")
+        await primary._pool.execute(f"DROP ROLE {quoted_role}")
+        if public_schema_create_revoked:
+            await primary._pool.execute("GRANT CREATE ON SCHEMA public TO PUBLIC")
+
+
+@pytest.mark.asyncio
+async def test_ownership_readiness_accepts_only_a_restricted_principal(
+    ownership_repository,
+) -> None:
+    _, primary = ownership_repository
+    assert DATABASE_URL is not None
+    assert primary._pool is not None
+    role = f"noop_ownership_test_{uuid4().hex}"
+    inherited_role = f"noop_ownership_parent_{uuid4().hex}"
+    owned_schema = f"ownership_owned_{uuid4().hex}"
+    test_sequence = f"ownership_sequence_{uuid4().hex}"
+    ordinary_function = f"ownership_owned_function_{uuid4().hex}"
+    password = uuid4().hex + uuid4().hex
+    quoted_role = f'"{role}"'
+    quoted_inherited_role = f'"{inherited_role}"'
+    quoted_owned_schema = f'"{owned_schema}"'
+    quoted_test_sequence = f'"{test_sequence}"'
+    quoted_ordinary_function = f'"{ordinary_function}"'
+    database_name = await primary._pool.fetchval("SELECT current_database()")
+    quoted_database = '"' + str(database_name).replace('"', '""') + '"'
+    await primary._pool.execute(
+        f"""
+        CREATE ROLE {quoted_role}
+        LOGIN PASSWORD '{password}'
+        NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
+        NOREPLICATION NOBYPASSRLS
+        """
+    )
+    restricted: PostgresRepository | None = None
+    public_schema_create_revoked = False
+    public_database_temporary_granted = bool(
+        await primary._pool.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_database database
+                CROSS JOIN LATERAL aclexplode(
+                    COALESCE(
+                        database.datacl,
+                        acldefault('d', database.datdba)
+                    )
+                ) AS permission
+                WHERE database.datname = current_database()
+                  AND permission.grantee = 0
+                  AND permission.privilege_type = 'TEMPORARY'
+            )
+            """
+        )
+    )
+    try:
+        await primary._pool.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
+        public_schema_create_revoked = True
+        await primary._pool.execute(
+            f"REVOKE TEMPORARY ON DATABASE {quoted_database} FROM PUBLIC"
+        )
         await primary._pool.execute(
             f"GRANT CONNECT ON DATABASE {quoted_database} TO {quoted_role}"
         )
@@ -2342,7 +3364,12 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
                 ownership_terms_acceptances,
                 ownership_claim_requests,
                 ownership_installation_authorizations,
-                ownership_plan_selection_requests
+                ownership_plan_selection_requests,
+                ownership_account_deletion_requests,
+                ownership_account_deletion_targets
+            TO {quoted_role};
+            GRANT SELECT ON TABLE
+                ownership_account_deletion_target_progress
             TO {quoted_role};
             GRANT SELECT ON TABLE
                 ownership_bands
@@ -2377,7 +3404,19 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
                 selection,
                 request_id,
                 updated_at
-            ) ON TABLE ownership_plan_selections TO {quoted_role}
+            ) ON TABLE ownership_plan_selections TO {quoted_role};
+            GRANT UPDATE (
+                status,
+                auth_valid_after,
+                updated_at,
+                deletion_requested_at
+            ) ON TABLE ownership_accounts TO {quoted_role};
+                GRANT UPDATE (
+                    canceled_at
+                ) ON TABLE ownership_account_deletion_requests TO {quoted_role};
+                GRANT EXECUTE ON FUNCTION
+                    noop_ownership_lock_unified_principal(text, text, text)
+                TO {quoted_role}
             """
         )
         parsed = urlsplit(DATABASE_URL)
@@ -2406,6 +3445,9 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
         scoped = PostgresOwnershipRepository(restricted)
         assert await scoped.configuration_ready() is True
         assert await scoped.runtime_ready() is True
+        provisioner = _load_ownership_provisioner()
+        async with restricted._require_pool().acquire() as restricted_connection:
+            await provisioner.verify_role(restricted_connection)
 
         await _provision_band(primary)
         claims, _, principal = await _register(
@@ -2477,6 +3519,15 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
         assert await scoped.configuration_ready() is True
 
         await primary._pool.execute(
+            f"GRANT TEMPORARY ON DATABASE {quoted_database} TO {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            f"REVOKE TEMPORARY ON DATABASE {quoted_database} FROM {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
             f"CREATE SCHEMA {quoted_owned_schema} AUTHORIZATION {quoted_role}"
         )
         assert await scoped.configuration_ready() is False
@@ -2493,6 +3544,125 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
         )
         assert await scoped.configuration_ready() is True
         await primary._pool.execute(f"DROP SEQUENCE public.{quoted_test_sequence}")
+
+        await primary._pool.execute(
+            "REVOKE EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"FROM {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            "GRANT EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"TO {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "GRANT EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"TO {quoted_role} WITH GRANT OPTION"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"FROM {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "GRANT EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"TO {quoted_inherited_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            "REVOKE EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"FROM {quoted_inherited_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "GRANT EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            "TO PUBLIC"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            "REVOKE EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            "FROM PUBLIC"
+        )
+        assert await scoped.configuration_ready() is True
+
+        quoted_principal_table_owner = await primary._pool.fetchval(
+            """
+            SELECT format('%I', pg_get_userbyid(candidate.relowner))
+            FROM pg_class candidate
+            JOIN pg_namespace namespace
+              ON namespace.oid = candidate.relnamespace
+            WHERE namespace.nspname = 'public'
+              AND candidate.relname = 'unified_account_principals'
+              AND candidate.relkind IN ('r', 'p')
+            """
+        )
+        assert quoted_principal_table_owner is not None
+        await primary._pool.execute(
+            "ALTER FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"OWNER TO {quoted_inherited_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        with pytest.raises(provisioner.ProvisioningError):
+            async with restricted._require_pool().acquire() as restricted_connection:
+                await provisioner.verify_role(restricted_connection)
+        await primary._pool.execute(
+            "ALTER FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"OWNER TO {quoted_principal_table_owner}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "ALTER FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) STABLE"
+        )
+        assert await scoped.configuration_ready() is False
+        with pytest.raises(provisioner.ProvisioningError):
+            async with restricted._require_pool().acquire() as restricted_connection:
+                await provisioner.verify_role(restricted_connection)
+        await primary._pool.execute(
+            "ALTER FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) VOLATILE"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            f"""
+            CREATE FUNCTION public.{quoted_ordinary_function}()
+            RETURNS integer
+            LANGUAGE sql
+            AS 'SELECT 1';
+            ALTER FUNCTION public.{quoted_ordinary_function}()
+                OWNER TO {quoted_role};
+            """
+        )
+        assert await scoped.configuration_ready() is False
+        with pytest.raises(provisioner.ProvisioningError):
+            await provisioner.assert_role_owns_no_objects(primary._pool, role)
+        with pytest.raises(provisioner.ProvisioningError):
+            async with restricted._require_pool().acquire() as restricted_connection:
+                await provisioner.verify_role(restricted_connection)
+        await primary._pool.execute(
+            "ALTER FUNCTION public."
+            f"{quoted_ordinary_function}() OWNER TO {quoted_principal_table_owner}"
+        )
+        await primary._pool.execute(
+            f"DROP FUNCTION public.{quoted_ordinary_function}()"
+        )
+        assert await scoped.configuration_ready() is True
 
         security_definer_function = f"ownership_escalation_{uuid4().hex}"
         quoted_security_definer_function = f'"{security_definer_function}"'
@@ -2585,6 +3755,17 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
             await primary._pool.execute(
                 f"REVOKE {privilege} ON TABLE ownership_accounts FROM {quoted_role}"
             )
+            if privilege == "UPDATE":
+                await primary._pool.execute(
+                    """
+                    GRANT UPDATE (
+                        status,
+                        auth_valid_after,
+                        updated_at,
+                        deletion_requested_at
+                    ) ON TABLE ownership_accounts TO """
+                    f"{quoted_role}"
+                )
             assert await scoped.configuration_ready() is True
 
         await primary._pool.execute(
@@ -2597,11 +3778,11 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
         assert await scoped.configuration_ready() is True
 
         await primary._pool.execute(
-            f"GRANT UPDATE (status) ON TABLE ownership_accounts TO {quoted_role}"
+            f"GRANT UPDATE (retired_at) ON TABLE ownership_accounts TO {quoted_role}"
         )
         assert await scoped.configuration_ready() is False
         await primary._pool.execute(
-            f"REVOKE UPDATE (status) ON TABLE ownership_accounts FROM {quoted_role}"
+            f"REVOKE UPDATE (retired_at) ON TABLE ownership_accounts FROM {quoted_role}"
         )
         assert await scoped.configuration_ready() is True
 
@@ -2666,6 +3847,9 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
                 f"DROP FUNCTION IF EXISTS public.{quoted_security_definer_function}()"
             )
         await primary._pool.execute(
+            f"DROP FUNCTION IF EXISTS public.{quoted_ordinary_function}()"
+        )
+        await primary._pool.execute(
             f"DROP SEQUENCE IF EXISTS public.{quoted_test_sequence}"
         )
         await primary._pool.execute(
@@ -2676,6 +3860,10 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
         await primary._pool.execute(f"DROP ROLE IF EXISTS {quoted_inherited_role}")
         if public_schema_create_revoked:
             await primary._pool.execute("GRANT CREATE ON SCHEMA public TO PUBLIC")
+        if public_database_temporary_granted:
+            await primary._pool.execute(
+                f"GRANT TEMPORARY ON DATABASE {quoted_database} TO PUBLIC"
+            )
 
 
 @pytest.mark.asyncio

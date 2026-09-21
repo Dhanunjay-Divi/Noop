@@ -27,7 +27,10 @@ from app.managed_safety_models import (
     ManagedSafetyLocationUpdate,
     ManagedSafetyRequestCreate,
 )
-from app.managed_safety_repository import ManagedSafetyPushService
+from app.managed_safety_repository import (
+    ManagedSafetyPushService,
+    ManagedSafetyRepeatPolicy,
+)
 
 
 class _Response:
@@ -51,6 +54,50 @@ class _ExplodingProvider:
 
     async def send_safety_incident(self, **_) -> ManagedPushResult:
         raise RuntimeError("untrusted provider failure text")
+
+
+def test_managed_safety_repeat_policy_is_default_off_and_strictly_bounded() -> None:
+    default = ManagedSafetyRepeatPolicy.from_environment({})
+
+    assert default.enabled is False
+    assert default.interval_seconds == 15 * 60
+    assert default.ttl_seconds == 60 * 60
+    assert default.max_rounds == 4
+
+    enabled = ManagedSafetyRepeatPolicy.from_environment(
+        {
+            "NOOP_MANAGED_SAFETY_REPEAT_ENABLED": "true",
+            "NOOP_MANAGED_SAFETY_REPEAT_INTERVAL_SECONDS": "120",
+            "NOOP_MANAGED_SAFETY_REPEAT_TTL_SECONDS": "900",
+            "NOOP_MANAGED_SAFETY_REPEAT_MAX_ROUNDS": "4",
+        }
+    )
+    assert enabled == ManagedSafetyRepeatPolicy(
+        enabled=True,
+        interval_seconds=120,
+        ttl_seconds=900,
+        max_rounds=4,
+    )
+
+    with pytest.raises(ValueError, match="must be true or false"):
+        ManagedSafetyRepeatPolicy.from_environment(
+            {"NOOP_MANAGED_SAFETY_REPEAT_ENABLED": "yes"}
+        )
+    with pytest.raises(ValueError, match="must be an integer"):
+        ManagedSafetyRepeatPolicy.from_environment(
+            {"NOOP_MANAGED_SAFETY_REPEAT_MAX_ROUNDS": "many"}
+        )
+    with pytest.raises(ValueError, match="at least two rounds"):
+        ManagedSafetyRepeatPolicy(enabled=True, max_rounds=1)
+    with pytest.raises(ValueError, match="cannot exceed"):
+        ManagedSafetyRepeatPolicy(
+            enabled=True,
+            interval_seconds=600,
+            ttl_seconds=900,
+            max_rounds=3,
+        )
+    with pytest.raises(ValueError, match="between 1 and 8"):
+        ManagedSafetyRepeatPolicy(max_rounds=9)
 
 
 class _DeliveryRepository:
@@ -769,6 +816,7 @@ def test_fcm_payload_contains_only_generic_notification_and_opaque_reference() -
     assert "display_name" not in serialized.casefold()
     assert payload["message"]["android"]["ttl"] == "28800s"
     assert payload["message"]["android"]["priority"] == "HIGH"
+    assert payload["message"]["android"]["collapse_key"] == f"noop-safety-{incident_id}"
     assert "notification" not in payload["message"]
     assert "apns" not in payload["message"]
     assert payload["message"]["token"] == "fcm-token:ABC_def-1234567890"

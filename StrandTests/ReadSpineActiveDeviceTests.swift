@@ -482,6 +482,182 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         ))
     }
 
+    func testRestFormulaTraversalCoversEveryResolvableTimeZoneSegment() throws {
+        let formatter = ISO8601DateFormatter()
+        func epoch(_ value: String) throws -> Int {
+            Int(
+                try XCTUnwrap(
+                    formatter.date(from: value)
+                ).timeIntervalSince1970
+            )
+        }
+        let firstStart = try epoch("2026-09-01T00:00:00Z")
+        let firstEnd = try epoch("2026-09-02T23:59:59Z")
+        let secondStart = try epoch("2026-09-04T00:00:00Z")
+        let secondEnd = try epoch("2026-09-05T23:59:59Z")
+        let latestStart = try epoch("2026-09-07T00:00:00Z")
+        let now = try epoch("2026-09-08T12:00:00Z")
+        let timeline = AnalysisTimeZoneTimeline(
+            observations: [
+                AnalysisTimeZoneObservation(
+                    observedAtSec: firstStart,
+                    timeZoneIdentifier: "UTC",
+                    offsetSeconds: 0
+                ),
+                AnalysisTimeZoneObservation(
+                    observedAtSec: firstEnd,
+                    timeZoneIdentifier: "UTC",
+                    offsetSeconds: 0
+                ),
+                AnalysisTimeZoneObservation(
+                    observedAtSec: secondStart,
+                    timeZoneIdentifier: "GMT",
+                    offsetSeconds: 0
+                ),
+                AnalysisTimeZoneObservation(
+                    observedAtSec: secondEnd,
+                    timeZoneIdentifier: "GMT",
+                    offsetSeconds: 0
+                ),
+                AnalysisTimeZoneObservation(
+                    observedAtSec: latestStart,
+                    timeZoneIdentifier: "Etc/GMT",
+                    offsetSeconds: 0
+                ),
+                AnalysisTimeZoneObservation(
+                    observedAtSec: now,
+                    timeZoneIdentifier: "Etc/GMT",
+                    offsetSeconds: 0
+                ),
+            ],
+            unresolvableBeforeTs: firstStart
+        )
+
+        let latest = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 4_000,
+            force: true,
+            claims: [],
+            now: now,
+            timezoneOffsetSeconds: 0,
+            timeZoneTimeline: timeline,
+            traverseResolvableHistory: true
+        )
+        let middleAnchor = try XCTUnwrap(
+            latest.nextResolvableHistoryAnchor
+        )
+        let middle = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 4_000,
+            force: true,
+            claims: [],
+            now: now,
+            timezoneOffsetSeconds: 0,
+            timeZoneTimeline: timeline,
+            traverseResolvableHistory: true,
+            resolvableHistoryAnchor: middleAnchor
+        )
+        let oldestAnchor = try XCTUnwrap(
+            middle.nextResolvableHistoryAnchor
+        )
+        let oldest = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 4_000,
+            force: true,
+            claims: [],
+            now: now,
+            timezoneOffsetSeconds: 0,
+            timeZoneTimeline: timeline,
+            traverseResolvableHistory: true,
+            resolvableHistoryAnchor: oldestAnchor
+        )
+
+        XCTAssertEqual(latest.timeZoneIdentifier, "Etc/GMT")
+        XCTAssertEqual(middle.timeZoneIdentifier, "GMT")
+        XCTAssertEqual(oldest.timeZoneIdentifier, "UTC")
+        XCTAssertFalse(latest.resolvableHistorySatisfied)
+        XCTAssertFalse(middle.resolvableHistorySatisfied)
+        XCTAssertTrue(oldest.resolvableHistorySatisfied)
+        XCTAssertNil(oldest.nextResolvableHistoryAnchor)
+        XCTAssertEqual(
+            IntelligenceEngine.analysisCivilDayWindows(
+                plan: latest,
+                timezoneOffsetSeconds: 0
+            ).count,
+            2
+        )
+        XCTAssertEqual(
+            IntelligenceEngine.analysisCivilDayWindows(
+                plan: middle,
+                timezoneOffsetSeconds: 0
+            ).count,
+            2
+        )
+        XCTAssertEqual(
+            IntelligenceEngine.analysisCivilDayWindows(
+                plan: oldest,
+                timezoneOffsetSeconds: 0
+            ).count,
+            2
+        )
+    }
+
+    func testRestFormulaTraversalKeepsTrueTruncationPending() throws {
+        let formatter = ISO8601DateFormatter()
+        let start = Int(
+            try XCTUnwrap(
+                formatter.date(from: "2026-09-01T00:00:00Z")
+            ).timeIntervalSince1970
+        )
+        let now = Int(
+            try XCTUnwrap(
+                formatter.date(from: "2026-09-05T12:00:00Z")
+            ).timeIntervalSince1970
+        )
+        let timeline = AnalysisTimeZoneTimeline(
+            observations: [
+                AnalysisTimeZoneObservation(
+                    observedAtSec: start,
+                    timeZoneIdentifier: "UTC",
+                    offsetSeconds: 0
+                ),
+                AnalysisTimeZoneObservation(
+                    observedAtSec: now,
+                    timeZoneIdentifier: "UTC",
+                    offsetSeconds: 0
+                ),
+            ],
+            unresolvableBeforeTs: start
+        )
+
+        let first = IntelligenceEngine.analysisScoringPlan(
+            requestedMaxDays: 2,
+            force: true,
+            claims: [],
+            now: now,
+            timezoneOffsetSeconds: 0,
+            timeZoneTimeline: timeline,
+            traverseResolvableHistory: true
+        )
+
+        XCTAssertEqual(
+            IntelligenceEngine.analysisCivilDayWindows(
+                plan: first,
+                timezoneOffsetSeconds: 0
+            ).count,
+            2
+        )
+        XCTAssertTrue(first.requestedWindowSatisfied)
+        XCTAssertFalse(first.resolvableHistorySatisfied)
+        XCTAssertNotNil(first.nextResolvableHistoryAnchor)
+        XCTAssertLessThan(
+            try XCTUnwrap(first.nextResolvableHistoryAnchor),
+            try XCTUnwrap(
+                IntelligenceEngine.analysisCivilDayWindows(
+                    plan: first,
+                    timezoneOffsetSeconds: 0
+                ).last
+            ).startTs
+        )
+    }
+
     func testHistoricalClaimUsesBoundedAnchoredBatchForAffectedCalendarDay() {
         let now = 1_780_000_000
         let oldTs = Int64(now - 30 * 86_400)
@@ -725,6 +901,7 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         )
         XCTAssertEqual(plan.passKind, .deferred)
         XCTAssertFalse(plan.shouldAnalyze)
+        XCTAssertFalse(plan.resolvableHistorySatisfied)
         XCTAssertEqual(
             plan.terminalUnknownRange?.reason,
             .travelBoundary

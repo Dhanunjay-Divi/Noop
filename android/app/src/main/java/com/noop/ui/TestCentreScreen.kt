@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.R
+import android.content.SharedPreferences
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -41,7 +44,6 @@ import com.noop.analytics.ReadinessTier
 import com.noop.ble.PuffinExperiment
 import com.noop.ble.WhoopModel
 import com.noop.data.DailyMetric
-import com.noop.testcentre.CaptureAccumulator
 import com.noop.testcentre.CaptureKind
 import com.noop.testcentre.DisplayPerformanceMonitor
 import com.noop.testcentre.ReportReviewGate
@@ -64,12 +66,25 @@ import kotlin.math.roundToInt
  * scheduled-export / experimental controls on the same bindings the Settings cards use. No em-dash.
  */
 @Composable
-fun TestCentreScreen(vm: AppViewModel) {
+fun TestCentreScreen(
+    vm: AppViewModel,
+    onRequestAppReport: () -> Unit,
+) {
     val context = LocalContext.current
     val testCentre = remember { TestCentre.from(context) }
     // CAPTURE-D: a UI scope to emit the data-volume line off the toggle-on path (a store read, so it can't
     // run inline in the non-suspend onToggle).
     val scope = rememberCoroutineScope()
+    var testCentreRevision by remember { mutableIntStateOf(0) }
+    DisposableEffect(testCentre) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, changedKey ->
+            if (changedKey?.startsWith("testcentre.") == true) {
+                scope.launch { testCentreRevision += 1 }
+            }
+        }
+        testCentre.registerListener(listener)
+        onDispose { testCentre.unregisterListener(listener) }
+    }
 
     // The strap model the Settings #22 gate reads, mirrored here so the 5/MG block shows for a 5/MG only.
     val live by vm.live.collectAsStateWithLifecycle()
@@ -118,47 +133,55 @@ fun TestCentreScreen(vm: AppViewModel) {
             blurb = uiString(R.string.appwide_ui_audit_test_centre_mode_blurb),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TestCentreLayout.visibleModes(is5MG).forEach { mode ->
-                    TestModeRow(
-                        mode = mode,
-                        active = testCentre.active(mode.domain),
-                        startedAtSeconds = testCentre.startedAt(mode.domain),
-                        // #965: the shareable strap log the report exports, so the row's "K of N" is the
-                        // HONEST per-mode captured-day count (CaptureAccumulator), not an elapsed-clock proxy.
-                        // Recomputes with `live` (collected above) so the count updates as new days land.
-                        logText = vm.ble.exportLogText(),
-                        onToggle = { on ->
-                            if (on) testCentre.activate(mode.domain) else testCentre.deactivate(mode.domain)
-                            // Display & Performance owns a live frame monitor. It must run ONLY while the
-                            // mode is on: start it on toggle-on (wiring its sink to the redacting DISPLAY
-                            // log), tear it down on toggle-off so no Choreographer callback survives.
-                            // Zero-cost when off.
-                            if (mode.domain == TestDomain.DISPLAY) {
+                key(testCentreRevision) {
+                    TestCentreLayout.visibleModes(is5MG).forEach { mode ->
+                        TestModeRow(
+                            mode = mode,
+                            active = testCentre.active(mode.domain),
+                            startedAtSeconds = testCentre.startedAt(mode.domain),
+                            capturedUnits = testCentre.capturedDays(mode.domain),
+                            onToggle = { on ->
                                 if (on) {
-                                    // CAPTURE-D (#797): wire the data-volume provider (store-read, active id),
-                                    // start the monitor, then emit the upfront dataVolume line off a scope.
-                                    DisplayPerformanceMonitor.dataVolumeProvider =
-                                        { vm.repo.dataVolumeSnapshot(vm.activeStrapId) }
-                                    DisplayPerformanceMonitor.start(context) { line ->
-                                        vm.ble.externalLog(line, TestDomain.DISPLAY)
-                                    }
-                                    scope.launch { DisplayPerformanceMonitor.emitDataVolume() }
+                                    testCentre.activate(mode.domain)
                                 } else {
-                                    DisplayPerformanceMonitor.stop()
+                                    testCentre.deactivate(mode.domain)
                                 }
-                            }
-                        },
-                        onReport = {
-                            // Launched (#1002): buildPending is now suspend (storage probe reads the store).
-                            scope.launch { pendingReport = buildPending(context, mode, vm.ble.exportLogText(), vm) }
-                        },
-                    )
+                                if (mode.domain == TestDomain.DISPLAY) {
+                                    if (on) {
+                                        DisplayPerformanceMonitor.dataVolumeProvider =
+                                            { vm.repo.dataVolumeSnapshot(vm.activeStrapId) }
+                                        DisplayPerformanceMonitor.start(context) { line ->
+                                            vm.ble.externalLog(line, TestDomain.DISPLAY)
+                                        }
+                                        scope.launch {
+                                            DisplayPerformanceMonitor.emitDataVolume()
+                                        }
+                                    } else {
+                                        DisplayPerformanceMonitor.stop()
+                                    }
+                                }
+                            },
+                            onReport = {
+                                scope.launch {
+                                    pendingReport = buildPending(
+                                        context,
+                                        mode,
+                                        vm.ble.exportLogText(),
+                                        vm,
+                                    )
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
 
         // --- Section 2: Diagnostic tools ---
-        DiagnosticToolsCard(vm)
+        DiagnosticToolsCard(
+            vm = vm,
+            onRequestAppReport = onRequestAppReport,
+        )
 
         // --- Section 3: Export and auto-export ---
         ExportCard(
@@ -281,39 +304,33 @@ private fun TestModeRow(
     mode: TestMode,
     active: Boolean,
     startedAtSeconds: Long?,
-    logText: String,
+    capturedUnits: Int,
     onToggle: (Boolean) -> Unit,
     onReport: () -> Unit,
 ) {
-    var on by remember { mutableStateOf(active) }
     val elapsed = startedAtSeconds?.let { (System.currentTimeMillis() / 1000.0) - it }
-    // #965: HONEST per-mode captured-day count for a guided row (distinct days THIS mode produced its own
-    // trace on), read from the same log the report exports, so each active mode accumulates its OWN count
-    // instead of every guided row sharing one elapsed number. null for a toggle mode (no "K of N") / when off.
-    val capturedUnits: Int? =
-        if (on && mode.capture is CaptureKind.Guided) {
-            CaptureAccumulator.capturedDays(
-                domain = mode.domain,
-                reportText = logText,
-                tzOffsetSeconds =
-                    (java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000).toLong(),
-            )
-        } else {
-            null
-        }
+    // #965: each guided mode owns a bounded structured day-token set. It is reset on activation and does
+    // not depend on report retention or retain health values in a diagnostic log.
+    val visibleCapturedUnits: Int? =
+        if (active && mode.capture is CaptureKind.Guided) capturedUnits else null
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(mode.title, style = NoopType.body, color = Palette.textPrimary)
                 Text(
-                    TestCentreLayout.statusText(mode, on, elapsed, capturedUnits),
+                    TestCentreLayout.statusText(
+                        mode,
+                        active,
+                        elapsed,
+                        visibleCapturedUnits,
+                    ),
                     style = NoopType.footnote,
                     color = Palette.textSecondary,
                 )
             }
             NoopToggleSwitch(
-                checked = on,
-                onCheckedChange = { on = it; onToggle(it) },
+                checked = active,
+                onCheckedChange = onToggle,
             )
         }
         Text(localizedTestModeBlurb(mode), style = NoopType.footnote, color = Palette.textTertiary)
@@ -335,7 +352,10 @@ private fun localizedTestModeBlurb(mode: TestMode): String = when (mode.domain) 
 }
 
 @Composable
-private fun DiagnosticToolsCard(vm: AppViewModel) {
+private fun DiagnosticToolsCard(
+    vm: AppViewModel,
+    onRequestAppReport: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showRecalibrate by remember { mutableStateOf(false) }
@@ -353,7 +373,7 @@ private fun DiagnosticToolsCard(vm: AppViewModel) {
                 leadingIcon = Icons.Filled.BugReport,
                 kind = NoopButtonKind.Primary,
                 fullWidth = true,
-                onClick = { AppDiagnosticReportRequestBridge.request() },
+                onClick = onRequestAppReport,
             )
             // Strap log, the same exportLogText share the Settings Diagnostics button uses.
             NoopButton(

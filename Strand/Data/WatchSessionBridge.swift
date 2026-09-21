@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import WatchConnectivity
+import StrandAnalytics
 import StrandDesign
 import WhoopStore   // DailyMetric (the anchor row's recovery / strain / sleep fields)
 
@@ -230,7 +231,18 @@ final class WatchSessionBridge: NSObject, ObservableObject {
         // day for the recovery side.
         let days = model.repo.days
         let now = Date()
-        let day = Repository.widgetAnchor(days: days, now: now)
+        let logicalKey = Repository.logicalDayKey(now)
+        let localKey = Repository.localDayKey(now)
+        let today = Repository.resolveToday(
+            days: days,
+            logicalKey: logicalKey,
+            localKey: localKey
+        )
+        let day = Repository.widgetAnchor(
+            days: days,
+            logicalKey: logicalKey,
+            localKey: localKey
+        )
 
         // Rest (sleep_performance) for that same anchor day. exploreSeries merges imported + on-device,
         // exactly like the Today Rest tile and the widget. The tail fallback (restSeries.last) is ONLY
@@ -251,30 +263,36 @@ final class WatchSessionBridge: NSObject, ObservableObject {
                 lastValue: restSeries.last?.value, isTodaySelected: anchorIsToday, todayKey: day.day)
         }
 
-        // The honesty rule: a missing number that is genuinely mid-calibration is flagged so the watch
-        // shows a cal marker, not a dash that looks like an outage. We treat "no number for the anchor
-        // day" as calibrating only when there is at least some day data to calibrate FROM. With no day
-        // at all (a fresh, never-synced phone) the flags stay false and the watch shows its neutral
-        // "open NOOP on your iPhone" empty state instead of implying calibration is underway.
-        let hasAnyDay = day != nil
+        // Recovery owns a real baseline gate, so only the shared scorer may declare it calibrating.
+        // Effort and Sleep have no equivalent launch-surface readiness evidence here; a missing value is
+        // therefore missing, never inferred as calibrating from the existence of some unrelated day row.
+        let recoveryCalibration = RecoveryScorer.calibrationNights(
+            nightlyHrv: days.map(\.avgHrv),
+            dayKeys: days.map(\.day),
+            before: today?.day ?? logicalKey,
+            hasRecovery: today?.recovery != nil
+        )
         let charge = day?.recovery
         let effort = day?.strain
         let rest = restScore
+        let scoreDay = day?.day
+            ?? (recoveryCalibration == nil ? nil : (today?.day ?? logicalKey))
+        let summaryDay = day ?? (recoveryCalibration == nil ? nil : today)
 
         let launchAuthorization = LaunchSurfaceAuthorization.current()
         let snap = WatchScoreSnapshot(
             charge: charge,
-            chargeCalibrating: hasAnyDay && charge == nil,
+            chargeCalibrating: charge == nil && recoveryCalibration != nil,
             effort: effort,
-            effortCalibrating: hasAnyDay && effort == nil,
+            effortCalibrating: false,
             rest: rest,
-            restCalibrating: hasAnyDay && rest == nil,
+            restCalibrating: false,
             hr: model.bpm ?? model.live.heartRate,
-            sleepSummary: sleepSummary(for: day),
+            sleepSummary: sleepSummary(for: summaryDay),
             asOf: Date(),
             // The day the scores are ABOUT (not when we built this), so the watch can label recency
             // honestly ("Yesterday") even when the build is fresh. nil when there's no anchor day at all.
-            scoreDay: day?.day,
+            scoreDay: scoreDay,
             launchGateRequired: launchAuthorization.required,
             launchGateVersion: launchAuthorization.gateVersion,
             launchGateAuthorized: launchAuthorization.authorized
@@ -283,26 +301,26 @@ final class WatchSessionBridge: NSObject, ObservableObject {
     }
 
     /// A one line sleep summary for the glance, formatted on the phone (the watch never recomputes it).
-    /// "7h 12m · 81%" when both are present; just the duration or just the efficiency when only one is;
+    /// "7h 12m · 81% sleep efficiency" when both are present; just the duration or the explicitly
+    /// labelled efficiency when only one is present;
     /// empty when neither is known (the watch then hides the line). Formatted through the app's string
     /// catalog ("%lldh %lldm" / "%lld%%", the same keys the Sleep screens use) so the wrist shows the
     /// phone's language, not hardcoded English.
     static func sleepSummary(for day: DailyMetric?) -> String {
         guard let day else { return "" }
-        var parts: [String] = []
-        if let mins = day.totalSleepMin, mins > 0 {
-            let h = Int(mins) / 60
-            let m = Int(mins) % 60
-            parts.append(String(localized: "\(h)h \(m)m"))
-        }
-        if let eff = day.efficiency, eff > 0 {
-            // efficiency is stored as a fraction in [0,1] in some paths and as a percent in others; the
-            // cached DailyMetric carries the percent-style value the Today tile reads, so render it as a
-            // whole percent and clamp defensively.
-            let pct = eff <= 1.0 ? eff * 100 : eff
-            parts.append(String(localized: "\(Int(pct.rounded()))%"))
-        }
-        return parts.joined(separator: " · ")
+        return WatchSleepSummaryFormatter.format(
+            totalSleepMinutes: day.totalSleepMin,
+            efficiency: day.efficiency,
+            durationText: { hours, minutes in
+                String(localized: "\(hours)h \(minutes)m")
+            },
+            efficiencyText: { percent in
+                String(
+                    format: String(localized: "appwide.watch.sleep_efficiency_format"),
+                    Int64(percent)
+                )
+            }
+        )
     }
 
     /// Push a snapshot to the watch via application context (latest-state) and mirror it into the shared

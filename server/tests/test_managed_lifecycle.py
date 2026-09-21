@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -13,6 +14,7 @@ from app.managed_identity_deletion import ManagedIdentityDeletionError
 from app.managed_object_store import ManagedObjectStoreError
 from app.managed_repository import ManagedProcessingBusyError
 from app.managed_safety_repository import ManagedPushBatchResult
+from app.ownership_deletion_lifecycle import OwnershipDeletionLifecycleResult
 from app.repository import MigrationManifestMismatchError
 
 
@@ -187,6 +189,32 @@ class FakeSafetyPushService:
         return self.result
 
 
+class FakeOwnershipDeletionLifecycle:
+    def __init__(self) -> None:
+        self.calls: list[bool] = []
+
+    async def run_once(
+        self,
+        *,
+        now: datetime,
+        claim_due: bool = True,
+    ) -> OwnershipDeletionLifecycleResult:
+        del now
+        self.calls.append(claim_due)
+        if claim_due:
+            return OwnershipDeletionLifecycleResult(
+                claimed=2,
+                processing_examined=1,
+                waiting=2,
+                retry_scheduled=1,
+            )
+        return OwnershipDeletionLifecycleResult(
+            processing_examined=2,
+            completed=1,
+            state_conflicts=1,
+        )
+
+
 class StaleMigrationPrimary:
     def __init__(self) -> None:
         self.started = False
@@ -206,6 +234,14 @@ class StaleMigrationPrimary:
         self.shutdown_called = True
 
 
+def test_managed_lifecycle_safety_delivery_uses_managed_retry_gate() -> None:
+    source = inspect.getsource(managed_lifecycle._run)
+    retry_gate = source.index("settings.managed_push_retry_enabled")
+    service = source.index("ManagedSafetyPushService(", retry_gate)
+    assert retry_gate < service
+    assert "settings.safety_worker_enabled" not in source[retry_gate:service]
+
+
 @pytest.mark.asyncio
 async def test_lifecycle_rejects_forward_schema_before_mutating_dependencies(
     monkeypatch: pytest.MonkeyPatch,
@@ -219,17 +255,20 @@ async def test_lifecycle_rejects_forward_schema_before_mutating_dependencies(
         managed_replay_secret="r" * 32,
     )
     primary = StaleMigrationPrimary()
+    constructed_database_urls: list[str] = []
 
     monkeypatch.setattr(
         managed_lifecycle.Settings,
         "from_env",
         classmethod(lambda cls: settings),
     )
-    monkeypatch.setattr(
-        managed_lifecycle,
-        "PostgresRepository",
-        lambda *args, **kwargs: primary,
-    )
+
+    def build_primary(database_url: str, *args, **kwargs):
+        del args, kwargs
+        constructed_database_urls.append(database_url)
+        return primary
+
+    monkeypatch.setattr(managed_lifecycle, "PostgresRepository", build_primary)
 
     def reject_mutating_dependency(*args, **kwargs):
         raise AssertionError("mutating lifecycle dependency was constructed")
@@ -245,6 +284,44 @@ async def test_lifecycle_rejects_forward_schema_before_mutating_dependencies(
 
     assert primary.started is True
     assert primary.shutdown_called is True
+    assert constructed_database_urls == [settings.database_url]
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_requires_separate_ownership_credential_before_database_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        api_token=None,
+        database_url="postgresql://synthetic.invalid/noop",
+        managed_project_id="synthetic-project",
+        managed_raw_bucket="synthetic-raw-bucket",
+        managed_signer_email="lifecycle@synthetic.invalid",
+        managed_replay_secret="r" * 32,
+        ownership_deletion_coordination_enabled=True,
+        ownership_lifecycle_database_url=None,
+    )
+    monkeypatch.setattr(
+        managed_lifecycle.Settings,
+        "from_env",
+        classmethod(lambda cls: settings),
+    )
+
+    def reject_database_use(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("database construction must not start")
+
+    monkeypatch.setattr(
+        managed_lifecycle,
+        "PostgresRepository",
+        reject_database_use,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL",
+    ):
+        await managed_lifecycle._run()
 
 
 @pytest.mark.asyncio
@@ -284,6 +361,28 @@ async def test_lifecycle_replays_pending_deletes_and_releases_lease() -> None:
         repository.pending_identities[0]["erasure_job_id"]
     ]
     assert repository.released_lease is True
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_coordinates_ownership_before_and_after_erasure() -> None:
+    repository = FakeLifecycleRepository()
+    ownership = FakeOwnershipDeletionLifecycle()
+
+    result = await ManagedLifecycleRunner(
+        repository,  # type: ignore[arg-type]
+        FakeObjectStore(),  # type: ignore[arg-type]
+        FakeIdentityDeleter(),
+        FakeChunkProcessor(),  # type: ignore[arg-type]
+        ownership_deletion=ownership,  # type: ignore[arg-type]
+    ).run_once(owner_id=uuid4())
+
+    assert ownership.calls == [True, False]
+    assert result.ownership_deletion_claimed == 2
+    assert result.ownership_deletion_processing_examined == 3
+    assert result.ownership_deletion_waiting == 2
+    assert result.ownership_deletion_completed == 1
+    assert result.ownership_deletion_retry_scheduled == 1
+    assert result.ownership_deletion_state_conflicts == 1
 
 
 @pytest.mark.asyncio
@@ -389,6 +488,7 @@ async def test_lifecycle_retries_due_managed_safety_pushes() -> None:
             provider_accepted=2,
             retryable_failures=1,
             terminal_failures=1,
+            repeated_claimed=3,
         ),
         events=events,
     )
@@ -409,6 +509,7 @@ async def test_lifecycle_retries_due_managed_safety_pushes() -> None:
     assert result.safety_push_retryable_failures == 1
     assert result.safety_push_terminal_failures == 1
     assert result.safety_push_receipt_failures == 0
+    assert result.safety_push_repeated_claimed == 3
 
 
 def test_lifecycle_cli_emits_bounded_failure_without_traceback(
@@ -447,7 +548,7 @@ def test_lifecycle_cli_partial_failure_exits_without_exception_text(
     async def partial() -> ManagedLifecycleResult:
         return ManagedLifecycleResult(
             lease_acquired=True,
-            object_delete_failures=1,
+            ownership_deletion_retry_scheduled=1,
         )
 
     monkeypatch.setattr(managed_lifecycle, "_run", partial)

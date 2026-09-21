@@ -139,6 +139,229 @@ struct PostBondTimeoutLoopDetector {
 /// These helpers accept booleans rather than an Error so reports never inherit localized messages,
 /// raw GATT codes, peripheral identifiers, or other dynamic values.
 struct BandDiagnostics {
+    typealias Recorder = (_ event: String, _ fields: [String: String]) -> Void
+
+    struct CandidateSessionDeduper {
+        private var seenFamilies = Set<DeviceFamily>()
+
+        mutating func reset() {
+            seenFamilies.removeAll()
+        }
+
+        mutating func shouldRecord(_ family: DeviceFamily) -> Bool {
+            seenFamilies.insert(family).inserted
+        }
+    }
+
+    enum ScanState: String {
+        case started
+        case unavailable
+        case noResult = "no_result"
+        case fallback
+        case stopped
+        case candidateFound = "candidate_found"
+    }
+
+    enum ReadinessStage: String {
+        case transport
+        case services
+        case bond
+        case notifications
+    }
+
+    enum ReadinessState: String {
+        case started
+        case ready
+        case failed
+    }
+
+    enum NotificationObservation: Equatable {
+        case pending
+        case ready
+        case failed
+    }
+
+    enum NotificationRearmPhase: Equatable {
+        case awaitingDisable
+        case awaitingEnable
+    }
+
+    enum NotificationRearmAction: Equatable {
+        case enable
+        case pending
+        case ready
+        case failed
+    }
+
+    enum RetryState: String {
+        case scheduled
+        case fired
+        case cancelled
+        case paused
+    }
+
+    static func family(_ family: DeviceFamily) -> String {
+        family == .whoop5 ? "modern" : "legacy"
+    }
+
+    private static let allowedReasons: Set<String> = [
+        "alternate_family", "attribute_error", "authentication", "available",
+        "bond_loop", "command_missing", "connect_failure", "connection",
+        "disabled", "disconnect", "discovery_error", "intentional",
+        "not_initialized", "pairing_reset", "permission", "platform_error",
+        "powered_off", "remote", "resetting", "scan_fallback", "superseded",
+        "timeout", "transport_error", "unknown", "unavailable",
+        "unsupported", "unsupported_service", "ambiguous_service",
+        "user_cancelled", "user_discovery",
+    ]
+
+    private static let allowedChannels: Set<String> = [
+        "battery", "command", "data", "event", "live_hr", "modern_custom",
+        "other",
+    ]
+
+    static func reason(_ value: String) -> String {
+        allowedReasons.contains(value) ? value : "other"
+    }
+
+    static func channel(_ value: String) -> String {
+        allowedChannels.contains(value) ? value : "other"
+    }
+
+    static func recordScan(
+        _ state: ScanState,
+        family: DeviceFamily,
+        reason: String? = nil,
+        recorder: Recorder = {
+            AppDiagnosticsRecorder.shared.record($0, fields: $1)
+        }
+    ) {
+        var fields = ["state": state.rawValue, "family": Self.family(family)]
+        if let reason { fields["reason"] = Self.reason(reason) }
+        recorder("band.scan", fields)
+    }
+
+    static func recordReadiness(
+        _ stage: ReadinessStage,
+        state: ReadinessState,
+        family: DeviceFamily,
+        channel: String? = nil,
+        reason: String? = nil,
+        recorder: Recorder = {
+            AppDiagnosticsRecorder.shared.record($0, fields: $1)
+        }
+    ) {
+        var fields = [
+            "stage": stage.rawValue,
+            "state": state.rawValue,
+            "family": Self.family(family),
+        ]
+        if let channel { fields["channel"] = Self.channel(channel) }
+        if let reason { fields["reason"] = Self.reason(reason) }
+        recorder("band.readiness", fields)
+    }
+
+    static func recordRetry(
+        _ state: RetryState,
+        family: DeviceFamily,
+        reason: String,
+        recorder: Recorder = {
+            AppDiagnosticsRecorder.shared.record($0, fields: $1)
+        }
+    ) {
+        recorder(
+            "band.retry",
+            [
+                "state": state.rawValue,
+                "family": Self.family(family),
+                "reason": Self.reason(reason),
+            ]
+        )
+    }
+
+    static func radioReason(_ state: CBManagerState) -> String {
+        switch state {
+        case .unauthorized: return "permission"
+        case .poweredOff: return "powered_off"
+        case .unsupported: return "unsupported"
+        case .resetting: return "resetting"
+        case .unknown: return "unknown"
+        case .poweredOn: return "available"
+        @unknown default: return "unknown"
+        }
+    }
+
+    static func coreBluetoothFailure(
+        hasError: Bool,
+        timedOut: Bool,
+        pairingReset: Bool,
+        authenticationFailure: Bool,
+        attributeFailure: Bool,
+        transportFailure: Bool
+    ) -> String {
+        guard hasError else { return "unknown" }
+        if pairingReset { return "pairing_reset" }
+        if timedOut { return "timeout" }
+        if authenticationFailure { return "authentication" }
+        if attributeFailure { return "attribute_error" }
+        if transportFailure { return "transport_error" }
+        return "platform_error"
+    }
+
+    static func serviceFailureReason(
+        supportedCustomServiceCount: Int,
+        hasRequiredCommandCharacteristic: Bool? = nil,
+        discoveryFailed: Bool = false
+    ) -> String? {
+        if discoveryFailed { return "discovery_error" }
+        if supportedCustomServiceCount == 0 { return "unsupported_service" }
+        if supportedCustomServiceCount > 1 { return "ambiguous_service" }
+        if hasRequiredCommandCharacteristic == false { return "command_missing" }
+        return nil
+    }
+
+    static func notificationObservation(
+        hasError: Bool,
+        isNotifying: Bool,
+        rearmPending: Bool
+    ) -> NotificationObservation {
+        if hasError { return .failed }
+        if isNotifying { return .ready }
+        return rearmPending ? .pending : .failed
+    }
+
+    static func notificationRearmAction(
+        phase: NotificationRearmPhase,
+        hasError: Bool,
+        isNotifying: Bool
+    ) -> NotificationRearmAction {
+        if hasError { return .failed }
+        switch phase {
+        case .awaitingDisable:
+            return isNotifying ? .failed : .enable
+        case .awaitingEnable:
+            return isNotifying ? .ready : .failed
+        }
+    }
+
+    static func notificationRearmFailureShouldReconnect(
+        isConnected: Bool,
+        isCurrentPeripheral: Bool
+    ) -> Bool {
+        isConnected && isCurrentPeripheral
+    }
+
+    static func notificationRearmTimeoutShouldReconnect(
+        expectedGeneration: Int,
+        currentGeneration: Int,
+        isPending: Bool,
+        isConnected: Bool
+    ) -> Bool {
+        isPending
+            && isConnected
+            && expectedGeneration == currentGeneration
+    }
+
     static func transportReason(intentional: Bool,
                                 timedOut: Bool,
                                 pairingReset: Bool,
@@ -534,6 +757,39 @@ struct ContinuousHrvSchedule {
 /// CoreBluetooth engine for the WHOOP 4.0: scan-by-service → connect → discover →
 /// BOND (one confirmed write) → subscribe → reassemble char-05 frames → FrameRouter.
 /// Cannot run in the simulator; verified manually on-device (Task C6).
+enum ConfirmedCommandWritePurpose: Equatable {
+    case command
+    case bond
+    case clientHello
+    case historicalAck(trim: UInt32, advances: Bool)
+
+    var isHistoricalAck: Bool {
+        if case .historicalAck = self { return true }
+        return false
+    }
+}
+
+struct ConfirmedCommandWriteLedger {
+    private var pending: [ConfirmedCommandWritePurpose] = []
+
+    var hasPendingHistoricalAck: Bool {
+        pending.contains(where: \.isHistoricalAck)
+    }
+
+    mutating func enqueue(_ purpose: ConfirmedCommandWritePurpose) {
+        pending.append(purpose)
+    }
+
+    mutating func completeNext() -> ConfirmedCommandWritePurpose? {
+        guard !pending.isEmpty else { return nil }
+        return pending.removeFirst()
+    }
+
+    mutating func reset() {
+        pending.removeAll(keepingCapacity: true)
+    }
+}
+
 @MainActor
 public final class BLEManager: NSObject, ObservableObject {
 
@@ -598,6 +854,13 @@ public final class BLEManager: NSObject, ObservableObject {
     /// Per-slice ACK count for transport outcome classification. The visible LiveState count spans an
     /// auto-continue burst, so it cannot answer whether this individual slice moved.
     private var acknowledgedBatchesThisSession = 0
+    /// CoreBluetooth reports confirmed command writes in submission order but does not return the frame
+    /// in its callback. Track every with-response purpose so a history trim advances only on its own
+    /// callback, never when writeValue merely queues it.
+    private var confirmedCommandWrites = ConfirmedCommandWriteLedger()
+    /// HISTORY_COMPLETE may arrive before the final confirmed-write callback. Hold the session boundary
+    /// until every queued historical acknowledgement has either succeeded or the link fails closed.
+    private var historyCompletionAwaitingAck = false
     /// Wall time of the most recent offload frame OR HISTORY_COMPLETE — drives the #174 deep-packet
     /// cooldown. A type-0x2F frame arriving just after a backfill ends (backfilling already flipped
     /// false) is a TRAILING historical frame, not the live R22 stream; it must not be miscounted as a
@@ -809,6 +1072,11 @@ public final class BLEManager: NSObject, ObservableObject {
     /// re-subscribe so delivery — and the settle/alarm-re-arm chain — is re-established. Cleared the moment
     /// `connectSettled` bumps, and on disconnect.
     private var restoreNeedsResubscribe = false
+    /// Characteristics intentionally moving through an off-then-on restoration cycle. The expected
+    /// off callback is pending, not a readiness failure; only a later notifying callback completes it.
+    private var pendingNotificationRearms: [String: BandDiagnostics.NotificationRearmPhase] = [:]
+    private var notificationRearmTimeouts: [String: DispatchWorkItem] = [:]
+    private static let notificationRearmTimeoutSeconds: TimeInterval = 8
     /// Re-entrancy guard for captureRawAccel: true while a bounded on-demand window is running.
     /// A second tap is a no-op until the active capture's asyncAfter block fires and clears this.
     private var rawCaptureInFlight = false
@@ -838,6 +1106,9 @@ public final class BLEManager: NSObject, ObservableObject {
 
     // MARK: CoreBluetooth
     private var central: CBCentralManager!
+    /// False for managed viewers. This is an ownership boundary, not a UI preference:
+    /// no call in a viewer process may instantiate CoreBluetooth.
+    private let allowsBluetoothRuntime: Bool
     /// A user connect requested while CoreBluetooth is still moving from `.unknown` to `.poweredOn`.
     /// Consumed exactly once by `centralManagerDidUpdateState` so the chosen family is not replaced by a
     /// default system reconnect after lazy central construction.
@@ -854,6 +1125,9 @@ public final class BLEManager: NSObject, ObservableObject {
     /// (`scanForWhoops()`) then off (`stopWhoopScan()`). Default false leaves the auto-connect path
     /// untouched. Must never overlap the normal connect flow (the wizard owns the central while true).
     private var isPresentingScan = false
+    /// Duplicate advertisements keep the visible RSSI current, but a report needs only one candidate
+    /// transition per transport family for each explicit discovery session.
+    private var presentScanDiagnosticDeduper = BandDiagnostics.CandidateSessionDeduper()
     /// The CBPeripheral.identifier.uuidString of the WHOOP we most recently CONNECTED to (`didConnect`).
     /// Published so the app/AppModel can persist it onto the active registry device
     /// (`registry.setPeripheralId`) - letting "my-whoop" adopt its strap's id on first connect and a
@@ -1052,10 +1326,12 @@ public final class BLEManager: NSObject, ObservableObject {
     public init(
         state: LiveState,
         deviceId: String = "my-whoop",
-        resumeRememberedRuntimeAtLaunch: Bool = true
+        resumeRememberedRuntimeAtLaunch: Bool = true,
+        allowsBluetoothRuntime: Bool = true
     ) {
         self.state = state
         self.deviceId = deviceId
+        self.allowsBluetoothRuntime = allowsBluetoothRuntime
         self.router = FrameRouter(state: state)
         // WhoopStore.init is now async, so it can't run here.
         // bootstrapStore() is called once the CBCentralManager reaches poweredOn
@@ -1072,14 +1348,19 @@ public final class BLEManager: NSObject, ObservableObject {
             activateCentralIfNeeded(recordUserIntent: false)
         }
         #else
-        // Strand (macOS desktop): no state-restoration identifier (iOS background feature).
-        central = CBCentralManager(delegate: self, queue: .main)
+        if allowsBluetoothRuntime {
+            // Compatibility-only collector tests may opt in explicitly. The shipping macOS
+            // composition root is a managed viewer and passes false.
+            central = CBCentralManager(delegate: self, queue: .main)
+        }
         #endif
         // Strap-as-clock: an incoming EVENT packet kicks a rate-limited catch-up sync.
         router.onSyncTrigger = { [weak self] in self?.requestSync(.strap) }
         router.onWristEvidence = { [weak self] worn in self?.noteWristEvidence(worn: worn) }
         // #78 hole-4: a paused-for-bond-loop strap gets one bounded salvage attempt per app-foreground.
-        installForegroundSalvageProbe()
+        if allowsBluetoothRuntime {
+            installForegroundSalvageProbe()
+        }
     }
 
     /// Build the WhoopStore + Collector + Backfiller asynchronously. Safe to call multiple
@@ -1095,15 +1376,14 @@ public final class BLEManager: NSObject, ObservableObject {
         do {
             path = try StorePaths.defaultDatabasePath()
         } catch {
-            log("Backfill: bootstrap FAILED resolving DB path - \(error)")
+            log("Backfill: bootstrap failed reason=path")
             return
         }
         let store: WhoopStore
         do {
             store = try await WhoopStore(path: path)
         } catch {
-            let ns = error as NSError
-            log("Backfill: bootstrap FAILED opening store - \(ns.domain) code=\(ns.code): \(ns.localizedDescription)")
+            log("Backfill: bootstrap failed reason=store")
             return
         }
         // Route deviceId through the device registry: use the active device's id (migration v15 seeds
@@ -1233,23 +1513,15 @@ public final class BLEManager: NSObject, ObservableObject {
     init(state: LiveState, deviceId: String = "my-whoop", collector: Collector?) {
         self.state = state
         self.deviceId = deviceId
+        self.allowsBluetoothRuntime = false
         self.router = FrameRouter(state: state)
         self.collector = collector
         super.init()
         state.lastSyncedAt = UserDefaults.standard.object(forKey: "lastSyncedAt") as? Double
-        // Tests/previews remain inert on iOS until they exercise a connect API. This also makes the
-        // fresh-install consent contract deterministic in unit tests.
-        #if os(iOS)
         central = nil
-        #else
-        // Strand (macOS desktop): no state-restoration identifier (iOS background feature).
-        central = CBCentralManager(delegate: self, queue: .main)
-        #endif
         // Strap-as-clock: an incoming EVENT packet kicks a rate-limited catch-up sync.
         router.onSyncTrigger = { [weak self] in self?.requestSync(.strap) }
         router.onWristEvidence = { [weak self] worn in self?.noteWristEvidence(worn: worn) }
-        // #78 hole-4: a paused-for-bond-loop strap gets one bounded salvage attempt per app-foreground.
-        installForegroundSalvageProbe()
     }
 
     // MARK: Public API
@@ -1267,6 +1539,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// The initializer can deliberately stay inert for a locked process; this method restores the normal
     /// returning-user path without recording a new user intent and is idempotent when a central already exists.
     func resumeRememberedRuntimeAfterLaunchAccess() {
+        guard allowsBluetoothRuntime else { return }
         guard Self.shouldResumeBluetoothRuntime else { return }
         activateCentralIfNeeded(recordUserIntent: false)
     }
@@ -1274,6 +1547,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// The single central-construction point. On iOS callers are either a returning-user restoration path or
     /// an explicit user action. macOS keeps its historical eager construction in the initializer.
     private func activateCentralIfNeeded(recordUserIntent: Bool) {
+        guard allowsBluetoothRuntime else { return }
         if recordUserIntent {
             UserDefaults.standard.set(true, forKey: Self.bluetoothIntentKey)
             UserDefaults.standard.set(false, forKey: Self.bluetoothReleasedKey)
@@ -1298,6 +1572,13 @@ public final class BLEManager: NSObject, ObservableObject {
     /// silently un-pause the give-up and re-run the full refusal hammer, forever, one burst per event
     /// (#78 hole-2; Android's onBluetoothRadioOn always had the correct one-attempt-latched shape).
     public func connect(model: WhoopModel = .persisted) {
+        guard allowsBluetoothRuntime else {
+            AppDiagnosticsRecorder.shared.record(
+                "band.connection_request",
+                fields: ["outcome": "viewer_rejected"]
+            )
+            return
+        }
         // #747/#750: re-arm on the user's explicit retry: clear the give-up streak + pause so this fresh
         // attempt isn't immediately re-paused and the auto-reconnect works again if it bonds.
         if autoReconnectPausedForBondLoop {
@@ -1306,6 +1587,7 @@ public final class BLEManager: NSObject, ObservableObject {
             bondLoopPausedAt = nil
         }
         activateCentralIfNeeded(recordUserIntent: true)
+        guard let central else { return }
         if central.state != .poweredOn { pendingConnectModel = model }
         connectCore(model: model)
     }
@@ -1323,6 +1605,7 @@ public final class BLEManager: NSObject, ObservableObject {
 
     private func connectCore(model: WhoopModel) {
         intentionalDisconnect = false
+        BandDiagnostics.recordReadiness(.transport, state: .started, family: model.deviceFamily)
         // Connection test mode: stamp when this connect attempt began so didConnect can report the connect
         // latency. A plain Date() assignment, no behaviour change; only read behind the .connection gate.
         connectAttemptStartedAt = Date()
@@ -1343,10 +1626,29 @@ public final class BLEManager: NSObject, ObservableObject {
         configureCollectorFamily()
         guard let central else {
             log("Bluetooth has not been enabled in NOOP yet; waiting for an explicit Connect action")
+            BandDiagnostics.recordScan(.unavailable, family: model.deviceFamily, reason: "not_initialized")
+            BandDiagnostics.recordReadiness(
+                .transport,
+                state: .failed,
+                family: model.deviceFamily,
+                reason: "not_initialized"
+            )
             return
         }
         guard central.state == .poweredOn else {
-            log("Bluetooth not powered on (state=\(central.state.rawValue)); cannot scan yet")
+            let reason = BandDiagnostics.radioReason(central.state)
+            log("Bluetooth unavailable reason=\(reason); cannot scan yet")
+            BandDiagnostics.recordScan(
+                .unavailable,
+                family: model.deviceFamily,
+                reason: reason
+            )
+            BandDiagnostics.recordReadiness(
+                .transport,
+                state: .failed,
+                family: model.deviceFamily,
+                reason: reason
+            )
             return
         }
         pendingConnectModel = nil
@@ -1372,12 +1674,12 @@ public final class BLEManager: NSObject, ObservableObject {
         let existing = central.retrieveConnectedPeripherals(withServices: [model.scanService])
         if preferredPeripheralUUID != nil {
             for other in existing where !isPreferredPeripheral(other) {
-                log("Dropping non-active WHOOP connection \(other.identifier) - not the selected strap")
+                log("Dropping a non-selected compatible-band connection")
                 central.cancelPeripheralConnection(other)
             }
         }
         if let p = existing.first(where: { isPreferredPeripheral($0) }) {
-            log("Found existing \(model.transportName) connection \(p.identifier) - attaching")
+            log("Found existing \(model.transportName) connection - attaching")
             preparePeripheral(p)
             // Attach OUR OWN session even when CoreBluetooth reports the strap .connected. On Apple
             // platforms an LE link is shared system-wide, so a strap held by the WHOOP app, a prior NOOP
@@ -1396,7 +1698,7 @@ public final class BLEManager: NSObject, ObservableObject {
         // retrieve can only ever return the strap we asked for.
         if let preferred = preferredPeripheralUUID,
            let p = central.retrievePeripherals(withIdentifiers: [preferred]).first {
-            log("Connecting to selected strap \(preferred) - targeted")
+            log("Connecting to selected band - targeted")
             preparePeripheral(p)
             central.connect(p, options: nil)
             return
@@ -1699,14 +2001,29 @@ public final class BLEManager: NSObject, ObservableObject {
     /// The wizard MUST call `stopWhoopScan()` before any normal connect resumes — this mode owns the
     /// central while active. No-op-to-the-connect-path: it never touches `peripheral`/bond state.
     public func scanForWhoops() {
+        guard allowsBluetoothRuntime else {
+            AppDiagnosticsRecorder.shared.record(
+                "band.scan",
+                fields: ["outcome": "viewer_rejected"]
+            )
+            return
+        }
         // Mark present mode before constructing the central: its asynchronous poweredOn callback then resumes
         // this exact user-requested scan instead of taking the default auto-connect branch.
         isPresentingScan = true
         pendingConnectModel = nil
         discoveredWhoops = []
+        presentScanDiagnosticDeduper.reset()
         activateCentralIfNeeded(recordUserIntent: true)
+        guard let central else { return }
         guard central.state == .poweredOn else {
-            log("Add-a-WHOOP scan: Bluetooth not powered on (state=\(central.state.rawValue))")
+            let reason = BandDiagnostics.radioReason(central.state)
+            log("Add-a-WHOOP scan: Bluetooth unavailable reason=\(reason)")
+            BandDiagnostics.recordScan(
+                .unavailable,
+                family: selectedModel.deviceFamily,
+                reason: reason
+            )
             return
         }
         cancelScanFallback()            // no family-rotation timer should fire during a present-scan
@@ -1716,6 +2033,7 @@ public final class BLEManager: NSObject, ObservableObject {
             withServices: WhoopModel.compatibleServices,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
+        BandDiagnostics.recordScan(.started, family: selectedModel.deviceFamily, reason: "user_discovery")
         log("Add-a-band scan: presenting nearby compatible straps")
     }
 
@@ -1725,6 +2043,7 @@ public final class BLEManager: NSObject, ObservableObject {
         guard isPresentingScan else { return }
         isPresentingScan = false
         central?.stopScan()
+        BandDiagnostics.recordScan(.stopped, family: selectedModel.deviceFamily, reason: "user_cancelled")
         log("Add-a-WHOOP scan: stopped")
     }
 
@@ -1801,6 +2120,20 @@ public final class BLEManager: NSObject, ObservableObject {
     ///     sites are unaffected. Pass `.withResponse` for acked commands (e.g. historicalDataResult).
     public func send(_ command: WhoopCommand, payload: [UInt8] = [0x00],
                      writeType: CBCharacteristicWriteType = .withoutResponse) {
+        send(
+            command,
+            payload: payload,
+            writeType: writeType,
+            confirmedPurpose: .command
+        )
+    }
+
+    private func send(
+        _ command: WhoopCommand,
+        payload: [UInt8],
+        writeType: CBCharacteristicWriteType,
+        confirmedPurpose: ConfirmedCommandWritePurpose
+    ) {
         // #314 parity: CoreBluetooth already covers both Android defects here — this `p.state == .connected`
         // guard makes a write a no-op once the radio powers off (no DeadObjectException to crash on), and
         // centralManagerDidUpdateState publishes state.connected = false on .poweredOff, so the iOS/macOS UI
@@ -1880,7 +2213,13 @@ public final class BLEManager: NSObject, ObservableObject {
             let puffinPayload: [UInt8] = isHaptics ? [0x01, 47, 152, 0, 0, 0, 0, 0, 0, 0, 0, 0] : payload
             seq = seq &+ 1
             let frame = puffinCommandFrame(cmd: puffinCmd, seq: seq, payload: puffinPayload)
-            p.writeValue(Data(frame), for: ch, type: writeType)
+            writeCommandValue(
+                Data(frame),
+                peripheral: p,
+                characteristic: ch,
+                type: writeType,
+                confirmedPurpose: confirmedPurpose
+            )
             let cmdNote = isHaptics ? " cmd=0x13" : ""
             if command == .historicalDataResult {
                 historicalAckLogCounter += 1
@@ -1894,8 +2233,27 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         seq = seq &+ 1
         let frame = command.frame(seq: seq, payload: payload)
-        p.writeValue(Data(frame), for: ch, type: writeType)
+        writeCommandValue(
+            Data(frame),
+            peripheral: p,
+            characteristic: ch,
+            type: writeType,
+            confirmedPurpose: confirmedPurpose
+        )
         log("→ \(command.label) payload=\(hex(payload))")
+    }
+
+    private func writeCommandValue(
+        _ value: Data,
+        peripheral: CBPeripheral,
+        characteristic: CBCharacteristic,
+        type: CBCharacteristicWriteType,
+        confirmedPurpose: ConfirmedCommandWritePurpose
+    ) {
+        if type == .withResponse {
+            confirmedCommandWrites.enqueue(confirmedPurpose)
+        }
+        peripheral.writeValue(value, for: characteristic, type: type)
     }
 
     /// Point the Collector's live decode at the selected family. For a 5/MG, also install an identity
@@ -1950,22 +2308,21 @@ public final class BLEManager: NSObject, ObservableObject {
     /// High-freq-sync ack form (matches re/sync_openwhoop.py, which pulled 762 type-47 records):
     /// HISTORICAL_DATA_RESULT(23) payload = `[0x01] + end_data`, where end_data is the verbatim
     /// 8 bytes of the HISTORY_END metadata.data[10:18] (trim u32 at [10:14] + next u32 at [14:18]).
-    /// The `trim` argument (= end_data first u32) is already persisted as the strap_trim cursor by
-    /// the Backfiller; it is passed here only for logging.
+    /// The `trim` argument (= end_data first u32) is already persisted as the local strap_trim
+    /// diagnostic watermark by the Backfiller. It is also retained here to correlate the confirmed
+    /// callback; firmware, not this local value, owns the next history range offered.
     func ackHistoricalChunk(trim: UInt32, endData: [UInt8]) {
         let trimAdvanced = HistorySyncDurableProgressPolicy.advances(
             rows: 0,
             trim: trim,
             previousTrim: backfiller?.lastAckedTrim
         )
-        send(.historicalDataResult, payload: [0x01] + endData, writeType: .withResponse)
-        acknowledgedBatchesThisSession += 1
-        if trimAdvanced {
-            // Live progress is coalesced to the first advancing ACK and every tenth after it. Repeated
-            // empty ENDs at one frozen cursor are not progress and cannot keep the watchdog alive.
-            state.noteAcknowledgedHistoryBatch()
-            armBackfillDurableProgressTimeout()
-        }
+        send(
+            .historicalDataResult,
+            payload: [0x01] + endData,
+            writeType: .withResponse,
+            confirmedPurpose: .historicalAck(trim: trim, advances: trimAdvanced)
+        )
     }
 
     // MARK: Backfill helpers
@@ -2024,6 +2381,10 @@ public final class BLEManager: NSObject, ObservableObject {
             log("Backfill: deferred - connect handshake not done yet")
             return false
         }
+        guard !confirmedCommandWrites.hasPendingHistoricalAck else {
+            log("Backfill: deferred - previous history acknowledgement is still awaiting its confirmed-write callback")
+            return false
+        }
         guard let backfiller else {
             // Store not built yet (bootstrapStore failed or hasn't run). Do NOT force live HR — the
             // type-47 backfill is the metric source. RE-ATTEMPT the bootstrap here so a transient
@@ -2045,6 +2406,7 @@ public final class BLEManager: NSObject, ObservableObject {
         finishHistorySyncDiagnostic(reason: "retry")
         backfiller.begin(family: selectedModel.deviceFamily, continuedAfterRows: continuingBurst)
         backfilling = true
+        historyCompletionAwaitingAck = false
         acknowledgedBatchesThisSession = 0
         beginHistorySyncDiagnostic(continuing: continuingBurst)
         state.beginHistorySync(continuing: continuingBurst)
@@ -2103,6 +2465,10 @@ public final class BLEManager: NSObject, ObservableObject {
     /// historical data (isBackfilling drops to false), exit the backfill session cleanly.
     private func afterBackfillIngest() {
         guard backfilling, backfiller?.isBackfilling == false else { return }
+        if confirmedCommandWrites.hasPendingHistoricalAck {
+            historyCompletionAwaitingAck = true
+            return
+        }
         exitBackfilling(reason: "HISTORY_COMPLETE")
     }
 
@@ -2125,8 +2491,9 @@ public final class BLEManager: NSObject, ObservableObject {
 
     /// Re-arm the idle watchdog. Called on every offload frame during backfill so the timer resets
     /// as long as the strap keeps sending HISTORY; if the strap goes silent the timer fires and we
-    /// exit the session (the durable strap_trim cursor means the next session resumes where we left
-    /// off). Timeout is generous (60 s, not 20 s): the unstoppable ~2/s type-43 raw flood eats BLE
+    /// exit the session. Unacknowledged history remains firmware-owned and is requested again next
+    /// session; the local strap_trim value is diagnostic only. Timeout is generous (60 s, not 20 s):
+    /// the unstoppable ~2/s type-43 raw flood eats BLE
     /// airtime, so genuine offload frames can arrive in bursts with multi-second lulls between chunks
     /// — a short watchdog cut sessions short mid-drain. Longer = more records drained per session.
     static let backfillIdleTimeoutSeconds = 60
@@ -2134,8 +2501,7 @@ public final class BLEManager: NSObject, ObservableObject {
         backfillTimeout?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.backfiller?.timeoutFired()
-            self.exitBackfilling(reason: "timeout")
+            self.endBackfillAfterWatchdog(reason: "timeout")
         }
         backfillTimeout = item
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(BLEManager.backfillIdleTimeoutSeconds), execute: item)
@@ -2159,8 +2525,7 @@ public final class BLEManager: NSObject, ObservableObject {
                 return
             }
             self.log("Backfill: durable progress stalled for 90s while frames may still be arriving - ending this attempt without acknowledging the held history.")
-            self.backfiller?.timeoutFired()
-            self.exitBackfilling(reason: "durableProgressTimeout")
+            self.endBackfillAfterWatchdog(reason: "durableProgressTimeout")
         }
         backfillDurableProgressTimeout = item
         DispatchQueue.main.asyncAfter(
@@ -2169,12 +2534,31 @@ public final class BLEManager: NSObject, ObservableObject {
         )
     }
 
+    /// End a watchdog-stalled attempt without allowing a delayed confirmed-write callback to be
+    /// credited to a replacement session. Durable rows remain local and firmware-retained state stays
+    /// authoritative. Reconnect when a historical acknowledgement was still in flight so CoreBluetooth
+    /// cannot carry that callback across the session boundary.
+    private func endBackfillAfterWatchdog(reason: String) {
+        backfiller?.timeoutFired()
+        let hadPendingHistoricalAck = confirmedCommandWrites.hasPendingHistoricalAck
+        if hadPendingHistoricalAck {
+            confirmedCommandWrites.reset()
+            historyCompletionAwaitingAck = false
+        }
+        exitBackfilling(reason: reason)
+        if hadPendingHistoricalAck, let peripheral {
+            log("Backfill: watchdog expired with a history acknowledgement in flight - reconnecting without crediting progress")
+            central?.cancelPeripheralConnection(peripheral)
+        }
+    }
+
     /// Tear down the backfill session. Does NOT auto-start live HR: the periodic type-47 backfill
     /// is the primary metric source now, mirroring how WHOOP syncs. Live HR is opt-in only (the
     /// manual "Start HR" button in LiveView). Between backfills the Collector sees only the live
     /// type-43 flood, which extractStreams ignores — the data comes from the next periodic offload.
     private func exitBackfilling(reason: String) {
         guard backfilling else { return }
+        historyCompletionAwaitingAck = false
         backfilling = false
         finishHistorySyncDiagnostic(reason: reason)
         state.finishHistorySyncProgress()
@@ -3675,6 +4059,8 @@ public final class BLEManager: NSObject, ObservableObject {
     }
 
     private func resetCharacteristics() {
+        notificationRearmTimeouts.values.forEach { $0.cancel() }
+        notificationRearmTimeouts.removeAll()
         cmdCharacteristic = nil
         cmdNotifyCharacteristic = nil
         eventNotifyCharacteristic = nil
@@ -3690,6 +4076,49 @@ public final class BLEManager: NSObject, ObservableObject {
         disHwRev = nil
         whoop5NotifyCharacteristics.removeAll()
         whoop5ClientHelloWritePending = false
+        confirmedCommandWrites.reset()
+        historyCompletionAwaitingAck = false
+        pendingNotificationRearms.removeAll()
+    }
+
+    private func cancelNotificationRearmTimeout(for key: String) {
+        notificationRearmTimeouts.removeValue(forKey: key)?.cancel()
+    }
+
+    private func scheduleNotificationRearmTimeout(
+        key: String,
+        channel: String,
+        peripheral: CBPeripheral
+    ) {
+        cancelNotificationRearmTimeout(for: key)
+        let generation = connectGeneration
+        let work = DispatchWorkItem { [weak self, weak peripheral] in
+            guard let self, let peripheral else { return }
+            self.notificationRearmTimeouts.removeValue(forKey: key)
+            guard BandDiagnostics.notificationRearmTimeoutShouldReconnect(
+                expectedGeneration: generation,
+                currentGeneration: self.connectGeneration,
+                isPending: self.pendingNotificationRearms[key] != nil,
+                isConnected: self.state.connected
+            ), self.peripheral === peripheral else {
+                return
+            }
+            self.pendingNotificationRearms.removeValue(forKey: key)
+            self.log("Notify re-arm timed out channel=\(channel)")
+            BandDiagnostics.recordReadiness(
+                .notifications,
+                state: .failed,
+                family: self.selectedModel.deviceFamily,
+                channel: channel,
+                reason: "timeout"
+            )
+            self.central?.cancelPeripheralConnection(peripheral)
+        }
+        notificationRearmTimeouts[key] = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.notificationRearmTimeoutSeconds,
+            execute: work
+        )
     }
 
     /// Start a service-filtered scan for `model`, re-framing the inbound stream for its family (so a
@@ -3714,14 +4143,20 @@ public final class BLEManager: NSObject, ObservableObject {
             withServices: diagnosticServices,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
+        BandDiagnostics.recordScan(.started, family: model.deviceFamily, reason: "connection")
         guard allowFallback else { return }
         let fallback = model.fallbackScanModel
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.central.isScanning, !self.state.connected else { return }
+            self.scanFallbackWorkItem = nil
+            BandDiagnostics.recordScan(.noResult, family: model.deviceFamily, reason: "timeout")
+            BandDiagnostics.recordScan(.fallback, family: fallback.deviceFamily, reason: "alternate_family")
+            BandDiagnostics.recordRetry(.fired, family: fallback.deviceFamily, reason: "scan_fallback")
             self.log("No \(model.transportName) found yet - trying \(fallback.transportName)")
             self.startScan(for: fallback, allowFallback: true)
         }
         scanFallbackWorkItem = work
+        BandDiagnostics.recordRetry(.scheduled, family: fallback.deviceFamily, reason: "scan_fallback")
         DispatchQueue.main.asyncAfter(
             deadline: .now() + BLEManager.scanFallbackDelaySeconds,
             execute: work
@@ -3729,8 +4164,40 @@ public final class BLEManager: NSObject, ObservableObject {
     }
 
     private func cancelScanFallback() {
+        if scanFallbackWorkItem != nil {
+            BandDiagnostics.recordRetry(
+                .cancelled,
+                family: selectedModel.deviceFamily,
+                reason: "scan_fallback"
+            )
+        }
         scanFallbackWorkItem?.cancel()
         scanFallbackWorkItem = nil
+    }
+
+    private func notificationDiagnosticChannel(_ characteristic: CBCharacteristic) -> String {
+        switch characteristic.uuid {
+        case BLEManager.cmdNotifyChar: return "command"
+        case BLEManager.eventNotifyChar: return "event"
+        case BLEManager.dataNotifyChar: return "data"
+        case BLEManager.heartRateChar: return "live_hr"
+        case BLEManager.batteryChar: return "battery"
+        default:
+            return BLEManager.whoop5NotifyChars.contains(characteristic.uuid)
+                ? "modern_custom" : "other"
+        }
+    }
+
+    private static func supportedCustomFamily(for serviceUUID: CBUUID) -> DeviceFamily? {
+        switch serviceUUID {
+        case BLEManager.customService: return .whoop4
+        case BLEManager.whoop5Service: return .whoop5
+        default: return nil
+        }
+    }
+
+    private static func requiredCommandCharacteristic(for family: DeviceFamily) -> CBUUID {
+        family == .whoop5 ? BLEManager.whoop5CmdWriteChar : BLEManager.cmdWriteChar
     }
 
     private func enableLiveNotifications(reason: String) {
@@ -3817,9 +4284,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// information content here) — never the full string, which would land in a shareable strap log.
     private func noteWhoop5VariantFromDIS() {
         let variant = Whoop5Variant.from(serial: disSerial, hardwareRevision: disHwRev)
-        let prefix = (disSerial?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
-            .map { String($0.prefix(3)) } ?? "?"
-        log("DIS: serialPrefix=\(prefix) hwRev=\(disHwRev ?? "?") -> variant=\(variant.label)")
+        log("DIS identity attestation resolved variant=\(variant.label)")
         guard disRead, !disSerialReadPending, !disHwRevReadPending else {
             log("DIS: waiting for remaining identity characteristic before attestation")
             return
@@ -3882,8 +4347,17 @@ public final class BLEManager: NSObject, ObservableObject {
         reason: String,
         forceRearm: Bool = false
     ) {
+        let channel = notificationDiagnosticChannel(c)
+        let rearmKey = c.uuid.uuidString.lowercased()
         guard c.properties.contains(.notify) || c.properties.contains(.indicate) else {
-            log("Notify unavailable \(c.uuid) (\(reason))")
+            log("Notify unavailable channel=\(channel) (\(reason))")
+            BandDiagnostics.recordReadiness(
+                .notifications,
+                state: .failed,
+                family: selectedModel.deviceFamily,
+                channel: channel,
+                reason: "unsupported"
+            )
             return
         }
         if c.isNotifying {
@@ -3893,16 +4367,49 @@ public final class BLEManager: NSObject, ObservableObject {
             // `didUpdateNotificationStateFor` fires — the only path that latches `cmdNotifyConfirmedActive`
             // → `connectSettled` → the alarm re-arm. One-shot: `restoreNeedsResubscribe` clears at settle.
             if restoreNeedsResubscribe || forceRearm {
-                log("Notify force re-arming \(c.uuid) (\(reason))")
+                guard pendingNotificationRearms[rearmKey] == nil else {
+                    log("Notify re-arm already pending channel=\(channel) (\(reason))")
+                    return
+                }
+                log("Notify force re-arming channel=\(channel) (\(reason))")
+                pendingNotificationRearms[rearmKey] = .awaitingDisable
+                BandDiagnostics.recordReadiness(
+                    .notifications,
+                    state: .started,
+                    family: selectedModel.deviceFamily,
+                    channel: channel
+                )
+                scheduleNotificationRearmTimeout(
+                    key: rearmKey,
+                    channel: channel,
+                    peripheral: p
+                )
                 p.setNotifyValue(false, for: c)
-                p.setNotifyValue(true, for: c)
                 return
             }
-            log("Notify already active \(c.uuid) (\(reason))")
+            pendingNotificationRearms.removeValue(forKey: rearmKey)
+            cancelNotificationRearmTimeout(for: rearmKey)
+            log("Notify already active channel=\(channel) (\(reason))")
+            BandDiagnostics.recordReadiness(
+                .notifications,
+                state: .ready,
+                family: selectedModel.deviceFamily,
+                channel: channel
+            )
             return
         }
+        if pendingNotificationRearms[rearmKey] != nil {
+            log("Notify re-arm already pending channel=\(channel) (\(reason))")
+            return
+        }
+        BandDiagnostics.recordReadiness(
+            .notifications,
+            state: .started,
+            family: selectedModel.deviceFamily,
+            channel: channel
+        )
         p.setNotifyValue(true, for: c)
-        log("Notify requested \(c.uuid) (\(reason))")
+        log("Notify requested channel=\(channel) (\(reason))")
     }
 
     // MARK: Alarm API (M6 — additive; does NOT touch connect/offload/sync flows)
@@ -4229,13 +4736,18 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
     }
 
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        log("Central state: \(central.state.rawValue) (5 = poweredOn)")
+        log("Bluetooth state reason=\(BandDiagnostics.radioReason(central.state))")
         // #391: ANY state update means the cold-start settling window moved on — a pending
         // unauthorized-settle escalation is obsolete whether the new state is good news (poweredOn)
         // or its own banner-worthy case (poweredOff handles itself below).
         unauthorizedSettleWork?.cancel()
         unauthorizedSettleWork = nil
         guard central.state == .poweredOn else {
+            BandDiagnostics.recordScan(
+                .unavailable,
+                family: selectedModel.deviceFamily,
+                reason: BandDiagnostics.radioReason(central.state)
+            )
             // #280: a non-poweredOn radio state used to be a SILENT return — the strap log showed only
             // "Central state: 3" and the UI just read "not connected", so a user whose Mac had denied NOOP
             // Bluetooth (.unauthorized == raw 3) had nothing explaining why no strap was ever found. This is
@@ -4323,7 +4835,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         // Bootstrap the async store once on first poweredOn (idempotent if already set).
         Task { @MainActor in await bootstrapStore() }
         if let p = restoredPeripheral {
-            log("poweredOn with restored peripheral - reconnecting \(p.identifier)")
+            log("Powered on with restored band - reconnecting")
             if p.state != .connected {
                 central.connect(p, options: nil)
             } else {
@@ -4376,6 +4888,13 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             } else {
                 discoveredWhoops.append(row)
             }
+            if presentScanDiagnosticDeduper.shouldRecord(observedModel.deviceFamily) {
+                BandDiagnostics.recordScan(
+                    .candidateFound,
+                    family: observedModel.deviceFamily,
+                    reason: "user_discovery"
+                )
+            }
             return
         }
         let scanDecision = whoopGattScanDecision(
@@ -4384,10 +4903,10 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         )
         if !scanDecision.shouldConnect {
             if let family = scanDecision.unsupportedFamily {
-                log("Discovered \(name) (rssi \(RSSI)) - \(family.diagnosticUnsupportedMessage)")
+                log("Discovered an unsupported compatible-family advertisement - \(family.diagnosticUnsupportedMessage)")
                 return
             }
-            log("Discovered \(name) (rssi \(RSSI)) without \(selectedModel.transportName) service - ignoring")
+            log("Discovered a peripheral without the selected compatible service - ignoring")
             return
         }
         // Multi-WHOOP preferred-peripheral filter: when the app has pinned a specific strap, ignore any
@@ -4395,7 +4914,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         // WHOOP default) this guard is skipped and the original "connect to the first discovered" path
         // below is byte-for-byte unchanged.
         if let preferred = preferredPeripheralUUID, peripheral.identifier != preferred {
-            log("Discovered \(name) (\(peripheral.identifier)) - not the preferred strap; ignoring")
+            log("Discovered a non-selected compatible band - ignoring")
             return
         }
         // This is the accepted auto-connect candidate, and a service-filtered scan either observed the
@@ -4405,7 +4924,8 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         // Persist the family that actually advertised so the next scan starts on the right service —
         // this is what makes a one-time rotation stick after a stale-preference reconnect. (PR#195)
         UserDefaults.standard.set(selectedModel.rawValue, forKey: "selectedWhoopModel")
-        log("Discovered \(name) (rssi \(RSSI)) - connecting")
+        log("Discovered selected compatible band - connecting")
+        BandDiagnostics.recordScan(.candidateFound, family: selectedModel.deviceFamily, reason: "connection")
         central.stopScan()
         preparePeripheral(peripheral)
         observeConnectedGattFamily(selectedModel.deviceFamily, evidence: "advertised GATT service")
@@ -4475,6 +4995,16 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             )
         }
         AppDiagnosticsRecorder.shared.record("band.transport", fields: diagnosticFields)
+        BandDiagnostics.recordReadiness(
+            .transport,
+            state: .ready,
+            family: selectedModel.deviceFamily
+        )
+        BandDiagnostics.recordReadiness(
+            .services,
+            state: .started,
+            family: selectedModel.deviceFamily
+        )
         log("Connected - discovering services")
         // Connection test mode: report the connect latency + the uptime-start marker the readout reads.
         // Gated zero-cost: the .connection bool is read before any string is built, so this is a no-op
@@ -4488,16 +5018,19 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         discoverPrimaryServices(on: peripheral)
     }
 
-    /// Connection test mode: a STABLE, integer-token reason for a BLE error, for parity with Android's
-    /// integer GATT status (which emits `status<N>`) and a tighter export surface than a localized,
-    /// locale-dependent free-text string. We emit the `CBError`/`CBATTError` raw enum value (an Int), so
-    /// the token is locale-independent and carries no free text. A nil error reads "unknown"; an error
-    /// from neither CoreBluetooth domain reads "code?" (no localizedDescription, which could carry text).
-    private func connErrorToken(_ error: Error?) -> String {
+    /// Fixed category for CoreBluetooth failures. The Error object is inspected locally, but raw enum
+    /// values and localized descriptions never enter the shareable transcript.
+    private func connErrorCategory(_ error: Error?) -> String {
         guard let error else { return "unknown" }
-        if let cb = error as? CBError { return "cbError\(cb.code.rawValue)" }
-        if let att = error as? CBATTError { return "cbAttError\(att.code.rawValue)" }
-        return "code?"
+        let cb = error as? CBError
+        return BandDiagnostics.coreBluetoothFailure(
+            hasError: true,
+            timedOut: cb?.code == .connectionTimeout,
+            pairingReset: cb?.code == .peerRemovedPairingInformation,
+            authenticationFailure: Self.isInsufficientAuthError(error),
+            attributeFailure: error is CBATTError,
+            transportFailure: cb != nil
+        )
     }
 
     public func centralManager(_ central: CBCentralManager,
@@ -4637,6 +5170,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         realtimeArmedAt = nil   // cleared after the marginal-radio detector above read it (#80)
         // Reset backfill state so the next connect starts a fresh offload (incl. the syncing pill —
         // a dropped link mid-offload must not leave "Syncing strap history…" stuck on, #77).
+        backfiller?.timeoutFired()
         backfillStarted = false
         // #364: the auto-continue streak + spin-detector are per-connection — a fresh connection earns a
         // fresh budget of back-to-back re-kicks and starts its trim-advance comparison from scratch.
@@ -4680,31 +5214,45 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         puffinDeepBufferLog.close()   // same for the high-rate deep-buffer log (#423)
         Task { @MainActor in await collector?.flushStandardHR() }   // persist any buffered 0x2A37 HR
         if autoReconnectPausedForBondLoop {
+            BandDiagnostics.recordRetry(
+                .paused,
+                family: selectedModel.deviceFamily,
+                reason: "bond_loop"
+            )
             // #747: the bond keeps being refused, so auto-reconnect is paused: we stop hammering a strap that
             // can't bond (the epitaph + paused hint were already surfaced when the give-up tripped). The user
             // re-arms it by tapping Connect. We do NOT schedule a rescan here.
-            log("Disconnected\(error.map { ": \($0.localizedDescription)" } ?? ""); auto-reconnect paused (strap keeps refusing to pair; tap Connect once it's free)")
+            log("Disconnected reason=\(connErrorCategory(error)); auto-reconnect paused")
             if TestCentre.active(.connection) {
                 state.append(log: "connect down (uptime ends)", domain: .connection)
                 state.append(log: "reconnect paused=bondLoop (strap refusing bond)", domain: .connection)
             }
         } else if !intentionalDisconnect {
-            log("Disconnected\(error.map { " - \($0.localizedDescription)" } ?? ""); rescanning in 3s")
+            log("Disconnected reason=\(connErrorCategory(error)); rescanning in 3s")
             // Connection test mode: count + describe the involuntary reconnect churn, and mark the link
             // down for the uptime readout. Gated zero-cost (the .connection bool is read before any string
             // is built). Diagnostic only - the rescan above is unchanged. The count increments only on an
             // INVOLUNTARY drop, mirroring an actual reconnect cycle.
             connReconnectCount += 1
+            BandDiagnostics.recordRetry(.scheduled, family: selectedModel.deviceFamily, reason: "disconnect")
             if TestCentre.active(.connection) {
-                let reason = (error as? CBError)?.code == .connectionTimeout
-                    ? "connectionTimeout" : connErrorToken(error)
+                let reason = connErrorCategory(error)
                 state.append(log: "connect down (uptime ends)", domain: .connection)
                 state.append(log: "reconnect n=\(connReconnectCount) reason=\(reason)", domain: .connection)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 // #78 hole-3: a timer in flight when the give-up trips must not fire an extra attempt
                 // (and, via connectFromSystem, can never reset the pause the way the old connect() did).
-                guard let self, !self.intentionalDisconnect, !self.autoReconnectPausedForBondLoop else { return }
+                guard let self else { return }
+                guard !self.intentionalDisconnect, !self.autoReconnectPausedForBondLoop else {
+                    BandDiagnostics.recordRetry(
+                        self.autoReconnectPausedForBondLoop ? .paused : .cancelled,
+                        family: self.selectedModel.deviceFamily,
+                        reason: "disconnect"
+                    )
+                    return
+                }
+                BandDiagnostics.recordRetry(.fired, family: self.selectedModel.deviceFamily, reason: "disconnect")
                 self.connectFromSystem()
             }
         } else {
@@ -4721,7 +5269,12 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
     public func centralManager(_ central: CBCentralManager,
                                didFailToConnect peripheral: CBPeripheral,
                                error: Error?) {
-        log("Failed to connect\(error.map { " - \($0.localizedDescription)" } ?? "")")
+        log("Failed to connect reason=\(connErrorCategory(error))")
+        BandDiagnostics.recordReadiness(
+            .transport,
+            state: .failed,
+            family: selectedModel.deviceFamily
+        )
         let pairingReset = (error as? CBError)?.code == .peerRemovedPairingInformation
         let timedOut = (error as? CBError)?.code == .connectionTimeout
         AppDiagnosticsRecorder.shared.record(
@@ -4754,7 +5307,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             if let cbErr = error as? CBError, cbErr.code == .peerRemovedPairingInformation {
                 reason = "peerRemovedPairing"   // stable token (strap re-bonded elsewhere or firmware reset)
             } else {
-                reason = connErrorToken(error)
+                reason = connErrorCategory(error)
             }
             state.append(log: "reconnect n=\(connReconnectCount) failedConnect reason=\(reason)", domain: .connection)
         }
@@ -4778,10 +5331,20 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         failedConnectAttempts += 1
         let delay = min(60.0, 3.0 * pow(2.0, Double(failedConnectAttempts - 1)))
         log("Reconnecting in \(Int(delay))s (attempt \(failedConnectAttempts))")
+        BandDiagnostics.recordRetry(.scheduled, family: selectedModel.deviceFamily, reason: "connect_failure")
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             // #78 hole-3: a backoff timer in flight when the give-up trips must not fire an extra
             // attempt (and connectFromSystem never resets the pause the way the old connect() did).
-            guard let self, !self.intentionalDisconnect, !self.autoReconnectPausedForBondLoop else { return }
+            guard let self else { return }
+            guard !self.intentionalDisconnect, !self.autoReconnectPausedForBondLoop else {
+                BandDiagnostics.recordRetry(
+                    self.autoReconnectPausedForBondLoop ? .paused : .cancelled,
+                    family: self.selectedModel.deviceFamily,
+                    reason: "connect_failure"
+                )
+                return
+            }
+            BandDiagnostics.recordRetry(.fired, family: self.selectedModel.deviceFamily, reason: "connect_failure")
             self.connectFromSystem()
         }
     }
@@ -4841,11 +5404,11 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             // `didUpdateNotificationStateFor` fires → `cmdNotifyConfirmedActive` → `connectSettled` → the
             // alarm re-arm. Cleared when `connectSettled` bumps.
             restoreNeedsResubscribe = true
-            log("Restored CONNECTED peripheral \(p.identifier) - re-discovering services")
+            log("Restored connected band - re-discovering services")
             discoverPrimaryServices(on: p)
         } else {
             state.connected = false
-            log("Restored DISCONNECTED peripheral \(p.identifier) - reconnect on poweredOn")
+            log("Restored disconnected band - reconnect on poweredOn")
             if central.state == .poweredOn { central.connect(p, options: nil) }
         }
     }
@@ -4856,11 +5419,26 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
 extension BLEManager: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error {
-            log("Service discovery failed: \(error.localizedDescription)")
+            log("Service discovery failed reason=\(connErrorCategory(error))")
+            BandDiagnostics.recordReadiness(
+                .services,
+                state: .failed,
+                family: selectedModel.deviceFamily,
+                reason: "discovery_error"
+            )
             return
         }
-        guard let services = peripheral.services else { return }
-        log("Services discovered: \(services.map { $0.uuid.uuidString }.joined(separator: ", "))")
+        guard let services = peripheral.services else {
+            log("Service discovery failed reason=missing_result")
+            BandDiagnostics.recordReadiness(
+                .services,
+                state: .failed,
+                family: selectedModel.deviceFamily,
+                reason: "discovery_error"
+            )
+            return
+        }
+        log("Services discovered: count=\(services.count)")
 
         // The peripheral's actual custom service is the strongest generation evidence available and is
         // especially important on CoreBluetooth state restoration, where a stale persisted picker can be
@@ -4880,9 +5458,29 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             log("Contradictory WHOOP GATT services discovered; retaining the selected family and not rewriting device identity")
         }
 
+        let supportedCustomServices = services.filter {
+            Self.supportedCustomFamily(for: $0.uuid) != nil
+        }
+        let serviceFailure = BandDiagnostics.serviceFailureReason(
+            supportedCustomServiceCount: supportedCustomServices.count
+        )
+        if let serviceFailure {
+            let diagnosticFamily = observedFamilies.count == 1
+                ? observedFamilies.first!
+                : selectedModel.deviceFamily
+            BandDiagnostics.recordReadiness(
+                .services,
+                state: .failed,
+                family: diagnosticFamily,
+                reason: serviceFailure
+            )
+        }
+        let canDiscoverCustomCharacteristics = serviceFailure == nil
+
         for s in services {
             switch s.uuid {
             case BLEManager.customService:
+                guard canDiscoverCustomCharacteristics else { continue }
                 peripheral.discoverCharacteristics(
                     [BLEManager.cmdWriteChar, BLEManager.cmdNotifyChar,
                      BLEManager.eventNotifyChar, BLEManager.dataNotifyChar], for: s)
@@ -4899,6 +5497,7 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 // so we can send CLIENT_HELLO and receive frames. Live HR/battery still arrive over the
                 // standard 0x2A37/0x2A19 profiles (discovered alongside this); this custom path is
                 // unverified on MG hardware.
+                guard canDiscoverCustomCharacteristics else { continue }
                 log("WHOOP 5/MG detected - discovering puffin characteristics (experimental).")
                 peripheral.discoverCharacteristics(
                     [BLEManager.whoop5CmdWriteChar] + BLEManager.whoop5NotifyChars, for: s)
@@ -4910,11 +5509,51 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverCharacteristicsFor service: CBService,
                            error: Error?) {
+        let customFamily = Self.supportedCustomFamily(for: service.uuid)
         if let error {
-            log("Characteristic discovery failed for \(service.uuid): \(error.localizedDescription)")
+            log("Characteristic discovery failed reason=\(connErrorCategory(error))")
+            if let customFamily {
+                BandDiagnostics.recordReadiness(
+                    .services,
+                    state: .failed,
+                    family: customFamily,
+                    reason: "discovery_error"
+                )
+            }
             return
         }
-        guard let chars = service.characteristics else { return }
+        guard let chars = service.characteristics else {
+            if let customFamily {
+                BandDiagnostics.recordReadiness(
+                    .services,
+                    state: .failed,
+                    family: customFamily,
+                    reason: "command_missing"
+                )
+            }
+            return
+        }
+        if let customFamily {
+            let requiredCommand = Self.requiredCommandCharacteristic(for: customFamily)
+            let hasRequiredCommand = chars.contains { $0.uuid == requiredCommand }
+            if let failure = BandDiagnostics.serviceFailureReason(
+                supportedCustomServiceCount: 1,
+                hasRequiredCommandCharacteristic: hasRequiredCommand
+            ) {
+                BandDiagnostics.recordReadiness(
+                    .services,
+                    state: .failed,
+                    family: customFamily,
+                    reason: failure
+                )
+                return
+            }
+            BandDiagnostics.recordReadiness(
+                .services,
+                state: .ready,
+                family: customFamily
+            )
+        }
         for c in chars {
             switch c.uuid {
             case BLEManager.cmdWriteChar:
@@ -4923,8 +5562,19 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 // GET_BATTERY_LEVEL is benign and what the Mac prototype uses.
                 seq = seq &+ 1
                 let bondFrame = WhoopCommand.getBatteryLevel.frame(seq: seq, payload: [0x00])
-                log("Bonding: confirmed write GET_BATTERY_LEVEL to 61080002")
-                peripheral.writeValue(Data(bondFrame), for: c, type: .withResponse)
+                log("Bonding: confirmed write requested")
+                BandDiagnostics.recordReadiness(
+                    .bond,
+                    state: .started,
+                    family: selectedModel.deviceFamily
+                )
+                writeCommandValue(
+                    Data(bondFrame),
+                    peripheral: peripheral,
+                    characteristic: c,
+                    type: .withResponse,
+                    confirmedPurpose: .bond
+                )
             case BLEManager.whoop5CmdWriteChar:
                 // EXPERIMENTAL WHOOP 5.0/MG: a 5/MG strap starts a session with the static CLIENT_HELLO
                 // frame, not the WHOOP4 GET_BATTERY_LEVEL bond frame. CLIENT_HELLO itself is a confirmed
@@ -4942,7 +5592,18 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                     log("WHOOP 5/MG: writing CLIENT_HELLO to fd4b0002 with response (to trigger bonding, experimental).")
                     state.pairingHint = nil   // fresh attempt; clear any stale pairing-mode guidance
                     whoop5ClientHelloWritePending = true
-                    peripheral.writeValue(Data(hello), for: c, type: .withResponse)
+                    BandDiagnostics.recordReadiness(
+                        .bond,
+                        state: .started,
+                        family: selectedModel.deviceFamily
+                    )
+                    writeCommandValue(
+                        Data(hello),
+                        peripheral: peripheral,
+                        characteristic: c,
+                        type: .withResponse,
+                        confirmedPurpose: .clientHello
+                    )
                 }
                 // The realtime-HR stream is armed POST-bond (in didWriteValueFor / startRealtime) with
                 // puffin framing — not here. Writing it pre-bond on an unauthenticated link did nothing.
@@ -4995,19 +5656,47 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral,
                            didWriteValueFor characteristic: CBCharacteristic,
                            error: Error?) {
+        let callbackMatchesCommandCharacteristic =
+            self.peripheral === peripheral && characteristic.uuid == cmdCharacteristic?.uuid
+        let confirmedPurpose = callbackMatchesCommandCharacteristic
+            ? confirmedCommandWrites.completeNext()
+            : nil
         let callbackMatchesHelloCharacteristic =
-            self.peripheral === peripheral && characteristic.uuid == BLEManager.whoop5CmdWriteChar
+            callbackMatchesCommandCharacteristic
+                && characteristic.uuid == BLEManager.whoop5CmdWriteChar
         let wasClientHelloWrite = Whoop5ClientHelloAck.shouldEstablishBond(
             family: selectedModel.deviceFamily,
             alreadyBonded: didBond,
-            helloPending: whoop5ClientHelloWritePending,
+            helloPending: confirmedPurpose == .clientHello || whoop5ClientHelloWritePending,
             callbackMatchesCommandCharacteristic: callbackMatchesHelloCharacteristic
         )
+        let wasBondWrite = confirmedPurpose == .bond || (!didBond && (
+            wasClientHelloWrite
+                || (selectedModel.deviceFamily == .whoop4
+                    && characteristic.uuid == BLEManager.cmdWriteChar)
+        ))
         if whoop5ClientHelloWritePending && callbackMatchesHelloCharacteristic {
             whoop5ClientHelloWritePending = false
         }
         if let error = error {
-            log("Confirmed write failed: \(error.localizedDescription)")
+            log("Confirmed write failed reason=\(connErrorCategory(error))")
+            if confirmedPurpose?.isHistoricalAck == true {
+                // The rows and local diagnostic watermark are durable, but the band did not confirm the
+                // trim. Close this command session without crediting progress; the reconnect path asks
+                // the band to re-offer anything it retained.
+                historyCompletionAwaitingAck = false
+                backfiller?.timeoutFired()
+                confirmedCommandWrites.reset()
+                central?.cancelPeripheralConnection(peripheral)
+                return
+            }
+            if wasBondWrite {
+                BandDiagnostics.recordReadiness(
+                    .bond,
+                    state: .failed,
+                    family: selectedModel.deviceFamily
+                )
+            }
             // #78 hole-1: classify by ATT code first (locale-proof), English string fallback second.
             // This one change repairs the pairing hint (streak>=2), the #747 give-up (5) AND the #52
             // stale-pin handoff below for non-English devices, which all key off this same flag.
@@ -5018,7 +5707,7 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             if TestCentre.active(.connection) {
                 state.append(log: insufficient
                     ? "otherCentral bondWrite refused=insufficient (strap likely held by the WHOOP app or a stale pairing; cannot start a fresh encrypted bond)"
-                    : "otherCentral bondWrite failed=\(connErrorToken(error))", domain: .connection)
+                    : "otherCentral bondWrite failed=\(connErrorCategory(error))", domain: .connection)
             }
             // WHOOP 5/MG first connect: CoreBluetooth won't start a fresh just-works bond against a strap
             // still bonded to the official WHOOP app, so the CLIENT_HELLO .withResponse write fails with
@@ -5051,11 +5740,16 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 if bondGiveUp.recordRefusal() {
                     autoReconnectPausedForBondLoop = true
                     bondLoopPausedAt = Date()   // starts the #78 hole-4 salvage-probe floor
-                    let opaque = BondRefusalGiveUp.opaqueId(fromLocalUUID: peripheral.identifier.uuidString)
-                    log(BondRefusalGiveUp.epitaphLine(refusals: bondGiveUp.refusals, opaqueId: opaque))
+                    log(BondRefusalGiveUp.epitaphLine(
+                        refusals: bondGiveUp.refusals,
+                        opaqueId: "redacted"
+                    ))
                     state.pairingHint = BondRefusalGiveUp.pausedHint()
                     if TestCentre.active(.connection) {
-                        state.append(log: "bond gaveUp refusals=\(bondGiveUp.refusals) id=\(opaque) (auto-reconnect paused)", domain: .connection)
+                        state.append(
+                            log: "bond gaveUp refusals=\(bondGiveUp.refusals) (auto-reconnect paused)",
+                            domain: .connection
+                        )
                     }
                 }
             }
@@ -5076,6 +5770,29 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 }
             }
             return
+        }
+        if case let .historicalAck(trim, trimAdvanced) = confirmedPurpose {
+            backfiller?.confirmAck(trim: trim)
+            acknowledgedBatchesThisSession += 1
+            if trimAdvanced {
+                // Visible progress and the durable-progress watchdog advance only after CoreBluetooth
+                // confirms that the band accepted this exact acknowledgement.
+                state.noteAcknowledgedHistoryBatch()
+                armBackfillDurableProgressTimeout()
+            }
+            if historyCompletionAwaitingAck,
+               !confirmedCommandWrites.hasPendingHistoricalAck {
+                historyCompletionAwaitingAck = false
+                exitBackfilling(reason: "HISTORY_COMPLETE")
+            }
+            return
+        }
+        if wasBondWrite {
+            BandDiagnostics.recordReadiness(
+                .bond,
+                state: .ready,
+                family: selectedModel.deviceFamily
+            )
         }
 
         // EXPERIMENTAL WHOOP 5.0/MG (issue #17): the CLIENT_HELLO is now a .withResponse write, so this
@@ -5399,17 +6116,17 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             // evidence arrived, but never from a provisional result while its sibling read is outstanding.
             if characteristic.uuid == BLEManager.disSerialChar {
                 disSerialReadPending = false
-                log("DIS serial read failed: \(error.localizedDescription)")
+                log("DIS identity read failed reason=\(connErrorCategory(error))")
                 noteWhoop5VariantFromDIS()
                 return
             }
             if characteristic.uuid == BLEManager.disHwRevChar {
                 disHwRevReadPending = false
-                log("DIS hardware-revision read failed: \(error.localizedDescription)")
+                log("DIS identity read failed reason=\(connErrorCategory(error))")
                 noteWhoop5VariantFromDIS()
                 return
             }
-            log("Notify update failed for \(characteristic.uuid): \(error.localizedDescription)")
+            log("Characteristic update failed reason=\(connErrorCategory(error))")
             return
         }
         guard let data = characteristic.value else { return }
@@ -5592,10 +6309,84 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral,
                            didUpdateNotificationStateFor characteristic: CBCharacteristic,
                            error: Error?) {
-        if let error = error {
-            log("Notify enable failed for \(characteristic.uuid): \(error.localizedDescription)")
-        } else {
-            log("Notify \(characteristic.isNotifying ? "active" : "off") \(characteristic.uuid)")
+        let channel = notificationDiagnosticChannel(characteristic)
+        let rearmKey = characteristic.uuid.uuidString.lowercased()
+        if let phase = pendingNotificationRearms[rearmKey] {
+            switch BandDiagnostics.notificationRearmAction(
+                phase: phase,
+                hasError: error != nil,
+                isNotifying: characteristic.isNotifying
+            ) {
+            case .enable:
+                pendingNotificationRearms[rearmKey] = .awaitingEnable
+                log("Notify re-arm enabling channel=\(channel)")
+                scheduleNotificationRearmTimeout(
+                    key: rearmKey,
+                    channel: channel,
+                    peripheral: peripheral
+                )
+                peripheral.setNotifyValue(true, for: characteristic)
+            case .pending:
+                log("Notify re-arm pending channel=\(channel)")
+            case .ready:
+                pendingNotificationRearms.removeValue(forKey: rearmKey)
+                cancelNotificationRearmTimeout(for: rearmKey)
+                log("Notify active channel=\(channel)")
+                BandDiagnostics.recordReadiness(
+                    .notifications,
+                    state: .ready,
+                    family: selectedModel.deviceFamily,
+                    channel: channel
+                )
+                if characteristic === cmdNotifyCharacteristic {
+                    cmdNotifyConfirmedActive = true
+                    maybeSignalConnectSettled()
+                }
+            case .failed:
+                pendingNotificationRearms.removeValue(forKey: rearmKey)
+                cancelNotificationRearmTimeout(for: rearmKey)
+                log("Notify re-arm failed channel=\(channel)")
+                BandDiagnostics.recordReadiness(
+                    .notifications,
+                    state: .failed,
+                    family: selectedModel.deviceFamily,
+                    channel: channel,
+                    reason: error.map(connErrorCategory) ?? "platform_error"
+                )
+                if BandDiagnostics.notificationRearmFailureShouldReconnect(
+                    isConnected: state.connected,
+                    isCurrentPeripheral: self.peripheral === peripheral
+                ) {
+                    central?.cancelPeripheralConnection(peripheral)
+                }
+            }
+            return
+        }
+        let observation = BandDiagnostics.notificationObservation(
+            hasError: error != nil,
+            isNotifying: characteristic.isNotifying,
+            rearmPending: false
+        )
+        switch observation {
+        case .failed:
+            log("Notify enable failed reason=\(error.map(connErrorCategory) ?? "disabled")")
+            BandDiagnostics.recordReadiness(
+                .notifications,
+                state: .failed,
+                family: selectedModel.deviceFamily,
+                channel: channel,
+                reason: error.map(connErrorCategory) ?? "disabled"
+            )
+        case .pending:
+            log("Notify re-arm pending channel=\(channel)")
+        case .ready:
+            log("Notify active channel=\(channel)")
+            BandDiagnostics.recordReadiness(
+                .notifications,
+                state: .ready,
+                family: selectedModel.deviceFamily,
+                channel: channel
+            )
             // #34: the cmd-notify channel carries GET_ALARM_TIME's (and every other COMMAND_RESPONSE's)
             // reply. Once IT confirms subscribed, check whether the handshake side of connectSettled is
             // also done - this is the "notify confirmed" half arriving AFTER the handshake body, the

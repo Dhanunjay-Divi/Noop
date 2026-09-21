@@ -7,10 +7,11 @@ import UserNotifications
 struct ManagedFriendsView: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject private var service = ManagedCloudService.shared
-    @Binding var selectedSource: String
 
     @State private var displayName = ""
     @State private var searchID = ""
+    @State private var phoneNumber = ""
+    @State private var verificationCode = ""
     @State private var pokeOptIn = false
     @State private var quietStartMinute = 22 * 60
     @State private var quietEndMinute = 7 * 60
@@ -19,20 +20,22 @@ struct ManagedFriendsView: View {
     @State private var profileToUnblock: ManagedSocialBlockedProfile?
     @State private var confirmRotate = false
     @State private var confirmDelete = false
+    @State private var confirmAccountDeletion = false
+    @State private var accountDeletionCodeRequested = false
+    @State private var accountDeletionCode = ""
 
     var body: some View {
         ScreenScaffold(
             title: "Friends",
             subtitle: "Private summaries with mutual control.",
             onRefresh: {
-                if service.phase == .enrolled {
+                if service.accountAccessReady {
                     await service.refreshSocial(repo: model.repo)
                 }
             },
             topBackground: liquidScaffoldSky()
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
-                FriendsSourcePicker(selection: $selectedSource)
                 content
                 if !service.socialStatus.isEmpty {
                     Text(service.socialStatus)
@@ -47,13 +50,13 @@ struct ManagedFriendsView: View {
             service.bootstrap()
             apply(service.socialProfile)
             applyPendingProfileLink(service.pendingSocialNOOPID)
-            if service.phase == .enrolled {
+            if service.accountAccessReady {
                 await service.refreshSocial(repo: model.repo)
                 apply(service.socialProfile)
             }
         }
-        .onChange(of: service.phase) { _, phase in
-            guard phase == .enrolled else { return }
+        .onChange(of: service.accountAccessReady) { _, ready in
+            guard ready else { return }
             Task {
                 await service.refreshSocial(repo: model.repo)
                 apply(service.socialProfile)
@@ -88,16 +91,30 @@ struct ManagedFriendsView: View {
             Text("Your current ID will stop accepting new requests. Existing friends are unchanged.")
         }
         .confirmationDialog(
-            "Delete managed Friends?",
+            "Delete Friends?",
             isPresented: $confirmDelete,
             titleVisibility: .visible
         ) {
-            Button("Delete managed Friends", role: .destructive) {
+            Button("Delete Friends", role: .destructive) {
                 Task { await service.deleteSocialProfile() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Friendships, invitations, shared summaries, badges, pending pokes, Safety contacts, Safety invitations, and Safety incident history will be deleted. Any active Safety page and location sharing will end. NOOP+ backup and on-device data are unchanged.")
+            Text("Friendships, invitations, shared summaries, badges, pending pokes, Safety contacts, Safety invitations, and Safety incident history will be deleted. Any active Safety page and location sharing will end. Cloud backup and on-device data are unchanged.")
+        }
+        .alert(
+            "Delete NOOP account?",
+            isPresented: $confirmAccountDeletion
+        ) {
+            Button("Send verification code", role: .destructive) {
+                accountDeletionCodeRequested = true
+                Task { await service.sendDeletionCode() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Friends, managed cloud data, and the NOOP account will be scheduled for deletion after a 24-hour cooling-off period. Local health data on this iPhone is not deleted."
+            )
         }
         .confirmationDialog(
             requestToBlock.map { "Block \($0.displayName)?" }
@@ -155,24 +172,13 @@ struct ManagedFriendsView: View {
 
     @ViewBuilder
     private var content: some View {
-        if service.phase != .enrolled {
-            ManagedCloudBackupCard(service: service, repo: model.repo)
-            StrandCard(padding: 18) {
-                HStack(alignment: .top, spacing: 12) {
-                    DepthGlyph("person.2.fill", size: 42)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Two private options")
-                            .font(StrandFont.headline)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                        Text("NOOP+ Friends needs an enrolled NOOP+ account. Self-hosted Friends remains available without NOOP+.")
-                            .font(StrandFont.caption)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
+        if service.phase == .deletionScheduled {
+            accountDeletionScheduledCard
+        } else if !service.accountAccessReady {
+            accountAccessCard
         } else if service.socialProfile == nil {
             profileSetup
+            accountManagementCard
         } else {
             if service.pendingSocialNOOPID != nil {
                 pendingProfileLink
@@ -185,6 +191,216 @@ struct ManagedFriendsView: View {
             requestsSection
             friendsSection
             settingsCard
+            accountManagementCard
+        }
+    }
+
+    private var accountManagementCard: some View {
+        StrandCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                Label("NOOP account", systemImage: "person.crop.circle.badge.checkmark")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(
+                    "Friends account access is active. Health backup remains separate and optional."
+                )
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                if !service.status.isEmpty {
+                    Text(service.status)
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                NoopButton(
+                    "Disconnect this iPhone",
+                    systemImage: "rectangle.portrait.and.arrow.right",
+                    kind: .secondary,
+                    fullWidth: true
+                ) {
+                    Task { await service.disconnect() }
+                }
+                .disabled(service.isBusy)
+
+                NoopButton(
+                    "Delete NOOP account...",
+                    systemImage: "trash",
+                    kind: .tertiary,
+                    fullWidth: true
+                ) {
+                    confirmAccountDeletion = true
+                }
+                .disabled(service.isBusy)
+
+                if accountDeletionCodeRequested {
+                    TextField(
+                        "Fresh verification code",
+                        text: $accountDeletionCode
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.oneTimeCode)
+                    .keyboardType(.numberPad)
+                    .disabled(service.isBusy)
+
+                    NoopButton(
+                        service.isBusy
+                            ? "Verifying..."
+                            : "Schedule account deletion",
+                        systemImage: "trash",
+                        kind: .destructive,
+                        fullWidth: true
+                    ) {
+                        Task {
+                            await service.requestAccountDeletion(
+                                code: accountDeletionCode
+                            )
+                        }
+                    }
+                    .disabled(
+                        service.isBusy
+                            || accountDeletionCode.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty
+                    )
+                }
+            }
+        }
+    }
+
+    private var accountDeletionScheduledCard: some View {
+        StrandCard(padding: 22, tint: StrandPalette.statusWarning) {
+            VStack(alignment: .leading, spacing: 14) {
+                Label(
+                    "Account deletion scheduled",
+                    systemImage: "clock.badge.exclamationmark"
+                )
+                .font(StrandFont.title2)
+                .foregroundStyle(StrandPalette.textPrimary)
+
+                Text(
+                    "Friends and account services are paused during the 24-hour cooling-off period. Local health data remains on this iPhone."
+                )
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                if let notBefore = service.deletionNotBefore {
+                    Text(
+                        "Deletion can begin after \(managedDeletionEligibilityText(notBefore))."
+                    )
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+                if !service.status.isEmpty {
+                    Text(service.status)
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                NoopButton(
+                    service.isBusy
+                        ? "Working..."
+                        : "Cancel account deletion",
+                    systemImage: "xmark.circle",
+                    kind: .primary,
+                    fullWidth: true
+                ) {
+                    Task { await service.cancelAccountDeletion() }
+                }
+                .disabled(service.isBusy)
+
+                NoopButton(
+                    service.isBusy
+                        ? "Checking..."
+                        : "Check deletion status",
+                    systemImage: "arrow.clockwise",
+                    kind: .secondary,
+                    fullWidth: true
+                ) {
+                    Task { await service.refreshDeletionStatus() }
+                }
+                .disabled(service.isBusy)
+            }
+        }
+    }
+
+    private var accountAccessCard: some View {
+        StrandCard(padding: 22) {
+            VStack(alignment: .leading, spacing: 16) {
+                Label("Your private NOOP account", systemImage: "person.badge.key")
+                    .font(StrandFont.title2)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text("Verify your phone to use NOOP-hosted Friends. This step does not enable cloud health backup or upload health data.")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                switch service.phase {
+                case .unavailable:
+                    Text("Friends account access is not configured in this build.")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.statusWarning)
+                case .signedOut:
+                    TextField(
+                        "Phone number with country code",
+                        text: $phoneNumber
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.telephoneNumber)
+                    .keyboardType(.phonePad)
+                    NoopButton(
+                        service.isBusy ? "Sending..." : "Send verification code",
+                        systemImage: "message.fill",
+                        kind: .primary,
+                        fullWidth: true
+                    ) {
+                        Task { await service.sendCode(to: phoneNumber) }
+                    }
+                    .disabled(
+                        service.isBusy
+                            || phoneNumber.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty
+                    )
+                case .codeSent:
+                    TextField("Verification code", text: $verificationCode)
+                        .textFieldStyle(.roundedBorder)
+                        .textContentType(.oneTimeCode)
+                        .keyboardType(.numberPad)
+                    NoopButton(
+                        service.isBusy ? "Verifying..." : "Verify code",
+                        systemImage: "checkmark.shield.fill",
+                        kind: .primary,
+                        fullWidth: true
+                    ) {
+                        Task { await service.verifyCode(verificationCode) }
+                    }
+                    .disabled(
+                        service.isBusy
+                            || verificationCode.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty
+                    )
+                case .consentRequired:
+                    NoopButton(
+                        service.isBusy ? "Preparing..." : "Continue to Friends",
+                        systemImage: "person.2.fill",
+                        kind: .primary,
+                        fullWidth: true
+                    ) {
+                        Task { await service.enrollAccount() }
+                    }
+                    .disabled(service.isBusy)
+                case .enrolled, .deletionScheduled:
+                    Text("Finishing account setup...")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
+            }
         }
     }
 
@@ -198,7 +414,7 @@ struct ManagedFriendsView: View {
                         highlighted: true
                     )
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Create your managed Friends profile")
+                        Text("Create your Friends profile")
                             .font(StrandFont.title2)
                             .foregroundStyle(StrandPalette.textPrimary)
                         Text("A random exact-match NOOP ID is created. There is no public directory.")
@@ -879,7 +1095,11 @@ private struct ManagedFriendCard: View {
                         Text(friend.displayName)
                             .font(StrandFont.headline)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text(friend.latest?.day ?? "Waiting for a shared day")
+                        Text(
+                            friend.latest.map {
+                                ManagedSocialFormat.day($0.day)
+                            } ?? String(localized: "Waiting for a shared day")
+                        )
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
@@ -1052,6 +1272,10 @@ private struct ManagedFriendDetailSheet: View {
     @State private var hrv: Bool
     @State private var rhr: Bool
     @State private var pokeAllowed: Bool
+    @State private var messagesAllowed: Bool
+    @State private var photosAllowed: Bool
+    @State private var audioCallsAllowed: Bool
+    @State private var videoCallsAllowed: Bool
     @State private var confirmRemove = false
     @State private var confirmBlock = false
 
@@ -1079,6 +1303,16 @@ private struct ManagedFriendDetailSheet: View {
         _hrv = State(initialValue: friend.sharing.hrv)
         _rhr = State(initialValue: friend.sharing.rhr)
         _pokeAllowed = State(initialValue: friend.sharing.pokeAllowed)
+        _messagesAllowed = State(
+            initialValue: friend.sharing.messagesAllowed
+        )
+        _photosAllowed = State(initialValue: friend.sharing.photosAllowed)
+        _audioCallsAllowed = State(
+            initialValue: friend.sharing.audioCallsAllowed
+        )
+        _videoCallsAllowed = State(
+            initialValue: friend.sharing.videoCallsAllowed
+        )
     }
 
     var body: some View {
@@ -1098,7 +1332,7 @@ private struct ManagedFriendDetailSheet: View {
                                     id: \.element.id
                                 ) { index, day in
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(day.day)
+                                        Text(ManagedSocialFormat.day(day.day))
                                             .font(StrandFont.caption)
                                             .foregroundStyle(
                                                 StrandPalette.textTertiary
@@ -1168,6 +1402,35 @@ private struct ManagedFriendDetailSheet: View {
                                 "Allow this friend to poke me",
                                 isOn: $pokeAllowed
                             )
+                            Divider()
+                            Text("Communication permissions")
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text("Each permission is directional and can be revoked at any time. Nothing is sent automatically.")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(
+                                    StrandPalette.textSecondary
+                                )
+                                .fixedSize(
+                                    horizontal: false,
+                                    vertical: true
+                                )
+                            ManagedSharingToggle(
+                                "Allow messages",
+                                isOn: $messagesAllowed
+                            )
+                            ManagedSharingToggle(
+                                "Allow photos",
+                                isOn: $photosAllowed
+                            )
+                            ManagedSharingToggle(
+                                "Allow audio calls",
+                                isOn: $audioCallsAllowed
+                            )
+                            ManagedSharingToggle(
+                                "Allow video calls",
+                                isOn: $videoCallsAllowed
+                            )
 
                             NoopButton(
                                 "Save sharing",
@@ -1185,7 +1448,13 @@ private struct ManagedFriendDetailSheet: View {
                                             sleepDuration: sleepDuration,
                                             hrv: hrv,
                                             rhr: rhr,
-                                            pokeAllowed: pokeAllowed
+                                            pokeAllowed: pokeAllowed,
+                                            messagesAllowed: messagesAllowed,
+                                            photosAllowed: photosAllowed,
+                                            audioCallsAllowed:
+                                                audioCallsAllowed,
+                                            videoCallsAllowed:
+                                                videoCallsAllowed
                                         ),
                                         repo: repo
                                     )
@@ -1226,6 +1495,28 @@ private struct ManagedFriendDetailSheet: View {
                             ManagedReadOnlySharing(
                                 "I can poke them",
                                 shared: friend.sharedWithMe.pokeAllowed
+                            )
+                            Divider()
+                            Text("Communication they allow")
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            ManagedReadOnlySharing(
+                                "I can message them",
+                                shared: friend.sharedWithMe.messagesAllowed
+                            )
+                            ManagedReadOnlySharing(
+                                "I can send photos",
+                                shared: friend.sharedWithMe.photosAllowed
+                            )
+                            ManagedReadOnlySharing(
+                                "I can start audio calls",
+                                shared:
+                                    friend.sharedWithMe.audioCallsAllowed
+                            )
+                            ManagedReadOnlySharing(
+                                "I can start video calls",
+                                shared:
+                                    friend.sharedWithMe.videoCallsAllowed
                             )
 
                             if friend.sharedWithMe.pokeAllowed {
@@ -1359,6 +1650,23 @@ private struct ManagedReadOnlySharing: View {
 }
 
 private enum ManagedSocialFormat {
+    static func day(_ raw: String) -> String {
+        let parser = DateFormatter()
+        parser.calendar = Calendar(identifier: .gregorian)
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.timeZone = TimeZone(secondsFromGMT: 0)
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: raw) else { return raw }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+
     static func compactDetails(_ summary: ManagedSocialSummary) -> [String] {
         var result: [String] = []
         if let charge = summary.charge {

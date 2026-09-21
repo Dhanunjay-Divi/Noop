@@ -13,12 +13,90 @@ import com.noop.protocol.extractHistoricalStreams
 import com.noop.protocol.rejectedHistoricalRecords
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicLong
 
 data class BackfillCommittedChunk(
     val rows: Int,
     val oldestUnix: Long?,
     val newestUnix: Long?,
 )
+
+internal data class PendingHistoricalAck<T>(
+    val sequence: Long,
+    val trim: Long,
+    val value: T,
+)
+
+/**
+ * Correlates durable HISTORY_END chunks with their later confirmed GATT write callback.
+ *
+ * Staging is not acknowledgement: [lastConfirmedTrim] changes only when [confirm] finds the exact
+ * trim carried by the completed [WhoopBleClient.PendingWrite]. Duplicate trim values are legal, so
+ * confirmations consume the oldest matching staged entry.
+ */
+internal class HistoricalAckLedger<T> {
+    private val pending = ArrayDeque<PendingHistoricalAck<T>>()
+    private var nextSequence = 0L
+
+    @Volatile
+    var lastConfirmedTrim: Long? = null
+        private set
+
+    @Synchronized
+    fun stage(trim: Long, value: T): PendingHistoricalAck<T> {
+        val receipt = PendingHistoricalAck(sequence = nextSequence++, trim = trim, value = value)
+        pending.addLast(receipt)
+        return receipt
+    }
+
+    @Synchronized
+    fun cancel(receipt: PendingHistoricalAck<T>): Boolean {
+        val iterator = pending.iterator()
+        while (iterator.hasNext()) {
+            if (iterator.next().sequence == receipt.sequence) {
+                iterator.remove()
+                return true
+            }
+        }
+        return false
+    }
+
+    @Synchronized
+    fun cancelFirst(trim: Long): PendingHistoricalAck<T>? {
+        val iterator = pending.iterator()
+        while (iterator.hasNext()) {
+            val receipt = iterator.next()
+            if (receipt.trim == trim) {
+                iterator.remove()
+                return receipt
+            }
+        }
+        return null
+    }
+
+    @Synchronized
+    fun confirm(trim: Long): PendingHistoricalAck<T>? {
+        val iterator = pending.iterator()
+        while (iterator.hasNext()) {
+            val receipt = iterator.next()
+            if (receipt.trim == trim) {
+                iterator.remove()
+                lastConfirmedTrim = trim
+                return receipt
+            }
+        }
+        return null
+    }
+
+    @Synchronized
+    fun pendingCount(): Int = pending.size
+
+    @Synchronized
+    fun clearPending() {
+        pending.clear()
+    }
+}
 
 /**
  * Historical-offload state machine (idle / backfilling).
@@ -28,11 +106,10 @@ data class BackfillCommittedChunk(
  * accumulating the type-47 records between them into chunks and committing each chunk durably.
  *
  * Per-chunk local safe-trim invariant (unchanged from Swift):
- *   decode known -> persist decoded (durable) -> persist the strap_trim cursor -> ack the trim to
- *   the strap (link-layer confirmed write).
- * A chunk is forgotten by the strap only after its decoded rows are locally durable AND the trim
- * cursor is persisted AND the ack write is confirmed. The phone NEVER waits on a server (there is
- * none — Strand is fully on-device).
+ *   decode known -> persist decoded (durable) -> persist the local strap_trim diagnostic watermark
+ *   -> queue the trim acknowledgement -> confirm it from the exact GATT write callback.
+ * The band's retained/acknowledged state, not the local watermark, determines what firmware offers
+ * again. Collection never waits on cloud upload before acknowledging a durable local chunk.
  *
  * CRITICAL behaviour preserved from Swift: a high-freq-sync offload sends ONE HISTORY_START then
  * REPEATED HISTORY_ENDs (a chunk-close every ~50 records). So we ack EVERY end and keep
@@ -64,7 +141,7 @@ class Backfiller(
      * end_data, persisted as the `strap_trim` cursor) and the verbatim 8-byte `end_data` (the raw
      * HISTORY_END metadata.data[10:18]) the high-freq-sync ack form requires.
      */
-    private val ackTrim: (trim: Long, endData: ByteArray) -> Unit,
+    private val ackTrim: (sessionGeneration: Long, trim: Long, endData: ByteArray) -> Boolean,
     /**
      * Fires after a chunk's decoded rows are durably committed AND acked — i.e. real new data just
      * landed. Lets the client schedule on-device scoring right away instead of leaving fresh history
@@ -166,6 +243,11 @@ class Backfiller(
 
     /** Guards the [chunk]/[chunkOpen] mutations (the only cross-thread state: ingest vs begin/timeout). */
     private val chunkLock = Any()
+    /** Invalidates a persistence continuation that outlives timeout/disconnect or a new session. */
+    private val sessionGeneration = AtomicLong(0L)
+
+    /** Durable chunks waiting for the exact confirmed HISTORICAL_DATA_RESULT write callback. */
+    private val historicalAckLedger = HistoricalAckLedger<BackfillCommittedChunk?>()
 
     /** Buffered data frames for the current open chunk (between START and the next END). */
     private val chunk = ArrayList<ByteArray>()
@@ -231,9 +313,11 @@ class Backfiller(
      * [begin] (it's a cross-session high-water mark, not a per-session tally). Mirrors Swift
      * `Backfiller.lastAckedTrim`.
      */
-    @Volatile
-    var lastAckedTrim: Long? = null
-        private set
+    val lastAckedTrim: Long?
+        get() = historicalAckLedger.lastConfirmedTrim
+
+    val pendingHistoricalAckCount: Int
+        get() = historicalAckLedger.pendingCount()
 
     /**
      * Distinct historical record-layout versions logged this session. Before this, only the unmapped/
@@ -270,6 +354,8 @@ class Backfiller(
      * Port of Swift `begin()`.
      */
     fun begin(family: DeviceFamily = DeviceFamily.WHOOP4, continuedAfterRows: Boolean = false) {
+        sessionGeneration.incrementAndGet()
+        historicalAckLedger.clearPending()
         this.family = family
         this.continuedAfterRows = continuedAfterRows
         isBackfilling = true
@@ -331,6 +417,7 @@ class Backfiller(
      * this END become the next chunk. An END with no records is still acked (advances the trim).
      */
     private suspend fun finishChunk(unix: Long, trim: Long, endFrame: ByteArray) {
+        val generation = sessionGeneration.get()
         val endData = endData(endFrame, family) ?: return
 
         // #773: corrupt future-RTC detection. A HISTORY_END carries the strap's own clock; a genuine offload
@@ -559,25 +646,68 @@ class Backfiller(
             return
         }
 
-        // Persist the trim cursor BEFORE acking (so a crash between persist and ack still resumes
-        // from the right place). Stored via [TrimCursorStore] because the Room schema has no cursor
-        // table — see the port FLAG. trim is a u32 carried as Long (unsigned-safe).
+        // Record the local diagnostic watermark BEFORE queueing the acknowledgement so local evidence
+        // never lags a confirmed band trim. Firmware-retained state remains the resume authority; this
+        // value is not sent as a selector on the next request. trim is a u32 carried as Long.
+        if (!isCurrentSession(generation)) {
+            log("Backfill: durable chunk belongs to an ended session - not queueing its history acknowledgement.")
+            return
+        }
         try {
             cursorStore.set(STRAP_TRIM_CURSOR, trim)
         } catch (t: Throwable) {
-            // Diag (#601 / #13): decoded rows are durable but the strap_trim cursor write failed. We return
-            // WITHOUT acking, acking now would let the strap trim past records the cursor hasn't recorded, so
-            // on reconnect the offload could replay or skip. Holding the ack keeps it safe; the strap re-offers
-            // this chunk next session. A silent return here was a prime "history won't advance" suspect with
-            // nothing in the log to confirm it. Mirrors the Swift twin's log.
+            // Diag (#601 / #13): decoded rows are durable but the local strap_trim watermark write failed.
+            // Return WITHOUT acking so diagnostics cannot fall behind a confirmed band trim. Firmware keeps
+            // the unacknowledged range authoritative and can offer it again on the next session.
             log("Backfill: failed to write strap_trim cursor (trim=$trim): $t, holding ack so the strap re-sends this chunk; history won't advance until the cursor write succeeds.")
             persistStalled = true   // #57
             return
         }
+        if (!isCurrentSession(generation)) {
+            log("Backfill: session ended while recording the local trim watermark - not queueing its history acknowledgement.")
+            return
+        }
 
-        ackTrim(trim, endData)
-        lastAckedTrim = trim   // #364: record the advanced cursor for the auto-continue spin-detector
-        committed?.let(onChunkCommitted)
+        val pendingAck = historicalAckLedger.stage(trim, committed)
+        if (!ackTrim(generation, trim, endData)) {
+            historicalAckLedger.cancel(pendingAck)
+            persistStalled = true
+            log(
+                "Backfill: failed to queue the confirmed history acknowledgement (trim=$trim); " +
+                    "holding later acknowledgements so the strap cannot trim past this chunk.",
+            )
+        }
+    }
+
+    /**
+     * Confirm the oldest staged chunk matching [trim] after a successful HISTORICAL_DATA_RESULT
+     * [android.bluetooth.BluetoothGattCallback.onCharacteristicWrite] callback.
+     *
+     * [beforeChunkCommitted] lets the transport owner advance its acknowledged-session counters in
+     * the same correlated transition before the optional decoded-chunk callback publishes row progress.
+     */
+    internal fun confirmHistoricalAck(
+        trim: Long,
+        beforeChunkCommitted: () -> Unit = {},
+    ): Boolean {
+        val confirmed = historicalAckLedger.confirm(trim) ?: return false
+        beforeChunkCommitted()
+        confirmed.value?.let(onChunkCommitted)
+        return true
+    }
+
+    /** Drop only unconfirmed receipts when the owning GATT connection is reset. */
+    internal fun clearPendingHistoricalAcks() {
+        historicalAckLedger.clearPending()
+    }
+
+    internal fun isCurrentSession(generation: Long): Boolean =
+        sessionGeneration.get() == generation
+
+    internal fun rejectHistoricalAck(generation: Long, trim: Long) {
+        if (!isCurrentSession(generation)) return
+        historicalAckLedger.cancelFirst(trim)
+        persistStalled = true
     }
 
     /**
@@ -585,6 +715,8 @@ class Backfiller(
      * WITHOUT acking — the open chunk was never durably committed. Port of Swift `timeoutFired()`.
      */
     fun timeoutFired() {
+        sessionGeneration.incrementAndGet()
+        historicalAckLedger.clearPending()
         isBackfilling = false
         synchronized(chunkLock) {
             chunk.clear()
@@ -702,18 +834,15 @@ data class ClockRef(val device: Int, val wall: Int) {
 }
 
 /**
- * Durable key/value cursor store. The macOS Backfiller persists `strap_trim` via the GRDB store's
- * cursor table; the Android Room schema has no cursor table (see Entities.kt — no cursor entity),
- * so this small SharedPreferences-backed store provides the equivalent durability WITHOUT touching
- * the Room schema or the build/manifest.
+ * Durable key/value store for the local `strap_trim` diagnostic watermark. The macOS Backfiller
+ * writes the same marker to the GRDB cursor table; Android uses private SharedPreferences because
+ * Room has no cursor entity. Neither value selects firmware history on the next request.
  *
  * FLAG (uncertain / divergence from macOS): on the Swift side the cursor lives in the same SQLite
- * file as the decoded rows, so cursor and rows commit/back-up atomically together. Here the cursor
- * lives in SharedPreferences, separate from the Room DB. The safe-trim ORDERING is preserved
- * (decoded rows are inserted and durable before the cursor is written, and the cursor is written
- * before the ack), so the worst case is a redundant re-offload of an already-stored chunk after a
- * crash — never data loss — because the decoded inserts are idempotent by natural key. If a Room
- * `cursor` table is later added, swap this implementation for a DAO-backed one.
+ * file as the decoded rows; here it lives separately from Room. The ordering remains strict: decoded
+ * rows become durable, then the watermark is committed, then the acknowledgement is queued. A crash
+ * may leave the watermark ahead of the last confirmed callback, but firmware retained state remains
+ * authoritative and decoded inserts are idempotent by natural key.
  */
 interface TrimCursorStore {
     suspend fun set(name: String, value: Long)
@@ -726,7 +855,7 @@ class PrefsTrimCursorStore(context: Context) : TrimCursorStore {
         .getSharedPreferences("noop_backfill_cursors", Context.MODE_PRIVATE)
 
     override suspend fun set(name: String, value: Long) {
-        // commit() (synchronous) so durability is established before we ack the strap.
+        // commit() is synchronous so the diagnostic watermark is durable before the acknowledgement.
         prefs.edit().putLong(name, value).commit()
     }
 

@@ -53,7 +53,11 @@ class AppWideLocalizationContractTest {
             "../../Tools/AppWideLocalization/appwide_strings.json",
         )
         assertTrue("Canonical app-wide localization source unavailable", canonical != null)
-        assertEquals("Android base keys match the canonical source", canonicalKeys(canonical!!), base.keys)
+        assertEquals(
+            "Android base keys match the canonical source",
+            canonicalKeys(canonical!!),
+            base.keys,
+        )
         assertEquals(
             "Confirm your adult profile details to see a personalized goal.",
             base["appwide_hydration_target_unavailable"],
@@ -95,6 +99,11 @@ class AppWideLocalizationContractTest {
             "Available recorded intake from NOOP and Health Connect · %1\$s.",
             base["appwide_hydration_subtitle_health_connect_format"],
         )
+        assertEquals("On-device", base["appwide_source_on_device"])
+        assertEquals("Imported", base["appwide_source_imported"])
+        assertEquals("Apple Health", base["appwide_source_apple_health"])
+        assertEquals("Health Connect", base["appwide_source_health_connect"])
+        assertEquals("Oura Ring", base["appwide_source_oura_ring"])
         assertEquals("NOOP Band is coming", base["appwide_terms_title"])
         assertTrue(
             base.getValue("appwide_terms_subtitle")
@@ -107,6 +116,39 @@ class AppWideLocalizationContractTest {
         assertTrue(
             base.getValue("appwide_trends_recovery_descriptor")
                 .contains("overnight HRV"),
+        )
+        assertEquals(
+            "Computed on device from HRV against your baseline, resting heart rate, Sleep Score, " +
+                "breathing rate and skin temperature deviation when available.",
+            base["appwide_metric_education_recovery_method"],
+        )
+        assertTrue(
+            "Recovery education must not claim an unwired load input",
+            !base.getValue("appwide_metric_education_recovery_method")
+                .contains("recent load", ignoreCase = true),
+        )
+        assertEquals(
+            "Recovery weighs HRV against your personal baseline (about 55 percent), resting heart " +
+                "rate (about 20 percent), Sleep Score (about 15 percent), breathing rate (about 5 " +
+                "percent), and skin-temperature deviation (about 5 percent) when those inputs are " +
+                "available. Effort is a 0–%1\$s cardiovascular-load score from time in heart-rate " +
+                "zones. Sleep Score combines available duration, efficiency, stages, and consistency. " +
+                "Some displayed days may come from local imports. NOOP-derived scores are calculated " +
+                "locally from the listed available inputs; they are not clinical measures, and missing " +
+                "inputs stay missing.",
+            base["appwide_intelligence_explainer_format"],
+        )
+        assertEquals(
+            "Only the positional Effort maximum may remain as an Android format token",
+            "",
+            base.getValue("appwide_intelligence_explainer_format")
+                .replace("%1\$s", "")
+                .filter { it == '%' },
+        )
+        assertTrue(
+            "Intelligence copy must not claim every displayed value is calculated locally",
+            !base.getValue("appwide_intelligence_explainer_format")
+                .contains("displays values calculated", ignoreCase = true),
         )
 
         val placeholder = Regex("""%\d+\$[ds]""")
@@ -122,4 +164,5 @@ class AppWideLocalizationContractTest {
             }
         }
     }
+
 }

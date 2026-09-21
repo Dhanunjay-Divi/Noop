@@ -157,7 +157,7 @@ public enum ManagedSafetyContactRequestPolicy {
              .policyChanged,
              .conflict:
             return true
-        case let .server(status):
+        case let .server(status, _):
             return (400..<500).contains(status)
                 && ![408, 429].contains(status)
         default:

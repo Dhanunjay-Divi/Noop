@@ -52,13 +52,38 @@ public struct ManagedLocalDocumentCandidate: Equatable, Sendable {
     public var deleted: Bool { payloadJSON == nil }
 }
 
+public struct ManagedPendingCiphertextReference: Equatable, Sendable {
+    public let tableName: String
+    public let localKey: String
+    public let generation: Int64
+    public let nextRevision: Int64
+
+    public init(
+        tableName: String,
+        localKey: String,
+        generation: Int64,
+        nextRevision: Int64
+    ) {
+        self.tableName = tableName
+        self.localKey = localKey
+        self.generation = generation
+        self.nextRevision = nextRevision
+    }
+}
+
 public struct ManagedDocumentApplyResult: Equatable, Sendable {
     public let changedRows: Int
     public let applied: Bool
+    public let acceptedRevision: Bool
 
-    public init(changedRows: Int, applied: Bool) {
+    public init(
+        changedRows: Int,
+        applied: Bool,
+        acceptedRevision: Bool = true
+    ) {
         self.changedRows = changedRows
         self.applied = applied
+        self.acceptedRevision = acceptedRevision
     }
 }
 
@@ -1000,12 +1025,57 @@ extension WhoopStore {
         )
     }
 
+    private static func upsertManagedPreferencesSnapshot(
+        _ db: Database,
+        localProfileID: String,
+        payload: Data,
+        updatedAtMs: Int64
+    ) throws {
+        guard let text = String(data: payload, encoding: .utf8) else {
+            throw ManagedDocumentStoreError.invalidPayload
+        }
+        let existing: String? = try String.fetchOne(
+            db,
+            sql: """
+                SELECT payloadJSON FROM managedDocumentDirty
+                WHERE localProfileId = ?
+                  AND tableName = ?
+                  AND localKey = ?
+                """,
+            arguments: [
+                localProfileID,
+                Self.managedPreferencesTable,
+                Self.managedPreferencesKey,
+            ]
+        )
+        guard existing != text else { return }
+        try db.execute(sql: """
+            INSERT INTO managedDocumentDirty (
+                localProfileId, tableName, localKey, documentKind, generation,
+                operation, updatedAtMs, payloadJSON
+            ) VALUES (?, ?, ?, ?, 1, 'upsert', ?, ?)
+            ON CONFLICT(localProfileId, tableName, localKey) DO UPDATE SET
+                documentKind = excluded.documentKind,
+                generation = managedDocumentDirty.generation + 1,
+                operation = 'upsert',
+                updatedAtMs = excluded.updatedAtMs,
+                payloadJSON = excluded.payloadJSON
+            """, arguments: [
+                localProfileID,
+                Self.managedPreferencesTable,
+                Self.managedPreferencesKey,
+                Self.managedPreferencesKind,
+                updatedAtMs,
+                text,
+            ])
+    }
+
     /// Stages the cross-platform settings whitelist as one small virtual document. Repeated snapshots
     /// do not advance its generation, so opening the app cannot create needless cloud revisions.
     public func stageManagedPreferences(_ payload: Data, updatedAtMs: Int64) async throws {
         guard updatedAtMs >= 0,
               payload.count <= 1_000_000,
-              let text = String(data: payload, encoding: .utf8),
+              String(data: payload, encoding: .utf8) != nil,
               let object = try JSONSerialization.jsonObject(with: payload) as? [String: Any],
               JSONSerialization.isValidJSONObject(object) else {
             throw ManagedDocumentStoreError.invalidPayload
@@ -1018,40 +1088,12 @@ extension WhoopStore {
                 localKey: Self.managedPreferencesKey,
                 localProfileID: localProfileID
             )
-            let existing: String? = try String.fetchOne(
+            try Self.upsertManagedPreferencesSnapshot(
                 db,
-                sql: """
-                    SELECT payloadJSON FROM managedDocumentDirty
-                    WHERE localProfileId = ?
-                      AND tableName = ?
-                      AND localKey = ?
-                    """,
-                arguments: [
-                    localProfileID,
-                    Self.managedPreferencesTable,
-                    Self.managedPreferencesKey,
-                ]
+                localProfileID: localProfileID,
+                payload: payload,
+                updatedAtMs: updatedAtMs
             )
-            guard existing != text else { return }
-            try db.execute(sql: """
-                INSERT INTO managedDocumentDirty (
-                    localProfileId, tableName, localKey, documentKind, generation,
-                    operation, updatedAtMs, payloadJSON
-                ) VALUES (?, ?, ?, ?, 1, 'upsert', ?, ?)
-                ON CONFLICT(localProfileId, tableName, localKey) DO UPDATE SET
-                    documentKind = excluded.documentKind,
-                    generation = managedDocumentDirty.generation + 1,
-                    operation = 'upsert',
-                    updatedAtMs = excluded.updatedAtMs,
-                    payloadJSON = excluded.payloadJSON
-                """, arguments: [
-                    localProfileID,
-                    Self.managedPreferencesTable,
-                    Self.managedPreferencesKey,
-                    Self.managedPreferencesKind,
-                    updatedAtMs,
-                    text,
-                ])
         }
     }
 
@@ -1238,6 +1280,80 @@ extension WhoopStore {
         }
     }
 
+    public func pendingManagedCiphertextReferences(
+        accountScopeHash: String
+    ) async throws -> [ManagedPendingCiphertextReference] {
+        guard Self.validAccountScopeHash(accountScopeHash) else {
+            throw ManagedDocumentStoreError.invalidState
+        }
+        return try syncRead { db in
+            let localProfileID = try Self.requiredManagedLocalProfile(
+                db,
+                accountScopeHash: accountScopeHash
+            )
+            var predicates = Self.managedDocumentTableSpecs
+                .filter { $0.contentMode == .clientEncrypted }
+                .map { _ in "(dirty.tableName = ? AND dirty.documentKind = ?)" }
+            var arguments = [
+                accountScopeHash.databaseValue,
+                localProfileID.databaseValue,
+            ]
+            for spec in Self.managedDocumentTableSpecs
+                where spec.contentMode == .clientEncrypted {
+                arguments.append(spec.tableName.databaseValue)
+                arguments.append(spec.documentKind.databaseValue)
+            }
+            if Self.managedPreferencesContentMode == .clientEncrypted {
+                predicates.append(
+                    "(dirty.tableName = ? AND dirty.documentKind = ?)"
+                )
+                arguments.append(Self.managedPreferencesTable.databaseValue)
+                arguments.append(Self.managedPreferencesKind.databaseValue)
+            }
+            guard !predicates.isEmpty else { return [] }
+
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT dirty.tableName,
+                       dirty.localKey,
+                       dirty.generation,
+                       COALESCE(state.remoteRevision, 0) AS remoteRevision
+                FROM managedDocumentDirty AS dirty
+                LEFT JOIN managedDocumentState AS state
+                  ON state.accountScopeHash = ?
+                 AND state.tableName = dirty.tableName
+                 AND state.localKey = dirty.localKey
+                WHERE dirty.localProfileId = ?
+                  AND (
+                    state.acknowledgedGeneration IS NULL
+                    OR state.acknowledgedGeneration < dirty.generation
+                  )
+                  AND (
+                    dirty.operation != 'delete'
+                    OR COALESCE(state.remoteRevision, 0) > 0
+                  )
+                  AND (
+                    \(predicates.joined(separator: " OR "))
+                  )
+                ORDER BY dirty.updatedAtMs, dirty.tableName, dirty.localKey
+                """, arguments: StatementArguments(arguments))
+
+            return try rows.map { row in
+                let remoteRevision: Int64 = row["remoteRevision"]
+                let (nextRevision, overflow) =
+                    remoteRevision.addingReportingOverflow(1)
+                guard !overflow, nextRevision > 0 else {
+                    throw ManagedDocumentStoreError.invalidState
+                }
+                return ManagedPendingCiphertextReference(
+                    tableName: row["tableName"],
+                    localKey: row["localKey"],
+                    generation: row["generation"],
+                    nextRevision: nextRevision
+                )
+            }
+        }
+    }
+
     public func acknowledgeManagedDocument(
         accountScopeHash: String,
         candidate: ManagedLocalDocumentCandidate,
@@ -1409,10 +1525,16 @@ extension WhoopStore {
                     ) {
                     case .apply:
                         break
-                    case .alreadyCurrent, .stale:
+                    case .alreadyCurrent:
                         return ManagedDocumentApplyResult(
                             changedRows: 0,
                             applied: true
+                        )
+                    case .stale:
+                        return ManagedDocumentApplyResult(
+                            changedRows: 0,
+                            applied: true,
+                            acceptedRevision: false
                         )
                     }
                 }
@@ -1428,6 +1550,12 @@ extension WhoopStore {
                     localProfileID: localProfileID,
                     tableName: Self.managedPreferencesTable,
                     localKey: Self.managedPreferencesKey
+                )
+                try Self.upsertManagedPreferencesSnapshot(
+                    db,
+                    localProfileID: localProfileID,
+                    payload: payloadJSON,
+                    updatedAtMs: appliedAtMs
                 )
                 try Self.upsertManagedDocumentState(
                     db,
@@ -1498,10 +1626,16 @@ extension WhoopStore {
                 ) {
                 case .apply:
                     break
-                case .alreadyCurrent, .stale:
+                case .alreadyCurrent:
                     return ManagedDocumentApplyResult(
                         changedRows: 0,
                         applied: true
+                    )
+                case .stale:
+                    return ManagedDocumentApplyResult(
+                        changedRows: 0,
+                        applied: true,
+                        acceptedRevision: false
                     )
                 }
                 try Self.discardConflictingDirtyProfiles(
@@ -1679,10 +1813,16 @@ extension WhoopStore {
                 ) {
                 case .apply:
                     break
-                case .alreadyCurrent, .stale:
+                case .alreadyCurrent:
                     return ManagedDocumentApplyResult(
                         changedRows: 0,
                         applied: true
+                    )
+                case .stale:
+                    return ManagedDocumentApplyResult(
+                        changedRows: 0,
+                        applied: true,
+                        acceptedRevision: false
                     )
                 }
             }

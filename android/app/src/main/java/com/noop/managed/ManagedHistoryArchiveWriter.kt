@@ -2,14 +2,22 @@ package com.noop.managed
 
 import android.content.Context
 import android.net.Uri
+import android.util.AtomicFile
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.nio.charset.StandardCharsets
 import java.util.zip.Deflater
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 
 internal class ManagedHistoryZipWriter(
     output: OutputStream,
@@ -45,7 +53,7 @@ internal class ManagedHistoryZipWriter(
         }
     }
 
-    private fun add(path: String, data: ByteArray) {
+    fun add(path: String, data: ByteArray) {
         check(!finished) { "Managed history archive is already finalized." }
         require(valid(path)) { "Invalid managed history archive path." }
         require(entryPaths.add(path)) { "Duplicate managed history archive path." }
@@ -66,6 +74,383 @@ internal class ManagedHistoryZipWriter(
             !path.contains('\\') &&
             !path.contains('\u0000') &&
             path.split('/').all { it.isNotEmpty() && it != "." && it != ".." }
+}
+
+internal class ManagedHistoryFileArchiveReader(
+    private val source: File,
+) {
+    init {
+        if (!source.isFile) throw IOException("Managed history archive is unavailable.")
+    }
+
+    fun entryPaths(): List<String> = ZipFile(source).use { zip ->
+        if (!managedHistoryArchiveEntryCountAllowed(zip.size())) {
+            throw IOException("Managed history archive has too many entries.")
+        }
+        val paths = zip.entries().asSequence()
+            .filterNot { it.isDirectory }
+            .map { it.name }
+            .toList()
+        if (paths.size != paths.toSet().size ||
+            paths.any { !validPath(it) } ||
+            "manifest.json" !in paths
+        ) {
+            throw IOException("Managed history archive is invalid.")
+        }
+        paths
+    }
+
+    fun manifestData(): ByteArray = data(
+        "manifest.json",
+        ManagedHistoryTransferLimits.MAXIMUM_MANIFEST_BYTES,
+    )
+
+    fun data(path: String, maximumBytes: Int): ByteArray {
+        if (!validPath(path) || maximumBytes < 0) {
+            throw IOException("Managed history archive path is invalid.")
+        }
+        return ZipFile(source).use { zip ->
+            val entry = zip.getEntry(path)
+                ?: throw IOException("Managed history archive entry is missing.")
+            if (entry.isDirectory || entry.size < 0 || entry.size > maximumBytes) {
+                throw IOException("Managed history archive entry is too large.")
+            }
+            zip.getInputStream(entry).use { input ->
+                readCapped(input, maximumBytes)
+            }
+        }
+    }
+
+}
+
+internal class ManagedHistoryTransferStore(
+    context: Context,
+    accountScopeHash: String,
+) {
+    private val appContext = context.applicationContext
+    private val root: File
+    private val exportEntries: File
+    private val exportCheckpoint: AtomicFile
+    private val importArchive: File
+    private val importArchiveBackup: File
+    private val importCheckpoint: AtomicFile
+
+    init {
+        if (!accountScopeHash.matches(SHA256)) {
+            throw IOException("Managed history transfer scope is invalid.")
+        }
+        root = File(
+            appContext.noBackupFilesDir,
+            "managed-history-transfers/$accountScopeHash",
+        )
+        exportEntries = File(root, "export-entries")
+        exportCheckpoint = AtomicFile(File(root, "export-checkpoint.json"))
+        importArchive = File(root, "import.zip")
+        importArchiveBackup = File(root, "import.zip.previous")
+        importCheckpoint = AtomicFile(File(root, "import-checkpoint.json"))
+        if (!root.exists() && !root.mkdirs()) {
+            throw IOException("Managed history transfer storage is unavailable.")
+        }
+        if (!importArchive.isFile && importArchiveBackup.isFile) {
+            if (!importArchiveBackup.renameTo(importArchive)) {
+                throw IOException("Managed history import recovery failed.")
+            }
+        } else {
+            importArchiveBackup.delete()
+        }
+    }
+
+    fun add(entry: ManagedHistoryExportEntry) {
+        val destination = entryFile(entry.path)
+        if (destination.isFile) {
+            val existing = FileInputStream(destination).use {
+                readCapped(it, entry.data.size)
+            }
+            if (!existing.contentEquals(entry.data)) {
+                throw ManagedStorageException.Conflict()
+            }
+            return
+        }
+        destination.parentFile?.let {
+            if (!it.exists() && !it.mkdirs()) {
+                throw IOException("Managed history transfer storage is unavailable.")
+            }
+        }
+        val temporary = File(destination.parentFile, "${destination.name}.tmp")
+        try {
+            FileOutputStream(temporary).use { output ->
+                output.write(entry.data)
+                output.fd.sync()
+            }
+            if (!temporary.renameTo(destination)) {
+                throw IOException("Managed history transfer entry was not committed.")
+            }
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    fun readExport(path: String, maximumBytes: Int): ByteArray {
+        val source = entryFile(path)
+        if (!source.isFile || source.length() > maximumBytes) {
+            throw IOException("Managed history transfer entry is unavailable.")
+        }
+        return FileInputStream(source).use { readCapped(it, maximumBytes) }
+    }
+
+    fun loadExportCheckpoint(): ManagedHistoryExportCheckpoint? =
+        readAtomic(exportCheckpoint)?.let(ManagedHistoryExportCheckpoint::decode)
+
+    fun saveExportCheckpoint(checkpoint: ManagedHistoryExportCheckpoint) {
+        writeAtomic(exportCheckpoint, checkpoint.encoded())
+    }
+
+    fun loadImportCheckpoint(): ManagedHistoryImportCheckpoint? =
+        readAtomic(importCheckpoint)?.let(ManagedHistoryImportCheckpoint::decode)
+
+    fun saveImportCheckpoint(checkpoint: ManagedHistoryImportCheckpoint) {
+        writeAtomic(importCheckpoint, checkpoint.encoded())
+    }
+
+    fun publishExport(
+        destination: Uri,
+        manifest: ManagedHistoryExportManifest,
+    ) {
+        val expected = (
+            manifest.chunks.map(ManagedHistoryExportChunk::path) +
+                manifest.documents.map(ManagedHistoryExportDocument::path)
+            ).toSet()
+        val actual = if (exportEntries.isDirectory) {
+            exportEntries.walkTopDown()
+                .filter(File::isFile)
+                .map { it.relativeTo(exportEntries).invariantSeparatorsPath }
+                .toSet()
+        } else {
+            emptySet()
+        }
+        if (expected.size != manifest.exportedObjects || actual != expected) {
+            throw ManagedHistoryExportStateException(
+                IOException("Managed history staged entries are inconsistent."),
+            )
+        }
+        val writer = ManagedHistorySafArchiveWriter(appContext, destination)
+        try {
+            manifest.chunks.forEach { chunk ->
+                val data = try {
+                    readExport(chunk.path, chunk.compressedBytes)
+                } catch (error: Throwable) {
+                    throw ManagedHistoryExportStateException(error)
+                }
+                if (data.size != chunk.compressedBytes ||
+                    ManagedDigest.sha256(data) != chunk.sha256
+                ) {
+                    throw ManagedHistoryExportStateException(
+                        IOException("Managed history staged entry failed validation."),
+                    )
+                }
+                writer.add(
+                    ManagedHistoryExportEntry(
+                        ManagedHistoryExportEntryKind.CHUNK,
+                        chunk.path,
+                        data,
+                    ),
+                )
+            }
+            manifest.documents.forEach { document ->
+                val data = try {
+                    readExport(document.path, document.archiveBytes)
+                } catch (error: Throwable) {
+                    throw ManagedHistoryExportStateException(error)
+                }
+                if (data.size != document.archiveBytes ||
+                    ManagedDigest.sha256(data) != document.archiveSha256
+                ) {
+                    throw ManagedHistoryExportStateException(
+                        IOException("Managed history staged entry failed validation."),
+                    )
+                }
+                writer.add(
+                    ManagedHistoryExportEntry(
+                        ManagedHistoryExportEntryKind.DOCUMENT,
+                        document.path,
+                        data,
+                    ),
+                )
+            }
+            writer.finish(manifest)
+            clearExport()
+        } catch (error: Throwable) {
+            writer.abort()
+            throw error
+        }
+    }
+
+    suspend fun stageImport(source: Uri): ManagedHistoryFileArchiveReader {
+        val temporary = File(root, "import.zip.tmp")
+        return appContext.contentResolver.openInputStream(source)?.use { input ->
+            stageManagedHistoryImportArchive(
+                input = input,
+                temporary = temporary,
+                importArchive = importArchive,
+                importArchiveBackup = importArchiveBackup,
+                loadCheckpoint = ::loadImportCheckpoint,
+                clearCheckpoint = importCheckpoint::delete,
+            )
+        } ?: throw IOException("Managed history archive could not be opened.")
+    }
+
+    fun clearExport() {
+        exportEntries.deleteRecursively()
+        exportCheckpoint.delete()
+    }
+
+    fun clearImport() {
+        importCheckpoint.delete()
+        importArchive.delete()
+        importArchiveBackup.delete()
+        File(root, "import.zip.tmp").delete()
+    }
+
+    private fun entryFile(path: String): File {
+        if (!validPath(path) || path == "manifest.json") {
+            throw IOException("Managed history transfer path is invalid.")
+        }
+        val candidate = File(exportEntries, path).canonicalFile
+        val parent = exportEntries.canonicalFile
+        if (!candidate.path.startsWith(parent.path + File.separator)) {
+            throw IOException("Managed history transfer path is invalid.")
+        }
+        return candidate
+    }
+
+    private fun readAtomic(file: AtomicFile): ByteArray? {
+        if (!file.baseFile.isFile) return null
+        val maximumBytes = if (file === exportCheckpoint) {
+            ManagedHistoryTransferLimits.MAXIMUM_EXPORT_CHECKPOINT_BYTES
+        } else {
+            ManagedHistoryTransferLimits.MAXIMUM_IMPORT_CHECKPOINT_BYTES
+        }
+        if (file.baseFile.length() > maximumBytes) {
+            throw IOException("Managed history checkpoint is too large.")
+        }
+        return file.openRead().use { readCapped(it, maximumBytes.toInt()) }
+    }
+
+    private fun writeAtomic(file: AtomicFile, data: ByteArray) {
+        val maximumBytes = if (file === exportCheckpoint) {
+            ManagedHistoryTransferLimits.MAXIMUM_EXPORT_CHECKPOINT_BYTES
+        } else {
+            ManagedHistoryTransferLimits.MAXIMUM_IMPORT_CHECKPOINT_BYTES
+        }
+        if (data.size.toLong() > maximumBytes) {
+            throw IOException("Managed history checkpoint is too large.")
+        }
+        val output = file.startWrite()
+        try {
+            output.write(data)
+            output.fd.sync()
+            file.finishWrite(output)
+        } catch (error: Throwable) {
+            file.failWrite(output)
+            throw error
+        }
+    }
+
+    private companion object {
+        val SHA256 = Regex("^[0-9a-f]{64}$")
+    }
+}
+
+internal suspend fun stageManagedHistoryImportArchive(
+    input: java.io.InputStream,
+    temporary: File,
+    importArchive: File,
+    importArchiveBackup: File,
+    loadCheckpoint: () -> ManagedHistoryImportCheckpoint?,
+    clearCheckpoint: () -> Unit,
+): ManagedHistoryFileArchiveReader {
+    try {
+        FileOutputStream(temporary).use { output ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0L
+            while (true) {
+                coroutineContext.ensureActive()
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count.toLong() > MAX_MANAGED_HISTORY_ARCHIVE_BYTES - total) {
+                    throw IOException("Managed history archive is too large.")
+                }
+                output.write(buffer, 0, count)
+                total += count
+                coroutineContext.ensureActive()
+            }
+            coroutineContext.ensureActive()
+            output.fd.sync()
+            coroutineContext.ensureActive()
+        }
+
+        val stagedReader = ManagedHistoryFileArchiveReader(temporary)
+        val stagedManifest = ManagedHistoryExportManifest.decode(
+            stagedReader.manifestData(),
+        )
+        val stagedDigest = ManagedDigest.sha256(stagedManifest.encoded())
+        val checkpoint = loadCheckpoint()
+        coroutineContext.ensureActive()
+
+        importArchiveBackup.delete()
+        if (importArchive.isFile && !importArchive.renameTo(importArchiveBackup)) {
+            throw IOException("Managed history import could not be replaced.")
+        }
+        if (!temporary.renameTo(importArchive)) {
+            if (importArchiveBackup.isFile) {
+                importArchiveBackup.renameTo(importArchive)
+            }
+            throw IOException("Managed history import was not committed.")
+        }
+        importArchiveBackup.delete()
+        if (checkpoint != null && checkpoint.archiveSha256 != stagedDigest) {
+            clearCheckpoint()
+        }
+        return ManagedHistoryFileArchiveReader(importArchive)
+    } finally {
+        temporary.delete()
+    }
+}
+
+internal fun managedHistoryArchiveEntryCountAllowed(count: Int): Boolean =
+    count in 1..ManagedHistoryTransferLimits.MAXIMUM_ARCHIVE_ENTRY_COUNT
+
+internal fun managedHistoryExportCheckpointMaximumBytes(): Long =
+    ManagedHistoryTransferLimits.MAXIMUM_EXPORT_CHECKPOINT_BYTES
+
+private const val MAX_MANAGED_HISTORY_ARCHIVE_BYTES =
+    32L * 1_024 * 1_024 * 1_024
+
+private fun validPath(path: String): Boolean =
+    path.isNotEmpty() &&
+        path.toByteArray(StandardCharsets.UTF_8).size <=
+        ManagedHistoryTransferLimits.MAXIMUM_PATH_BYTES &&
+        !path.startsWith("/") &&
+        !path.endsWith("/") &&
+        !path.contains('\\') &&
+        !path.contains('\u0000') &&
+        path.split('/').all { it.isNotEmpty() && it != "." && it != ".." }
+
+private fun readCapped(
+    input: java.io.InputStream,
+    maximumBytes: Int,
+): ByteArray {
+    val output = java.io.ByteArrayOutputStream(minOf(maximumBytes, DEFAULT_BUFFER_SIZE))
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        if (output.size() > maximumBytes - count) {
+            throw IOException("Managed history archive entry is too large.")
+        }
+        output.write(buffer, 0, count)
+    }
+    return output.toByteArray()
 }
 
 internal class ManagedHistorySafArchiveWriter(

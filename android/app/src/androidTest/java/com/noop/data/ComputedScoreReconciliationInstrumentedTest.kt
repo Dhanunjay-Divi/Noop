@@ -110,6 +110,72 @@ class ComputedScoreReconciliationInstrumentedTest {
     }
 
     @Test
+    fun formulaMigrationEmptyReplacementClearsOnlyStaleComputedScores() = runBlocking {
+        val computed = "compatible-band-noop"
+        val imported = "compatible-band"
+        dao.upsertDailyMetrics(
+            listOf(
+                DailyMetric(computed, "2026-05-02", recovery = 52.0),
+                DailyMetric(computed, "2026-05-03", recovery = 53.0),
+                DailyMetric(imported, "2026-05-02", recovery = 92.0),
+            ),
+        )
+        dao.upsertMetricSeries(
+            listOf(
+                MetricSeriesRow(computed, "2026-05-02", "sleep_performance", 72.0),
+                MetricSeriesRow(computed, "2026-05-03", "rest_confidence", 1.0),
+                MetricSeriesRow(computed, "2026-05-02", "sleep_debt_min", 20.0),
+                MetricSeriesRow(imported, "2026-05-02", "sleep_performance", 95.0),
+            ),
+        )
+
+        val receipt = repository.reconcileComputedScoreRange(
+            deviceId = computed,
+            fromDay = "2026-05-02",
+            toDay = "2026-05-03",
+            dailyRows = emptyList(),
+            managedRestKeys = setOf(
+                "sleep_performance",
+                "rest_confidence",
+                "rest_evidence_flags",
+            ),
+            restRows = emptyList(),
+            allowEmptyReplacement = true,
+        )
+
+        assertTrue(receipt.isEmpty())
+        assertTrue(
+            dao.dailyMetricsRange(computed, "2026-05-02", "2026-05-03").isEmpty(),
+        )
+        assertTrue(
+            dao.metricSeries(computed, "sleep_performance", "2026-05-02", "2026-05-03")
+                .isEmpty(),
+        )
+        assertTrue(
+            dao.metricSeries(computed, "rest_confidence", "2026-05-02", "2026-05-03")
+                .isEmpty(),
+        )
+        assertEquals(
+            20.0,
+            dao.metricSeries(computed, "sleep_debt_min", "2026-05-02", "2026-05-02")
+                .single().value,
+            0.0,
+        )
+        assertEquals(
+            92.0,
+            dao.dailyMetricsRange(imported, "2026-05-02", "2026-05-02")
+                .single().recovery!!,
+            0.0,
+        )
+        assertEquals(
+            95.0,
+            dao.metricSeries(imported, "sleep_performance", "2026-05-02", "2026-05-02")
+                .single().value,
+            0.0,
+        )
+    }
+
+    @Test
     fun clearingComputedEffortPreservesOtherMetricsAndImportedOwner() = runBlocking {
         val computed = "compatible-band-noop"
         val imported = "compatible-band"

@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import inspect
 import os
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -38,6 +39,7 @@ from app.managed_safety_repository import (
     SAFETY_MAX_REQUESTS_PER_DAY,
     SAFETY_REQUEST_LIST_LIMIT,
     ManagedSafetyPushService,
+    ManagedSafetyRepeatPolicy,
     PostgresManagedSafetyRepository,
 )
 from app.repository import PostgresRepository
@@ -46,6 +48,10 @@ DATABASE_URL = os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL")
 DATABASE_ENGINE = "postgresql"
 REPLAY_SECRET = "test-managed-safety-replay-secret-at-least-32-bytes"
 PUSH_SECRET = "test-managed-safety-push-secret-at-least-32-bytes"
+
+
+def _capability() -> str:
+    return "noopsafety_" + uuid4().hex + uuid4().hex[:11]
 
 
 def test_incident_location_requires_explicit_opt_in() -> None:
@@ -369,11 +375,24 @@ def test_safety_mutation_lock_order_contracts() -> None:
         PostgresManagedSafetyRepository.complete_push_delivery
     )
     installation_lock = completion_source.index("FROM managed_push_installations")
-    delivery_lock = completion_source.index(
-        "FROM managed_safety_push_deliveries",
+    completion_incident_lock = completion_source.index(
+        "FROM managed_safety_incidents",
         installation_lock,
     )
-    assert installation_lock < delivery_lock
+    completion_participant_lock = completion_source.index(
+        "FROM managed_safety_participants",
+        completion_incident_lock,
+    )
+    delivery_lock = completion_source.index(
+        "FROM managed_safety_push_deliveries",
+        completion_participant_lock,
+    )
+    assert (
+        installation_lock
+        < completion_incident_lock
+        < completion_participant_lock
+        < delivery_lock
+    )
 
 
 @pytest.mark.skipif(
@@ -714,6 +733,278 @@ async def test_concurrent_contact_acceptance_preserves_owner_limit() -> None:
     ),
 )
 @pytest.mark.asyncio
+async def test_unreachable_safety_incidents_terminalize_and_delete_location() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=10,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        pool = primary._require_pool()
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+
+        async def create_group(label: str) -> dict[str, object]:
+            owner = await _principal(primary, label=f"{label}-owner-{uuid4()}")
+            first = await _principal(primary, label=f"{label}-first-{uuid4()}")
+            second = await _principal(primary, label=f"{label}-second-{uuid4()}")
+            await _profile(managed, owner, display_name=f"{label} owner")
+            first_profile, _ = await _accept_contact(
+                managed,
+                safety,
+                owner=owner,
+                contact=first,
+                contact_name=f"{label} first",
+            )
+            second_profile, _ = await _accept_contact(
+                managed,
+                safety,
+                owner=owner,
+                contact=second,
+                contact_name=f"{label} second",
+            )
+            await _register_push_eligibility(
+                primary,
+                safety,
+                principal=first,
+                label=f"{label}-first",
+            )
+            await _register_push_eligibility(
+                primary,
+                safety,
+                principal=second,
+                label=f"{label}-second",
+            )
+            incident = await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=uuid4(),
+                    duration_hours=8,
+                    share_location=True,
+                    initial_location=ManagedSafetyLocationUpdate(
+                        sequence=1,
+                        latitude=17.385,
+                        longitude=78.4867,
+                        horizontal_accuracy_m=12.5,
+                        captured_at=datetime.now(UTC),
+                    ),
+                ),
+            )
+            return {
+                "owner": owner,
+                "first": first,
+                "second": second,
+                "first_profile_id": UUID(first_profile["profile_id"]),
+                "second_profile_id": UUID(second_profile["profile_id"]),
+                "incident_id": UUID(incident["incident_id"]),
+            }
+
+        async def storage_state(incident_id: UUID):
+            return await pool.fetchrow(
+                """
+                SELECT incident.status,
+                       incident.ended_at,
+                       (
+                           SELECT count(*)
+                           FROM managed_safety_locations location
+                           WHERE location.incident_id = incident.incident_id
+                       ) AS location_count,
+                       (
+                           SELECT count(*)
+                           FROM managed_safety_participants participant
+                           WHERE participant.incident_id = incident.incident_id
+                             AND participant.status <> 'revoked'
+                       ) AS non_revoked_participant_count,
+                       (
+                           SELECT count(*)
+                           FROM managed_safety_push_deliveries delivery
+                           WHERE delivery.incident_id = incident.incident_id
+                             AND (
+                                  delivery.status = 'sending'
+                                  OR (
+                                      delivery.status IN (
+                                          'pending',
+                                          'transient_failure',
+                                          'unavailable'
+                                      )
+                                      AND delivery.attempts < 3
+                                  )
+                             )
+                       ) AS retryable_delivery_count,
+                       (
+                           SELECT count(*)
+                           FROM managed_safety_push_deliveries delivery
+                           WHERE delivery.incident_id = incident.incident_id
+                             AND (
+                                  delivery.claim_id IS NOT NULL
+                                  OR delivery.claim_expires_at IS NOT NULL
+                                  OR delivery.next_page_at IS NOT NULL
+                             )
+                       ) AS paging_state_count
+                FROM managed_safety_incidents incident
+                WHERE incident.incident_id = $1
+                """,
+                incident_id,
+            )
+
+        async def assert_active(
+            incident_id: UUID,
+            *,
+            non_revoked_participants: int,
+        ) -> None:
+            state = await storage_state(incident_id)
+            assert state["status"] == "open"
+            assert state["ended_at"] is None
+            assert state["location_count"] == 1
+            assert state["non_revoked_participant_count"] == non_revoked_participants
+            assert state["retryable_delivery_count"] > 0
+
+        async def assert_terminal(incident_id: UUID) -> None:
+            state = await storage_state(incident_id)
+            assert state["status"] == "canceled"
+            assert state["ended_at"] is not None
+            assert state["location_count"] == 0
+            assert state["retryable_delivery_count"] == 0
+            assert state["paging_state_count"] == 0
+
+        all_invalid = await create_group("all-invalid")
+        invalid_incident_id = all_invalid["incident_id"]
+        invalid_claims = await safety.claim_push_deliveries(
+            principal=all_invalid["owner"],
+            incident_id=invalid_incident_id,
+            limit=20,
+        )
+        assert len(invalid_claims) == 2
+        await safety.complete_push_delivery(
+            delivery_id=invalid_claims[0]["delivery_id"],
+            claim_id=invalid_claims[0]["claim_id"],
+            claimed_token_hash=invalid_claims[0]["token_hash"],
+            outcome="invalid",
+            provider_reference_hash=None,
+        )
+        await assert_active(
+            invalid_incident_id,
+            non_revoked_participants=2,
+        )
+        await safety.complete_push_delivery(
+            delivery_id=invalid_claims[1]["delivery_id"],
+            claim_id=invalid_claims[1]["claim_id"],
+            claimed_token_hash=invalid_claims[1]["token_hash"],
+            outcome="invalid",
+            provider_reference_hash=None,
+        )
+        await assert_terminal(invalid_incident_id)
+        assert [
+            row["status"]
+            for row in await pool.fetch(
+                """
+                SELECT status
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = $1
+                ORDER BY delivery_id
+                """,
+                invalid_incident_id,
+            )
+        ] == ["invalid", "invalid"]
+
+        all_exhausted = await create_group("all-exhausted")
+        exhausted_incident_id = all_exhausted["incident_id"]
+        for attempt in range(1, 4):
+            exhausted_claims = await safety.claim_push_deliveries(
+                principal=all_exhausted["owner"],
+                incident_id=exhausted_incident_id,
+                limit=20,
+            )
+            assert len(exhausted_claims) == 2
+            for index, delivery in enumerate(exhausted_claims):
+                assert delivery["attempt"] == attempt
+                await safety.complete_push_delivery(
+                    delivery_id=delivery["delivery_id"],
+                    claim_id=delivery["claim_id"],
+                    claimed_token_hash=delivery["token_hash"],
+                    outcome="transient_failure",
+                    provider_reference_hash=None,
+                )
+                if attempt == 3 and index == 0:
+                    await assert_active(
+                        exhausted_incident_id,
+                        non_revoked_participants=2,
+                    )
+            if attempt < 3:
+                await assert_active(
+                    exhausted_incident_id,
+                    non_revoked_participants=2,
+                )
+        await assert_terminal(exhausted_incident_id)
+        assert [
+            row["status"]
+            for row in await pool.fetch(
+                """
+                SELECT status
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = $1
+                ORDER BY delivery_id
+                """,
+                exhausted_incident_id,
+            )
+        ] == ["rejected", "rejected"]
+
+        removed = await create_group("removed")
+        removed_incident_id = removed["incident_id"]
+        await safety.remove_contact(
+            principal=removed["owner"],
+            other_profile_id=removed["first_profile_id"],
+        )
+        await assert_active(
+            removed_incident_id,
+            non_revoked_participants=1,
+        )
+        await safety.remove_contact(
+            principal=removed["owner"],
+            other_profile_id=removed["second_profile_id"],
+        )
+        await assert_terminal(removed_incident_id)
+
+        blocked = await create_group("blocked")
+        blocked_incident_id = blocked["incident_id"]
+        await managed.block_social_profile(
+            principal=blocked["owner"],
+            blocked_profile_id=blocked["first_profile_id"],
+        )
+        await assert_active(
+            blocked_incident_id,
+            non_revoked_participants=1,
+        )
+        await managed.block_social_profile(
+            principal=blocked["owner"],
+            blocked_profile_id=blocked["second_profile_id"],
+        )
+        await assert_terminal(blocked_incident_id)
+
+        profile_deleted = await create_group("profile-deleted")
+        deleted_incident_id = profile_deleted["incident_id"]
+        await managed.delete_social_profile(principal=profile_deleted["first"])
+        await assert_active(
+            deleted_incident_id,
+            non_revoked_participants=1,
+        )
+        await managed.delete_social_profile(principal=profile_deleted["second"])
+        await assert_terminal(deleted_incident_id)
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
 async def test_safety_invite_churn_has_account_scoped_daily_quota() -> None:
     primary = PostgresRepository(
         DATABASE_URL or "",
@@ -768,7 +1059,7 @@ async def test_safety_invite_churn_has_account_scoped_daily_quota() -> None:
                 principal=owner,
                 request=ManagedSafetyInviteCreate(
                     request_id=uuid4(),
-                    capability="noopsafety_" + ("q" * 43),
+                    capability=_capability(),
                 ),
             )
         assert 1 <= limited.value.retry_after_seconds <= 24 * 60 * 60
@@ -789,7 +1080,7 @@ async def test_safety_invite_churn_has_account_scoped_daily_quota() -> None:
                 principal=owner,
                 request=ManagedSafetyInviteCreate(
                     request_id=uuid4(),
-                    capability="noopsafety_" + ("w" * 43),
+                    capability=_capability(),
                 ),
             )
 
@@ -813,7 +1104,7 @@ async def test_safety_invite_churn_has_account_scoped_daily_quota() -> None:
             principal=owner,
             request=ManagedSafetyInviteCreate(
                 request_id=uuid4(),
-                capability="noopsafety_" + ("x" * 43),
+                capability=_capability(),
             ),
         )
         assert after_window["duplicate"] is False
@@ -1120,7 +1411,7 @@ async def test_safety_relationships_require_active_managed_accounts() -> None:
             contact,
             display_name="Contact",
         )
-        capability = "noopsafety_" + ("a" * 43)
+        capability = _capability()
         await safety.create_invite(
             principal=owner,
             request=ManagedSafetyInviteCreate(
@@ -2826,7 +3117,7 @@ async def test_invite_redeem_and_owner_profile_delete_do_not_deadlock() -> None:
         contact = await _principal(primary, label=f"invite-race-contact-{uuid4()}")
         owner_profile = await _profile(managed, owner, display_name="Owner")
         await _profile(managed, contact, display_name="Contact")
-        capability = "noopsafety_" + ("r" * 43)
+        capability = _capability()
         invite = await safety.create_invite(
             principal=owner,
             request=ManagedSafetyInviteCreate(
@@ -3473,7 +3764,7 @@ async def test_safety_incident_locks_contact_profiles_before_contact_rows() -> N
     ),
 )
 @pytest.mark.asyncio
-async def test_account_erasure_retires_active_safety_participation() -> None:
+async def test_account_erasure_retires_safety_only_after_cooling_off() -> None:
     primary = PostgresRepository(
         DATABASE_URL or "",
         pool_min_size=1,
@@ -3510,22 +3801,25 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
             contact=pending,
             contact_name="Pending",
         )
-        installations = {}
-        for principal, profile, platform in (
-            (responding, responding_profile, "ios"),
-            (pending, pending_profile, "android"),
+        responding_profile_id = UUID(responding_profile["profile_id"])
+        pending_profile_id = UUID(pending_profile["profile_id"])
+        installations = {
+            responding_profile_id: f"ios-erasure-{uuid4().hex}",
+            pending_profile_id: f"android-erasure-{uuid4().hex}",
+        }
+        for principal, profile_id, platform in (
+            (responding, responding_profile_id, "ios"),
+            (pending, pending_profile_id, "android"),
         ):
-            installation_id = f"{platform}-erasure-{uuid4().hex}"
-            installations[UUID(profile["profile_id"])] = installation_id
             await _installation(
                 primary,
                 principal,
-                installation_id=installation_id,
+                installation_id=installations[profile_id],
                 platform=platform,
             )
             await push.register(
                 principal=principal,
-                installation_id=installation_id,
+                installation_id=installations[profile_id],
                 registration=ManagedPushRegistration(
                     platform=platform,
                     environment="development",
@@ -3543,6 +3837,31 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
             ),
         )
         incident_id = UUID(incident["incident_id"])
+        pool = primary._require_pool()
+        delivered_at = datetime.now(UTC)
+        assert (
+            await pool.fetchval(
+                """
+                UPDATE managed_safety_push_deliveries
+                SET status = 'sent',
+                    attempts = 1,
+                    last_attempt_at = $4,
+                    delivered_at = $4,
+                    provider_reference_hash = $5,
+                    updated_at = $4
+                WHERE incident_id = $1
+                  AND contact_profile_id = $2
+                  AND installation_id = $3
+                RETURNING status
+                """,
+                incident_id,
+                responding_profile_id,
+                installations[responding_profile_id],
+                delivered_at,
+                hashlib.sha256(b"erasure-cooling-delivery").hexdigest(),
+            )
+            == "sent"
+        )
         await safety.update_location(
             principal=owner,
             incident_id=incident_id,
@@ -3561,7 +3880,7 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
         )
         assert acknowledged["status"] == "acknowledged"
 
-        await managed.request_erasure(
+        responding_erasure = await managed.request_erasure(
             principal=responding,
             request_id=uuid4(),
             scope="all_managed_data",
@@ -3569,8 +3888,22 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
             identity_deletion_ticket=None,
             cooling_off=timedelta(days=1),
         )
+        responding_pending = replace(
+            responding,
+            account_status="erasure_pending",
+        )
+        visible_to_pending_contact = await safety.get_incident(
+            principal=responding_pending,
+            incident_id=incident_id,
+        )
+        assert visible_to_pending_contact["status"] == "acknowledged"
+        duplicate_response = await safety.respond(
+            principal=responding_pending,
+            incident_id=incident_id,
+            decision="responding",
+        )
+        assert duplicate_response["duplicate"] is True
 
-        pool = primary._require_pool()
         reopened = await pool.fetchrow(
             """
             SELECT status, acknowledged_at
@@ -3579,8 +3912,8 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
             """,
             incident_id,
         )
-        assert reopened["status"] == "open"
-        assert reopened["acknowledged_at"] is None
+        assert reopened["status"] == "acknowledged"
+        assert reopened["acknowledged_at"] is not None
         participants = await pool.fetch(
             """
             SELECT contact_profile_id, status
@@ -3593,9 +3926,7 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
         participant_statuses = {
             row["contact_profile_id"]: row["status"] for row in participants
         }
-        responding_profile_id = UUID(responding_profile["profile_id"])
-        pending_profile_id = UUID(pending_profile["profile_id"])
-        assert participant_statuses[responding_profile_id] == "revoked"
+        assert participant_statuses[responding_profile_id] == "responding"
         assert participant_statuses[pending_profile_id] == "pending"
         assert (
             await pool.fetchval(
@@ -3610,7 +3941,7 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
                 responding_profile_id,
                 installations[responding_profile_id],
             )
-            == "rejected"
+            == "sent"
         )
         assert (
             await pool.fetchval(
@@ -3628,7 +3959,13 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
             == "pending"
         )
 
-        await managed.request_erasure(
+        canceled = await managed.cancel_erasure(
+            principal=responding,
+            erasure_job_id=UUID(responding_erasure["erasure_job_id"]),
+        )
+        assert canceled["status"] == "canceled"
+
+        owner_erasure = await managed.request_erasure(
             principal=owner,
             request_id=uuid4(),
             scope="all_managed_data",
@@ -3636,8 +3973,27 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
             identity_deletion_ticket=None,
             cooling_off=timedelta(days=1),
         )
+        owner_pending = replace(owner, account_status="erasure_pending")
+        visible_to_pending_owner = await safety.list_incidents(
+            principal=owner_pending,
+        )
+        assert [row["incident_id"] for row in visible_to_pending_owner] == [
+            str(incident_id)
+        ]
+        updated_location = await safety.update_location(
+            principal=owner_pending,
+            incident_id=incident_id,
+            update=ManagedSafetyLocationUpdate(
+                sequence=2,
+                latitude=17.386,
+                longitude=78.487,
+                horizontal_accuracy_m=10.0,
+                captured_at=datetime.now(UTC),
+            ),
+        )
+        assert updated_location["sequence"] == 2
 
-        retired = await pool.fetchrow(
+        cooling = await pool.fetchrow(
             """
             SELECT status, ended_at
             FROM managed_safety_incidents
@@ -3645,8 +4001,8 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
             """,
             incident_id,
         )
-        assert retired["status"] == "canceled"
-        assert retired["ended_at"] is not None
+        assert cooling["status"] == "acknowledged"
+        assert cooling["ended_at"] is None
         assert (
             await pool.fetchval(
                 """
@@ -3656,7 +4012,7 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
                 """,
                 incident_id,
             )
-            == 0
+            == 1
         )
         assert (
             await pool.fetchval(
@@ -3671,8 +4027,23 @@ async def test_account_erasure_retires_active_safety_participation() -> None:
                 pending_profile_id,
                 installations[pending_profile_id],
             )
-            == "rejected"
+            == "pending"
         )
+        await managed.claim_erasure_deletions(
+            now=datetime.now(UTC) + timedelta(days=2),
+            batch_size=10,
+        )
+        retired = await pool.fetchrow(
+            """
+            SELECT status, ended_at
+            FROM managed_safety_incidents
+            WHERE incident_id = $1
+            """,
+            incident_id,
+        )
+        assert retired["status"] == "canceled"
+        assert retired["ended_at"] is not None
+        assert UUID(owner_erasure["erasure_job_id"])
     finally:
         await primary.shutdown()
 
@@ -4754,5 +5125,408 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
             )
             == "rejected"
         )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_managed_repeated_paging_is_bounded_response_aware_and_isolated() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=10,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        pool = primary._require_pool()
+        await pool.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'rejected',
+                claim_id = NULL,
+                claim_expires_at = NULL,
+                next_page_at = NULL,
+                updated_at = clock_timestamp()
+            WHERE status IN (
+                    'pending',
+                    'sending',
+                    'transient_failure',
+                    'unavailable'
+                  )
+               OR next_page_at IS NOT NULL
+            """
+        )
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        provider = _RecordingPushProvider()
+        repeat_policy = ManagedSafetyRepeatPolicy(
+            enabled=True,
+            interval_seconds=60,
+            ttl_seconds=10 * 60,
+            max_rounds=3,
+        )
+        push = ManagedSafetyPushService(
+            repository=safety,
+            token_codec=ManagedPushTokenCodec(PUSH_SECRET),
+            provider=provider,
+            repeat_policy=repeat_policy,
+        )
+
+        async def create_group(label: str) -> dict[str, object]:
+            owner = await _principal(primary, label=f"{label}-owner-{uuid4()}")
+            first = await _principal(primary, label=f"{label}-first-{uuid4()}")
+            second = await _principal(primary, label=f"{label}-second-{uuid4()}")
+            await _profile(managed, owner, display_name=f"{label} owner")
+            first_profile, _ = await _accept_contact(
+                managed,
+                safety,
+                owner=owner,
+                contact=first,
+                contact_name=f"{label} first",
+            )
+            second_profile, _ = await _accept_contact(
+                managed,
+                safety,
+                owner=owner,
+                contact=second,
+                contact_name=f"{label} second",
+            )
+            await _register_push_eligibility(
+                primary,
+                safety,
+                principal=first,
+                label=f"{label}-first",
+            )
+            await _register_push_eligibility(
+                primary,
+                safety,
+                principal=second,
+                label=f"{label}-second",
+            )
+            incident = await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=uuid4(),
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+            return {
+                "owner": owner,
+                "first": first,
+                "second": second,
+                "first_profile_id": UUID(first_profile["profile_id"]),
+                "second_profile_id": UUID(second_profile["profile_id"]),
+                "incident_id": UUID(incident["incident_id"]),
+            }
+
+        first_group = await create_group("repeat-a")
+        second_group = await create_group("repeat-b")
+        for group in (first_group, second_group):
+            summary = await push.dispatch(
+                principal=group["owner"],
+                incident_id=group["incident_id"],
+            )
+            assert summary["contacts_reached"] == 2
+
+        assert len(provider.tokens) == 4
+        first_incident_id = first_group["incident_id"]
+        second_incident_id = second_group["incident_id"]
+
+        initial = await pool.fetch(
+            """
+            SELECT incident_id,
+                   page_round,
+                   status,
+                   attempts,
+                   first_delivered_at,
+                   next_page_at
+            FROM managed_safety_push_deliveries
+            WHERE incident_id = ANY($1::uuid[])
+            ORDER BY incident_id, installation_id
+            """,
+            [first_incident_id, second_incident_id],
+        )
+        assert len(initial) == 4
+        assert all(row["page_round"] == 1 for row in initial)
+        assert all(row["status"] == "sent" for row in initial)
+        assert all(row["attempts"] == 1 for row in initial)
+        assert all(row["first_delivered_at"] is not None for row in initial)
+        assert all(row["next_page_at"] is not None for row in initial)
+
+        await pool.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET delivered_at = clock_timestamp() - interval '2 seconds',
+                next_page_at = clock_timestamp() - interval '1 second'
+            WHERE incident_id = $1
+              AND status = 'sent'
+              AND next_page_at IS NOT NULL
+            """,
+            first_incident_id,
+        )
+        concurrent = await asyncio.gather(
+            push.dispatch_due(limit=20),
+            push.dispatch_due(limit=20),
+        )
+        assert sum(result.claimed for result in concurrent) == 2
+        assert sum(result.repeated_claimed for result in concurrent) == 2
+        assert sum(result.provider_accepted for result in concurrent) == 2
+        assert len(provider.tokens) == 6
+        assert (await push.dispatch_due(limit=20)).claimed == 0
+
+        first_round_two = await pool.fetch(
+            """
+            SELECT contact_profile_id,
+                   page_round,
+                   status,
+                   attempts,
+                   first_delivered_at,
+                   next_page_at
+            FROM managed_safety_push_deliveries
+            WHERE incident_id = $1
+            ORDER BY contact_profile_id
+            """,
+            first_incident_id,
+        )
+        assert len(first_round_two) == 2
+        assert all(row["page_round"] == 2 for row in first_round_two)
+        assert all(row["status"] == "sent" for row in first_round_two)
+        assert all(row["attempts"] == 1 for row in first_round_two)
+        assert all(row["first_delivered_at"] is not None for row in first_round_two)
+        assert all(row["next_page_at"] is not None for row in first_round_two)
+
+        await pool.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'transient_failure',
+                delivered_at = NULL,
+                next_page_at = NULL,
+                updated_at = clock_timestamp()
+            WHERE incident_id = $1
+            """,
+            first_incident_id,
+        )
+        reached_after_later_failure = await safety.get_incident(
+            principal=first_group["owner"],
+            incident_id=first_incident_id,
+        )
+        assert reached_after_later_failure["delivery"]["contacts_reached"] == 2
+        assert reached_after_later_failure["delivery"]["installations_reached"] == 2
+        await pool.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'sent',
+                delivered_at = clock_timestamp(),
+                next_page_at = clock_timestamp() + interval '1 minute',
+                updated_at = clock_timestamp()
+            WHERE incident_id = $1
+            """,
+            first_incident_id,
+        )
+
+        await pool.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET delivered_at = clock_timestamp() - interval '2 seconds',
+                next_page_at = clock_timestamp() - interval '1 second'
+            WHERE incident_id = $1
+              AND status = 'sent'
+              AND next_page_at IS NOT NULL
+            """,
+            first_incident_id,
+        )
+        acknowledged = await safety.respond(
+            principal=first_group["first"],
+            incident_id=first_incident_id,
+            decision="responding",
+        )
+        assert acknowledged["status"] == "acknowledged"
+
+        await pool.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET delivered_at = clock_timestamp() - interval '2 seconds',
+                next_page_at = clock_timestamp() - interval '1 second'
+            WHERE incident_id = $1
+              AND status = 'sent'
+              AND next_page_at IS NOT NULL
+            """,
+            second_incident_id,
+        )
+        isolated = await push.dispatch_due(limit=20)
+        assert isolated.claimed == 2
+        assert isolated.repeated_claimed == 2
+        assert len(provider.tokens) == 8
+        assert (
+            await pool.fetchval(
+                """
+                SELECT min(page_round)
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = $1
+                """,
+                first_incident_id,
+            )
+            == 2
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT min(page_round)
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = $1
+                """,
+                second_incident_id,
+            )
+            == 2
+        )
+
+        reopened = await safety.respond(
+            principal=first_group["first"],
+            incident_id=first_incident_id,
+            decision="cannot_respond",
+        )
+        assert reopened["status"] == "open"
+        resumed = await push.dispatch_due(limit=20)
+        assert resumed.claimed == 1
+        assert resumed.repeated_claimed == 1
+        assert len(provider.tokens) == 9
+        participant_rounds = {
+            row["contact_profile_id"]: int(row["page_round"])
+            for row in await pool.fetch(
+                """
+                SELECT contact_profile_id, page_round
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = $1
+                """,
+                first_incident_id,
+            )
+        }
+        assert participant_rounds[first_group["first_profile_id"]] == 2
+        assert participant_rounds[first_group["second_profile_id"]] == 3
+
+        await pool.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET delivered_at = clock_timestamp() - interval '2 seconds',
+                next_page_at = clock_timestamp() - interval '1 second'
+            WHERE incident_id = $1
+              AND status = 'sent'
+              AND next_page_at IS NOT NULL
+            """,
+            second_incident_id,
+        )
+        bounded = await push.dispatch_due(limit=20)
+        assert bounded.claimed == 2
+        assert bounded.repeated_claimed == 2
+        second_rounds = await pool.fetch(
+            """
+            SELECT page_round, next_page_at
+            FROM managed_safety_push_deliveries
+            WHERE incident_id = $1
+            """,
+            second_incident_id,
+        )
+        assert all(row["page_round"] == 3 for row in second_rounds)
+        assert all(row["next_page_at"] is None for row in second_rounds)
+        assert (await push.dispatch_due(limit=20)).claimed == 0
+
+        await safety.end_incident(
+            principal=first_group["owner"],
+            incident_id=first_incident_id,
+            outcome="canceled",
+        )
+        await safety.end_incident(
+            principal=second_group["owner"],
+            incident_id=second_incident_id,
+            outcome="resolved",
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = ANY($1::uuid[])
+                  AND next_page_at IS NOT NULL
+                """,
+                [first_incident_id, second_incident_id],
+            )
+            == 0
+        )
+        assert (await push.dispatch_due(limit=20)).claimed == 0
+
+        expiring = await safety.create_incident(
+            principal=second_group["owner"],
+            request=ManagedSafetyIncidentCreate(
+                request_id=uuid4(),
+                duration_hours=8,
+                share_location=True,
+                initial_location=ManagedSafetyLocationUpdate(
+                    sequence=1,
+                    latitude=17.385,
+                    longitude=78.4867,
+                    horizontal_accuracy_m=12.5,
+                    captured_at=datetime.now(UTC),
+                ),
+            ),
+        )
+        expiring_id = UUID(expiring["incident_id"])
+        await push.dispatch(
+            principal=second_group["owner"],
+            incident_id=expiring_id,
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_locations
+                WHERE incident_id = $1
+                """,
+                expiring_id,
+            )
+            == 1
+        )
+        await pool.execute(
+            """
+            UPDATE managed_safety_incidents
+            SET created_at = created_at - interval '9 hours',
+                expires_at = expires_at - interval '9 hours',
+                purge_after = purge_after - interval '9 hours'
+            WHERE incident_id = $1
+            """,
+            expiring_id,
+        )
+        assert (await push.dispatch_due(limit=20)).claimed == 0
+        expired = await pool.fetchrow(
+            """
+            SELECT status,
+                   EXISTS (
+                       SELECT 1
+                       FROM managed_safety_locations location
+                       WHERE location.incident_id = incident.incident_id
+                   ) AS has_location,
+                   EXISTS (
+                       SELECT 1
+                       FROM managed_safety_push_deliveries delivery
+                       WHERE delivery.incident_id = incident.incident_id
+                         AND delivery.next_page_at IS NOT NULL
+                   ) AS has_next_page
+            FROM managed_safety_incidents incident
+            WHERE incident_id = $1
+            """,
+            expiring_id,
+        )
+        assert expired["status"] == "expired"
+        assert expired["has_location"] is False
+        assert expired["has_next_page"] is False
     finally:
         await primary.shutdown()

@@ -67,6 +67,37 @@ internal class ManagedCloudPreferences(context: Context) {
             }
     }
 
+    fun accountEnrollmentRequestId(): UUID =
+        stableRequestId(KEY_ACCOUNT_ENROLLMENT_REQUEST_ID)
+
+    fun completeAccountAccess(binding: ManagedAccountScopeBinding) {
+        check(
+            preferences.edit()
+                .putString(KEY_ACCOUNT_ACCESS_SCOPE_HASH, binding.dataScopeHash)
+                .remove(KEY_ACCOUNT_ENROLLMENT_REQUEST_ID)
+                .commit(),
+        ) { "Could not persist managed account access." }
+    }
+
+    fun isAccountAccessReady(binding: ManagedAccountScopeBinding): Boolean =
+        preferences.getString(
+            KEY_ACCOUNT_ACCESS_SCOPE_HASH,
+            null,
+        ) == binding.dataScopeHash
+
+    val accountAccessScopeHash: String?
+        get() = preferences.getString(
+            KEY_ACCOUNT_ACCESS_SCOPE_HASH,
+            null,
+        )?.takeIf { it.matches(SHA256) }
+
+    fun clearAccountAccess() {
+        preferences.edit()
+            .remove(KEY_ACCOUNT_ACCESS_SCOPE_HASH)
+            .remove(KEY_ACCOUNT_ENROLLMENT_REQUEST_ID)
+            .apply()
+    }
+
     fun socialProfileRequestId(): UUID =
         stableRequestId(KEY_SOCIAL_PROFILE_REQUEST_ID)
 
@@ -380,8 +411,8 @@ internal class ManagedCloudPreferences(context: Context) {
             .apply()
     }
 
-    fun clearSocialState() {
-        preferences.edit()
+    fun clearSocialState(preserveEnabled: Boolean = false) {
+        val editor = preferences.edit()
             .remove(KEY_SOCIAL_PROFILE_REQUEST_ID)
             .remove(KEY_SOCIAL_INVITE_REQUEST_ID)
             .remove(KEY_SOCIAL_INVITE_CAPABILITY)
@@ -391,8 +422,10 @@ internal class ManagedCloudPreferences(context: Context) {
             .remove(KEY_SOCIAL_SUMMARY_DIGESTS)
             .remove(KEY_SOCIAL_LAST_ATTEMPT_MS)
             .remove(KEY_SOCIAL_DELIVERY_RECEIPTS)
-            .remove(KEY_SOCIAL_ENABLED)
-            .apply()
+        if (!preserveEnabled) {
+            editor.remove(KEY_SOCIAL_ENABLED)
+        }
+        editor.apply()
     }
 
     fun clearSafetyState() {
@@ -408,20 +441,105 @@ internal class ManagedCloudPreferences(context: Context) {
             .apply()
     }
 
-    fun completeEnrollment(accountScopeHash: String, policyVersion: String) {
+    fun completeEnrollment(
+        binding: ManagedAccountScopeBinding,
+        policyVersion: String,
+    ) {
         check(
             preferences.edit()
-                .putString(KEY_ENROLLED_SCOPE_HASH, accountScopeHash)
+                .putString(KEY_ENROLLED_SCOPE_HASH, binding.dataScopeHash)
+                .putString(
+                    KEY_ENROLLED_IDENTITY_SCOPE_HASH,
+                    binding.identityScopeHash,
+                )
+                .putInt(
+                    KEY_ENROLLED_DATA_SCOPE_VERSION,
+                    binding.dataScopeVersion,
+                )
                 .putString(KEY_ENROLLED_POLICY, policyVersion)
+                .putInt(
+                    KEY_ENROLLED_BINDING_SCHEMA,
+                    ManagedAccountScope.BINDING_SCHEMA_VERSION,
+                )
+                .remove(
+                    "$KEY_RETAINED_LEGACY_SCOPE_PREFIX${binding.identityScopeHash}",
+                )
                 .putBoolean(KEY_AUTOMATIC, true)
                 .remove(KEY_ENROLLMENT_REQUEST_ID)
                 .commit(),
         ) { "Could not persist NOOP+ enrollment." }
     }
 
-    fun isEnrolled(accountScopeHash: String, policyVersion: String): Boolean =
-        preferences.getString(KEY_ENROLLED_SCOPE_HASH, null) == accountScopeHash &&
+    fun persistAccountScopeBinding(
+        binding: ManagedAccountScopeBinding,
+    ): Boolean =
+        preferences.edit()
+            .putString(
+                KEY_ENROLLED_IDENTITY_SCOPE_HASH,
+                binding.identityScopeHash,
+            )
+            .putInt(
+                KEY_ENROLLED_DATA_SCOPE_VERSION,
+                binding.dataScopeVersion,
+            )
+            .putInt(
+                KEY_ENROLLED_BINDING_SCHEMA,
+                ManagedAccountScope.BINDING_SCHEMA_VERSION,
+            )
+            .commit()
+
+    fun isEnrolled(
+        binding: ManagedAccountScopeBinding,
+        policyVersion: String,
+    ): Boolean =
+        preferences.getString(
+            KEY_ENROLLED_SCOPE_HASH,
+            null,
+        ) == binding.dataScopeHash &&
+            preferences.getString(
+                KEY_ENROLLED_IDENTITY_SCOPE_HASH,
+                null,
+            ) == binding.identityScopeHash &&
+            preferences.getInt(
+                KEY_ENROLLED_DATA_SCOPE_VERSION,
+                0,
+            ) == binding.dataScopeVersion &&
+            preferences.getInt(
+                KEY_ENROLLED_BINDING_SCHEMA,
+                0,
+            ) == ManagedAccountScope.BINDING_SCHEMA_VERSION &&
             preferences.getString(KEY_ENROLLED_POLICY, null) == policyVersion
+
+    val enrolledScopeHash: String?
+        get() = preferences.getString(KEY_ENROLLED_SCOPE_HASH, null)
+
+    val enrolledIdentityScopeHash: String?
+        get() = preferences.getString(
+            KEY_ENROLLED_IDENTITY_SCOPE_HASH,
+            null,
+        )
+
+    val enrolledDataScopeVersion: Int?
+        get() = if (preferences.contains(KEY_ENROLLED_DATA_SCOPE_VERSION)) {
+            preferences.getInt(KEY_ENROLLED_DATA_SCOPE_VERSION, 0)
+        } else {
+            null
+        }
+
+    val enrolledBindingSchema: Int?
+        get() = if (preferences.contains(KEY_ENROLLED_BINDING_SCHEMA)) {
+            preferences.getInt(KEY_ENROLLED_BINDING_SCHEMA, 0)
+        } else {
+            null
+        }
+
+    fun retainedLegacyDataScopeHash(identityScopeHash: String): String? {
+        require(identityScopeHash.matches(SHA256))
+        return preferences.getString(
+            "$KEY_RETAINED_LEGACY_SCOPE_PREFIX$identityScopeHash",
+            null,
+        )?.takeIf { it.matches(SHA256) }
+    }
 
     var automatic: Boolean
         get() = preferences.getBoolean(KEY_AUTOMATIC, false)
@@ -462,18 +580,28 @@ internal class ManagedCloudPreferences(context: Context) {
         get() = preferences.getString(KEY_ERASURE_NOT_BEFORE, null)
         set(value) = putString(KEY_ERASURE_NOT_BEFORE, value)
 
-    fun disconnect() {
-        preferences.edit()
-            .remove(KEY_VERIFICATION_ID)
-            .remove(KEY_DELETION_VERIFICATION_ID)
-            .putBoolean(KEY_AUTOMATIC, false)
-            .putBoolean(KEY_OPTIMIZE_PHONE_STORAGE, false)
-            .apply()
-    }
-
-    fun clearEnrollment() {
-        preferences.edit()
+    fun clearEnrollment(preserveLegacyScope: Boolean = false) {
+        val editor = preferences.edit()
+        val identity = enrolledIdentityScopeHash
+        if (preserveLegacyScope) {
+            val dataScope = enrolledScopeHash
+            if (enrolledDataScopeVersion == 1 &&
+                identity?.matches(SHA256) == true &&
+                dataScope?.matches(SHA256) == true
+            ) {
+                editor.putString(
+                    "$KEY_RETAINED_LEGACY_SCOPE_PREFIX$identity",
+                    dataScope,
+                )
+            }
+        } else if (identity?.matches(SHA256) == true) {
+            editor.remove("$KEY_RETAINED_LEGACY_SCOPE_PREFIX$identity")
+        }
+        editor
             .remove(KEY_ENROLLED_SCOPE_HASH)
+            .remove(KEY_ENROLLED_IDENTITY_SCOPE_HASH)
+            .remove(KEY_ENROLLED_DATA_SCOPE_VERSION)
+            .remove(KEY_ENROLLED_BINDING_SCHEMA)
             .remove(KEY_ENROLLED_POLICY)
             .remove(KEY_ENROLLMENT_REQUEST_ID)
             .remove(KEY_VERIFICATION_ID)
@@ -608,8 +736,20 @@ internal class ManagedCloudPreferences(context: Context) {
         private const val KEY_VERIFICATION_ID = "verification_id"
         private const val KEY_DELETION_VERIFICATION_ID = "deletion_verification_id"
         private const val KEY_ENROLLMENT_REQUEST_ID = "enrollment_request_id"
+        private const val KEY_ACCOUNT_ENROLLMENT_REQUEST_ID =
+            "account_enrollment_request_id"
+        private const val KEY_ACCOUNT_ACCESS_SCOPE_HASH =
+            "account_access_scope_hash"
         private const val KEY_ENROLLED_SCOPE_HASH = "enrolled_scope_hash"
+        private const val KEY_ENROLLED_IDENTITY_SCOPE_HASH =
+            "enrolled_identity_scope_hash"
+        private const val KEY_ENROLLED_DATA_SCOPE_VERSION =
+            "enrolled_data_scope_version"
+        private const val KEY_ENROLLED_BINDING_SCHEMA =
+            "enrolled_binding_schema"
         private const val KEY_ENROLLED_POLICY = "enrolled_policy"
+        private const val KEY_RETAINED_LEGACY_SCOPE_PREFIX =
+            "retained_legacy_scope_"
         private const val KEY_AUTOMATIC = "automatic"
         private const val KEY_OPTIMIZE_PHONE_STORAGE = "optimize_phone_storage"
         private const val KEY_LAST_ATTEMPT_MS = "last_attempt_ms"

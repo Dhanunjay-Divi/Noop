@@ -4,10 +4,11 @@ import asyncio
 import hashlib
 import hmac
 import math
+import os
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Mapping
 from uuid import UUID, uuid4
 
 from app.managed_push import (
@@ -56,6 +57,12 @@ SAFETY_MAX_INCIDENTS_PER_HOUR = 4
 SAFETY_MAX_INCIDENTS_PER_DAY = 12
 SAFETY_LOCATION_MAXIMUM_AGE = timedelta(minutes=5)
 SAFETY_LOCATION_MAXIMUM_FUTURE_SKEW = timedelta(minutes=1)
+SAFETY_REPEAT_DEFAULT_INTERVAL_SECONDS = 15 * 60
+SAFETY_REPEAT_DEFAULT_TTL_SECONDS = 60 * 60
+SAFETY_REPEAT_DEFAULT_MAX_ROUNDS = 4
+SAFETY_REPEAT_MAX_ROUNDS = 8
+SAFETY_PUSH_DUE_QUEUE_LOCK = "noop-managed-safety-push-due-queue"
+SAFETY_TERMINAL_RECONCILIATION_LIMIT = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +72,76 @@ class ManagedPushBatchResult:
     retryable_failures: int = 0
     terminal_failures: int = 0
     receipt_failures: int = 0
+    repeated_claimed: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedSafetyRepeatPolicy:
+    enabled: bool = False
+    interval_seconds: int = SAFETY_REPEAT_DEFAULT_INTERVAL_SECONDS
+    ttl_seconds: int = SAFETY_REPEAT_DEFAULT_TTL_SECONDS
+    max_rounds: int = SAFETY_REPEAT_DEFAULT_MAX_ROUNDS
+
+    def __post_init__(self) -> None:
+        if not 60 <= self.interval_seconds <= 6 * 60 * 60:
+            raise ValueError(
+                "Safety repeat interval must be between 60 seconds and 6 hours"
+            )
+        if not 5 * 60 <= self.ttl_seconds <= 12 * 60 * 60:
+            raise ValueError("Safety repeat TTL must be between 5 minutes and 12 hours")
+        if not 1 <= self.max_rounds <= SAFETY_REPEAT_MAX_ROUNDS:
+            raise ValueError("Safety repeat rounds must be between 1 and 8")
+        if self.enabled:
+            if self.max_rounds < 2:
+                raise ValueError(
+                    "enabled Safety repeated paging requires at least two rounds"
+                )
+            if self.interval_seconds * (self.max_rounds - 1) > self.ttl_seconds:
+                raise ValueError(
+                    "Safety repeat cadence cannot exceed the configured TTL"
+                )
+
+    @classmethod
+    def from_environment(
+        cls,
+        environment: Mapping[str, str] | None = None,
+    ) -> ManagedSafetyRepeatPolicy:
+        values = os.environ if environment is None else environment
+        enabled_value = (
+            values.get(
+                "NOOP_MANAGED_SAFETY_REPEAT_ENABLED",
+                "false",
+            )
+            .strip()
+            .lower()
+        )
+        if enabled_value not in {"true", "false"}:
+            raise ValueError("NOOP_MANAGED_SAFETY_REPEAT_ENABLED must be true or false")
+
+        def integer(name: str, default: int) -> int:
+            raw = values.get(name)
+            if raw is None:
+                return default
+            try:
+                return int(raw)
+            except ValueError as error:
+                raise ValueError(f"{name} must be an integer") from error
+
+        return cls(
+            enabled=enabled_value == "true",
+            interval_seconds=integer(
+                "NOOP_MANAGED_SAFETY_REPEAT_INTERVAL_SECONDS",
+                SAFETY_REPEAT_DEFAULT_INTERVAL_SECONDS,
+            ),
+            ttl_seconds=integer(
+                "NOOP_MANAGED_SAFETY_REPEAT_TTL_SECONDS",
+                SAFETY_REPEAT_DEFAULT_TTL_SECONDS,
+            ),
+            max_rounds=integer(
+                "NOOP_MANAGED_SAFETY_REPEAT_MAX_ROUNDS",
+                SAFETY_REPEAT_DEFAULT_MAX_ROUNDS,
+            ),
+        )
 
 
 class PostgresManagedSafetyRepository:
@@ -78,6 +155,13 @@ class PostgresManagedSafetyRepository:
     def _require_active(principal: ManagedPrincipal) -> None:
         if principal.account_status != "active":
             raise ManagedForbiddenError("managed account is not active")
+
+    @staticmethod
+    def _require_incident_access(principal: ManagedPrincipal) -> None:
+        if principal.account_status not in {"active", "erasure_pending"}:
+            raise ManagedForbiddenError(
+                "managed account cannot access Safety incidents"
+            )
 
     @staticmethod
     def _retired_token_hash(
@@ -99,15 +183,21 @@ class PostgresManagedSafetyRepository:
         *,
         account_id: UUID,
         for_update: bool = False,
+        allow_erasure_pending: bool = False,
     ) -> Any:
         lock = " FOR UPDATE OF account, profile" if for_update else ""
+        account_status = (
+            "account.status IN ('active', 'erasure_pending')"
+            if allow_erasure_pending
+            else "account.status = 'active'"
+        )
         row = await connection.fetchrow(
             f"""
             SELECT profile.*, alias.alias_value AS noop_id
             FROM managed_social_profiles profile
             JOIN managed_accounts account
               ON account.account_id = profile.account_id
-             AND account.status = 'active'
+             AND {account_status}
             JOIN managed_social_aliases alias
               ON alias.profile_id = profile.profile_id
              AND alias.status = 'active'
@@ -208,21 +298,211 @@ class PostgresManagedSafetyRepository:
             await connection.execute(
                 """
                 UPDATE managed_safety_push_deliveries
-                SET status = 'rejected',
+                SET status = CASE
+                        WHEN status = 'sent' THEN 'sent'
+                        ELSE 'rejected'
+                    END,
                     claim_id = NULL,
                     claim_expires_at = NULL,
+                    next_page_at = NULL,
                     updated_at = $2
                 WHERE incident_id = ANY($1::uuid[])
-                  AND status IN (
-                      'pending',
-                      'sending',
-                      'transient_failure',
-                      'unavailable'
+                  AND (
+                      status IN (
+                          'pending',
+                          'sending',
+                          'transient_failure',
+                          'unavailable'
+                      )
+                      OR (status = 'sent' AND next_page_at IS NOT NULL)
                   )
                 """,
                 incident_ids,
                 now,
             )
+
+    @staticmethod
+    async def _terminalize_unreachable_incidents(
+        connection: Any,
+        *,
+        now: datetime,
+        incident_ids: Collection[UUID] | None = None,
+        limit: int = SAFETY_TERMINAL_RECONCILIATION_LIMIT,
+    ) -> tuple[UUID, ...]:
+        requested_ids = (
+            None if incident_ids is None else sorted(set(incident_ids), key=str)
+        )
+        if requested_ids == []:
+            return ()
+        candidates = await connection.fetch(
+            """
+            SELECT incident.incident_id
+            FROM managed_safety_incidents incident
+            WHERE incident.status IN ('open', 'acknowledged')
+              AND (
+                    $1::uuid[] IS NULL
+                    OR incident.incident_id = ANY($1::uuid[])
+                  )
+              AND (
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM managed_safety_participants participant
+                        WHERE participant.incident_id = incident.incident_id
+                          AND participant.status <> 'revoked'
+                    )
+                    OR (
+                        NOT EXISTS (
+                            SELECT 1
+                            FROM managed_safety_participants participant
+                            WHERE participant.incident_id = incident.incident_id
+                              AND participant.status IN (
+                                  'responding',
+                                  'cannot_respond'
+                              )
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM managed_safety_participants participant
+                            JOIN managed_safety_push_deliveries delivery
+                              ON delivery.incident_id =
+                                    participant.incident_id
+                             AND delivery.contact_profile_id =
+                                    participant.contact_profile_id
+                            WHERE participant.incident_id =
+                                    incident.incident_id
+                              AND participant.status <> 'revoked'
+                              AND (
+                                    delivery.first_delivered_at IS NOT NULL
+                                    OR delivery.status = 'sent'
+                                    OR delivery.status = 'sending'
+                                    OR (
+                                        delivery.status IN (
+                                            'pending',
+                                            'transient_failure',
+                                            'unavailable'
+                                        )
+                                        AND delivery.attempts < 3
+                                    )
+                                  )
+                        )
+                    )
+                  )
+            ORDER BY incident.incident_id
+            FOR UPDATE OF incident SKIP LOCKED
+            LIMIT $2
+            """,
+            requested_ids,
+            limit,
+        )
+        candidate_ids = [row["incident_id"] for row in candidates]
+        if not candidate_ids:
+            return ()
+
+        # Push registration locks the participant before adding a delivery.
+        # Holding both rows makes the reachability recheck linearizable without
+        # exposing location or participant identifiers to observability.
+        await connection.fetch(
+            """
+            SELECT incident_id, contact_profile_id
+            FROM managed_safety_participants
+            WHERE incident_id = ANY($1::uuid[])
+            ORDER BY incident_id, contact_profile_id
+            FOR UPDATE
+            """,
+            candidate_ids,
+        )
+        terminalized = await connection.fetch(
+            """
+            UPDATE managed_safety_incidents incident
+            SET status = 'canceled',
+                ended_at = $2
+            WHERE incident.incident_id = ANY($1::uuid[])
+              AND incident.status IN ('open', 'acknowledged')
+              AND (
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM managed_safety_participants participant
+                        WHERE participant.incident_id = incident.incident_id
+                          AND participant.status <> 'revoked'
+                    )
+                    OR (
+                        NOT EXISTS (
+                            SELECT 1
+                            FROM managed_safety_participants participant
+                            WHERE participant.incident_id = incident.incident_id
+                              AND participant.status IN (
+                                  'responding',
+                                  'cannot_respond'
+                              )
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM managed_safety_participants participant
+                            JOIN managed_safety_push_deliveries delivery
+                              ON delivery.incident_id =
+                                    participant.incident_id
+                             AND delivery.contact_profile_id =
+                                    participant.contact_profile_id
+                            WHERE participant.incident_id =
+                                    incident.incident_id
+                              AND participant.status <> 'revoked'
+                              AND (
+                                    delivery.first_delivered_at IS NOT NULL
+                                    OR delivery.status = 'sent'
+                                    OR delivery.status = 'sending'
+                                    OR (
+                                        delivery.status IN (
+                                            'pending',
+                                            'transient_failure',
+                                            'unavailable'
+                                        )
+                                        AND delivery.attempts < 3
+                                    )
+                                  )
+                        )
+                    )
+                  )
+            RETURNING incident.incident_id
+            """,
+            candidate_ids,
+            now,
+        )
+        terminalized_ids = [row["incident_id"] for row in terminalized]
+        if not terminalized_ids:
+            return ()
+        await connection.execute(
+            """
+            DELETE FROM managed_safety_locations
+            WHERE incident_id = ANY($1::uuid[])
+            """,
+            terminalized_ids,
+        )
+        await connection.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = CASE
+                    WHEN status = 'sent' THEN 'sent'
+                    ELSE 'rejected'
+                END,
+                claim_id = NULL,
+                claim_expires_at = NULL,
+                next_page_at = NULL,
+                updated_at = $2
+            WHERE incident_id = ANY($1::uuid[])
+              AND (
+                    status IN (
+                        'pending',
+                        'sending',
+                        'transient_failure',
+                        'unavailable'
+                    )
+                    OR (status = 'sent' AND next_page_at IS NOT NULL)
+                  )
+            """,
+            terminalized_ids,
+            now,
+        )
+        return tuple(terminalized_ids)
 
     async def _expire(self, connection: Any, now: datetime) -> None:
         await connection.execute(
@@ -245,19 +525,48 @@ class PostgresManagedSafetyRepository:
             connection,
             now=now,
         )
-        await connection.execute(
+        stale_incidents = await connection.fetch(
             """
-            UPDATE managed_safety_push_deliveries
-            SET status = CASE
-                    WHEN attempts >= 3 THEN 'rejected'
-                    ELSE 'transient_failure'
-                END,
-                claim_id = NULL,
-                claim_expires_at = NULL,
-                updated_at = $1
-            WHERE status = 'sending' AND claim_expires_at <= $1
+            SELECT incident.incident_id
+            FROM managed_safety_incidents incident
+            WHERE incident.status IN ('open', 'acknowledged')
+              AND EXISTS (
+                    SELECT 1
+                    FROM managed_safety_push_deliveries delivery
+                    WHERE delivery.incident_id = incident.incident_id
+                      AND delivery.status = 'sending'
+                      AND delivery.claim_expires_at <= $1
+                  )
+            ORDER BY incident.incident_id
+            FOR UPDATE OF incident SKIP LOCKED
+            LIMIT $2
             """,
             now,
+            SAFETY_TERMINAL_RECONCILIATION_LIMIT,
+        )
+        stale_incident_ids = [row["incident_id"] for row in stale_incidents]
+        if stale_incident_ids:
+            await connection.execute(
+                """
+                UPDATE managed_safety_push_deliveries
+                SET status = CASE
+                        WHEN attempts >= 3 THEN 'rejected'
+                        ELSE 'transient_failure'
+                    END,
+                    claim_id = NULL,
+                    claim_expires_at = NULL,
+                    next_page_at = NULL,
+                    updated_at = $2
+                WHERE incident_id = ANY($1::uuid[])
+                  AND status = 'sending'
+                  AND claim_expires_at <= $2
+                """,
+                stale_incident_ids,
+                now,
+            )
+        await self._terminalize_unreachable_incidents(
+            connection,
+            now=now,
         )
 
     async def _expire_before_profile_operation(self) -> None:
@@ -446,7 +755,7 @@ class PostgresManagedSafetyRepository:
                      AND participant.status = 'pending'
                     JOIN managed_safety_incidents incident
                       ON incident.incident_id = participant.incident_id
-                     AND incident.status IN ('open', 'acknowledged')
+                     AND incident.status = 'open'
                      AND incident.expires_at > $2
                     WHERE profile.account_id = $1
                       AND profile.status = 'active'
@@ -489,7 +798,7 @@ class PostgresManagedSafetyRepository:
                      AND participant.status = 'pending'
                     JOIN managed_safety_incidents incident
                       ON incident.incident_id = participant.incident_id
-                     AND incident.status IN ('open', 'acknowledged')
+                     AND incident.status = 'open'
                      AND incident.expires_at > $3
                     WHERE push.account_id = $1
                       AND push.installation_id = $2
@@ -506,6 +815,7 @@ class PostgresManagedSafetyRepository:
                         last_attempt_at = NULL,
                         delivered_at = NULL,
                         provider_reference_hash = NULL,
+                        next_page_at = NULL,
                         updated_at = EXCLUDED.updated_at
                     WHERE NOT $4::boolean
                       AND managed_safety_push_deliveries.status <> 'sent'
@@ -560,6 +870,20 @@ class PostgresManagedSafetyRepository:
             )
             if row is None:
                 raise ManagedNotFoundError("managed push installation was not found")
+        await self._pool().execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET next_page_at = NULL,
+                updated_at = $3
+            WHERE account_id = $1
+              AND installation_id = $2
+              AND status = 'sent'
+              AND next_page_at IS NOT NULL
+            """,
+            principal.account_id,
+            installation_id,
+            now,
+        )
 
     async def create_invite(
         self,
@@ -1548,9 +1872,13 @@ class PostgresManagedSafetyRepository:
                 await connection.execute(
                     """
                     UPDATE managed_safety_push_deliveries delivery
-                    SET status = 'rejected',
+                    SET status = CASE
+                            WHEN delivery.status = 'sent' THEN 'sent'
+                            ELSE 'rejected'
+                        END,
                         claim_id = NULL,
                         claim_expires_at = NULL,
+                        next_page_at = NULL,
                         updated_at = $3
                     FROM managed_safety_incidents incident
                     WHERE delivery.incident_id = incident.incident_id
@@ -1564,16 +1892,28 @@ class PostgresManagedSafetyRepository:
                             AND delivery.contact_profile_id = $1
                           )
                       )
-                      AND delivery.status IN (
-                          'pending',
-                          'sending',
-                          'transient_failure',
-                          'unavailable'
+                      AND (
+                          delivery.status IN (
+                              'pending',
+                              'sending',
+                              'transient_failure',
+                              'unavailable'
+                          )
+                          OR (
+                              delivery.status = 'sent'
+                              AND delivery.next_page_at IS NOT NULL
+                          )
                       )
                     """,
                     profile["profile_id"],
                     other_profile_id,
                     now,
+                )
+                await self._terminalize_unreachable_incidents(
+                    connection,
+                    now=now,
+                    incident_ids=active_incident_ids,
+                    limit=max(1, len(active_incident_ids)),
                 )
 
     async def create_incident(
@@ -2013,7 +2353,7 @@ class PostgresManagedSafetyRepository:
                    profile.display_name,
                    count(delivery.delivery_id) AS installation_count,
                    count(delivery.delivery_id) FILTER (
-                       WHERE delivery.status = 'sent'
+                       WHERE delivery.first_delivered_at IS NOT NULL
                    ) AS sent_count,
                    count(delivery.delivery_id) FILTER (
                        WHERE delivery.status IN (
@@ -2133,13 +2473,14 @@ class PostgresManagedSafetyRepository:
         *,
         principal: ManagedPrincipal,
     ) -> list[dict[str, Any]]:
-        self._require_active(principal)
+        self._require_incident_access(principal)
         await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 profile = await self._profile(
                     connection,
                     account_id=principal.account_id,
+                    allow_erasure_pending=True,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 rows = await connection.fetch(
@@ -2183,13 +2524,14 @@ class PostgresManagedSafetyRepository:
         principal: ManagedPrincipal,
         incident_id: UUID,
     ) -> dict[str, Any]:
-        self._require_active(principal)
+        self._require_incident_access(principal)
         await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 profile = await self._profile(
                     connection,
                     account_id=principal.account_id,
+                    allow_erasure_pending=True,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 return await self._incident_detail(
@@ -2206,13 +2548,14 @@ class PostgresManagedSafetyRepository:
         incident_id: UUID,
         update: ManagedSafetyLocationUpdate,
     ) -> dict[str, Any]:
-        self._require_active(principal)
+        self._require_incident_access(principal)
         await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 owner = await self._profile(
                     connection,
                     account_id=principal.account_id,
+                    allow_erasure_pending=True,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 incident = await connection.fetchrow(
@@ -2329,13 +2672,14 @@ class PostgresManagedSafetyRepository:
         incident_id: UUID,
         decision: str,
     ) -> dict[str, Any]:
-        self._require_active(principal)
+        self._require_incident_access(principal)
         await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 contact = await self._profile(
                     connection,
                     account_id=principal.account_id,
+                    allow_erasure_pending=True,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 incident = await connection.fetchrow(
@@ -2389,17 +2733,24 @@ class PostgresManagedSafetyRepository:
                 await connection.execute(
                     """
                     UPDATE managed_safety_push_deliveries
-                    SET status = 'rejected',
+                    SET status = CASE
+                            WHEN status = 'sent' THEN 'sent'
+                            ELSE 'rejected'
+                        END,
                         claim_id = NULL,
                         claim_expires_at = NULL,
+                        next_page_at = NULL,
                         updated_at = $3
                     WHERE incident_id = $1
                       AND contact_profile_id = $2
-                      AND status IN (
-                          'pending',
-                          'sending',
-                          'transient_failure',
-                          'unavailable'
+                      AND (
+                          status IN (
+                              'pending',
+                              'sending',
+                              'transient_failure',
+                              'unavailable'
+                          )
+                          OR (status = 'sent' AND next_page_at IS NOT NULL)
                       )
                     """,
                     incident_id,
@@ -2422,13 +2773,14 @@ class PostgresManagedSafetyRepository:
         incident_id: UUID,
         outcome: str,
     ) -> dict[str, Any]:
-        self._require_active(principal)
+        self._require_incident_access(principal)
         await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 owner = await self._profile(
                     connection,
                     account_id=principal.account_id,
+                    allow_erasure_pending=True,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 incident = await connection.fetchrow(
@@ -2473,17 +2825,24 @@ class PostgresManagedSafetyRepository:
                     )
                 await connection.execute(
                     """
-                    UPDATE managed_safety_push_deliveries
-                    SET status = 'rejected',
-                        claim_id = NULL,
-                        claim_expires_at = NULL,
-                        updated_at = $2
-                    WHERE incident_id = $1
-                      AND status IN (
-                          'pending',
-                          'sending',
-                          'transient_failure',
-                          'unavailable'
+                UPDATE managed_safety_push_deliveries
+                SET status = CASE
+                        WHEN status = 'sent' THEN 'sent'
+                        ELSE 'rejected'
+                    END,
+                    claim_id = NULL,
+                    claim_expires_at = NULL,
+                    next_page_at = NULL,
+                    updated_at = $2
+                WHERE incident_id = $1
+                      AND (
+                          status IN (
+                              'pending',
+                              'sending',
+                              'transient_failure',
+                              'unavailable'
+                          )
+                          OR (status = 'sent' AND next_page_at IS NOT NULL)
                       )
                     """,
                     incident_id,
@@ -2533,10 +2892,7 @@ class PostgresManagedSafetyRepository:
                 )
                 if incident is None:
                     raise ManagedNotFoundError("Safety incident was not found")
-                if (
-                    incident["status"] not in {"open", "acknowledged"}
-                    or incident["expires_at"] <= now
-                ):
+                if incident["status"] != "open" or incident["expires_at"] <= now:
                     return []
                 await self._insert_current_push_deliveries(
                     connection,
@@ -2550,6 +2906,7 @@ class PostgresManagedSafetyRepository:
                     SET status = 'invalid',
                         claim_id = NULL,
                         claim_expires_at = NULL,
+                        next_page_at = NULL,
                         updated_at = $2
                     FROM managed_push_installations push
                     WHERE delivery.incident_id = $1
@@ -2572,6 +2929,7 @@ class PostgresManagedSafetyRepository:
                     SET status = 'rejected',
                         claim_id = NULL,
                         claim_expires_at = NULL,
+                        next_page_at = NULL,
                         updated_at = $2
                     FROM managed_accounts account
                     WHERE delivery.incident_id = $1
@@ -2587,6 +2945,14 @@ class PostgresManagedSafetyRepository:
                     incident_id,
                     now,
                 )
+                terminalized = await self._terminalize_unreachable_incidents(
+                    connection,
+                    now=now,
+                    incident_ids=(incident_id,),
+                    limit=1,
+                )
+                if terminalized:
+                    return []
                 candidates = await connection.fetch(
                     """
                     SELECT delivery.*,
@@ -2642,55 +3008,125 @@ class PostgresManagedSafetyRepository:
         *,
         limit: int = 100,
         claim_seconds: int = SAFETY_PUSH_MIN_CLAIM_SECONDS,
+        repeat_policy: ManagedSafetyRepeatPolicy | None = None,
     ) -> list[dict[str, Any]]:
         if not 1 <= limit <= 200:
             raise ValueError("push retry claim limit must be 1 through 200")
         if not SAFETY_PUSH_MIN_CLAIM_SECONDS <= claim_seconds <= 15 * 60:
             raise ValueError("push claim duration is outside the supported bound")
+        policy = repeat_policy or ManagedSafetyRepeatPolicy()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                queue_lock_acquired = await connection.fetchval(
+                    """
+                    SELECT pg_try_advisory_xact_lock(
+                        hashtextextended($1, 0)
+                    )
+                    """,
+                    SAFETY_PUSH_DUE_QUEUE_LOCK,
+                )
+                if queue_lock_acquired is not True:
+                    return []
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 await self._expire(connection, now)
                 retry_before = now - timedelta(seconds=SAFETY_PUSH_RETRY_DELAY_SECONDS)
-                await connection.execute(
+                inactive_target_incidents = await connection.fetch(
                     """
-                    UPDATE managed_safety_push_deliveries delivery
-                    SET status = 'invalid',
-                        claim_id = NULL,
-                        claim_expires_at = NULL,
-                        updated_at = $1
-                    FROM managed_push_installations push
-                    WHERE delivery.account_id = push.account_id
-                      AND delivery.installation_id = push.installation_id
-                      AND push.status <> 'active'
-                      AND delivery.status IN (
-                          'pending',
-                          'sending',
-                          'transient_failure',
-                          'unavailable'
-                      )
+                    SELECT incident.incident_id
+                    FROM managed_safety_incidents incident
+                    WHERE incident.status IN ('open', 'acknowledged')
+                      AND incident.expires_at > $1
+                      AND EXISTS (
+                            SELECT 1
+                            FROM managed_safety_push_deliveries delivery
+                            JOIN managed_push_installations push
+                              ON push.account_id = delivery.account_id
+                             AND push.installation_id =
+                                    delivery.installation_id
+                            JOIN managed_accounts account
+                              ON account.account_id = delivery.account_id
+                            WHERE delivery.incident_id =
+                                    incident.incident_id
+                              AND delivery.status IN (
+                                  'pending',
+                                  'sending',
+                                  'transient_failure',
+                                  'unavailable'
+                              )
+                              AND (
+                                  push.status <> 'active'
+                                  OR account.status <> 'active'
+                              )
+                          )
+                    ORDER BY incident.incident_id
+                    FOR UPDATE OF incident SKIP LOCKED
+                    LIMIT $2
                     """,
                     now,
+                    limit,
                 )
-                await connection.execute(
-                    """
-                    UPDATE managed_safety_push_deliveries delivery
-                    SET status = 'rejected',
-                        claim_id = NULL,
-                        claim_expires_at = NULL,
-                        updated_at = $1
-                    FROM managed_accounts account
-                    WHERE delivery.account_id = account.account_id
-                      AND account.status <> 'active'
-                      AND delivery.status IN (
-                          'pending',
-                          'sending',
-                          'transient_failure',
-                          'unavailable'
-                      )
-                    """,
-                    now,
-                )
+                inactive_target_incident_ids = [
+                    row["incident_id"] for row in inactive_target_incidents
+                ]
+                if inactive_target_incident_ids:
+                    await connection.execute(
+                        """
+                        UPDATE managed_safety_push_deliveries delivery
+                        SET status = 'invalid',
+                            claim_id = NULL,
+                            claim_expires_at = NULL,
+                            next_page_at = NULL,
+                            updated_at = $2
+                        FROM managed_push_installations push
+                        WHERE delivery.incident_id = ANY($1::uuid[])
+                          AND delivery.account_id = push.account_id
+                          AND delivery.installation_id = push.installation_id
+                          AND push.status <> 'active'
+                          AND delivery.status IN (
+                              'pending',
+                              'sending',
+                              'transient_failure',
+                              'unavailable'
+                          )
+                        """,
+                        inactive_target_incident_ids,
+                        now,
+                    )
+                    await connection.execute(
+                        """
+                        UPDATE managed_safety_push_deliveries delivery
+                        SET status = 'rejected',
+                            claim_id = NULL,
+                            claim_expires_at = NULL,
+                            next_page_at = NULL,
+                            updated_at = $2
+                        FROM managed_accounts account
+                        WHERE delivery.incident_id = ANY($1::uuid[])
+                          AND delivery.account_id = account.account_id
+                          AND account.status <> 'active'
+                          AND delivery.status IN (
+                              'pending',
+                              'sending',
+                              'transient_failure',
+                              'unavailable'
+                          )
+                        """,
+                        inactive_target_incident_ids,
+                        now,
+                    )
+                    await self._terminalize_unreachable_incidents(
+                        connection,
+                        now=now,
+                        incident_ids=inactive_target_incident_ids,
+                        limit=len(inactive_target_incident_ids),
+                    )
+                if policy.enabled:
+                    await self._advance_due_page_rounds(
+                        connection,
+                        now=now,
+                        limit=limit,
+                        policy=policy,
+                    )
                 candidates = await connection.fetch(
                     """
                     SELECT delivery.*,
@@ -2709,7 +3145,7 @@ class PostgresManagedSafetyRepository:
                      AND account.status = 'active'
                     JOIN managed_safety_incidents incident
                       ON incident.incident_id = delivery.incident_id
-                     AND incident.status IN ('open', 'acknowledged')
+                     AND incident.status = 'open'
                      AND incident.expires_at > $1
                     JOIN managed_safety_participants participant
                       ON participant.incident_id = delivery.incident_id
@@ -2743,6 +3179,84 @@ class PostgresManagedSafetyRepository:
                     now=now,
                     claim_seconds=claim_seconds,
                 )
+
+    @staticmethod
+    async def _advance_due_page_rounds(
+        connection: Any,
+        *,
+        now: datetime,
+        limit: int,
+        policy: ManagedSafetyRepeatPolicy,
+    ) -> int:
+        rows = await connection.fetch(
+            """
+            WITH candidates AS (
+                SELECT delivery.delivery_id
+                FROM managed_safety_push_deliveries delivery
+                JOIN managed_push_installations push
+                  ON push.account_id = delivery.account_id
+                 AND push.installation_id = delivery.installation_id
+                 AND push.status = 'active'
+                JOIN managed_accounts account
+                  ON account.account_id = delivery.account_id
+                 AND account.status = 'active'
+                JOIN managed_safety_incidents incident
+                  ON incident.incident_id = delivery.incident_id
+                 AND incident.status = 'open'
+                 AND incident.expires_at > $1
+                JOIN managed_safety_participants participant
+                  ON participant.incident_id = delivery.incident_id
+                 AND participant.contact_profile_id =
+                        delivery.contact_profile_id
+                 AND participant.status = 'pending'
+                WHERE delivery.status = 'sent'
+                  AND delivery.delivered_at IS NOT NULL
+                  AND delivery.page_round < $4
+                  AND COALESCE(
+                        delivery.next_page_at,
+                        delivery.delivered_at
+                            + make_interval(secs => $2::double precision)
+                      ) <= $1
+                  AND COALESCE(
+                        delivery.next_page_at,
+                        delivery.delivered_at
+                            + make_interval(secs => $2::double precision)
+                      ) < LEAST(
+                        incident.expires_at,
+                        incident.created_at
+                            + make_interval(secs => $3::double precision)
+                      )
+                ORDER BY COALESCE(
+                            delivery.next_page_at,
+                            delivery.delivered_at
+                                + make_interval(secs => $2::double precision)
+                         ),
+                         delivery.delivery_id
+                FOR UPDATE OF incident, participant, delivery SKIP LOCKED
+                LIMIT $5
+            )
+            UPDATE managed_safety_push_deliveries delivery
+            SET status = 'pending',
+                attempts = 0,
+                page_round = delivery.page_round + 1,
+                claim_id = NULL,
+                claim_expires_at = NULL,
+                last_attempt_at = NULL,
+                delivered_at = NULL,
+                provider_reference_hash = NULL,
+                next_page_at = NULL,
+                updated_at = $1
+            FROM candidates
+            WHERE delivery.delivery_id = candidates.delivery_id
+            RETURNING delivery.delivery_id
+            """,
+            now,
+            policy.interval_seconds,
+            policy.ttl_seconds,
+            policy.max_rounds,
+            limit,
+        )
+        return len(rows)
 
     @staticmethod
     async def _claim_delivery_candidates(
@@ -2788,6 +3302,7 @@ class PostgresManagedSafetyRepository:
                     "token_ciphertext": str(candidate["token_ciphertext"]),
                     "expires_at": candidate["expires_at"],
                     "attempt": attempt,
+                    "page_round": int(candidate["page_round"]),
                 }
             )
         return claimed
@@ -2800,6 +3315,7 @@ class PostgresManagedSafetyRepository:
         claimed_token_hash: str,
         outcome: str,
         provider_reference_hash: str | None,
+        repeat_policy: ManagedSafetyRepeatPolicy | None = None,
     ) -> None:
         if outcome not in {
             "sent",
@@ -2814,7 +3330,10 @@ class PostgresManagedSafetyRepository:
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 delivery_owner = await connection.fetchrow(
                     """
-                    SELECT account_id, installation_id
+                    SELECT incident_id,
+                           contact_profile_id,
+                           account_id,
+                           installation_id
                     FROM managed_safety_push_deliveries
                     WHERE delivery_id = $1
                     """,
@@ -2832,12 +3351,44 @@ class PostgresManagedSafetyRepository:
                     delivery_owner["account_id"],
                     delivery_owner["installation_id"],
                 )
+                incident_lock = await connection.fetchrow(
+                    """
+                    SELECT incident_id
+                    FROM managed_safety_incidents
+                    WHERE incident_id = $1
+                    FOR UPDATE
+                    """,
+                    delivery_owner["incident_id"],
+                )
+                participant_lock = await connection.fetchrow(
+                    """
+                    SELECT incident_id, contact_profile_id
+                    FROM managed_safety_participants
+                    WHERE incident_id = $1
+                      AND contact_profile_id = $2
+                    FOR UPDATE
+                    """,
+                    delivery_owner["incident_id"],
+                    delivery_owner["contact_profile_id"],
+                )
+                if incident_lock is None or participant_lock is None:
+                    raise ManagedNotFoundError("Safety push delivery was not found")
                 row = await connection.fetchrow(
                     """
-                    SELECT *
-                    FROM managed_safety_push_deliveries
-                    WHERE delivery_id = $1
-                    FOR UPDATE
+                    SELECT delivery.*,
+                           incident.status AS incident_status,
+                           incident.created_at AS incident_created_at,
+                           incident.expires_at AS incident_expires_at,
+                           participant.status AS participant_status
+                    FROM managed_safety_push_deliveries delivery
+                    JOIN managed_safety_incidents incident
+                      ON incident.incident_id = delivery.incident_id
+                    JOIN managed_safety_participants participant
+                      ON participant.incident_id = delivery.incident_id
+                     AND participant.contact_profile_id =
+                            delivery.contact_profile_id
+                    WHERE delivery.delivery_id = $1
+                    FOR UPDATE OF delivery
                     """,
                     delivery_id,
                 )
@@ -2852,6 +3403,23 @@ class PostgresManagedSafetyRepository:
                     raise ManagedConflictError(
                         "Safety push delivery claim is no longer valid"
                     )
+                policy = repeat_policy or ManagedSafetyRepeatPolicy()
+                next_page_at = None
+                if (
+                    outcome == "sent"
+                    and policy.enabled
+                    and int(row["page_round"]) < policy.max_rounds
+                    and row["incident_status"] == "open"
+                    and row["participant_status"] == "pending"
+                ):
+                    candidate = now + timedelta(seconds=policy.interval_seconds)
+                    deadline = min(
+                        row["incident_expires_at"],
+                        row["incident_created_at"]
+                        + timedelta(seconds=policy.ttl_seconds),
+                    )
+                    if candidate < deadline:
+                        next_page_at = candidate
                 await connection.execute(
                     """
                     UPDATE managed_safety_push_deliveries
@@ -2869,7 +3437,13 @@ class PostgresManagedSafetyRepository:
                             WHEN $3 = 'sent' THEN $4
                             ELSE delivered_at
                         END,
+                        first_delivered_at = CASE
+                            WHEN $3 = 'sent'
+                                THEN COALESCE(first_delivered_at, $4)
+                            ELSE first_delivered_at
+                        END,
                         provider_reference_hash = $5,
+                        next_page_at = $6,
                         updated_at = $4
                     WHERE delivery_id = $1 AND claim_id = $2
                     """,
@@ -2878,6 +3452,7 @@ class PostgresManagedSafetyRepository:
                     outcome,
                     now,
                     provider_reference_hash,
+                    next_page_at,
                 )
                 if outcome == "invalid":
                     await connection.execute(
@@ -2896,6 +3471,17 @@ class PostgresManagedSafetyRepository:
                         row["installation_id"],
                         claimed_token_hash,
                         now,
+                    )
+                terminal_outcome = outcome in {"invalid", "rejected"} or (
+                    outcome in {"transient_failure", "unavailable"}
+                    and int(row["attempts"]) >= 3
+                )
+                if terminal_outcome:
+                    await self._terminalize_unreachable_incidents(
+                        connection,
+                        now=now,
+                        incident_ids=(row["incident_id"],),
+                        limit=1,
                     )
 
     async def reencrypt_push_installation_token(
@@ -3128,6 +3714,7 @@ class ManagedSafetyPushService:
         token_codec: ManagedPushTokenCodec,
         provider: ManagedPushSending,
         max_concurrency: int = 6,
+        repeat_policy: ManagedSafetyRepeatPolicy | None = None,
     ) -> None:
         if not 1 <= max_concurrency <= 20:
             raise ValueError("push concurrency must be between 1 and 20")
@@ -3135,6 +3722,7 @@ class ManagedSafetyPushService:
         self.token_codec = token_codec
         self.provider = provider
         self.max_concurrency = max_concurrency
+        self.repeat_policy = repeat_policy or ManagedSafetyRepeatPolicy()
         provider_delivery_seconds = int(
             getattr(provider, "maximum_delivery_seconds", 30)
         )
@@ -3214,6 +3802,7 @@ class ManagedSafetyPushService:
             deliveries = await self.repository.claim_due_push_deliveries(
                 limit=wave_limit,
                 claim_seconds=self.claim_seconds,
+                repeat_policy=self.repeat_policy,
             )
             if not deliveries:
                 break
@@ -3224,6 +3813,7 @@ class ManagedSafetyPushService:
                 retryable_failures=(total.retryable_failures + wave.retryable_failures),
                 terminal_failures=(total.terminal_failures + wave.terminal_failures),
                 receipt_failures=(total.receipt_failures + wave.receipt_failures),
+                repeated_claimed=(total.repeated_claimed + wave.repeated_claimed),
             )
             remaining -= len(deliveries)
             if len(deliveries) < wave_limit:
@@ -3298,6 +3888,7 @@ class ManagedSafetyPushService:
                         claimed_token_hash=delivery["token_hash"],
                         outcome=outcome,
                         provider_reference_hash=provider_reference_hash,
+                        repeat_policy=self.repeat_policy,
                     )
                 except ManagedStorageError:
                     # The incident remains available through authenticated
@@ -3326,4 +3917,7 @@ class ManagedSafetyPushService:
             retryable_failures=retryable_failures,
             terminal_failures=terminal_failures,
             receipt_failures=sum(not completed for _, completed in outcomes),
+            repeated_claimed=sum(
+                int(delivery.get("page_round", 1)) > 1 for delivery in deliveries
+            ),
         )

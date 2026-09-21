@@ -29,9 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.noop.BuildConfig
 import com.noop.NoopApplication
@@ -131,15 +129,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         setContent {
             NoopTheme {
                 Box(Modifier.fillMaxSize()) {
-                    NoopRoot(demoRoute = demoRoute)
+                    NoopRoot(
+                        demoRoute = demoRoute,
+                        onRequestAppReport = ::requestAppDiagnosticReport,
+                    )
                     AppDiagnosticReportSheet(appReport)
-                }
-            }
-        }
-        lifecycleScope.launch {
-            lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                AppDiagnosticReportRequestBridge.requests.collect {
-                    appReport.requestManually()
                 }
             }
         }
@@ -291,6 +285,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    internal fun requestAppDiagnosticReport() {
+        appReport.requestManually()
+    }
 
     private fun requestDemoReportIfNeeded() {
         if (!BuildConfig.DEBUG || demoRoute != DEMO_APP_REPORT_ROUTE) return
@@ -1386,7 +1384,10 @@ object NoopPrefs {
  * state on each transition.
  */
 @Composable
-fun NoopRoot(demoRoute: String? = null) {
+fun NoopRoot(
+    demoRoute: String? = null,
+    onRequestAppReport: () -> Unit,
+) {
     val context = LocalContext.current
     val application = context.applicationContext as NoopApplication
     val prefs = remember { NoopPrefs.of(context) }
@@ -1550,7 +1551,11 @@ fun NoopRoot(demoRoute: String? = null) {
 
     // Existing, onboarded user: render the app, and if they've updated since last launch
     // (stored version behind current), show "What's New" once over the top.
-    AppRoot(viewModel = appViewModel, initialRoute = demoRoute)
+    AppRoot(
+        viewModel = appViewModel,
+        initialRoute = demoRoute,
+        onRequestAppReport = onRequestAppReport,
+    )
 
     val completeWhatsNewPresentation = {
         val completed = ReleaseWelcomeInstallState(

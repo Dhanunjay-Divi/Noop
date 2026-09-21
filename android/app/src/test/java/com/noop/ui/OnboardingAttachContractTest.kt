@@ -83,6 +83,9 @@ class OnboardingAttachContractTest {
         val planAction = onboarding
             .substringAfter("OnboardingPage.Plan -> {")
             .substringBefore("OnboardingPage.Bluetooth ->")
+        val moveTo = onboarding
+            .substringAfter("fun moveTo(target: Int, direction: String) {")
+            .substringBefore("// The bonded celebration only makes sense")
 
         assertTrue(
             onboarding.contains(
@@ -91,9 +94,16 @@ class OnboardingAttachContractTest {
             ),
         )
         assertTrue(
+            moveTo.contains("resolvedOnboardingOwnershipDestination("),
+        )
+        assertTrue(
+            moveTo.indexOf("resolvedOnboardingOwnershipDestination(") <
+                moveTo.indexOf("prefs.edit()"),
+        )
+        assertTrue(
             onboarding.contains(
-                "requested.requiresCurrentOwnershipClaim &&\n" +
-                    "            !postClaimOwnershipReady",
+                "if (!reconciliationComplete) {\n" +
+                    "        return null",
             ),
         )
         assertTrue(
@@ -110,6 +120,12 @@ class OnboardingAttachContractTest {
         )
         assertTrue(onboarding.contains("fun complete() {"))
         assertTrue(onboarding.contains("if (!postClaimOwnershipReady) {"))
+        assertTrue(
+            onboarding.contains(
+                "resolvedOnboardingOwnershipDestination(\n" +
+                    "                            requested = page,",
+            ),
+        )
         assertTrue(
             planAction.indexOf("ownershipCanAccessPostClaimOnboarding(") <
                 planAction.indexOf("ownership.selectPlan(selectedPlan)"),

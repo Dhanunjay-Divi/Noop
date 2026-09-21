@@ -3,20 +3,49 @@ import StrandDesign
 
 // MARK: - WatchGlanceView — the watch app's single primary screen
 //
-// The Apple-Fitness-x-WHOOP look scaled to the wrist: the three NOOP rings (Charge / Effort / Rest) with
-// their numbers in SF-Rounded, each honouring confidence (a calibrating score shows a dash plus a small
-// "cal" marker, NEVER a fabricated number), a live heart-rate readout from the watch's own sensor, and a
-// one-line sleep summary. When nothing has synced yet we show a friendly "open NOOP on your iPhone" state,
-// and we always label the scores with the snapshot's age ("as of 2h ago") rather than implying they are live.
+// The NOOP score hierarchy scaled to the wrist: the three rings (Recovery / Effort / Sleep) with
+// their numbers in SF-Rounded, each honouring measured, calibrating, missing, and stale states without
+// fabricating a score, a live heart-rate readout from the watch's own sensor, and a one-line sleep summary.
+// When nothing has synced yet we show a friendly "open NOOP on your iPhone" state, and we always label the
+// scores with the snapshot's age ("as of 2h ago") rather than implying they are live.
 struct WatchGlanceView: View {
     @EnvironmentObject private var store: WatchScoreStore
     @EnvironmentObject private var liveHR: WatchLiveHR
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         // The glance is page 1 of the watch app's swipeable page deck (WatchRootView): just the synced
         // scores, sized to ONE screen with no scrolling. Breathe / Workout / Intervals are their OWN pages
         // a swipe away, so the glance no longer pushes or links anywhere. The phone is the brain for the
         // SCORES here; the active features run on the watch's own sensors + haptics on their pages.
+        adaptiveContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(StrandPalette.surfaceBase.ignoresSafeArea())
+            .onAppear {
+                #if DEBUG
+                // Screenshot routes run without a paired phone and must not be covered by Health's
+                // first-run authorization sheet. Normal debug and every release build still request it.
+                guard ProcessInfo.processInfo.environment["NOOP_DEMO_SCREEN"] == nil else { return }
+                #endif
+                liveHR.start()
+            }
+            .onDisappear { liveHR.stop() }
+    }
+
+    @ViewBuilder
+    private var adaptiveContent: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            ScrollView {
+                content
+                    .padding(.vertical, 8)
+            }
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         Group {
             if let snap = store.snapshot {
                 glance(snap)
@@ -24,17 +53,6 @@ struct WatchGlanceView: View {
                 emptyState
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(StrandPalette.surfaceBase.ignoresSafeArea())
-        .onAppear {
-            #if DEBUG
-            // Screenshot routes run without a paired phone and must not be covered by Health's
-            // first-run authorization sheet. Normal debug and every release build still request it.
-            guard ProcessInfo.processInfo.environment["NOOP_DEMO_SCREEN"] == nil else { return }
-            #endif
-            liveHR.start()
-        }
-        .onDisappear { liveHR.stop() }
     }
 
     // MARK: Synced state
@@ -42,24 +60,38 @@ struct WatchGlanceView: View {
     @ViewBuilder
     private func glance(_ snap: WatchScoreSnapshot) -> some View {
         // One staleness decision for the whole glance: when the snapshot has aged out (per the shared
-        // contract) we force every ring into its empty-track + dash branch so an arbitrarily old
-        // snapshot never shows live-looking numbers. The honest recency line below says how old it is.
+        // contract) every ring enters its explicit stale state so an arbitrarily old snapshot never
+        // shows live-looking numbers or masquerades as a score that is still calibrating.
         let stale = snap.isStale()
+        let freshness = snap.freshnessText()
         VStack(spacing: 12) {
-            // The three score rings. Each renders a number only when the phone earned one AND it is
-            // still current; a calibrating OR stale score is a dash with a small "cal" marker so we
-            // never show a value we did not compute or one that is no longer current.
-            HStack(spacing: 8) {
+            // The three score rings. Each renders a number only when the phone earned one and it is
+            // still current. Calibration, missing input, and stale transport each remain distinct.
+            LazyVGrid(
+                columns: dynamicTypeSize.isAccessibilitySize
+                    ? [GridItem(.flexible())]
+                    : Array(repeating: GridItem(.flexible()), count: 3),
+                spacing: 8
+            ) {
                 // The labels ride a plain String property into ScoreRing, so they must be wrapped HERE;
                 // a bare literal would bypass the string catalog entirely.
-                ScoreRing(label: String(localized: "Recovery"), value: snap.charge,
-                          calibrating: snap.chargeCalibrating || stale,
+                ScoreRing(label: String(localized: "Recovery"),
+                          state: ScoreRingState(value: snap.charge,
+                                                calibrating: snap.chargeCalibrating,
+                                                stale: stale,
+                                                freshness: freshness),
                           color: StrandPalette.chargeColor)
-                ScoreRing(label: String(localized: "Effort"), value: snap.effort,
-                          calibrating: snap.effortCalibrating || stale,
+                ScoreRing(label: String(localized: "Effort"),
+                          state: ScoreRingState(value: snap.effort,
+                                                calibrating: snap.effortCalibrating,
+                                                stale: stale,
+                                                freshness: freshness),
                           color: StrandPalette.effortColor)
-                ScoreRing(label: String(localized: "Rest"), value: snap.rest,
-                          calibrating: snap.restCalibrating || stale,
+                ScoreRing(label: String(localized: "Sleep"),
+                          state: ScoreRingState(value: snap.rest,
+                                                calibrating: snap.restCalibrating,
+                                                stale: stale,
+                                                freshness: freshness),
                           color: StrandPalette.restColor)
             }
             .frame(maxWidth: .infinity)
@@ -73,25 +105,59 @@ struct WatchGlanceView: View {
         .padding(.vertical, 8)
     }
 
-    /// Live heart rate from the watch's own sensor. Honest about denial: "HR unavailable" when HealthKit
-    /// access was refused, a dash until the first sample lands, then the live BPM.
+    /// Live heart rate from the watch's own sensor. A first-use permission prompt is always initiated by
+    /// the visible button; mounting the glance never opens a system sheet.
     private var heartRate: some View {
         HStack(spacing: 6) {
             Image(systemName: "heart.fill")
                 .font(.system(size: 13))
                 .foregroundStyle(StrandPalette.statusCritical)
-            if liveHR.denied {
+            switch liveHR.accessState {
+            case .needsRequest:
+                Button("Allow access") {
+                    liveHR.requestAuthorization()
+                }
+                .disabled(liveHR.isRequesting)
+                .font(StrandFont.caption)
+            case .unavailable:
                 Text("HR unavailable")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
-            } else {
-                Text(liveHR.bpm.map(String.init) ?? "–")
-                    .font(StrandFont.rounded(20, weight: .semibold))
-                    .foregroundStyle(StrandPalette.textPrimary)
-                    .monospacedDigit()
-                Text("bpm")
+            case .checking:
+                Text("appwide.watch.live_hr.checking")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
+            case .noReadableSample:
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("appwide.watch.live_hr.no_recent")
+                    Text("appwide.watch.live_hr.check_access")
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+                .font(StrandFont.caption)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            case .queryFailed:
+                Text("HR unavailable")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                Button("Retry") {
+                    liveHR.retry()
+                }
+                .font(StrandFont.caption)
+            case .available:
+                if let bpm = liveHR.bpm {
+                    Text(verbatim: String(bpm))
+                        .font(StrandFont.rounded(20, weight: .semibold))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .monospacedDigit()
+                    Text("bpm")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                } else {
+                    Text("appwide.watch.live_hr.waiting")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -99,7 +165,8 @@ struct WatchGlanceView: View {
         .background(StrandPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    /// One-line sleep summary straight from the phone (e.g. "7h 12m · 81% Sleep Score"). Empty string = skip it.
+    /// One-line sleep summary straight from the phone (e.g. "7h 12m · 81% sleep efficiency").
+    /// The separate Sleep ring is the 0-100 Sleep Score. Empty string means skip the line.
     @ViewBuilder
     private func sleepLine(_ summary: String) -> some View {
         if !summary.isEmpty {
@@ -152,12 +219,30 @@ struct WatchGlanceView: View {
 // MARK: - ScoreRing — one clean NOOP ring scaled for the wrist
 //
 // Wraps the shared GlowRing (the flat, crisp Apple-Fitness-x-WHOOP arc) so the watch matches the phone's
-// rings exactly. A calibrating score draws an EMPTY track with a dash centre and a small "cal" marker
-// underneath, never a fabricated fill or number. Reduce-motion is respected inside GlowRing itself.
+// rings exactly. Non-measured states keep an empty track and distinct content; Reduce Motion is respected
+// inside GlowRing itself.
+private enum ScoreRingState {
+    case measured(Double)
+    case calibrating
+    case missing
+    case stale(freshness: String)
+
+    init(value: Double?, calibrating: Bool, stale: Bool, freshness: String) {
+        if stale {
+            self = .stale(freshness: freshness)
+        } else if calibrating {
+            self = .calibrating
+        } else if let value {
+            self = .measured(value)
+        } else {
+            self = .missing
+        }
+    }
+}
+
 private struct ScoreRing: View {
     let label: String
-    let value: Double?
-    let calibrating: Bool
+    let state: ScoreRingState
     let color: Color
 
     private let diameter: CGFloat = 52
@@ -171,36 +256,64 @@ private struct ScoreRing: View {
                 .foregroundStyle(StrandPalette.textTertiary)
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: label))
+        .accessibilityValue(accessibilityValue)
     }
 
     @ViewBuilder
     private var ring: some View {
-        if let value, !calibrating {
-            // A real, earned score: the clean filled arc with its SF-Rounded number in the centre.
+        switch state {
+        case .measured(let value):
             GlowRing(fraction: value / 100,
                      value: value,
                      format: { "\(Int($0.rounded()))" },
                      color: color,
                      diameter: diameter,
                      lineWidth: lineWidth)
-        } else {
-            // Calibrating / no number yet: an empty track with a dash and a small "cal" marker. We render
-            // "needs more data" as a dash, NEVER a number we did not earn.
-            ZStack {
-                Circle()
-                    .stroke(StrandPalette.textPrimary.opacity(0.10),
-                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                VStack(spacing: 1) {
-                    Text("–")
-                        .font(GlowRing.centerFont(diameter: diameter))
-                        .foregroundStyle(StrandPalette.textTertiary)
-                    Text("cal")
-                        .font(StrandFont.overlineScaled(8))
-                        .tracking(0.5)
-                        .foregroundStyle(color)
-                }
+        case .calibrating:
+            emptyRing {
+                Image(systemName: "hourglass")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(color)
             }
-            .frame(width: diameter, height: diameter)
+        case .missing:
+            emptyRing {
+                Text("–")
+                    .font(GlowRing.centerFont(diameter: diameter))
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+        case .stale:
+            emptyRing {
+                Image(systemName: "clock.badge.exclamationmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+        }
+    }
+
+    private func emptyRing<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack {
+            Circle()
+                .stroke(StrandPalette.textPrimary.opacity(0.10),
+                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            content()
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    private var accessibilityValue: Text {
+        switch state {
+        case .measured(let value):
+            return Text(verbatim: "\(Int(value.rounded()))")
+        case .calibrating:
+            return Text("Calibrating")
+        case .missing:
+            return Text("No data")
+        case .stale(let freshness):
+            return Text("Last sync: \(freshness)")
         }
     }
 }

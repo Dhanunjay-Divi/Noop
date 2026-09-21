@@ -46,6 +46,124 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
         )
     }
 
+    func testRestoreOnlyNeverRegistersUploadsOrPrunes() async throws {
+        let sourceID = UUID()
+        let prepared = try XCTUnwrap(
+            ManagedPreparedChunk.prepare(
+                sourceID: sourceID,
+                dataClass: "essential_timeseries",
+                eventStartMs: 0,
+                eventEndMs: 1_000,
+                streams: [
+                    ManagedChunkStreamPayload(
+                        streamKey: "heart_rate",
+                        columns: ["event_at_ms", "bpm", "quality", "provenance"],
+                        rows: [
+                            [.integer(500), .integer(68), .null, .string("sensor")],
+                        ]
+                    ),
+                ]
+            )
+        )
+        let compressed = try ManagedChunkCodec.encode(
+            prepared.uncompressed,
+            compression: .gzip
+        )
+        let change = ManagedChangeFeed.Change(
+            sequence: 1,
+            resourceKind: "chunk",
+            resourceID: prepared.payload.chunkID,
+            operation: "available",
+            contentSHA256: ManagedDigest.sha256(compressed),
+            dataClass: prepared.payload.dataClass,
+            eventStart: "1970-01-01T00:00:00Z",
+            eventEnd: "1970-01-01T00:00:01Z",
+            chunk: .init(
+                chunkID: prepared.payload.chunkID,
+                sourceID: sourceID,
+                schemaVersion: 1,
+                contentMode: "server_readable",
+                state: "available",
+                compression: "gzip",
+                contentType: "application/vnd.noop.chunk+json",
+                expectedCompressedBytes: compressed.count,
+                expectedUncompressedBytes: prepared.uncompressed.count,
+                objectGeneration: 1,
+                expiresAt: nil
+            ),
+            document: nil
+        )
+        let transport = CoordinatorTransport(
+            changes: [change],
+            downloadableChunks: [
+                prepared.payload.chunkID: CoordinatorDownloadFixture(
+                    compressed: compressed,
+                    uncompressedBytes: prepared.uncompressed.count
+                ),
+            ]
+        )
+        let state = CoordinatorState(localChunkIDs: [prepared.payload.chunkID])
+        let restore = CoordinatorRestore()
+        let outbox = QueuedDocumentOutbox(
+            pending: [
+                ManagedPendingDocument(
+                    localIdentifier: "pending-document",
+                    generation: 1,
+                    mutation: ManagedDocumentMutation(
+                        requestID: UUID(),
+                        documentKind: .journal,
+                        documentID: UUID(),
+                        baseRevision: 0,
+                        contentMode: "server_readable",
+                        payloadJSON: ["value": .string("pending")],
+                        contentSHA256: String(repeating: "f", count: 64),
+                        updatedAt: "2026-09-19T10:00:00Z"
+                    )
+                ),
+            ]
+        )
+        let coordinator = ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: restore,
+            documents: outbox
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "macos-viewer",
+            installationToken: installationToken
+        )
+
+        let result = try await coordinator.restoreOnly(
+            authorization: authorization,
+            dataClasses: ["essential_timeseries"]
+        )
+
+        XCTAssertEqual(result.appliedChanges, 1)
+        XCTAssertFalse(result.hasMoreChanges)
+        XCTAssertEqual(ManagedStoragePlatform.macOS.rawValue, "macos")
+        let sourceRegistrations = await transport.sourceRegistrationCount()
+        let chunkReservations = await transport.chunkReservationCount()
+        let uploads = await transport.uploadCount()
+        let completions = await transport.completionCount()
+        let documentUploads = await transport.documentUploadCount()
+        let downloads = await transport.downloadCount()
+        let uploadAcknowledgements = await state.acknowledgementCount()
+        let appliedChunks = await restore.appliedChunkCount()
+        let pruneCutoffs = await state.recordedPruneCutoffs()
+        XCTAssertEqual(sourceRegistrations, 0)
+        XCTAssertEqual(chunkReservations, 0)
+        XCTAssertEqual(uploads, 0)
+        XCTAssertEqual(completions, 0)
+        XCTAssertEqual(documentUploads, 0)
+        XCTAssertEqual(downloads, 1)
+        XCTAssertEqual(uploadAcknowledgements, 0)
+        XCTAssertEqual(appliedChunks, 1)
+        XCTAssertEqual(pruneCutoffs, [:])
+    }
+
     func testLocalRetentionAppliesPerDataClassCutoffs() async throws {
         let dayMs: Int64 = 86_400_000
         let state = CoordinatorState()
@@ -88,6 +206,176 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
                 "raw_motion": 93 * dayMs,
             ]
         )
+    }
+
+    func testCancellationAfterCheckpointPreventsLocalPruning() async throws {
+        let dayMs: Int64 = 86_400_000
+        let state = CoordinatorState(blockCheckpointSave: true)
+        let coordinator = ManagedSyncCoordinator(
+            transport: CoordinatorTransport(),
+            extractor: MultiWindowExtractor(eventTimes: []),
+            state: state,
+            restore: CoordinatorRestore()
+        )
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+
+        let task = Task {
+            try await coordinator.sync(
+                source: source,
+                authorization: authorization,
+                now: Date(
+                    timeIntervalSince1970:
+                        Double(100 * dayMs) / 1_000
+                ),
+                dataClasses: ["essential_timeseries"],
+                maxChangePages: 0,
+                maxDocumentUploads: 0,
+                localPruneNowMs: 100 * dayMs,
+                maxPruneWindowsPerClass: 1
+            )
+        }
+
+        await state.waitForCheckpointSave()
+        task.cancel()
+        await state.releaseCheckpointSave()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation before local pruning")
+        } catch is CancellationError {
+            // Expected.
+        }
+        let pruneCutoffs = await state.recordedPruneCutoffs()
+        XCTAssertEqual(pruneCutoffs, [:])
+    }
+
+    func testAccountFenceStopsDownloadedChunkBeforeApplyOrCursorAdvance()
+        async throws
+    {
+        let sourceID = UUID()
+        let prepared = try XCTUnwrap(
+            ManagedPreparedChunk.prepare(
+                sourceID: sourceID,
+                dataClass: "essential_timeseries",
+                eventStartMs: 0,
+                eventEndMs: 1_000,
+                streams: [
+                    ManagedChunkStreamPayload(
+                        streamKey: "heart_rate",
+                        columns: [
+                            "event_at_ms",
+                            "bpm",
+                            "quality",
+                            "provenance",
+                        ],
+                        rows: [
+                            [
+                                .integer(500),
+                                .integer(68),
+                                .null,
+                                .string("sensor"),
+                            ],
+                        ]
+                    ),
+                ]
+            )
+        )
+        let compressed = try ManagedChunkCodec.encode(
+            prepared.uncompressed,
+            compression: .gzip
+        )
+        let change = ManagedChangeFeed.Change(
+            sequence: 1,
+            resourceKind: "chunk",
+            resourceID: prepared.payload.chunkID,
+            operation: "available",
+            contentSHA256: ManagedDigest.sha256(compressed),
+            dataClass: prepared.payload.dataClass,
+            eventStart: "1970-01-01T00:00:00Z",
+            eventEnd: "1970-01-01T00:00:01Z",
+            chunk: .init(
+                chunkID: prepared.payload.chunkID,
+                sourceID: sourceID,
+                schemaVersion: 1,
+                contentMode: "server_readable",
+                state: "available",
+                compression: "gzip",
+                contentType: "application/vnd.noop.chunk+json",
+                expectedCompressedBytes: compressed.count,
+                expectedUncompressedBytes: prepared.uncompressed.count,
+                objectGeneration: 1,
+                expiresAt: nil
+            ),
+            document: nil
+        )
+        let gate = OperationValidityGate()
+        let transport = CoordinatorTransport(
+            changes: [change],
+            downloadableChunks: [
+                prepared.payload.chunkID: CoordinatorDownloadFixture(
+                    compressed: compressed,
+                    uncompressedBytes: prepared.uncompressed.count
+                ),
+            ],
+            onDownload: {
+                await gate.invalidate()
+            }
+        )
+        let state = CoordinatorState()
+        let restore = CoordinatorRestore()
+        let coordinator = ManagedSyncCoordinator(
+            transport: transport,
+            extractor: MultiWindowExtractor(eventTimes: []),
+            state: state,
+            restore: restore,
+            operationValidator: {
+                try await gate.validate()
+            }
+        )
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+
+        do {
+            _ = try await coordinator.sync(
+                source: source,
+                authorization: authorization,
+                now: Date(timeIntervalSince1970: 1),
+                dataClasses: ["essential_timeseries"],
+                maxChangePages: 1,
+                maxDocumentUploads: 0
+            )
+            XCTFail("Expected the account fence to cancel restore")
+        } catch is CancellationError {
+            // Expected.
+        }
+
+        let appliedChunks = await restore.appliedChunkCount()
+        let sequence = await state.currentSequence()
+        let pruneCutoffs = await state.recordedPruneCutoffs()
+        XCTAssertEqual(appliedChunks, 0)
+        XCTAssertEqual(sequence, 0)
+        XCTAssertEqual(pruneCutoffs, [:])
     }
 
     func testBoundedForwardUploadReportsLocalContinuation() async throws {
@@ -496,6 +784,66 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
             ManagedSyncCoordinator.changeFeedCapabilityVersion
         )
         XCTAssertNil(checkpoint)
+    }
+
+    func testServerReadableRestoreUpgradeDiscardsLegacyInProgressCheckpoint() async throws {
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+        let legacyCheckpoint = ManagedSnapshotRestoreCheckpoint(
+            requestID: UUID(),
+            dataClasses: ["essential_timeseries"],
+            changeFeedCapabilityVersion: 1,
+            restoreJobID: UUID(),
+            snapshotAt: "2026-09-01T01:00:00Z",
+            changeSequence: 11,
+            selectedObjects: 1,
+            selectedBytes: 1,
+            documentsComplete: true,
+            deliveredObjects: 2,
+            deliveredBytes: 2
+        )
+        let state = CoordinatorState(
+            snapshotCheckpoint: legacyCheckpoint,
+            changeFeedCapabilityVersion: 1
+        )
+        let transport = CoordinatorTransport()
+
+        let result = try await ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        ).sync(
+            source: source,
+            authorization: authorization,
+            now: Date(timeIntervalSince1970: 0),
+            dataClasses: ["essential_timeseries"],
+            maxChangePages: 1,
+            maxDocumentUploads: 0
+        )
+
+        let snapshotClearCount = await state.snapshotClearCount()
+        let restoreCreationCount = await transport.restoreCreationCount()
+        let capabilityVersion = await state.currentChangeFeedCapabilityVersion()
+        let checkpoint = await state.currentSnapshotCheckpoint()
+        XCTAssertEqual(snapshotClearCount, 1)
+        XCTAssertEqual(restoreCreationCount, 1)
+        XCTAssertEqual(
+            capabilityVersion,
+            ManagedSyncCoordinator.changeFeedCapabilityVersion
+        )
+        XCTAssertNil(checkpoint)
+        XCTAssertFalse(result.hasMoreChanges)
     }
 
     func testRejectedCapabilityUpgradeTombstoneDoesNotAdvanceSnapshotCursor() async throws {
@@ -1435,16 +1783,23 @@ private actor CoordinatorState: ManagedSyncStateStoring {
     private var snapshotCheckpoint: ManagedSnapshotRestoreCheckpoint?
     private var snapshotClears = 0
     private var pruneCutoffs: [String: Int64] = [:]
+    private var shouldBlockCheckpointSave: Bool
+    private var checkpointSaveStarted = false
+    private var checkpointSaveWaiters:
+        [CheckedContinuation<Void, Never>] = []
+    private var checkpointSaveRelease: CheckedContinuation<Void, Never>?
 
     init(
         localChunkIDs: Set<UUID> = [],
         snapshotCheckpoint: ManagedSnapshotRestoreCheckpoint? = nil,
         changeFeedCapabilityVersion: Int =
-            ManagedSyncCoordinator.changeFeedCapabilityVersion
+            ManagedSyncCoordinator.changeFeedCapabilityVersion,
+        blockCheckpointSave: Bool = false
     ) {
         self.localChunkIDs = localChunkIDs
         self.snapshotCheckpoint = snapshotCheckpoint
         capabilityVersion = changeFeedCapabilityVersion
+        shouldBlockCheckpointSave = blockCheckpointSave
     }
 
     func currentCheckpoint() -> ManagedUploadCheckpoint { checkpoint }
@@ -1457,6 +1812,16 @@ private actor CoordinatorState: ManagedSyncStateStoring {
     }
     func snapshotClearCount() -> Int { snapshotClears }
     func recordedPruneCutoffs() -> [String: Int64] { pruneCutoffs }
+    func waitForCheckpointSave() async {
+        guard !checkpointSaveStarted else { return }
+        await withCheckedContinuation { continuation in
+            checkpointSaveWaiters.append(continuation)
+        }
+    }
+    func releaseCheckpointSave() {
+        checkpointSaveRelease?.resume()
+        checkpointSaveRelease = nil
+    }
     func markCurrentWindowAvailable() {
         guard let window else { return }
         self.window = ManagedWindowUpload(
@@ -1481,6 +1846,18 @@ private actor CoordinatorState: ManagedSyncStateStoring {
         sourceID: UUID,
         dataClass: String
     ) async throws {
+        if shouldBlockCheckpointSave {
+            shouldBlockCheckpointSave = false
+            checkpointSaveStarted = true
+            let waiters = checkpointSaveWaiters
+            checkpointSaveWaiters.removeAll(keepingCapacity: true)
+            for waiter in waiters {
+                waiter.resume()
+            }
+            await withCheckedContinuation { continuation in
+                checkpointSaveRelease = continuation
+            }
+        }
         self.checkpoint = checkpoint
     }
 
@@ -1635,6 +2012,18 @@ private actor CoordinatorRestore: ManagedRestoreApplying {
     }
 }
 
+private actor OperationValidityGate {
+    private var valid = true
+
+    func invalidate() {
+        valid = false
+    }
+
+    func validate() throws {
+        guard valid else { throw CancellationError() }
+    }
+}
+
 private actor RejectingDocumentRestore: ManagedRestoreApplying {
     func apply(
         chunk: ManagedChunkPayload,
@@ -1712,6 +2101,11 @@ private actor QueuedDocumentOutbox: ManagedDocumentOutbox {
     }
 }
 
+private struct CoordinatorDownloadFixture: Sendable {
+    let compressed: Data
+    let uncompressedBytes: Int
+}
+
 private actor CoordinatorTransport: ManagedStorageTransport {
     private let failFirstCompletion: Bool
     private let feedChanges: [ManagedChangeFeed.Change]
@@ -1721,6 +2115,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     private let expireFirstChangeCursor: Bool
     private let failSnapshotNotFound: Bool
     private let feedHighWatermark: Int64?
+    private let downloadableChunks: [UUID: CoordinatorDownloadFixture]
     private let restoreJobID = UUID()
     private var uploads = 0
     private var completions = 0
@@ -1728,9 +2123,13 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     private var restoreCreations = 0
     private var restoreCompletions = 0
     private var documentUploads = 0
+    private var sourceRegistrations = 0
+    private var chunkReservations = 0
+    private var downloads = 0
     private var snapshotCursors: [ManagedChunkPage.Cursor?] = []
     private var snapshotIncludeDeleted: [Bool] = []
     private var restoreIncludeDeleted: [Bool] = []
+    private let onDownload: (@Sendable () async -> Void)?
 
     init(
         failFirstCompletion: Bool = false,
@@ -1740,7 +2139,9 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         remoteDocuments: [UUID: ManagedDocument] = [:],
         expireFirstChangeCursor: Bool = false,
         failSnapshotNotFound: Bool = false,
-        feedHighWatermark: Int64? = nil
+        feedHighWatermark: Int64? = nil,
+        downloadableChunks: [UUID: CoordinatorDownloadFixture] = [:],
+        onDownload: (@Sendable () async -> Void)? = nil
     ) {
         self.failFirstCompletion = failFirstCompletion
         feedChanges = changes
@@ -1750,6 +2151,8 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         self.expireFirstChangeCursor = expireFirstChangeCursor
         self.failSnapshotNotFound = failSnapshotNotFound
         self.feedHighWatermark = feedHighWatermark
+        self.downloadableChunks = downloadableChunks
+        self.onDownload = onDownload
     }
 
     func uploadCount() -> Int { uploads }
@@ -1757,6 +2160,9 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     func restoreCreationCount() -> Int { restoreCreations }
     func restoreCompletionCount() -> Int { restoreCompletions }
     func documentUploadCount() -> Int { documentUploads }
+    func sourceRegistrationCount() -> Int { sourceRegistrations }
+    func chunkReservationCount() -> Int { chunkReservations }
+    func downloadCount() -> Int { downloads }
     func snapshotCursorChunkIDs() -> [UUID?] {
         snapshotCursors.map { $0?.afterChunkID }
     }
@@ -1767,7 +2173,8 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         _ source: ManagedSourceRegistration,
         authorization: ManagedAuthorization
     ) async throws -> ManagedSourceResponse {
-        ManagedSourceResponse(
+        sourceRegistrations += 1
+        return ManagedSourceResponse(
             source: ManagedSourceResponse.Source(
                 sourceID: source.sourceID,
                 sourceKind: source.sourceKind
@@ -1779,7 +2186,8 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         _ reservation: ManagedChunkReservation,
         authorization: ManagedAuthorization
     ) async throws -> ManagedChunkReservationResponse {
-        ManagedChunkReservationResponse(
+        chunkReservations += 1
+        return ManagedChunkReservationResponse(
             chunk: ManagedChunkReservationResponse.Chunk(
                 chunkID: reservation.chunkID,
                 state: "reserved",
@@ -1933,11 +2341,32 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         requestID: UUID,
         authorization: ManagedAuthorization
     ) async throws -> ManagedDownloadCapability {
-        throw ManagedStorageError.invalidResponse
+        guard let fixture = downloadableChunks[chunkID] else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return ManagedDownloadCapability(
+            grantID: UUID(),
+            method: "GET",
+            url: URL(string: "https://storage.googleapis.com/bucket/object")!,
+            headers: [:],
+            expiresAt: "2026-09-19T12:10:00Z",
+            chunk: .init(
+                chunkID: chunkID,
+                expectedSHA256: ManagedDigest.sha256(fixture.compressed),
+                compression: "gzip",
+                contentType: "application/vnd.noop.chunk+json",
+                expectedUncompressedBytes: fixture.uncompressedBytes
+            )
+        )
     }
 
     func download(using capability: ManagedDownloadCapability) async throws -> Data {
-        throw ManagedStorageError.invalidResponse
+        guard let fixture = downloadableChunks[capability.chunk.chunkID] else {
+            throw ManagedStorageError.invalidResponse
+        }
+        downloads += 1
+        await onDownload?()
+        return fixture.compressed
     }
 
     func document(

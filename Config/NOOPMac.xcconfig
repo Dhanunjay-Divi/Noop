@@ -1,0 +1,16 @@
+// Target-only configuration for the read-only macOS viewer. The Mac keeps the
+// optional Oura wrapper while using a distinct Firebase Apple app identity from
+// iPhone. Missing ignored configuration leaves managed viewing unavailable.
+#include "../Strand/Oura/OuraConfig.xcconfig"
+
+NOOP_MANAGED_PROJECT_ID =
+NOOP_MANAGED_API_KEY =
+NOOP_MANAGED_MACOS_GOOGLE_APP_ID =
+NOOP_MANAGED_GCM_SENDER_ID =
+NOOP_MANAGED_API_URL =
+NOOP_MANAGED_POLICY_VERSION =
+NOOP_MANAGED_POLICY_SHA256 =
+NOOP_MANAGED_ALLOW_LOCAL_HTTP = NO
+#include? "ManagedCloudSecrets.xcconfig"
+
+NOOP_APP_ATTEST_ENVIRONMENT = development

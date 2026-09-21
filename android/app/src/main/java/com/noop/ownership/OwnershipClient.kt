@@ -22,6 +22,8 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -363,6 +365,74 @@ internal class OwnershipClient(
         )
     }
 
+    suspend fun requestAccountDeletion(
+        requestId: UUID,
+        confirmationSha256: String,
+        exportAcknowledged: Boolean,
+        retentionAcknowledged: Boolean,
+        policyVersion: String,
+        policySha256: String,
+        locale: String,
+        authorization: OwnershipAuthorization,
+    ): OwnershipAccountDeletion {
+        if (
+            !confirmationSha256.matches(SHA256) ||
+            !policyVersion.matches(POLICY_VERSION) ||
+            !policySha256.matches(SHA256) ||
+            !locale.matches(LOCALE)
+        ) {
+            throw OwnershipException.InvalidResponse
+        }
+        return parseAccountDeletion(
+            execute(
+                url = apiUrl("v1/ownership/account/deletion-requests"),
+                method = "POST",
+                routeGroup = "account_deletion_request",
+                authorization = authorization,
+                body = JSONObject()
+                    .put("request_id", requestId.toString().lowercase())
+                    .put("confirmation_sha256", confirmationSha256)
+                    .put("export_acknowledged", exportAcknowledged)
+                    .put("retention_acknowledged", retentionAcknowledged)
+                    .put("policy_version", policyVersion)
+                    .put("policy_sha256", policySha256)
+                    .put("locale", locale),
+            ),
+        )
+    }
+
+    suspend fun accountDeletion(
+        requestId: UUID,
+        authorization: OwnershipAuthorization,
+    ): OwnershipAccountDeletion = parseAccountDeletion(
+        execute(
+            url = apiUrl(
+                "v1/ownership/account/deletion-requests/" +
+                    requestId.toString().lowercase(),
+            ),
+            method = "GET",
+            routeGroup = "account_deletion_status",
+            authorization = authorization,
+            includeInstallation = false,
+        ),
+    )
+
+    suspend fun cancelAccountDeletion(
+        requestId: UUID,
+        authorization: OwnershipAuthorization,
+    ): OwnershipAccountDeletion = parseAccountDeletion(
+        execute(
+            url = apiUrl(
+                "v1/ownership/account/deletion-requests/" +
+                    requestId.toString().lowercase() +
+                    "/cancel",
+            ),
+            method = "POST",
+            routeGroup = "account_deletion_cancel",
+            authorization = authorization,
+        ),
+    )
+
     suspend fun selectPlan(
         plan: NoopProductPlan,
         requestId: UUID,
@@ -477,6 +547,7 @@ internal class OwnershipClient(
                                 "installation_authorize",
                                 "overview",
                                 "terms_acceptance",
+                                "account_deletion_request",
                             )
                         ) {
                             OwnershipException.TermsChanged
@@ -580,6 +651,98 @@ internal class OwnershipClient(
         )
     }
 
+    private fun parseAccountDeletion(data: ByteArray): OwnershipAccountDeletion {
+        val value = jsonObject(data).requiredObject("deletion")
+        val idRaw = value.requiredString("deletion_request_id")
+        val id = runCatching { UUID.fromString(idRaw) }.getOrNull()
+            ?.takeIf { it.toString() == idRaw.lowercase() }
+            ?: throw OwnershipException.InvalidResponse
+        val state = value.requiredString("state")
+            .takeIf { it in DELETION_STATES }
+            ?: throw OwnershipException.InvalidResponse
+        val accountState = value.requiredString("account_state")
+            .takeIf { it in setOf("active", "deletion_pending", "retired") }
+            ?: throw OwnershipException.InvalidResponse
+        val requestedAt = value.requiredTimestamp("requested_at")
+        val cancelBefore = value.requiredTimestamp("cancel_before")
+        val canceledAt = value.requiredNullableTimestamp("canceled_at")
+        val cancellationAllowed = value.requiredBoolean("cancellation_allowed")
+        val policyVersion = value.requiredString("policy_version", POLICY_VERSION)
+        val sessionsRevoked = value.requiredBoolean("sessions_revoked")
+        val revokedSessionCount = value.requiredInt("revoked_session_count")
+        val cloud = value.requiredObject("cloud_data_deletion")
+        val identity = value.requiredObject("identity_deletion")
+        val band = value.requiredObject("band_retirement")
+        val control = value.requiredObject("control_plane_deletion")
+        val cloudState = cloud.requiredDeletionWorkState("state")
+        val cloudNotBefore = cloud.requiredTimestamp("not_before")
+        val identityState = identity.requiredDeletionWorkState("state")
+        val identityBlocker = identity.requiredNullableDeletionToken("blocker")
+        val bandRequired = band.requiredBoolean("required")
+        val bandEligibility = band.requiredString("eligibility")
+            .takeIf { it in BAND_RETIREMENT_ELIGIBILITY }
+            ?: throw OwnershipException.InvalidResponse
+        val bandState = band.requiredDeletionWorkState("work_state")
+        val bandBlocker = band.requiredNullableDeletionToken("blocker")
+        val bandPolicyVersion = band.requiredNullableString(
+            "policy_version",
+            POLICY_VERSION,
+        )
+        val bandHardwareVersion = band.requiredNullableString(
+            "hardware_capability_version",
+            POLICY_VERSION,
+        )
+        val controlState = control.requiredDeletionWorkState("state")
+        val controlBlocker = control.requiredNullableDeletionToken("blocker")
+        if (
+            !value.requiredBoolean("export_acknowledged") ||
+            !value.requiredBoolean("retention_acknowledged") ||
+            !sessionsRevoked ||
+            revokedSessionCount !in 1..10 ||
+            !value.requiredBoolean("reauthorization_required") ||
+            value.requiredBoolean("destructive_completion_claimed") ||
+            value.opt("duplicate") !is Boolean ||
+            (state == "canceled") != (canceledAt != null) ||
+            cancellationAllowed != (state == "cooling_off") ||
+            bandRequired != (bandEligibility != "not_required") ||
+            !deletionBlockerIsConsistent(identityState, identityBlocker) ||
+            !deletionBlockerIsConsistent(bandState, bandBlocker) ||
+            !deletionBlockerIsConsistent(controlState, controlBlocker)
+        ) {
+            throw OwnershipException.InvalidResponse
+        }
+        return OwnershipAccountDeletion(
+            id = id,
+            state = state,
+            accountState = accountState,
+            requestedAt = requestedAt,
+            cancelBefore = cancelBefore,
+            canceledAt = canceledAt,
+            cancellationAllowed = cancellationAllowed,
+            policyVersion = policyVersion,
+            sessionsRevoked = sessionsRevoked,
+            revokedSessionCount = revokedSessionCount,
+            cloudDataState = cloudState,
+            cloudDataNotBefore = cloudNotBefore,
+            identityState = identityState,
+            identityBlocker = identityBlocker,
+            bandRetirementRequired = bandRequired,
+            bandRetirementEligibility = bandEligibility,
+            bandRetirementState = bandState,
+            bandRetirementBlocker = bandBlocker,
+            bandRetirementPolicyVersion = bandPolicyVersion,
+            bandHardwareCapabilityVersion = bandHardwareVersion,
+            controlPlaneState = controlState,
+            controlPlaneBlocker = controlBlocker,
+        )
+    }
+
+    private fun deletionBlockerIsConsistent(
+        state: String,
+        blocker: String?,
+    ): Boolean =
+        (state == "blocked") == (blocker != null)
+
     private fun recordRequest(
         routeGroup: String,
         method: String,
@@ -611,6 +774,24 @@ internal class OwnershipClient(
         private val LOCALE = Regex("^[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8}){0,2}$")
         private val CHALLENGE = Regex("^[A-Za-z0-9_-]{43}$")
         private val INSTALLATION_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+        internal val DELETION_TOKEN = Regex("^[a-z][a-z0-9_]{0,63}$")
+        private val DELETION_STATES =
+            setOf("cooling_off", "scheduled", "blocked", "canceled")
+        internal val DELETION_WORK_STATES = setOf(
+            "scheduled",
+            "blocked",
+            "not_required",
+            "canceled",
+            "processing",
+            "completed",
+            "failed",
+        )
+        private val BAND_RETIREMENT_ELIGIBILITY = setOf(
+            "not_required",
+            "blocked_hardware",
+            "eligible_pending_operator",
+            "blocked_policy",
+        )
     }
 }
 
@@ -666,6 +847,52 @@ private fun JSONObject.requiredInt(key: String): Int {
         throw OwnershipException.InvalidResponse
     }
     return value.toInt()
+}
+
+private fun JSONObject.requiredObject(key: String): JSONObject {
+    if (!has(key) || isNull(key)) throw OwnershipException.InvalidResponse
+    return opt(key) as? JSONObject ?: throw OwnershipException.InvalidResponse
+}
+
+private fun JSONObject.requiredNullableString(
+    key: String,
+    pattern: Regex,
+): String? {
+    if (!has(key)) throw OwnershipException.InvalidResponse
+    if (isNull(key)) return null
+    val value = opt(key) as? String ?: throw OwnershipException.InvalidResponse
+    if (!value.matches(pattern)) throw OwnershipException.InvalidResponse
+    return value
+}
+
+private fun JSONObject.requiredNullableDeletionToken(key: String): String? =
+    requiredNullableString(key, OwnershipClient.DELETION_TOKEN)
+
+private fun JSONObject.requiredDeletionWorkState(key: String): String =
+    requiredString(key)
+        .takeIf { it in OwnershipClient.DELETION_WORK_STATES }
+        ?: throw OwnershipException.InvalidResponse
+
+private fun JSONObject.requiredTimestamp(key: String): String =
+    requiredString(key).also(::validateDeletionTimestamp)
+
+private fun JSONObject.requiredNullableTimestamp(key: String): String? {
+    if (!has(key)) throw OwnershipException.InvalidResponse
+    if (isNull(key)) return null
+    return (opt(key) as? String)
+        ?.also(::validateDeletionTimestamp)
+        ?: throw OwnershipException.InvalidResponse
+}
+
+private fun validateDeletionTimestamp(value: String) {
+    if (
+        value.length > 64 ||
+        runCatching {
+            OffsetDateTime.parse(value, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        }.isFailure
+    ) {
+        throw OwnershipException.InvalidResponse
+    }
 }
 
 private fun sha256(data: ByteArray): String =

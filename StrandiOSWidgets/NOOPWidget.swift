@@ -1,6 +1,7 @@
 import WidgetKit
 import SwiftUI
 import StrandDesign
+import Foundation
 
 /// Timeline entry backed by the latest tiny snapshot the app publishes into its private App Group.
 struct NOOPEntry: TimelineEntry {
@@ -30,9 +31,11 @@ struct NOOPProvider: TimelineProvider {
     func getSnapshot(in context: Context, completion: @escaping (NOOPEntry) -> Void) {
         let authorized = LaunchSurfaceAuthorization.isAuthorized()
         let fallback: WidgetSnapshot = context.isPreview ? .placeholder : .unavailable
+        let now = Date()
+        let rawSnapshot = authorized ? (WidgetSnapshot.load() ?? fallback) : .unavailable
         completion(NOOPEntry(
-            date: Date(),
-            snapshot: authorized ? (WidgetSnapshot.load() ?? fallback) : .unavailable,
+            date: now,
+            snapshot: rawSnapshot.presented(at: now),
             supportingMetrics: authorized
                 ? WidgetMetricPreference.load()
                 : WidgetMetricPreference.defaultSelection,
@@ -42,7 +45,7 @@ struct NOOPProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<NOOPEntry>) -> Void) {
         let authorized = LaunchSurfaceAuthorization.isAuthorized()
-        let snapshot = authorized ? (WidgetSnapshot.load() ?? .unavailable) : .unavailable
+        let rawSnapshot = authorized ? (WidgetSnapshot.load() ?? .unavailable) : .unavailable
         // WidgetKit controls the final cadence. The app also explicitly reloads after meaningful data
         // changes, while high-frequency HR publishes are throttled before they reach the extension.
         let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date())
@@ -51,22 +54,23 @@ struct NOOPProvider: TimelineProvider {
         let metrics = authorized
             ? WidgetMetricPreference.load()
             : WidgetMetricPreference.defaultSelection
-        var entries = [NOOPEntry(date: now, snapshot: snapshot, supportingMetrics: metrics,
+        var entries = [NOOPEntry(date: now, snapshot: rawSnapshot.presented(at: now),
+                                 supportingMetrics: metrics,
                                  launchSurfaceAuthorized: authorized)]
         // WidgetKit can defer the requested reload, so schedule semantic state transitions into this
         // timeline. Live HR expires from the REAL packet receipt (two minutes), while connection remains
         // a distinct, coarser observation that retains the existing 20-minute expiry.
         var expiries: [Date] = []
-        if snapshot.hasLiveHeartRate(at: now), let liveUntil = snapshot.liveHeartRateExpiresAt {
+        if rawSnapshot.hasLiveHeartRate(at: now), let liveUntil = rawSnapshot.liveHeartRateExpiresAt {
             expiries.append(liveUntil.addingTimeInterval(1))
         }
-        let connectionExpiry = snapshot.updated.addingTimeInterval(20 * 60 + 1)
-        if snapshot.hasCurrentConnection(at: now), connectionExpiry > now {
+        let connectionExpiry = rawSnapshot.updated.addingTimeInterval(20 * 60 + 1)
+        if rawSnapshot.hasCurrentConnection(at: now), connectionExpiry > now {
             expiries.append(connectionExpiry)
         }
         for expiry in expiries.filter({ $0 > now }).sorted() {
             guard entries.last?.date != expiry else { continue }
-            entries.append(NOOPEntry(date: expiry, snapshot: snapshot,
+            entries.append(NOOPEntry(date: expiry, snapshot: rawSnapshot.presented(at: expiry),
                                      supportingMetrics: metrics,
                                      launchSurfaceAuthorized: authorized))
         }
@@ -88,9 +92,14 @@ struct NOOPDailyWidgetView: View {
         if entry.launchSurfaceAuthorized && LaunchSurfaceAuthorization.isAuthorized() {
             switch family {
             case .accessoryCircular:
-                WidgetScoreGauge(value: snapshot.recovery, symbol: "bolt.heart.fill", tint: chargeTint)
+                WidgetScoreGauge(
+                    value: snapshot.recovery,
+                    state: snapshot.recoveryPresentationState,
+                    symbol: "bolt.heart.fill",
+                    tint: chargeTint
+                )
             case .accessoryInline:
-                Text(dailyInlineText)
+                Text(verbatim: dailyInlineText)
             case .accessoryRectangular:
                 DailyAccessoryRectangular(snapshot: snapshot)
             case .systemSmall:
@@ -116,7 +125,12 @@ struct NOOPDailyWidgetView: View {
 
     private var dailyInlineText: String {
         guard snapshot.hasDailySignal else { return String(localized: "NOOP · Open for your Daily Signal") }
-        return "R \(value(snapshot.recovery)) · E \(value(snapshot.effort)) · S \(value(snapshot.rest))"
+        return String(
+            format: String(localized: "R %@ · E %@ · S %@"),
+            scoreValue(snapshot.recovery, state: snapshot.recoveryPresentationState),
+            scoreValue(snapshot.effort, state: snapshot.effortPresentationState),
+            scoreValue(snapshot.rest, state: snapshot.restPresentationState)
+        )
     }
 
     private var small: some View {
@@ -125,9 +139,15 @@ struct NOOPDailyWidgetView: View {
                          snapshot: snapshot, now: entry.date)
             Spacer(minLength: 0)
             HStack(spacing: 6) {
-                WidgetScoreRing(label: "Recovery", value: snapshot.recovery, tint: chargeTint, diameter: 38)
-                WidgetScoreRing(label: "Effort", value: snapshot.effort, tint: effortTint, diameter: 38)
-                WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 38)
+                WidgetScoreRing(label: "Recovery", value: snapshot.recovery,
+                                state: snapshot.recoveryPresentationState,
+                                tint: chargeTint, diameter: 38)
+                WidgetScoreRing(label: "Effort", value: snapshot.effort,
+                                state: snapshot.effortPresentationState,
+                                tint: effortTint, diameter: 38)
+                WidgetScoreRing(label: "Sleep", value: snapshot.rest,
+                                state: snapshot.restPresentationState,
+                                tint: restTint, diameter: 38)
             }
             .frame(maxWidth: .infinity)
             Spacer(minLength: 0)
@@ -142,9 +162,15 @@ struct NOOPDailyWidgetView: View {
                          snapshot: snapshot, now: entry.date)
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
-                    WidgetScoreRing(label: "Recovery", value: snapshot.recovery, tint: chargeTint, diameter: 50)
-                    WidgetScoreRing(label: "Effort", value: snapshot.effort, tint: effortTint, diameter: 50)
-                    WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 50)
+                    WidgetScoreRing(label: "Recovery", value: snapshot.recovery,
+                                    state: snapshot.recoveryPresentationState,
+                                    tint: chargeTint, diameter: 50)
+                    WidgetScoreRing(label: "Effort", value: snapshot.effort,
+                                    state: snapshot.effortPresentationState,
+                                    tint: effortTint, diameter: 50)
+                    WidgetScoreRing(label: "Sleep", value: snapshot.rest,
+                                    state: snapshot.restPresentationState,
+                                    tint: restTint, diameter: 50)
                 }
                 Divider().overlay(StrandPalette.hairline)
                 VStack(alignment: .leading, spacing: 7) {
@@ -170,9 +196,15 @@ struct NOOPDailyWidgetView: View {
                          snapshot: snapshot, now: entry.date)
 
             HStack(spacing: 16) {
-                WidgetScoreRing(label: "Recovery", value: snapshot.recovery, tint: chargeTint, diameter: 72)
-                WidgetScoreRing(label: "Effort", value: snapshot.effort, tint: effortTint, diameter: 72)
-                WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 72)
+                WidgetScoreRing(label: "Recovery", value: snapshot.recovery,
+                                state: snapshot.recoveryPresentationState,
+                                tint: chargeTint, diameter: 72)
+                WidgetScoreRing(label: "Effort", value: snapshot.effort,
+                                state: snapshot.effortPresentationState,
+                                tint: effortTint, diameter: 72)
+                WidgetScoreRing(label: "Sleep", value: snapshot.rest,
+                                state: snapshot.restPresentationState,
+                                tint: restTint, diameter: 72)
             }
             .frame(maxWidth: .infinity)
 
@@ -237,8 +269,11 @@ struct NOOPVitalsWidgetView: View {
                 Text(value(snapshot.bpm))
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .foregroundStyle(snapshot.bpm == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
-                Text(snapshot.bpm == nil ? "" : "bpm")
-                    .font(.caption).foregroundStyle(StrandPalette.textTertiary)
+                if snapshot.bpm != nil {
+                    Text("bpm")
+                        .font(.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
             }
             Text(isLive(snapshot, at: entry.date) ? "Live heart rate" : "Last heart rate")
                 .font(.caption2.weight(.medium)).foregroundStyle(StrandPalette.textSecondary)
@@ -321,9 +356,14 @@ struct NOOPSleepWidgetView: View {
         if entry.launchSurfaceAuthorized && LaunchSurfaceAuthorization.isAuthorized() {
             switch family {
             case .accessoryCircular:
-                WidgetScoreGauge(value: snapshot.rest, symbol: "moon.zzz.fill", tint: restTint)
+                WidgetScoreGauge(
+                    value: snapshot.rest,
+                    state: snapshot.restPresentationState,
+                    symbol: "moon.zzz.fill",
+                    tint: restTint
+                )
             case .accessoryInline:
-                Text("Sleep \(value(snapshot.rest)) · \(sleepDuration(snapshot.sleepMinutes))")
+                Text("Sleep \(scoreValue(snapshot.rest, state: snapshot.restPresentationState)) · \(sleepDuration(snapshot.sleepMinutes))")
             case .accessoryRectangular:
                 accessoryRectangular
             case .systemMedium:
@@ -342,7 +382,9 @@ struct NOOPSleepWidgetView: View {
                          snapshot: snapshot, now: entry.date)
             Spacer(minLength: 0)
             HStack(spacing: 12) {
-                WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 60)
+                WidgetScoreRing(label: "Sleep", value: snapshot.rest,
+                                state: snapshot.restPresentationState,
+                                tint: restTint, diameter: 60)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(sleepDuration(snapshot.sleepMinutes))
                         .font(.system(size: 20, weight: .bold, design: .rounded))
@@ -363,7 +405,9 @@ struct NOOPSleepWidgetView: View {
             WidgetHeader(title: "Sleep", symbol: "moon.zzz.fill",
                          snapshot: snapshot, now: entry.date)
             HStack(spacing: 16) {
-                WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 68)
+                WidgetScoreRing(label: "Sleep", value: snapshot.rest,
+                                state: snapshot.restPresentationState,
+                                tint: restTint, diameter: 68)
                 VStack(alignment: .leading, spacing: 9) {
                     WidgetMetricLine(symbol: "clock.fill", label: "Duration",
                                      value: sleepDuration(snapshot.sleepMinutes), tint: StrandPalette.restColor)
@@ -384,7 +428,8 @@ struct NOOPSleepWidgetView: View {
         HStack(spacing: 10) {
             Image(systemName: "moon.zzz.fill")
             VStack(alignment: .leading, spacing: 1) {
-                Text("Sleep \(value(snapshot.rest))").font(.headline)
+                Text("Sleep \(scoreValue(snapshot.rest, state: snapshot.restPresentationState))")
+                    .font(.headline)
                 Text("Sleep \(sleepDuration(snapshot.sleepMinutes)) · HRV \(unitValue(snapshot.hrv, "ms"))")
                     .font(.caption2)
             }
@@ -453,6 +498,7 @@ private struct WidgetHeader: View {
 private struct WidgetScoreRing: View {
     let label: LocalizedStringKey
     let value: Int?
+    let state: WidgetScoreState
     let tint: Color
     let diameter: CGFloat
 
@@ -463,17 +509,14 @@ private struct WidgetScoreRing: View {
                     .fill(StrandPalette.surfaceInset.opacity(0.78))
                 Circle()
                     .stroke(StrandPalette.hairline.opacity(0.7), lineWidth: max(3, diameter * 0.075))
-                if let value {
+                if state == .measured, let value {
                     Circle()
                         .trim(from: 0, to: min(1, max(0, CGFloat(value) / 100)))
                         .stroke(tint, style: StrokeStyle(lineWidth: max(3, diameter * 0.075), lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .shadow(color: tint.opacity(0.28), radius: 3)
                 }
-                Text(value.map(String.init) ?? "–")
-                    .font(.system(size: diameter * 0.31, weight: .bold, design: .rounded))
-                    .foregroundStyle(value == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
-                    .minimumScaleFactor(0.7)
+                scoreContent
             }
             .frame(width: diameter, height: diameter)
             Text(label)
@@ -486,25 +529,76 @@ private struct WidgetScoreRing: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
-        .accessibilityValue(value.map { Text("\($0) out of 100") } ?? Text("Unavailable"))
+        .accessibilityValue(accessibilityValue)
+    }
+
+    @ViewBuilder
+    private var scoreContent: some View {
+        switch state {
+        case .measured:
+            Text(value.map(String.init) ?? "–")
+                .font(.system(size: diameter * 0.31, weight: .bold, design: .rounded))
+                .foregroundStyle(value == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
+                .minimumScaleFactor(0.7)
+        case .calibrating:
+            Image(systemName: "hourglass")
+                .font(.system(size: diameter * 0.26, weight: .semibold))
+                .foregroundStyle(tint)
+        case .missing:
+            Text("–")
+                .font(.system(size: diameter * 0.31, weight: .bold, design: .rounded))
+                .foregroundStyle(StrandPalette.textTertiary)
+        }
+    }
+
+    private var accessibilityValue: Text {
+        switch state {
+        case .measured:
+            return value.map { Text("\($0) out of 100") } ?? Text("No data")
+        case .calibrating:
+            return Text("Calibrating")
+        case .missing:
+            return Text("No data")
+        }
     }
 }
 
 private struct WidgetScoreGauge: View {
     let value: Int?
+    let state: WidgetScoreState
     let symbol: String
     let tint: Color
 
     var body: some View {
-        Gauge(value: Double(value ?? 0), in: 0...100) {
+        Gauge(value: Double(state == .measured ? (value ?? 0) : 0), in: 0...100) {
             Image(systemName: symbol)
         } currentValueLabel: {
-            Text(value.map(String.init) ?? "–")
-                .fontWeight(.bold)
+            switch state {
+            case .measured:
+                Text(value.map(String.init) ?? "–")
+                    .fontWeight(.bold)
+            case .calibrating:
+                Image(systemName: "hourglass")
+            case .missing:
+                Text("–")
+                    .fontWeight(.bold)
+            }
         }
         .gaugeStyle(.accessoryCircular)
         .tint(tint)
         .widgetAccentable()
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: Text {
+        switch state {
+        case .measured:
+            return value.map { Text("\($0) out of 100") } ?? Text("No data")
+        case .calibrating:
+            return Text("Calibrating")
+        case .missing:
+            return Text("No data")
+        }
     }
 }
 
@@ -519,18 +613,22 @@ private struct DailyAccessoryRectangular: View {
                 Text(scoreDayShort(snapshot.scoreDay)).font(.caption2)
             }
             HStack(spacing: 10) {
-                accessoryScore("R", snapshot.recovery)
-                accessoryScore("E", snapshot.effort)
-                accessoryScore("S", snapshot.rest)
+                accessoryScore("R", snapshot.recovery, snapshot.recoveryPresentationState)
+                accessoryScore("E", snapshot.effort, snapshot.effortPresentationState)
+                accessoryScore("S", snapshot.rest, snapshot.restPresentationState)
             }
         }
         .widgetAccentable()
     }
 
-    private func accessoryScore(_ label: String, _ score: Int?) -> some View {
+    private func accessoryScore(
+        _ label: String,
+        _ score: Int?,
+        _ state: WidgetScoreState
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 2) {
             Text(label).font(.caption2)
-            Text(value(score)).font(.headline)
+            Text(scoreValue(score, state: state)).font(.headline)
         }
     }
 }
@@ -734,24 +832,47 @@ private struct DailyGuidance: View {
     }
 
     private var title: LocalizedStringKey {
-        guard let charge = snapshot.recovery else { return "Building your baseline" }
+        switch snapshot.recoveryPresentationState {
+        case .calibrating:
+            return "Building your baseline"
+        case .missing:
+            return "No data"
+        case .measured:
+            break
+        }
+        guard let charge = snapshot.recovery else { return "No data" }
         if charge >= 67 { return "Capacity looks strong" }
         if charge >= 34 { return "Keep today balanced" }
         return "Prioritize recovery"
     }
 
     private var detail: LocalizedStringKey {
-        guard snapshot.recovery != nil else { return "Wear your device consistently to unlock scores." }
-        return "Open NOOP for context, trends, and confidence."
+        switch snapshot.recoveryPresentationState {
+        case .calibrating:
+            return "Wear your device consistently to unlock scores."
+        case .measured, .missing:
+            return "Open NOOP for context, trends, and confidence."
+        }
     }
 
     private var symbol: String {
-        guard let charge = snapshot.recovery else { return "circle.dotted" }
+        switch snapshot.recoveryPresentationState {
+        case .calibrating:
+            return "hourglass"
+        case .missing:
+            return "arrow.up.forward.app"
+        case .measured:
+            break
+        }
+        guard let charge = snapshot.recovery else { return "arrow.up.forward.app" }
         return charge >= 67 ? "sparkles" : charge >= 34 ? "equal.circle.fill" : "moon.zzz.fill"
     }
 
     private var tint: Color {
-        scoreTint(snapshot.recovery, fallback: StrandPalette.chargeColor)
+        guard snapshot.recoveryPresentationState != .missing else {
+            return StrandPalette.textTertiary
+        }
+        return scoreTint(snapshot.recovery, fallback: StrandPalette.chargeColor)
     }
 }
 
@@ -902,6 +1023,17 @@ struct NOOPSleepWidget: Widget {
 
 private func value(_ value: Int?) -> String { value.map(String.init) ?? "–" }
 
+private func scoreValue(_ value: Int?, state: WidgetScoreState) -> String {
+    switch state {
+    case .measured:
+        return value.map(String.init) ?? "–"
+    case .calibrating:
+        return "…"
+    case .missing:
+        return "–"
+    }
+}
+
 private func percent(_ value: Int?) -> String { value.map { "\($0)%" } ?? "–" }
 
 private func unitValue(_ value: Int?, _ unit: String) -> String {
@@ -912,9 +1044,23 @@ private func sleepDuration(_ minutes: Int?) -> String {
     guard let minutes, minutes > 0 else { return "–" }
     let hours = minutes / 60
     let remainder = minutes % 60
-    if hours == 0 { return "\(remainder)m" }
-    if remainder == 0 { return "\(hours)h" }
-    return "\(hours)h \(remainder)m"
+    if hours == 0 {
+        return String(
+            format: String(localized: "appwide.day_overview.duration_minutes_format"),
+            Int64(remainder)
+        )
+    }
+    if remainder == 0 {
+        return String(
+            format: String(localized: "widget.duration_hours_format"),
+            Int64(hours)
+        )
+    }
+    return String(
+        format: String(localized: "appwide.day_overview.duration_hours_minutes_format"),
+        Int64(hours),
+        Int64(remainder)
+    )
 }
 
 private func supportingMetricLabel(_ metric: WidgetMetric) -> LocalizedStringKey {

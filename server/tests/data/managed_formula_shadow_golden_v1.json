@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "synthetic_account_id": "00000000-0000-4000-8000-000000000001",
+  "provenance": {
+    "source_kind": "synthetic_fixture",
+    "source_revision": "fixture-v1",
+    "input_manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "calibration_revision": "baseline-v1"
+  },
+  "contracts": [
+    {
+      "metric_key": "recovery",
+      "formula_revision": "noop-charge-v2",
+      "input_schema_revision": 1,
+      "output_unit": "percent"
+    },
+    {
+      "metric_key": "daily_effort",
+      "formula_revision": "noop-effort-v2",
+      "input_schema_revision": 1,
+      "output_unit": "score_0_100"
+    }
+  ],
+  "cases": [
+    {
+      "id": "recovery_neutral_personal_baseline",
+      "metric_key": "recovery",
+      "formula_revision": "noop-charge-v2",
+      "local_day": "2026-01-15",
+      "timezone_name": "America/Chicago",
+      "inputs": {
+        "hrv": 50.0,
+        "rhr": 55.0,
+        "hrv_baseline": {
+          "mean": 50.0,
+          "spread": 4.788507581803671,
+          "usable": true
+        },
+        "rhr_baseline": {
+          "mean": 55.0,
+          "spread": 2.3942537909018355,
+          "usable": true
+        },
+        "sleep_performance_fraction": 0.85
+      },
+      "expected": {
+        "status": "present",
+        "value": 57.932425214874954,
+        "missing_inputs": [],
+        "day_start_at": "2026-01-15T06:00:00+00:00",
+        "day_end_at": "2026-01-16T06:00:00+00:00",
+        "parity_status": "match"
+      }
+    },
+    {
+      "id": "recovery_all_optional_drivers",
+      "metric_key": "recovery",
+      "formula_revision": "noop-charge-v2",
+      "local_day": "2026-01-16",
+      "timezone_name": "America/Chicago",
+      "inputs": {
+        "hrv": 55.0,
+        "rhr": 52.0,
+        "hrv_baseline": {
+          "mean": 50.0,
+          "spread": 4.788507581803671,
+          "usable": true
+        },
+        "rhr_baseline": {
+          "mean": 55.0,
+          "spread": 2.3942537909018355,
+          "usable": true
+        },
+        "resp": 14.0,
+        "resp_baseline": {
+          "mean": 15.0,
+          "spread": 0.8,
+          "usable": true
+        },
+        "sleep_performance_fraction": 0.9,
+        "rest_quality_baseline": {
+          "mean": 0.82,
+          "spread": 0.03,
+          "usable": true
+        },
+        "skin_temperature_deviation_c": 0.4,
+        "recovery_index_slope_bpm_per_hour": -1.5,
+        "effort_baseline": {
+          "mean": 50.0,
+          "spread": 8.0,
+          "usable": true
+        },
+        "prior_day_effort": 40.0
+      },
+      "expected": {
+        "status": "present",
+        "value": 83.1120751430384,
+        "missing_inputs": [],
+        "day_start_at": "2026-01-16T06:00:00+00:00",
+        "day_end_at": "2026-01-17T06:00:00+00:00",
+        "parity_status": "match"
+      }
+    },
+    {
+      "id": "recovery_missing_required_hrv",
+      "metric_key": "recovery",
+      "formula_revision": "noop-charge-v2",
+      "local_day": "2026-01-17",
+      "timezone_name": "UTC",
+      "inputs": {
+        "rhr": 55.0,
+        "hrv_baseline": {
+          "mean": 50.0,
+          "spread": 5.0,
+          "usable": true
+        }
+      },
+      "expected": {
+        "status": "missing",
+        "value": null,
+        "missing_inputs": [
+          "hrv"
+        ],
+        "day_start_at": "2026-01-17T00:00:00+00:00",
+        "day_end_at": "2026-01-18T00:00:00+00:00",
+        "parity_status": "both_missing"
+      }
+    },
+    {
+      "id": "daily_effort_step_floor",
+      "metric_key": "daily_effort",
+      "formula_revision": "noop-effort-v2",
+      "local_day": "2026-01-18",
+      "timezone_name": "UTC",
+      "inputs": {
+        "steps": 1715
+      },
+      "expected": {
+        "status": "present",
+        "value": 18.75,
+        "missing_inputs": [],
+        "day_start_at": "2026-01-18T00:00:00+00:00",
+        "day_end_at": "2026-01-19T00:00:00+00:00",
+        "parity_status": "match"
+      }
+    },
+    {
+      "id": "daily_effort_cardio_uses_max_not_sum",
+      "metric_key": "daily_effort",
+      "formula_revision": "noop-effort-v2",
+      "local_day": "2026-01-19",
+      "timezone_name": "UTC",
+      "inputs": {
+        "cardio_effort": 50.0,
+        "steps": 10000
+      },
+      "expected": {
+        "status": "present",
+        "value": 50.0,
+        "missing_inputs": [],
+        "day_start_at": "2026-01-19T00:00:00+00:00",
+        "day_end_at": "2026-01-20T00:00:00+00:00",
+        "parity_status": "match"
+      }
+    },
+    {
+      "id": "daily_effort_gravity_fallback",
+      "metric_key": "daily_effort",
+      "formula_revision": "noop-effort-v2",
+      "local_day": "2026-01-20",
+      "timezone_name": "UTC",
+      "inputs": {
+        "gravity_samples": [
+          {"ts": 0, "x": 0.0, "y": 0.0, "z": 1.0},
+          {"ts": 60, "x": 0.2, "y": 0.0, "z": 1.0},
+          {"ts": 120, "x": 0.0, "y": 0.0, "z": 1.0},
+          {"ts": 180, "x": 0.2, "y": 0.0, "z": 1.0},
+          {"ts": 240, "x": 0.0, "y": 0.0, "z": 1.0},
+          {"ts": 300, "x": 0.2, "y": 0.0, "z": 1.0},
+          {"ts": 360, "x": 0.0, "y": 0.0, "z": 1.0},
+          {"ts": 420, "x": 0.2, "y": 0.0, "z": 1.0},
+          {"ts": 480, "x": 0.0, "y": 0.0, "z": 1.0},
+          {"ts": 540, "x": 0.2, "y": 0.0, "z": 1.0},
+          {"ts": 600, "x": 0.0, "y": 0.0, "z": 1.0}
+        ]
+      },
+      "expected": {
+        "status": "present",
+        "value": 14.1,
+        "missing_inputs": [],
+        "day_start_at": "2026-01-20T00:00:00+00:00",
+        "day_end_at": "2026-01-21T00:00:00+00:00",
+        "parity_status": "match"
+      }
+    },
+    {
+      "id": "daily_effort_missing_all_inputs",
+      "metric_key": "daily_effort",
+      "formula_revision": "noop-effort-v2",
+      "local_day": "2026-01-21",
+      "timezone_name": "UTC",
+      "inputs": {},
+      "expected": {
+        "status": "missing",
+        "value": null,
+        "missing_inputs": [
+          "cardio_effort",
+          "movement_evidence"
+        ],
+        "day_start_at": "2026-01-21T00:00:00+00:00",
+        "day_end_at": "2026-01-22T00:00:00+00:00",
+        "parity_status": "both_missing"
+      }
+    },
+    {
+      "id": "recovery_spring_dst_day",
+      "metric_key": "recovery",
+      "formula_revision": "noop-charge-v2",
+      "local_day": "2026-03-08",
+      "timezone_name": "America/Chicago",
+      "inputs": {
+        "hrv": 50.0,
+        "rhr": 55.0,
+        "hrv_baseline": {
+          "mean": 50.0,
+          "spread": 5.0,
+          "usable": true
+        }
+      },
+      "expected": {
+        "status": "present",
+        "value": 57.932425214874954,
+        "missing_inputs": [],
+        "day_start_at": "2026-03-08T06:00:00+00:00",
+        "day_end_at": "2026-03-09T05:00:00+00:00",
+        "parity_status": "match"
+      }
+    },
+    {
+      "id": "recovery_fall_dst_day",
+      "metric_key": "recovery",
+      "formula_revision": "noop-charge-v2",
+      "local_day": "2026-11-01",
+      "timezone_name": "America/Chicago",
+      "inputs": {
+        "hrv": 50.0,
+        "rhr": 55.0,
+        "hrv_baseline": {
+          "mean": 50.0,
+          "spread": 5.0,
+          "usable": true
+        }
+      },
+      "expected": {
+        "status": "present",
+        "value": 57.932425214874954,
+        "missing_inputs": [],
+        "day_start_at": "2026-11-01T05:00:00+00:00",
+        "day_end_at": "2026-11-02T06:00:00+00:00",
+        "parity_status": "match"
+      }
+    }
+  ]
+}

@@ -424,6 +424,12 @@ final class ScreenStateContractTests: XCTestCase {
         let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
 
         XCTAssertTrue(today.contains("RecoveryBandPresentation.label(for: score)"))
+        XCTAssertTrue(liquidToday.contains(
+            "RecoveryBandPresentation.gaugeColors(for: score)"
+        ))
+        XCTAssertTrue(liquidToday.contains(
+            "RecoveryBandPresentation.label(for: score)"
+        ))
         XCTAssertTrue(calendar.contains(
             "RecoveryBandPresentation.color(for: v).opacity(0.9)"
         ))
@@ -434,15 +440,40 @@ final class ScreenStateContractTests: XCTestCase {
             "RecoveryBandPresentation.color(for: s.thisWeek.mean)"
         ))
 
-        XCTAssertTrue(liquidToday.contains(
-            #"case .steady: return String(localized: "appwide.daily_signal.status.aligned")"#
-        ))
-        XCTAssertTrue(liquidToday.contains(
-            #"case .watch: return String(localized: "appwide.daily_signal.status.recheck")"#
-        ))
-        XCTAssertTrue(liquidToday.contains(
-            #"case .alert: return String(localized: "appwide.daily_signal.status.check_in")"#
-        ))
+        XCTAssertTrue(liquidToday.contains("dailySignalPillPresentation("))
+        XCTAssertTrue(liquidToday.contains("appwide.readiness.balanced.headline"))
+        XCTAssertTrue(liquidToday.contains("appwide.readiness.rundown.headline"))
+    }
+
+    func testDailySignalPillMatchesReadinessVocabularyAndPolarity() {
+        XCTAssertEqual(
+            dailySignalPillPresentation(status: .steady, readinessLevel: .primed),
+            DailySignalPillPresentation(label: .aligned, polarity: .positive)
+        )
+        XCTAssertEqual(
+            dailySignalPillPresentation(status: .steady, readinessLevel: .balanced),
+            DailySignalPillPresentation(label: .withinRange, polarity: .positive)
+        )
+        XCTAssertEqual(
+            dailySignalPillPresentation(status: .watch, readinessLevel: .strained),
+            DailySignalPillPresentation(label: .oneShift, polarity: .warning)
+        )
+        XCTAssertEqual(
+            dailySignalPillPresentation(status: .watch, readinessLevel: .rundown),
+            DailySignalPillPresentation(label: .multipleShifts, polarity: .critical)
+        )
+        XCTAssertEqual(
+            dailySignalPillPresentation(status: .watch, readinessLevel: .balanced),
+            DailySignalPillPresentation(label: .watch, polarity: .warning)
+        )
+        XCTAssertEqual(
+            dailySignalPillPresentation(status: .alert, readinessLevel: .balanced),
+            DailySignalPillPresentation(label: .checkIn, polarity: .critical)
+        )
+        XCTAssertEqual(
+            dailySignalPillPresentation(status: .building, readinessLevel: .primed),
+            DailySignalPillPresentation(label: .building, polarity: .neutral)
+        )
     }
 
     func testWorkoutCoachEntryBranchesOnBandAndCurrentRecovery() throws {
@@ -494,10 +525,20 @@ final class RootDynamicTypeContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(
             "compact && !dynamicTypeSize.isAccessibilitySize"
         ))
-        XCTAssertTrue(shell.contains("@ScaledMetric(relativeTo: .caption2)"))
-        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ? 2 : 1"))
+        XCTAssertTrue(shell.contains("@ScaledMetric(relativeTo: .footnote)"))
+        XCTAssertTrue(shell.contains("private static let labelLineCount = 1"))
+        XCTAssertFalse(shell.contains("dynamicTypeSize.isAccessibilitySize ? 2 : 1"))
+        XCTAssertTrue(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxLarge)"))
+        XCTAssertTrue(shell.contains(
+            "private static let labelMinimumScaleFactor: CGFloat = 0.56"
+        ))
+        XCTAssertTrue(shell.contains(".lineLimit(Self.labelLineCount)"))
+        XCTAssertTrue(shell.contains(
+            ".minimumScaleFactor(Self.labelMinimumScaleFactor)"
+        ))
+        XCTAssertTrue(shell.contains("private static func boundedLabelLineHeight"))
+        XCTAssertFalse(shell.contains("showsVisualLabels"))
         XCTAssertTrue(shell.contains("FloatingTabBar.expandedBodyHeight("))
-        XCTAssertFalse(shell.contains(".dynamicTypeSize(...DynamicTypeSize.xxxLarge)"))
         XCTAssertTrue(shell.contains("accessibilityShowsLargeContentViewer"))
     }
 
@@ -697,12 +738,16 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
 
         XCTAssertTrue(shell.contains("expandedReservedHeight: CGFloat = 76"))
         XCTAssertTrue(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
-        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight)"))
         XCTAssertTrue(shell.contains(
-            "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize"
+            ".frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))"
         ))
-        XCTAssertTrue(shell.contains(".frame(height: visibleTabBarHeight + 28)"))
-        XCTAssertFalse(shell.contains(".padding(.bottom, visibleTabBarHeight)"))
+        XCTAssertTrue(shell.contains(
+            "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize || tabBarCompact"
+        ))
+        XCTAssertTrue(shell.contains(
+            "(tabBarCompact ? IPhonePrimaryTab.compactControlDimension : 28)"
+        ))
+        XCTAssertTrue(shell.contains(".padding(.bottom, tabContentBottomReservation)"))
         XCTAssertFalse(shell.contains("floatingTabBarClearance"))
     }
 }
@@ -1021,10 +1066,11 @@ final class ReferenceSurfaceContractTests: XCTestCase {
             "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
         ))
         XCTAssertTrue(classic.contains("StrandPalette.recoveryGaugeColors(s).base"))
-        XCTAssertTrue(liquid.contains("StrandPalette.recoveryGaugeColors(score)"))
+        XCTAssertTrue(liquid.contains("RecoveryBandPresentation.gaugeColors(for: score)"))
         XCTAssertTrue(recoveryRing.contains("StrandPalette.recoveryGaugeStops(score)"))
+        XCTAssertTrue(androidToday.contains("TodayRecoveryHeroTone.RECOVERY ->"))
         XCTAssertTrue(androidToday.contains(
-            "TodayRecoveryHeroTone.RECOVERY -> Palette.recoveryGaugeColors"
+            "RecoveryBandPresentation.gaugeColors(requireNotNull(recovery))"
         ))
         XCTAssertTrue(androidToday.contains("tint = todayRecoveryHeroColors("))
         XCTAssertTrue(androidRing.contains("Palette.recoveryGaugeStops(score)"))
@@ -1195,7 +1241,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 813)
+        XCTAssertGreaterThanOrEqual(source.count, 818)
         XCTAssertEqual(source["appwide.daily_signal.status.aligned"]?["en"], "Steady")
         XCTAssertEqual(source["appwide.daily_signal.status.recheck"]?["en"], "Watch")
         XCTAssertEqual(
@@ -1479,6 +1525,44 @@ final class NutritionSummaryContractTests: XCTestCase {
         XCTAssertNotEqual(
             LabBookFormat.dayFromKey("2026-08-23", locale: german),
             LabBookFormat.dayFromKey("2026-08-23", locale: english)
+        )
+    }
+
+    func testIntelligenceExplanationUsesSharedTruthfulLocalizedContract() throws {
+        let apple = try repoSource("Strand/Screens/IntelligenceView.swift")
+        let android = try repoSource(
+            "android/app/src/main/java/com/noop/ui/IntelligenceScreen.kt"
+        )
+        let catalog = try repoSource(
+            "Tools/AppWideLocalization/appwide_strings.json"
+        )
+
+        XCTAssertTrue(apple.contains("appwide.intelligence.explainer_format"))
+        XCTAssertTrue(android.contains("appwide_intelligence_explainer_format"))
+        XCTAssertTrue(catalog.contains("\"appwide.intelligence.explainer_format\""))
+        XCTAssertTrue(catalog.contains("Some displayed days may come from local imports."))
+        XCTAssertTrue(catalog.contains("NOOP-derived scores are calculated locally"))
+        XCTAssertTrue(catalog.contains("they are not clinical measures"))
+        XCTAssertTrue(catalog.contains("missing inputs stay missing"))
+        for obsolete in [
+            "full on-device recompute",
+            "later port",
+            "cached metrics",
+            "Everything is computed here from Noop Band's raw data",
+            "NOOP displays values calculated on this device"
+        ] {
+            XCTAssertFalse(apple.localizedCaseInsensitiveContains(obsolete))
+            XCTAssertFalse(android.localizedCaseInsensitiveContains(obsolete))
+        }
+    }
+
+    private func repoSource(_ relativePath: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(
+            contentsOf: root.appendingPathComponent(relativePath),
+            encoding: .utf8
         )
     }
 

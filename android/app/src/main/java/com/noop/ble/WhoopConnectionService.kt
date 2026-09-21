@@ -43,6 +43,7 @@ import com.noop.notif.NotificationLifecycleId
 import com.noop.notif.NotificationLifecycleLedger
 import com.noop.notif.NotificationPlatformIdentity
 import com.noop.notif.NotificationLifecycleState
+import com.noop.notif.NotificationPresentationPreferences
 import com.noop.notif.protectPrivateContent
 import com.noop.safety.SafetyIncidentLocationTracker
 import com.noop.safety.SafetyIncidentStatusMonitor
@@ -55,6 +56,7 @@ import com.noop.ui.NoopPrefs
 import com.noop.ui.appLaunchIntent
 import com.noop.widget.WidgetSnapshotFactory
 import com.noop.widget.WidgetSnapshotStore
+import java.lang.ref.WeakReference
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -118,11 +120,22 @@ private data class NotifyTick(
 
 internal fun connectionNotificationDetail(
     connected: Boolean,
+    backfilling: Boolean,
+    receivingRecentData: Boolean,
     recoveryPct: Double?,
     effort: Double?,
     batteryPct: Double?,
+    heartRateText: String? = null,
 ): String = buildList {
-    add(if (connected) "Streaming in the background" else "Keeping the link open")
+    add(
+        when {
+            !connected -> "Keeping the connection ready"
+            backfilling -> "Syncing saved history"
+            receivingRecentData -> "Receiving recent band data"
+            else -> "Connected; waiting for new band data"
+        },
+    )
+    heartRateText?.let { add(it) }
     recoveryPct?.let { add("Recovery ${it.roundToInt()}%") }
     effort?.let { add("Effort ${it.roundToInt()}") }
     batteryPct?.let { add("Noop Band ${it.roundToInt()}%") }
@@ -223,6 +236,7 @@ class WhoopConnectionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        activeInstance = WeakReference(this)
         SafetyLiveLocationSession.initialize(this)
         ManagedSafetyLiveLocationSession.initialize(this)
         (application as NoopApplication).managedCloud
@@ -887,35 +901,189 @@ class WhoopConnectionService : Service() {
             }
         }
 
-    /** Signature of the fields the notification actually renders (#216). The live HR stream emits ~1 Hz
-     *  but the notification no longer shows BPM, so we only re-post when one of THESE changes — turning
-     *  a per-beat wakeup into a handful of updates a day. */
-    private var lastNotificationKey: String? = null
+    /** The base fields update immediately. Optional live HR uses a separate 15-second presentation
+     * cadence, never the sensor's roughly 1 Hz emission cadence. */
+    private var lastNotificationBaseKey: String? = null
+    private var lastVisibleNotificationBpm: Int? = null
+    private var lastNotificationPostedAtMs: Long = 0L
+    private var lastNotificationAttemptAtMs: Long = 0L
+    private var lastLiveHeartRateEnabled: Boolean? = null
+    private var notificationPostFailurePending = false
+    private var notificationPostFailureCount = 0
+    private var notificationUpdateFailureRecorded = false
+    private var notificationRetryJob: Job? = null
+    private var liveHeartRateExpiryJob: Job? = null
+    private var lastNotificationRecoveryPct: Double? = null
+    private var lastNotificationEffort: Double? = null
 
     private fun postNotification(
         state: LiveState,
         recoveryPct: Double? = null,
         effort: Double? = null,
     ) {
-        val key = listOf(
+        lastNotificationRecoveryPct = recoveryPct
+        lastNotificationEffort = effort
+        val nowMillis = System.currentTimeMillis()
+        val receivingRecentData = LiveHeartRateNotificationPolicy.hasFreshSample(
+            connected = state.connected,
+            receivedAtMillis = state.heartRateReceivedAtMillis,
+            nowMillis = nowMillis,
+        )
+        val baseKey = listOf(
             state.connected,
             state.backfilling,
+            receivingRecentData,
             recoveryPct?.roundToInt(),
             effort?.roundToInt(),
             state.batteryPct?.roundToInt(),
             safetyLocationActive(),
         ).joinToString("|")
-        if (key == lastNotificationKey) return
-        lastNotificationKey = key
+        val liveHeartRateEnabled = NotificationPresentationPreferences.liveHeartRate(this)
+        val visibleBpm = LiveHeartRateNotificationPolicy.visibleBpm(
+            enabled = liveHeartRateEnabled,
+            connected = state.connected,
+            bpm = state.heartRate,
+            receivedAtMillis = state.heartRateReceivedAtMillis,
+            nowMillis = nowMillis,
+        )
+        reconcileSampleFreshnessExpiry(
+            connected = state.connected,
+            receivedAtMillis = state.heartRateReceivedAtMillis,
+            nowMillis = nowMillis,
+        )
+        val preferenceChanged = lastLiveHeartRateEnabled != liveHeartRateEnabled
+        val baseChanged = baseKey != lastNotificationBaseKey || preferenceChanged
+        val retryDelayMillis =
+            LiveHeartRateNotificationPolicy.failedPostRetryDelayMillis(
+                notificationPostFailureCount,
+            )
+        if (
+            !LiveHeartRateNotificationPolicy.mayRetryFailedPost(
+                failurePending = notificationPostFailurePending,
+                nowMillis = nowMillis,
+                lastAttemptAtMillis = lastNotificationAttemptAtMs,
+                requiredDelayMillis = retryDelayMillis,
+            )
+        ) {
+            return
+        }
+        if (
+            !LiveHeartRateNotificationPolicy.shouldPost(
+                baseChanged = baseChanged,
+                liveHeartRateEnabled = liveHeartRateEnabled,
+                visibleBpm = visibleBpm,
+                previousVisibleBpm = lastVisibleNotificationBpm,
+                nowMillis = nowMillis,
+                lastPostedAtMillis = lastNotificationPostedAtMs,
+            )
+        ) {
+            return
+        }
         // Defensive: a notify() throw (OEM quirk, revoked POST_NOTIFICATIONS on some ROMs) must not
         // crash the collector and tear down the connection we exist to keep alive.
-        NotificationLifecycleLedger.posted(
-            this,
-            NotificationLifecycleId.CONNECTION_SERVICE,
-            NotificationLifecycleCategory.SERVICE,
-        ) {
+        val post = {
             val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            mgr.notify(NOTIF_ID, buildNotification(state, recoveryPct, effort))
+            mgr.notify(
+                NOTIF_ID,
+                buildNotification(
+                    state = state,
+                    recoveryPct = recoveryPct,
+                    effort = effort,
+                    visibleHeartRateBpm = visibleBpm,
+                    receivingRecentData = receivingRecentData,
+                ),
+            )
+        }
+        lastNotificationAttemptAtMs = nowMillis
+        val posted = if (baseChanged) {
+            NotificationLifecycleLedger.posted(
+                this,
+                NotificationLifecycleId.CONNECTION_SERVICE,
+                NotificationLifecycleCategory.SERVICE,
+                post,
+            )
+        } else {
+            runCatching(post).isSuccess
+        }
+        if (posted) {
+            lastNotificationBaseKey = baseKey
+            lastLiveHeartRateEnabled = liveHeartRateEnabled
+            lastVisibleNotificationBpm = visibleBpm
+            lastNotificationPostedAtMs = nowMillis
+            notificationPostFailurePending = false
+            notificationPostFailureCount = 0
+            notificationRetryJob?.cancel()
+            notificationRetryJob = null
+            if (notificationUpdateFailureRecorded) {
+                com.noop.AppDiagnosticsRecorder.record(
+                    "connection.notification_update",
+                    fields = mapOf("outcome" to "recovered"),
+                )
+            }
+            notificationUpdateFailureRecorded = false
+        } else {
+            notificationPostFailurePending = true
+            notificationPostFailureCount += 1
+            if (!notificationUpdateFailureRecorded) {
+                notificationUpdateFailureRecorded = true
+                com.noop.AppDiagnosticsRecorder.record(
+                    "connection.notification_update",
+                    fields = mapOf(
+                        "outcome" to "failed",
+                        "failure_kind" to "platform",
+                    ),
+                )
+            }
+            scheduleNotificationRetry(
+                LiveHeartRateNotificationPolicy.failedPostRetryDelayMillis(
+                    notificationPostFailureCount,
+                ),
+            )
+        }
+    }
+
+    private fun scheduleNotificationRetry(delayMillis: Long) {
+        notificationRetryJob?.cancel()
+        notificationRetryJob = scope.launch {
+            delay(delayMillis)
+            notificationRetryJob = null
+            postNotification(
+                ble.state.value,
+                lastNotificationRecoveryPct,
+                lastNotificationEffort,
+            )
+        }
+    }
+
+    private fun reconcileSampleFreshnessExpiry(
+        connected: Boolean,
+        receivedAtMillis: Long?,
+        nowMillis: Long,
+    ) {
+        if (
+            !LiveHeartRateNotificationPolicy.hasFreshSample(
+                connected = connected,
+                receivedAtMillis = receivedAtMillis,
+                nowMillis = nowMillis,
+            )
+        ) {
+            liveHeartRateExpiryJob?.cancel()
+            liveHeartRateExpiryJob = null
+            return
+        }
+        if (liveHeartRateExpiryJob?.isActive == true) return
+        val waitMillis = LiveHeartRateNotificationPolicy.expiryCheckDelayMillis(
+            receivedAtMillis = receivedAtMillis,
+            nowMillis = nowMillis,
+        ) ?: return
+        liveHeartRateExpiryJob = scope.launch {
+            delay(waitMillis)
+            liveHeartRateExpiryJob = null
+            postNotification(
+                ble.state.value,
+                lastNotificationRecoveryPct,
+                lastNotificationEffort,
+            )
         }
     }
 
@@ -923,11 +1091,21 @@ class WhoopConnectionService : Service() {
         state: LiveState,
         recoveryPct: Double?,
         effort: Double? = null,
+        visibleHeartRateBpm: Int? = LiveHeartRateNotificationPolicy.visibleBpm(
+            enabled = NotificationPresentationPreferences.liveHeartRate(this),
+            connected = state.connected,
+            bpm = state.heartRate,
+            receivedAtMillis = state.heartRateReceivedAtMillis,
+            nowMillis = System.currentTimeMillis(),
+        ),
+        receivingRecentData: Boolean = LiveHeartRateNotificationPolicy.hasFreshSample(
+            connected = state.connected,
+            receivedAtMillis = state.heartRateReceivedAtMillis,
+            nowMillis = System.currentTimeMillis(),
+        ),
     ): Notification {
-        // #216: deliberately NO live BPM in the title. A per-beat-changing notification forces the
-        // foreground service to re-post (and wake the device) ~once a second all day, which is a real
-        // battery cost for a number nobody reads off the lock screen. The title now reflects only the
-        // connection / sync state, which changes rarely — see postNotification's dedup.
+        // Live BPM remains out of the title and appears only after explicit opt-in. Its refresh policy is
+        // bounded to 15 seconds; connection, sync, Safety, recovery and battery changes remain immediate.
         val safetyLocationActive = safetyLocationActive()
         val title = when {
             safetyLocationActive -> "Safety location sharing active"
@@ -941,9 +1119,14 @@ class WhoopConnectionService : Service() {
             } else {
                 connectionNotificationDetail(
                     connected = state.connected,
+                    backfilling = state.backfilling,
+                    receivingRecentData = receivingRecentData,
                     recoveryPct = recoveryPct,
                     effort = effort,
                     batteryPct = state.batteryPct,
+                    heartRateText = visibleHeartRateBpm?.let {
+                        getString(R.string.live_heart_rate_notification_value, it)
+                    },
                 )
             }
 
@@ -998,22 +1181,54 @@ class WhoopConnectionService : Service() {
     }
 
     override fun onDestroy() {
+        if (activeInstance?.get() === this) {
+            activeInstance = null
+        }
         if (bluetoothReceiverRegistered) {
             // unregisterReceiver throws if it was never registered; the flag guards that, and runCatching
             // covers the rare case the OS already reclaimed it.
             runCatching { unregisterReceiver(bluetoothStateReceiver) }
             bluetoothReceiverRegistered = false
         }
+        notificationRetryJob?.cancel()
+        notificationRetryJob = null
+        liveHeartRateExpiryJob?.cancel()
+        liveHeartRateExpiryJob = null
         scope.cancel()
         super.onDestroy()
     }
 
     companion object {
+        @Volatile
+        private var activeInstance: WeakReference<WhoopConnectionService>? = null
+
         private const val CHANNEL_ID = "noop_strap_connection"
         private const val NOTIF_ID =
             NotificationPlatformIdentity.NotificationId.CONNECTION_SERVICE
         const val ACTION_STOP = "com.noop.ble.action.STOP_CONNECTION"
         const val ACTION_RECONNECT = "com.noop.ble.action.RECONNECT_SAVED"
+
+        /**
+         * Refresh presentation on an already-running collector without acquiring a new foreground-service
+         * lifetime. A presentation preference must never start collection or reconnect a band.
+         */
+        fun refreshPresentationIfRunning(): Boolean {
+            val service = activeInstance?.get()
+            val outcome = if (service == null) "not_running" else "requested"
+            com.noop.AppDiagnosticsRecorder.record(
+                "live_hr.notification_refresh",
+                fields = mapOf("outcome" to outcome),
+            )
+            if (service == null) return false
+            service.scope.launch {
+                service.postNotification(
+                    service.ble.state.value,
+                    service.lastNotificationRecoveryPct,
+                    service.lastNotificationEffort,
+                )
+            }
+            return true
+        }
 
         /**
          * Promote the process to the foreground so the strap stays connected. Safe to call when

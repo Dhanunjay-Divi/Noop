@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="managed_safety_presentation_title">Оповещения Safety</string>
+    <string name="managed_safety_presentation_blurb">Приватные оповещения от принятых контактов NOOP. NOOP не обращается в экстренные службы.</string>
+    <string name="managed_safety_urgent_sound_title">Срочный звук Safety</string>
+    <string name="managed_safety_urgent_sound_detail">Использовать отдельный звук высокого приоритета, вибрацию и свет. По умолчанию выключено. Настройки звука и «Не беспокоить» Android сохраняются; NOOP не открывает полноэкранное оповещение.</string>
+    <string name="managed_safety_urgent_channel_name">Контакты NOOP Safety · срочный звук</string>
+    <string name="managed_safety_urgent_channel_description">Необязательный срочный звук, вибрация и свет для приватных оповещений NOOP Safety.</string>
+    <string name="managed_safety_open_notification_settings">Открыть настройки оповещений Safety</string>
+    <string name="live_heart_rate_notification_title">Пульс в фоновом уведомлении</string>
+    <string name="live_heart_rate_notification_detail">Показывать свежий пульс в существующем фоновом уведомлении. Обновление не чаще раза в 15 секунд для экономии заряда; непрерывное измерение не включается.</string>
+    <string name="live_heart_rate_notification_accessibility">Пульс в фоновом уведомлении. Не запускает непрерывное измерение пульса.</string>
+    <string name="live_heart_rate_notification_value">Пульс %1$d уд/мин</string>
+</resources>

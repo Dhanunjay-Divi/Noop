@@ -899,7 +899,7 @@ final class NOOPiOSUITests: XCTestCase {
         let app = launchDemoScreen(
             "onboarding",
             extraArguments: [
-                "--demo-onboarding-step", "7",
+                "--demo-onboarding-page", "profile",
                 "-units.system", "metric",
                 "-units.mass", "kg",
                 "-units.height", "cm",
@@ -1272,13 +1272,13 @@ final class NOOPiOSUITests: XCTestCase {
         let scrollIdentifier = "noop.today.scroll"
         XCTAssertTrue(app.scrollViews[scrollIdentifier].waitForExistence(timeout: 5))
 
-        let options = XCTMeasureOptions()
         #if targetEnvironment(simulator)
         // The iOS 26 simulator currently throws NSInternalInconsistencyException while decoding the
-        // scrolling signpost payload and can starve XCTest's event-loop observer across repeated measured
-        // gestures. One unmeasured round trip plus one complete process-metric round trip keeps hosted CI
-        // as a bounded liveness check without crossing the simulator's repeat-interaction failure edge.
-        // Re-query before every event because interruption handling can invalidate a cached XCUIElement.
+        // scrolling signpost payload and can starve XCTest's event-loop observer across repeated gestures.
+        // XCTest also invokes a measurement closure for an uncounted calibration pass even when
+        // iterationCount is one, so wrapping this interaction in `measure` silently performs more than the
+        // requested round trip and can wedge the observer. Execute exactly one timed round trip instead.
+        // Re-query before each event because interruption handling can invalidate a cached XCUIElement.
         // The dedicated compaction test owns navigation semantics; production's bounded CADisplayLink
         // monitor records 50 ms and 150 ms hitches, and real devices retain five iterations of Apple's
         // scrolling/deceleration metric below.
@@ -1291,15 +1291,8 @@ final class NOOPiOSUITests: XCTestCase {
             15,
             "A simulator Today scroll round trip must not stall."
         )
-        options.iterationCount = 1
-        measure(
-            metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()],
-            options: options
-        ) {
-            app.scrollViews[scrollIdentifier].swipeUp()
-            app.scrollViews[scrollIdentifier].swipeDown()
-        }
         #else
+        let options = XCTMeasureOptions()
         options.iterationCount = 5
         measure(
             metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric],

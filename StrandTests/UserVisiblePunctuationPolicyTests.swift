@@ -18,6 +18,7 @@ final class UserVisiblePunctuationPolicyTests: XCTestCase {
         let forbidden = String(UnicodeScalar(0x2014)!)
         let paths = [
             "Strand/Resources/Localizable.xcstrings",
+            "StrandiOSWidgets/Localizable.xcstrings",
             "Packages/StrandDesign/Sources/StrandDesign/Resources/Localizable.xcstrings",
             "Tools/AppWideLocalization/appwide_strings.json",
             "Tools/CoachLocalization/coach_strings.json",

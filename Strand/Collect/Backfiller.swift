@@ -31,11 +31,13 @@ struct BackfillPersistedRowsReceipt: Equatable, Sendable {
 /// Per-chunk local safe-trim invariant:
 ///   decode known → await insert (decoded durable) →
 ///   await enqueueRawBatch (raw durable) →
-///   await setCursor(strap_trim) →
-///   ackTrim (link-layer confirmed ack to strap)
+///   await setCursor(strap_trim diagnostic watermark) →
+///   queue ackTrim (.withResponse) →
+///   confirmAck from the platform callback
 ///
 /// A chunk is forgotten only after decoded AND raw are both locally durable AND the ack
-/// (.withResponse) is link-layer confirmed. Never waits on the server.
+/// (.withResponse) is link-layer confirmed. The band owns retained history/resume state; the local
+/// watermark does not select a firmware resume position. Never waits on the server.
 @MainActor
 final class Backfiller {
     /// (parsed frames, deviceClockRef, wallClockRef, sessionOldestUnix?, sessionNewestUnix?) → Streams.
@@ -49,9 +51,10 @@ final class Backfiller {
     /// than freezing the id captured at construction. Single-WHOOP never switches, so this stays
     /// "my-whoop" exactly as a `let` would have.
     var deviceId: String
-    /// Confirms one HISTORY_END chunk to the strap. Carries both the trim cursor (= first u32
-    /// of end_data, used for the `strap_trim` cursor) and the 8-byte `end_data` (= the raw
-    /// HISTORY_END metadata.data[10:18]) that the high-freq-sync ack form requires verbatim.
+    /// Queues confirmation of one HISTORY_END chunk to the strap. Carries both the trim value
+    /// (= first u32 of end_data, stored as the local `strap_trim` diagnostic watermark) and the
+    /// 8-byte `end_data` (= the raw HISTORY_END metadata.data[10:18]) that the high-freq-sync ack
+    /// form requires verbatim. BLEManager records confirmation only from the platform callback.
     private let ackTrim: (_ trim: UInt32, _ endData: [UInt8]) -> Void
     private let extract: Extractor
     /// Research toggle. When false (DEFAULT) no raw frames are persisted — the chunk's
@@ -72,6 +75,10 @@ final class Backfiller {
 
     /// True while a historical offload session is active.
     private(set) var isBackfilling = false
+    /// Invalidates a finishChunk continuation when timeout/disconnect or a replacement session occurs
+    /// while an awaited store write is suspended. Durable rows may still publish their receipt, but the
+    /// stale continuation must never acknowledge history through a later BLE connection.
+    private var sessionGeneration: UInt64 = 0
 
     /// Buffered data frames for the current open chunk (between START and END).
     private var chunk: [[UInt8]] = []
@@ -137,8 +144,8 @@ final class Backfiller {
     /// ingest gate already kept the garbage rows out of the DB).
     private(set) var sessionDroppedImplausible = 0
 
-    /// The trim cursor of the LAST chunk this Backfiller acked (durably persisted + confirmed to the
-    /// strap). Survives across sessions on the same connection so the auto-continue gate (#364) can ask
+    /// The trim cursor of the LAST chunk whose confirmed-write callback succeeded after durable
+    /// persistence. Survives across sessions on the same connection so the auto-continue gate (#364) can ask
     /// "did the offload actually advance the strap's trim this session?" - the spin-detector signal that
     /// stops it re-kicking forever when the cursor is frozen. nil until the first ack. NOT reset in
     /// `begin()` (it's a cross-session high-water mark, not a per-session tally).
@@ -224,6 +231,7 @@ final class Backfiller {
     /// chunkOpen starts TRUE: the high-freq-sync biometric replay streams records immediately and
     /// sends one HISTORY_START then repeated HISTORY_ENDs, so we must accumulate from the outset.
     func begin(family: DeviceFamily, continuedAfterRows: Bool = false) {
+        sessionGeneration &+= 1
         self.family = family
         self.continuedAfterRows = continuedAfterRows
         isBackfilling = true
@@ -387,6 +395,7 @@ final class Backfiller {
     }
 
     private func finishChunk(unix: UInt32, trim: UInt32, endFrame: [UInt8]) async {
+        let generation = sessionGeneration
         guard let endData = Backfiller.endData(from: endFrame, family: family) else { return }
 
         // #773: corrupt future-RTC detection. A HISTORY_END carries the strap's own clock; a genuine offload
@@ -665,6 +674,10 @@ final class Backfiller {
             return
         }
 
+        guard sessionGeneration == generation else {
+            log?("Backfill: durable chunk belongs to an ended session - not queueing its history acknowledgement.")
+            return
+        }
         do { try await store.setCursor("strap_trim", Int(trim)) } catch {
             // Diag (#601): decoded (and raw, if on) are durable but the strap_trim cursor write failed. We
             // return WITHOUT acking — acking now would let the strap trim past records the cursor hasn't
@@ -675,14 +688,28 @@ final class Backfiller {
             persistStalled = true   // #57
             return
         }
+        guard sessionGeneration == generation else {
+            log?("Backfill: session ended while recording the local trim watermark - not queueing its history acknowledgement.")
+            return
+        }
 
+        // Queue the link-layer acknowledgement only after decoded/raw rows and the diagnostic watermark
+        // are durable. BLEManager calls confirmAck(trim:) from CoreBluetooth's successful confirmed-write
+        // callback; enqueueing a write is not evidence that the band accepted it.
         ackTrim(trim, endData)
-        lastAckedTrim = trim   // #364: record the advanced cursor for the auto-continue spin-detector
+    }
+
+    /// Record a historical acknowledgement only after the platform confirms the with-response write.
+    /// A failed callback or disconnect deliberately leaves the previous high-water mark intact so the
+    /// next session cannot misclassify a queued-but-unaccepted trim as durable progress.
+    func confirmAck(trim: UInt32) {
+        lastAckedTrim = trim
     }
 
     /// Called when a backfill watchdog timer fires (strap went silent mid-offload).
     /// Clears state without acking — the chunk was never durably committed.
     func timeoutFired() {
+        sessionGeneration &+= 1
         isBackfilling = false
         chunk.removeAll(keepingCapacity: true)
         chunkOpen = false

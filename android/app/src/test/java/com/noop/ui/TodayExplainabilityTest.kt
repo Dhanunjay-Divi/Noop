@@ -84,7 +84,7 @@ class TodayExplainabilityTest {
             ).first,
         )
         assertEquals(
-            Palette.recoveryGaugeColors(72.0),
+            RecoveryBandPresentation.gaugeColors(72.0),
             todayRecoveryHeroColors(recovery = 72.0, calibrationNights = null),
         )
     }

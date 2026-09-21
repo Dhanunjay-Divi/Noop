@@ -35,9 +35,11 @@ import com.noop.analytics.SleepMark
 import com.noop.analytics.SleepMarkType
 import com.noop.analytics.Sport
 import com.noop.analytics.Calories
+import com.noop.analytics.ChargeFormulaUpgradeGate
 import com.noop.analytics.ContextualVitalPolicy
 import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.ReadinessEngine
+import com.noop.analytics.RestFormulaUpgradeGate
 import com.noop.analytics.StrainScorer
 import com.noop.analytics.UserProfile
 import com.noop.analytics.WorkoutSport
@@ -83,7 +85,6 @@ import com.noop.notif.ScheduledReportPolicy
 import com.noop.protocol.CommandNumber
 import com.noop.safety.SafetySosDispatcher
 import com.noop.safety.SafetySosGestureRuntime
-import com.noop.sync.RemoteNoopAlgorithmRevision
 import com.noop.widget.WidgetSnapshotFactory
 import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.Dispatchers
@@ -112,21 +113,6 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlin.math.roundToInt
-
-/**
- * Upgrade boundary for Charge formula changes that do not create a raw-input dirty marker.
- *
- * The revision string makes future formula updates fail open into one full-history pass. AppViewModel
- * writes completion only from the successful branch of the scoring call.
- */
-internal object ChargeFormulaUpgradeGate {
-    const val COMPLETED_REVISION_KEY = "noop.analysis.completedChargeFormulaRevision"
-    const val HISTORY_DAYS = 4_000
-    const val CURRENT_REVISION = RemoteNoopAlgorithmRevision.CHARGE
-
-    fun needsRescore(completedRevision: String?): Boolean =
-        completedRevision != CURRENT_REVISION
-}
 
 internal object ActiveZoneUpgradeGate {
     const val COMPLETED_REVISION_KEY = "noop.analysis.completedActiveZoneRevision"
@@ -1194,12 +1180,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
                 // #836 parity (Android): the 15-min tick normally skips when raw inputs are unchanged. A
-                // formula-only upgrade does not create a dirty marker, so the explicit Charge revision
-                // overrides the skip and expands this one pass to full history. The completion marker is
-                // written only from onSuccess below; interruption/failure therefore retries next iteration.
+                // formula-only upgrade does not create a dirty marker, so explicit Charge and Rest revisions
+                // override the skip and expand this one pass to full history. Completion markers are written
+                // only from onSuccess below; interruption/failure therefore retries next iteration.
                 val prefs = NoopPrefs.of(appContext)
                 val chargeUpgradePending = ChargeFormulaUpgradeGate.needsRescore(
                     prefs.getString(ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY, null),
+                )
+                val restUpgradePending = RestFormulaUpgradeGate.needsRescore(
+                    prefs.getString(RestFormulaUpgradeGate.COMPLETED_REVISION_KEY, null),
                 )
                 val activeZoneUpgradePending = ActiveZoneUpgradeGate.needsRescore(
                     prefs.getString(ActiveZoneUpgradeGate.COMPLETED_REVISION_KEY, null),
@@ -1209,6 +1198,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // signal without bringing the COUNT/MAX fingerprint scan back to launch/resume.
                 val explicitRescorePending =
                     prefs.getString(NoopPrefs.KEY_ANALYZE_WATERMARK, null) == ""
+                val formulaTraversalSelected =
+                    restUpgradePending || chargeUpgradePending
+                val storedRestAnchor =
+                    if (prefs.contains(RestFormulaUpgradeGate.NEXT_ANCHOR_KEY)) {
+                        prefs.getLong(
+                            RestFormulaUpgradeGate.NEXT_ANCHOR_KEY,
+                            0L,
+                        )
+                    } else {
+                        null
+                    }
+                val restTraversalAnchor =
+                    RestFormulaUpgradeGate.traversalAnchor(
+                        migrationRequired =
+                            formulaTraversalSelected,
+                        anchorRevision =
+                            prefs.getString(
+                                RestFormulaUpgradeGate.ANCHOR_REVISION_KEY,
+                                null,
+                            ),
+                        storedAnchor = storedRestAnchor,
+                    )
                 val analysisSourceId = deviceId
                 val registeredAnalysisSources = try {
                     noopApp.deviceRegistry.all()
@@ -1222,7 +1233,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     registeredDevices = registeredAnalysisSources,
                 )
                 val forceAnalysis =
-                    chargeUpgradePending || activeZoneUpgradePending || explicitRescorePending
+                    chargeUpgradePending || restUpgradePending ||
+                        activeZoneUpgradePending || explicitRescorePending
                 val analysisNowSeconds = System.currentTimeMillis() / 1_000L
                 val analysisTimeZoneHistory =
                     AnalysisTimeZoneHistory.from(appContext).observe(
@@ -1249,8 +1261,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         ),
                     )
                 } else if (analysisLease != null) {
-                    val requestedAnalysisDays = if (chargeUpgradePending) {
-                        ChargeFormulaUpgradeGate.HISTORY_DAYS
+                    val requestedAnalysisDays = if (
+                        chargeUpgradePending || restUpgradePending
+                    ) {
+                        maxOf(
+                            ChargeFormulaUpgradeGate.HISTORY_DAYS,
+                            RestFormulaUpgradeGate.HISTORY_DAYS,
+                        )
                     } else {
                         ActiveZoneUpgradeGate.HISTORY_DAYS
                     }
@@ -1260,6 +1277,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         nowSeconds = analysisNowSeconds,
                         force = forceAnalysis,
                         timeZoneHistory = analysisTimeZoneHistory,
+                        traverseResolvableHistory =
+                            formulaTraversalSelected,
+                        resolvableHistoryAnchor =
+                            restTraversalAnchor,
                     )
                     if (!analysisPlan.shouldAnalyze) {
                         val terminalExclusion = analysisPlan.terminalUnknownRange
@@ -1314,6 +1335,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         "analysis.recent",
                         fields = mapOf(
                             "charge_upgrade" to chargeUpgradePending.toString(),
+                            "rest_upgrade" to restUpgradePending.toString(),
                             "active_zone_upgrade" to activeZoneUpgradePending.toString(),
                             "explicit_rescore" to explicitRescorePending.toString(),
                             "change_gate_ok" to analysisLease.dirtyGateSucceeded.toString(),
@@ -1336,6 +1358,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 providedCalibrationCivilDayWindows =
                                     analysisPlan.calibrationCivilDayWindows,
                                 historicalCatchUp = analysisPlan.isHistoricalCatchUp,
+                                traverseResolvableHistory =
+                                    formulaTraversalSelected,
                                 importedDeviceId = analysisSourceId,
                                 maxHROverride = profileStore.hrMaxOverride
                                     .takeIf { it > 0 }?.toDouble(),
@@ -1440,20 +1464,80 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         // CancellationException that runCatching would otherwise swallow, breaking the loop's
                         // own cancellation — rethrow it so onCleared() actually stops the loop. (#125)
                     }.onSuccess {
+                        val restProgress =
+                            RestFormulaUpgradeGate.progress(
+                                // onSuccess proves scoring, persistence, repair, and claim finalization.
+                                // The dirty gate is a separate fail-open read and must also have succeeded.
+                                passCompleted =
+                                    analysisLease.dirtyGateSucceeded,
+                                resolvableHistorySatisfied =
+                                    analysisPlan.resolvableHistorySatisfied,
+                                nextResolvableHistoryAnchor =
+                                    analysisPlan.nextResolvableHistoryAnchor,
+                                wasRequired =
+                                    restUpgradePending || chargeUpgradePending,
+                                traversalWasSelected =
+                                    formulaTraversalSelected,
+                            )
                         com.noop.AppDiagnosticsRecorder.endOperation(
                             analysisDiagnostic,
                             outcome = "completed",
+                            fields = mapOf(
+                                "rest_history_complete" to
+                                    analysisPlan.resolvableHistorySatisfied.toString(),
+                                "rest_history_progress" to
+                                    when (restProgress) {
+                                        RestFormulaUpgradeGate.Progress.Retry ->
+                                            "retry"
+                                        is RestFormulaUpgradeGate.Progress.Advance ->
+                                            "advance"
+                                        is RestFormulaUpgradeGate.Progress.Complete ->
+                                            "complete"
+                                    },
+                            ),
                             includeResourceSnapshot = true,
                         )
-                        if (chargeUpgradePending && analysisPlan.requestedWindowSatisfied) {
-                            prefs.edit()
-                                .putString(
-                                    ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY,
-                                    ChargeFormulaUpgradeGate.CURRENT_REVISION,
-                                )
-                                .apply()
+                        when (restProgress) {
+                            RestFormulaUpgradeGate.Progress.Retry -> Unit
+                            is RestFormulaUpgradeGate.Progress.Advance ->
+                                prefs.edit()
+                                    .putLong(
+                                        RestFormulaUpgradeGate.NEXT_ANCHOR_KEY,
+                                        restProgress.nextAnchor,
+                                    )
+                                    .putString(
+                                        RestFormulaUpgradeGate.ANCHOR_REVISION_KEY,
+                                        RestFormulaUpgradeGate.TRAVERSAL_REVISION,
+                                    )
+                                    .apply()
+                            is RestFormulaUpgradeGate.Progress.Complete ->
+                                prefs.edit()
+                                    .also { editor ->
+                                        if (restUpgradePending) {
+                                            editor.putString(
+                                                RestFormulaUpgradeGate.COMPLETED_REVISION_KEY,
+                                                restProgress.revision,
+                                            )
+                                        }
+                                        if (chargeUpgradePending) {
+                                            editor.putString(
+                                                ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY,
+                                                ChargeFormulaUpgradeGate.CURRENT_REVISION,
+                                            )
+                                        }
+                                    }
+                                    .remove(
+                                        RestFormulaUpgradeGate.NEXT_ANCHOR_KEY,
+                                    )
+                                    .remove(
+                                        RestFormulaUpgradeGate.ANCHOR_REVISION_KEY,
+                                    )
+                                    .apply()
                         }
-                        if (activeZoneUpgradePending && analysisPlan.requestedWindowSatisfied) {
+                        if (activeZoneUpgradePending &&
+                            !formulaTraversalSelected &&
+                            analysisPlan.requestedWindowSatisfied
+                        ) {
                             prefs.edit()
                                 .putString(
                                     ActiveZoneUpgradeGate.COMPLETED_REVISION_KEY,

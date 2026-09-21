@@ -199,7 +199,7 @@ extension RecoveryScorer {
         if let sp = validRestQuality(sleepPerf) {
             let center = restQualityCenter(usableRestBaseline.map(DriverBaseline.init))
             drivers.append(ChargeDriver(
-                label: "Sleep quality",
+                label: "Sleep Score",
                 deltaPoints: points(recovery(hrv: hrv, rhr: rhr, resp: resp,
                                              hrvBaseline: hrvBaseline, rhrBaseline: usableRhrBaseline,
                                              respBaseline: usableRespBaseline, sleepPerf: center,
@@ -281,9 +281,9 @@ extension RecoveryScorer {
     }
 
     static func sleepSignalVerdict(sleepPerf: Double, center: Double) -> String {
-        if sleepPerf > center { return "sleep quality supported recovery" }
-        if sleepPerf < center { return "sleep quality limited recovery" }
-        return "sleep quality was neutral"
+        if sleepPerf > center { return "Sleep Score supported recovery" }
+        if sleepPerf < center { return "Sleep Score limited recovery" }
+        return "Sleep Score was neutral"
     }
 
     static func skinTempVerdict(_ dev: Double) -> String {

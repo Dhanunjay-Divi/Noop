@@ -32,7 +32,13 @@ from app.managed_repository import (
 )
 from app.managed_safety_repository import (
     ManagedSafetyPushService,
+    ManagedSafetyRepeatPolicy,
     PostgresManagedSafetyRepository,
+)
+from app.ownership_deletion_lifecycle import (
+    OwnershipDeletionLifecycleCoordinator,
+    OwnershipDeletionLifecycleResult,
+    PostgresOwnershipDeletionProgressRepository,
 )
 from app.repository import PostgresRepository
 from app.observability import emit_operational_event
@@ -63,6 +69,15 @@ class ManagedLifecycleResult:
     safety_push_retryable_failures: int = 0
     safety_push_terminal_failures: int = 0
     safety_push_receipt_failures: int = 0
+    safety_push_repeated_claimed: int = 0
+    ownership_deletion_claimed: int = 0
+    ownership_deletion_processing_examined: int = 0
+    ownership_deletion_not_required: int = 0
+    ownership_deletion_completed: int = 0
+    ownership_deletion_waiting: int = 0
+    ownership_deletion_retry_scheduled: int = 0
+    ownership_deletion_blocked: int = 0
+    ownership_deletion_state_conflicts: int = 0
 
 
 class ManagedLifecycleRunner:
@@ -74,6 +89,7 @@ class ManagedLifecycleRunner:
         chunk_processor: ManagedChunkProcessor,
         safety_repository: PostgresManagedSafetyRepository | None = None,
         safety_push_service: ManagedSafetyPushService | None = None,
+        ownership_deletion: OwnershipDeletionLifecycleCoordinator | None = None,
         *,
         batch_size: int = 200,
         reconciliation_batch_size: int = 20,
@@ -94,6 +110,7 @@ class ManagedLifecycleRunner:
         self.chunk_processor = chunk_processor
         self.safety_repository = safety_repository
         self.safety_push_service = safety_push_service
+        self.ownership_deletion = ownership_deletion
         self.batch_size = batch_size
         self.reconciliation_batch_size = reconciliation_batch_size
         self.lease_seconds = lease_seconds
@@ -116,6 +133,11 @@ class ManagedLifecycleRunner:
             return ManagedLifecycleResult(lease_acquired=False)
 
         try:
+            ownership_before = OwnershipDeletionLifecycleResult()
+            if self.ownership_deletion is not None:
+                ownership_before = await self.ownership_deletion.run_once(
+                    now=now,
+                )
             push_result = None
             if self.safety_push_service is not None:
                 push_result = await self.safety_push_service.dispatch_due(
@@ -154,6 +176,12 @@ class ManagedLifecycleRunner:
                 now=now,
                 batch_size=self.batch_size,
             )
+            ownership_after = OwnershipDeletionLifecycleResult()
+            if self.ownership_deletion is not None:
+                ownership_after = await self.ownership_deletion.run_once(
+                    now=now,
+                    claim_due=False,
+                )
             pending_identities = await self.repository.pending_identity_deletions(
                 now=now,
                 batch_size=self.batch_size,
@@ -207,6 +235,32 @@ class ManagedLifecycleRunner:
                 ),
                 safety_push_receipt_failures=(
                     push_result.receipt_failures if push_result is not None else 0
+                ),
+                safety_push_repeated_claimed=(
+                    push_result.repeated_claimed if push_result is not None else 0
+                ),
+                ownership_deletion_claimed=ownership_before.claimed,
+                ownership_deletion_processing_examined=(
+                    ownership_before.processing_examined
+                    + ownership_after.processing_examined
+                ),
+                ownership_deletion_not_required=(
+                    ownership_before.not_required + ownership_after.not_required
+                ),
+                ownership_deletion_completed=(
+                    ownership_before.completed + ownership_after.completed
+                ),
+                ownership_deletion_waiting=(
+                    ownership_before.waiting + ownership_after.waiting
+                ),
+                ownership_deletion_retry_scheduled=(
+                    ownership_before.retry_scheduled + ownership_after.retry_scheduled
+                ),
+                ownership_deletion_blocked=(
+                    ownership_before.blocked + ownership_after.blocked
+                ),
+                ownership_deletion_state_conflicts=(
+                    ownership_before.state_conflicts + ownership_after.state_conflicts
                 ),
             )
         finally:
@@ -362,8 +416,15 @@ async def _run() -> ManagedLifecycleResult:
         raise RuntimeError(
             "managed lifecycle requires NOOP_MANAGED_PROJECT_ID, "
             "NOOP_MANAGED_RAW_BUCKET, and NOOP_MANAGED_SIGNER_EMAIL "
-            "plus a 32-byte "
-            "NOOP_MANAGED_REPLAY_SECRET"
+            "plus a 32-byte NOOP_MANAGED_REPLAY_SECRET"
+        )
+    if (
+        settings.ownership_deletion_coordination_enabled
+        and not settings.ownership_lifecycle_database_url
+    ):
+        raise RuntimeError(
+            "ownership deletion coordination requires "
+            "NOOP_OWNERSHIP_LIFECYCLE_DATABASE_URL"
         )
     primary = PostgresRepository(
         settings.database_url or "",
@@ -374,7 +435,21 @@ async def _run() -> ManagedLifecycleResult:
         database_engine=settings.database_engine,
     )
     await primary.startup()
+    ownership_primary = (
+        PostgresRepository(
+            settings.ownership_lifecycle_database_url or "",
+            pool_min_size=1,
+            pool_max_size=2,
+            statement_cache_size=settings.database_statement_cache_size,
+            run_migrations=False,
+            database_engine=settings.database_engine,
+        )
+        if settings.ownership_deletion_coordination_enabled
+        else None
+    )
     try:
+        if ownership_primary is not None:
+            await ownership_primary.startup()
         async with primary.maintenance_guard():
             repository = PostgresManagedRepository(
                 primary,
@@ -383,10 +458,29 @@ async def _run() -> ManagedLifecycleResult:
                 default_plan_code=settings.managed_default_plan_code,
                 default_plan_revision=settings.managed_default_plan_revision,
                 consent_policy_kind=settings.managed_consent_policy_kind,
+                account_max_installations=(settings.managed_account_max_installations),
                 entitlement_mode=settings.managed_entitlement_mode,
                 replay_secret=settings.managed_replay_secret or "",
             )
             safety_repository = PostgresManagedSafetyRepository(primary)
+            ownership_deletion = None
+            if ownership_primary is not None:
+                ownership_progress = PostgresOwnershipDeletionProgressRepository(
+                    ownership_primary
+                )
+                if not await ownership_progress.configuration_ready():
+                    raise RuntimeError(
+                        "ownership deletion lifecycle database role is not ready"
+                    )
+                ownership_deletion = OwnershipDeletionLifecycleCoordinator(
+                    ownership_progress,
+                    repository,
+                    claim_limit=100,
+                    processing_limit=100,
+                    lease_seconds=300,
+                    retry_base_seconds=30,
+                    retry_max_seconds=3_600,
+                )
             object_store = GCSV4ObjectStore(
                 bucket=settings.managed_raw_bucket or "",
                 signer=IAMBlobSigner(settings.managed_signer_email or ""),
@@ -421,6 +515,7 @@ async def _run() -> ManagedLifecycleResult:
                         timeout_seconds=settings.managed_push_timeout_seconds,
                     ),
                     max_concurrency=settings.managed_push_max_concurrency,
+                    repeat_policy=ManagedSafetyRepeatPolicy.from_environment(),
                 )
             return await ManagedLifecycleRunner(
                 repository,
@@ -429,8 +524,11 @@ async def _run() -> ManagedLifecycleResult:
                 chunk_processor,
                 safety_repository,
                 safety_push_service,
+                ownership_deletion,
             ).run_once()
     finally:
+        if ownership_primary is not None:
+            await ownership_primary.shutdown()
         await primary.shutdown()
 
 
@@ -463,6 +561,9 @@ def main() -> None:
         or result.export_delete_failures
         or result.identity_delete_failures
         or result.safety_push_receipt_failures
+        or result.ownership_deletion_retry_scheduled
+        or result.ownership_deletion_blocked
+        or result.ownership_deletion_state_conflicts
     )
     emit_operational_event(
         "managed_lifecycle.run",

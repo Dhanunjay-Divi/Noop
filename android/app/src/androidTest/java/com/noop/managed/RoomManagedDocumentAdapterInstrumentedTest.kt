@@ -321,6 +321,41 @@ class RoomManagedDocumentAdapterInstrumentedTest {
     }
 
     @Test
+    fun staleDayOwnershipDoesNotRegressRemoteStateOrLocalValue() = runBlocking {
+        val initial = dayOwnershipUpsert(
+            keyDay = "2026-09-05",
+            deviceId = "band-a",
+            locked = false,
+        )
+        val current = revisedDayOwnership(
+            initial,
+            revision = 2,
+            deviceId = "band-b",
+            locked = true,
+        )
+        adapter.apply(current, current.asChange())
+
+        adapter.apply(initial, initial.asChange())
+
+        assertEquals(
+            "band-b",
+            text(
+                "SELECT deviceId FROM dayOwnership WHERE day = ?",
+                "2026-09-05",
+            ),
+        )
+        assertEquals(
+            1L,
+            long(
+                "SELECT locked FROM dayOwnership WHERE day = ?",
+                "2026-09-05",
+            ),
+        )
+        assertEquals(2L, stateRemoteRevision("2026-09-05"))
+        assertTrue(adapter.pendingDocuments(10).isEmpty())
+    }
+
+    @Test
     fun remoteDayOwnershipInvalidatesExactDayOnlyWhenValueChanges() = runBlocking {
         val day = "2026-09-08"
         val utcDayStart = LocalDate.parse(day)

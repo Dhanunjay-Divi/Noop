@@ -58,6 +58,34 @@ final class ManagedStorageClientTests: XCTestCase {
         }
     }
 
+    func testRetryableServerResponsePreservesBoundedRetryAfter() async throws {
+        let (client, authorization) = try makeClient()
+        ManagedURLProtocolStub.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 429,
+                    httpVersion: nil,
+                    headerFields: [
+                        "Content-Type": "application/json",
+                        "Retry-After": "300",
+                    ]
+                )!,
+                Data(#"{"detail":"rate limited"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await client.overview(authorization: authorization)
+            XCTFail("Expected rate limiting")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedStorageError,
+                .server(status: 429, retryAfter: 300)
+            )
+        }
+    }
+
     func testEnrollmentCarriesAppCheckIdentityAndExplicitPolicy() async throws {
         let (client, authorization) = try makeClient()
         let requestID = UUID(uuidString: "397f4624-1c42-49ea-8af7-ced2ca439a36")!
@@ -114,6 +142,78 @@ final class ManagedStorageClientTests: XCTestCase {
         XCTAssertTrue(response.created)
         XCTAssertTrue(response.productBoundary.accountOptional)
         XCTAssertTrue(response.productBoundary.localMetricsAvailable)
+    }
+
+    func testAccountEnrollmentDoesNotSendHealthConsent() async throws {
+        let (client, authorization) = try makeClient()
+        let requestID = UUID(
+            uuidString: "e1fa3fa4-33f5-4514-a1ef-725ea18186a7"
+        )!
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/managed/account/enroll"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Bearer identity"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "X-Firebase-AppCheck"),
+                "app-check"
+            )
+            XCTAssertNil(
+                request.value(
+                    forHTTPHeaderField: "X-Noop-Installation-ID"
+                )
+            )
+            let data = try requestBody(request)
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            XCTAssertEqual(
+                object["installation_id"] as? String,
+                "ios-installation"
+            )
+            XCTAssertEqual(
+                (object["enrollment_request_id"] as? String)
+                    .flatMap(UUID.init(uuidString:)),
+                requestID
+            )
+            XCTAssertNil(object["policy_version"])
+            XCTAssertNil(object["policy_sha256"])
+            XCTAssertNil(object["data_classes"])
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 201,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                  "created": true,
+                  "product_boundary": {
+                    "account_ready": true,
+                    "health_data_consent_granted": false,
+                    "health_data_uploaded": false,
+                    "edge_collection_required": true
+                  }
+                }
+                """.utf8)
+            )
+        }
+
+        let response = try await client.enrollAccount(
+            platform: .iOS,
+            authorization: authorization,
+            requestID: requestID
+        )
+        XCTAssertTrue(response.created)
+        XCTAssertTrue(response.productBoundary.accountReady)
+        XCTAssertFalse(response.productBoundary.healthDataConsentGranted)
+        XCTAssertFalse(response.productBoundary.healthDataUploaded)
+        XCTAssertTrue(response.productBoundary.edgeCollectionRequired)
     }
 
     func testSourceRegistrationDecodesProductionSnakeCaseResponse() async throws {
@@ -275,6 +375,460 @@ final class ManagedStorageClientTests: XCTestCase {
             document.payloadCiphertextBase64,
             ciphertext.base64EncodedString()
         )
+    }
+
+    func testManagedDocumentKeyPutUsesAuthenticatedOpaqueContract() async throws {
+        let (client, authorization) = try makeClient()
+        let keyID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let wrappedKey = Data(repeating: 0x6d, count: 40)
+        let mutation = try ManagedWrappedKeyMutation(
+            keyKind: .accountMaster,
+            wrappingKeyID: nil,
+            wrappingRevision: 1,
+            wrappedKey: wrappedKey,
+            masterKeyConfirmationHMACSHA256: String(repeating: "f", count: 64),
+            recoveryMethod: .deviceTransfer
+        )
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/managed/document-keys/\(keyID.uuidString.lowercased())"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Bearer identity"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "X-Firebase-AppCheck"),
+                "app-check"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "X-Noop-Installation-ID"),
+                "ios-installation"
+            )
+            let body = try XCTUnwrap(
+                JSONSerialization.jsonObject(
+                    with: requestBody(request)
+                ) as? [String: Any]
+            )
+            XCTAssertEqual(body["key_kind"] as? String, "account_master")
+            XCTAssertNil(body["wrapping_key_id"] as? String)
+            XCTAssertEqual(body["wrapping_revision"] as? Int, 1)
+            XCTAssertEqual(body["algorithm"] as? String, "A256GCM")
+            XCTAssertEqual(
+                body["wrapped_key_base64"] as? String,
+                wrappedKey.base64EncodedString()
+            )
+            XCTAssertEqual(
+                body["wrapped_key_sha256"] as? String,
+                ManagedDigest.sha256(wrappedKey)
+            )
+            XCTAssertEqual(
+                body["master_key_confirmation_hmac_sha256"] as? String,
+                String(repeating: "f", count: 64)
+            )
+            XCTAssertEqual(body["recovery_method"] as? String, "device_transfer")
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                managedWrappedKeyResponse(
+                    keyID: keyID,
+                    keyKind: "account_master",
+                    wrappingKeyID: nil,
+                    wrappingRevision: 1,
+                    wrappedKey: wrappedKey,
+                    confirmation: String(repeating: "f", count: 64),
+                    recoveryMethod: "device_transfer"
+                )
+            )
+        }
+
+        let stored = try await client.putManagedDocumentKey(
+            keyID: keyID,
+            mutation: mutation,
+            authorization: authorization
+        )
+
+        XCTAssertEqual(stored.keyID, keyID)
+        XCTAssertEqual(stored.keyKind, .accountMaster)
+        XCTAssertEqual(stored.wrappedKey, wrappedKey)
+        XCTAssertEqual(stored.status, .active)
+    }
+
+    func testManagedDocumentKeyCurrentVersionRotateAndRevokeRoutes() async throws {
+        let (client, authorization) = try makeClient()
+        let keyID = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
+        let firstMasterID = UUID(
+            uuidString: "33333333-3333-4333-8333-333333333333"
+        )!
+        let secondMasterID = UUID(
+            uuidString: "44444444-4444-4444-8444-444444444444"
+        )!
+        let successorKeyID = UUID(
+            uuidString: "55555555-5555-4555-8555-555555555555"
+        )!
+        let original = Data(repeating: 0x31, count: 72)
+        let rotated = Data(repeating: 0x32, count: 72)
+        let rotation = try ManagedWrappedKeyRotation(
+            mutation: ManagedWrappedKeyMutation(
+                keyKind: .document,
+                wrappingKeyID: secondMasterID,
+                wrappingRevision: 2,
+                wrappedKey: rotated
+            ),
+            expectedWrappingRevision: 1
+        )
+        let requests = LockedRequestCount()
+        ManagedURLProtocolStub.handler = { request in
+            let index = requests.next()
+            switch index {
+            case 0:
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(
+                    request.url?.path,
+                    "/v1/managed/document-keys/\(keyID.uuidString.lowercased())"
+                )
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    managedWrappedKeyResponse(
+                        keyID: keyID,
+                        keyKind: "document",
+                        wrappingKeyID: firstMasterID,
+                        wrappingRevision: 1,
+                        wrappedKey: original
+                    )
+                )
+            case 1:
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(
+                    request.url?.path,
+                    "/v1/managed/document-keys/"
+                        + keyID.uuidString.lowercased()
+                        + "/versions/1"
+                )
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    managedWrappedKeyVersionResponse(
+                        keyID: keyID,
+                        wrappingKeyID: firstMasterID,
+                        wrappingRevision: 1,
+                        wrappedKey: original
+                    )
+                )
+            case 2:
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(
+                    request.url?.path,
+                    "/v1/managed/document-keys/"
+                        + keyID.uuidString.lowercased()
+                        + "/rotate"
+                )
+                let body = try XCTUnwrap(
+                    JSONSerialization.jsonObject(
+                        with: requestBody(request)
+                    ) as? [String: Any]
+                )
+                XCTAssertEqual(body["key_kind"] as? String, "document")
+                XCTAssertEqual(
+                    body["wrapping_key_id"] as? String,
+                    secondMasterID.uuidString.lowercased()
+                )
+                XCTAssertEqual(body["wrapping_revision"] as? Int, 2)
+                XCTAssertEqual(body["expected_wrapping_revision"] as? Int, 1)
+                XCTAssertNil(body["recovery_method"] as? String)
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    managedWrappedKeyResponse(
+                        keyID: keyID,
+                        keyKind: "document",
+                        wrappingKeyID: secondMasterID,
+                        wrappingRevision: 2,
+                        wrappedKey: rotated
+                    )
+                )
+            case 3:
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(
+                    request.url?.path,
+                    "/v1/managed/document-keys/"
+                        + keyID.uuidString.lowercased()
+                        + "/revoke"
+                )
+                let body = try XCTUnwrap(
+                    JSONSerialization.jsonObject(
+                        with: requestBody(request)
+                    ) as? [String: Any]
+                )
+                XCTAssertEqual(
+                    body["successor_key_id"] as? String,
+                    successorKeyID.uuidString.lowercased()
+                )
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    managedWrappedKeyResponse(
+                        keyID: keyID,
+                        keyKind: "document",
+                        wrappingKeyID: secondMasterID,
+                        wrappingRevision: 2,
+                        wrappedKey: rotated,
+                        status: "revoked",
+                        successorKeyID: successorKeyID,
+                        revokedAt: "2026-09-20T05:04:00Z"
+                    )
+                )
+            default:
+                XCTFail("Unexpected managed document-key request")
+                throw ManagedStorageError.invalidResponse
+            }
+        }
+
+        let current = try await client.managedDocumentKey(
+            keyID: keyID,
+            authorization: authorization
+        )
+        let version = try await client.managedDocumentKeyVersion(
+            keyID: keyID,
+            wrappingRevision: 1,
+            authorization: authorization
+        )
+        let rotatedRecord = try await client.rotateManagedDocumentKey(
+            keyID: keyID,
+            rotation: rotation,
+            authorization: authorization
+        )
+        let revoked = try await client.revokeManagedDocumentKey(
+            keyID: keyID,
+            successorKeyID: successorKeyID,
+            authorization: authorization
+        )
+
+        XCTAssertEqual(current.wrappedKey, original)
+        XCTAssertEqual(version.wrappedKey, original)
+        XCTAssertEqual(rotatedRecord.wrappingRevision, 2)
+        XCTAssertEqual(revoked.status, .revoked)
+        XCTAssertEqual(revoked.successorKeyID, successorKeyID)
+        XCTAssertEqual(requests.value, 4)
+    }
+
+    func testManagedDocumentKeyResponsesRejectMalformedContracts() async throws {
+        let (client, authorization) = try makeClient()
+        let keyID = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
+        let otherKeyID = UUID(
+            uuidString: "77777777-7777-4777-8777-777777777777"
+        )!
+        let masterID = UUID(uuidString: "88888888-8888-4888-8888-888888888888")!
+        let validWrapped = Data(repeating: 0x41, count: 72)
+        var malformedBodies: [Data] = [
+            managedWrappedKeyResponse(
+                keyID: otherKeyID,
+                keyKind: "document",
+                wrappingKeyID: masterID,
+                wrappingRevision: 1,
+                wrappedKey: validWrapped
+            ),
+            managedWrappedKeyResponse(
+                keyID: keyID,
+                keyKind: "document",
+                wrappingKeyID: masterID,
+                wrappingRevision: 0,
+                wrappedKey: validWrapped
+            ),
+            managedWrappedKeyResponse(
+                keyID: keyID,
+                keyKind: "document",
+                wrappingKeyID: masterID,
+                wrappingRevision: 1,
+                wrappedKey: Data(repeating: 0x42, count: 40)
+            ),
+            managedWrappedKeyResponse(
+                keyID: keyID,
+                keyKind: "document",
+                wrappingKeyID: masterID,
+                wrappingRevision: 1,
+                wrappedKey: validWrapped,
+                digest: String(repeating: "0", count: 64)
+            ),
+            managedWrappedKeyResponse(
+                keyID: keyID,
+                keyKind: "document",
+                wrappingKeyID: masterID,
+                wrappingRevision: 1,
+                wrappedKey: validWrapped,
+                status: "revoked",
+                revokedAt: nil
+            ),
+        ]
+        var noncanonicalBase64 = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: managedWrappedKeyResponse(
+                    keyID: keyID,
+                    keyKind: "document",
+                    wrappingKeyID: masterID,
+                    wrappingRevision: 1,
+                    wrappedKey: validWrapped
+                )
+            ) as? [String: Any]
+        )
+        var noncanonicalKey = try XCTUnwrap(
+            noncanonicalBase64["key"] as? [String: Any]
+        )
+        noncanonicalKey["wrapped_key_base64"] =
+            validWrapped.base64EncodedString() + "\n"
+        noncanonicalBase64["key"] = noncanonicalKey
+        malformedBodies.append(
+            try JSONSerialization.data(withJSONObject: noncanonicalBase64)
+        )
+
+        for body in malformedBodies {
+            ManagedURLProtocolStub.handler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    body
+                )
+            }
+            do {
+                _ = try await client.managedDocumentKey(
+                    keyID: keyID,
+                    authorization: authorization
+                )
+                XCTFail("Expected malformed wrapped-key response rejection")
+            } catch {
+                XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+            }
+        }
+
+        for (field, value) in [
+            ("key_kind", "unsupported"),
+            ("algorithm", "A128GCM"),
+            ("status", "unknown"),
+        ] {
+            var object = try XCTUnwrap(
+                JSONSerialization.jsonObject(
+                    with: managedWrappedKeyResponse(
+                        keyID: keyID,
+                        keyKind: "document",
+                        wrappingKeyID: masterID,
+                        wrappingRevision: 1,
+                        wrappedKey: validWrapped
+                    )
+                ) as? [String: Any]
+            )
+            var key = try XCTUnwrap(object["key"] as? [String: Any])
+            key[field] = value
+            object["key"] = key
+            let body = try JSONSerialization.data(withJSONObject: object)
+            ManagedURLProtocolStub.handler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    body
+                )
+            }
+            do {
+                _ = try await client.managedDocumentKey(
+                    keyID: keyID,
+                    authorization: authorization
+                )
+                XCTFail("Expected malformed \(field) rejection")
+            } catch {
+                XCTAssertEqual(error as? ManagedStorageError, .decoding)
+            }
+        }
+    }
+
+    func testManagedDocumentKeyDiagnosticsDoNotExposeKeyMaterial() async throws {
+        let diagnostics = LockedManagedDiagnostics()
+        let configuration = try ManagedStorageConfiguration(
+            baseURL: XCTUnwrap(URL(string: "https://noop.example")),
+            policyVersion: "synthetic-v1",
+            policySHA256: String(repeating: "a", count: 64)
+        )
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [ManagedURLProtocolStub.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "ios-installation",
+            installationToken: "noopm_" + String(repeating: "a", count: 43)
+        )
+        let client = ManagedStorageClient(
+            configuration: configuration,
+            session: session,
+            requestObserver: { diagnostics.append($0) }
+        )
+        let keyID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
+        let wrappedKey = Data(repeating: 0x51, count: 72)
+        let wrappingKeyID = UUID(
+            uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        )!
+        ManagedURLProtocolStub.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: [
+                        "Content-Type": "application/json",
+                        "X-Noop-Request-ID": String(repeating: "b", count: 32),
+                    ]
+                )!,
+                managedWrappedKeyResponse(
+                    keyID: keyID,
+                    keyKind: "document",
+                    wrappingKeyID: wrappingKeyID,
+                    wrappingRevision: 1,
+                    wrappedKey: wrappedKey
+                )
+            )
+        }
+
+        _ = try await client.managedDocumentKey(
+            keyID: keyID,
+            authorization: authorization
+        )
+
+        let diagnostic = try XCTUnwrap(diagnostics.values.first)
+        let rendered = String(describing: diagnostic)
+        XCTAssertEqual(diagnostic.routeGroup, "/v1/managed/document-keys")
+        XCTAssertEqual(diagnostic.outcome, "completed")
+        XCTAssertFalse(rendered.contains(keyID.uuidString.lowercased()))
+        XCTAssertFalse(rendered.contains(wrappedKey.base64EncodedString()))
+        XCTAssertFalse(rendered.contains(ManagedDigest.sha256(wrappedKey)))
     }
 
     func testChangeFeedRejectsSensitiveServerReadableMetadata() async throws {
@@ -983,6 +1537,67 @@ final class ManagedStorageClientTests: XCTestCase {
         XCTAssertEqual(job.status, "cooling_off")
     }
 
+    func testAccountErasureReceiptOmitsIdentityBearer() async throws {
+        let (client, authorization) = try makeClient()
+        let jobID = UUID(uuidString: "8519298E-C785-45E8-963A-81834BE94638")!
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/managed/erasure/\(jobID.uuidString.lowercased())/receipt"
+            )
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "X-Firebase-AppCheck"),
+                "app-check"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "X-Noop-Installation-ID"),
+                "ios-installation"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "X-Noop-Installation-Token"),
+                "noopm_" + String(repeating: "a", count: 43)
+            )
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                  "erasure": {
+                    "erasure_job_id": "\(jobID.uuidString.lowercased())",
+                    "scope": "account",
+                    "status": "completed",
+                    "objects_selected": 0,
+                    "objects_deleted": 0,
+                    "bytes_selected": 0,
+                    "bytes_deleted": 0,
+                    "database_rows_deleted": 0,
+                    "requested_at": "2026-09-04T04:00:00Z",
+                    "not_before": "2026-09-05T04:00:00Z",
+                    "started_at": "2026-09-05T04:00:00Z",
+                    "completed_at": "2026-09-05T04:01:00Z",
+                    "verification_expires_at": "2027-10-09T04:00:00Z",
+                    "duplicate": false
+                  }
+                }
+                """.utf8)
+            )
+        }
+
+        let job = try await client.erasureReceipt(
+            jobID: jobID,
+            authorization: authorization
+        )
+
+        XCTAssertEqual(job.erasureJobID, jobID)
+        XCTAssertEqual(job.status, "completed")
+    }
+
     func testSignedUploadRejectsInvalidGenerationReceipt() async throws {
         let (client, _) = try makeClient()
         let capability = ManagedChunkReservationResponse.Upload(
@@ -1065,6 +1680,10 @@ final class ManagedStorageClientTests: XCTestCase {
                 ["essential_timeseries", "raw_ppg"]
             )
             XCTAssertEqual(
+                body["chunk_content_mode"] as? String,
+                "server_readable"
+            )
+            XCTAssertEqual(
                 body["include_deleted_documents"] as? Bool,
                 true
             )
@@ -1105,6 +1724,42 @@ final class ManagedStorageClientTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? ManagedStorageError, .conflict)
         }
+    }
+
+    func testSnapshotChunkListRequestsServerReadableContentMode() async throws {
+        let (client, authorization) = try makeClient()
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/managed/chunks")
+            let components = try XCTUnwrap(
+                URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            )
+            func queryValue(_ name: String) -> String? {
+                components.queryItems?.first(where: { $0.name == name })?.value
+            }
+            XCTAssertEqual(queryValue("data_class"), "essential_timeseries")
+            XCTAssertEqual(queryValue("content_mode"), "server_readable")
+            XCTAssertEqual(queryValue("snapshot_at"), "2026-09-01T00:00:00Z")
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"chunks":[],"next_cursor":null}"#.utf8)
+            )
+        }
+
+        let page = try await client.availableChunks(
+            dataClass: "essential_timeseries",
+            snapshotAt: "2026-09-01T00:00:00Z",
+            after: nil,
+            limit: 25,
+            authorization: authorization
+        )
+
+        XCTAssertTrue(page.chunks.isEmpty)
+        XCTAssertNil(page.nextCursor)
     }
 
     func testMissingManagedResourceHasDistinctError() async throws {
@@ -2034,6 +2689,86 @@ private final class LockedManagedDiagnostics: @unchecked Sendable {
         storage.append(value)
         lock.unlock()
     }
+}
+
+private final class LockedRequestCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func next() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        let value = storage
+        storage += 1
+        return value
+    }
+}
+
+private func managedWrappedKeyResponse(
+    keyID: UUID,
+    keyKind: String,
+    wrappingKeyID: UUID?,
+    wrappingRevision: Int,
+    wrappedKey: Data,
+    digest: String? = nil,
+    confirmation: String? = nil,
+    recoveryMethod: String? = nil,
+    status: String = "active",
+    successorKeyID: UUID? = nil,
+    revokedAt: String? = nil
+) -> Data {
+    let key: [String: Any] = [
+        "key_id": keyID.uuidString.lowercased(),
+        "key_kind": keyKind,
+        "wrapping_key_id":
+            wrappingKeyID?.uuidString.lowercased() ?? NSNull(),
+        "wrapping_revision": wrappingRevision,
+        "algorithm": "A256GCM",
+        "wrapped_key_base64": wrappedKey.base64EncodedString(),
+        "wrapped_key_sha256": digest ?? ManagedDigest.sha256(wrappedKey),
+        "master_key_confirmation_hmac_sha256": confirmation ?? NSNull(),
+        "recovery_method": recoveryMethod ?? NSNull(),
+        "status": status,
+        "successor_key_id":
+            successorKeyID?.uuidString.lowercased() ?? NSNull(),
+        "created_at": "2026-09-20T05:01:00Z",
+        "updated_at": revokedAt ?? "2026-09-20T05:03:00Z",
+        "revoked_at": revokedAt ?? NSNull(),
+    ]
+    return try! JSONSerialization.data(
+        withJSONObject: ["key": key],
+        options: [.sortedKeys]
+    )
+}
+
+private func managedWrappedKeyVersionResponse(
+    keyID: UUID,
+    wrappingKeyID: UUID,
+    wrappingRevision: Int,
+    wrappedKey: Data
+) -> Data {
+    let key: [String: Any] = [
+        "key_id": keyID.uuidString.lowercased(),
+        "key_kind": "document",
+        "wrapping_key_id": wrappingKeyID.uuidString.lowercased(),
+        "wrapping_revision": wrappingRevision,
+        "algorithm": "A256GCM",
+        "wrapped_key_base64": wrappedKey.base64EncodedString(),
+        "wrapped_key_sha256": ManagedDigest.sha256(wrappedKey),
+        "master_key_confirmation_hmac_sha256": NSNull(),
+        "recovery_method": NSNull(),
+        "created_at": "2026-09-20T05:01:00Z",
+    ]
+    return try! JSONSerialization.data(
+        withJSONObject: ["key_version": key],
+        options: [.sortedKeys]
+    )
 }
 
 private func requestBody(_ request: URLRequest) throws -> Data {
