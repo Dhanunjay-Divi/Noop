@@ -66,7 +66,10 @@ import kotlin.math.roundToInt
  * scheduled-export / experimental controls on the same bindings the Settings cards use. No em-dash.
  */
 @Composable
-fun TestCentreScreen(vm: AppViewModel) {
+fun TestCentreScreen(
+    vm: AppViewModel,
+    onRequestAppReport: () -> Unit,
+) {
     val context = LocalContext.current
     val testCentre = remember { TestCentre.from(context) }
     // CAPTURE-D: a UI scope to emit the data-volume line off the toggle-on path (a store read, so it can't
@@ -175,7 +178,10 @@ fun TestCentreScreen(vm: AppViewModel) {
         }
 
         // --- Section 2: Diagnostic tools ---
-        DiagnosticToolsCard(vm)
+        DiagnosticToolsCard(
+            vm = vm,
+            onRequestAppReport = onRequestAppReport,
+        )
 
         // --- Section 3: Export and auto-export ---
         ExportCard(
@@ -346,7 +352,10 @@ private fun localizedTestModeBlurb(mode: TestMode): String = when (mode.domain) 
 }
 
 @Composable
-private fun DiagnosticToolsCard(vm: AppViewModel) {
+private fun DiagnosticToolsCard(
+    vm: AppViewModel,
+    onRequestAppReport: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showRecalibrate by remember { mutableStateOf(false) }
@@ -364,7 +373,7 @@ private fun DiagnosticToolsCard(vm: AppViewModel) {
                 leadingIcon = Icons.Filled.BugReport,
                 kind = NoopButtonKind.Primary,
                 fullWidth = true,
-                onClick = { AppDiagnosticReportRequestBridge.request() },
+                onClick = onRequestAppReport,
             )
             // Strap log, the same exportLogText share the Settings Diagnostics button uses.
             NoopButton(

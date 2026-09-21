@@ -343,6 +343,7 @@ internal object MoreSectionPrefs {
 fun AppRoot(
     viewModel: AppViewModel = viewModel(),
     initialRoute: String? = null,
+    onRequestAppReport: () -> Unit,
 ) {
     val nav = rememberNavController()
     val startRoute = remember(initialRoute) {
@@ -706,7 +707,12 @@ fun AppRoot(
                         onOpenBackupSync = { nav.navigate(Destination.BackupSync.route) },
                     )
                 }
-                composable(Destination.TestCentre.route) { TestCentreScreen(viewModel) }
+                composable(Destination.TestCentre.route) {
+                    TestCentreScreen(
+                        vm = viewModel,
+                        onRequestAppReport = onRequestAppReport,
+                    )
+                }
                 // The "More" page - the iOS More tab's twin: a navigated ScreenScaffold page hosting the
                 // full grouped destination list. Rows push inside More's owned stack so re-tapping More
                 // can always return to this root, exactly like iOS clearing that tab's NavigationPath.

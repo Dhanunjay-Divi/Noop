@@ -209,9 +209,7 @@ class AppShellInstrumentedTest {
 
     @Test
     fun appReportKeepsContextOptionalAndReviewsExactDefaultAttachments() {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync {
-            AppDiagnosticReportRequestBridge.request()
-        }
+        scenario.onActivity(MainActivity::requestAppDiagnosticReport)
         compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodesWithTag("noop.app-report.user-note")
                 .fetchSemanticsNodes()
@@ -258,9 +256,7 @@ class AppShellInstrumentedTest {
 
     @Test
     fun appReportCapturesAndReviewsScreenOnlyAfterExplicitOptIn() {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync {
-            AppDiagnosticReportRequestBridge.request()
-        }
+        scenario.onActivity(MainActivity::requestAppDiagnosticReport)
         compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodesWithTag("noop.app-report.include-screenshot")
                 .fetchSemanticsNodes()

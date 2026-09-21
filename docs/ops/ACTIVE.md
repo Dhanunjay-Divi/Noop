@@ -169,6 +169,20 @@ Last updated: **2026-09-21**
   pass locally. The correction is formatting-only and does not invalidate the
   recorded server behavior wall. The corrected exact head still requires one
   replacement push and hosted verification.
+- Exact PR head `825d015cd404433ac28f67ec7182520b123d48d5`
+  passed every required Apple, server, package, policy, release, trust, and
+  Android build wall. Its API 35 production shell passed the new eight-case
+  stale-formula Room regression but failed two existing app-report tests before
+  their sheets opened. The process-global report channel could hand a request
+  to a retiring Activity collector. The local correction removes that mailbox
+  and routes Test Centre through a compiler-required callback owned by the
+  current `MainActivity`; shake and demo requests retain their direct
+  controller path. Fixed-category `report.request` outcomes make the boundary
+  observable without identifiers or payloads. The 4 GiB one-worker Full app,
+  focused JVM test, and complete Full instrumentation-source compile pass; a
+  deliberate 1.5 GiB local attempt stopped at the known Compose compiler heap
+  boundary. One narrow commit/push, replacement exact-SHA checks, protected
+  merge/main verification, and cleanup remain.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
 - Earlier broad local evidence before the late-review follow-up:

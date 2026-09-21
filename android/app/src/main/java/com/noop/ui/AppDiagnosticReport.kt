@@ -95,9 +95,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -106,15 +104,6 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.math.sqrt
-
-internal object AppDiagnosticReportRequestBridge {
-    private val pendingRequests = Channel<Unit>(Channel.CONFLATED)
-    val requests = pendingRequests.receiveAsFlow()
-
-    fun request() {
-        check(pendingRequests.trySend(Unit).isSuccess)
-    }
-}
 
 internal class PhysicalShakeDetector(
     private val thresholdG: Float = 2.7f,
@@ -296,25 +285,34 @@ internal class AppDiagnosticReportController(
 
     private fun request(source: String) {
         val now = SystemClock.elapsedRealtime()
-        if (isPresented || lastRequestAtMs?.let { now - it < 2_000L } == true) return
-        lastRequestAtMs = now
-        AppDiagnosticsRecorder.record(
-            "report.shake_detected",
-            fields = mapOf("source" to source),
-            includeResourceSnapshot = true,
-        )
-
-        if (localFeedbackId != null) {
-            isPresented = true
-            return
+        val outcome = when {
+            isPresented -> "already_open"
+            lastRequestAtMs?.let { now - it < 2_000L } == true -> "debounced"
+            localFeedbackId != null -> {
+                lastRequestAtMs = now
+                isPresented = true
+                "existing_delivery"
+            }
+            else -> {
+                lastRequestAtMs = now
+                invalidateScreenshotCapture()
+                userNote = ""
+                entries = emptyList()
+                statusMessage = null
+                phase = Phase.EXPLANATION
+                isPresented = true
+                "opened"
+            }
         }
-
-        invalidateScreenshotCapture()
-        userNote = ""
-        entries = emptyList()
-        statusMessage = null
-        phase = Phase.EXPLANATION
-        isPresented = true
+        AppDiagnosticsRecorder.record(
+            "report.request",
+            fields = mapOf(
+                "source" to source,
+                "outcome" to outcome,
+            ),
+            includeResourceSnapshot =
+                outcome == "opened" || outcome == "existing_delivery",
+        )
     }
 
     fun updateUserNote(value: String) {
