@@ -7,7 +7,7 @@
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - End implementation commit:
-  `d8028186898b934f34ec50a98614f7e67d06d947`
+  `68a855cc191f3ab2f8a2aad04594441357603393`
 - Record commit or PR: PR `#17`; final record and protected exact-SHA evidence pending
 
 ## Objective
@@ -186,7 +186,7 @@ Success means:
 | Feedback cleanup instrumentation regression | Full instrumentation source compiled, then the five continuity cases followed by all eight AppShell cases passed 13/13 on `pixel2Api35` in 2m37s | WorkManager generations quiesce before the exact test record is removed, and both previously failing report sheets open in the same managed-device sequence | The complete hosted production-shell wall or physical Android behavior |
 | Apple app boundary | Xcode 27 focused macOS test passed 5/5 in the real app target, including WHOOP-default routing, source-scoped restore, explicit terminals, generation invalidation, and bounded failure categories | App-target compilation and shared Apple boundary behavior are green on the current host | iOS runtime, universal/macOS-15, BLE, background, or hardware behavior |
 | Bounded disk exception and cleanup | The final isolated Apple rerun used an 8 GiB runner floor after measuring 13 GiB free and a prior 3.2 GiB DerivedData footprint; it passed, then the exact DerivedData and generated `.swiftpm` directory were removed and the artifact verifier passed | The final Apple test could run without risking the concurrent UI cache, while round-owned disk use returned immediately | Future host capacity without the same preflight and cleanup |
-| Final repository policy wall | 310/310 tests passed with one intentional skip; 9 release checks; required-CI 10 contexts; trusted self-check; shell syntax and ShellCheck; Actionlint; calibration parity; terminology; distribution provenance; private-data and health-claims guards; strict Apple/Android localization; 83 operations records; and diff hygiene passed | The exact local candidate satisfies the repository-controlled release, trust, privacy, claims, localization, and operations contracts | Hosted exact-SHA enforcement or protected integration |
+| Final repository policy wall | The exact release-control module wall passed 196/196; the complete Tools wall passed 310/310 with one intentional skip; 9 release checks, required-CI 10 contexts, trusted self-check, shell syntax and ShellCheck, Actionlint, calibration parity, terminology, distribution provenance, private-data and health-claims guards, strict Apple/Android localization, 83 operations records, and diff hygiene passed | The exact local candidate satisfies the repository-controlled release, trust, privacy, claims, localization, and operations contracts | Hosted exact-SHA enforcement or protected integration |
 | Final terminology and claims gates | 17,869 classified occurrences across 1,588 groups with unchanged category totals and zero forbidden mappings; health-claims scanned 1,299 files; complete localization audit passed with zero translated-key gaps in the supported Apple catalogs | The reviewed terminology snapshot, health wording guard, and localization catalogs remain coherent | Physical accessibility, every pre-existing hardcoded-literal debt item, or medical accuracy |
 | Previous remote candidate | PR `#17` head `c16488d7` passed every applicable hosted app, policy, trust, package, server, and release context before review remediation | The pre-remediation integration graph was hosted-green | The unpushed remediation candidate; new exact-SHA checks remain required |
 
@@ -212,12 +212,13 @@ Success means:
   `c16488d70001bb3257c7c0c4d6644ab7f88d1372`; review-remediation implementation
   `4fcc134240a542694c5acc51a4d1487b074064bd`; prior evidence update
   `ce09fa67038865a35bc32698730953bd379d726f`; final SDK-export replacement
-  `d8028186898b934f34ec50a98614f7e67d06d947`.
+  `d8028186898b934f34ec50a98614f7e67d06d947`; final runtime-authority
+  adoption `68a855cc191f3ab2f8a2aad04594441357603393`.
 - Branch and remote state: PR `#17` is open from the dedicated branch; the
   remote head is `9ff11b63`. The `dab6072` artifact replacement, app-boundary
-  revision updates, trust-root repin, and this evidence record remain local and
-  uncommitted; the exact replacement SHA remains subject to all protected
-  checks.
+  revision updates, and trust-root repin are committed locally at `68a855cc`;
+  this evidence update remains local. The exact replacement SHA remains
+  subject to all protected checks.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and
   `Dhanunjay-Divi/NoopBandSDK` both report `PRIVATE` with default branch
   `main`.
@@ -242,15 +243,13 @@ Success means:
 
 ## Next round
 
-1. Finish the final trust, release-control, operations, terminology, and tool
-   gates on the `dab6072` replacement.
-2. Commit and push the replacement once.
-3. Require every exact-SHA protected context, including the full Apple and
+1. Commit this final evidence update and push both local commits once.
+2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.
-4. Merge normally, verify protected `main`, and remove exact round-owned logs,
+3. Merge normally, verify protected `main`, and remove exact round-owned logs,
    DerivedData, exports, package scratch data, and the dedicated worktree.
-5. Keep the supplier adapter/flasher disabled until the exact SDK, firmware,
+4. Keep the supplier adapter/flasher disabled until the exact SDK, firmware,
    tooling, keys, rights, and representative physical bands pass their
    acceptance matrix.
 

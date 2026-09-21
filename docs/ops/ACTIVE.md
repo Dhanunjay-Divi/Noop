@@ -27,10 +27,14 @@ Last updated: **2026-09-21**
   checking all 30 automated scenarios; Android Full passes 5/5 and Demo
   compiles independently; and the real macOS app target passes 5/5. The
   private SDK itself passed Swift 27/27, Kotlin 28/28, 30/30 cross-platform
-  scenarios, and its 40-file repository guard before merge. Final trust,
-  release-control, operations, terminology, and complete tool gates are still
-  being rerun on the uncommitted replacement. PR `#17` remote head remains
-  `9ff11b63`; one consolidated commit/push, exact-SHA hosted checks,
+  scenarios, and its 40-file repository guard before merge. The exact local
+  replacement also passes 196/196 release-control tests, the complete 310-test
+  Tools wall with one intentional skip, nine release checks, ten required
+  contexts, trusted self-check, calibration, terminology, provenance,
+  private-data, health-claims, strict localization, operations, shell,
+  Actionlint, and diff gates. Implementation commit `68a855cc` is local.
+  PR `#17` remote head remains `9ff11b63`; the evidence commit and one
+  consolidated push, exact-SHA hosted checks,
   review-thread resolution, protected merge/main verification, and exact
   cleanup remain. No supplier binary, firmware, real adapter, or flasher is
   included.
