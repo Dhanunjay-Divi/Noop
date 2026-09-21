@@ -16,6 +16,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 
 internal class ManagedHistoryZipWriter(
     output: OutputStream,
@@ -283,50 +285,18 @@ internal class ManagedHistoryTransferStore(
         }
     }
 
-    fun stageImport(source: Uri): ManagedHistoryFileArchiveReader {
+    suspend fun stageImport(source: Uri): ManagedHistoryFileArchiveReader {
         val temporary = File(root, "import.zip.tmp")
-        try {
-            appContext.contentResolver.openInputStream(source)?.use { input ->
-                FileOutputStream(temporary).use { output ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                    var total = 0L
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        total += count
-                        if (total > MAX_ARCHIVE_BYTES) {
-                            throw IOException("Managed history archive is too large.")
-                        }
-                        output.write(buffer, 0, count)
-                    }
-                    output.fd.sync()
-                }
-            } ?: throw IOException("Managed history archive could not be opened.")
-            val stagedReader = ManagedHistoryFileArchiveReader(temporary)
-            val stagedManifest = ManagedHistoryExportManifest.decode(
-                stagedReader.manifestData(),
+        return appContext.contentResolver.openInputStream(source)?.use { input ->
+            stageManagedHistoryImportArchive(
+                input = input,
+                temporary = temporary,
+                importArchive = importArchive,
+                importArchiveBackup = importArchiveBackup,
+                loadCheckpoint = ::loadImportCheckpoint,
+                clearCheckpoint = importCheckpoint::delete,
             )
-            val stagedDigest = ManagedDigest.sha256(stagedManifest.encoded())
-            val checkpoint = loadImportCheckpoint()
-
-            importArchiveBackup.delete()
-            if (importArchive.isFile && !importArchive.renameTo(importArchiveBackup)) {
-                throw IOException("Managed history import could not be replaced.")
-            }
-            if (!temporary.renameTo(importArchive)) {
-                if (importArchiveBackup.isFile) {
-                    importArchiveBackup.renameTo(importArchive)
-                }
-                throw IOException("Managed history import was not committed.")
-            }
-            importArchiveBackup.delete()
-            if (checkpoint != null && checkpoint.archiveSha256 != stagedDigest) {
-                importCheckpoint.delete()
-            }
-            return ManagedHistoryFileArchiveReader(importArchive)
-        } finally {
-            temporary.delete()
-        }
+        } ?: throw IOException("Managed history archive could not be opened.")
     }
 
     fun clearExport() {
@@ -388,7 +358,62 @@ internal class ManagedHistoryTransferStore(
 
     private companion object {
         val SHA256 = Regex("^[0-9a-f]{64}$")
-        const val MAX_ARCHIVE_BYTES = 32L * 1_024 * 1_024 * 1_024
+    }
+}
+
+internal suspend fun stageManagedHistoryImportArchive(
+    input: java.io.InputStream,
+    temporary: File,
+    importArchive: File,
+    importArchiveBackup: File,
+    loadCheckpoint: () -> ManagedHistoryImportCheckpoint?,
+    clearCheckpoint: () -> Unit,
+): ManagedHistoryFileArchiveReader {
+    try {
+        FileOutputStream(temporary).use { output ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0L
+            while (true) {
+                coroutineContext.ensureActive()
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count.toLong() > MAX_MANAGED_HISTORY_ARCHIVE_BYTES - total) {
+                    throw IOException("Managed history archive is too large.")
+                }
+                output.write(buffer, 0, count)
+                total += count
+                coroutineContext.ensureActive()
+            }
+            coroutineContext.ensureActive()
+            output.fd.sync()
+            coroutineContext.ensureActive()
+        }
+
+        val stagedReader = ManagedHistoryFileArchiveReader(temporary)
+        val stagedManifest = ManagedHistoryExportManifest.decode(
+            stagedReader.manifestData(),
+        )
+        val stagedDigest = ManagedDigest.sha256(stagedManifest.encoded())
+        val checkpoint = loadCheckpoint()
+        coroutineContext.ensureActive()
+
+        importArchiveBackup.delete()
+        if (importArchive.isFile && !importArchive.renameTo(importArchiveBackup)) {
+            throw IOException("Managed history import could not be replaced.")
+        }
+        if (!temporary.renameTo(importArchive)) {
+            if (importArchiveBackup.isFile) {
+                importArchiveBackup.renameTo(importArchive)
+            }
+            throw IOException("Managed history import was not committed.")
+        }
+        importArchiveBackup.delete()
+        if (checkpoint != null && checkpoint.archiveSha256 != stagedDigest) {
+            clearCheckpoint()
+        }
+        return ManagedHistoryFileArchiveReader(importArchive)
+    } finally {
+        temporary.delete()
     }
 }
 
@@ -397,6 +422,9 @@ internal fun managedHistoryArchiveEntryCountAllowed(count: Int): Boolean =
 
 internal fun managedHistoryExportCheckpointMaximumBytes(): Long =
     ManagedHistoryTransferLimits.MAXIMUM_EXPORT_CHECKPOINT_BYTES
+
+private const val MAX_MANAGED_HISTORY_ARCHIVE_BYTES =
+    32L * 1_024 * 1_024 * 1_024
 
 private fun validPath(path: String): Boolean =
     path.isNotEmpty() &&
