@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `final Android report-entry correction is locally green; replacement hosted checks and protected integration pending`
+- State: `exact-SHA platform checks are green; reviewed terminology regeneration, final hosted release controls, and protected integration pending`
 - Owner: project team
 - Branch: `codex/ui-cloud-readiness-20260917`
 - Start commit: `84ee85eeb4aa711e2762591fe0a52dc2ba9cb4f3`
@@ -227,6 +227,23 @@ candidate:
   same Activity-owned controller directly. There is no global report mailbox,
   stale collector, replay buffer, or timeout increase. The content,
   attachment-consent, outbox, and delivery state machines are unchanged.
+- Exact hosted candidate
+  `e1eaa4deafbc1b986e933037acaaec3d4e7367da` proves the correction in the
+  API 35 production shell. Android production shell, Review Sample shell,
+  build-and-test, and the aggregate Android context pass; iOS, macOS, server,
+  Swift packages, operations, localization, health-claims, runtime-license,
+  and trust checks also pass. The sole hosted failure is the fail-closed
+  release-control snapshot test because the reviewed Android source and
+  operations records moved existing terminology line numbers and file
+  digests. Counts remain 17,846 occurrences across 1,585 groups, category
+  totals are unchanged, the active customer/core allowlist is byte-identical,
+  and the audit reports zero forbidden mappings.
+- The reviewed inventory was regenerated and its exact SHA-256 was repinned in
+  the required-CI trust root. The exact 191-case release-control unit wall then
+  passed, as did the standalone 9-check release-control report, required-CI
+  ten-context check, trusted self-verification, shell entrypoints, calibration
+  parity, distribution provenance, private-data filename guard, terminology
+  ratchet, operations validation, and diff hygiene.
 
 ## Data, privacy, and medical truth
 
@@ -308,8 +325,8 @@ candidate:
 | Late Android review remediation | Full and Demo each passed 12/12 import/Safety cases while compiling app and instrumentation sources; after the localization ratchet each variant passed 18/18 focused cases. Full completed 41 tasks, Demo 58 tasks, and the combined locale rerun 57 tasks | Long managed-history imports have an explicit cancel path and localized terminal status; disabling the active Safety channel blocks registration/delivery while a missing urgent channel may still use the enabled standard fallback | Physical notification-settings behavior, process death during import, or emulator execution of instrumentation cases |
 | Android stale-formula follow-up | `ChargeFormulaUpgradeGateTest` passed 3/3; the Full-debug app and complete instrumentation test source compiled in a 41-task bounded Gradle run. The new Room regression is included in the hosted production-shell suite | Formula traversal selects an empty score-window reconciliation, that reconciliation deletes only the computed daily and managed Rest rows, and imported owners plus unrelated series remain untouched | API 35 execution of the new Room regression, physical-device behavior, or formula accuracy |
 | Hosted `825d015c` candidate | 29 hosted checks passed, three were intentionally skipped, and the final Apple and Android build jobs passed. The API 35 production shell alone failed two existing app-report tests at their initial sheet-open waits; the new Room formula regression passed all 8 cases | The candidate is coherent across every other protected wall and the failure is isolated to Activity-bound report request delivery | The corrected report entrypoint or protected integration |
-| Android app-report lifecycle correction | The repository-standard 4 GiB one-worker run passed `AppDiagnosticReportEntryPointTest`, compiled the Full app, and compiled all Full instrumentation source across 41 tasks. A deliberate 1.5 GiB local attempt stopped in the Compose compiler with heap exhaustion before tests | The current Activity owns Test Centre invocation, no global replay state remains, callback wiring compiles through production navigation, and the existing API 35 report tests compile against the new entrypoint | API 35 execution, physical shake delivery, or report upload service behavior |
-| Final terminology and policy wall | 17,846 occurrences across 1,585 groups with zero forbidden mappings; 355 repository-tool/i18n tests plus 44 subtests passed; required-CI verified 10 contexts; release controls passed 9 checks; operations validation passed across 82 records; legal inventory verified 230 runtime components and 3 container inputs; private-data, health-claims across 1,297 files, calibration parity, trusted-control self-verification, strict/full i18n audit, and diff checks passed | The reviewed terminology snapshot, localization catalogs, ten-context release-control contract, operations records, privacy/claims guards, and repository policy tests match the final local tree | Hosted exact-SHA results, protected-main trust, physical localization/accessibility, or removal of the separately baselined hardcoded-literal debt |
+| Android app-report lifecycle correction | The repository-standard 4 GiB one-worker run passed `AppDiagnosticReportEntryPointTest`, compiled the Full app, and compiled all Full instrumentation source across 41 tasks. A deliberate 1.5 GiB local attempt stopped in the Compose compiler with heap exhaustion before tests. On exact hosted SHA `e1eaa4de`, Android production shell, Review Sample shell, build-and-test, and the required Android aggregate all pass | The current Activity owns Test Centre invocation, no global replay state remains, callback wiring compiles through production navigation, and the API 35 report tests execute successfully against the new entrypoint | Physical shake delivery or report upload service behavior |
+| Final terminology and policy wall | 17,846 occurrences across 1,585 groups with zero forbidden mappings and a byte-identical active allowlist; the reviewed inventory digest is repinned. The exact 191-case release-control unit wall, standalone 9-check release-control report, required-CI 10-context check, trusted self-verification, shell entrypoints, calibration parity, distribution provenance, private-data guard, operations validation across 82 records, and diff hygiene pass. The earlier complete repository wall passed 355 tests plus 44 subtests, legal inventory verified 230 runtime components and 3 container inputs, and health-claims scanned 1,297 files | The reviewed terminology snapshot, localization catalogs, ten-context release-control contract, operations records, privacy/claims guards, and repository policy tests match the final local tree | Replacement hosted exact-SHA release controls, protected-main trust, physical localization/accessibility, or removal of the separately baselined hardcoded-literal debt |
 | Apple history acknowledgement and generation fence | 23 passed, 0 failed after the final watchdog correction | FIFO callback correlation, callback-only trim credit, and delayed persistence rejection compile and pass in the macOS app target | CoreBluetooth callback timing or firmware trim behavior on a physical band |
 | Android history acknowledgement and generation fence | Expanded six-class Full-debug selector wall passed; Gradle build succeeded | Callback-only acknowledgement, write single-delivery, drain gates, continuation, burst progress, and delayed-session fencing compile and pass | Android GATT timing, process death, or firmware behavior on a physical phone and band |
 | Android Full instrumentation source compile | 33 tasks completed; build succeeded | The changed Room managed-document instrumentation test and Full app instrumentation source compile together | Emulator execution or physical-device behavior |
@@ -362,16 +379,18 @@ data, or cloud resource was removed.
 ## Git and release state
 
 - Pull request: `#16`
-- Remote PR head before this app-report correction:
-  `825d015cd404433ac28f67ec7182520b123d48d5`
-- Local tree: the Activity-owned Android report entrypoint, request-outcome
-  diagnostics, focused JVM ratchet, updated API 35 shell calls, and this
-  operations evidence remain to be committed. The exact hosted run on
-  `825d015c` passed every other required wall; the focused 4 GiB Full-debug
-  compile and test are green on the corrected local tree.
-- Required next state: one final narrow follow-up commit and push, all ten protected
-  contexts green on the exact SHA, every proven review thread resolved, normal
-  protected merge, protected-main verification, and exact round-owned cleanup.
+- Current remote PR head:
+  `e1eaa4deafbc1b986e933037acaaec3d4e7367da`
+- Hosted state: every applicable Apple, Android, server, package, operations,
+  localization, claims, license, and trust job passes on the exact SHA. The
+  sole failure is the expected stale generated terminology inventory in
+  `release-controls`; no occurrence/category count or active allowlist changed,
+  and zero forbidden mappings are present.
+- Required next state: regenerate and revalidate the reviewed terminology
+  evidence, make one evidence-only follow-up commit and push, require all ten
+  protected contexts green on that exact SHA, resolve every proven review
+  thread, merge normally, verify protected `main`, and perform exact
+  round-owned cleanup.
 
 ## Open risks and honest limitations
 
@@ -408,8 +427,9 @@ data, or cloud resource was removed.
 
 ## Next round
 
-1. Review and commit the exact Android report-entry follow-up.
-2. Push that reviewed follow-up to pull request `#16`.
+1. Regenerate the reviewed terminology inventory from the final documentation
+   state and rerun the exact release-control wall.
+2. Commit and push that evidence-only correction to pull request `#16`.
 3. Require all ten hosted contexts on the exact candidate SHA.
 4. Resolve only review threads proven by the final source and evidence.
 5. Merge normally, verify protected `main`, synchronize the canonical

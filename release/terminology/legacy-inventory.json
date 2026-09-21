@@ -24282,10 +24282,10 @@
       "lineNumbers": [
         75,
         76,
-        417,
-        450,
-        450,
-        464
+        415,
+        448,
+        448,
+        462
       ],
       "occurrenceCount": 6,
       "path": "android/app/src/main/java/com/noop/ui/AppDiagnosticReport.kt",
@@ -24300,8 +24300,8 @@
     {
       "category": "customer",
       "lineNumbers": [
-        451,
-        451
+        449,
+        449
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ui/AppDiagnosticReport.kt",
@@ -25374,26 +25374,26 @@
     {
       "category": "core",
       "lineNumbers": [
+        36,
         38,
-        40,
-        100,
-        105,
-        391,
-        397,
-        404,
-        422,
-        428,
-        436,
-        444,
-        476,
-        577,
-        581,
-        584,
-        1328,
-        1336,
-        1339,
-        1340,
-        1340
+        98,
+        103,
+        389,
+        395,
+        402,
+        420,
+        426,
+        434,
+        442,
+        474,
+        575,
+        579,
+        582,
+        1326,
+        1334,
+        1337,
+        1338,
+        1338
       ],
       "occurrenceCount": 20,
       "path": "android/app/src/main/java/com/noop/ui/MainActivity.kt",
@@ -25411,7 +25411,7 @@
     {
       "category": "customer",
       "lineNumbers": [
-        579
+        577
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/ui/MainActivity.kt",
@@ -25885,16 +25885,16 @@
       "category": "core",
       "lineNumbers": [
         45,
-        93,
-        93,
-        93,
-        256,
-        257,
-        261,
-        271,
-        271,
-        290,
-        507
+        96,
+        96,
+        96,
+        262,
+        263,
+        267,
+        277,
+        277,
+        296,
+        516
       ],
       "occurrenceCount": 11,
       "path": "android/app/src/main/java/com/noop/ui/TestCentreScreen.kt",
@@ -25913,8 +25913,8 @@
     {
       "category": "customer",
       "lineNumbers": [
-        272,
-        272
+        278,
+        278
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ui/TestCentreScreen.kt",
@@ -36054,9 +36054,9 @@
       "lineNumbers": [
         57,
         78,
-        176,
-        296,
-        323
+        206,
+        326,
+        353
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36376,11 +36376,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        208,
         210,
-        296,
-        369,
-        398
+        212,
+        334,
+        408,
+        438
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/rounds/2026-09-21-pr16-final-readiness-closeout.md",
@@ -36402,7 +36402,7 @@
       ],
       "occurrenceCount": 6,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "a79e5133908aefaaa924b6f59ddf13d21cc795ecc60e35cc1e0259fb5aad0332",
+      "sha256": "bb71972db993f9096c014e7e754b1ec904705fde69116a483f0d095bb9697ae2",
       "tokenCounts": {
         "whoop": 3,
         "whoopstore": 3

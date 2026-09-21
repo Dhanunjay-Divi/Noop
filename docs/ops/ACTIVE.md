@@ -183,6 +183,22 @@ Last updated: **2026-09-21**
   deliberate 1.5 GiB local attempt stopped at the known Compose compiler heap
   boundary. One narrow commit/push, replacement exact-SHA checks, protected
   merge/main verification, and cleanup remain.
+- Replacement PR head
+  `e1eaa4deafbc1b986e933037acaaec3d4e7367da` proves that correction in the
+  hosted API 35 production shell. Android production shell, Review Sample,
+  build-and-test, and its required aggregate pass; iOS, macOS, server, Swift
+  packages, operations, localization, health-claims, runtime-license, and trust
+  checks also pass. The sole failure is the release-control terminology
+  snapshot ratchet: source and operations edits moved existing line numbers and
+  digests while occurrence count, category totals, and the active customer/core
+  allowlist remained unchanged. The reviewed scan records 17,846 occurrences
+  across 1,585 groups and zero forbidden mappings. The inventory has now been
+  regenerated and its exact digest repinned; the 191-case release-control wall,
+  standalone 9-check report, required-CI ten-context check, trusted self-check,
+  shell entrypoints, calibration parity, distribution provenance, private-data
+  guard, operations validation, terminology ratchet, and diff hygiene pass
+  locally. One evidence-only push, final exact-SHA hosted verification,
+  protected merge/main trust, and cleanup remain.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
 - Earlier broad local evidence before the late-review follow-up:
