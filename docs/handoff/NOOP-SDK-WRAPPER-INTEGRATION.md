@@ -130,6 +130,7 @@ authoritative for the physical scenarios and evidence package.
 | Boundary | Current source state | Still required |
 |---|---|---|
 | Single active source | Implemented by `SourceCoordinator` on Apple and Android | Supplier adapter registration and physical source-switch tests |
+| Neutral SDK core | Digest-pinned Swift and Kotlin state machines, bounded diagnostics, virtual fixtures, conformance scenarios, and app build boundaries are integrated default-off | Supplier-specific transport mapping and physical validation |
 | WHOOP transport | Implemented and retained | Continue regression coverage until supplier acceptance completes |
 | Device registry | Implemented with one active source and source-specific provenance | First-party identity mapping and migration fixtures |
 | Live persistence | Implemented for current transports | Supplier sample normalization, units, quality, deduplication, and physical comparison |
@@ -145,9 +146,14 @@ authoritative for the physical scenarios and evidence package.
 | Android supplier runtime | Candidate AARs reviewed | Signed Android integration, OEM/background matrix, and physical runs |
 | Production band accuracy | Not established | Bench and participant validation for every shipped signal and firmware revision |
 
-The supplier wrapper described here is not yet implemented in this app
-repository. Existing source seams make the integration possible; they do not
-close the supplier or hardware gates.
+The binary-free neutral SDK core is integrated in this app repository through
+one exact source manifest. Apple consumes the pinned Swift package, Android
+compiles the pinned Kotlin sources, and both source coordinators expose an
+optional factory that every production composition root leaves disabled. The
+supplier-specific wrapper described below is not implemented: no vendor
+binary, real scan, identity mapping, possession proof, history offload,
+haptic/alarm command, OTA, or firmware flasher is registered. The integrated
+core and virtual evidence do not close any supplier or hardware gate.
 
 ## 4. Target topology
 

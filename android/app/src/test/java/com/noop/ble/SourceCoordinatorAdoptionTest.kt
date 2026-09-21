@@ -31,6 +31,24 @@ import org.junit.Test
  */
 class SourceCoordinatorAdoptionTest {
 
+    private class FakeNoopBandSource : LiveHrSource {
+        var scans = 0
+        val connections = mutableListOf<String>()
+        var stops = 0
+
+        override fun scan() {
+            scans += 1
+        }
+
+        override fun connect(address: String) {
+            connections += address
+        }
+
+        override fun stop() {
+            stops += 1
+        }
+    }
+
     /** In-memory [DeviceRegistryDao] (same reproduction as DeviceRegistryTest, trimmed to what's used). */
     private class FakeRegistryDao : DeviceRegistryDao {
         val devices = LinkedHashMap<String, PairedDeviceRow>()
@@ -308,5 +326,82 @@ class SourceCoordinatorAdoptionTest {
 
         assertEquals("a different WHOOP must drop the current link", 1, stops)
         assertEquals("a different WHOOP must reconnect", 1, starts)
+    }
+
+    @Test
+    fun explicitNoopBandFactoryOwnsNonWhoopLifecycle() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["noop-band-synthetic"] = PairedDeviceRow(
+                id = "noop-band-synthetic",
+                brand = "NOOP",
+                model = "Synthetic",
+                nickname = null,
+                sourceKind = SourceKind.liveBLE.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 200,
+                lastSeenAt = 200,
+                peripheralId = null,
+            )
+        }
+        val source = FakeNoopBandSource()
+        val requested = mutableListOf<String>()
+        var starts = 0
+        var stops = 0
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = { starts += 1 },
+            stopWhoop = { stops += 1 },
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            noopBandSourceFactory = { id, _ ->
+                requested += id
+                source
+            },
+        )
+
+        coordinator.onActiveDeviceChanged("noop-band-synthetic")
+        assertEquals(listOf("noop-band-synthetic"), requested)
+        assertEquals(1, stops)
+        assertEquals(1, source.scans)
+        assertTrue(source.connections.isEmpty())
+
+        dao.demoteActive()
+        dao.promote("my-whoop", 300)
+        coordinator.onActiveDeviceChanged("my-whoop")
+        assertEquals(1, source.stops)
+        assertEquals(1, starts)
+    }
+
+    @Test
+    fun whoopDefaultNeverRequestsNoopBandFactory() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+        }
+        var factoryCalls = 0
+        var starts = 0
+        var stops = 0
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = { starts += 1 },
+            stopWhoop = { stops += 1 },
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            noopBandSourceFactory = { _, _ ->
+                factoryCalls += 1
+                FakeNoopBandSource()
+            },
+        )
+
+        coordinator.start()
+        assertEquals(0, factoryCalls)
+        assertEquals(0, starts)
+        assertEquals(0, stops)
     }
 }

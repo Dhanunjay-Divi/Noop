@@ -44,6 +44,7 @@ jobs:
           Tools.tests.test_github_release_tag_gate
           Tools.tests.test_homebrew_helper
           Tools.tests.test_homebrew_version_gate
+          Tools.tests.test_noop_band_sdk_artifact
           Tools.tests.test_required_ci_gate
           Tools.tests.test_release_version_gate
           Tools.tests.test_testing_release_workflow

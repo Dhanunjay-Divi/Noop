@@ -92,6 +92,12 @@ class SourceCoordinator(
      *  [StandardHrSource] as its `log`; kept SEPARATE from [log] above (which defaults to logcat and only
      *  carries the multi-WHOOP adoption notice). Default no-op keeps existing call sites compiling. */
     private val straplog: (String) -> Unit = {},
+    /**
+     * Default-off app seam for the supplier-neutral NOOP Band SDK adapter. Production composition
+     * roots leave this null until a reviewed supplier transport exists. Tests inject a source to prove
+     * lifecycle ownership without registering a fake device kind or changing the WHOOP path.
+     */
+    private val noopBandSourceFactory: ((String, PairedDeviceRow?) -> LiveHrSource?)? = null,
     /** Push a strap's battery percent into the live state (e.g. `ble::publishExternalBattery`), so a
      *  generic strap / FTMS machine surfaces its charge where the WHOOP strap battery does. Default no-op
      *  keeps existing call sites + JVM tests compiling unchanged. */
@@ -361,6 +367,7 @@ class SourceCoordinator(
      * macOS `SourceCoordinator.makeSource(for:)`.
      */
     private fun makeSource(id: String, row: PairedDeviceRow?): LiveHrSource {
+        noopBandSourceFactory?.invoke(id, row)?.let { return it }
         // Non-null in production (set at the composition root); only the JVM-test paths that never reach a
         // strap switch leave it null. Fail loudly rather than silently no-op if that invariant breaks.
         val ctx = requireNotNull(context) { "SourceCoordinator.context is required to run a strap source" }

@@ -204,6 +204,12 @@ android {
     }
 
     sourceSets {
+        getByName("main").java.srcDir(
+            rootProject.file("../Vendor/NoopBandSDK/production/android"),
+        )
+        getByName("test").java.srcDir(
+            rootProject.file("../Vendor/NoopBandSDK/test-support/android"),
+        )
         getByName("androidTest").assets.srcDir("schemas")
     }
 

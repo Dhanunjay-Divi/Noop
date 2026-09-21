@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 1,
+  "scenarios": [
+    {
+      "id": "happy_path",
+      "automated": true,
+      "expected": {
+        "events": [
+          "scan_started",
+          "candidate_selected",
+          "connected",
+          "capabilities_accepted",
+          "live_committed",
+          "history_received",
+          "history_committed",
+          "history_acknowledged"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 3,
+        "failure": null
+      }
+    },
+    {
+      "id": "single_command_queue",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "command_started",
+          "second_command_rejected",
+          "command_completed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "busy"
+      }
+    },
+    {
+      "id": "stale_callback_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "generation_advanced",
+          "stale_callback_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "history_requires_durable_receipt",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "history_received",
+          "ack_rejected",
+          "history_committed",
+          "history_acknowledged"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": "storage"
+      }
+    },
+    {
+      "id": "live_does_not_advance_history",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "live_committed",
+          "cursor_unchanged",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 1,
+        "failure": null
+      }
+    },
+    {
+      "id": "live_batch_deduplicated",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "live_committed",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 1,
+        "failure": null
+      }
+    },
+    {
+      "id": "history_cursor_chain_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "first_history_committed",
+          "cursor_chain_rejected",
+          "operation_completed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": "historyStalled"
+      }
+    },
+    {
+      "id": "operation_capability_fail_closed",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "unsupported_operation_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "unsupported"
+      }
+    },
+    {
+      "id": "oversized_metadata_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "oversized_metadata_rejected",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidInput"
+      }
+    },
+    {
+      "id": "capability_unknown_fail_closed",
+      "automated": true,
+      "expected": {
+        "events": [
+          "scan_started",
+          "candidate_selected",
+          "connected",
+          "capability_rejected"
+        ],
+        "finalState": "incompatible",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "incompatible"
+      }
+    },
+    {
+      "id": "history_interrupted_resume",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "history_received",
+          "history_interrupted",
+          "reconnected",
+          "history_resumed",
+          "history_committed",
+          "history_acknowledged"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": "disconnected"
+      }
+    },
+    {
+      "id": "diagnostics_bounded",
+      "automated": true,
+      "expected": {
+        "events": [
+          "diagnostics_recorded",
+          "diagnostics_bounded"
+        ],
+        "finalState": "idle",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
+      }
+    },
+    {
+      "id": "closed_session_terminal",
+      "automated": true,
+      "expected": {
+        "events": [
+          "session_closed",
+          "operation_rejected"
+        ],
+        "finalState": "closed",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "closed"
+      }
+    },
+    {
+      "id": "firmware_possession_proof",
+      "automated": false,
+      "externalGate": "Requires approved challenge-bound firmware proof and physical bands."
+    },
+    {
+      "id": "unexpected_network_egress_blocked",
+      "automated": false,
+      "externalGate": "Requires signed-app traffic inspection with the approved supplier binary."
+    },
+    {
+      "id": "ota_wrong_image_rejected",
+      "automated": false,
+      "externalGate": "Requires approved signed firmware manifests, bootloader contract, and hardware."
+    },
+    {
+      "id": "ota_interruption_recovery",
+      "automated": false,
+      "externalGate": "Requires physical update, rollback, rescue, and power-interruption evidence."
+    },
+    {
+      "id": "collector_handoff",
+      "automated": false,
+      "externalGate": "Requires account-authorized multi-device physical lifecycle evidence."
+    },
+    {
+      "id": "background_reconnect",
+      "automated": false,
+      "externalGate": "Requires signed physical iOS and Android process-lifecycle evidence."
+    },
+    {
+      "id": "sensor_accuracy",
+      "automated": false,
+      "externalGate": "Requires the exact hardware, firmware, references, and approved validation study."
+    }
+  ]
+}

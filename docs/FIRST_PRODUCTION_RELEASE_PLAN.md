@@ -256,8 +256,12 @@ Exact UUIDs and byte layouts remain pending the input dossier.
 ### 6.1 Repository boundaries
 
 The NOOP-owned protocol, adapters, fixtures, and conformance tools live in the
-separate private `Dhanunjay-Divi/NoopBandSDK` repository. The initial
-English-only, binary-free scaffold is published at commit `ee82cc0`.
+separate private `Dhanunjay-Divi/NoopBandSDK` repository. The binary-free
+neutral Swift/Kotlin implementation was merged at
+`e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b`; the app consumes the deterministic
+export from implementation revision
+`0abd9a3ce4f808b51bdc93ad28504ac810914631` through a digest-pinned,
+supplier-artifact-free boundary.
 
 ```text
 NoopBandSDK/

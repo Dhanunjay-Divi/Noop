@@ -52,6 +52,11 @@ packages:
     path: Packages/WhoopStore
   NoopRemoteSync:
     path: Packages/NoopRemoteSync
+  # Digest-pinned, source-only export from the private NoopBandSDK repository.
+  # The artifact verifier rejects drift and supplier binaries. This package is
+  # the neutral state machine only; no production transport is registered.
+  NoopBandSDK:
+    path: Vendor/NoopBandSDK
   Firebase:
     url: https://github.com/firebase/firebase-ios-sdk.git
     exactVersion: 12.18.0
@@ -190,6 +195,7 @@ targets:
       - package: WhoopProtocol
       - package: WhoopStore
       - package: NoopRemoteSync
+      - package: NoopBandSDK
       - package: Firebase
         product: FirebaseAuth
       - package: Firebase
@@ -222,6 +228,7 @@ targets:
       - package: WhoopProtocol
       - package: WhoopStore
       - package: NoopRemoteSync
+      - package: NoopBandSDK
       - package: OuraProtocol
     settings:
       base:
@@ -460,6 +467,7 @@ targets:
       - package: WhoopProtocol
       - package: WhoopStore
       - package: NoopRemoteSync
+      - package: NoopBandSDK
       - package: Firebase
         product: FirebaseAuth
       - package: Firebase

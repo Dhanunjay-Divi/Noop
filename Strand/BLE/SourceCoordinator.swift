@@ -74,6 +74,10 @@ final class SourceCoordinator: ObservableObject {
     /// previously invisible). Passed straight into `StandardHRSource`. Defaults to a no-op so existing
     /// call sites (and tests) compile unchanged.
     private let straplog: (String) -> Void
+    /// Default-off app seam for the supplier-neutral NOOP Band SDK adapter. Every production
+    /// composition root leaves this nil until a reviewed supplier transport exists. Tests inject a
+    /// source to prove lifecycle ownership without registering a fake device kind or changing WHOOP.
+    private let noopBandSourceFactory: ((String) -> (any LiveHRSource)?)?
 
     // MARK: - State
 
@@ -135,7 +139,8 @@ final class SourceCoordinator: ObservableObject {
          setWhoopPreferredPeripheral: @escaping (String?) -> Void,
          setWhoopActiveDeviceId: @escaping (String) -> Void,
          connectedPeripheralUUID: AnyPublisher<String?, Never>,
-         straplog: @escaping (String) -> Void = { _ in }) {
+         straplog: @escaping (String) -> Void = { _ in },
+         noopBandSourceFactory: ((String) -> (any LiveHRSource)?)? = nil) {
         self.registry = registry
         self.live = live
         self.storeHandle = storeHandle
@@ -145,6 +150,7 @@ final class SourceCoordinator: ObservableObject {
         self.setWhoopActiveDeviceId = setWhoopActiveDeviceId
         self.connectedPeripheralUUID = connectedPeripheralUUID
         self.straplog = straplog
+        self.noopBandSourceFactory = noopBandSourceFactory
     }
 
     // MARK: - Wiring
@@ -305,6 +311,9 @@ final class SourceCoordinator: ObservableObject {
     /// onBattery closures, plus Oura's ringGen / authKey / adoptIntent). Returns the source WITHOUT
     /// connecting — the caller (`switchToStrap`) does the connect-by-identifier-else-scan bring-up.
     private func makeSource(for id: String) -> any LiveHRSource {
+        if let source = noopBandSourceFactory?(id) {
+            return source
+        }
         switch sourceKind(for: id) {
         case .ftms:  return makeFTMSSource(id: id)
         case .huami: return makeHuamiSource(id: id)

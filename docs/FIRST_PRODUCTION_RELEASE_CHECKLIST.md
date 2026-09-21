@@ -276,6 +276,13 @@ position without changing its ID. This inbox intentionally starts empty.
   `Dhanunjay-Divi/NoopBandSDK` repository with local language/binary/JSON
   validation and no hosted Actions workflow. (Evidence: initial `main` commit
   `ee82cc0`, `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`)
+- [x] SDK-006A [ENG] Implement the supplier-neutral Swift/Kotlin session core,
+  bounded diagnostics, deterministic virtual conformance, and one
+  digest-pinned source-only app boundary. Keep every production NOOP-band
+  factory disabled and retain WHOOP as the comparison transport until the
+  supplier and physical gates pass. (Evidence: private SDK merge
+  `e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b`,
+  `ops/rounds/2026-09-21-noop-band-sdk-app-integration.md`)
 - [ ] SDK-007 [ENG] Build quarantined Apple and Android supplier adapters behind
   neutral NOOP session/sample types; keep vendor callbacks, persistence, and
   errors out of screens, analytics, storage, and cloud code.

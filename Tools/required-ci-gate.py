@@ -44,7 +44,7 @@ RELEASE_SOURCE_DIGESTS = {
         "75020df9587cc34387f41b3b9482bd71187639e39a79a3db97cb1dfd13552719"
     ),
     ".github/workflows/release-controls.yml": (
-        "98f9b95510411d6c84aa3e78233c73cb8e2263b2b0d798c23104b775f1b876ce"
+        "630e0555bf18a18878187d5b9d74bffe6a04f10521f4aadb5c99c67ce2e9ab70"
     ),
     ".github/workflows/release.yml": (
         "08751fb8e82e0c14fdb4630f45262892077b42e644d740219e7750494c34c01b"
@@ -71,7 +71,7 @@ RELEASE_SOURCE_DIGESTS = {
         "53e4cf11c307ba0dd22c30811dade78806b6451ff09ba3d3ed483f10868c8955"
     ),
     "release/terminology/legacy-inventory.json": (
-        "200e881ddcc96546a96378635be327223c83bf6bdbe2ba507e3ed3f6a42871a4"
+        "83ef27d6c2b030449518ac2f9fbf3a6851ac5e3f484a184cba5fb6618afe7752"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -1499,6 +1499,7 @@ def check_release_control_test_suite(root: Path) -> None:
         "Tools.tests.test_github_release_tag_gate",
         "Tools.tests.test_homebrew_helper",
         "Tools.tests.test_homebrew_version_gate",
+        "Tools.tests.test_noop_band_sdk_artifact",
         "Tools.tests.test_testing_release_workflow",
         "Tools.tests.test_trusted_release_controls",
     )

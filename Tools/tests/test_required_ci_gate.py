@@ -315,9 +315,11 @@ class RequiredCIGateTests(unittest.TestCase):
         text = (ROOT / ".github/workflows/app-build.yml").read_text(encoding="utf-8")
         for marker in (
             "NOOPWatch|NOOPWatchComplications",
+            "Vendor/NoopBandSDK/",
             "Strand\\.xcodeproj/project\\.xcworkspace/xcshareddata/swiftpm/"
             "Package\\.resolved",
             "LICENSE|NOTICE|ATTRIBUTION\\.md|DISCLAIMER\\.md|TERMS\\.md",
+            "swift test --package-path Vendor/NoopBandSDK",
         ):
             self.assertIn(marker, text)
 
@@ -446,6 +448,7 @@ class RequiredCIGateTests(unittest.TestCase):
             "Tools.tests.test_github_release_tag_gate",
             "Tools.tests.test_homebrew_helper",
             "Tools.tests.test_homebrew_version_gate",
+            "Tools.tests.test_noop_band_sdk_artifact",
             "Tools.tests.test_testing_release_workflow",
             "Tools.tests.test_trusted_release_controls",
         ):
@@ -776,6 +779,7 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertEqual(source.count("timeout-minutes: 50"), 2)
         self.assertEqual(source.count("continue-on-error: true"), 2)
         self.assertIn("Tools/android-managed-device-retry.py", source)
+        self.assertIn("Vendor/NoopBandSDK/", source)
         self.assertEqual(source.count("Tools/run-bounded-command.py"), 8)
         self.assertEqual(source.count("--timeout-seconds 1200"), 2)
         self.assertEqual(source.count("--timeout-seconds 420"), 2)
