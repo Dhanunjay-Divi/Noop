@@ -27,7 +27,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "34028a2ab56feb90ae774b0ee0055529ce175723"
+            "dab6072eb2b69b07ee34221dbb649a0119547246"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let generation = try await session.beginScan()
@@ -54,14 +54,15 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 handle: "synthetic-candidate",
                 compatible: true,
                 identifyEligible: true
-            )
+            ),
+            callbackGeneration: generation
         )
         let identity = BandIdentity(
             sourceIdentity: checkpoint.sourceIdentity,
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-34028a2"
+            wrapperRevision: "artifact-dab6072"
         )
         try await session.connect(identity)
         try await session.acceptCapabilities(
@@ -111,14 +112,15 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 handle: "synthetic-candidate",
                 compatible: true,
                 identifyEligible: true
-            )
+            ),
+            callbackGeneration: generation
         )
         let identity = BandIdentity(
             sourceIdentity: "synthetic-source",
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-34028a2"
+            wrapperRevision: "artifact-dab6072"
         )
         try await session.connect(identity)
         try await session.acceptCapabilities(

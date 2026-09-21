@@ -53,6 +53,66 @@
       }
     },
     {
+      "id": "cross_session_credentials_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready_pair",
+          "foreign_live_receipt_rejected",
+          "own_live_receipt_accepted",
+          "foreign_history_receipt_rejected",
+          "foreign_operation_token_rejected",
+          "own_history_completed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 3,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "same_session_replay_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "first_live_committed",
+          "stale_live_receipt_rejected",
+          "second_live_committed",
+          "stale_operation_token_rejected",
+          "first_history_committed",
+          "stale_history_receipt_rejected",
+          "second_history_committed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-3",
+        "acceptedSamples": 5,
+        "failure": "storage"
+      }
+    },
+    {
+      "id": "stale_terminal_callbacks_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "scan_restarted",
+          "stale_scan_cancel_rejected",
+          "stale_scan_failure_rejected",
+          "ready",
+          "stale_reconnect_interrupt_rejected",
+          "reconnect_started",
+          "first_reconnect_completed",
+          "second_reconnect_started",
+          "stale_reconnect_completion_rejected",
+          "reconnected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
       "id": "history_requires_durable_receipt",
       "automated": true,
       "expected": {

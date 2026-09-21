@@ -55,8 +55,10 @@ PROTECTED_PATHS = {
     "Tools/required-ci-gate.py",
     "Tools/run-bounded-command.py",
     "Tools/terminology-audit.py",
+    "Tools/tests/test_noop_band_sdk_artifact.py",
     "Tools/trusted-release-controls.py",
     "Tools/update-homebrew-cask.sh",
+    "Tools/verify-noop-band-sdk-artifact.py",
 }
 
 

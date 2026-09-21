@@ -12,29 +12,28 @@ Last updated: **2026-09-21**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: the private binary-free SDK final implementation is merged at
-  `34028a2`, its closeout is on private `main` at `a04c263`, and two
-  independent clean exports were byte-identical with manifest SHA-256
-  `f0baf194ae0daa51e2d7c02d83b9324efd5bc278080aa622857ecfa32af54f8b`.
+- Current state: the private binary-free SDK is merged on private `main` at
+  `dab6072eb2b69b07ee34221dbb649a0119547246`, and two independent clean
+  exports from that exact revision were byte-identical with manifest SHA-256
+  `35c03822b8993799a75fdcacc12867d124e1e94701364e7c9eb3f8f51e33c7a2`.
   The exact ten-file artifact is integrated locally into Apple and Android
   behind a production-default-off source factory; WHOOP remains the default
-  comparison transport. The final SDK closes the additional generation,
-  device-time, per-operation history receipt, firmware diagnostics,
-  nonadvancing cursor, UTF-8 bound, sampling capability, identity-cache, and
-  explicit operation-terminal findings plus the independent follow-up review.
-  Current focused and repository-policy evidence is green: the exact artifact and five verifier
-  tests pass; the Swift package passes 4/4 while checking all 27 automated
-  scenarios; Android Full passes 4/4 and Demo compiles independently; and the
-  real macOS app target passes 5/5. The complete Tools wall passes 310 tests
-  with one intentional skip, alongside all nine release controls, ten required
-  contexts, trust, calibration, terminology, provenance, privacy, claims,
-  localization, operations, shell, Actionlint, and diff gates. One combined Full+Demo invocation was
-  recorded as an avoidable Kotlin heap spike and replaced by sequential
-  bounded runs. PR `#17` still needs one consolidated replacement push, new exact-SHA hosted checks, review-thread
-  resolution, protected merge/main verification, and exact cleanup. No
-  supplier binary, firmware, real adapter, or flasher is included.
-  The final local implementation commit is `d8028186`; the record closeout is
-  being prepared before the single remote replacement push.
+  comparison transport. The final SDK additionally binds operation tokens and
+  durable receipts to their issuing session, fences stale scan/reconnect
+  terminals, snapshots capability inputs, supports negotiated non-HR live
+  streams, enforces history availability, and invalidates negotiation after
+  firmware terminals. Current focused evidence is green: the exact artifact
+  and five verifier tests pass; the vendored Swift package passes 15/15 while
+  checking all 30 automated scenarios; Android Full passes 5/5 and Demo
+  compiles independently; and the real macOS app target passes 5/5. The
+  private SDK itself passed Swift 27/27, Kotlin 28/28, 30/30 cross-platform
+  scenarios, and its 40-file repository guard before merge. Final trust,
+  release-control, operations, terminology, and complete tool gates are still
+  being rerun on the uncommitted replacement. PR `#17` remote head remains
+  `9ff11b63`; one consolidated commit/push, exact-SHA hosted checks,
+  review-thread resolution, protected merge/main verification, and exact
+  cleanup remain. No supplier binary, firmware, real adapter, or flasher is
+  included.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,

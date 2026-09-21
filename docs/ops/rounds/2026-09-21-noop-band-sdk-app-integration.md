@@ -66,12 +66,12 @@ Success means:
     `f32633a9fc63a9edd273f38e97b48c216a798234`;
   - private SDK final implementation merge
     `34028a2ab56feb90ae774b0ee0055529ce175723`;
-  - private SDK closeout on `main`
-    `a04c263e7229532038b13c7da343a43747864390`;
+  - private SDK runtime-authority hardening merge on `main`
+    `dab6072eb2b69b07ee34221dbb649a0119547246`;
   - ten-file export manifest with
     `supplierArtifactsIncluded: false`;
-  - standalone Swift 24-test, Kotlin 25-test, 27-scenario cross-platform
-    conformance, and 39-file repository-gate evidence;
+  - standalone Swift 27-test, Kotlin 28-test, 30-scenario cross-platform
+    conformance, and 40-file repository-gate evidence;
   - existing Apple and Android single-active-source coordinators.
 - Unknowns that must remain unknown until measured: exact supplier APIs and
   callbacks, protocol/device identity, disconnected flash depth and overwrite
@@ -81,10 +81,10 @@ Success means:
 
 ## Delivered
 
-- Re-exported the exact ten-file source artifact from private SDK implementation
-  revision `34028a2ab56feb90ae774b0ee0055529ce175723` twice from a detached clean
-  worktree. Both artifacts were byte-identical; the manifest SHA-256 is
-  `f0baf194ae0daa51e2d7c02d83b9324efd5bc278080aa622857ecfa32af54f8b`.
+- Re-exported the exact ten-file source artifact from private SDK `main`
+  revision `dab6072eb2b69b07ee34221dbb649a0119547246` twice from a detached
+  clean worktree. Both artifacts were byte-identical; the manifest SHA-256 is
+  `35c03822b8993799a75fdcacc12867d124e1e94701364e7c9eb3f8f51e33c7a2`.
   The verified artifact replaced `Vendor/NoopBandSDK` without supplier
   binaries or symlinks.
 - Preserved the original seven private-SDK review corrections and consumed the
@@ -101,7 +101,7 @@ Success means:
   unexpected top-level files, tree drift, and supplier binary/archive
   payloads.
 - Added the local Swift package to the macOS, iOS, and macOS test graphs. Its
-  test target compiles the exported Apple virtual band and compares all 27
+  test target compiles the exported Apple virtual band and compares all 30
   automated results with the exported JSON contract.
 - Added the exported Kotlin production sources to the Android main source set
   and its virtual band to the JVM test source set. The app test compares every
@@ -175,12 +175,12 @@ Success means:
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Starting app context snapshot | Clean dedicated branch at `9c514175`; concurrent UI work remains in its own worktree | Work is isolated from protected `main` and concurrent changes | Build correctness or hardware behavior |
-| Private SDK final remediation | PR `#3` merged normally at `34028a2`; Swift 24/24, Kotlin 25/25, 27 shared scenarios, 39-file repository gate, and independent no-finding re-review passed | All known source-authority findings are corrected before final app ingestion | Supplier API compatibility or physical behavior |
-| Independent clean exports | Two detached-worktree exports were byte-identical; manifest SHA-256 `f0baf194ae0daa51e2d7c02d83b9324efd5bc278080aa622857ecfa32af54f8b` | The vendored artifact is deterministic and traceable to `34028a2` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Private SDK final remediation | PR `#5` merged normally at `dab6072`; Swift 27/27, Kotlin 28/28, 30 shared scenarios, 40-file repository gate, and independent no-finding re-review passed | All known neutral-runtime authority findings are corrected before final app ingestion | Supplier API compatibility or physical behavior |
+| Independent clean exports | Two detached-worktree exports were byte-identical; manifest SHA-256 `35c03822b8993799a75fdcacc12867d124e1e94701364e7c9eb3f8f51e33c7a2` | The vendored artifact is deterministic and traceable to `dab6072` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Artifact verifier plus unit tests | Exact ten-file export passed; 5/5 verifier tests passed; no symlinks or supplier artifacts found | Source, manifest, package wrapper, exact layout, and no-binary policy are pinned | Physical compatibility |
-| Exact Swift package workflow order | External scratch path completed 4/4 tests and checked all 27 automated exported scenarios, then the verifier still passed | SwiftPM agrees with the shared contract without mutating the vendored source | App lifecycle, BLE, background, or hardware behavior |
-| Android Full app boundary | `NoopBandSdkIntegrationTest` passed 4/4 under `testFullDebugUnitTest` in 18 seconds on the final tree | Full-variant app source, generation fences, durable checkpoint restoration, explicit terminals, bounded diagnostics, and all shared scenarios compile and pass | Instrumentation, OEM background, BLE, or physical behavior |
-| Android Demo compile | `compileDemoDebugKotlin` passed independently in 1m38s | The Demo variant consumes the same final source successfully | Demo runtime rendering or device behavior |
+| Exact Swift package workflow order | The vendored package completed 15/15 tests and checked all 30 automated exported scenarios, then its generated `.build` cache was removed and the exact artifact verifier passed | SwiftPM agrees with the shared contract without leaving generated files inside the verified source tree | App lifecycle, BLE, background, or hardware behavior |
+| Android Full app boundary | `NoopBandSdkIntegrationTest` passed 5/5 under `testFullDebugUnitTest`, including all 30 shared scenarios | Full-variant app source, immutable capability authorization, generation fences, durable checkpoint restoration, explicit terminals, and bounded diagnostics compile and pass | Instrumentation, OEM background, BLE, or physical behavior |
+| Android Demo compile | `compileDemoDebugKotlin` passed independently in 1m23s | The Demo variant consumes the same final source successfully | Demo runtime rendering or device behavior |
 | Android memory classification | One combined Full+Demo invocation let the two Compose compilers overlap and exhausted a 3 GiB Kotlin heap; separate no-daemon, no-parallel, two-worker commands passed | The failure was an avoidable verification command shape, not a source failure; variant walls must stay sequential | Every future machine configuration |
 | Hosted production-shell diagnosis | PR `#17` run `35643099439` started 120 API 35 tests; 116 passed, two App Report cases timed out before their explanation sheets appeared, and the retained result protobuf contained real test cases | The red required context was a real cross-test state leak, not a zero-test infrastructure event or SDK behavior failure | The local correction until rerun on the protected exact SHA |
 | Feedback cleanup instrumentation regression | Full instrumentation source compiled, then the five continuity cases followed by all eight AppShell cases passed 13/13 on `pixel2Api35` in 2m37s | WorkManager generations quiesce before the exact test record is removed, and both previously failing report sheets open in the same managed-device sequence | The complete hosted production-shell wall or physical Android behavior |
@@ -214,9 +214,10 @@ Success means:
   `ce09fa67038865a35bc32698730953bd379d726f`; final SDK-export replacement
   `d8028186898b934f34ec50a98614f7e67d06d947`.
 - Branch and remote state: PR `#17` is open from the dedicated branch; the
-  remote head is `599454f4`. The test-isolation follow-up and this evidence
-  record are the next consolidated commit; the exact replacement SHA remains
-  subject to all protected checks.
+  remote head is `9ff11b63`. The `dab6072` artifact replacement, app-boundary
+  revision updates, trust-root repin, and this evidence record remain local and
+  uncommitted; the exact replacement SHA remains subject to all protected
+  checks.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and
   `Dhanunjay-Divi/NoopBandSDK` both report `PRIVATE` with default branch
   `main`.
@@ -241,13 +242,15 @@ Success means:
 
 ## Next round
 
-1. Commit and push the feedback-isolation follow-up once.
-2. Require every exact-SHA protected context, including the full Apple and
+1. Finish the final trust, release-control, operations, terminology, and tool
+   gates on the `dab6072` replacement.
+2. Commit and push the replacement once.
+3. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.
-3. Merge normally, verify protected `main`, and remove exact round-owned logs,
+4. Merge normally, verify protected `main`, and remove exact round-owned logs,
    DerivedData, exports, package scratch data, and the dedicated worktree.
-4. Keep the supplier adapter/flasher disabled until the exact SDK, firmware,
+5. Keep the supplier adapter/flasher disabled until the exact SDK, firmware,
    tooling, keys, rights, and representative physical bands pass their
    acceptance matrix.
 

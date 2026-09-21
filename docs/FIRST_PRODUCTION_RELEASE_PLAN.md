@@ -262,10 +262,12 @@ neutral Swift/Kotlin implementation was merged at
 hardening was merged at `f32633a9fc63a9edd273f38e97b48c216a798234`;
 and the generation, history, diagnostics, input-validation, cache-bound, and
 operation-terminal remediation was merged at
-`34028a2ab56feb90ae774b0ee0055529ce175723`. The app consumes the
-deterministic export from that final implementation revision through a
-digest-pinned, supplier-artifact-free boundary. SDK closeout documentation is
-on private `main` at `a04c263e7229532038b13c7da343a43747864390`.
+`34028a2ab56feb90ae774b0ee0055529ce175723`. Session-bound operation
+authority, immutable capability inputs, non-HR live streams, history gates,
+firmware invalidation, and stale terminal fencing were merged at
+`dab6072eb2b69b07ee34221dbb649a0119547246`. The app consumes the
+deterministic export from that current private `main` revision through a
+digest-pinned, supplier-artifact-free boundary.
 
 ```text
 NoopBandSDK/

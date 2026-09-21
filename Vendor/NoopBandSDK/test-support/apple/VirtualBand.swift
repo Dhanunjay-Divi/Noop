@@ -6,21 +6,49 @@ public actor VirtualBandStore {
     public init() {}
 
     public func commit(
+        acceptance: LiveAcceptance
+    ) -> DurableLiveReceipt {
+        let identities = Set(acceptance.acceptedSamples.map(\.identity))
+        committed.formUnion(identities)
+        return DurableLiveReceipt(
+            acceptance: acceptance,
+            committedSamples: identities.count,
+            committed: true
+        )
+    }
+
+    public func commit(
         acceptance: HistoryAcceptance,
         samples: [BandSample]
     ) -> DurableHistoryReceipt {
         let identities = Set(samples.map(\.identity))
         committed.formUnion(identities)
         return DurableHistoryReceipt(
-            chunkIdentity: acceptance.chunkIdentity,
-            acknowledgementToken: acceptance.acknowledgementToken,
-            nextCursor: acceptance.nextCursor,
-            complete: acceptance.complete,
-            overflowed: acceptance.overflowed,
+            acceptance: acceptance,
             historyStateCommitted: true,
             committedSamples: identities.count,
             committed: true
         )
+    }
+}
+
+private extension BandSessionMachine {
+    func durablyCommitLiveBatch(
+        _ batch: BandSampleBatch,
+        callbackGeneration: UInt64
+    ) async throws -> Int {
+        let acceptance = try await stageLiveBatch(
+            batch,
+            callbackGeneration: callbackGeneration
+        )
+        let receipt = await VirtualBandStore().commit(
+            acceptance: acceptance
+        )
+        try await acknowledgeLive(
+            receipt: receipt,
+            callbackGeneration: callbackGeneration
+        )
+        return acceptance.acceptedSamples.count
     }
 }
 
@@ -193,6 +221,9 @@ public enum BandConformanceRunner {
         "happy_path",
         "single_command_queue",
         "stale_callback_rejected",
+        "cross_session_credentials_rejected",
+        "same_session_replay_rejected",
+        "stale_terminal_callbacks_rejected",
         "history_requires_durable_receipt",
         "live_does_not_advance_history",
         "live_batch_deduplicated",
@@ -227,6 +258,12 @@ public enum BandConformanceRunner {
             return try await singleCommandQueue()
         case "stale_callback_rejected":
             return try await staleCallbackRejected()
+        case "cross_session_credentials_rejected":
+            return try await crossSessionCredentialsRejected()
+        case "same_session_replay_rejected":
+            return try await sameSessionReplayRejected()
+        case "stale_terminal_callbacks_rejected":
+            return try await staleTerminalCallbacksRejected()
         case "history_requires_durable_receipt":
             return try await historyRequiresDurableReceipt()
         case "live_does_not_advance_history":
@@ -287,7 +324,10 @@ public enum BandConformanceRunner {
     {
         let session = BandSessionMachine()
         let generation = try await session.beginScan()
-        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
         try await session.connect(VirtualBandFixtures.identity)
         try await session.acceptCapabilities(
             capabilities,
@@ -304,7 +344,10 @@ public enum BandConformanceRunner {
 
         let generation = try await session.beginScan()
         events.append("scan_started")
-        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
         events.append("candidate_selected")
         try await session.connect(VirtualBandFixtures.identity)
         events.append("connected")
@@ -314,7 +357,7 @@ public enum BandConformanceRunner {
         )
         events.append("capabilities_accepted")
         try await session.beginLive()
-        accepted += try await session.commitLiveBatch(
+        accepted += try await session.durablyCommitLiveBatch(
             VirtualBandFixtures.liveBatch,
             callbackGeneration: generation
         )
@@ -381,12 +424,16 @@ public enum BandConformanceRunner {
     private static func staleCallbackRejected() async throws -> BandConformanceResult {
         let (session, oldGeneration) = try await readySession()
         var events = ["ready"]
-        _ = try await session.interruptForReconnect()
-        try await session.resumeAfterReconnect()
+        let reconnectGeneration = try await session.interruptForReconnect(
+            callbackGeneration: oldGeneration
+        )
+        try await session.resumeAfterReconnect(
+            callbackGeneration: reconnectGeneration
+        )
         events.append("generation_advanced")
         var failure: BandFailureCategory?
         do {
-            _ = try await session.commitLiveBatch(
+            _ = try await session.durablyCommitLiveBatch(
                 VirtualBandFixtures.liveBatch,
                 callbackGeneration: oldGeneration
             )
@@ -398,6 +445,334 @@ public enum BandConformanceRunner {
             scenario: "stale_callback_rejected",
             events: events,
             snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func crossSessionCredentialsRejected()
+        async throws -> BandConformanceResult
+    {
+        let (first, firstGeneration) = try await readySession()
+        let (second, secondGeneration) = try await readySession()
+        let firstStore = VirtualBandStore()
+        let secondStore = VirtualBandStore()
+        var events = ["ready_pair"]
+        var failure: BandFailureCategory?
+
+        try await first.beginLive()
+        try await second.beginLive()
+        let firstLive = try await first.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            callbackGeneration: firstGeneration
+        )
+        let secondLive = try await second.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            callbackGeneration: secondGeneration
+        )
+        let foreignLiveReceipt = await firstStore.commit(
+            acceptance: firstLive
+        )
+        do {
+            try await second.acknowledgeLive(
+                receipt: foreignLiveReceipt,
+                callbackGeneration: secondGeneration
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("foreign_live_receipt_rejected")
+        }
+        try await first.acknowledgeLive(
+            receipt: foreignLiveReceipt,
+            callbackGeneration: firstGeneration
+        )
+        let ownLiveReceipt = await secondStore.commit(
+            acceptance: secondLive
+        )
+        try await second.acknowledgeLive(
+            receipt: ownLiveReceipt,
+            callbackGeneration: secondGeneration
+        )
+        try await first.stopLive()
+        try await second.stopLive()
+        events.append("own_live_receipt_accepted")
+
+        let firstToken = try await first.beginOperation(.history)
+        let secondToken = try await second.beginOperation(.history)
+        let firstHistory = try await first.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: firstToken,
+            callbackGeneration: firstGeneration
+        )
+        let secondHistory = try await second.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: secondToken,
+            callbackGeneration: secondGeneration
+        )
+        let foreignHistoryReceipt = await firstStore.commit(
+            acceptance: firstHistory,
+            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
+        )
+        do {
+            try await second.acknowledgeHistory(
+                receipt: foreignHistoryReceipt,
+                token: secondToken,
+                callbackGeneration: secondGeneration
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("foreign_history_receipt_rejected")
+        }
+        do {
+            try await second.completeOperation(firstToken)
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("foreign_operation_token_rejected")
+        }
+        let ownHistoryReceipt = await secondStore.commit(
+            acceptance: secondHistory,
+            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
+        )
+        try await second.acknowledgeHistory(
+            receipt: ownHistoryReceipt,
+            token: secondToken,
+            callbackGeneration: secondGeneration
+        )
+        try await second.completeOperation(secondToken)
+        events.append("own_history_completed")
+
+        return result(
+            scenario: "cross_session_credentials_rejected",
+            events: events,
+            snapshot: await second.snapshot(),
+            acceptedSamples:
+                secondLive.acceptedSamples.count
+                    + secondHistory.acceptedSamples,
+            failure: failure
+        )
+    }
+
+    private static func staleTerminalCallbacksRejected()
+        async throws -> BandConformanceResult
+    {
+        let scanSession = BandSessionMachine()
+        let firstScan = try await scanSession.beginScan()
+        try await scanSession.cancelScan(callbackGeneration: firstScan)
+        let secondScan = try await scanSession.beginScan()
+        var events = ["scan_restarted"]
+        var failure: BandFailureCategory?
+        do {
+            try await scanSession.cancelScan(callbackGeneration: firstScan)
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_scan_cancel_rejected")
+        }
+        do {
+            try await scanSession.failScan(
+                .timeout,
+                callbackGeneration: firstScan
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_scan_failure_rejected")
+        }
+        guard await scanSession.snapshot().state == .scanning else {
+            throw BandFailureCategory.internalFailure
+        }
+        try await scanSession.cancelScan(callbackGeneration: secondScan)
+
+        let (session, generation) = try await readySession()
+        events.append("ready")
+        do {
+            _ = try await session.interruptForReconnect(
+                callbackGeneration: generation - 1
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_reconnect_interrupt_rejected")
+        }
+        let firstReconnect = try await session.interruptForReconnect(
+            callbackGeneration: generation
+        )
+        events.append("reconnect_started")
+        try await session.resumeAfterReconnect(
+            callbackGeneration: firstReconnect
+        )
+        events.append("first_reconnect_completed")
+        let secondReconnect = try await session.interruptForReconnect(
+            callbackGeneration: firstReconnect
+        )
+        events.append("second_reconnect_started")
+        do {
+            try await session.resumeAfterReconnect(
+                callbackGeneration: firstReconnect
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_reconnect_completion_rejected")
+        }
+        try await session.resumeAfterReconnect(
+            callbackGeneration: secondReconnect
+        )
+        events.append("reconnected")
+        return result(
+            scenario: "stale_terminal_callbacks_rejected",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func sameSessionReplayRejected()
+        async throws -> BandConformanceResult
+    {
+        let (session, generation) = try await readySession()
+        let store = VirtualBandStore()
+        var events = ["ready"]
+        var failure: BandFailureCategory?
+
+        try await session.beginLive()
+        let firstLive = try await session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            callbackGeneration: generation
+        )
+        let firstLiveReceipt = await store.commit(acceptance: firstLive)
+        try await session.acknowledgeLive(
+            receipt: firstLiveReceipt,
+            callbackGeneration: generation
+        )
+        events.append("first_live_committed")
+        let secondLiveBatch = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
+            samples: [
+                BandSample(
+                    identity: BandSampleIdentity(
+                        stream: .heartRate,
+                        sequence: 100,
+                        deviceTimeMilliseconds: 100_000
+                    ),
+                    value: 73,
+                    unit: .beatsPerMinute,
+                    quality: .accepted
+                ),
+            ]
+        )
+        let secondLive = try await session.stageLiveBatch(
+            secondLiveBatch,
+            callbackGeneration: generation
+        )
+        do {
+            try await session.acknowledgeLive(
+                receipt: firstLiveReceipt,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_live_receipt_rejected")
+        }
+        try await session.acknowledgeLive(
+            receipt: await store.commit(acceptance: secondLive),
+            callbackGeneration: generation
+        )
+        try await session.stopLive()
+        events.append("second_live_committed")
+
+        let firstCommand = try await session.beginOperation(.battery)
+        try await session.completeOperation(firstCommand)
+        let secondCommand = try await session.beginOperation(.battery)
+        do {
+            try await session.completeOperation(firstCommand)
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_operation_token_rejected")
+        }
+        try await session.completeOperation(secondCommand)
+
+        let firstHistoryToken = try await session.beginOperation(.history)
+        let firstHistory = try await session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: firstHistoryToken,
+            callbackGeneration: generation
+        )
+        let firstHistoryReceipt = await store.commit(
+            acceptance: firstHistory,
+            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
+        )
+        try await session.acknowledgeHistory(
+            receipt: firstHistoryReceipt,
+            token: firstHistoryToken,
+            callbackGeneration: generation
+        )
+        try await session.completeOperation(firstHistoryToken)
+        events.append("first_history_committed")
+
+        let secondHistoryChunk = BandHistoryChunk(
+            chunkIdentity: "chunk-replay-2",
+            previousCursor: "cursor-2",
+            nextCursor: "cursor-3",
+            complete: true,
+            overflowed: false,
+            acknowledgementToken: "ack-replay-2",
+            batches: [
+                BandSampleBatch(
+                    sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+                    lane: .history,
+                    parserRevision: "parser-v1",
+                    calibrationRevision: "calibration-v1",
+                    samples: [
+                        BandSample(
+                            identity: BandSampleIdentity(
+                                stream: .heartRate,
+                                sequence: 101,
+                                deviceTimeMilliseconds: 101_000
+                            ),
+                            value: 71,
+                            unit: .beatsPerMinute,
+                            quality: .accepted
+                        ),
+                    ]
+                ),
+            ]
+        )
+        let secondHistoryToken = try await session.beginOperation(.history)
+        let secondHistory = try await session.stageHistoryChunk(
+            secondHistoryChunk,
+            token: secondHistoryToken,
+            callbackGeneration: generation
+        )
+        do {
+            try await session.acknowledgeHistory(
+                receipt: firstHistoryReceipt,
+                token: secondHistoryToken,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_history_receipt_rejected")
+        }
+        let secondHistoryReceipt = await store.commit(
+            acceptance: secondHistory,
+            samples: secondHistoryChunk.batches.flatMap(\.samples)
+        )
+        try await session.acknowledgeHistory(
+            receipt: secondHistoryReceipt,
+            token: secondHistoryToken,
+            callbackGeneration: generation
+        )
+        try await session.completeOperation(secondHistoryToken)
+        events.append("second_history_committed")
+
+        return result(
+            scenario: "same_session_replay_rejected",
+            events: events,
+            snapshot: await session.snapshot(),
+            acceptedSamples:
+                firstLive.acceptedSamples.count
+                    + secondLive.acceptedSamples.count
+                    + firstHistory.acceptedSamples
+                    + secondHistory.acceptedSamples,
             failure: failure
         )
     }
@@ -416,11 +791,7 @@ public enum BandConformanceRunner {
         )
         events.append("history_received")
         let rejectedReceipt = DurableHistoryReceipt(
-            chunkIdentity: acceptance.chunkIdentity,
-            acknowledgementToken: acceptance.acknowledgementToken,
-            nextCursor: acceptance.nextCursor,
-            complete: acceptance.complete,
-            overflowed: acceptance.overflowed,
+            acceptance: acceptance,
             historyStateCommitted: false,
             committedSamples: 0,
             committed: false
@@ -462,7 +833,7 @@ public enum BandConformanceRunner {
         var events = ["ready"]
         let before = await session.snapshot().acknowledgedHistoryCursor
         try await session.beginLive()
-        let accepted = try await session.commitLiveBatch(
+        let accepted = try await session.durablyCommitLiveBatch(
             VirtualBandFixtures.liveBatch,
             callbackGeneration: generation
         )
@@ -486,7 +857,7 @@ public enum BandConformanceRunner {
         let (session, generation) = try await readySession()
         var events = ["ready"]
         try await session.beginLive()
-        let accepted = try await session.commitLiveBatch(
+        let accepted = try await session.durablyCommitLiveBatch(
             VirtualBandFixtures.duplicateLiveBatch,
             callbackGeneration: generation
         )
@@ -555,7 +926,10 @@ public enum BandConformanceRunner {
     {
         let session = BandSessionMachine()
         let generation = try await session.beginScan()
-        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
         try await session.connect(VirtualBandFixtures.identity)
         let report = BandCapabilityReport(
             schemaVersion: BandCapabilityReport.supportedSchemaVersion,
@@ -603,7 +977,7 @@ public enum BandConformanceRunner {
         try await session.beginLive()
         var failure: BandFailureCategory?
         do {
-            _ = try await session.commitLiveBatch(
+            _ = try await session.durablyCommitLiveBatch(
                 batch,
                 callbackGeneration: generation
             )
@@ -628,7 +1002,10 @@ public enum BandConformanceRunner {
         var events: [String] = []
         let generation = try await session.beginScan()
         events.append("scan_started")
-        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
         events.append("candidate_selected")
         let identity = BandIdentity(
             sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
@@ -678,11 +1055,14 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         events.append("history_received")
-        _ = try await session.interruptForReconnect()
+        let resumedGeneration = try await session.interruptForReconnect(
+            callbackGeneration: generation
+        )
         failure = .disconnected
         events.append("history_interrupted")
-        let resumedGeneration = await session.snapshot().generation
-        try await session.resumeAfterReconnect()
+        try await session.resumeAfterReconnect(
+            callbackGeneration: resumedGeneration
+        )
         events.append("reconnected")
         let secondToken = try await session.beginOperation(.history)
         let acceptance = try await session.stageHistoryChunk(
@@ -727,7 +1107,10 @@ public enum BandConformanceRunner {
         )
         let session = BandSessionMachine(historyCheckpoint: checkpoint)
         let generation = try await session.beginScan()
-        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
         try await session.connect(VirtualBandFixtures.identity)
         try await session.acceptCapabilities(
             VirtualBandFixtures.capabilities,
@@ -859,7 +1242,7 @@ public enum BandConformanceRunner {
         try await session.beginLive()
         var failure: BandFailureCategory?
         do {
-            _ = try await session.commitLiveBatch(
+            _ = try await session.durablyCommitLiveBatch(
                 batch,
                 callbackGeneration: generation
             )
@@ -983,12 +1366,8 @@ public enum BandConformanceRunner {
         do {
             try await session.acknowledgeHistory(
                 receipt: DurableHistoryReceipt(
-                    chunkIdentity: firstAcceptance.chunkIdentity,
-                    acknowledgementToken: firstAcceptance.acknowledgementToken,
-                    nextCursor: firstAcceptance.nextCursor,
-                    complete: firstAcceptance.complete,
-                    overflowed: false,
-                    historyStateCommitted: true,
+                    acceptance: firstAcceptance,
+                    historyStateCommitted: false,
                     committedSamples: firstAcceptance.acceptedSamples,
                     committed: true
                 ),
@@ -1085,8 +1464,12 @@ public enum BandConformanceRunner {
     {
         let (session, oldGeneration) = try await readySession()
         var events = ["ready"]
-        _ = try await session.interruptForReconnect()
-        try await session.resumeAfterReconnect()
+        let reconnectGeneration = try await session.interruptForReconnect(
+            callbackGeneration: oldGeneration
+        )
+        try await session.resumeAfterReconnect(
+            callbackGeneration: reconnectGeneration
+        )
         events.append("generation_advanced")
         var failure: BandFailureCategory?
         do {
@@ -1134,7 +1517,7 @@ public enum BandConformanceRunner {
         try await session.beginLive()
         var failure: BandFailureCategory?
         do {
-            _ = try await session.commitLiveBatch(
+            _ = try await session.durablyCommitLiveBatch(
                 batch,
                 callbackGeneration: generation
             )
@@ -1206,7 +1589,10 @@ public enum BandConformanceRunner {
         } catch BandFailureCategory.invalidState {
             // The diagnostic assertion below verifies this rejection family.
         }
-        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
         try await session.connect(VirtualBandFixtures.identity)
         let report = BandCapabilityReport(
             schemaVersion: BandCapabilityReport.supportedSchemaVersion,
@@ -1223,6 +1609,16 @@ public enum BandConformanceRunner {
         var events = ["ready"]
         let token = try await session.beginOperation(.firmware)
         try await session.completeOperation(token)
+        let postFirmwareGeneration = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: postFirmwareGeneration
+        )
+        try await session.connect(VirtualBandFixtures.identity)
+        try await session.acceptCapabilities(
+            report,
+            callbackGeneration: postFirmwareGeneration
+        )
         try await session.beginLive()
         do {
             _ = try await session.beginOperation(.firmware)
@@ -1231,8 +1627,19 @@ public enum BandConformanceRunner {
         }
         try await session.stopLive()
         let staleToken = try await session.beginOperation(.firmware)
-        _ = try await session.interruptForReconnect()
-        try await session.resumeAfterReconnect()
+        _ = try await session.interruptForReconnect(
+            callbackGeneration: postFirmwareGeneration
+        )
+        let recoveryGeneration = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: recoveryGeneration
+        )
+        try await session.connect(VirtualBandFixtures.identity)
+        try await session.acceptCapabilities(
+            report,
+            callbackGeneration: recoveryGeneration
+        )
         do {
             try await session.completeOperation(staleToken)
         } catch BandFailureCategory.staleCallback {
@@ -1251,6 +1658,7 @@ public enum BandConformanceRunner {
             "completed:none",
             "rejected:busy",
             "began:none",
+            "interrupted:disconnected",
             "rejected:staleCallback",
         ]
         {
@@ -1316,7 +1724,7 @@ public enum BandConformanceRunner {
         try await session.beginLive()
         var failure: BandFailureCategory?
         do {
-            _ = try await session.commitLiveBatch(
+            _ = try await session.durablyCommitLiveBatch(
                 batch,
                 callbackGeneration: generation
             )
@@ -1403,7 +1811,10 @@ public enum BandConformanceRunner {
         )
         let session = BandSessionMachine(historyCheckpoint: checkpoint)
         let generation = try await session.beginScan()
-        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
         try await session.connect(VirtualBandFixtures.identity)
         let capabilities = BandCapabilityReport(
             schemaVersion: BandCapabilityReport.supportedSchemaVersion,
@@ -1439,7 +1850,7 @@ public enum BandConformanceRunner {
             samples: [next]
         )
         try await session.beginLive()
-        let accepted = try await session.commitLiveBatch(
+        let accepted = try await session.durablyCommitLiveBatch(
             batch,
             callbackGeneration: generation
         )
@@ -1460,7 +1871,7 @@ public enum BandConformanceRunner {
             calibrationRevision: "calibration-v1",
             samples: [evictedCandidate]
         )
-        let evictionAccepted = try await session.commitLiveBatch(
+        let evictionAccepted = try await session.durablyCommitLiveBatch(
             evictionProbe,
             callbackGeneration: generation
         )
@@ -1489,7 +1900,10 @@ public enum BandConformanceRunner {
         let diagnostics = BandDiagnosticsRecorder()
         let session = BandSessionMachine(diagnostics: diagnostics)
         let generation = try await session.beginScan()
-        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
         try await session.connect(VirtualBandFixtures.identity)
         try await session.acceptCapabilities(
             VirtualBandFixtures.capabilities,
@@ -1523,14 +1937,16 @@ public enum BandConformanceRunner {
             events.append("disconnect_recovery_incorrect")
         }
         do {
-            _ = try await session.commitLiveBatch(
+            _ = try await session.durablyCommitLiveBatch(
                 VirtualBandFixtures.liveBatch,
                 callbackGeneration: generation
             )
         } catch BandFailureCategory.staleCallback {
             events.append("stale_callback_rejected")
         }
-        try await session.resumeAfterReconnect()
+        try await session.resumeAfterReconnect(
+            callbackGeneration: recovering.generation
+        )
         events.append("reconnected")
         return result(
             scenario: "operation_terminal_paths",

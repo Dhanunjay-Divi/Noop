@@ -50,11 +50,13 @@ class TrustedReleaseControlTests(unittest.TestCase):
             "Tools/github-release-publish.py",
             "Tools/github-release-tag-gate.py",
             "Tools/homebrew-version-gate.py",
+            "Tools/tests/test_noop_band_sdk_artifact.py",
             "Tools/release.sh",
             "Tools/required-ci-gate.py",
             "Tools/run-bounded-command.py",
             "Tools/trusted-release-controls.py",
             "Tools/update-homebrew-cask.sh",
+            "Tools/verify-noop-band-sdk-artifact.py",
         ):
             with self.subTest(path=path):
                 self.assertTrue(TRUSTED.is_protected_path(path))

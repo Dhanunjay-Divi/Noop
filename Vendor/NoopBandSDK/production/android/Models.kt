@@ -1,5 +1,7 @@
 package com.noop.bandsdk
 
+import java.util.UUID
+
 object BandContractLimits {
     const val OPAQUE_HANDLE_LENGTH = 128
     const val SOURCE_IDENTITY_LENGTH = 128
@@ -226,6 +228,10 @@ data class BandCapabilityReport(
         }
     }
 
+    internal fun immutableSnapshot(): BandCapabilityReport = copy(
+        capabilities = capabilities.toSet(),
+    )
+
     companion object {
         const val SUPPORTED_SCHEMA_VERSION = 1
         const val SUPPORTED_PROTOCOL_VERSION = "noop-band-v1"
@@ -363,15 +369,46 @@ data class BandHistoryCheckpoint(
             fail(BandFailureCategory.INVALID_INPUT)
         }
     }
+
+    internal fun immutableSnapshot(): BandHistoryCheckpoint = copy(
+        durableSampleIdentities = durableSampleIdentities.toSet(),
+    )
 }
 
-data class BandOperationToken(
-    val generation: Long,
-    val sequence: Long,
-    val operationClass: BandOperationClass,
-)
+class BandOperationToken internal constructor(
+    internal val sessionNonce: UUID,
+    internal val generation: Long,
+    internal val sequence: Long,
+    internal val operationClass: BandOperationClass,
+) {
+    override fun toString(): String = "BandOperationToken"
+}
 
-data class HistoryAcceptance(
+class LiveAcceptance internal constructor(
+    acceptedSamples: List<BandSample>,
+    val duplicateSamples: Int,
+    internal val sessionNonce: UUID,
+    internal val generation: Long,
+    internal val receiptSequence: Long,
+) {
+    val acceptedSamples: List<BandSample> = acceptedSamples.toList()
+
+    override fun toString(): String = "LiveAcceptance"
+}
+
+class DurableLiveReceipt(
+    acceptance: LiveAcceptance,
+    val committedSamples: Int,
+    val committed: Boolean,
+) {
+    internal val sessionNonce: UUID = acceptance.sessionNonce
+    internal val generation: Long = acceptance.generation
+    internal val receiptSequence: Long = acceptance.receiptSequence
+
+    override fun toString(): String = "DurableLiveReceipt"
+}
+
+class HistoryAcceptance internal constructor(
     val chunkIdentity: String,
     val acknowledgementToken: String,
     val nextCursor: String?,
@@ -379,18 +416,28 @@ data class HistoryAcceptance(
     val overflowed: Boolean,
     val acceptedSamples: Int,
     val duplicateSamples: Int,
-)
+    internal val sessionNonce: UUID,
+    internal val receiptSequence: Long,
+) {
+    override fun toString(): String = "HistoryAcceptance"
+}
 
-data class DurableHistoryReceipt(
-    val chunkIdentity: String,
-    val acknowledgementToken: String,
-    val nextCursor: String?,
-    val complete: Boolean,
-    val overflowed: Boolean,
+class DurableHistoryReceipt(
+    acceptance: HistoryAcceptance,
     val historyStateCommitted: Boolean,
     val committedSamples: Int,
     val committed: Boolean,
-)
+) {
+    val chunkIdentity: String = acceptance.chunkIdentity
+    val acknowledgementToken: String = acceptance.acknowledgementToken
+    val nextCursor: String? = acceptance.nextCursor
+    val complete: Boolean = acceptance.complete
+    val overflowed: Boolean = acceptance.overflowed
+    internal val sessionNonce: UUID = acceptance.sessionNonce
+    internal val receiptSequence: Long = acceptance.receiptSequence
+
+    override fun toString(): String = "DurableHistoryReceipt"
+}
 
 data class BandSessionSnapshot(
     val state: BandSessionState,

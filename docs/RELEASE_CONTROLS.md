@@ -87,6 +87,10 @@ product test:
   in-repository head whose exact `opened` or `synchronize` actor is the
   repository owner. Other changes are checked against the protected base's
   required-CI structure.
+- The source-only NOOP Band SDK verifier and its tamper-test module are
+  enumerated release-authority paths. A candidate may update the vendored
+  source and manifest, but cannot also weaken their digest, layout, symlink, or
+  supplier-binary checks without the same owner-bound trust-root review.
 - The workflow publishes one custom `trusted-release-controls` result to the
   exact pull-request head. A failed, skipped, or canceled validation fails the
   context. The independent `release-controls` context still validates the

@@ -23,7 +23,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "34028a2ab56feb90ae774b0ee0055529ce175723",
+            "dab6072eb2b69b07ee34221dbb649a0119547246",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -51,13 +51,14 @@ class NoopBandSdkIntegrationTest {
                 compatible = true,
                 identifyEligible = true,
             ),
+            generation,
         )
         val identity = BandIdentity(
             sourceIdentity = checkpoint.sourceIdentity,
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-34028a2",
+            wrapperRevision = "artifact-dab6072",
         )
         session.connect(identity)
         session.acceptCapabilities(
@@ -108,13 +109,14 @@ class NoopBandSdkIntegrationTest {
                 compatible = true,
                 identifyEligible = true,
             ),
+            generation,
         )
         val identity = BandIdentity(
             sourceIdentity = "synthetic-source",
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-34028a2",
+            wrapperRevision = "artifact-dab6072",
         )
         session.connect(identity)
         session.acceptCapabilities(
@@ -159,6 +161,49 @@ class NoopBandSdkIntegrationTest {
     }
 
     @Test
+    fun capabilityAuthorizationUsesImmutableIdempotentSnapshot() {
+        val session = NoopBandSdkBoundary.newSession()
+        val generation = session.beginScan()
+        session.selectCandidate(
+            BandPairingCandidate(
+                handle = "synthetic-candidate",
+                compatible = true,
+                identifyEligible = true,
+            ),
+            generation,
+        )
+        val identity = BandIdentity(
+            sourceIdentity = "synthetic-source",
+            hardwareRevision = "synthetic-hw-1",
+            firmwareVersion = "synthetic-fw-1",
+            protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
+            wrapperRevision = "artifact-dab6072",
+        )
+        session.connect(identity)
+        val mutableCapabilities = mutableSetOf(BandCapability.HEART_RATE)
+        val report = BandCapabilityReport(
+            schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
+            protocolVersion = identity.protocolVersion,
+            hardwareRevision = identity.hardwareRevision,
+            firmwareVersion = identity.firmwareVersion,
+            historyDays = 7,
+            capabilities = mutableCapabilities,
+        )
+        session.acceptCapabilities(report, generation)
+        session.acceptCapabilities(report, generation)
+        mutableCapabilities += BandCapability.FIRMWARE_UPDATE
+
+        val failure = try {
+            session.beginOperation(BandOperationClass.FIRMWARE)
+            null
+        } catch (error: BandException) {
+            error.category
+        }
+        assertEquals(BandFailureCategory.UPDATE_NOT_ELIGIBLE, failure)
+        assertEquals(BandSessionState.READY, session.snapshot().state)
+    }
+
+    @Test
     fun allExportedConformanceScenariosMatchContractInAppModule() {
         val contract = JSONObject(contractFile().readText())
         assertEquals(1, contract.getInt("schemaVersion"))
@@ -167,6 +212,7 @@ class NoopBandSdkIntegrationTest {
             .map { scenarios.getJSONObject(it) }
             .filter { it.getBoolean("automated") }
 
+        assertEquals(30, automated.size)
         assertEquals(
             automated.map { it.getString("id") },
             BandConformanceRunner.automatedScenarios,

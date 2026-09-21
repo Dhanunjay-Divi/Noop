@@ -1,6 +1,11 @@
 import Foundation
 
 public actor BandSessionMachine {
+    private struct PendingLive {
+        let acceptance: LiveAcceptance
+        let sampleIdentities: [BandSampleIdentity]
+    }
+
     private struct PendingHistory {
         let acceptance: HistoryAcceptance
         let sampleIdentities: [BandSampleIdentity]
@@ -8,13 +13,18 @@ public actor BandSessionMachine {
 
     private let diagnostics: BandDiagnosticsRecorder
     private let restoredHistoryCheckpoint: BandHistoryCheckpoint?
+    private let sessionNonce = UUID()
     private var state: BandSessionState = .idle
     private var generation: UInt64 = 0
     private var nextOperationSequence: UInt64 = 0
+    private var nextLiveReceiptSequence: UInt64 = 0
+    private var nextHistoryReceiptSequence: UInt64 = 0
     private var activeOperation: BandOperationToken?
     private var liveActive = false
+    private var liveStreams: Set<BandStreamKind> = []
     private var identity: BandIdentity?
     private var capabilityReport: BandCapabilityReport?
+    private var pendingLive: PendingLive?
     private var pendingHistory: PendingHistory?
     private var lastDurableHistoryComplete: Bool?
     private var historyOperationReceivedDurableReceipt = false
@@ -23,6 +33,7 @@ public actor BandSessionMachine {
     private var durableSampleIdentityOrder: [BandSampleIdentity] = []
     private var durableSampleIdentityNextEviction = 0
     private var acknowledgedHistoryCursor: String?
+    private var durableSourceIdentity: String?
 
     public init(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
@@ -44,7 +55,9 @@ public actor BandSessionMachine {
     }
 
     public func historyCheckpoint() -> BandHistoryCheckpoint? {
-        guard let sourceIdentity = identity?.sourceIdentity else {
+        guard let sourceIdentity = durableSourceIdentity
+            ?? identity?.sourceIdentity
+        else {
             return nil
         }
         return BandHistoryCheckpoint(
@@ -63,7 +76,9 @@ public actor BandSessionMachine {
         }
         generation &+= 1
         clearOperationTracking()
-        liveActive = false
+        clearLiveTracking()
+        identity = nil
+        capabilityReport = nil
         state = .scanning
         await diagnostics.record(
             BandDiagnosticEvent(kind: .discovery, outcome: .began)
@@ -71,13 +86,24 @@ public actor BandSessionMachine {
         return generation
     }
 
-    public func selectCandidate(_ candidate: BandPairingCandidate) async throws {
+    public func selectCandidate(
+        _ candidate: BandPairingCandidate,
+        callbackGeneration: UInt64
+    ) async throws {
         try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .discovery
+        )
         do {
             try candidate.validate()
         } catch {
             await diagnostics.record(
-                BandDiagnosticEvent(kind: .discovery, outcome: .rejected)
+                BandDiagnosticEvent(
+                    kind: .discovery,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
             )
             throw BandFailureCategory.invalidInput
         }
@@ -86,7 +112,11 @@ public actor BandSessionMachine {
               candidate.identifyEligible
         else {
             await diagnostics.record(
-                BandDiagnosticEvent(kind: .discovery, outcome: .rejected)
+                BandDiagnosticEvent(
+                    kind: .discovery,
+                    outcome: .rejected,
+                    failureCategory: .rejected
+                )
             )
             throw BandFailureCategory.rejected
         }
@@ -100,17 +130,103 @@ public actor BandSessionMachine {
         )
     }
 
+    public func cancelScan(callbackGeneration: UInt64) async throws {
+        try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .discovery
+        )
+        guard state == .scanning else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .discovery,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        generation &+= 1
+        state = .idle
+        await diagnostics.record(
+            BandDiagnosticEvent(kind: .discovery, outcome: .cancelled)
+        )
+    }
+
+    public func failScan(
+        _ category: BandFailureCategory,
+        callbackGeneration: UInt64
+    ) async throws {
+        try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .discovery
+        )
+        let allowed: Set<BandFailureCategory> = [
+            .noResult,
+            .timeout,
+            .permission,
+            .unavailable,
+            .internalFailure,
+        ]
+        guard state == .scanning, allowed.contains(category) else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .discovery,
+                    outcome: .rejected,
+                    failureCategory: state == .scanning
+                        ? .invalidInput
+                        : .invalidState
+                )
+            )
+            throw state == .scanning
+                ? BandFailureCategory.invalidInput
+                : BandFailureCategory.invalidState
+        }
+        generation &+= 1
+        state = .idle
+        await diagnostics.record(
+            BandDiagnosticEvent(
+                kind: .discovery,
+                outcome: category == .timeout ? .timedOut : .failed,
+                failureCategory: category
+            )
+        )
+    }
+
     public func connect(_ newIdentity: BandIdentity) async throws {
         try ensureNotClosed()
         guard state == .candidateSelected else {
             throw BandFailureCategory.invalidState
         }
-        try newIdentity.validate()
-        if identity == nil,
+        do {
+            try newIdentity.validate()
+        } catch {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .connection,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
+        if durableSourceIdentity == nil,
            let restoredHistoryCheckpoint,
            restoredHistoryCheckpoint.sourceIdentity == newIdentity.sourceIdentity
         {
-            try restoredHistoryCheckpoint.validate()
+            do {
+                try restoredHistoryCheckpoint.validate()
+            } catch {
+                await diagnostics.record(
+                    BandDiagnosticEvent(
+                        kind: .history,
+                        outcome: .rejected,
+                        failureCategory: .invalidInput
+                    )
+                )
+                throw BandFailureCategory.invalidInput
+            }
             restoreDurableSampleIdentities(
                 restoredHistoryCheckpoint.durableSampleIdentities
             )
@@ -118,10 +234,12 @@ public actor BandSessionMachine {
                 restoredHistoryCheckpoint.acknowledgedCursor
             lastDurableHistoryComplete =
                 restoredHistoryCheckpoint.lastHistoryComplete
-        } else if identity?.sourceIdentity != newIdentity.sourceIdentity {
+            durableSourceIdentity = newIdentity.sourceIdentity
+        } else if durableSourceIdentity != newIdentity.sourceIdentity {
             clearDurableSampleIdentities()
             acknowledgedHistoryCursor = nil
             lastDurableHistoryComplete = nil
+            durableSourceIdentity = newIdentity.sourceIdentity
         }
         capabilityReport = nil
         state = .connecting
@@ -138,7 +256,26 @@ public actor BandSessionMachine {
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(callbackGeneration)
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .capability
+        )
+        if state != .negotiatingCapabilities {
+            if capabilityReport == report {
+                await diagnostics.record(
+                    BandDiagnosticEvent(kind: .capability, outcome: .stale)
+                )
+                return
+            }
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
         guard state == .negotiatingCapabilities,
               identity?.hardwareRevision == report.hardwareRevision,
               identity?.firmwareVersion == report.firmwareVersion,
@@ -147,7 +284,11 @@ public actor BandSessionMachine {
             state = .incompatible
             capabilityReport = nil
             await diagnostics.record(
-                BandDiagnosticEvent(kind: .capability, outcome: .rejected)
+                BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .rejected,
+                    failureCategory: .incompatible
+                )
             )
             throw BandFailureCategory.incompatible
         }
@@ -158,7 +299,11 @@ public actor BandSessionMachine {
             state = .incompatible
             capabilityReport = nil
             await diagnostics.record(
-                BandDiagnosticEvent(kind: .capability, outcome: .rejected)
+                BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .rejected,
+                    failureCategory: .incompatible
+                )
             )
             throw BandFailureCategory.incompatible
         }
@@ -174,14 +319,52 @@ public actor BandSessionMachine {
         )
     }
 
-    public func beginLive() async throws {
-        try ensureReadyForOperation()
+    public func beginLive(
+        streams requestedStreams: Set<BandStreamKind>? = nil
+    ) async throws {
+        do {
+            try ensureReadyForOperation()
+        } catch let failure as BandFailureCategory {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: failure
+                )
+            )
+            throw failure
+        }
         guard !liveActive else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
             throw BandFailureCategory.busy
         }
-        guard capabilityReport?.capabilities.contains(.heartRate) == true else {
+        let negotiatedStreams = Set(
+            BandStreamKind.allCases.filter { stream in
+                capabilityReport?.capabilities.contains(
+                    requiredCapability(for: stream)
+                ) == true
+            }
+        )
+        let selectedStreams = requestedStreams ?? negotiatedStreams
+        guard !selectedStreams.isEmpty,
+              selectedStreams.isSubset(of: negotiatedStreams)
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .unsupported
+                )
+            )
             throw BandFailureCategory.unsupported
         }
+        liveStreams = selectedStreams
         liveActive = true
         state = .liveCollecting
         await diagnostics.record(
@@ -191,47 +374,171 @@ public actor BandSessionMachine {
 
     public func stopLive() async throws {
         try ensureNotClosed()
-        guard liveActive, activeOperation == nil else {
+        guard liveActive else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
             throw BandFailureCategory.invalidState
         }
-        liveActive = false
+        guard pendingLive == nil else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .storage
+                )
+            )
+            throw BandFailureCategory.storage
+        }
+        guard activeOperation == nil else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        clearLiveTracking()
         state = .ready
         await diagnostics.record(
             BandDiagnosticEvent(kind: .live, outcome: .completed)
         )
     }
 
-    @discardableResult
-    public func commitLiveBatch(
+    public func stageLiveBatch(
         _ batch: BandSampleBatch,
         callbackGeneration: UInt64
-    ) async throws -> Int {
-        try await validateCallbackGeneration(callbackGeneration)
+    ) async throws -> LiveAcceptance {
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .live
+        )
         guard liveActive,
-              state == .liveCollecting || activeOperation != nil,
-              batch.sourceIdentity == identity?.sourceIdentity
+              state == .liveCollecting || activeOperation != nil
         else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
             throw BandFailureCategory.invalidState
         }
-        try batch.validate(expectedLane: .live)
+        guard batch.sourceIdentity == identity?.sourceIdentity else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
+        guard pendingLive == nil else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
+            throw BandFailureCategory.busy
+        }
+        do {
+            try batch.validate(expectedLane: .live)
+        } catch {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
         try await validateNegotiatedStreams(
             batch.samples,
-            diagnosticKind: .live
+            diagnosticKind: .live,
+            allowedStreams: liveStreams
         )
         var acceptedIdentities: Set<BandSampleIdentity> = []
         let unique = batch.samples.filter { sample in
             !durableSampleIdentities.contains(sample.identity)
                 && acceptedIdentities.insert(sample.identity).inserted
         }
-        rememberDurableSampleIdentities(unique.map(\.identity))
+        nextLiveReceiptSequence &+= 1
+        let acceptance = LiveAcceptance(
+            acceptedSamples: unique,
+            duplicateSamples: batch.samples.count - unique.count,
+            sessionNonce: sessionNonce,
+            generation: generation,
+            receiptSequence: nextLiveReceiptSequence
+        )
+        pendingLive = PendingLive(
+            acceptance: acceptance,
+            sampleIdentities: unique.map(\.identity)
+        )
+        return acceptance
+    }
+
+    public func acknowledgeLive(
+        receipt: DurableLiveReceipt,
+        callbackGeneration: UInt64
+    ) async throws {
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .live
+        )
+        try await validateSessionNonce(
+            receipt.sessionNonce,
+            diagnosticKind: .live
+        )
+        guard let pendingLive,
+              receipt.generation == pendingLive.acceptance.generation,
+              receipt.receiptSequence
+                == pendingLive.acceptance.receiptSequence
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .failed,
+                    failureCategory: .storage
+                )
+            )
+            throw BandFailureCategory.storage
+        }
+        guard receipt.committed,
+              receipt.committedSamples
+                >= pendingLive.acceptance.acceptedSamples.count
+        else {
+            self.pendingLive = nil
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .failed,
+                    failureCategory: .storage
+                )
+            )
+            throw BandFailureCategory.storage
+        }
+        rememberDurableSampleIdentities(pendingLive.sampleIdentities)
+        self.pendingLive = nil
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: .live,
                 outcome: .completed,
-                countBucket: BandCountBucket(count: unique.count)
+                countBucket: BandCountBucket(
+                    count: receipt.committedSamples
+                )
             )
         )
-        return unique.count
     }
 
     public func beginOperation(
@@ -313,6 +620,17 @@ public actor BandSessionMachine {
                 )
                 throw BandFailureCategory.unsupported
             }
+        } else if operationClass == .history,
+                  (capabilityReport?.historyDays ?? 0) <= 0
+        {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: operationDiagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .unsupported
+                )
+            )
+            throw BandFailureCategory.unsupported
         } else {
             let capabilities = [
                 impliedCapability(for: operationClass),
@@ -335,6 +653,7 @@ public actor BandSessionMachine {
 
         nextOperationSequence &+= 1
         let token = BandOperationToken(
+            sessionNonce: sessionNonce,
             generation: generation,
             sequence: nextOperationSequence,
             operationClass: operationClass
@@ -364,7 +683,10 @@ public actor BandSessionMachine {
         token: BandOperationToken,
         callbackGeneration: UInt64
     ) async throws -> HistoryAcceptance {
-        try await validateCallbackGeneration(callbackGeneration)
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .history
+        )
         try validateActiveToken(token, expected: .history)
         guard pendingHistory == nil else {
             throw BandFailureCategory.busy
@@ -379,7 +701,18 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.invalidState
         }
-        try chunk.validate()
+        do {
+            try chunk.validate()
+        } catch {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
         try await validateNegotiatedStreams(
             chunk.batches.flatMap(\.samples),
             diagnosticKind: .history
@@ -410,6 +743,13 @@ public actor BandSessionMachine {
         guard chunk.batches.allSatisfy({
             $0.sourceIdentity == identity?.sourceIdentity
         }) else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
             throw BandFailureCategory.invalidInput
         }
 
@@ -425,6 +765,7 @@ public actor BandSessionMachine {
                 unique.append(sample.identity)
             }
         }
+        nextHistoryReceiptSequence &+= 1
         let acceptance = HistoryAcceptance(
             chunkIdentity: chunk.chunkIdentity,
             acknowledgementToken: chunk.acknowledgementToken,
@@ -432,7 +773,9 @@ public actor BandSessionMachine {
             complete: chunk.complete,
             overflowed: chunk.overflowed,
             acceptedSamples: unique.count,
-            duplicateSamples: duplicateCount
+            duplicateSamples: duplicateCount,
+            sessionNonce: sessionNonce,
+            receiptSequence: nextHistoryReceiptSequence
         )
         pendingHistory = PendingHistory(
             acceptance: acceptance,
@@ -453,9 +796,18 @@ public actor BandSessionMachine {
         token: BandOperationToken,
         callbackGeneration: UInt64
     ) async throws {
-        try await validateCallbackGeneration(callbackGeneration)
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .history
+        )
+        try await validateSessionNonce(
+            receipt.sessionNonce,
+            diagnosticKind: .history
+        )
         try validateActiveToken(token, expected: .history)
         guard let pendingHistory,
+              receipt.receiptSequence
+                == pendingHistory.acceptance.receiptSequence,
               receipt.committed,
               receipt.chunkIdentity == pendingHistory.acceptance.chunkIdentity,
               receipt.acknowledgementToken
@@ -467,7 +819,11 @@ public actor BandSessionMachine {
               receipt.committedSamples >= pendingHistory.acceptance.acceptedSamples
         else {
             await diagnostics.record(
-                BandDiagnosticEvent(kind: .history, outcome: .failed)
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .failed,
+                    failureCategory: .storage
+                )
             )
             throw BandFailureCategory.storage
         }
@@ -535,7 +891,11 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.historyStalled
         }
-        clearActiveOperation()
+        if token.operationClass == .firmware {
+            invalidateNegotiationAfterFirmware()
+        } else {
+            clearActiveOperation()
+        }
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: operationDiagnosticKind,
@@ -558,7 +918,11 @@ public actor BandSessionMachine {
             )
             throw failure
         }
-        clearActiveOperation()
+        if token.operationClass == .firmware {
+            invalidateNegotiationAfterFirmware()
+        } else {
+            clearActiveOperation()
+        }
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: operationDiagnosticKind,
@@ -584,9 +948,11 @@ public actor BandSessionMachine {
             )
             throw failure
         }
-        if category == .disconnected {
+        if token.operationClass == .firmware {
+            invalidateNegotiationAfterFirmware()
+        } else if category == .disconnected {
             clearOperationTracking()
-            liveActive = false
+            clearLiveTracking()
             generation &+= 1
             state = .recovering
         } else {
@@ -611,8 +977,14 @@ public actor BandSessionMachine {
     }
 
     @discardableResult
-    public func interruptForReconnect() async throws -> UInt64 {
+    public func interruptForReconnect(
+        callbackGeneration: UInt64
+    ) async throws -> UInt64 {
         try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .reconnect
+        )
         guard state != .idle,
               state != .incompatible,
               state != .rejected,
@@ -620,18 +992,42 @@ public actor BandSessionMachine {
         else {
             throw BandFailureCategory.invalidState
         }
+        let interruptedOperationKind = activeOperation.map {
+            diagnosticKind(for: $0.operationClass)
+        }
+        let firmwareWasActive =
+            activeOperation?.operationClass == .firmware
         clearOperationTracking()
-        liveActive = false
+        clearLiveTracking()
+        if firmwareWasActive {
+            identity = nil
+            capabilityReport = nil
+        }
         generation &+= 1
         state = .recovering
+        if let interruptedOperationKind {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: interruptedOperationKind,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                )
+            )
+        }
         await diagnostics.record(
             BandDiagnosticEvent(kind: .reconnect, outcome: .interrupted)
         )
         return generation
     }
 
-    public func resumeAfterReconnect() async throws {
+    public func resumeAfterReconnect(
+        callbackGeneration: UInt64
+    ) async throws {
         try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .reconnect
+        )
         guard state == .recovering,
               identity != nil,
               capabilityReport != nil
@@ -647,17 +1043,26 @@ public actor BandSessionMachine {
     public func close() async {
         generation &+= 1
         clearOperationTracking()
-        liveActive = false
+        clearLiveTracking()
+        identity = nil
+        capabilityReport = nil
         state = .closed
         await diagnostics.record(
             BandDiagnosticEvent(kind: .connection, outcome: .cancelled)
         )
     }
 
-    private func validateCallbackGeneration(_ callbackGeneration: UInt64) async throws {
+    private func validateCallbackGeneration(
+        _ callbackGeneration: UInt64,
+        diagnosticKind: BandDiagnosticKind
+    ) async throws {
         guard callbackGeneration == generation else {
             await diagnostics.record(
-                BandDiagnosticEvent(kind: .connection, outcome: .stale)
+                BandDiagnosticEvent(
+                    kind: diagnosticKind,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
             )
             throw BandFailureCategory.staleCallback
         }
@@ -667,13 +1072,31 @@ public actor BandSessionMachine {
         _ token: BandOperationToken,
         expected: BandOperationClass
     ) throws {
-        guard token.generation == generation else {
+        guard token.sessionNonce == sessionNonce,
+              token.generation == generation
+        else {
             throw BandFailureCategory.staleCallback
         }
         guard token.operationClass == expected,
               token == activeOperation
         else {
             throw BandFailureCategory.invalidState
+        }
+    }
+
+    private func validateSessionNonce(
+        _ candidate: UUID,
+        diagnosticKind: BandDiagnosticKind
+    ) async throws {
+        guard candidate == sessionNonce else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: diagnosticKind,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
         }
     }
 
@@ -718,6 +1141,21 @@ public actor BandSessionMachine {
     private func clearActiveOperation() {
         clearOperationTracking()
         state = liveActive ? .liveCollecting : .ready
+    }
+
+    private func invalidateNegotiationAfterFirmware() {
+        clearOperationTracking()
+        clearLiveTracking()
+        identity = nil
+        capabilityReport = nil
+        generation &+= 1
+        state = .recovering
+    }
+
+    private func clearLiveTracking() {
+        liveActive = false
+        liveStreams.removeAll(keepingCapacity: true)
+        pendingLive = nil
     }
 
     private func clearOperationTracking() {
@@ -778,15 +1216,21 @@ public actor BandSessionMachine {
 
     private func validateNegotiatedStreams(
         _ samples: [BandSample],
-        diagnosticKind: BandDiagnosticKind
+        diagnosticKind: BandDiagnosticKind,
+        allowedStreams: Set<BandStreamKind>? = nil
     ) async throws {
         guard let capabilities = capabilityReport?.capabilities,
               samples.allSatisfy({
                   capabilities.contains(requiredCapability(for: $0.identity.stream))
+                    && (allowedStreams?.contains($0.identity.stream) ?? true)
               })
         else {
             await diagnostics.record(
-                BandDiagnosticEvent(kind: diagnosticKind, outcome: .rejected)
+                BandDiagnosticEvent(
+                    kind: diagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .unsupported
+                )
             )
             throw BandFailureCategory.unsupported
         }

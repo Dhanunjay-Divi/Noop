@@ -106,7 +106,7 @@ public enum BandProvenanceLane: String, Codable, Sendable {
     case history
 }
 
-public enum BandStreamKind: String, Codable, Sendable {
+public enum BandStreamKind: String, Codable, CaseIterable, Sendable {
     case heartRate
     case rrInterval
     case steps
@@ -449,18 +449,63 @@ public struct BandHistoryCheckpoint: Equatable, Sendable {
 }
 
 public struct BandOperationToken: Equatable, Sendable {
-    public let generation: UInt64
-    public let sequence: UInt64
-    public let operationClass: BandOperationClass
+    let sessionNonce: UUID
+    let generation: UInt64
+    let sequence: UInt64
+    let operationClass: BandOperationClass
 
-    public init(
+    init(
+        sessionNonce: UUID,
         generation: UInt64,
         sequence: UInt64,
         operationClass: BandOperationClass
     ) {
+        self.sessionNonce = sessionNonce
         self.generation = generation
         self.sequence = sequence
         self.operationClass = operationClass
+    }
+}
+
+public struct LiveAcceptance: Equatable, Sendable {
+    public let acceptedSamples: [BandSample]
+    public let duplicateSamples: Int
+    let sessionNonce: UUID
+    let generation: UInt64
+    let receiptSequence: UInt64
+
+    init(
+        acceptedSamples: [BandSample],
+        duplicateSamples: Int,
+        sessionNonce: UUID,
+        generation: UInt64,
+        receiptSequence: UInt64
+    ) {
+        self.acceptedSamples = acceptedSamples
+        self.duplicateSamples = duplicateSamples
+        self.sessionNonce = sessionNonce
+        self.generation = generation
+        self.receiptSequence = receiptSequence
+    }
+}
+
+public struct DurableLiveReceipt: Equatable, Sendable {
+    public let committedSamples: Int
+    public let committed: Bool
+    let sessionNonce: UUID
+    let generation: UInt64
+    let receiptSequence: UInt64
+
+    public init(
+        acceptance: LiveAcceptance,
+        committedSamples: Int,
+        committed: Bool
+    ) {
+        self.committedSamples = committedSamples
+        self.committed = committed
+        sessionNonce = acceptance.sessionNonce
+        generation = acceptance.generation
+        receiptSequence = acceptance.receiptSequence
     }
 }
 
@@ -472,15 +517,19 @@ public struct HistoryAcceptance: Equatable, Sendable {
     public let overflowed: Bool
     public let acceptedSamples: Int
     public let duplicateSamples: Int
+    let sessionNonce: UUID
+    let receiptSequence: UInt64
 
-    public init(
+    init(
         chunkIdentity: String,
         acknowledgementToken: String,
         nextCursor: String?,
         complete: Bool,
         overflowed: Bool,
         acceptedSamples: Int,
-        duplicateSamples: Int
+        duplicateSamples: Int,
+        sessionNonce: UUID,
+        receiptSequence: UInt64
     ) {
         self.chunkIdentity = chunkIdentity
         self.acknowledgementToken = acknowledgementToken
@@ -489,6 +538,8 @@ public struct HistoryAcceptance: Equatable, Sendable {
         self.overflowed = overflowed
         self.acceptedSamples = acceptedSamples
         self.duplicateSamples = duplicateSamples
+        self.sessionNonce = sessionNonce
+        self.receiptSequence = receiptSequence
     }
 }
 
@@ -501,25 +552,25 @@ public struct DurableHistoryReceipt: Equatable, Sendable {
     public let historyStateCommitted: Bool
     public let committedSamples: Int
     public let committed: Bool
+    let sessionNonce: UUID
+    let receiptSequence: UInt64
 
     public init(
-        chunkIdentity: String,
-        acknowledgementToken: String,
-        nextCursor: String?,
-        complete: Bool,
-        overflowed: Bool,
+        acceptance: HistoryAcceptance,
         historyStateCommitted: Bool,
         committedSamples: Int,
         committed: Bool
     ) {
-        self.chunkIdentity = chunkIdentity
-        self.acknowledgementToken = acknowledgementToken
-        self.nextCursor = nextCursor
-        self.complete = complete
-        self.overflowed = overflowed
+        chunkIdentity = acceptance.chunkIdentity
+        acknowledgementToken = acceptance.acknowledgementToken
+        nextCursor = acceptance.nextCursor
+        complete = acceptance.complete
+        overflowed = acceptance.overflowed
         self.historyStateCommitted = historyStateCommitted
         self.committedSamples = committedSamples
         self.committed = committed
+        sessionNonce = acceptance.sessionNonce
+        receiptSequence = acceptance.receiptSequence
     }
 }
 

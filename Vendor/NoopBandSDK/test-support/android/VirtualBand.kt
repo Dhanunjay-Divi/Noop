@@ -4,6 +4,18 @@ class VirtualBandStore {
     private val committed = mutableSetOf<BandSampleIdentity>()
 
     @Synchronized
+    fun commit(acceptance: LiveAcceptance): DurableLiveReceipt {
+        val identities =
+            acceptance.acceptedSamples.map(BandSample::identity).toSet()
+        committed.addAll(identities)
+        return DurableLiveReceipt(
+            acceptance = acceptance,
+            committedSamples = identities.size,
+            committed = true,
+        )
+    }
+
+    @Synchronized
     fun commit(
         acceptance: HistoryAcceptance,
         samples: List<BandSample>,
@@ -11,16 +23,22 @@ class VirtualBandStore {
         val identities = samples.map(BandSample::identity).toSet()
         committed.addAll(identities)
         return DurableHistoryReceipt(
-            chunkIdentity = acceptance.chunkIdentity,
-            acknowledgementToken = acceptance.acknowledgementToken,
-            nextCursor = acceptance.nextCursor,
-            complete = acceptance.complete,
-            overflowed = acceptance.overflowed,
+            acceptance = acceptance,
             historyStateCommitted = true,
             committedSamples = identities.size,
             committed = true,
         )
     }
+}
+
+private fun BandSessionMachine.durablyCommitLiveBatch(
+    batch: BandSampleBatch,
+    callbackGeneration: Long,
+): Int {
+    val acceptance = stageLiveBatch(batch, callbackGeneration)
+    val receipt = VirtualBandStore().commit(acceptance)
+    acknowledgeLive(receipt, callbackGeneration)
+    return acceptance.acceptedSamples.size
 }
 
 data class BandConformanceResult(
@@ -165,6 +183,9 @@ object BandConformanceRunner {
         "happy_path",
         "single_command_queue",
         "stale_callback_rejected",
+        "cross_session_credentials_rejected",
+        "same_session_replay_rejected",
+        "stale_terminal_callbacks_rejected",
         "history_requires_durable_receipt",
         "live_does_not_advance_history",
         "live_batch_deduplicated",
@@ -195,6 +216,12 @@ object BandConformanceRunner {
         "happy_path" -> happyPath()
         "single_command_queue" -> singleCommandQueue()
         "stale_callback_rejected" -> staleCallbackRejected()
+        "cross_session_credentials_rejected" ->
+            crossSessionCredentialsRejected()
+        "same_session_replay_rejected" ->
+            sameSessionReplayRejected()
+        "stale_terminal_callbacks_rejected" ->
+            staleTerminalCallbacksRejected()
         "history_requires_durable_receipt" -> historyRequiresDurableReceipt()
         "live_does_not_advance_history" -> liveDoesNotAdvanceHistory()
         "live_batch_deduplicated" -> liveBatchDeduplicated()
@@ -232,7 +259,7 @@ object BandConformanceRunner {
     ): Pair<BandSessionMachine, Long> {
         val session = BandSessionMachine()
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate)
+        session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.connect(VirtualBandFixtures.identity)
         session.acceptCapabilities(capabilities, generation)
         return session to generation
@@ -246,14 +273,14 @@ object BandConformanceRunner {
 
         val generation = session.beginScan()
         events += "scan_started"
-        session.selectCandidate(VirtualBandFixtures.candidate)
+        session.selectCandidate(VirtualBandFixtures.candidate, generation)
         events += "candidate_selected"
         session.connect(VirtualBandFixtures.identity)
         events += "connected"
         session.acceptCapabilities(VirtualBandFixtures.capabilities, generation)
         events += "capabilities_accepted"
         session.beginLive()
-        accepted += session.commitLiveBatch(
+        accepted += session.durablyCommitLiveBatch(
             VirtualBandFixtures.liveBatch,
             generation,
         )
@@ -317,12 +344,13 @@ object BandConformanceRunner {
     private fun staleCallbackRejected(): BandConformanceResult {
         val (session, oldGeneration) = readySession()
         val events = mutableListOf("ready")
-        session.interruptForReconnect()
-        session.resumeAfterReconnect()
+        val reconnectGeneration =
+            session.interruptForReconnect(oldGeneration)
+        session.resumeAfterReconnect(reconnectGeneration)
         events += "generation_advanced"
         var failure: BandFailureCategory? = null
         try {
-            session.commitLiveBatch(
+            session.durablyCommitLiveBatch(
                 VirtualBandFixtures.liveBatch,
                 oldGeneration,
             )
@@ -334,6 +362,309 @@ object BandConformanceRunner {
             "stale_callback_rejected",
             events,
             session.snapshot(),
+            failure = failure,
+        )
+    }
+
+    private fun crossSessionCredentialsRejected(): BandConformanceResult {
+        val (first, firstGeneration) = readySession()
+        val (second, secondGeneration) = readySession()
+        val firstStore = VirtualBandStore()
+        val secondStore = VirtualBandStore()
+        val events = mutableListOf("ready_pair")
+        var failure: BandFailureCategory? = null
+
+        first.beginLive()
+        second.beginLive()
+        val firstLive = first.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            firstGeneration,
+        )
+        val secondLive = second.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            secondGeneration,
+        )
+        val foreignLiveReceipt = firstStore.commit(firstLive)
+        try {
+            second.acknowledgeLive(
+                foreignLiveReceipt,
+                secondGeneration,
+            )
+        } catch (error: BandException) {
+            failure = error.category
+            events += "foreign_live_receipt_rejected"
+        }
+        first.acknowledgeLive(foreignLiveReceipt, firstGeneration)
+        val ownLiveReceipt = secondStore.commit(secondLive)
+        second.acknowledgeLive(ownLiveReceipt, secondGeneration)
+        first.stopLive()
+        second.stopLive()
+        events += "own_live_receipt_accepted"
+
+        val firstToken = first.beginOperation(BandOperationClass.HISTORY)
+        val secondToken = second.beginOperation(BandOperationClass.HISTORY)
+        val firstHistory = first.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            firstToken,
+            firstGeneration,
+        )
+        val secondHistory = second.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            secondToken,
+            secondGeneration,
+        )
+        val foreignHistoryReceipt = firstStore.commit(
+            firstHistory,
+            VirtualBandFixtures.historyChunk.batches.flatMap(
+                BandSampleBatch::samples,
+            ),
+        )
+        try {
+            second.acknowledgeHistory(
+                foreignHistoryReceipt,
+                secondToken,
+                secondGeneration,
+            )
+        } catch (error: BandException) {
+            failure = error.category
+            events += "foreign_history_receipt_rejected"
+        }
+        try {
+            second.completeOperation(firstToken)
+        } catch (error: BandException) {
+            failure = error.category
+            events += "foreign_operation_token_rejected"
+        }
+        val ownHistoryReceipt = secondStore.commit(
+            secondHistory,
+            VirtualBandFixtures.historyChunk.batches.flatMap(
+                BandSampleBatch::samples,
+            ),
+        )
+        second.acknowledgeHistory(
+            ownHistoryReceipt,
+            secondToken,
+            secondGeneration,
+        )
+        second.completeOperation(secondToken)
+        events += "own_history_completed"
+
+        return result(
+            "cross_session_credentials_rejected",
+            events,
+            second.snapshot(),
+            acceptedSamples =
+                secondLive.acceptedSamples.size +
+                    secondHistory.acceptedSamples,
+            failure = failure,
+        )
+    }
+
+    private fun staleTerminalCallbacksRejected(): BandConformanceResult {
+        val scanSession = BandSessionMachine()
+        val firstScan = scanSession.beginScan()
+        scanSession.cancelScan(firstScan)
+        val secondScan = scanSession.beginScan()
+        val events = mutableListOf("scan_restarted")
+        var failure: BandFailureCategory? = null
+        try {
+            scanSession.cancelScan(firstScan)
+        } catch (error: BandException) {
+            failure = error.category
+            events += "stale_scan_cancel_rejected"
+        }
+        try {
+            scanSession.failScan(
+                BandFailureCategory.TIMEOUT,
+                firstScan,
+            )
+        } catch (error: BandException) {
+            failure = error.category
+            events += "stale_scan_failure_rejected"
+        }
+        if (scanSession.snapshot().state != BandSessionState.SCANNING) {
+            fail(BandFailureCategory.INTERNAL_FAILURE)
+        }
+        scanSession.cancelScan(secondScan)
+
+        val (session, generation) = readySession()
+        events += "ready"
+        try {
+            session.interruptForReconnect(generation - 1)
+        } catch (error: BandException) {
+            failure = error.category
+            events += "stale_reconnect_interrupt_rejected"
+        }
+        val firstReconnect =
+            session.interruptForReconnect(generation)
+        events += "reconnect_started"
+        session.resumeAfterReconnect(firstReconnect)
+        events += "first_reconnect_completed"
+        val secondReconnect =
+            session.interruptForReconnect(firstReconnect)
+        events += "second_reconnect_started"
+        try {
+            session.resumeAfterReconnect(firstReconnect)
+        } catch (error: BandException) {
+            failure = error.category
+            events += "stale_reconnect_completion_rejected"
+        }
+        session.resumeAfterReconnect(secondReconnect)
+        events += "reconnected"
+        return result(
+            "stale_terminal_callbacks_rejected",
+            events,
+            session.snapshot(),
+            failure = failure,
+        )
+    }
+
+    private fun sameSessionReplayRejected(): BandConformanceResult {
+        val (session, generation) = readySession()
+        val store = VirtualBandStore()
+        val events = mutableListOf("ready")
+        var failure: BandFailureCategory? = null
+
+        session.beginLive()
+        val firstLive = session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            generation,
+        )
+        val firstLiveReceipt = store.commit(firstLive)
+        session.acknowledgeLive(firstLiveReceipt, generation)
+        events += "first_live_committed"
+        val secondLiveBatch = BandSampleBatch(
+            sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+            lane = BandProvenanceLane.LIVE,
+            parserRevision = "parser-v1",
+            calibrationRevision = "calibration-v1",
+            samples = listOf(
+                BandSample(
+                    identity = BandSampleIdentity(
+                        stream = BandStreamKind.HEART_RATE,
+                        sequence = 100,
+                        deviceTimeMilliseconds = 100_000,
+                    ),
+                    value = 73.0,
+                    unit = BandUnit.BEATS_PER_MINUTE,
+                    quality = BandSampleQuality.ACCEPTED,
+                ),
+            ),
+        )
+        val secondLive = session.stageLiveBatch(
+            secondLiveBatch,
+            generation,
+        )
+        try {
+            session.acknowledgeLive(firstLiveReceipt, generation)
+        } catch (error: BandException) {
+            failure = error.category
+            events += "stale_live_receipt_rejected"
+        }
+        session.acknowledgeLive(store.commit(secondLive), generation)
+        session.stopLive()
+        events += "second_live_committed"
+
+        val firstCommand =
+            session.beginOperation(BandOperationClass.BATTERY)
+        session.completeOperation(firstCommand)
+        val secondCommand =
+            session.beginOperation(BandOperationClass.BATTERY)
+        try {
+            session.completeOperation(firstCommand)
+        } catch (error: BandException) {
+            failure = error.category
+            events += "stale_operation_token_rejected"
+        }
+        session.completeOperation(secondCommand)
+
+        val firstHistoryToken =
+            session.beginOperation(BandOperationClass.HISTORY)
+        val firstHistory = session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            firstHistoryToken,
+            generation,
+        )
+        val firstHistoryReceipt = store.commit(
+            firstHistory,
+            VirtualBandFixtures.historyChunk.batches.flatMap(
+                BandSampleBatch::samples,
+            ),
+        )
+        session.acknowledgeHistory(
+            firstHistoryReceipt,
+            firstHistoryToken,
+            generation,
+        )
+        session.completeOperation(firstHistoryToken)
+        events += "first_history_committed"
+
+        val secondHistoryChunk = BandHistoryChunk(
+            chunkIdentity = "chunk-replay-2",
+            previousCursor = "cursor-2",
+            nextCursor = "cursor-3",
+            complete = true,
+            overflowed = false,
+            acknowledgementToken = "ack-replay-2",
+            batches = listOf(
+                BandSampleBatch(
+                    sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+                    lane = BandProvenanceLane.HISTORY,
+                    parserRevision = "parser-v1",
+                    calibrationRevision = "calibration-v1",
+                    samples = listOf(
+                        BandSample(
+                            identity = BandSampleIdentity(
+                                stream = BandStreamKind.HEART_RATE,
+                                sequence = 101,
+                                deviceTimeMilliseconds = 101_000,
+                            ),
+                            value = 71.0,
+                            unit = BandUnit.BEATS_PER_MINUTE,
+                            quality = BandSampleQuality.ACCEPTED,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val secondHistoryToken =
+            session.beginOperation(BandOperationClass.HISTORY)
+        val secondHistory = session.stageHistoryChunk(
+            secondHistoryChunk,
+            secondHistoryToken,
+            generation,
+        )
+        try {
+            session.acknowledgeHistory(
+                firstHistoryReceipt,
+                secondHistoryToken,
+                generation,
+            )
+        } catch (error: BandException) {
+            failure = error.category
+            events += "stale_history_receipt_rejected"
+        }
+        val secondHistoryReceipt = store.commit(
+            secondHistory,
+            secondHistoryChunk.batches.flatMap(BandSampleBatch::samples),
+        )
+        session.acknowledgeHistory(
+            secondHistoryReceipt,
+            secondHistoryToken,
+            generation,
+        )
+        session.completeOperation(secondHistoryToken)
+        events += "second_history_committed"
+
+        return result(
+            "same_session_replay_rejected",
+            events,
+            session.snapshot(),
+            acceptedSamples =
+                firstLive.acceptedSamples.size +
+                    secondLive.acceptedSamples.size +
+                    firstHistory.acceptedSamples +
+                    secondHistory.acceptedSamples,
             failure = failure,
         )
     }
@@ -353,11 +684,7 @@ object BandConformanceRunner {
         try {
             session.acknowledgeHistory(
                 DurableHistoryReceipt(
-                    chunkIdentity = acceptance.chunkIdentity,
-                    acknowledgementToken = acceptance.acknowledgementToken,
-                    nextCursor = acceptance.nextCursor,
-                    complete = acceptance.complete,
-                    overflowed = acceptance.overflowed,
+                    acceptance = acceptance,
                     historyStateCommitted = false,
                     committedSamples = 0,
                     committed = false,
@@ -393,7 +720,7 @@ object BandConformanceRunner {
         val events = mutableListOf("ready")
         val before = session.snapshot().acknowledgedHistoryCursor
         session.beginLive()
-        val accepted = session.commitLiveBatch(
+        val accepted = session.durablyCommitLiveBatch(
             VirtualBandFixtures.liveBatch,
             generation,
         )
@@ -417,7 +744,7 @@ object BandConformanceRunner {
         val (session, generation) = readySession()
         val events = mutableListOf("ready")
         session.beginLive()
-        val accepted = session.commitLiveBatch(
+        val accepted = session.durablyCommitLiveBatch(
             VirtualBandFixtures.duplicateLiveBatch,
             generation,
         )
@@ -480,7 +807,7 @@ object BandConformanceRunner {
     private fun operationCapabilityFailsClosed(): BandConformanceResult {
         val session = BandSessionMachine()
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate)
+        session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.connect(VirtualBandFixtures.identity)
         session.acceptCapabilities(
             BandCapabilityReport(
@@ -527,7 +854,7 @@ object BandConformanceRunner {
         session.beginLive()
         var failure: BandFailureCategory? = null
         try {
-            session.commitLiveBatch(batch, generation)
+            session.durablyCommitLiveBatch(batch, generation)
         } catch (error: BandException) {
             failure = error.category
             events += "oversized_metadata_rejected"
@@ -547,7 +874,7 @@ object BandConformanceRunner {
         val events = mutableListOf<String>()
         val generation = session.beginScan()
         events += "scan_started"
-        session.selectCandidate(VirtualBandFixtures.candidate)
+        session.selectCandidate(VirtualBandFixtures.candidate, generation)
         events += "candidate_selected"
         val identity = VirtualBandFixtures.identity.copy(
             protocolVersion = "noop-band-v2",
@@ -588,11 +915,11 @@ object BandConformanceRunner {
             generation,
         )
         events += "history_received"
-        session.interruptForReconnect()
+        val resumedGeneration =
+            session.interruptForReconnect(generation)
         val failure = BandFailureCategory.DISCONNECTED
         events += "history_interrupted"
-        val resumedGeneration = session.snapshot().generation
-        session.resumeAfterReconnect()
+        session.resumeAfterReconnect(resumedGeneration)
         events += "reconnected"
         val secondToken = session.beginOperation(BandOperationClass.HISTORY)
         val acceptance = session.stageHistoryChunk(
@@ -637,7 +964,7 @@ object BandConformanceRunner {
         )
         val session = BandSessionMachine(restoredHistoryCheckpoint = checkpoint)
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate)
+        session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.connect(VirtualBandFixtures.identity)
         session.acceptCapabilities(VirtualBandFixtures.capabilities, generation)
         val events = mutableListOf("ready")
@@ -757,7 +1084,7 @@ object BandConformanceRunner {
         session.beginLive()
         var failure: BandFailureCategory? = null
         try {
-            session.commitLiveBatch(batch, generation)
+            session.durablyCommitLiveBatch(batch, generation)
         } catch (error: BandException) {
             failure = error.category
             events += "live_stream_rejected"
@@ -870,12 +1197,8 @@ object BandConformanceRunner {
         try {
             session.acknowledgeHistory(
                 DurableHistoryReceipt(
-                    chunkIdentity = firstAcceptance.chunkIdentity,
-                    acknowledgementToken = firstAcceptance.acknowledgementToken,
-                    nextCursor = firstAcceptance.nextCursor,
-                    complete = firstAcceptance.complete,
-                    overflowed = false,
-                    historyStateCommitted = true,
+                    acceptance = firstAcceptance,
+                    historyStateCommitted = false,
                     committedSamples = firstAcceptance.acceptedSamples,
                     committed = true,
                 ),
@@ -958,8 +1281,9 @@ object BandConformanceRunner {
     private fun staleCapabilityCallbackRejected(): BandConformanceResult {
         val (session, oldGeneration) = readySession()
         val events = mutableListOf("ready")
-        session.interruptForReconnect()
-        session.resumeAfterReconnect()
+        val reconnectGeneration =
+            session.interruptForReconnect(oldGeneration)
+        session.resumeAfterReconnect(reconnectGeneration)
         events += "generation_advanced"
         var failure: BandFailureCategory? = null
         try {
@@ -1005,7 +1329,7 @@ object BandConformanceRunner {
         session.beginLive()
         var failure: BandFailureCategory? = null
         try {
-            session.commitLiveBatch(batch, generation)
+            session.durablyCommitLiveBatch(batch, generation)
         } catch (error: BandException) {
             failure = error.category
             events += "invalid_device_time_rejected"
@@ -1070,7 +1394,7 @@ object BandConformanceRunner {
                 throw error
             }
         }
-        session.selectCandidate(VirtualBandFixtures.candidate)
+        session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.connect(VirtualBandFixtures.identity)
         val report = BandCapabilityReport(
             schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
@@ -1087,6 +1411,13 @@ object BandConformanceRunner {
         val events = mutableListOf("ready")
         val token = session.beginOperation(BandOperationClass.FIRMWARE)
         session.completeOperation(token)
+        val postFirmwareGeneration = session.beginScan()
+        session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            postFirmwareGeneration,
+        )
+        session.connect(VirtualBandFixtures.identity)
+        session.acceptCapabilities(report, postFirmwareGeneration)
         session.beginLive()
         try {
             session.beginOperation(BandOperationClass.FIRMWARE)
@@ -1097,8 +1428,14 @@ object BandConformanceRunner {
         }
         session.stopLive()
         val staleToken = session.beginOperation(BandOperationClass.FIRMWARE)
-        session.interruptForReconnect()
-        session.resumeAfterReconnect()
+        session.interruptForReconnect(postFirmwareGeneration)
+        val recoveryGeneration = session.beginScan()
+        session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            recoveryGeneration,
+        )
+        session.connect(VirtualBandFixtures.identity)
+        session.acceptCapabilities(report, recoveryGeneration)
         try {
             session.completeOperation(staleToken)
         } catch (error: BandException) {
@@ -1121,6 +1458,7 @@ object BandConformanceRunner {
                 "completed:none",
                 "rejected:busy",
                 "began:none",
+                "interrupted:disconnected",
                 "rejected:staleCallback",
             )
         ) {
@@ -1178,7 +1516,7 @@ object BandConformanceRunner {
         session.beginLive()
         var failure: BandFailureCategory? = null
         try {
-            session.commitLiveBatch(batch, generation)
+            session.durablyCommitLiveBatch(batch, generation)
         } catch (error: BandException) {
             failure = error.category
             events += "utf8_limit_rejected"
@@ -1255,7 +1593,7 @@ object BandConformanceRunner {
         )
         val session = BandSessionMachine(restoredHistoryCheckpoint = checkpoint)
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate)
+        session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.connect(VirtualBandFixtures.identity)
         val capabilities = VirtualBandFixtures.capabilities.copy(
             capabilities =
@@ -1284,7 +1622,7 @@ object BandConformanceRunner {
             samples = listOf(next),
         )
         session.beginLive()
-        val accepted = session.commitLiveBatch(batch, generation)
+        val accepted = session.durablyCommitLiveBatch(batch, generation)
         val evictedCandidate = BandSample(
             identity = BandSampleIdentity(
                 stream = BandStreamKind.ACCELERATION,
@@ -1303,7 +1641,7 @@ object BandConformanceRunner {
             samples = listOf(evictedCandidate),
         )
         val evictionAccepted =
-            session.commitLiveBatch(evictionProbe, generation)
+            session.durablyCommitLiveBatch(evictionProbe, generation)
         if (
             accepted == 1 &&
             evictionAccepted == 1 &&
@@ -1328,7 +1666,7 @@ object BandConformanceRunner {
         val diagnostics = BandDiagnosticsRecorder()
         val session = BandSessionMachine(diagnostics)
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate)
+        session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.connect(VirtualBandFixtures.identity)
         session.acceptCapabilities(VirtualBandFixtures.capabilities, generation)
         val events = mutableListOf("ready")
@@ -1361,14 +1699,14 @@ object BandConformanceRunner {
             events += "disconnect_recovery_incorrect"
         }
         try {
-            session.commitLiveBatch(VirtualBandFixtures.liveBatch, generation)
+            session.durablyCommitLiveBatch(VirtualBandFixtures.liveBatch, generation)
         } catch (error: BandException) {
             if (error.category != BandFailureCategory.STALE_CALLBACK) {
                 throw error
             }
             events += "stale_callback_rejected"
         }
-        session.resumeAfterReconnect()
+        session.resumeAfterReconnect(recovering.generation)
         events += "reconnected"
         return result(
             "operation_terminal_paths",
