@@ -33,6 +33,8 @@ Last updated: **2026-09-21**
   bounded runs. PR `#17` still needs one consolidated replacement push, new exact-SHA hosted checks, review-thread
   resolution, protected merge/main verification, and exact cleanup. No
   supplier binary, firmware, real adapter, or flasher is included.
+  The final local implementation commit is `d8028186`; the record closeout is
+  being prepared before the single remote replacement push.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,

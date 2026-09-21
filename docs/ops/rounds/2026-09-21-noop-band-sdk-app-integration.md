@@ -6,8 +6,9 @@
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
-- End implementation commit: pending final replacement commit
-- Record commit or PR: PR `#17`; protected exact-SHA evidence pending
+- End implementation commit:
+  `d8028186898b934f34ec50a98614f7e67d06d947`
+- Record commit or PR: PR `#17`; final record and protected exact-SHA evidence pending
 
 ## Objective
 
@@ -198,9 +199,12 @@ Success means:
   `68fb9fd5cfd0f2731917cee8b14f84e391b9128e`; initial operations record
   `c16488d70001bb3257c7c0c4d6644ab7f88d1372`; review-remediation implementation
   `4fcc134240a542694c5acc51a4d1487b074064bd`; prior evidence update
-  `ce09fa67038865a35bc32698730953bd379d726f`; final replacement commit pending.
+  `ce09fa67038865a35bc32698730953bd379d726f`; final SDK-export replacement
+  `d8028186898b934f34ec50a98614f7e67d06d947`.
 - Branch and remote state: PR `#17` is open from the dedicated branch; the
-  remote head remains `ce09fa67` until one consolidated replacement push.
+  local implementation head is `d8028186`, while the remote head remains
+  `ce09fa67` until the final record commit and one consolidated replacement
+  push.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and
   `Dhanunjay-Divi/NoopBandSDK` both report `PRIVATE` with default branch
   `main`.
