@@ -11,6 +11,16 @@ public enum BandContractLimits {
     public static let samplesPerHistoryChunk = 16_384
     public static let historyCheckpointIdentities = 65_536
     public static let maximumSampleSequence = UInt64(Int64.max)
+    public static let minimumDeviceTimeMilliseconds: Int64 = 0
+}
+
+private extension String {
+    func hasValidUTF8Length(
+        maximum: Int,
+        allowEmpty: Bool = false
+    ) -> Bool {
+        (allowEmpty || !isEmpty) && utf8.count <= maximum
+    }
 }
 
 public enum BandCapability: String, Codable, CaseIterable, Sendable {
@@ -134,8 +144,9 @@ public struct BandPairingCandidate: Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard !handle.isEmpty,
-              handle.count <= BandContractLimits.opaqueHandleLength
+        guard handle.hasValidUTF8Length(
+            maximum: BandContractLimits.opaqueHandleLength
+        )
         else {
             throw BandFailureCategory.invalidInput
         }
@@ -164,16 +175,17 @@ public struct BandIdentity: Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard !sourceIdentity.isEmpty,
-              sourceIdentity.count <= BandContractLimits.sourceIdentityLength,
-              !hardwareRevision.isEmpty,
-              hardwareRevision.count <= 32,
-              !firmwareVersion.isEmpty,
-              firmwareVersion.count <= BandContractLimits.revisionLength,
-              !protocolVersion.isEmpty,
-              protocolVersion.count <= 32,
-              !wrapperRevision.isEmpty,
-              wrapperRevision.count <= BandContractLimits.revisionLength
+        guard sourceIdentity.hasValidUTF8Length(
+                  maximum: BandContractLimits.sourceIdentityLength
+              ),
+              hardwareRevision.hasValidUTF8Length(maximum: 32),
+              firmwareVersion.hasValidUTF8Length(
+                  maximum: BandContractLimits.revisionLength
+              ),
+              protocolVersion.hasValidUTF8Length(maximum: 32),
+              wrapperRevision.hasValidUTF8Length(
+                  maximum: BandContractLimits.revisionLength
+              )
         else {
             throw BandFailureCategory.invalidInput
         }
@@ -210,10 +222,10 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
     public func validate() throws {
         guard schemaVersion == Self.supportedSchemaVersion,
               protocolVersion == Self.supportedProtocolVersion,
-              !hardwareRevision.isEmpty,
-              hardwareRevision.count <= 32,
-              !firmwareVersion.isEmpty,
-              firmwareVersion.count <= 64,
+              hardwareRevision.hasValidUTF8Length(maximum: 32),
+              firmwareVersion.hasValidUTF8Length(
+                  maximum: BandContractLimits.revisionLength
+              ),
               (0 ... 255).contains(historyDays),
               !capabilities.isEmpty
         else {
@@ -258,6 +270,8 @@ public struct BandSample: Equatable, Codable, Sendable {
 
     public func validate() throws {
         guard identity.sequence <= BandContractLimits.maximumSampleSequence,
+              identity.deviceTimeMilliseconds
+                >= BandContractLimits.minimumDeviceTimeMilliseconds,
               value.isFinite,
               quality != .rejected
         else {
@@ -322,12 +336,15 @@ public struct BandSampleBatch: Equatable, Codable, Sendable {
 
     public func validate(expectedLane: BandProvenanceLane) throws {
         guard lane == expectedLane,
-              !sourceIdentity.isEmpty,
-              sourceIdentity.count <= BandContractLimits.sourceIdentityLength,
-              !parserRevision.isEmpty,
-              parserRevision.count <= BandContractLimits.revisionLength,
-              !calibrationRevision.isEmpty,
-              calibrationRevision.count <= BandContractLimits.revisionLength,
+              sourceIdentity.hasValidUTF8Length(
+                  maximum: BandContractLimits.sourceIdentityLength
+              ),
+              parserRevision.hasValidUTF8Length(
+                  maximum: BandContractLimits.revisionLength
+              ),
+              calibrationRevision.hasValidUTF8Length(
+                  maximum: BandContractLimits.revisionLength
+              ),
               !samples.isEmpty,
               samples.count <= BandContractLimits.samplesPerBatch
         else {
@@ -365,17 +382,22 @@ public struct BandHistoryChunk: Equatable, Codable, Sendable {
     }
 
     public func validate() throws {
-        guard !chunkIdentity.isEmpty,
-              chunkIdentity.count <= BandContractLimits.opaqueHandleLength,
+        guard chunkIdentity.hasValidUTF8Length(
+                  maximum: BandContractLimits.opaqueHandleLength
+              ),
               previousCursor.map({
-                  !$0.isEmpty && $0.count <= BandContractLimits.cursorLength
+                  $0.hasValidUTF8Length(
+                      maximum: BandContractLimits.cursorLength
+                  )
               }) ?? true,
               nextCursor.map({
-                  !$0.isEmpty && $0.count <= BandContractLimits.cursorLength
+                  $0.hasValidUTF8Length(
+                      maximum: BandContractLimits.cursorLength
+                  )
               }) ?? true,
-              !acknowledgementToken.isEmpty,
-              acknowledgementToken.count
-                <= BandContractLimits.acknowledgementTokenLength,
+              acknowledgementToken.hasValidUTF8Length(
+                  maximum: BandContractLimits.acknowledgementTokenLength
+              ),
               batches.count <= BandContractLimits.batchesPerHistoryChunk,
               batches.reduce(0, { $0 + $1.samples.count })
                 <= BandContractLimits.samplesPerHistoryChunk
@@ -405,15 +427,20 @@ public struct BandHistoryCheckpoint: Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard !sourceIdentity.isEmpty,
-              sourceIdentity.count <= BandContractLimits.sourceIdentityLength,
+        guard sourceIdentity.hasValidUTF8Length(
+                  maximum: BandContractLimits.sourceIdentityLength
+              ),
               acknowledgedCursor.map({
-                  !$0.isEmpty && $0.count <= BandContractLimits.cursorLength
+                  $0.hasValidUTF8Length(
+                      maximum: BandContractLimits.cursorLength
+                  )
               }) ?? true,
               durableSampleIdentities.count
                 <= BandContractLimits.historyCheckpointIdentities,
               durableSampleIdentities.allSatisfy({
                   $0.sequence <= BandContractLimits.maximumSampleSequence
+                    && $0.deviceTimeMilliseconds
+                        >= BandContractLimits.minimumDeviceTimeMilliseconds
               })
         else {
             throw BandFailureCategory.invalidInput

@@ -26,7 +26,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         hardwareRevision: "synthetic-hw-1",
         firmwareVersion: "synthetic-fw-1",
         protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-        wrapperRevision: "artifact-f2c1e189"
+        wrapperRevision: "artifact-34028a2"
     )
 
     private var capabilities: BandCapabilityReport {
@@ -51,7 +51,10 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             )
         )
         try await session.connect(identity)
-        try await session.acceptCapabilities(capabilities)
+        try await session.acceptCapabilities(
+            capabilities,
+            callbackGeneration: generation
+        )
         return (session, generation)
     }
 
@@ -150,6 +153,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         let snapshot = await session.snapshot()
         XCTAssertNil(snapshot.acknowledgedHistoryCursor)
         XCTAssertEqual(snapshot.durableSampleCount, 0)
+        try await session.cancelOperation(token)
+        let cancelledSnapshot = await session.snapshot()
+        XCTAssertEqual(cancelledSnapshot.state, .ready)
     }
 
     func testReconnectRejectsStaleCallbacks() async throws {

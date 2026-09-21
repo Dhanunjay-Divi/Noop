@@ -258,11 +258,14 @@ Exact UUIDs and byte layouts remain pending the input dossier.
 The NOOP-owned protocol, adapters, fixtures, and conformance tools live in the
 separate private `Dhanunjay-Divi/NoopBandSDK` repository. The binary-free
 neutral Swift/Kotlin implementation was merged at
-`e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b` and its protected-review hardening
-was merged at `f32633a9fc63a9edd273f38e97b48c216a798234`; the app consumes the
-deterministic export from implementation revision
-`f2c1e189d6e703ceecea3502e1ba9ea77d8e2bd7` through a digest-pinned,
-supplier-artifact-free boundary.
+`e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b`; its first protected-review
+hardening was merged at `f32633a9fc63a9edd273f38e97b48c216a798234`;
+and the generation, history, diagnostics, input-validation, cache-bound, and
+operation-terminal remediation was merged at
+`34028a2ab56feb90ae774b0ee0055529ce175723`. The app consumes the
+deterministic export from that final implementation revision through a
+digest-pinned, supplier-artifact-free boundary. SDK closeout documentation is
+on private `main` at `a04c263e7229532038b13c7da343a43747864390`.
 
 ```text
 NoopBandSDK/

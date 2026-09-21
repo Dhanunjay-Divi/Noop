@@ -27,7 +27,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "f2c1e189d6e703ceecea3502e1ba9ea77d8e2bd7"
+            "34028a2ab56feb90ae774b0ee0055529ce175723"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let generation = try await session.beginScan()
@@ -37,6 +37,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     }
 
     func testPinnedBoundaryRestoresSourceScopedHistoryCheckpoint() async throws {
+        let diagnostics = BandDiagnosticsRecorder()
         let checkpoint = BandHistoryCheckpoint(
             sourceIdentity: "synthetic-source",
             acknowledgedCursor: "cursor-2",
@@ -44,9 +45,10 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             durableSampleIdentities: []
         )
         let session = NoopBandSDKBoundary.makeSession(
+            diagnostics: diagnostics,
             historyCheckpoint: checkpoint
         )
-        _ = try await session.beginScan()
+        let generation = try await session.beginScan()
         try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "synthetic-candidate",
@@ -59,7 +61,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-f2c1e189"
+            wrapperRevision: "artifact-34028a2"
         )
         try await session.connect(identity)
         try await session.acceptCapabilities(
@@ -70,7 +72,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 firmwareVersion: identity.firmwareVersion,
                 historyDays: 7,
                 capabilities: [.heartRate]
-            )
+            ),
+            callbackGeneration: generation
         )
         let restoredSnapshot = await session.snapshot()
         XCTAssertEqual(
@@ -82,8 +85,79 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             try await session.completeOperation(token)
             XCTFail("An incomplete restored range must require a terminal chunk")
         } catch let error as BandFailureCategory {
-            XCTAssertEqual(error, .historyStalled)
+            XCTAssertEqual(error, .storage)
         }
+        let events = await diagnostics.snapshot()
+        XCTAssertTrue(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .failed,
+                    failureCategory: .storage
+                )
+            )
+        )
+        try await session.cancelOperation(token)
+        let cancelledSnapshot = await session.snapshot()
+        XCTAssertEqual(cancelledSnapshot.state, .ready)
+    }
+
+    func testOperationFailureAdvancesGenerationAndRecordsBoundedCategory() async throws {
+        let diagnostics = BandDiagnosticsRecorder()
+        let session = NoopBandSDKBoundary.makeSession(diagnostics: diagnostics)
+        let generation = try await session.beginScan()
+        try await session.selectCandidate(
+            BandPairingCandidate(
+                handle: "synthetic-candidate",
+                compatible: true,
+                identifyEligible: true
+            )
+        )
+        let identity = BandIdentity(
+            sourceIdentity: "synthetic-source",
+            hardwareRevision: "synthetic-hw-1",
+            firmwareVersion: "synthetic-fw-1",
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            wrapperRevision: "artifact-34028a2"
+        )
+        try await session.connect(identity)
+        try await session.acceptCapabilities(
+            BandCapabilityReport(
+                schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+                protocolVersion: identity.protocolVersion,
+                hardwareRevision: identity.hardwareRevision,
+                firmwareVersion: identity.firmwareVersion,
+                historyDays: 7,
+                capabilities: [.battery]
+            ),
+            callbackGeneration: generation
+        )
+
+        let token = try await session.beginOperation(.battery)
+        try await session.failOperation(token, category: .disconnected)
+
+        let snapshot = await session.snapshot()
+        XCTAssertEqual(snapshot.state, .recovering)
+        XCTAssertEqual(snapshot.generation, generation + 1)
+        let events = await diagnostics.snapshot()
+        XCTAssertTrue(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .command,
+                    outcome: .failed,
+                    failureCategory: .disconnected
+                )
+            )
+        )
+        XCTAssertTrue(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                )
+            )
+        )
     }
 
     @MainActor

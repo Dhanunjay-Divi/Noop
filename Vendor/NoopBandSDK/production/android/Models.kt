@@ -11,6 +11,43 @@ object BandContractLimits {
     const val SAMPLES_PER_HISTORY_CHUNK = 16_384
     const val HISTORY_CHECKPOINT_IDENTITIES = 65_536
     const val MAXIMUM_SAMPLE_SEQUENCE = Long.MAX_VALUE
+    const val MINIMUM_DEVICE_TIME_MILLISECONDS = 0L
+}
+
+private fun String.hasValidUtf8Length(
+    maximum: Int,
+    allowEmpty: Boolean = false,
+): Boolean {
+    if (!allowEmpty && isEmpty()) {
+        return false
+    }
+    var bytes = 0
+    var index = 0
+    while (index < length) {
+        val codeUnit = this[index]
+        val encodedBytes = when {
+            codeUnit.code <= 0x7F -> 1
+            codeUnit.code <= 0x7FF -> 2
+            Character.isHighSurrogate(codeUnit) -> {
+                if (
+                    index + 1 >= length ||
+                    !Character.isLowSurrogate(this[index + 1])
+                ) {
+                    return false
+                }
+                index += 1
+                4
+            }
+            Character.isLowSurrogate(codeUnit) -> return false
+            else -> 3
+        }
+        if (bytes > maximum - encodedBytes) {
+            return false
+        }
+        bytes += encodedBytes
+        index += 1
+    }
+    return true
 }
 
 enum class BandCapability(val wireValue: String) {
@@ -100,14 +137,14 @@ enum class BandProvenanceLane {
     HISTORY,
 }
 
-enum class BandStreamKind {
-    HEART_RATE,
-    RR_INTERVAL,
-    STEPS,
-    SPO2,
-    RESPIRATION,
-    TEMPERATURE,
-    ACCELERATION,
+enum class BandStreamKind(val wireValue: String) {
+    HEART_RATE("heartRate"),
+    RR_INTERVAL("rrInterval"),
+    STEPS("steps"),
+    SPO2("spo2"),
+    RESPIRATION("respiration"),
+    TEMPERATURE("temperature"),
+    ACCELERATION("acceleration"),
 }
 
 enum class BandUnit {
@@ -133,8 +170,7 @@ data class BandPairingCandidate(
 ) {
     fun validate() {
         if (
-            handle.isEmpty() ||
-            handle.length > BandContractLimits.OPAQUE_HANDLE_LENGTH
+            !handle.hasValidUtf8Length(BandContractLimits.OPAQUE_HANDLE_LENGTH)
         ) {
             fail(BandFailureCategory.INVALID_INPUT)
         }
@@ -150,16 +186,17 @@ data class BandIdentity(
 ) {
     fun validate() {
         if (
-            sourceIdentity.isEmpty() ||
-            sourceIdentity.length > BandContractLimits.SOURCE_IDENTITY_LENGTH ||
-            hardwareRevision.isEmpty() ||
-            hardwareRevision.length > 32 ||
-            firmwareVersion.isEmpty() ||
-            firmwareVersion.length > BandContractLimits.REVISION_LENGTH ||
-            protocolVersion.isEmpty() ||
-            protocolVersion.length > 32 ||
-            wrapperRevision.isEmpty() ||
-            wrapperRevision.length > BandContractLimits.REVISION_LENGTH
+            !sourceIdentity.hasValidUtf8Length(
+                BandContractLimits.SOURCE_IDENTITY_LENGTH,
+            ) ||
+            !hardwareRevision.hasValidUtf8Length(32) ||
+            !firmwareVersion.hasValidUtf8Length(
+                BandContractLimits.REVISION_LENGTH,
+            ) ||
+            !protocolVersion.hasValidUtf8Length(32) ||
+            !wrapperRevision.hasValidUtf8Length(
+                BandContractLimits.REVISION_LENGTH,
+            )
         ) {
             fail(BandFailureCategory.INVALID_INPUT)
         }
@@ -178,10 +215,10 @@ data class BandCapabilityReport(
         if (
             schemaVersion != SUPPORTED_SCHEMA_VERSION ||
             protocolVersion != SUPPORTED_PROTOCOL_VERSION ||
-            hardwareRevision.isEmpty() ||
-            hardwareRevision.length > 32 ||
-            firmwareVersion.isEmpty() ||
-            firmwareVersion.length > 64 ||
+            !hardwareRevision.hasValidUtf8Length(32) ||
+            !firmwareVersion.hasValidUtf8Length(
+                BandContractLimits.REVISION_LENGTH,
+            ) ||
             historyDays !in 0..255 ||
             capabilities.isEmpty()
         ) {
@@ -210,6 +247,8 @@ data class BandSample(
     fun validate() {
         if (
             identity.sequence < 0 ||
+            identity.deviceTimeMilliseconds <
+            BandContractLimits.MINIMUM_DEVICE_TIME_MILLISECONDS ||
             !value.isFinite() ||
             quality == BandSampleQuality.REJECTED
         ) {
@@ -248,12 +287,15 @@ data class BandSampleBatch(
     fun validate(expectedLane: BandProvenanceLane) {
         if (
             lane != expectedLane ||
-            sourceIdentity.isEmpty() ||
-            sourceIdentity.length > BandContractLimits.SOURCE_IDENTITY_LENGTH ||
-            parserRevision.isEmpty() ||
-            parserRevision.length > BandContractLimits.REVISION_LENGTH ||
-            calibrationRevision.isEmpty() ||
-            calibrationRevision.length > BandContractLimits.REVISION_LENGTH ||
+            !sourceIdentity.hasValidUtf8Length(
+                BandContractLimits.SOURCE_IDENTITY_LENGTH,
+            ) ||
+            !parserRevision.hasValidUtf8Length(
+                BandContractLimits.REVISION_LENGTH,
+            ) ||
+            !calibrationRevision.hasValidUtf8Length(
+                BandContractLimits.REVISION_LENGTH,
+            ) ||
             samples.isEmpty() ||
             samples.size > BandContractLimits.SAMPLES_PER_BATCH
         ) {
@@ -274,17 +316,18 @@ data class BandHistoryChunk(
 ) {
     fun validate() {
         if (
-            chunkIdentity.isEmpty() ||
-            chunkIdentity.length > BandContractLimits.OPAQUE_HANDLE_LENGTH ||
+            !chunkIdentity.hasValidUtf8Length(
+                BandContractLimits.OPAQUE_HANDLE_LENGTH,
+            ) ||
             previousCursor?.let {
-                it.isEmpty() || it.length > BandContractLimits.CURSOR_LENGTH
-            } == true ||
+                !it.hasValidUtf8Length(BandContractLimits.CURSOR_LENGTH)
+            } ?: false ||
             nextCursor?.let {
-                it.isEmpty() || it.length > BandContractLimits.CURSOR_LENGTH
-            } == true ||
-            acknowledgementToken.isEmpty() ||
-            acknowledgementToken.length >
-            BandContractLimits.ACKNOWLEDGEMENT_TOKEN_LENGTH ||
+                !it.hasValidUtf8Length(BandContractLimits.CURSOR_LENGTH)
+            } ?: false ||
+            !acknowledgementToken.hasValidUtf8Length(
+                BandContractLimits.ACKNOWLEDGEMENT_TOKEN_LENGTH,
+            ) ||
             batches.size > BandContractLimits.BATCHES_PER_HISTORY_CHUNK ||
             batches.sumOf { it.samples.size } >
             BandContractLimits.SAMPLES_PER_HISTORY_CHUNK
@@ -303,15 +346,18 @@ data class BandHistoryCheckpoint(
 ) {
     fun validate() {
         if (
-            sourceIdentity.isEmpty() ||
-            sourceIdentity.length > BandContractLimits.SOURCE_IDENTITY_LENGTH ||
+            !sourceIdentity.hasValidUtf8Length(
+                BandContractLimits.SOURCE_IDENTITY_LENGTH,
+            ) ||
             acknowledgedCursor?.let {
-                it.isEmpty() || it.length > BandContractLimits.CURSOR_LENGTH
-            } == true ||
+                !it.hasValidUtf8Length(BandContractLimits.CURSOR_LENGTH)
+            } ?: false ||
             durableSampleIdentities.size >
             BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES ||
             durableSampleIdentities.any {
-                it.sequence < 0
+                it.sequence < 0 ||
+                    it.deviceTimeMilliseconds <
+                    BandContractLimits.MINIMUM_DEVICE_TIME_MILLISECONDS
             }
         ) {
             fail(BandFailureCategory.INVALID_INPUT)

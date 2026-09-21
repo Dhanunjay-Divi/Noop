@@ -12,23 +12,27 @@ Last updated: **2026-09-21**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: the private binary-free SDK review hardening is merged at
-  `f32633a9`, and two independent clean exports of implementation revision
-  `f2c1e189` were byte-identical. The exact ten-file artifact is integrated
-  locally into Apple and Android behind a production-default-off source
-  factory; WHOOP remains the default comparison transport. All seven SDK
-  review findings are corrected, including durable source-scoped incomplete
-  history restore and exact completion/overflow receipts. Artifact and
-  required-CI tests pass 54/54; the Swift package passes 4/4 across all 18
-  conformance scenarios. The Android Full boundary test and Demo compile pass
-  independently under the bounded memory policy, and the real macOS app target
-  passes 4/4 focused integration tests. A combined parallel Full+Demo command
-  was classified as an avoidable Kotlin heap spike and replaced by sequential
-  bounded verification. PR `#17` still needs one consolidated remediation
-  push from local implementation commit `4fcc1342`, new exact-SHA hosted
-  checks, review-thread resolution, protected merge/main verification, and
-  exact cleanup. No supplier binary, firmware, real adapter, or flasher is
-  included.
+- Current state: the private binary-free SDK final implementation is merged at
+  `34028a2`, its closeout is on private `main` at `a04c263`, and two
+  independent clean exports were byte-identical with manifest SHA-256
+  `f0baf194ae0daa51e2d7c02d83b9324efd5bc278080aa622857ecfa32af54f8b`.
+  The exact ten-file artifact is integrated locally into Apple and Android
+  behind a production-default-off source factory; WHOOP remains the default
+  comparison transport. The final SDK closes the additional generation,
+  device-time, per-operation history receipt, firmware diagnostics,
+  nonadvancing cursor, UTF-8 bound, sampling capability, identity-cache, and
+  explicit operation-terminal findings plus the independent follow-up review.
+  Current focused and repository-policy evidence is green: the exact artifact and five verifier
+  tests pass; the Swift package passes 4/4 while checking all 27 automated
+  scenarios; Android Full passes 4/4 and Demo compiles independently; and the
+  real macOS app target passes 5/5. The complete Tools wall passes 310 tests
+  with one intentional skip, alongside all nine release controls, ten required
+  contexts, trust, calibration, terminology, provenance, privacy, claims,
+  localization, operations, shell, Actionlint, and diff gates. One combined Full+Demo invocation was
+  recorded as an avoidable Kotlin heap spike and replaced by sequential
+  bounded runs. PR `#17` still needs one consolidated replacement push, new exact-SHA hosted checks, review-thread
+  resolution, protected merge/main verification, and exact cleanup. No
+  supplier binary, firmware, real adapter, or flasher is included.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,

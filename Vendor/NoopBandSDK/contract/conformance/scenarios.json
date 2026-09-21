@@ -108,7 +108,7 @@
           "ready",
           "first_history_committed",
           "cursor_chain_rejected",
-          "operation_completed"
+          "operation_cancelled"
         ],
         "finalState": "ready",
         "acknowledgedCursor": "cursor-2",
@@ -220,7 +220,7 @@
           "live_stream_rejected",
           "live_stopped",
           "history_stream_rejected",
-          "operation_completed"
+          "operation_cancelled"
         ],
         "finalState": "ready",
         "acknowledgedCursor": null,
@@ -256,12 +256,150 @@
           "range_incomplete",
           "terminal_received",
           "terminal_committed",
+          "post_terminal_chunk_rejected",
           "operation_completed"
         ],
         "finalState": "ready",
         "acknowledgedCursor": "cursor-3",
         "acceptedSamples": 2,
         "failure": "historyStalled"
+      }
+    },
+    {
+      "id": "stale_capability_callback_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "generation_advanced",
+          "stale_capability_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "invalid_device_time_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "invalid_device_time_rejected",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidInput"
+      }
+    },
+    {
+      "id": "history_operation_requires_own_receipt",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "first_history_completed",
+          "own_receipt_required",
+          "operation_cancelled"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": "storage"
+      }
+    },
+    {
+      "id": "firmware_diagnostics_specific",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "firmware_diagnostics_specific"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
+      }
+    },
+    {
+      "id": "history_nonadvancing_cursor_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "nonadvancing_cursor_rejected",
+          "operation_cancelled"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "historyStalled"
+      }
+    },
+    {
+      "id": "utf8_length_cross_platform",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "utf8_limit_rejected",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidInput"
+      }
+    },
+    {
+      "id": "sampling_requires_sensor_capability",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "sampling_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "unsupported"
+      }
+    },
+    {
+      "id": "durable_identity_cache_bounded",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "identity_cache_bounded",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 2,
+        "failure": null
+      }
+    },
+    {
+      "id": "operation_terminal_paths",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "operation_cancelled",
+          "operation_failed",
+          "disconnect_recovery",
+          "stale_callback_rejected",
+          "reconnected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
       }
     },
     {

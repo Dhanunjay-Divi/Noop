@@ -66,6 +66,7 @@ data class BandDiagnosticEvent(
     val outcome: BandDiagnosticOutcome,
     val countBucket: BandCountBucket? = null,
     val durationBucket: BandDurationBucket? = null,
+    val failureCategory: BandFailureCategory? = null,
 )
 
 class BandDiagnosticsRecorder(capacity: Int = 128) {

@@ -72,17 +72,20 @@ public enum BandDurationBucket: String, Codable, Sendable {
 public struct BandDiagnosticEvent: Equatable, Codable, Sendable {
     public let kind: BandDiagnosticKind
     public let outcome: BandDiagnosticOutcome
+    public let failureCategory: BandFailureCategory?
     public let countBucket: BandCountBucket?
     public let durationBucket: BandDurationBucket?
 
     public init(
         kind: BandDiagnosticKind,
         outcome: BandDiagnosticOutcome,
+        failureCategory: BandFailureCategory? = nil,
         countBucket: BandCountBucket? = nil,
         durationBucket: BandDurationBucket? = nil
     ) {
         self.kind = kind
         self.outcome = outcome
+        self.failureCategory = failureCategory
         self.countBucket = countBucket
         self.durationBucket = durationBucket
     }

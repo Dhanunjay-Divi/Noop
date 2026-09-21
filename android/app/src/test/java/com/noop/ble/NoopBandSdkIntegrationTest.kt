@@ -3,6 +3,10 @@ package com.noop.ble
 import com.noop.bandsdk.BandConformanceRunner
 import com.noop.bandsdk.BandCapability
 import com.noop.bandsdk.BandCapabilityReport
+import com.noop.bandsdk.BandDiagnosticEvent
+import com.noop.bandsdk.BandDiagnosticKind
+import com.noop.bandsdk.BandDiagnosticOutcome
+import com.noop.bandsdk.BandDiagnosticsRecorder
 import com.noop.bandsdk.BandException
 import com.noop.bandsdk.BandFailureCategory
 import com.noop.bandsdk.BandHistoryCheckpoint
@@ -19,7 +23,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "f2c1e189d6e703ceecea3502e1ba9ea77d8e2bd7",
+            "34028a2ab56feb90ae774b0ee0055529ce175723",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -29,6 +33,7 @@ class NoopBandSdkIntegrationTest {
 
     @Test
     fun appBoundaryRestoresSourceScopedHistoryCheckpoint() {
+        val diagnostics = BandDiagnosticsRecorder()
         val checkpoint = BandHistoryCheckpoint(
             sourceIdentity = "synthetic-source",
             acknowledgedCursor = "cursor-2",
@@ -36,9 +41,10 @@ class NoopBandSdkIntegrationTest {
             durableSampleIdentities = emptySet(),
         )
         val session = NoopBandSdkBoundary.newSession(
+            diagnostics = diagnostics,
             historyCheckpoint = checkpoint,
         )
-        session.beginScan()
+        val generation = session.beginScan()
         session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
@@ -51,7 +57,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-f2c1e189",
+            wrapperRevision = "artifact-34028a2",
         )
         session.connect(identity)
         session.acceptCapabilities(
@@ -63,6 +69,7 @@ class NoopBandSdkIntegrationTest {
                 historyDays = 7,
                 capabilities = setOf(BandCapability.HEART_RATE),
             ),
+            generation,
         )
         assertEquals(
             checkpoint.acknowledgedCursor,
@@ -75,7 +82,80 @@ class NoopBandSdkIntegrationTest {
         } catch (error: BandException) {
             error.category
         }
-        assertEquals(BandFailureCategory.HISTORY_STALLED, failure)
+        assertEquals(BandFailureCategory.STORAGE, failure)
+        assertEquals(
+            true,
+            diagnostics.snapshot().contains(
+                BandDiagnosticEvent(
+                    kind = BandDiagnosticKind.HISTORY,
+                    outcome = BandDiagnosticOutcome.FAILED,
+                    failureCategory = BandFailureCategory.STORAGE,
+                ),
+            ),
+        )
+        session.cancelOperation(token)
+        assertEquals(BandSessionState.READY, session.snapshot().state)
+    }
+
+    @Test
+    fun operationFailureAdvancesGenerationAndRecordsBoundedCategory() {
+        val diagnostics = BandDiagnosticsRecorder()
+        val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
+        val generation = session.beginScan()
+        session.selectCandidate(
+            BandPairingCandidate(
+                handle = "synthetic-candidate",
+                compatible = true,
+                identifyEligible = true,
+            ),
+        )
+        val identity = BandIdentity(
+            sourceIdentity = "synthetic-source",
+            hardwareRevision = "synthetic-hw-1",
+            firmwareVersion = "synthetic-fw-1",
+            protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
+            wrapperRevision = "artifact-34028a2",
+        )
+        session.connect(identity)
+        session.acceptCapabilities(
+            BandCapabilityReport(
+                schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
+                protocolVersion = identity.protocolVersion,
+                hardwareRevision = identity.hardwareRevision,
+                firmwareVersion = identity.firmwareVersion,
+                historyDays = 7,
+                capabilities = setOf(BandCapability.BATTERY),
+            ),
+            generation,
+        )
+
+        val token = session.beginOperation(BandOperationClass.BATTERY)
+        session.failOperation(token, BandFailureCategory.DISCONNECTED)
+
+        val snapshot = session.snapshot()
+        assertEquals(BandSessionState.RECOVERING, snapshot.state)
+        assertEquals(generation + 1, snapshot.generation)
+        val events = diagnostics.snapshot()
+        assertEquals(
+            true,
+            events.contains(
+                BandDiagnosticEvent(
+                    kind = BandDiagnosticKind.COMMAND,
+                    outcome = BandDiagnosticOutcome.FAILED,
+                    failureCategory = BandFailureCategory.DISCONNECTED,
+                ),
+            ),
+        )
+        assertEquals(
+            true,
+            events.contains(
+                BandDiagnosticEvent(
+                    kind = BandDiagnosticKind.RECONNECT,
+                    outcome = BandDiagnosticOutcome.INTERRUPTED,
+                    failureCategory = BandFailureCategory.DISCONNECTED,
+                ),
+            ),
+        )
     }
 
     @Test

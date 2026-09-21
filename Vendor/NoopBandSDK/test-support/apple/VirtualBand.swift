@@ -206,6 +206,15 @@ public enum BandConformanceRunner {
         "unnegotiated_stream_rejected",
         "firmware_blocked_during_live",
         "history_state_requires_durable_receipt",
+        "stale_capability_callback_rejected",
+        "invalid_device_time_rejected",
+        "history_operation_requires_own_receipt",
+        "firmware_diagnostics_specific",
+        "history_nonadvancing_cursor_rejected",
+        "utf8_length_cross_platform",
+        "sampling_requires_sensor_capability",
+        "durable_identity_cache_bounded",
+        "operation_terminal_paths",
         "diagnostics_bounded",
         "closed_session_terminal",
     ]
@@ -244,6 +253,24 @@ public enum BandConformanceRunner {
             return try await firmwareBlockedDuringLive()
         case "history_state_requires_durable_receipt":
             return try await historyStateRequiresDurableReceipt()
+        case "stale_capability_callback_rejected":
+            return try await staleCapabilityCallbackRejected()
+        case "invalid_device_time_rejected":
+            return try await invalidDeviceTimeRejected()
+        case "history_operation_requires_own_receipt":
+            return try await historyOperationRequiresOwnReceipt()
+        case "firmware_diagnostics_specific":
+            return try await firmwareDiagnosticsSpecific()
+        case "history_nonadvancing_cursor_rejected":
+            return try await historyNonadvancingCursorRejected()
+        case "utf8_length_cross_platform":
+            return try await utf8LengthCrossPlatform()
+        case "sampling_requires_sensor_capability":
+            return try await samplingRequiresSensorCapability()
+        case "durable_identity_cache_bounded":
+            return try await durableIdentityCacheBounded()
+        case "operation_terminal_paths":
+            return try await operationTerminalPaths()
         case "diagnostics_bounded":
             return await diagnosticsBounded()
         case "closed_session_terminal":
@@ -262,7 +289,10 @@ public enum BandConformanceRunner {
         let generation = try await session.beginScan()
         try await session.selectCandidate(VirtualBandFixtures.candidate)
         try await session.connect(VirtualBandFixtures.identity)
-        try await session.acceptCapabilities(capabilities)
+        try await session.acceptCapabilities(
+            capabilities,
+            callbackGeneration: generation
+        )
         return (session, generation)
     }
 
@@ -278,7 +308,10 @@ public enum BandConformanceRunner {
         events.append("candidate_selected")
         try await session.connect(VirtualBandFixtures.identity)
         events.append("connected")
-        try await session.acceptCapabilities(VirtualBandFixtures.capabilities)
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            callbackGeneration: generation
+        )
         events.append("capabilities_accepted")
         try await session.beginLive()
         accepted += try await session.commitLiveBatch(
@@ -505,8 +538,8 @@ public enum BandConformanceRunner {
             failure = error
             events.append("cursor_chain_rejected")
         }
-        try await session.completeOperation(secondToken)
-        events.append("operation_completed")
+        try await session.cancelOperation(secondToken)
+        events.append("operation_cancelled")
 
         return result(
             scenario: "history_cursor_chain_rejected",
@@ -521,7 +554,7 @@ public enum BandConformanceRunner {
         async throws -> BandConformanceResult
     {
         let session = BandSessionMachine()
-        _ = try await session.beginScan()
+        let generation = try await session.beginScan()
         try await session.selectCandidate(VirtualBandFixtures.candidate)
         try await session.connect(VirtualBandFixtures.identity)
         let report = BandCapabilityReport(
@@ -532,7 +565,10 @@ public enum BandConformanceRunner {
             historyDays: 7,
             capabilities: [.battery, .heartRate]
         )
-        try await session.acceptCapabilities(report)
+        try await session.acceptCapabilities(
+            report,
+            callbackGeneration: generation
+        )
         var events = ["ready"]
         var failure: BandFailureCategory?
         do {
@@ -590,7 +626,7 @@ public enum BandConformanceRunner {
     {
         let session = BandSessionMachine()
         var events: [String] = []
-        _ = try await session.beginScan()
+        let generation = try await session.beginScan()
         events.append("scan_started")
         try await session.selectCandidate(VirtualBandFixtures.candidate)
         events.append("candidate_selected")
@@ -613,7 +649,10 @@ public enum BandConformanceRunner {
         )
         var failure: BandFailureCategory?
         do {
-            try await session.acceptCapabilities(report)
+            try await session.acceptCapabilities(
+                report,
+                callbackGeneration: generation
+            )
         } catch let error as BandFailureCategory {
             failure = error
             events.append("capability_rejected")
@@ -690,7 +729,10 @@ public enum BandConformanceRunner {
         let generation = try await session.beginScan()
         try await session.selectCandidate(VirtualBandFixtures.candidate)
         try await session.connect(VirtualBandFixtures.identity)
-        try await session.acceptCapabilities(VirtualBandFixtures.capabilities)
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            callbackGeneration: generation
+        )
         var events = ["ready"]
         guard await session.snapshot().acknowledgedHistoryCursor == "cursor-2" else {
             throw BandFailureCategory.internalFailure
@@ -699,7 +741,7 @@ public enum BandConformanceRunner {
         let token = try await session.beginOperation(.history)
         do {
             try await session.completeOperation(token)
-        } catch BandFailureCategory.historyStalled {
+        } catch BandFailureCategory.storage {
             events.append("range_resume_required")
         }
 
@@ -855,8 +897,8 @@ public enum BandConformanceRunner {
             failure = error
             events.append("history_stream_rejected")
         }
-        try await session.completeOperation(historyToken)
-        events.append("operation_completed")
+        try await session.cancelOperation(historyToken)
+        events.append("operation_cancelled")
         return result(
             scenario: "unnegotiated_stream_rejected",
             events: events,
@@ -1016,6 +1058,15 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         events.append("terminal_committed")
+        do {
+            _ = try await session.stageHistoryChunk(
+                terminalChunk,
+                token: token,
+                callbackGeneration: generation
+            )
+        } catch BandFailureCategory.invalidState {
+            events.append("post_terminal_chunk_rejected")
+        }
         try await session.completeOperation(token)
         events.append("operation_completed")
         return result(
@@ -1026,6 +1077,465 @@ public enum BandConformanceRunner {
                 firstAcceptance.acceptedSamples
                     + terminalAcceptance.acceptedSamples,
             failure: failure
+        )
+    }
+
+    private static func staleCapabilityCallbackRejected()
+        async throws -> BandConformanceResult
+    {
+        let (session, oldGeneration) = try await readySession()
+        var events = ["ready"]
+        _ = try await session.interruptForReconnect()
+        try await session.resumeAfterReconnect()
+        events.append("generation_advanced")
+        var failure: BandFailureCategory?
+        do {
+            try await session.acceptCapabilities(
+                VirtualBandFixtures.capabilities,
+                callbackGeneration: oldGeneration
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_capability_rejected")
+        }
+        guard await session.snapshot().state == .ready else {
+            throw BandFailureCategory.internalFailure
+        }
+        return result(
+            scenario: "stale_capability_callback_rejected",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func invalidDeviceTimeRejected()
+        async throws -> BandConformanceResult
+    {
+        let (session, generation) = try await readySession()
+        var events = ["ready"]
+        let invalidSample = BandSample(
+            identity: BandSampleIdentity(
+                stream: .heartRate,
+                sequence: 10,
+                deviceTimeMilliseconds: -1
+            ),
+            value: 72,
+            unit: .beatsPerMinute,
+            quality: .accepted
+        )
+        let batch = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
+            samples: [invalidSample]
+        )
+        try await session.beginLive()
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.commitLiveBatch(
+                batch,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("invalid_device_time_rejected")
+        }
+        try await session.stopLive()
+        events.append("live_stopped")
+        return result(
+            scenario: "invalid_device_time_rejected",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func historyOperationRequiresOwnReceipt()
+        async throws -> BandConformanceResult
+    {
+        let (session, generation) = try await readySession()
+        let store = VirtualBandStore()
+        var events = ["ready"]
+        let firstToken = try await session.beginOperation(.history)
+        let firstAcceptance = try await session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: firstToken,
+            callbackGeneration: generation
+        )
+        let firstReceipt = await store.commit(
+            acceptance: firstAcceptance,
+            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
+        )
+        try await session.acknowledgeHistory(
+            receipt: firstReceipt,
+            token: firstToken,
+            callbackGeneration: generation
+        )
+        try await session.completeOperation(firstToken)
+        events.append("first_history_completed")
+
+        let secondToken = try await session.beginOperation(.history)
+        var failure: BandFailureCategory?
+        do {
+            try await session.completeOperation(secondToken)
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("own_receipt_required")
+        }
+        try await session.cancelOperation(secondToken)
+        events.append("operation_cancelled")
+        return result(
+            scenario: "history_operation_requires_own_receipt",
+            events: events,
+            snapshot: await session.snapshot(),
+            acceptedSamples: firstAcceptance.acceptedSamples,
+            failure: failure
+        )
+    }
+
+    private static func firmwareDiagnosticsSpecific()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let session = BandSessionMachine(diagnostics: diagnostics)
+        let generation = try await session.beginScan()
+        do {
+            _ = try await session.beginOperation(.firmware)
+        } catch BandFailureCategory.invalidState {
+            // The diagnostic assertion below verifies this rejection family.
+        }
+        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.connect(VirtualBandFixtures.identity)
+        let report = BandCapabilityReport(
+            schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
+            firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
+            historyDays: 7,
+            capabilities: [.heartRate, .firmwareUpdate]
+        )
+        try await session.acceptCapabilities(
+            report,
+            callbackGeneration: generation
+        )
+        var events = ["ready"]
+        let token = try await session.beginOperation(.firmware)
+        try await session.completeOperation(token)
+        try await session.beginLive()
+        do {
+            _ = try await session.beginOperation(.firmware)
+        } catch BandFailureCategory.busy {
+            // The diagnostic assertion below verifies the rejection family.
+        }
+        try await session.stopLive()
+        let staleToken = try await session.beginOperation(.firmware)
+        _ = try await session.interruptForReconnect()
+        try await session.resumeAfterReconnect()
+        do {
+            try await session.completeOperation(staleToken)
+        } catch BandFailureCategory.staleCallback {
+            // The diagnostic assertion below verifies this rejection family.
+        }
+        let firmwareEvents = await diagnostics.snapshot().filter {
+            $0.kind == .firmware
+        }
+        let firmwareEvidence = firmwareEvents.map {
+            "\($0.outcome.rawValue):"
+                + ($0.failureCategory?.rawValue ?? "none")
+        }
+        if firmwareEvidence == [
+            "rejected:invalidState",
+            "began:none",
+            "completed:none",
+            "rejected:busy",
+            "began:none",
+            "rejected:staleCallback",
+        ]
+        {
+            events.append("firmware_diagnostics_specific")
+        } else {
+            events.append("firmware_diagnostics_incorrect")
+        }
+        return result(
+            scenario: "firmware_diagnostics_specific",
+            events: events,
+            snapshot: await session.snapshot()
+        )
+    }
+
+    private static func historyNonadvancingCursorRejected()
+        async throws -> BandConformanceResult
+    {
+        let (session, generation) = try await readySession()
+        var events = ["ready"]
+        let token = try await session.beginOperation(.history)
+        let chunk = BandHistoryChunk(
+            chunkIdentity: "chunk-stalled",
+            previousCursor: nil,
+            nextCursor: nil,
+            complete: false,
+            overflowed: false,
+            acknowledgementToken: "ack-stalled",
+            batches: []
+        )
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.stageHistoryChunk(
+                chunk,
+                token: token,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("nonadvancing_cursor_rejected")
+        }
+        try await session.cancelOperation(token)
+        events.append("operation_cancelled")
+        return result(
+            scenario: "history_nonadvancing_cursor_rejected",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func utf8LengthCrossPlatform()
+        async throws -> BandConformanceResult
+    {
+        let (session, generation) = try await readySession()
+        var events = ["ready"]
+        let batch = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: String(repeating: "é", count: 33),
+            calibrationRevision: "calibration-v1",
+            samples: VirtualBandFixtures.liveBatch.samples
+        )
+        try await session.beginLive()
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.commitLiveBatch(
+                batch,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("utf8_limit_rejected")
+        }
+        try await session.stopLive()
+        events.append("live_stopped")
+        return result(
+            scenario: "utf8_length_cross_platform",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func samplingRequiresSensorCapability()
+        async throws -> BandConformanceResult
+    {
+        let report = BandCapabilityReport(
+            schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
+            firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
+            historyDays: 7,
+            capabilities: [.battery]
+        )
+        let (session, _) = try await readySession(capabilities: report)
+        var events = ["ready"]
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.beginOperation(.sampling)
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("sampling_rejected")
+        }
+        return result(
+            scenario: "sampling_requires_sensor_capability",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func durableIdentityCacheBounded()
+        async throws -> BandConformanceResult
+    {
+        let samePositionStreams: [BandStreamKind] = [
+            .heartRate,
+            .rrInterval,
+            .steps,
+            .spo2,
+            .respiration,
+            .temperature,
+            .acceleration,
+        ]
+        var identities = Set(
+            samePositionStreams.map {
+                BandSampleIdentity(
+                    stream: $0,
+                    sequence: 0,
+                    deviceTimeMilliseconds: 0
+                )
+            }
+        )
+        let remaining =
+            BandContractLimits.historyCheckpointIdentities
+                - samePositionStreams.count
+        for index in 1 ... remaining {
+            identities.insert(
+                BandSampleIdentity(
+                    stream: .heartRate,
+                    sequence: UInt64(index),
+                    deviceTimeMilliseconds: Int64(index)
+                )
+            )
+        }
+        let checkpoint = BandHistoryCheckpoint(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor: nil,
+            lastHistoryComplete: nil,
+            durableSampleIdentities: identities
+        )
+        let session = BandSessionMachine(historyCheckpoint: checkpoint)
+        let generation = try await session.beginScan()
+        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.connect(VirtualBandFixtures.identity)
+        let capabilities = BandCapabilityReport(
+            schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
+            firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
+            historyDays: 7,
+            capabilities:
+                VirtualBandFixtures.capabilities.capabilities
+                    .union([.accelerometer])
+        )
+        try await session.acceptCapabilities(
+            capabilities,
+            callbackGeneration: generation
+        )
+        var events = ["ready"]
+        let next = BandSample(
+            identity: BandSampleIdentity(
+                stream: .heartRate,
+                sequence: UInt64(BandContractLimits.historyCheckpointIdentities),
+                deviceTimeMilliseconds:
+                    Int64(BandContractLimits.historyCheckpointIdentities)
+            ),
+            value: 72,
+            unit: .beatsPerMinute,
+            quality: .accepted
+        )
+        let batch = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
+            samples: [next]
+        )
+        try await session.beginLive()
+        let accepted = try await session.commitLiveBatch(
+            batch,
+            callbackGeneration: generation
+        )
+        let evictedCandidate = BandSample(
+            identity: BandSampleIdentity(
+                stream: .acceleration,
+                sequence: 0,
+                deviceTimeMilliseconds: 0
+            ),
+            value: 0,
+            unit: .gravity,
+            quality: .accepted
+        )
+        let evictionProbe = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
+            samples: [evictedCandidate]
+        )
+        let evictionAccepted = try await session.commitLiveBatch(
+            evictionProbe,
+            callbackGeneration: generation
+        )
+        if accepted == 1,
+           evictionAccepted == 1,
+           await session.snapshot().durableSampleCount
+             == BandContractLimits.historyCheckpointIdentities
+        {
+            events.append("identity_cache_bounded")
+        } else {
+            events.append("identity_cache_unbounded")
+        }
+        try await session.stopLive()
+        events.append("live_stopped")
+        return result(
+            scenario: "durable_identity_cache_bounded",
+            events: events,
+            snapshot: await session.snapshot(),
+            acceptedSamples: accepted + evictionAccepted
+        )
+    }
+
+    private static func operationTerminalPaths()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let session = BandSessionMachine(diagnostics: diagnostics)
+        let generation = try await session.beginScan()
+        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.connect(VirtualBandFixtures.identity)
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            callbackGeneration: generation
+        )
+        var events = ["ready"]
+        let cancelled = try await session.beginOperation(.battery)
+        try await session.cancelOperation(cancelled)
+        events.append("operation_cancelled")
+        let failed = try await session.beginOperation(.haptic)
+        try await session.failOperation(failed, category: .timeout)
+        let lastEvent = await diagnostics.snapshot().last
+        if lastEvent?.kind == .command,
+           lastEvent?.outcome == .failed,
+           lastEvent?.failureCategory == .timeout
+        {
+            events.append("operation_failed")
+        } else {
+            events.append("operation_failure_incorrect")
+        }
+        try await session.beginLive()
+        let disconnected = try await session.beginOperation(.battery)
+        try await session.failOperation(disconnected, category: .disconnected)
+        let recovering = await session.snapshot()
+        if recovering.state == .recovering,
+           recovering.generation == generation + 1,
+           !recovering.liveActive
+        {
+            events.append("disconnect_recovery")
+        } else {
+            events.append("disconnect_recovery_incorrect")
+        }
+        do {
+            _ = try await session.commitLiveBatch(
+                VirtualBandFixtures.liveBatch,
+                callbackGeneration: generation
+            )
+        } catch BandFailureCategory.staleCallback {
+            events.append("stale_callback_rejected")
+        }
+        try await session.resumeAfterReconnect()
+        events.append("reconnected")
+        return result(
+            scenario: "operation_terminal_paths",
+            events: events,
+            snapshot: await session.snapshot()
         )
     }
 
