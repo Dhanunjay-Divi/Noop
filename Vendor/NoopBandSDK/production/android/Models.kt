@@ -9,6 +9,8 @@ object BandContractLimits {
     const val SAMPLES_PER_BATCH = 4_096
     const val BATCHES_PER_HISTORY_CHUNK = 256
     const val SAMPLES_PER_HISTORY_CHUNK = 16_384
+    const val HISTORY_CHECKPOINT_IDENTITIES = 65_536
+    const val MAXIMUM_SAMPLE_SEQUENCE = Long.MAX_VALUE
 }
 
 enum class BandCapability(val wireValue: String) {
@@ -293,6 +295,30 @@ data class BandHistoryChunk(
     }
 }
 
+data class BandHistoryCheckpoint(
+    val sourceIdentity: String,
+    val acknowledgedCursor: String?,
+    val lastHistoryComplete: Boolean?,
+    val durableSampleIdentities: Set<BandSampleIdentity>,
+) {
+    fun validate() {
+        if (
+            sourceIdentity.isEmpty() ||
+            sourceIdentity.length > BandContractLimits.SOURCE_IDENTITY_LENGTH ||
+            acknowledgedCursor?.let {
+                it.isEmpty() || it.length > BandContractLimits.CURSOR_LENGTH
+            } == true ||
+            durableSampleIdentities.size >
+            BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES ||
+            durableSampleIdentities.any {
+                it.sequence < 0
+            }
+        ) {
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
+    }
+}
+
 data class BandOperationToken(
     val generation: Long,
     val sequence: Long,
@@ -303,6 +329,8 @@ data class HistoryAcceptance(
     val chunkIdentity: String,
     val acknowledgementToken: String,
     val nextCursor: String?,
+    val complete: Boolean,
+    val overflowed: Boolean,
     val acceptedSamples: Int,
     val duplicateSamples: Int,
 )
@@ -311,6 +339,9 @@ data class DurableHistoryReceipt(
     val chunkIdentity: String,
     val acknowledgementToken: String,
     val nextCursor: String?,
+    val complete: Boolean,
+    val overflowed: Boolean,
+    val historyStateCommitted: Boolean,
     val committedSamples: Int,
     val committed: Boolean,
 )

@@ -15,6 +15,9 @@ public actor VirtualBandStore {
             chunkIdentity: acceptance.chunkIdentity,
             acknowledgementToken: acceptance.acknowledgementToken,
             nextCursor: acceptance.nextCursor,
+            complete: acceptance.complete,
+            overflowed: acceptance.overflowed,
+            historyStateCommitted: true,
             committedSamples: identities.count,
             committed: true
         )
@@ -198,6 +201,11 @@ public enum BandConformanceRunner {
         "oversized_metadata_rejected",
         "capability_unknown_fail_closed",
         "history_interrupted_resume",
+        "history_checkpoint_restored",
+        "firmware_eligibility_specific",
+        "unnegotiated_stream_rejected",
+        "firmware_blocked_during_live",
+        "history_state_requires_durable_receipt",
         "diagnostics_bounded",
         "closed_session_terminal",
     ]
@@ -226,6 +234,16 @@ public enum BandConformanceRunner {
             return try await capabilityUnknownFailsClosed()
         case "history_interrupted_resume":
             return try await historyInterruptedResume()
+        case "history_checkpoint_restored":
+            return try await historyCheckpointRestored()
+        case "firmware_eligibility_specific":
+            return try await firmwareEligibilitySpecific()
+        case "unnegotiated_stream_rejected":
+            return try await unnegotiatedStreamRejected()
+        case "firmware_blocked_during_live":
+            return try await firmwareBlockedDuringLive()
+        case "history_state_requires_durable_receipt":
+            return try await historyStateRequiresDurableReceipt()
         case "diagnostics_bounded":
             return await diagnosticsBounded()
         case "closed_session_terminal":
@@ -235,14 +253,16 @@ public enum BandConformanceRunner {
         }
     }
 
-    private static func readySession()
+    private static func readySession(
+        capabilities: BandCapabilityReport = VirtualBandFixtures.capabilities
+    )
         async throws -> (BandSessionMachine, UInt64)
     {
         let session = BandSessionMachine()
         let generation = try await session.beginScan()
         try await session.selectCandidate(VirtualBandFixtures.candidate)
         try await session.connect(VirtualBandFixtures.identity)
-        try await session.acceptCapabilities(VirtualBandFixtures.capabilities)
+        try await session.acceptCapabilities(capabilities)
         return (session, generation)
     }
 
@@ -366,6 +386,9 @@ public enum BandConformanceRunner {
             chunkIdentity: acceptance.chunkIdentity,
             acknowledgementToken: acceptance.acknowledgementToken,
             nextCursor: acceptance.nextCursor,
+            complete: acceptance.complete,
+            overflowed: acceptance.overflowed,
+            historyStateCommitted: false,
             committedSamples: 0,
             committed: false
         )
@@ -646,6 +669,362 @@ public enum BandConformanceRunner {
             events: events,
             snapshot: await session.snapshot(),
             acceptedSamples: acceptance.acceptedSamples,
+            failure: failure
+        )
+    }
+
+    private static func historyCheckpointRestored()
+        async throws -> BandConformanceResult
+    {
+        let checkpoint = BandHistoryCheckpoint(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor: "cursor-2",
+            lastHistoryComplete: false,
+            durableSampleIdentities: Set(
+                VirtualBandFixtures.historyChunk.batches
+                    .flatMap(\.samples)
+                    .map(\.identity)
+            )
+        )
+        let session = BandSessionMachine(historyCheckpoint: checkpoint)
+        let generation = try await session.beginScan()
+        try await session.selectCandidate(VirtualBandFixtures.candidate)
+        try await session.connect(VirtualBandFixtures.identity)
+        try await session.acceptCapabilities(VirtualBandFixtures.capabilities)
+        var events = ["ready"]
+        guard await session.snapshot().acknowledgedHistoryCursor == "cursor-2" else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("checkpoint_restored")
+        let token = try await session.beginOperation(.history)
+        do {
+            try await session.completeOperation(token)
+        } catch BandFailureCategory.historyStalled {
+            events.append("range_resume_required")
+        }
+
+        let duplicate = VirtualBandFixtures.historyChunk.batches[0].samples[1]
+        let newSample = BandSample(
+            identity: BandSampleIdentity(
+                stream: .heartRate,
+                sequence: 4,
+                deviceTimeMilliseconds: 4_000
+            ),
+            value: 67,
+            unit: .beatsPerMinute,
+            quality: .accepted
+        )
+        let chunk = BandHistoryChunk(
+            chunkIdentity: "chunk-2",
+            previousCursor: "cursor-2",
+            nextCursor: "cursor-3",
+            complete: true,
+            overflowed: false,
+            acknowledgementToken: "ack-2",
+            batches: [
+                BandSampleBatch(
+                    sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+                    lane: .history,
+                    parserRevision: "parser-v1",
+                    calibrationRevision: "calibration-v1",
+                    samples: [duplicate, newSample]
+                ),
+            ]
+        )
+        let acceptance = try await session.stageHistoryChunk(
+            chunk,
+            token: token,
+            callbackGeneration: generation
+        )
+        let receipt = await VirtualBandStore().commit(
+            acceptance: acceptance,
+            samples: chunk.batches.flatMap(\.samples)
+        )
+        events.append("history_committed")
+        try await session.acknowledgeHistory(
+            receipt: receipt,
+            token: token,
+            callbackGeneration: generation
+        )
+        events.append("history_acknowledged")
+        try await session.completeOperation(token)
+        return result(
+            scenario: "history_checkpoint_restored",
+            events: events,
+            snapshot: await session.snapshot(),
+            acceptedSamples: acceptance.acceptedSamples
+        )
+    }
+
+    private static func firmwareEligibilitySpecific()
+        async throws -> BandConformanceResult
+    {
+        let report = BandCapabilityReport(
+            schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
+            firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
+            historyDays: 7,
+            capabilities: [.heartRate]
+        )
+        let (session, _) = try await readySession(capabilities: report)
+        var events = ["ready"]
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.beginOperation(.firmware)
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("firmware_rejected")
+        }
+        return result(
+            scenario: "firmware_eligibility_specific",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func unnegotiatedStreamRejected()
+        async throws -> BandConformanceResult
+    {
+        let report = BandCapabilityReport(
+            schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
+            firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
+            historyDays: 7,
+            capabilities: [.heartRate]
+        )
+        let (session, generation) = try await readySession(capabilities: report)
+        var events = ["ready"]
+        let sample = BandSample(
+            identity: BandSampleIdentity(
+                stream: .spo2,
+                sequence: 4,
+                deviceTimeMilliseconds: 4_000
+            ),
+            value: 98,
+            unit: .percent,
+            quality: .accepted
+        )
+        let batch = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
+            samples: [sample]
+        )
+        try await session.beginLive()
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.commitLiveBatch(
+                batch,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("live_stream_rejected")
+        }
+        try await session.stopLive()
+        events.append("live_stopped")
+        let historyToken = try await session.beginOperation(.history)
+        let historyChunk = BandHistoryChunk(
+            chunkIdentity: "chunk-unnegotiated",
+            previousCursor: nil,
+            nextCursor: "cursor-unnegotiated",
+            complete: true,
+            overflowed: false,
+            acknowledgementToken: "ack-unnegotiated",
+            batches: [
+                BandSampleBatch(
+                    sourceIdentity: batch.sourceIdentity,
+                    lane: .history,
+                    parserRevision: batch.parserRevision,
+                    calibrationRevision: batch.calibrationRevision,
+                    samples: batch.samples
+                ),
+            ]
+        )
+        do {
+            _ = try await session.stageHistoryChunk(
+                historyChunk,
+                token: historyToken,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("history_stream_rejected")
+        }
+        try await session.completeOperation(historyToken)
+        events.append("operation_completed")
+        return result(
+            scenario: "unnegotiated_stream_rejected",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func firmwareBlockedDuringLive()
+        async throws -> BandConformanceResult
+    {
+        let report = BandCapabilityReport(
+            schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
+            firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
+            historyDays: 7,
+            capabilities: [.heartRate, .firmwareUpdate]
+        )
+        let (session, _) = try await readySession(capabilities: report)
+        var events = ["ready"]
+        try await session.beginLive()
+        events.append("live_started")
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.beginOperation(.firmware)
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("firmware_rejected")
+        }
+        try await session.stopLive()
+        events.append("live_stopped")
+        return result(
+            scenario: "firmware_blocked_during_live",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func historyStateRequiresDurableReceipt()
+        async throws -> BandConformanceResult
+    {
+        let (session, generation) = try await readySession()
+        let store = VirtualBandStore()
+        var events = ["ready"]
+        var failure: BandFailureCategory?
+        let firstSample = BandSample(
+            identity: BandSampleIdentity(
+                stream: .heartRate,
+                sequence: 4,
+                deviceTimeMilliseconds: 4_000
+            ),
+            value: 67,
+            unit: .beatsPerMinute,
+            quality: .accepted
+        )
+        let firstChunk = BandHistoryChunk(
+            chunkIdentity: "chunk-incomplete",
+            previousCursor: nil,
+            nextCursor: "cursor-2",
+            complete: false,
+            overflowed: true,
+            acknowledgementToken: "ack-incomplete",
+            batches: [
+                BandSampleBatch(
+                    sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+                    lane: .history,
+                    parserRevision: "parser-v1",
+                    calibrationRevision: "calibration-v1",
+                    samples: [firstSample]
+                ),
+            ]
+        )
+        let token = try await session.beginOperation(.history)
+        let firstAcceptance = try await session.stageHistoryChunk(
+            firstChunk,
+            token: token,
+            callbackGeneration: generation
+        )
+        events.append("history_received")
+        do {
+            try await session.acknowledgeHistory(
+                receipt: DurableHistoryReceipt(
+                    chunkIdentity: firstAcceptance.chunkIdentity,
+                    acknowledgementToken: firstAcceptance.acknowledgementToken,
+                    nextCursor: firstAcceptance.nextCursor,
+                    complete: firstAcceptance.complete,
+                    overflowed: false,
+                    historyStateCommitted: true,
+                    committedSamples: firstAcceptance.acceptedSamples,
+                    committed: true
+                ),
+                token: token,
+                callbackGeneration: generation
+            )
+        } catch {
+            events.append("receipt_rejected")
+        }
+        let firstReceipt = await store.commit(
+            acceptance: firstAcceptance,
+            samples: firstChunk.batches.flatMap(\.samples)
+        )
+        try await session.acknowledgeHistory(
+            receipt: firstReceipt,
+            token: token,
+            callbackGeneration: generation
+        )
+        events.append("history_committed")
+        do {
+            try await session.completeOperation(token)
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("range_incomplete")
+        }
+
+        let terminalSample = BandSample(
+            identity: BandSampleIdentity(
+                stream: .heartRate,
+                sequence: 5,
+                deviceTimeMilliseconds: 5_000
+            ),
+            value: 66,
+            unit: .beatsPerMinute,
+            quality: .accepted
+        )
+        let terminalChunk = BandHistoryChunk(
+            chunkIdentity: "chunk-terminal",
+            previousCursor: "cursor-2",
+            nextCursor: "cursor-3",
+            complete: true,
+            overflowed: false,
+            acknowledgementToken: "ack-terminal",
+            batches: [
+                BandSampleBatch(
+                    sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+                    lane: .history,
+                    parserRevision: "parser-v1",
+                    calibrationRevision: "calibration-v1",
+                    samples: [terminalSample]
+                ),
+            ]
+        )
+        let terminalAcceptance = try await session.stageHistoryChunk(
+            terminalChunk,
+            token: token,
+            callbackGeneration: generation
+        )
+        events.append("terminal_received")
+        let terminalReceipt = await store.commit(
+            acceptance: terminalAcceptance,
+            samples: terminalChunk.batches.flatMap(\.samples)
+        )
+        try await session.acknowledgeHistory(
+            receipt: terminalReceipt,
+            token: token,
+            callbackGeneration: generation
+        )
+        events.append("terminal_committed")
+        try await session.completeOperation(token)
+        events.append("operation_completed")
+        return result(
+            scenario: "history_state_requires_durable_receipt",
+            events: events,
+            snapshot: await session.snapshot(),
+            acceptedSamples:
+                firstAcceptance.acceptedSamples
+                    + terminalAcceptance.acceptedSamples,
             failure: failure
         )
     }

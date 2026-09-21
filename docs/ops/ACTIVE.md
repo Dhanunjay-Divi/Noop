@@ -12,18 +12,22 @@ Last updated: **2026-09-21**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: the private binary-free SDK core is merged and its exact
-  ten-file export is now integrated locally into Apple and Android behind a
-  production-default-off source factory. WHOOP remains unchanged. Artifact
-  verification and five tamper/layout tests pass. The Swift package passes 4/4
-  tests and the focused Android JUnit path passes 2/2; both execute all 13
-  exported conformance expectations. XcodeGen accepts the local package graph,
-  Gradle configuration accepts the Kotlin source sets, and an independent
-  review's package-integrity and conformance-assertion findings are corrected.
-  The 196-test release-control wall and all current policy gates pass. Full
-  Apple/Android app compilation is pending the single protected-CI candidate
-  because the host remains below the 10 GiB local heavy-build floor. No
-  supplier binary, firmware, real adapter, or flasher is included.
+- Current state: the private binary-free SDK review hardening is merged at
+  `f32633a9`, and two independent clean exports of implementation revision
+  `f2c1e189` were byte-identical. The exact ten-file artifact is integrated
+  locally into Apple and Android behind a production-default-off source
+  factory; WHOOP remains the default comparison transport. All seven SDK
+  review findings are corrected, including durable source-scoped incomplete
+  history restore and exact completion/overflow receipts. Artifact and
+  required-CI tests pass 54/54; the Swift package passes 4/4 across all 18
+  conformance scenarios. The Android Full boundary test and Demo compile pass
+  independently under the bounded memory policy, and the real macOS app target
+  passes 4/4 focused integration tests. A combined parallel Full+Demo command
+  was classified as an avoidable Kotlin heap spike and replaced by sequential
+  bounded verification. PR `#17` still needs one consolidated remediation
+  commit/push, new exact-SHA hosted checks, review-thread resolution, protected
+  merge/main verification, and exact cleanup. No supplier binary, firmware,
+  real adapter, or flasher is included.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,

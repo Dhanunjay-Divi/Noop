@@ -2,6 +2,7 @@ package com.noop.bandsdk
 
 class BandSessionMachine(
     private val diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
+    private val restoredHistoryCheckpoint: BandHistoryCheckpoint? = null,
 ) {
     private data class PendingHistory(
         val acceptance: HistoryAcceptance,
@@ -16,6 +17,7 @@ class BandSessionMachine(
     private var identity: BandIdentity? = null
     private var capabilityReport: BandCapabilityReport? = null
     private var pendingHistory: PendingHistory? = null
+    private var lastDurableHistoryComplete: Boolean? = null
     private val durableSampleIdentities = mutableSetOf<BandSampleIdentity>()
     private var acknowledgedHistoryCursor: String? = null
 
@@ -28,6 +30,36 @@ class BandSessionMachine(
         acknowledgedHistoryCursor = acknowledgedHistoryCursor,
         durableSampleCount = durableSampleIdentities.size,
     )
+
+    @Synchronized
+    fun historyCheckpoint(): BandHistoryCheckpoint? {
+        val sourceIdentity = identity?.sourceIdentity ?: return null
+        val identities = if (
+            durableSampleIdentities.size <=
+            BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES
+        ) {
+            durableSampleIdentities.toSet()
+        } else {
+            durableSampleIdentities
+                .sortedWith(
+                    compareBy<BandSampleIdentity> {
+                        it.deviceTimeMilliseconds
+                    }.thenBy {
+                        it.sequence
+                    }.thenBy {
+                        it.stream.ordinal
+                    },
+                )
+                .takeLast(BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES)
+                .toSet()
+        }
+        return BandHistoryCheckpoint(
+            sourceIdentity = sourceIdentity,
+            acknowledgedCursor = acknowledgedHistoryCursor,
+            lastHistoryComplete = lastDurableHistoryComplete,
+            durableSampleIdentities = identities,
+        )
+    }
 
     @Synchronized
     fun beginScan(): Long {
@@ -93,9 +125,23 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_STATE)
         }
         newIdentity.validate()
-        if (identity?.sourceIdentity != newIdentity.sourceIdentity) {
+        if (
+            identity == null &&
+            restoredHistoryCheckpoint?.sourceIdentity == newIdentity.sourceIdentity
+        ) {
+            restoredHistoryCheckpoint.validate()
+            durableSampleIdentities.clear()
+            durableSampleIdentities.addAll(
+                restoredHistoryCheckpoint.durableSampleIdentities,
+            )
+            acknowledgedHistoryCursor =
+                restoredHistoryCheckpoint.acknowledgedCursor
+            lastDurableHistoryComplete =
+                restoredHistoryCheckpoint.lastHistoryComplete
+        } else if (identity?.sourceIdentity != newIdentity.sourceIdentity) {
             durableSampleIdentities.clear()
             acknowledgedHistoryCursor = null
+            lastDurableHistoryComplete = null
         }
         capabilityReport = null
         state = BandSessionState.CONNECTING
@@ -187,6 +233,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_STATE)
         }
         batch.validate(BandProvenanceLane.LIVE)
+        validateNegotiatedStreams(batch.samples, BandDiagnosticKind.LIVE)
         val acceptedIdentities = mutableSetOf<BandSampleIdentity>()
         val unique = batch.samples.filter {
             it.identity !in durableSampleIdentities &&
@@ -219,19 +266,40 @@ class BandSessionMachine(
             fail(BandFailureCategory.BUSY)
         }
         ensureReadyForOperation()
-        listOfNotNull(
-            impliedCapability(operationClass),
-            requiredCapability,
-        ).forEach { capability ->
-            if (capabilityReport?.capabilities?.contains(capability) != true) {
-                fail(BandFailureCategory.UNSUPPORTED)
-            }
+        if (operationClass == BandOperationClass.FIRMWARE && liveActive) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.COMMAND,
+                    BandDiagnosticOutcome.REJECTED,
+                ),
+            )
+            fail(BandFailureCategory.BUSY)
         }
         if (
             operationClass == BandOperationClass.FIRMWARE &&
             capabilityReport?.capabilities?.contains(BandCapability.FIRMWARE_UPDATE) != true
         ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.COMMAND,
+                    BandDiagnosticOutcome.REJECTED,
+                ),
+            )
             fail(BandFailureCategory.UPDATE_NOT_ELIGIBLE)
+        }
+        listOfNotNull(
+            impliedCapability(operationClass),
+            requiredCapability,
+        ).forEach { capability ->
+            if (capabilityReport?.capabilities?.contains(capability) != true) {
+                diagnostics.record(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.COMMAND,
+                        BandDiagnosticOutcome.REJECTED,
+                    ),
+                )
+                fail(BandFailureCategory.UNSUPPORTED)
+            }
         }
 
         nextOperationSequence += 1
@@ -271,6 +339,10 @@ class BandSessionMachine(
             fail(BandFailureCategory.BUSY)
         }
         chunk.validate()
+        validateNegotiatedStreams(
+            chunk.batches.flatMap(BandSampleBatch::samples),
+            BandDiagnosticKind.HISTORY,
+        )
         if (chunk.previousCursor != acknowledgedHistoryCursor) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -298,6 +370,8 @@ class BandSessionMachine(
             chunkIdentity = chunk.chunkIdentity,
             acknowledgementToken = chunk.acknowledgementToken,
             nextCursor = chunk.nextCursor,
+            complete = chunk.complete,
+            overflowed = chunk.overflowed,
             acceptedSamples = unique.size,
             duplicateSamples = duplicates,
         )
@@ -327,6 +401,9 @@ class BandSessionMachine(
             receipt.chunkIdentity != pending.acceptance.chunkIdentity ||
             receipt.acknowledgementToken != pending.acceptance.acknowledgementToken ||
             receipt.nextCursor != pending.acceptance.nextCursor ||
+            receipt.complete != pending.acceptance.complete ||
+            receipt.overflowed != pending.acceptance.overflowed ||
+            !receipt.historyStateCommitted ||
             receipt.committedSamples < pending.acceptance.acceptedSamples
         ) {
             diagnostics.record(
@@ -340,6 +417,7 @@ class BandSessionMachine(
 
         durableSampleIdentities.addAll(pending.sampleIdentities)
         acknowledgedHistoryCursor = receipt.nextCursor
+        lastDurableHistoryComplete = pending.acceptance.complete
         pendingHistory = null
         diagnostics.record(
             BandDiagnosticEvent(
@@ -358,6 +436,12 @@ class BandSessionMachine(
             pendingHistory != null
         ) {
             fail(BandFailureCategory.STORAGE)
+        }
+        if (
+            token.operationClass == BandOperationClass.HISTORY &&
+            lastDurableHistoryComplete == false
+        ) {
+            fail(BandFailureCategory.HISTORY_STALLED)
         }
         activeOperation = null
         state = if (liveActive) {
@@ -488,6 +572,37 @@ class BandSessionMachine(
         }
     }
 
+    private fun validateNegotiatedStreams(
+        samples: List<BandSample>,
+        diagnosticKind: BandDiagnosticKind,
+    ) {
+        val capabilities = capabilityReport?.capabilities
+        if (
+            capabilities == null ||
+            samples.any { requiredCapability(it.identity.stream) !in capabilities }
+        ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    diagnosticKind,
+                    BandDiagnosticOutcome.REJECTED,
+                ),
+            )
+            fail(BandFailureCategory.UNSUPPORTED)
+        }
+    }
+
+    private fun requiredCapability(
+        stream: BandStreamKind,
+    ): BandCapability = when (stream) {
+        BandStreamKind.HEART_RATE -> BandCapability.HEART_RATE
+        BandStreamKind.RR_INTERVAL -> BandCapability.RR_INTERVALS
+        BandStreamKind.STEPS -> BandCapability.STEPS
+        BandStreamKind.SPO2 -> BandCapability.SPO2
+        BandStreamKind.RESPIRATION -> BandCapability.RESPIRATION
+        BandStreamKind.TEMPERATURE -> BandCapability.TEMPERATURE
+        BandStreamKind.ACCELERATION -> BandCapability.ACCELEROMETER
+    }
+
     private fun impliedCapability(
         operationClass: BandOperationClass,
     ): BandCapability? = when (operationClass) {
@@ -495,9 +610,9 @@ class BandSessionMachine(
         BandOperationClass.WEAR_STATE -> BandCapability.WEAR_STATE
         BandOperationClass.HAPTIC -> BandCapability.HAPTICS
         BandOperationClass.ALARM -> BandCapability.ALARMS
-        BandOperationClass.FIRMWARE -> BandCapability.FIRMWARE_UPDATE
         BandOperationClass.HISTORY,
         BandOperationClass.SAMPLING,
+        BandOperationClass.FIRMWARE,
         -> null
     }
 }

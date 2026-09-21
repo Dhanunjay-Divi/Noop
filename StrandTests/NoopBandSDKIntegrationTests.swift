@@ -27,13 +27,63 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "0abd9a3ce4f808b51bdc93ad28504ac810914631"
+            "f2c1e189d6e703ceecea3502e1ba9ea77d8e2bd7"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let generation = try await session.beginScan()
         XCTAssertEqual(generation, 1)
         let snapshot = await session.snapshot()
         XCTAssertEqual(snapshot.state, .scanning)
+    }
+
+    func testPinnedBoundaryRestoresSourceScopedHistoryCheckpoint() async throws {
+        let checkpoint = BandHistoryCheckpoint(
+            sourceIdentity: "synthetic-source",
+            acknowledgedCursor: "cursor-2",
+            lastHistoryComplete: false,
+            durableSampleIdentities: []
+        )
+        let session = NoopBandSDKBoundary.makeSession(
+            historyCheckpoint: checkpoint
+        )
+        _ = try await session.beginScan()
+        try await session.selectCandidate(
+            BandPairingCandidate(
+                handle: "synthetic-candidate",
+                compatible: true,
+                identifyEligible: true
+            )
+        )
+        let identity = BandIdentity(
+            sourceIdentity: checkpoint.sourceIdentity,
+            hardwareRevision: "synthetic-hw-1",
+            firmwareVersion: "synthetic-fw-1",
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            wrapperRevision: "artifact-f2c1e189"
+        )
+        try await session.connect(identity)
+        try await session.acceptCapabilities(
+            BandCapabilityReport(
+                schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+                protocolVersion: identity.protocolVersion,
+                hardwareRevision: identity.hardwareRevision,
+                firmwareVersion: identity.firmwareVersion,
+                historyDays: 7,
+                capabilities: [.heartRate]
+            )
+        )
+        let restoredSnapshot = await session.snapshot()
+        XCTAssertEqual(
+            restoredSnapshot.acknowledgedHistoryCursor,
+            checkpoint.acknowledgedCursor
+        )
+        let token = try await session.beginOperation(.history)
+        do {
+            try await session.completeOperation(token)
+            XCTFail("An incomplete restored range must require a terminal chunk")
+        } catch let error as BandFailureCategory {
+            XCTAssertEqual(error, .historyStalled)
+        }
     }
 
     @MainActor

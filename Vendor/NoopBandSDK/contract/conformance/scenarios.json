@@ -181,6 +181,90 @@
       }
     },
     {
+      "id": "history_checkpoint_restored",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "checkpoint_restored",
+          "range_resume_required",
+          "history_committed",
+          "history_acknowledged"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-3",
+        "acceptedSamples": 1,
+        "failure": null
+      }
+    },
+    {
+      "id": "firmware_eligibility_specific",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "firmware_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "updateNotEligible"
+      }
+    },
+    {
+      "id": "unnegotiated_stream_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "live_stream_rejected",
+          "live_stopped",
+          "history_stream_rejected",
+          "operation_completed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "unsupported"
+      }
+    },
+    {
+      "id": "firmware_blocked_during_live",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "live_started",
+          "firmware_rejected",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "busy"
+      }
+    },
+    {
+      "id": "history_state_requires_durable_receipt",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "history_received",
+          "receipt_rejected",
+          "history_committed",
+          "range_incomplete",
+          "terminal_received",
+          "terminal_committed",
+          "operation_completed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-3",
+        "acceptedSamples": 2,
+        "failure": "historyStalled"
+      }
+    },
+    {
       "id": "diagnostics_bounded",
       "automated": true,
       "expected": {

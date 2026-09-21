@@ -15751,8 +15751,8 @@
       "category": "historical",
       "lineNumbers": [
         4,
-        41,
-        92
+        91,
+        142
       ],
       "occurrenceCount": 3,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -15764,8 +15764,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        85,
-        116
+        135,
+        166
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -35281,10 +35281,10 @@
         181,
         181,
         181,
-        575,
-        582,
-        582,
-        583
+        576,
+        583,
+        583,
+        584
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -36093,15 +36093,15 @@
     {
       "category": "historical",
       "lineNumbers": [
-        17,
-        69,
-        90,
-        234,
-        354
+        19,
+        73,
+        94,
+        238,
+        358
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "96b874af5a0ab8564dd73d84454526f991bf4b838c364ac26b12889b13eb2936",
+      "sha256": "8ba0aa971a70f20b729b485826961177147738c894c72867fdc36687f8d31577",
       "tokenCounts": {
         "whoop": 2,
         "whoopstore": 3
@@ -36420,14 +36420,15 @@
         17,
         28,
         49,
-        97,
-        150
+        109,
+        164
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "4bde135a717c8f979160f3ba4b5b2673536482a91ca930958c11e2b50139b9bc",
+      "sha256": "e3729222b956a5882856d765189f750a6dd2f1bc0cefc90e20ee66425554ded8",
       "tokenCounts": {
-        "whoop": 5
+        "whoop": 4,
+        "whoop-default": 1
       }
     },
     {
@@ -36460,7 +36461,7 @@
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "dd873eb5afac5c8bd0212903d909635a835580df57d74ac207ca0b7e68635de1",
+      "sha256": "68f1c0461556d9c05b22692aba28ec5ededa27dca3d8ae84cf5728f08d16770c",
       "tokenCounts": {
         "whoop": 4,
         "whoopstore": 3

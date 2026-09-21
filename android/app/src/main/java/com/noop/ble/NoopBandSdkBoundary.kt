@@ -1,6 +1,7 @@
 package com.noop.ble
 
 import com.noop.bandsdk.BandDiagnosticsRecorder
+import com.noop.bandsdk.BandHistoryCheckpoint
 import com.noop.bandsdk.BandSessionMachine
 
 /**
@@ -11,9 +12,13 @@ import com.noop.bandsdk.BandSessionMachine
  */
 object NoopBandSdkBoundary {
     const val PINNED_SOURCE_REVISION =
-        "0abd9a3ce4f808b51bdc93ad28504ac810914631"
+        "f2c1e189d6e703ceecea3502e1ba9ea77d8e2bd7"
 
     fun newSession(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
-    ): BandSessionMachine = BandSessionMachine(diagnostics)
+        historyCheckpoint: BandHistoryCheckpoint? = null,
+    ): BandSessionMachine = BandSessionMachine(
+        diagnostics = diagnostics,
+        restoredHistoryCheckpoint = historyCheckpoint,
+    )
 }

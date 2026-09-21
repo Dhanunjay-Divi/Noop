@@ -98,7 +98,9 @@ jobs:
 
       - name: Test pinned NOOP Band SDK artifact
         if: matrix.scheme == 'Strand'
-        run: swift test --package-path Vendor/NoopBandSDK
+        run: >-
+          swift test --package-path Vendor/NoopBandSDK
+          --scratch-path "$RUNNER_TEMP/noop-band-sdk-swiftpm"
 
       - name: Test launch-gate isolation checker
         if: matrix.scheme == 'NOOPiOS'

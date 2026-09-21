@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
-- End implementation commit: `68fb9fd5cfd0f2731917cee8b14f84e391b9128e`
+- End implementation commit: pending final review-remediation commit
 - Record commit or PR: pending
 
 ## Objective
@@ -59,13 +59,15 @@ Success means:
   firmware is part of this round.
 - Existing tests, logs, exports, screenshots, or documents:
   - protected app `main` at `9c514175`;
-  - private `NoopBandSDK` `main` at merge commit
+  - private `NoopBandSDK` neutral-core merge
     `e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b`;
+  - private SDK review-hardening merge
+    `f32633a9fc63a9edd273f38e97b48c216a798234`;
   - exported implementation revision
-    `0abd9a3ce4f808b51bdc93ad28504ac810914631`;
+    `f2c1e189d6e703ceecea3502e1ba9ea77d8e2bd7`;
   - ten-file export manifest with
     `supplierArtifactsIncluded: false`;
-  - standalone Swift 9-test, Kotlin 10-test, and 13-scenario cross-platform
+  - standalone Swift 15-test, Kotlin 16-test, and 18-scenario cross-platform
     conformance evidence;
   - existing Apple and Android single-active-source coordinators.
 - Unknowns that must remain unknown until measured: exact supplier APIs and
@@ -76,23 +78,33 @@ Success means:
 
 ## Delivered
 
-- Copied the exact ten-file source export from private SDK implementation
-  revision `0abd9a3ce4f808b51bdc93ad28504ac810914631` into
-  `Vendor/NoopBandSDK` with its original manifest unchanged.
+- Re-exported the exact ten-file source artifact from private SDK implementation
+  revision `f2c1e189d6e703ceecea3502e1ba9ea77d8e2bd7` twice from a detached clean
+  worktree. Both artifacts were byte-identical; the manifest SHA-256 is
+  `c33bdf82133b4fa7320b6974258de01dd3b049247e31831264902cbdfe91d735`.
+  The verified artifact replaced `Vendor/NoopBandSDK` without supplier
+  binaries or symlinks.
+- Closed all seven independent private-SDK review findings: external SwiftPM
+  scratch isolation, truthful absent-firmware eligibility, durable
+  source-scoped history restore, one signed 64-bit sequence domain,
+  capability enforcement for live/history streams, firmware exclusion while
+  live collection is active, and exact history completion/overflow/commit
+  receipts.
 - Added a release-control verifier that pins the export manifest, source
   repository/revision, every exported file digest and size, the executable
   Swift package definition, and the package test wrapper. It rejects symlinks,
   unexpected top-level files, tree drift, and supplier binary/archive
   payloads.
 - Added the local Swift package to the macOS, iOS, and macOS test graphs. Its
-  test target compiles the exported Apple virtual band and compares all 13
+  test target compiles the exported Apple virtual band and compares all 18
   automated results with the exported JSON contract.
 - Added the exported Kotlin production sources to the Android main source set
   and its virtual band to the JVM test source set. The app test compares every
-  event, final state, cursor, accepted count, and failure with the same 13-case
+  event, final state, cursor, accepted count, and failure with the same 18-case
   contract.
 - Added app-owned Apple and Android boundaries that construct only the neutral
-  session core and pin the consumed SDK revision.
+  session core, pin the consumed SDK revision, and may restore an explicitly
+  supplied durable history checkpoint.
 - Added optional source factories to both source coordinators. Production
   composition roots use their nil/null defaults; WHOOP classification and
   transport behavior remain unchanged.
@@ -141,17 +153,19 @@ Success means:
 
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
-| Starting app context snapshot | Clean dedicated branch at `9c514175`; 4.0 GiB free | Work is isolated from protected `main` and concurrent worktrees | Build correctness or hardware behavior |
-| Standalone SDK export evidence | Previously green in the private SDK repository | The source export is deterministic and cross-platform before ingestion | App build wiring or supplier behavior |
-| `verify-noop-band-sdk-artifact.py` plus focused unit tests | Exact ten-file export passed; 5/5 verifier tests passed | Source, manifest, executable package wrapper, layout, and no-binary policy are pinned | Supplier provenance or physical compatibility |
-| `swift test --package-path Vendor/NoopBandSDK` | 4/4 passed; all 13 automated scenarios matched the exported expectations | Apple production core and virtual conformance compile and agree with the contract | App-target compile, BLE, background, or hardware behavior |
-| Focused cached Kotlin compiler plus JUnit | Exact production/test-support/app-boundary source set compiled; 2/2 tests passed and all 13 scenarios matched | Android SDK integration syntax and deterministic contract behavior | Full Gradle app graph, instrumentation, or device behavior |
-| XcodeGen and Gradle configuration | XcodeGen accepted the local package graph; offline `:app:tasks` succeeded | Project/package and Android source-set configuration are structurally accepted | Full app compilation |
-| Independent read-only review | Found package-wrapper pinning and incomplete conformance assertions; both corrected and reverified; no WHOOP routing regression found | Fresh review findings were resolved before commit | Hosted app compilation or physical behavior |
-| Release-control wall | 196/196 tests; 9 release checks; required-CI 10 contexts; trusted self-check passed | Workflow applicability, integrity ratchets, and protected-check contracts remain valid | Hosted exact-SHA result |
-| Product/policy gates | Terminology 17,869 occurrences/1,588 groups/zero forbidden; health claims, provenance, private-data, operations, calibration, and diff checks passed | The source-only integration preserves current policy boundaries | Legal approval for future supplier artifacts |
-| Local app-build attempt | Xcode package resolution was stopped by the disk watchdog; no full local Apple or Android app wall run | The resource floor prevented an unsafe build | App-target correctness; protected CI remains required |
-| Resource cleanup | Removed exact round-owned 1.9 GiB Strand DerivedData, generated Xcode files except the restored tracked lockfile, Swift build state, and Android project cache | No known heavy round-owned local build remains | Unrelated/shared machine storage |
+| Starting app context snapshot | Clean dedicated branch at `9c514175`; concurrent UI work remains in its own worktree | Work is isolated from protected `main` and concurrent changes | Build correctness or hardware behavior |
+| Private SDK hardening | PR `#2` merged normally at `f32633a9`; Swift 15/15, Kotlin 16/16, 18 shared scenarios, and the 38-file repository gate passed | Review findings are corrected in source authority before app ingestion | Supplier API compatibility or physical behavior |
+| Independent clean exports | Two detached-worktree exports were byte-identical; manifest SHA-256 `c33bdf82133b4fa7320b6974258de01dd3b049247e31831264902cbdfe91d735` | The vendored artifact is deterministic and traceable to `f2c1e189` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Artifact verifier plus required-CI unit tests | Exact ten-file export passed; 54/54 tests passed; no symlinks found | Source, manifest, package wrapper, workflow scratch path, layout, and no-binary policy are pinned | Physical compatibility |
+| Exact Swift package workflow order | External scratch path completed 4/4 tests and all 18 exported scenarios, then the verifier still passed | SwiftPM does not mutate the vendored source and the exported Apple core agrees with the shared contract | App lifecycle, BLE, background, or hardware behavior |
+| Android Full app boundary | `NoopBandSdkIntegrationTest` passed under `testFullDebugUnitTest`; build succeeded in 2m36s | Full-variant app source, durable checkpoint restoration, and all 18 shared scenarios compile and pass | Instrumentation, OEM background, BLE, or physical behavior |
+| Android Demo compile | `compileDemoDebugKotlin` passed independently in 1m19s | The Demo variant consumes the same hardened source successfully | Demo runtime rendering or device behavior |
+| Android memory classification | A combined parallel Full+Demo compile exhausted the Kotlin heap; the repository-standard in-process, no-parallel, two-worker runs passed independently with healthy host memory | The failure was an avoidable verification command shape, not a source failure; sequential bounded builds prevent the spike | Every future machine configuration |
+| Apple app boundary | Xcode 27 focused macOS test passed 4/4 in the real hosted app target, including WHOOP-default routing and source-scoped checkpoint restore | App-target compilation and Apple boundary behavior are green on the current host | Universal/macOS-15, iOS simulator, BLE, or physical behavior |
+| Local package-metadata cleanup | The focused Xcode run created ignored `Vendor/NoopBandSDK/.swiftpm`; the exact generated directory had no open process, was removed, and the artifact verifier passed afterward | Local Xcode metadata cannot contaminate the pinned artifact or its copied tamper tests | Future Xcode behavior unless the same exact-layout verifier is run |
+| Final release-control wall | 196/196 tests; 9 release checks; required-CI 10 contexts; trusted self-check; shell syntax/static checks; calibration parity; distribution provenance; private-data guard; 83 operations records; and diff hygiene passed | The exact local candidate satisfies the repository-controlled release and trust contracts | Hosted exact-SHA enforcement or protected integration |
+| Final terminology and claims gates | 17,869 classified occurrences across 1,588 groups with unchanged category totals and zero forbidden mappings; health-claims scanned 1,299 files; complete localization audit passed with zero translated-key gaps in the supported Apple catalogs | The reviewed terminology snapshot, health wording guard, and localization catalogs remain coherent | Physical accessibility, every pre-existing hardcoded-literal debt item, or medical accuracy |
+| Previous remote candidate | PR `#17` head `c16488d7` passed every applicable hosted app, policy, trust, package, server, and release context before review remediation | The pre-remediation integration graph was hosted-green | The unpushed remediation candidate; new exact-SHA checks remain required |
 
 ## Physical device and deployment
 
@@ -170,9 +184,12 @@ Success means:
   Android app boundaries, source coordinators, build inputs, and tests;
   protected workflow applicability and release controls; terminology and
   release/handoff/operations documents.
-- Commits: implementation `68fb9fd5cfd0f2731917cee8b14f84e391b9128e`;
-  operations-record commit pending.
-- Branch and remote state: local dedicated branch from protected `main`.
+- Commits: initial implementation
+  `68fb9fd5cfd0f2731917cee8b14f84e391b9128e`; initial operations record
+  `c16488d70001bb3257c7c0c4d6644ab7f88d1372`; review-remediation commit
+  pending.
+- Branch and remote state: PR `#17` is open from the dedicated branch; the
+  remote head remains `c16488d7` until one consolidated remediation push.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and
   `Dhanunjay-Divi/NoopBandSDK` both report `PRIVATE` with default branch
   `main`.
@@ -189,21 +206,21 @@ Success means:
 
 ## Open risks and honest limitations
 
-- The host is below the repository's 10 GiB heavy-build floor. Full local
-  Xcode/Gradle walls did not run. Free disk reached 1.3 GiB after an Xcode graph
-  probe and returned to 2.4 GiB after exact cleanup; one consolidated
-  protected-CI candidate is the required heavy verification.
+- Focused Apple and Android app-target verification is green, but the complete
+  protected Apple/Android walls must rerun on the final exact SHA.
 - A source-only adapter seam cannot establish that a supplier band is
   compatible or flashable.
 
 ## Next round
 
-1. Commit and push the consolidated candidate once.
-2. Require every exact-SHA protected context, including the full Apple and
-   Android app walls.
-3. Merge normally, verify protected `main`, and remove exact round-owned logs,
-   temporary compilers, and the dedicated worktree.
-4. Keep the supplier adapter/flasher disabled until the exact SDK, firmware,
+1. Run the final local release, policy, operations, terminology, and diff gates.
+2. Commit and push the consolidated review-remediation candidate once.
+3. Require every exact-SHA protected context, including the full Apple and
+   Android app walls, then resolve the seven review threads from matching
+   evidence.
+4. Merge normally, verify protected `main`, and remove exact round-owned logs,
+   DerivedData, exports, package scratch data, and the dedicated worktree.
+5. Keep the supplier adapter/flasher disabled until the exact SDK, firmware,
    tooling, keys, rights, and representative physical bands pass their
    acceptance matrix.
 

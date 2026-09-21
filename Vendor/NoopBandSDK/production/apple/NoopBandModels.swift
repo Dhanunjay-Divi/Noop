@@ -9,6 +9,8 @@ public enum BandContractLimits {
     public static let samplesPerBatch = 4_096
     public static let batchesPerHistoryChunk = 256
     public static let samplesPerHistoryChunk = 16_384
+    public static let historyCheckpointIdentities = 65_536
+    public static let maximumSampleSequence = UInt64(Int64.max)
 }
 
 public enum BandCapability: String, Codable, CaseIterable, Sendable {
@@ -255,7 +257,10 @@ public struct BandSample: Equatable, Codable, Sendable {
     }
 
     public func validate() throws {
-        guard value.isFinite, quality != .rejected else {
+        guard identity.sequence <= BandContractLimits.maximumSampleSequence,
+              value.isFinite,
+              quality != .rejected
+        else {
             throw BandFailureCategory.invalidInput
         }
 
@@ -381,6 +386,41 @@ public struct BandHistoryChunk: Equatable, Codable, Sendable {
     }
 }
 
+public struct BandHistoryCheckpoint: Equatable, Sendable {
+    public let sourceIdentity: String
+    public let acknowledgedCursor: String?
+    public let lastHistoryComplete: Bool?
+    public let durableSampleIdentities: Set<BandSampleIdentity>
+
+    public init(
+        sourceIdentity: String,
+        acknowledgedCursor: String?,
+        lastHistoryComplete: Bool?,
+        durableSampleIdentities: Set<BandSampleIdentity>
+    ) {
+        self.sourceIdentity = sourceIdentity
+        self.acknowledgedCursor = acknowledgedCursor
+        self.lastHistoryComplete = lastHistoryComplete
+        self.durableSampleIdentities = durableSampleIdentities
+    }
+
+    public func validate() throws {
+        guard !sourceIdentity.isEmpty,
+              sourceIdentity.count <= BandContractLimits.sourceIdentityLength,
+              acknowledgedCursor.map({
+                  !$0.isEmpty && $0.count <= BandContractLimits.cursorLength
+              }) ?? true,
+              durableSampleIdentities.count
+                <= BandContractLimits.historyCheckpointIdentities,
+              durableSampleIdentities.allSatisfy({
+                  $0.sequence <= BandContractLimits.maximumSampleSequence
+              })
+        else {
+            throw BandFailureCategory.invalidInput
+        }
+    }
+}
+
 public struct BandOperationToken: Equatable, Sendable {
     public let generation: UInt64
     public let sequence: UInt64
@@ -401,6 +441,8 @@ public struct HistoryAcceptance: Equatable, Sendable {
     public let chunkIdentity: String
     public let acknowledgementToken: String
     public let nextCursor: String?
+    public let complete: Bool
+    public let overflowed: Bool
     public let acceptedSamples: Int
     public let duplicateSamples: Int
 
@@ -408,12 +450,16 @@ public struct HistoryAcceptance: Equatable, Sendable {
         chunkIdentity: String,
         acknowledgementToken: String,
         nextCursor: String?,
+        complete: Bool,
+        overflowed: Bool,
         acceptedSamples: Int,
         duplicateSamples: Int
     ) {
         self.chunkIdentity = chunkIdentity
         self.acknowledgementToken = acknowledgementToken
         self.nextCursor = nextCursor
+        self.complete = complete
+        self.overflowed = overflowed
         self.acceptedSamples = acceptedSamples
         self.duplicateSamples = duplicateSamples
     }
@@ -423,6 +469,9 @@ public struct DurableHistoryReceipt: Equatable, Sendable {
     public let chunkIdentity: String
     public let acknowledgementToken: String
     public let nextCursor: String?
+    public let complete: Bool
+    public let overflowed: Bool
+    public let historyStateCommitted: Bool
     public let committedSamples: Int
     public let committed: Bool
 
@@ -430,12 +479,18 @@ public struct DurableHistoryReceipt: Equatable, Sendable {
         chunkIdentity: String,
         acknowledgementToken: String,
         nextCursor: String?,
+        complete: Bool,
+        overflowed: Bool,
+        historyStateCommitted: Bool,
         committedSamples: Int,
         committed: Bool
     ) {
         self.chunkIdentity = chunkIdentity
         self.acknowledgementToken = acknowledgementToken
         self.nextCursor = nextCursor
+        self.complete = complete
+        self.overflowed = overflowed
+        self.historyStateCommitted = historyStateCommitted
         self.committedSamples = committedSamples
         self.committed = committed
     }

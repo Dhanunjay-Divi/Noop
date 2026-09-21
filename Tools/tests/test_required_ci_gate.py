@@ -320,6 +320,7 @@ class RequiredCIGateTests(unittest.TestCase):
             "Package\\.resolved",
             "LICENSE|NOTICE|ATTRIBUTION\\.md|DISCLAIMER\\.md|TERMS\\.md",
             "swift test --package-path Vendor/NoopBandSDK",
+            '--scratch-path "$RUNNER_TEMP/noop-band-sdk-swiftpm"',
         ):
             self.assertIn(marker, text)
 

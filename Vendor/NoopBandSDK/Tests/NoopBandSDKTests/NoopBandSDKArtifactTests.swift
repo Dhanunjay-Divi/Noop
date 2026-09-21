@@ -26,7 +26,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         hardwareRevision: "synthetic-hw-1",
         firmwareVersion: "synthetic-fw-1",
         protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-        wrapperRevision: "artifact-0abd9a3c"
+        wrapperRevision: "artifact-f2c1e189"
     )
 
     private var capabilities: BandCapabilityReport {
@@ -90,6 +90,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                 chunkIdentity: acceptance.chunkIdentity,
                 acknowledgementToken: acceptance.acknowledgementToken,
                 nextCursor: acceptance.nextCursor,
+                complete: acceptance.complete,
+                overflowed: acceptance.overflowed,
+                historyStateCommitted: true,
                 committedSamples: acceptance.acceptedSamples,
                 committed: true
             ),
@@ -130,6 +133,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                     chunkIdentity: acceptance.chunkIdentity,
                     acknowledgementToken: acceptance.acknowledgementToken,
                     nextCursor: acceptance.nextCursor,
+                    complete: acceptance.complete,
+                    overflowed: acceptance.overflowed,
+                    historyStateCommitted: false,
                     committedSamples: 0,
                     committed: false
                 ),
