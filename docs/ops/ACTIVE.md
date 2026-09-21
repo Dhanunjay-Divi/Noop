@@ -6,12 +6,24 @@ Last updated: **2026-09-21**
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`
-- Active worktree: dedicated UI/cloud-readiness review checkout
-- Active branch: `codex/ui-cloud-readiness-20260917`
+- Active worktree: dedicated NOOP Band SDK app-integration checkout
+- Active branch: `codex/noop-band-sdk-app-integration-20260921`
 - Branch base against protected `main`:
-  `b688b3b725cd497e96a31b28540a219bf50446e1`
-- Current round implementation resumed from:
-  `9d859d9aa6788a936be75bdfeac93603c9fd0ae8`
+  `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
+- Current round implementation started from protected `main` after PR `#16`
+  merged and mainline trust was verified.
+- Current state: the private binary-free SDK core is merged and its exact
+  ten-file export is now integrated locally into Apple and Android behind a
+  production-default-off source factory. WHOOP remains unchanged. Artifact
+  verification and five tamper/layout tests pass. The Swift package passes 4/4
+  tests and the focused Android JUnit path passes 2/2; both execute all 13
+  exported conformance expectations. XcodeGen accepts the local package graph,
+  Gradle configuration accepts the Kotlin source sets, and an independent
+  review's package-integrity and conformance-assertion findings are corrected.
+  The 196-test release-control wall and all current policy gates pass. Full
+  Apple/Android app compilation is pending the single protected-CI candidate
+  because the host remains below the 10 GiB local heavy-build floor. No
+  supplier binary, firmware, real adapter, or flasher is included.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,
@@ -340,12 +352,12 @@ Resume from:
   presentation controls, managed Friends parity, macOS viewer foundations,
   evidence-backed UI refinements, and the supplier wrapper handoff.
 - Preserve the current WHOOP compatibility path for physical regression
-  testing. The private `NoopBandSDK` repository currently contains a
-  binary-free scaffold and integration contract, not an executable supplier
-  adapter or firmware flasher. Implement the neutral core/virtual adapter in a
-  separate reviewed round before adding supplier artifacts; keep real
-  scanning, possession proof, history, haptics, OTA, and flashing behind the
-  supplier-artifact and physical-device gates.
+  testing. The private `NoopBandSDK` repository now contains the binary-free
+  neutral core and virtual conformance surface, and the app pins that export
+  behind a disabled factory. It still does not contain an executable supplier
+  adapter or firmware flasher. Keep real scanning, possession proof, history,
+  haptics, OTA, and flashing behind the supplier-artifact and physical-device
+  gates.
 - Validate every material external finding against current source.
 - Inspect representative current and proposed renders directly.
 - Correct only evidence-backed formula explanation, terminology, loading,
@@ -357,14 +369,11 @@ Resume from:
 
 ## Immediate next actions
 
-1. Review the complete intended diff and create the final late-review follow-up
-   commit.
-2. Push the corrected exact replacement head once to pull request `#16`.
-3. Require all ten hosted contexts, resolve only source-proven review threads,
-   merge normally, and verify the protected-main trusted result.
-4. Remove exact round-owned logs, build outputs, and package caches after their
-   results are recorded. Physical hardware, signing/store, legal, carrier,
-   credential, production-runtime, and elapsed soak gates remain external.
-5. Start the separate neutral SDK-boundary round only after protected `main` is
-   synchronized; preserve WHOOP as the default test transport until the
-   supplier adapter and firmware pass their physical acceptance matrix.
+1. Complete the independent review and lightweight release-control wall.
+2. Commit and push one SDK-integration candidate, open a protected pull request,
+   and require all ten exact-SHA contexts.
+3. Merge normally only after Apple and Android app compilers/tests are green,
+   verify protected `main`, and remove exact round-owned outputs and logs.
+4. Execute the supplier adapter and flashing round only after the exact
+   supplier artifacts, firmware project, rights/SBOM/security evidence, and
+   representative physical units are available.
