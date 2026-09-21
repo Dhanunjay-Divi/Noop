@@ -302,6 +302,26 @@ public actor ManagedStorageClient {
         )
     }
 
+    public func enrollAccount(
+        platform: ManagedStoragePlatform,
+        authorization: ManagedAuthorization,
+        requestID: UUID
+    ) async throws -> ManagedAccountEnrollmentResponse {
+        let body = ManagedAccountEnrollmentRequest(
+            installationID: authorization.installationID,
+            installationToken: authorization.installationToken,
+            platform: platform,
+            enrollmentRequestID: requestID
+        )
+        return try await send(
+            path: "v1/managed/account/enroll",
+            method: "POST",
+            body: body,
+            authorization: authorization,
+            includeInstallation: false
+        )
+    }
+
     public func overview(
         authorization: ManagedAuthorization
     ) async throws -> ManagedStorageOverview {

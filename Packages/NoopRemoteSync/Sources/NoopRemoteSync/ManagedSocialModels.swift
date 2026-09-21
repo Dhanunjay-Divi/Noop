@@ -152,6 +152,10 @@ public struct ManagedSocialVisibility: Codable, Equatable, Sendable {
     public let hrv: Bool
     public let rhr: Bool
     public let pokeAllowed: Bool
+    public let messagesAllowed: Bool
+    public let photosAllowed: Bool
+    public let audioCallsAllowed: Bool
+    public let videoCallsAllowed: Bool
 
     public init(
         charge: Bool = false,
@@ -160,7 +164,11 @@ public struct ManagedSocialVisibility: Codable, Equatable, Sendable {
         sleepDuration: Bool = false,
         hrv: Bool = false,
         rhr: Bool = false,
-        pokeAllowed: Bool = false
+        pokeAllowed: Bool = false,
+        messagesAllowed: Bool = false,
+        photosAllowed: Bool = false,
+        audioCallsAllowed: Bool = false,
+        videoCallsAllowed: Bool = false
     ) {
         self.charge = charge
         self.effort = effort
@@ -169,6 +177,47 @@ public struct ManagedSocialVisibility: Codable, Equatable, Sendable {
         self.hrv = hrv
         self.rhr = rhr
         self.pokeAllowed = pokeAllowed
+        self.messagesAllowed = messagesAllowed
+        self.photosAllowed = photosAllowed
+        self.audioCallsAllowed = audioCallsAllowed
+        self.videoCallsAllowed = videoCallsAllowed
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case charge
+        case effort
+        case rest
+        case sleepDuration
+        case hrv
+        case rhr
+        case pokeAllowed
+        case messagesAllowed
+        case photosAllowed
+        case audioCallsAllowed
+        case videoCallsAllowed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        charge = try container.decode(Bool.self, forKey: .charge)
+        effort = try container.decode(Bool.self, forKey: .effort)
+        rest = try container.decode(Bool.self, forKey: .rest)
+        sleepDuration = try container.decode(Bool.self, forKey: .sleepDuration)
+        hrv = try container.decode(Bool.self, forKey: .hrv)
+        rhr = try container.decode(Bool.self, forKey: .rhr)
+        pokeAllowed = try container.decode(Bool.self, forKey: .pokeAllowed)
+        messagesAllowed =
+            try container.decodeIfPresent(Bool.self, forKey: .messagesAllowed)
+            ?? false
+        photosAllowed =
+            try container.decodeIfPresent(Bool.self, forKey: .photosAllowed)
+            ?? false
+        audioCallsAllowed =
+            try container.decodeIfPresent(Bool.self, forKey: .audioCallsAllowed)
+            ?? false
+        videoCallsAllowed =
+            try container.decodeIfPresent(Bool.self, forKey: .videoCallsAllowed)
+            ?? false
     }
 }
 
@@ -180,6 +229,10 @@ public struct ManagedSocialVisibilityPatch: Codable, Equatable, Sendable {
     public let hrv: Bool?
     public let rhr: Bool?
     public let pokeAllowed: Bool?
+    public let messagesAllowed: Bool?
+    public let photosAllowed: Bool?
+    public let audioCallsAllowed: Bool?
+    public let videoCallsAllowed: Bool?
 
     public init(
         charge: Bool? = nil,
@@ -188,7 +241,11 @@ public struct ManagedSocialVisibilityPatch: Codable, Equatable, Sendable {
         sleepDuration: Bool? = nil,
         hrv: Bool? = nil,
         rhr: Bool? = nil,
-        pokeAllowed: Bool? = nil
+        pokeAllowed: Bool? = nil,
+        messagesAllowed: Bool? = nil,
+        photosAllowed: Bool? = nil,
+        audioCallsAllowed: Bool? = nil,
+        videoCallsAllowed: Bool? = nil
     ) {
         self.charge = charge
         self.effort = effort
@@ -197,6 +254,10 @@ public struct ManagedSocialVisibilityPatch: Codable, Equatable, Sendable {
         self.hrv = hrv
         self.rhr = rhr
         self.pokeAllowed = pokeAllowed
+        self.messagesAllowed = messagesAllowed
+        self.photosAllowed = photosAllowed
+        self.audioCallsAllowed = audioCallsAllowed
+        self.videoCallsAllowed = videoCallsAllowed
     }
 
     public var hasChange: Bool {
@@ -207,6 +268,10 @@ public struct ManagedSocialVisibilityPatch: Codable, Equatable, Sendable {
             || hrv != nil
             || rhr != nil
             || pokeAllowed != nil
+            || messagesAllowed != nil
+            || photosAllowed != nil
+            || audioCallsAllowed != nil
+            || videoCallsAllowed != nil
     }
 }
 

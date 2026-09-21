@@ -37,12 +37,19 @@ internal enum class ManagedDocumentCiphertextInboxSweepDisposition(
     INVALID_PURGED("invalid_purged"),
     STALE_PURGED("stale_purged"),
     QUOTA_TRIMMED("quota_trimmed"),
+    QUOTA_BLOCKED("quota_blocked"),
     MULTIPLE("multiple"),
 }
 
 internal data class ManagedDocumentCiphertextInboxMaintenanceResult(
     val legacyDisposition: ManagedDocumentCiphertextInboxLegacyDisposition,
     val sweepDisposition: ManagedDocumentCiphertextInboxSweepDisposition,
+)
+
+internal data class ManagedDocumentCiphertextInboxOutgoingReference(
+    val localIdentifier: String,
+    val generation: Long,
+    val revision: Long,
 )
 
 internal enum class ManagedDocumentCiphertextInboxPurgeDisposition(
@@ -153,6 +160,40 @@ internal class ManagedDocumentCiphertextInbox(
         } else {
             ManagedDocumentCiphertextInboxPurgeDisposition.NOT_PRESENT
         }
+    }
+
+    @Synchronized
+    fun reconcileOutgoing(
+        accountScopeHash: String,
+        retaining: List<ManagedDocumentCiphertextInboxOutgoingReference>,
+    ): Int {
+        val scope = prepareIfNeeded(accountScopeHash)
+        val identities = retaining.mapTo(mutableSetOf()) { reference ->
+            if (!reference.localIdentifier.matches(SHA256_PATTERN) ||
+                reference.generation <= 0L ||
+                reference.revision <= 0L
+            ) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+            outgoingIdentity(
+                scope,
+                reference.localIdentifier,
+                reference.generation,
+                reference.revision,
+            )
+        }
+        var removed = 0
+        scopedEntries(scope)
+            .filter {
+                it.record.direction == OUTGOING &&
+                    it.record.identity !in identities
+            }
+            .forEach {
+                removeFileOrDirectory(it.file)
+                removed += 1
+            }
+        cleanupEmptyScopedDirectories(scope)
+        return removed
     }
 
     @Synchronized
@@ -449,12 +490,14 @@ internal class ManagedDocumentCiphertextInbox(
                     removedInvalid = true
                     return@forEach
                 }
-                if (entry.record.stagedAtMilliseconds > now) {
+                if (direction == INCOMING &&
+                    entry.record.stagedAtMilliseconds > now
+                ) {
                     removeFileOrDirectory(file)
                     removedInvalid = true
                     return@forEach
                 }
-                if (
+                if (direction == INCOMING &&
                     now - entry.record.stagedAtMilliseconds >=
                     policy.maximumAgeMilliseconds
                 ) {
@@ -472,17 +515,23 @@ internal class ManagedDocumentCiphertextInbox(
             valid.size > policy.maximumRecordCount ||
             totalBytes > policy.maximumTotalBytes
         ) {
-            val removed = valid.removeAt(0)
+            val removableIndex = valid.indexOfFirst { it.record.direction == INCOMING }
+            if (removableIndex < 0) break
+            val removed = valid.removeAt(removableIndex)
             removeFileOrDirectory(removed.file)
             totalBytes -= removed.byteCount
             trimmedQuota = true
         }
+        val quotaBlocked =
+            valid.size > policy.maximumRecordCount ||
+                totalBytes > policy.maximumTotalBytes
         cleanupEmptyScopedDirectories(accountScopeHash)
 
         val flags = listOf(
             removedInvalid,
             removedStale,
             trimmedQuota,
+            quotaBlocked,
         ).count { it }
         return when {
             flags > 1 ->
@@ -493,6 +542,8 @@ internal class ManagedDocumentCiphertextInbox(
                 ManagedDocumentCiphertextInboxSweepDisposition.STALE_PURGED
             trimmedQuota ->
                 ManagedDocumentCiphertextInboxSweepDisposition.QUOTA_TRIMMED
+            quotaBlocked ->
+                ManagedDocumentCiphertextInboxSweepDisposition.QUOTA_BLOCKED
             else -> ManagedDocumentCiphertextInboxSweepDisposition.CLEAN
         }
     }
@@ -573,10 +624,13 @@ internal class ManagedDocumentCiphertextInbox(
             projectedCount > policy.maximumRecordCount ||
             projectedBytes > policy.maximumTotalBytes
         ) {
-            if (entries.isEmpty()) {
+            val removableIndex = entries.indexOfFirst {
+                it.record.direction == INCOMING
+            }
+            if (removableIndex < 0) {
                 throw ManagedStorageException.QuotaExceeded()
             }
-            val removed = entries.removeAt(0)
+            val removed = entries.removeAt(removableIndex)
             removeFileOrDirectory(removed.file)
             projectedCount -= 1
             projectedBytes -= removed.byteCount

@@ -27,12 +27,13 @@ local SQLite — has no network layer at all: no phone-home, no analytics, no ac
 no login, no cloud sync, and no telemetry. Everything NOOP computes about you lives in a
 single SQLite file on your own device.
 
-NOOP's runtime network clients have exactly **four optional data-bearing destinations**: the **AI Coach** (§1.1a),
-the **Oura history import** (§1.1b), and a server the user operates through
-**Self-hosted Sync** (§1.1c), plus **NOOP+ managed backup and Friends** (§1.1f).
-**Friends** (§1.1d) and the **Safety Network**
-(§1.1e) are separately scoped services on that same self-hosted server, not
-additional NOOP-operated destinations. The AI Coach is off until you turn it on with your own API key; when you
+NOOP's runtime network clients have exactly **four optional data-bearing
+destination classes**: the **AI Coach** (§1.1a), the **Oura history import**
+(§1.1b), a server the user operates through **Self-hosted Sync** (§1.1c), and
+NOOP-hosted account services for **managed backup, Friends, and app-to-app
+Safety** (§1.1e-f). The legacy self-hosted Friends protocol (§1.1d) remains
+only for compatibility and controlled migration; Apple, Android, and macOS do
+not route customers to it. The AI Coach is off until you turn it on with your own API key; when you
 ask it a question it sends a short text summary of your recent metrics to the provider you
 choose. The Oura history import is **not even compiled into a default build** — the code
 only exists in your binary if you build from source with your own Oura developer app's
@@ -59,16 +60,18 @@ one of the explicit outputs:
 | Live collection | Bluetooth LE, strap → device | Read-only from the strap |
 | File import (Apple Health, WHOOP CSV, nutrition CSV) | User-selected files on disk | Read-only from disk |
 | Oura history import (opt-in build flag, §1.1b) | HTTPS OAuth + REST, `api.ouraring.com` → device | Read-only from your own Oura account |
-| Self-hosted Sync + Friends (§1.1c–d) | HTTPS, or HTTP only on loopback/private LAN | Selected records and optional friend summaries ↔ the server you configure |
+| Self-hosted Sync (§1.1c) and legacy Friends compatibility API (§1.1d) | HTTPS, or HTTP only on loopback/private LAN | Selected records ↔ the server you configure. The retained Friends API is not exposed by the current customer Friends route. |
 | Safety Network (§1.1e, §1.4) | HTTPS plus opaque APNs/FCM wake delivery for the managed app-to-app path; optional self-hosted/server-to-provider HTTPS only when separately enabled | Accepted-contact enrollment and an explicit app SOS → the server; authenticated page/response state → NOOP. Location requires separate incident-scoped consent. Band and possible-fall origins, plus SMS/voice fallback, remain unavailable until their own gates pass. |
 | NOOP+ managed backup and Friends (§1.1f) | HTTPS with phone identity, App Check, and per-installation authorization | Selected server-readable sensor chunks/control records, the strict `day_ownership` operational document, and explicitly consented six-field Friends projections ↔ NOOP's managed service; personal managed documents require client encryption and remain local until encryption and key recovery are available |
 | Check for updates | HTTPS GET to GitHub's public releases API, only when tapped | Public version metadata → device; no biometric payload |
 | Apple Health export, incl. iOS "Export for Shortcuts" | On-device, user-initiated | NOOP → your Apple Health, on your device only (§1.3) |
 | Safety message handoff | OS share sheet, user-initiated | Prepared text and an optional fresh one-shot location → the destination app and recipient you choose (§1.4) |
 
-The only **NOOP-owned data-bearing network clients** are those four opt-ins. Friends
-uses the already configured self-hosted destination and its own scoped
-credential. The collection/analysis pipeline itself produces no network traffic.
+The only **NOOP-owned data-bearing network clients** are those four opt-in
+destination classes. Customer Friends and app-to-app Safety use the separately
+configured managed account service; the retained self-hosted Friends protocol
+is not a current customer route. The collection/analysis pipeline itself
+produces no network traffic.
 Apple Health export is an **on-device** hand-off, while Safety sharing is an explicit
 handoff to another app whose own transport and privacy terms then apply — see §1.3–1.4.
 
@@ -224,10 +227,13 @@ Raw ADC fields remain labeled raw/unvalidated throughout ingestion and display. 
 not silently turn optical or thermistor register values into clinical SpO₂, temperature,
 or respiration.
 
-### 1.1d Private Friends (optional, self-hosted, Apple and Android clients)
+### 1.1d Legacy self-hosted Friends protocol (compatibility only)
 
 Friends is an invitation-only summary layer on the server in §1.1c. It does not
-create a Noop-operated account, directory, or social graph:
+create a Noop-operated account, directory, or social graph. D-060 removed its
+customer provider/setup route from Apple, Android, and macOS; the protocol and
+lower-level clients remain only for compatibility, controlled migration, and
+operator-side retirement evidence:
 
 - **Separate credentials.** The configured `NOOP_API_TOKEN` is used once to
   bootstrap the server owner's profile and remains the full-data/admin
@@ -1037,10 +1043,11 @@ visibility alone.
   NOOP Band has one narrow ownership-account exception for initial claim and
   replacement-phone authorization. That control plane stores hashed identity
   and ownership metadata, not health data, and is disabled in released builds
-  until approved physical possession proof exists. An optional self-hosted
-  Friends profile uses a local scoped member credential
-  (§1.1d)—server-issued for owner bootstrap or client-generated for an invited
-  first join. It is not a Noop account and is never sent to a Noop-operated service.
+  until approved physical possession proof exists. NOOP-hosted Friends uses a
+  managed account, but account access is separate from managed health-backup
+  consent and does not upload health data by itself. The retained self-hosted
+  Friends credential described in §1.1d is compatibility-only and has no
+  routed customer setup flow.
   Separately, Oura history import (§1.1b) has *you* sign into *your own* Oura
   account, at Oura's login page, over OAuth—NOOP never sees your password, only
   the resulting tokens kept in Keychain. NOOP+ is the optional exception:
@@ -1048,8 +1055,10 @@ visibility alone.
   the separate consent in §1.1f.
 - **No telemetry / analytics / crash reporting.** No third-party SDKs of that kind.
 - **No required managed cloud in current compatible-device builds.** Self-hosted
-  Sync and Friends (§1.1c–d) use only the endpoint you configure; both are
-  optional. Oura history import is inbound-only. NOOP+ managed sync is a
+  Sync (§1.1c) remains optional, and its legacy Friends protocol (§1.1d) has no
+  routed customer setup flow. NOOP-hosted Friends account access is separate
+  from health-backup enrollment. Oura history import is inbound-only. NOOP+
+  managed sync is a
   separate, explicit opt-in and does not currently participate in local
   collection or metric computation. D-059 is a staged first-party target for
   durable history and canonical formula publication; no authority changes until
@@ -1067,12 +1076,12 @@ visibility alone.
 
 | Surface | Risk | Mitigation | Where |
 |---------|------|------------|-------|
-| Process | Data exfiltration / network egress | Four explicit optional destinations: AI Coach (your provider/key and text summary, §1.1a), Oura import (your OAuth app, inbound-only, §1.1b), your self-hosted server (Sync plus optional Friends/Safety, §1.1c-e), and separately consented NOOP+ managed backup (§1.1f). No telemetry; default builds have no NOOP+ endpoint configuration. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, `Strand/Data/FriendsService.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `infra/gcp/` |
+| Process | Data exfiltration / network egress | Four explicit optional destination classes: AI Coach (your provider/key and text summary, §1.1a), Oura import (your OAuth app, inbound-only, §1.1b), your self-hosted Sync server (§1.1c, with a compatibility-only legacy Friends API), and separately consented NOOP-hosted managed backup, Friends, and app-to-app Safety (§1.1e-f). No telemetry; default builds have no managed endpoint configuration. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, `Strand/Data/FriendsService.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `infra/gcp/` |
 | First-party band ownership | Identity enumeration, duplicate claim, stolen installation credential, weak database principal, terms substitution, cross-account access | Separate default-off control plane; App Check plus verified email/password identity plus random Keychain/Keystore-backed installation credential; hashed provider subject and band identity; digest- and host-pinned no-cache terms; idempotent advisory-locked claim; append-only acceptance/claim/event rows; column-level runtime grants; readiness rejects privilege escalation. The production possession provider always returns unavailable until an approved supplier challenge-bound proof exists. No health payload, email, phone, password, OTP, printed number, raw possession response, or plaintext provider subject is stored. | `server/migrations/026_band_ownership.sql`, `server/app/ownership_*`, `Strand/System/OwnershipFlowState.swift`, `StrandiOS/System/Ownership*`, `android/app/src/main/java/com/noop/ownership/`, `infra/gcp/scripts/configure-ownership-database.py` |
 | NOOP+ managed backup | Identity abuse, cross-tenant access, token leak, oversized/decompression payload, ambiguous upload, over-retention | Separate phone verification and versioned health-data consent; App Check plus ID token plus per-installation credential plus tenant/resource authorization; secret credentials in Keychain/Keystore-backed encrypted storage; one-object generation-safe upload capabilities; compressed and uncompressed bounds plus digests; idempotent manifests/change feed; seven-day raw and 30-day essential local pruning only after exact server validation; revoke and erasure state machines. Apple and Android resume a restore-snapshot-bound ZIP for selected retained managed chunk classes plus `day_ownership`, the only managed document included, verify v2 object and aggregate integrity, and complete a two-pass import validation before any local mutation. Private checkpoints make export and idempotent import resumable. This is not every personal record. The readable sensitive ZIP is user-initiated and is separate from the server `/exports` route, which only verifies a client-produced encrypted archive. Live large-account, effective-expiry, cancellation/auth-refresh, cross-tenant, low-storage, and physical process-death evidence remain open. | `Packages/NoopRemoteSync`, `Packages/WhoopStore`, `Strand/System/ManagedHistoryArchiveWriter.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `server/app/managed_*`, `server/migrations/014_*` through `025_*`, `infra/gcp/` |
 | NOOP+ managed Friends | Alias/invite enumeration, over-sharing, harassment, link interception, stale poke delivery | Random rotatable exact-match aliases; no directory/contact upload; hashed expiring revocable invite capabilities; mutual acceptance; directional six-field allowlists; field clearing; blocks/removal/profile deletion; non-competitive badges; receiver global and per-friend poke controls; quiet hours, cooldowns, daily limits, expiry, leased claims, and idempotent acknowledgement. Received capabilities stay in Keychain/encrypted preferences and diagnostics omit links, aliases, names, IDs, values, and payloads. Current custom links and catch-up-only local notification/haptics are disclosed as pre-launch limitations. | `server/migrations/025_managed_social.sql`, `server/app/managed_repository.py`, `Packages/NoopRemoteSync/.../ManagedSocialModels.swift`, `StrandiOS/System/ManagedFriendsView.swift`, `android/app/src/main/java/com/noop/managed/`, `android/app/src/main/java/com/noop/ui/ManagedFriendsScreen.kt` |
 | Self-hosted sync | Token leak, cleartext egress, redirect exfiltration, lost backfill | Token in Keychain/encrypted preferences; HTTPS required except validated local/private literals; URL credentials/query/fragment rejected; redirects cannot cross origin or downgrade transport; error reflection redacted; per-row acknowledgement only after a matching accepted response; resumable, bounded replay on destination change. Local deletions require a separate authenticated server delete. | `Packages/NoopRemoteSync`, `Packages/WhoopStore/.../RemoteSyncStore.swift`, `server/` |
-| Private Friends | Invite theft, retry races, over-broad access, operator visibility, unwanted continued sharing | Plain-text server address + one-time code with manual review and no custom capability URL; hashed codes/tokens; client-generated Keychain/Keystore token plus idempotent enrollment UUID; explicit interrupted-join recovery and server-confirmed pending cleanup; no biometric summary values before acceptance; empty replacement maps clear stale shares; accepted-friend field union limited to six range-checked keys; dedicated `*-noop-friends` producer; per-friend projection only from acceptance date; explicit not-E2E/operator-trust disclosure; remove/block/token rotation and Leave & delete controls; foreground/WorkManager catch-up is best effort, not guaranteed delivery. | `Strand/Data/FriendsService.swift`, `Strand/Screens/FriendsView.swift`, `android/app/src/main/java/com/noop/social/`, `android/app/src/main/java/com/noop/ui/FriendsScreen.kt`, `server/FRIENDS.md`, `server/migrations/003_friends.sql` |
+| Legacy self-hosted Friends protocol | Invite theft, retry races, over-broad access, operator visibility, unwanted continued sharing | Compatibility-only plain-text server address + one-time code with manual review and no custom capability URL; hashed codes/tokens; client-generated Keychain/Keystore token plus idempotent enrollment UUID; explicit interrupted-join recovery and server-confirmed pending cleanup; no biometric summary values before acceptance; six range-checked fields; dedicated `*-noop-friends` producer; remove/block/token rotation and deletion controls. No current Apple, Android, or macOS Friends route exposes this setup. | `Strand/Data/FriendsService.swift`, `android/app/src/main/java/com/noop/social/`, `server/FRIENDS.md`, `server/migrations/003_friends.sql` |
 | Oura history import | OAuth token / scope leakage, cross-account data mixing | Compiled out by default (`OURA_CLOUD_IMPORT`, §1.1b); tokens Keychain-only (`kSecAttrAccessibleAfterFirstUnlock`, never UserDefaults/plist); fixed OAuth scopes set at build time; raw + normalized rows partitioned under `deviceId = "oura-api"`; Oura's own scores kept reference-only (`ref_*`/`oura_*` metricSeries keys, never NOOP's Charge/Effort/Rest); `.cloudImport` is structurally priority-2 so it never seizes a WHOOP day; Forget Oura access purges tokens + every `oura-api` row incl. the raw archive | `Strand/Oura/OuraTokenStore.swift`, `Strand/Oura/OuraConnectModel.swift`, `Packages/WhoopStore/Sources/WhoopStore/OuraRawStore.swift` |
 | Filesystem | Broad disk access | Only `files.user-selected.read-write`; data stays in the sandbox container | `Strand.entitlements`, `Strand/Collect/StorePaths.swift` |
 | BLE frames | Malformed / adversarial packets | CRC8 + CRC32 (+ CRC16 for v5) gating; reject on failure | `WhoopProtocol/Framing.swift`, `Strand/BLE/FrameRouter.swift` |

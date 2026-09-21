@@ -100,6 +100,34 @@ class ManagedStorageClient(
         response.optBoolean("created", false)
     }
 
+    suspend fun enrollAccount(
+        authorization: ManagedAuthorization,
+        requestId: UUID,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("installation_id", authorization.installationId)
+            .put("installation_token", authorization.installationToken)
+            .put("platform", "android")
+            .put("enrollment_request_id", requestId.toString())
+        val response = executeJson(
+            apiRequest(
+                "v1/managed/account/enroll",
+                authorization,
+                includeInstallation = false,
+            )
+                .post(body.toString().toRequestBody(JSON))
+                .build(),
+        )
+        val boundary = response.optJSONObject("product_boundary")
+            ?: throw ManagedStorageException.InvalidResponse()
+        if (!boundary.optBoolean("account_ready") ||
+            !boundary.optBoolean("edge_collection_required")
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        response.optBoolean("created", false)
+    }
+
     suspend fun installations(
         authorization: ManagedAuthorization,
     ): List<ManagedInstallation> = withContext(Dispatchers.IO) {
@@ -2554,6 +2582,10 @@ class ManagedStorageClient(
             hrv = value.requiredBoolean("hrv"),
             rhr = value.requiredBoolean("rhr"),
             pokeAllowed = value.requiredBoolean("poke_allowed"),
+            messagesAllowed = value.requiredBoolean("messages_allowed"),
+            photosAllowed = value.requiredBoolean("photos_allowed"),
+            audioCallsAllowed = value.requiredBoolean("audio_calls_allowed"),
+            videoCallsAllowed = value.requiredBoolean("video_calls_allowed"),
         )
 
     private fun parseSocialSummary(value: JSONObject): ManagedSocialSummary {

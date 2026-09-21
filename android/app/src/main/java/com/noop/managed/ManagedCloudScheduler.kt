@@ -210,6 +210,7 @@ object ManagedCloudScheduler {
     internal enum class RetryWorkerDecision {
         SUCCESS,
         RETRY,
+        FAILURE,
     }
 
     internal fun retryWorkSpec(scope: CatchUpScope): RetryWorkSpec =
@@ -365,10 +366,17 @@ object ManagedCloudScheduler {
 
     internal fun retryWorkerDecision(
         outcome: RetryEnqueueOutcome,
-    ): RetryWorkerDecision = when (outcome) {
-        RetryEnqueueOutcome.SCHEDULED -> RetryWorkerDecision.SUCCESS
-        RetryEnqueueOutcome.WORKER_RETRY -> RetryWorkerDecision.RETRY
-        RetryEnqueueOutcome.DEADLINE_RELEASE_FAILED -> RetryWorkerDecision.RETRY
+        failures: List<CatchUpFailure> = emptyList(),
+    ): RetryWorkerDecision {
+        if (outcome != RetryEnqueueOutcome.SCHEDULED) return RetryWorkerDecision.RETRY
+        return if (failures.any {
+                !isAutomaticRetryable(it.error) && !isHandledTerminalFailure(it.error)
+            }
+        ) {
+            RetryWorkerDecision.FAILURE
+        } else {
+            RetryWorkerDecision.SUCCESS
+        }
     }
 
     internal fun retryRecoverySchedules(
@@ -677,32 +685,21 @@ class ManagedCloudWorker(
                     ManagedCloudScheduler.RetryDeadlineClearReason.TERMINAL_FAILURE,
                 )
             }
-        val hasRetryableFailure = failures.any {
-            ManagedCloudScheduler.isAutomaticRetryable(it.error)
-        }
-        if (hasRetryableFailure) {
-            return when (
-                ManagedCloudScheduler.retryWorkerDecision(
-                    ManagedCloudScheduler.scheduleRetries(
-                        applicationContext,
-                        failures,
-                    ),
-                )
-            ) {
-                ManagedCloudScheduler.RetryWorkerDecision.SUCCESS ->
-                    Result.success()
-                ManagedCloudScheduler.RetryWorkerDecision.RETRY ->
-                    Result.retry()
-            }
-        }
-        if (failures.any {
-                !ManagedCloudScheduler.isHandledTerminalFailure(it.error)
-            }
-        ) {
-            return Result.failure()
-        }
         if (continuationNeeded) {
             ManagedCloudScheduler.enqueueContinuation(applicationContext)
+        }
+        if (failures.isNotEmpty()) {
+            val retryOutcome = ManagedCloudScheduler.scheduleRetries(
+                applicationContext,
+                failures,
+            )
+            return when (
+                ManagedCloudScheduler.retryWorkerDecision(retryOutcome, failures)
+            ) {
+                ManagedCloudScheduler.RetryWorkerDecision.SUCCESS -> Result.success()
+                ManagedCloudScheduler.RetryWorkerDecision.RETRY -> Result.retry()
+                ManagedCloudScheduler.RetryWorkerDecision.FAILURE -> Result.failure()
+            }
         }
         return Result.success()
     }

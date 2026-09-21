@@ -38,6 +38,110 @@ final class OwnershipAccountDeletionContractTests: XCTestCase {
             .joined()
     }
 
+    func testOwnershipDeletionCopyIsLocalizedAcrossSupportedAppleLocales()
+        throws
+    {
+        let catalogURL = repoRoot.appendingPathComponent(
+            "Strand/Resources/Localizable.xcstrings"
+        )
+        let root = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: catalogURL)
+            ) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(root["strings"] as? [String: Any])
+        let locales = [
+            "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant",
+        ]
+        let keys = [
+            "Cancel ownership account deletion?",
+            "Cancel deletion",
+            "Keep deletion request",
+            "Cancellation keeps the ownership account, but this phone must sign in and reauthorize because active ownership sessions were already revoked.",
+            "Ownership account deletion",
+            "This deletes the ownership identity and control-plane account through a cooling-off workflow. It does not delete local health data from this iPhone.",
+            "A claimed band is not released, transferred, or made resellable here. Retirement remains blocked until the approved hardware and operator policy allow it.",
+            "Type this exact confirmation:",
+            "Deletion confirmation",
+            "Current password",
+            "I have exported anything I want to keep from account services. Local health data stays on this iPhone.",
+            "I understand limited legal, security, and audit records may be retained as described in the current ownership policy.",
+            "Requesting...",
+            "Request account deletion",
+            "Keep account",
+            "Review account deletion",
+            "Account deletion in progress",
+            "Ownership sessions are revoked. Local health data remains on this iPhone while the server coordinates each account target.",
+            "Cooling-off ends %@.",
+            "Cooling-off has ended.",
+            "Managed cloud data",
+            "Identity provider",
+            "Band retirement",
+            "Ownership control plane",
+            "Cancel account deletion",
+            "Current account password",
+            "Checking or canceling requires a fresh account verification. The password is sent only to the identity provider.",
+            "Checking...",
+            "Check deletion status",
+            "Scheduled",
+            "Blocked",
+            "Not required",
+            "Canceled",
+            "Processing",
+            "Completed",
+            "Needs attention",
+            "Pending",
+            "No claimed band requires retirement.",
+            "The band remains attached to the account because approved hardware retirement support is unavailable.",
+            "The band is eligible for reviewed operator retirement. It is not released automatically.",
+            "The band remains attached to the account under the current ownership policy. This flow does not unpair or transfer it.",
+            "Ownership account deletion is in its cooling-off period. Local health data remains on this iPhone.",
+            "Deletion was requested, but this phone could not save the status reference. Keep this screen open and contact support before signing out.",
+            "Ownership account deletion was canceled. Sign in again to reauthorize this phone; local health data was not changed.",
+            "Ownership account deletion was canceled and this phone signed out. Its saved status reference could not be removed; local health data was not changed.",
+            "Ownership account deletion is being coordinated. Local health data remains on this iPhone.",
+            "Type the full ownership account deletion confirmation exactly as shown.",
+            "Confirm both the export and retention acknowledgements before continuing.",
+            "Sign in again to continue.",
+        ]
+
+        for key in keys {
+            let entry = try XCTUnwrap(
+                strings[key] as? [String: Any],
+                "Missing ownership deletion key: \(key)"
+            )
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any],
+                "Missing localizations for: \(key)"
+            )
+            for locale in locales {
+                let localization = try XCTUnwrap(
+                    localizations[locale] as? [String: Any],
+                    "Missing \(locale) localization for: \(key)"
+                )
+                let unit = try XCTUnwrap(
+                    localization["stringUnit"] as? [String: Any],
+                    "Missing \(locale) string unit for: \(key)"
+                )
+                XCTAssertEqual(
+                    unit["state"] as? String,
+                    "translated",
+                    "\(locale): \(key)"
+                )
+                let value = try XCTUnwrap(
+                    unit["value"] as? String,
+                    "Missing \(locale) value for: \(key)"
+                )
+                XCTAssertFalse(
+                    value.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    ).isEmpty,
+                    "\(locale): \(key)"
+                )
+            }
+        }
+    }
+
     func testRequestStatusAndCancelRoutesMatchServerContract() throws {
         let apple = try source("StrandiOS/System/OwnershipService.swift")
         let server = try source("server/app/ownership_api.py")

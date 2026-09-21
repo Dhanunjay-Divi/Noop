@@ -311,10 +311,107 @@ resource "google_secret_manager_secret" "bootstrap_admin_token" {
   depends_on = [google_project_service.required]
 }
 
-resource "google_secret_manager_secret" "database_url" {
+moved {
+  from = google_secret_manager_secret.database_url
+  to   = google_secret_manager_secret.migration_database_url
+}
+
+resource "google_secret_manager_secret" "migration_database_url" {
   project   = var.project_id
   secret_id = "${local.prefix}-database-url"
-  labels    = local.labels
+  labels = merge(local.labels, {
+    purpose = "migration"
+  })
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret" "runtime_database_url" {
+  project   = var.project_id
+  secret_id = "${local.prefix}-runtime-database-url"
+  labels = merge(local.labels, {
+    purpose = "private-api"
+  })
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret" "managed_api_database_url" {
+  project   = var.project_id
+  secret_id = "${local.prefix}-managed-api-database-url"
+  labels = merge(local.labels, {
+    purpose = "managed-api"
+  })
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret" "managed_processor_database_url" {
+  project   = var.project_id
+  secret_id = "${local.prefix}-managed-processor-database-url"
+  labels = merge(local.labels, {
+    purpose = "managed-processor"
+  })
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret" "managed_lifecycle_database_url" {
+  project   = var.project_id
+  secret_id = "${local.prefix}-managed-lifecycle-database-url"
+  labels = merge(local.labels, {
+    purpose = "managed-lifecycle"
+  })
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret" "feedback_lifecycle_database_url" {
+  project   = var.project_id
+  secret_id = "${local.prefix}-feedback-lifecycle-database-url"
+  labels = merge(local.labels, {
+    purpose = "feedback-lifecycle"
+  })
 
   replication {
     user_managed {
@@ -416,14 +513,14 @@ resource "google_secret_manager_secret_iam_member" "api_admin_token" {
 
 resource "google_secret_manager_secret_iam_member" "api_database_url" {
   project   = var.project_id
-  secret_id = google_secret_manager_secret.database_url.secret_id
+  secret_id = google_secret_manager_secret.runtime_database_url.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.api.email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "managed_api_database_url" {
   project   = var.project_id
-  secret_id = google_secret_manager_secret.database_url.secret_id
+  secret_id = google_secret_manager_secret.managed_api_database_url.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.managed_api.email}"
 }
@@ -527,7 +624,7 @@ resource "google_secret_manager_secret_iam_member" "managed_lifecycle_push_token
 
 resource "google_secret_manager_secret_iam_member" "processor_database_url" {
   project   = var.project_id
-  secret_id = google_secret_manager_secret.database_url.secret_id
+  secret_id = google_secret_manager_secret.managed_processor_database_url.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.processor.email}"
 }
@@ -554,7 +651,7 @@ resource "google_project_iam_member" "processor_cloud_sql_client" {
 
 resource "google_secret_manager_secret_iam_member" "managed_lifecycle_database_url" {
   project   = var.project_id
-  secret_id = google_secret_manager_secret.database_url.secret_id
+  secret_id = google_secret_manager_secret.managed_lifecycle_database_url.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.managed_lifecycle.email}"
 }
@@ -563,7 +660,7 @@ resource "google_secret_manager_secret_iam_member" "feedback_lifecycle_database_
   count = var.enable_feedback_lifecycle ? 1 : 0
 
   project   = var.project_id
-  secret_id = google_secret_manager_secret.database_url.secret_id
+  secret_id = google_secret_manager_secret.feedback_lifecycle_database_url.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.feedback_lifecycle[0].email}"
 }
@@ -577,7 +674,7 @@ resource "google_secret_manager_secret_iam_member" "managed_lifecycle_replay_sec
 
 resource "google_secret_manager_secret_iam_member" "migration_database_url" {
   project   = var.project_id
-  secret_id = google_secret_manager_secret.database_url.secret_id
+  secret_id = google_secret_manager_secret.migration_database_url.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.migration.email}"
 }

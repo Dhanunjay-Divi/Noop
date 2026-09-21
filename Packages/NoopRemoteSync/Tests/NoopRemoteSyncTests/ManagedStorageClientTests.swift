@@ -144,6 +144,78 @@ final class ManagedStorageClientTests: XCTestCase {
         XCTAssertTrue(response.productBoundary.localMetricsAvailable)
     }
 
+    func testAccountEnrollmentDoesNotSendHealthConsent() async throws {
+        let (client, authorization) = try makeClient()
+        let requestID = UUID(
+            uuidString: "e1fa3fa4-33f5-4514-a1ef-725ea18186a7"
+        )!
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/managed/account/enroll"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Bearer identity"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "X-Firebase-AppCheck"),
+                "app-check"
+            )
+            XCTAssertNil(
+                request.value(
+                    forHTTPHeaderField: "X-Noop-Installation-ID"
+                )
+            )
+            let data = try requestBody(request)
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            XCTAssertEqual(
+                object["installation_id"] as? String,
+                "ios-installation"
+            )
+            XCTAssertEqual(
+                (object["enrollment_request_id"] as? String)
+                    .flatMap(UUID.init(uuidString:)),
+                requestID
+            )
+            XCTAssertNil(object["policy_version"])
+            XCTAssertNil(object["policy_sha256"])
+            XCTAssertNil(object["data_classes"])
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 201,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                  "created": true,
+                  "product_boundary": {
+                    "account_ready": true,
+                    "health_data_consent_granted": false,
+                    "health_data_uploaded": false,
+                    "edge_collection_required": true
+                  }
+                }
+                """.utf8)
+            )
+        }
+
+        let response = try await client.enrollAccount(
+            platform: .iOS,
+            authorization: authorization,
+            requestID: requestID
+        )
+        XCTAssertTrue(response.created)
+        XCTAssertTrue(response.productBoundary.accountReady)
+        XCTAssertFalse(response.productBoundary.healthDataConsentGranted)
+        XCTAssertFalse(response.productBoundary.healthDataUploaded)
+        XCTAssertTrue(response.productBoundary.edgeCollectionRequired)
+    }
+
     func testSourceRegistrationDecodesProductionSnakeCaseResponse() async throws {
         let (client, authorization) = try makeClient()
         let sourceID = UUID(uuidString: "4baec329-3dc1-5f72-91bd-f9524c74bb22")!

@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-20**
+Last updated: **2026-09-21**
 
 ## Authoritative context
 
@@ -32,18 +32,59 @@ Last updated: **2026-09-20**
   mappings. The exact Python 3.14 release-policy matrix is green; replacement
   commit/push, hosted exact-SHA checks, protected merge, and protected-main
   verification remain pending.
+- Fresh September 20 independent Apple/Android and server/infrastructure review
+  found no P0, but the replacement candidate is not yet release-ready. Local
+  fixes now quiesce Friends work around account deletion, preserve scheduling
+  after cancellation, reconcile Android encrypted outbox generations, restore
+  `noop-charge-v2` reproducibility, bind installations to platform/plan limits,
+  return truthful account privacy state, fail closed on migration-058 schema
+  drift, bound deletion-worker lock attempts, verify real Friends account
+  erasure, bind mobile App Check enrollment to platform, and emit bounded
+  enrollment outcomes. Focused Android Full-debug tests, 29 Swift Recovery
+  tests, 305 Tools tests with one intentional skip, 50 i18n tests, required-CI
+  validation, 38 consolidated PostgreSQL cases, and 4 focused enrollment API
+  cases pass. The GCP source now separates pinned migration authority from five
+  workload-specific restricted runtime identities and database secrets; 13
+  provisioning tests, 22 production-deployment contracts, and 20 plan-only
+  OpenTofu tests pass. Failed secret publication or verification restores the
+  previous password or quarantines a first-time runtime role. The final Friends
+  localization/accessibility wall also passes on Android and Apple, the
+  unreachable Apple/Android self-hosted Friends presentation has been removed,
+  account-deletion copy is plan-neutral, and 33 focused Apple tests plus the
+  29-task Android managed-only Friends build pass. The exact-current unsigned
+  Release iOS graph builds with its embedded Watch app and widget validated.
+  `NoopRemoteSync` passes 188/188 after a fail-safe legacy communication-field
+  decoder correction, `WhoopStore` passes 539/539, and the complete Tools wall
+  passes 305 tests plus 44 subtests with zero forbidden terminology mappings.
+  The exact-current complete macOS wall passes 2,207 tests with one intentional
+  skip and zero failures.
+  Remaining blockers include live staging credential provisioning, the
+  consolidated commit/push, hosted exact-SHA checks, and protected integration.
+- Initial hosted replacement commit `bec61a55c7e45fbb2b1563c891858e439049b9cb`
+  reached run `35546684149`. Server source lint passed, but Ruff's format check
+  identified seven files. Ruff 0.12.2 applied its canonical formatting to
+  exactly those files; the complete server source check and format check now
+  pass locally. The correction is formatting-only and does not invalidate the
+  recorded server behavior wall. The corrected exact head still requires one
+  replacement push and hosted verification.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
-- Surviving exact-current local evidence: 24 affected macOS contracts pass; the
-  unsigned Release iOS graph builds with widgets and Watch embedded; Android
-  Full and Demo unit-task, compile, lint, APK, and instrumentation-source tasks
-  pass across a 137-task wall; `NoopRemoteSync` passes 177/177; PostgreSQL 16
-  executes 736 cases with 704 passes, 32 skips, and no failures; and 14
-  plan-only OpenTofu tests pass without apply. Earlier complete package,
-  macOS, iPhone-shell, visual, and API 35 walls remain evidence for their exact
-  recorded trees. Exact replacement-candidate API 35 execution remains a
-  required hosted context because the required local x86 managed device is
-  unavailable.
+- Exact-current local evidence: `NoopRemoteSync` passes 188/188 and
+  `WhoopStore` passes 539/539. The complete disposable-PostgreSQL server wall
+  passes 783 cases with one intentional skip and one warning. Android Full and
+  Demo each execute 4,964 tests with seven intentional skips and zero
+  failures/errors inside one 175-task compile, lint, APK, unit, and
+  instrumentation-source wall; lint reports zero Error/Fatal findings. The
+  complete macOS wall passes 2,207 tests with one intentional skip and zero
+  failures. The unsigned Release iOS graph succeeds with zero compiler errors,
+  zero `ManagedCloudService.swift` warnings, and its Watch, complications, and
+  widget extensions embedded. The final repository-tool wall passes 305 tests
+  plus 44 subtests, and the terminology inventory records 17,821 classified
+  occurrences across 1,581 groups with zero forbidden mappings. Thirteen
+  database-role tests, 22 production-deployment contracts, and 20 plan-only
+  OpenTofu tests pass without apply. Exact replacement-candidate API 35
+  execution remains a required hosted context because the required local x86
+  managed device is unavailable.
 - Deterministic Safety paging capture passes a test-only user confirmation and
   two preselected dummy contact roles through the production token codec,
   managed push service, and FCM payload builder with 3/3 installations and 2/2
@@ -76,8 +117,8 @@ Last updated: **2026-09-20**
   removed 62 exact round-owned `/private/tmp/noop-*` paths totaling
   16,566,458 bytes after preserving their results. Current agent-session files
   with open handles and the two cleanup manifests are deliberately retained.
-  New exact Apple verification logs and round-owned DerivedData remain until
-  the replacement hosted result is durable, then require exact-owner cleanup.
+  Later verification outputs were removed by the final closeout cleanup
+  recorded below.
 - Replacement candidate SHA, hosted `10/10`, protected merge SHA, and
   protected-main trusted result remain pending. No Docker image build,
   production runtime, signing, legal, carrier, physiology, or physical
@@ -96,11 +137,41 @@ Last updated: **2026-09-20**
   `ACC-340` remains open for provider identity erasure, ownership control-plane
   final erasure, approved physical band retirement/wipe, and legal/operator
   evidence.
+- The September 20 managed-Friends slice now separates account-only background
+  work from health-backup and Safety enrollment, exposes account-only deletion
+  and cancellation on Apple and Android, and completes the corresponding
+  localized account lifecycle. Focused Apple tests pass 12/12; Android
+  scheduler/localization tests and resource processing pass; the latest iPhone
+  simulator graph builds with Watch and widgets validated; and the isolated
+  PostgreSQL managed-Friends suite passes 8/8. Current routed source and 33
+  focused Apple tests prove that macOS uses the managed read-only account
+  route; the historical self-hosted screenshot is stale and is not accepted as
+  current evidence. The legacy Apple/Android Friends presentation source is
+  now removed, and Android managed-resource contracts pass. See
+  [NOOP-hosted Friends and communications](rounds/2026-09-20-noop-hosted-friends-communications.md).
+- Cleanup manifest
+  `c302d957bcd169f7244512291cab3cbb9334690ee7d7d0baad5757b937d3ff09`
+  removed 23 exact September 20 round-owned temporary paths totaling 7.170 GiB
+  after evidence was recorded. Post-cleanup verification found no test
+  PostgreSQL listener or candidate app process, with 20 GiB free and iTerm at
+  approximately 330 MiB RSS.
+- Final pause cleanup manifest
+  `13f5560c7a39e340cd3c4d842a369fbd3dd979f0c01bec0868d7221d387c271c`
+  removed 30 additional exact round-owned paths after the complete macOS and
+  final policy evidence was recorded. No build or test process remained, 21
+  GiB was free, and the unrelated pre-existing Homebrew PostgreSQL service was
+  preserved.
+- Final closeout cleanup manifest
+  `a9380fba359496f22cf7ae977dbd95ee39b5eec420ff51876aecc5f17424e152`
+  removed five exact regeneratable paths containing 118,883 files and
+  approximately 6,111,817,728 bytes. Verification found no remaining build or
+  test process, 22 GiB free, and iTerm2 at approximately 310 MiB RSS.
 
 Resume from:
 
 - [Cloud authority, Safety paging, and live surfaces](rounds/2026-09-19-cloud-authority-safety-live-surfaces.md)
 - [Current UI/cloud readiness review](rounds/2026-09-17-ui-cloud-readiness-review.md)
+- [NOOP-hosted Friends and communications](rounds/2026-09-20-noop-hosted-friends-communications.md)
 - [First production release checklist](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md)
 - [Release blockers](../handoff/RELEASE-BLOCKERS.md)
 - [Band physical validation handoff](../handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md)
@@ -128,9 +199,11 @@ Resume from:
 
 ## Immediate next actions
 
-1. Commit once and push the exact replacement head to protected pull request
+1. Amend the consolidated replacement commit with the hosted Ruff formatting
+   correction.
+2. Push the corrected exact replacement head to protected pull request
    `#16`.
-2. Require all ten hosted contexts before protected merge, then verify the
+3. Require all ten hosted contexts before protected merge, then verify the
    protected-main trusted result. Physical hardware, signing/store,
    legal, carrier, credential, production-runtime, and elapsed soak gates
    remain external.

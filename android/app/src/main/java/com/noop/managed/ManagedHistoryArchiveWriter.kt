@@ -82,6 +82,9 @@ internal class ManagedHistoryFileArchiveReader(
     }
 
     fun entryPaths(): List<String> = ZipFile(source).use { zip ->
+        if (!managedHistoryArchiveEntryCountAllowed(zip.size())) {
+            throw IOException("Managed history archive has too many entries.")
+        }
         val paths = zip.entries().asSequence()
             .filterNot { it.isDirectory }
             .map { it.name }
@@ -95,7 +98,10 @@ internal class ManagedHistoryFileArchiveReader(
         paths
     }
 
-    fun manifestData(): ByteArray = data("manifest.json", MAX_MANIFEST_BYTES)
+    fun manifestData(): ByteArray = data(
+        "manifest.json",
+        ManagedHistoryTransferLimits.MAXIMUM_MANIFEST_BYTES,
+    )
 
     fun data(path: String, maximumBytes: Int): ByteArray {
         if (!validPath(path) || maximumBytes < 0) {
@@ -113,9 +119,6 @@ internal class ManagedHistoryFileArchiveReader(
         }
     }
 
-    private companion object {
-        const val MAX_MANIFEST_BYTES = 8 * 1_024 * 1_024
-    }
 }
 
 internal class ManagedHistoryTransferStore(
@@ -352,11 +355,24 @@ internal class ManagedHistoryTransferStore(
 
     private fun readAtomic(file: AtomicFile): ByteArray? {
         if (!file.baseFile.isFile) return null
-        return file.openRead().use { readCapped(it, MAX_CHECKPOINT_BYTES) }
+        val maximumBytes = if (file === exportCheckpoint) {
+            ManagedHistoryTransferLimits.MAXIMUM_EXPORT_CHECKPOINT_BYTES
+        } else {
+            ManagedHistoryTransferLimits.MAXIMUM_IMPORT_CHECKPOINT_BYTES
+        }
+        if (file.baseFile.length() > maximumBytes) {
+            throw IOException("Managed history checkpoint is too large.")
+        }
+        return file.openRead().use { readCapped(it, maximumBytes.toInt()) }
     }
 
     private fun writeAtomic(file: AtomicFile, data: ByteArray) {
-        if (data.size > MAX_CHECKPOINT_BYTES) {
+        val maximumBytes = if (file === exportCheckpoint) {
+            ManagedHistoryTransferLimits.MAXIMUM_EXPORT_CHECKPOINT_BYTES
+        } else {
+            ManagedHistoryTransferLimits.MAXIMUM_IMPORT_CHECKPOINT_BYTES
+        }
+        if (data.size.toLong() > maximumBytes) {
             throw IOException("Managed history checkpoint is too large.")
         }
         val output = file.startWrite()
@@ -372,13 +388,20 @@ internal class ManagedHistoryTransferStore(
 
     private companion object {
         val SHA256 = Regex("^[0-9a-f]{64}$")
-        const val MAX_CHECKPOINT_BYTES = 8 * 1_024 * 1_024
         const val MAX_ARCHIVE_BYTES = 32L * 1_024 * 1_024 * 1_024
     }
 }
 
+internal fun managedHistoryArchiveEntryCountAllowed(count: Int): Boolean =
+    count in 1..ManagedHistoryTransferLimits.MAXIMUM_ARCHIVE_ENTRY_COUNT
+
+internal fun managedHistoryExportCheckpointMaximumBytes(): Long =
+    ManagedHistoryTransferLimits.MAXIMUM_EXPORT_CHECKPOINT_BYTES
+
 private fun validPath(path: String): Boolean =
     path.isNotEmpty() &&
+        path.toByteArray(StandardCharsets.UTF_8).size <=
+        ManagedHistoryTransferLimits.MAXIMUM_PATH_BYTES &&
         !path.startsWith("/") &&
         !path.endsWith("/") &&
         !path.contains('\\') &&

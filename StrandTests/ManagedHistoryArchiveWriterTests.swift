@@ -4,6 +4,34 @@ import ZIPFoundation
 @testable import Strand
 
 final class ManagedHistoryArchiveWriterTests: XCTestCase {
+    func testEntryEnumerationStopsAtCountLimitBeforeReadingRemainder()
+        throws
+    {
+        var reads = 0
+        let entries = AnySequence<String> {
+            AnyIterator {
+                guard reads < 10 else { return nil }
+                reads += 1
+                return "entries/\(reads).json"
+            }
+        }
+
+        do {
+            _ = try ManagedHistoryArchiveEntryEnumeration.paths(
+                in: entries,
+                maximumEntryCount: 2,
+                filePath: { $0 }
+            )
+            XCTFail("Expected entry-count rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedHistoryArchiveError,
+                .invalidArchive
+            )
+        }
+        XCTAssertEqual(reads, 3)
+    }
+
     func testWriterStreamsEntriesAndPublishesVerifiedManifestLast() async throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("noop-managed-writer-\(UUID().uuidString).zip")
@@ -264,6 +292,142 @@ final class ManagedHistoryArchiveWriterTests: XCTestCase {
         XCTAssertNil(cleared)
     }
 
+    func testTransferStoreRoundTripsExportCheckpointLargerThanEightMiB()
+        async throws
+    {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "noop-managed-large-checkpoint-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let store = try ManagedHistoryTransferStore(
+            accountScopeHash: String(repeating: "d", count: 64),
+            baseDirectoryURL: root
+        )
+        let chunks = (0..<20_000).map { index in
+            ManagedHistoryExportManifest.Chunk(
+                path: "chunks/essential_timeseries/\(index).json",
+                chunkID: UUID(),
+                sourceID: UUID(),
+                dataClass: "essential_timeseries",
+                schemaVersion: 1,
+                eventStart: "2026-09-04T11:00:00Z",
+                eventEnd: "2026-09-04T11:00:00Z",
+                compression: "none",
+                contentType: "application/vnd.noop.chunk+json",
+                sha256: String(repeating: "a", count: 64),
+                compressedBytes: 1,
+                uncompressedBytes: 1,
+                objectGeneration: Int64(index + 1)
+            )
+        }
+        let checkpoint = ManagedHistoryExportCheckpoint(
+            createdAt: "2026-09-04T12:00:00Z",
+            requestID: UUID(),
+            restoreJobID: UUID(),
+            snapshotAt: "2026-09-04T11:59:00Z",
+            changeSequence: 42,
+            expiresAt: "2026-09-19T00:00:00Z",
+            dataClasses: ["essential_timeseries"],
+            pageSize: 100,
+            selectedObjects: chunks.count,
+            selectedChunkBytes: Int64(chunks.count),
+            dataClassIndex: 1,
+            documentsComplete: true,
+            serverCompleted: true,
+            exportedObjects: chunks.count,
+            exportedChunkBytes: Int64(chunks.count),
+            chunks: chunks
+        )
+        let encoded = try checkpoint.encoded()
+        XCTAssertGreaterThan(encoded.count, 8 * 1_024 * 1_024)
+        XCTAssertLessThanOrEqual(
+            encoded.count,
+            ManagedHistoryTransferLimits.maximumExportCheckpointBytes
+        )
+
+        try await store.saveExportCheckpoint(checkpoint)
+        let restored = try await store.loadExportCheckpoint()
+        XCTAssertEqual(restored, checkpoint)
+    }
+
+    func testTransferStoreRejectsOversizedImportCheckpointBeforeDecode()
+        async throws
+    {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "noop-managed-import-checkpoint-limit-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let account = String(repeating: "e", count: 64)
+        let store = try ManagedHistoryTransferStore(
+            accountScopeHash: account,
+            baseDirectoryURL: root
+        )
+        let checkpointURL = transferDirectory(
+            root: root,
+            accountScopeHash: account
+        ).appendingPathComponent("import-checkpoint.json")
+        try Data(
+            repeating: 0x20,
+            count:
+                ManagedHistoryTransferLimits.maximumImportCheckpointBytes + 1
+        ).write(to: checkpointURL)
+
+        do {
+            _ = try await store.loadImportCheckpoint()
+            XCTFail("Expected import checkpoint size rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedHistoryArchiveError,
+                .entryTooLarge
+            )
+        }
+    }
+
+    func testTransferStoreRejectsExportCheckpointAboveArchitecturalCeiling()
+        async throws
+    {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "noop-managed-export-checkpoint-limit-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let account = String(repeating: "f", count: 64)
+        let store = try ManagedHistoryTransferStore(
+            accountScopeHash: account,
+            baseDirectoryURL: root
+        )
+        let checkpointURL = transferDirectory(
+            root: root,
+            accountScopeHash: account
+        ).appendingPathComponent("export-checkpoint.json")
+        XCTAssertTrue(FileManager.default.createFile(
+            atPath: checkpointURL.path,
+            contents: nil
+        ))
+        let handle = try FileHandle(forWritingTo: checkpointURL)
+        try handle.truncate(
+            atOffset: UInt64(
+                ManagedHistoryTransferLimits.maximumExportCheckpointBytes + 1
+            )
+        )
+        try handle.close()
+
+        do {
+            _ = try await store.loadExportCheckpoint()
+            XCTFail("Expected export checkpoint size rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedHistoryArchiveError,
+                .entryTooLarge
+            )
+        }
+    }
+
     private func archive(
         entry: ManagedHistoryExportEntry,
         manifest: ManagedHistoryExportManifest,
@@ -333,6 +497,16 @@ final class ManagedHistoryArchiveWriterTests: XCTestCase {
                 )
                 : nil
         )
+    }
+
+    private func transferDirectory(
+        root: URL,
+        accountScopeHash: String
+    ) -> URL {
+        root.appendingPathComponent(
+            "ManagedHistoryTransfers",
+            isDirectory: true
+        ).appendingPathComponent(accountScopeHash, isDirectory: true)
     }
 
     private func manifest(

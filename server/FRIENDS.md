@@ -1,4 +1,10 @@
-# Invitation-only Friends API
+# Legacy self-hosted Friends API
+
+This document describes the retained operator/server API, not the routed
+customer Friends product. D-060 makes customer Friends a NOOP-hosted account
+service with no provider picker or local-server setup. Keep this API available
+only for compatibility and controlled migration until its route, data, and
+credential retirement are separately proven.
 
 Friends is an optional, self-hosted sharing layer for small groups. It is
 designed around explicit consent and deliberately does not expose the server's

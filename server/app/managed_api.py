@@ -58,6 +58,7 @@ from app.managed_document_keys import (
 from app.managed_models import (
     MANAGED_DOCUMENT_KINDS,
     MANAGED_INSTALLATION_TOKEN_PATTERN,
+    ManagedAccountEnrollment,
     ManagedAccessRequest,
     ManagedAuthorityOptOutRequest,
     ManagedAuthorityReconsentRequest,
@@ -335,6 +336,12 @@ def managed_router(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="managed installation platform is not supported",
             )
+        if platform in {"ios", "android"}:
+            require_matching_platform(
+                platform=platform,
+                app_assertion=app_assertion,
+                request=request,
+            )
         if platform == "macos":
             if not settings.managed_macos_app_id:
                 request.state.auth_result = "macos_viewer_unavailable"
@@ -476,21 +483,17 @@ def managed_router(
             )
         return push
 
-    @router.post(
-        "/enroll",
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def enroll(
-        body: ManagedEnrollment,
+    def require_matching_platform(
+        *,
+        platform: ManagedClientPlatform,
+        app_assertion: ManagedAppAssertion,
         request: Request,
-        app_assertion: ManagedAppAssertion = Depends(require_app_check),
-        claims: ManagedIdentityClaims = Depends(require_claims),
-    ) -> dict:
+    ) -> None:
         expected_app_id = {
             "ios": settings.managed_apple_app_id,
             "android": settings.managed_android_app_id,
             "macos": settings.managed_macos_app_id,
-        }[body.platform]
+        }[platform]
         if not expected_app_id:
             request.state.auth_result = "managed_platform_unavailable"
             raise HTTPException(
@@ -503,36 +506,118 @@ def managed_router(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="managed app assertion does not match enrollment platform",
             )
-        if (
-            body.policy_version != settings.managed_consent_policy_version
-            or body.policy_sha256 != settings.managed_consent_policy_sha256
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="managed storage policy has changed; review the current policy",
-            )
+
+    @router.post(
+        "/account/enroll",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def enroll_account(
+        body: ManagedAccountEnrollment,
+        request: Request,
+        app_assertion: ManagedAppAssertion = Depends(require_app_check),
+        claims: ManagedIdentityClaims = Depends(require_claims),
+    ) -> dict:
+        outcome = "rejected"
         try:
-            result = await repository.enroll(claims=claims, enrollment=body)
-            principal = await repository.principal_for_identity(claims)
-        except ManagedStorageError as error:
-            _raise_managed(error)
-            raise AssertionError("unreachable")
-        await reconcile_unified_identity(
-            request=request,
-            claims=claims,
-            principal=principal,
-        )
-        return {
-            **result,
-            "product_boundary": {
-                "account_optional": True,
-                "local_metrics_available": True,
-                "storage_only_entitlement": True,
-                "cloud_authority_mode": "staged_per_data_class",
-                "formula_authority": "client_until_parity_approved",
-                "edge_collection_required": True,
-            },
-        }
+            require_matching_platform(
+                platform=body.platform,
+                app_assertion=app_assertion,
+                request=request,
+            )
+            try:
+                result = await repository.enroll_account(
+                    claims=claims,
+                    enrollment=body,
+                )
+                principal = await repository.principal_for_identity(claims)
+            except ManagedStorageError as error:
+                _raise_managed(error)
+                raise AssertionError("unreachable")
+            await reconcile_unified_identity(
+                request=request,
+                claims=claims,
+                principal=principal,
+            )
+            outcome = "created" if result["created"] else "existing"
+            return {
+                **result,
+                "product_boundary": {
+                    "account_ready": True,
+                    "health_data_consent_granted": bool(
+                        result["account"]["health_data_consent_granted"]
+                    ),
+                    "health_data_uploaded": bool(
+                        result["account"]["health_data_uploaded"]
+                    ),
+                    "edge_collection_required": True,
+                },
+            }
+        finally:
+            emit_operational_event(
+                "managed_account.enrollment",
+                service="noop-managed-api",
+                outcome=outcome,
+                platform=body.platform,
+            )
+
+    @router.post(
+        "/enroll",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def enroll(
+        body: ManagedEnrollment,
+        request: Request,
+        app_assertion: ManagedAppAssertion = Depends(require_app_check),
+        claims: ManagedIdentityClaims = Depends(require_claims),
+    ) -> dict:
+        outcome = "rejected"
+        try:
+            require_matching_platform(
+                platform=body.platform,
+                app_assertion=app_assertion,
+                request=request,
+            )
+            if (
+                body.policy_version != settings.managed_consent_policy_version
+                or body.policy_sha256 != settings.managed_consent_policy_sha256
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "managed storage policy has changed; review the current policy"
+                    ),
+                )
+            try:
+                result = await repository.enroll(claims=claims, enrollment=body)
+                principal = await repository.principal_for_identity(claims)
+            except ManagedStorageError as error:
+                _raise_managed(error)
+                raise AssertionError("unreachable")
+            await reconcile_unified_identity(
+                request=request,
+                claims=claims,
+                principal=principal,
+            )
+            outcome = "created" if result["created"] else "existing"
+            return {
+                **result,
+                "product_boundary": {
+                    "account_optional": True,
+                    "local_metrics_available": True,
+                    "storage_only_entitlement": True,
+                    "cloud_authority_mode": "staged_per_data_class",
+                    "formula_authority": "client_until_parity_approved",
+                    "edge_collection_required": True,
+                },
+            }
+        finally:
+            emit_operational_event(
+                "managed_storage.enrollment",
+                service="noop-managed-api",
+                outcome=outcome,
+                platform=body.platform,
+                data_class_count=len(body.data_classes),
+            )
 
     @router.get("/me")
     async def me(

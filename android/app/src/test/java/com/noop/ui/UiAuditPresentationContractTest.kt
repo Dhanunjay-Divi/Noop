@@ -88,7 +88,6 @@ class UiAuditPresentationContractTest {
     fun auditedCoreSurfacesUseSharedMissingValueToken() {
         val auditedPaths = listOf(
             "src/main/java/com/noop/ui/CoupledScreen.kt",
-            "src/main/java/com/noop/ui/FriendsScreen.kt",
             "src/main/java/com/noop/ui/HealthScreen.kt",
             "src/main/java/com/noop/ui/LiveScreen.kt",
             "src/main/java/com/noop/ui/ManagedFriendsScreen.kt",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -20,6 +21,22 @@ from app.ownership_deletion_lifecycle import (
 
 NOW = datetime(2026, 9, 18, 12, tzinfo=UTC)
 SUBJECT_HASH = "a" * 64
+
+
+def test_claim_serializes_with_cancellation_request_lock() -> None:
+    from app.ownership_deletion_lifecycle import (
+        PostgresOwnershipDeletionProgressRepository,
+    )
+
+    source = inspect.getsource(
+        PostgresOwnershipDeletionProgressRepository.claim_due_managed_targets
+    )
+    assert "pg_try_advisory_xact_lock" in source
+    assert "noop-ownership-account:" in source
+    assert "FOR UPDATE OF progress SKIP LOCKED" in source
+    assert "FOR UPDATE OF request" not in source
+    assert source.index("LIMIT $2") < source.index("pg_try_advisory_xact_lock")
+    assert "FROM due_candidates due" in source
 
 
 def target(

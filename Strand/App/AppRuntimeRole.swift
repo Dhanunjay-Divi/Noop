@@ -22,18 +22,20 @@ enum AppRuntimeRole: Equatable {
     }
 
     var allowsLocalAnalysisAndGuidance: Bool {
-        self == .phoneCollector
+        true
     }
 
-    /// A viewer label must not imply that account transport exists. The current
-    /// macOS target deliberately has no managed-auth or restore composition.
+    /// The macOS target has a signed-in, read-only managed transport. Runtime
+    /// configuration still fails closed when its separate App Check identity
+    /// or managed endpoint is absent.
     var hasManagedViewerTransport: Bool {
-        false
+        self == .managedViewer
     }
 
-    /// Never mount the operational repository-backed shell for a viewer until
-    /// an authenticated managed transport can establish account provenance.
+    /// Preserve the existing local macOS history, export, and analysis shell.
+    /// Collector-only actions remain gated by `allowsLocalCollection`, so
+    /// macOS cannot compete with the phone for live-source ownership.
     var canPresentOperationalShell: Bool {
-        allowsLocalCollection || hasManagedViewerTransport
+        allowsLocalAnalysisAndGuidance || hasManagedViewerTransport
     }
 }

@@ -293,16 +293,34 @@ final class ManagedCloudRetryContractTests: XCTestCase {
         XCTAssertTrue(retry.contains("retryAfter: retryAfter"))
     }
 
-    func testAppleBusyCatchUpRemainsIncompleteWithoutRetryingUnenrolledState()
+    func testAppleAccountOnlyFriendsCatchUpKeepsStorageScopesGated()
         throws
     {
         let apple = try source("StrandiOS/System/ManagedCloudService.swift")
         XCTAssertTrue(
-            apple.contains("guard phase == .enrolled else { return true }")
+            apple.contains(
+                "let storageEnrolled = phase == .enrolled"
+            )
+        )
+        XCTAssertTrue(
+            apple.contains(
+                "accountAccessReady && defaults.bool(forKey: Key.socialEnabled)"
+            )
+        )
+        XCTAssertTrue(
+            apple.contains(
+                "let coreEnabled = storageEnrolled && automatic"
+            )
+        )
+        XCTAssertTrue(
+            apple.contains(
+                "guard storageEnrolled || socialEnabled else { return true }"
+            )
         )
         XCTAssertTrue(
             apple.contains(
                 "guard !disconnecting,\n"
+                    + "              !accountTransitioning,\n"
                     + "              !isBusy,\n"
                     + "              !running,\n"
                     + "              !socialRunning,\n"
@@ -310,6 +328,89 @@ final class ManagedCloudRetryContractTests: XCTestCase {
                     + "        else { return false }"
             )
         )
+        XCTAssertTrue(apple.contains("if coreEnabled"))
+        XCTAssertTrue(apple.contains("if socialEnabled,"))
+        XCTAssertTrue(apple.contains("if safetyEnabled,"))
+    }
+
+    func testAppleAccountEnrollmentAcceptsExistingHealthPrivacyState() throws {
+        let apple = try source("StrandiOS/System/ManagedCloudService.swift")
+        let enrollment = try section(
+            apple,
+            from: "    func enrollAccount() async",
+            to: "    func enroll(repo: Repository) async"
+        )
+
+        XCTAssertTrue(
+            enrollment.contains("response.productBoundary.accountReady")
+        )
+        XCTAssertTrue(
+            enrollment.contains(
+                "response.productBoundary.edgeCollectionRequired"
+            )
+        )
+        XCTAssertFalse(enrollment.contains("healthDataConsentGranted"))
+        XCTAssertFalse(enrollment.contains("healthDataUploaded"))
+        XCTAssertTrue(
+            enrollment.contains(
+                "localized: \"Your NOOP account is ready.\""
+            )
+        )
+    }
+
+    func testAccountOnlyDeletionUsesPersistedAccountInstallationScope()
+        throws
+    {
+        let apple = try source("StrandiOS/System/ManagedCloudService.swift")
+        let android = try source(
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+        )
+        let friends = try source(
+            "StrandiOS/System/ManagedFriendsView.swift"
+        )
+        let androidFriends = try source(
+            "android/app/src/main/java/com/noop/ui/ManagedFriendsScreen.kt"
+        )
+
+        XCTAssertGreaterThanOrEqual(
+            apple.components(
+                separatedBy:
+                    "?? defaults.string(forKey: Key.accountAccessScopeHash)"
+            ).count - 1,
+            2
+        )
+        XCTAssertGreaterThanOrEqual(
+            android.components(
+                separatedBy: "?: preferences.accountAccessScopeHash"
+            ).count - 1,
+            2
+        )
+        XCTAssertTrue(
+            friends.contains(
+                "if service.phase == .deletionScheduled"
+            )
+        )
+        XCTAssertTrue(friends.contains("accountDeletionScheduledCard"))
+        XCTAssertTrue(friends.contains("accountManagementCard"))
+        XCTAssertTrue(apple.contains(
+            "reason: \"deletion_requested\""
+        ))
+        XCTAssertTrue(apple.contains(
+            "await cancelAndAwaitAccountOperations()"
+        ))
+        XCTAssertTrue(apple.contains(
+            "clearSocialState(preservingEnabled: true)"
+        ))
+        XCTAssertTrue(android.contains(
+            "private suspend fun scheduleAccountDeletion() =\n"
+                + "        socialMutex.withLock"
+        ))
+        XCTAssertTrue(android.contains(
+            "preferences.clearSocialState(preserveEnabled = true)"
+        ))
+        XCTAssertTrue(androidFriends.contains(
+            "LaunchedEffect(service, state.accountAccessReady)"
+        ))
     }
 
     func testAndroidFallbackReleasesDeadlineBeforeWorkerRetryAndAuthClearsState()

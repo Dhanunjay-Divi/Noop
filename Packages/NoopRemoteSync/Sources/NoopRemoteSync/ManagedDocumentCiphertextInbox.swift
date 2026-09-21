@@ -79,6 +79,25 @@ public enum ManagedDocumentCiphertextInboxPurgeDisposition:
     case removed
 }
 
+public struct ManagedDocumentCiphertextInboxOutgoingReference:
+    Hashable,
+    Sendable
+{
+    public let localIdentifier: String
+    public let generation: Int64
+    public let revision: Int64
+
+    public init(
+        localIdentifier: String,
+        generation: Int64,
+        revision: Int64
+    ) {
+        self.localIdentifier = localIdentifier
+        self.generation = generation
+        self.revision = revision
+    }
+}
+
 public actor ManagedDocumentCiphertextInbox {
     private struct Record: Codable, Equatable {
         let version: Int
@@ -389,6 +408,40 @@ public actor ManagedDocumentCiphertextInbox {
         )
     }
 
+    @discardableResult
+    public func reconcileOutgoing(
+        accountScopeHash: String,
+        retaining references:
+            [ManagedDocumentCiphertextInboxOutgoingReference]
+    ) throws -> Int {
+        let scope = try prepareIfNeeded(accountScopeHash)
+        let identities = try Set(references.map { reference in
+            guard reference.localIdentifier.range(
+                of: #"^[0-9a-f]{64}$"#,
+                options: .regularExpression
+            ) != nil,
+            reference.generation > 0,
+            reference.revision > 0 else {
+                throw ManagedDocumentCiphertextInboxError.invalidRecord
+            }
+            return outgoingIdentity(
+                accountScopeHash: scope,
+                localIdentifier: reference.localIdentifier,
+                generation: reference.generation,
+                revision: reference.revision
+            )
+        })
+        var removed = 0
+        for entry in try scopedEntries(accountScopeHash: scope)
+            where entry.record.direction == "outgoing"
+                && !identities.contains(entry.record.identity) {
+            try removeFileOrDirectory(entry.url)
+            removed += 1
+        }
+        try cleanupEmptyScopedDirectories(accountScopeHash: scope)
+        return removed
+    }
+
     public func pendingIncomingCount() throws -> Int {
         try pendingCount(direction: "incoming")
     }
@@ -601,12 +654,14 @@ public actor ManagedDocumentCiphertextInbox {
                     removedInvalid = true
                     continue
                 }
-                guard entry.record.stagedAtMilliseconds <= now else {
+                guard direction == "outgoing"
+                        || entry.record.stagedAtMilliseconds <= now else {
                     try removeFileOrDirectory(file)
                     removedInvalid = true
                     continue
                 }
-                if now - entry.record.stagedAtMilliseconds
+                if direction == "incoming",
+                   now - entry.record.stagedAtMilliseconds
                     >= policy.maximumAgeMilliseconds {
                     try removeFileOrDirectory(file)
                     removedStale = true
@@ -620,7 +675,12 @@ public actor ManagedDocumentCiphertextInbox {
         var totalBytes = valid.reduce(Int64(0)) { $0 + $1.byteCount }
         while valid.count > policy.maximumRecordCount
             || totalBytes > policy.maximumTotalBytes {
-            let removed = valid.removeFirst()
+            guard let index = valid.firstIndex(
+                where: { $0.record.direction == "incoming" }
+            ) else {
+                break
+            }
+            let removed = valid.remove(at: index)
             try removeFileOrDirectory(removed.url)
             totalBytes -= removed.byteCount
             trimmedQuota = true
@@ -698,10 +758,12 @@ public actor ManagedDocumentCiphertextInbox {
             entries.reduce(Int64(0)) { $0 + $1.byteCount } + newByteCount
         while projectedCount > policy.maximumRecordCount
             || projectedBytes > policy.maximumTotalBytes {
-            guard !entries.isEmpty else {
+            guard let index = entries.firstIndex(
+                where: { $0.record.direction == "incoming" }
+            ) else {
                 throw ManagedDocumentCiphertextInboxError.quotaExceeded
             }
-            let removed = entries.removeFirst()
+            let removed = entries.remove(at: index)
             try removeFileOrDirectory(removed.url)
             projectedCount -= 1
             projectedBytes -= removed.byteCount

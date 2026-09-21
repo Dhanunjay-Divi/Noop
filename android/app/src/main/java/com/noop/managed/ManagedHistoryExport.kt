@@ -9,6 +9,15 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
 
+internal object ManagedHistoryTransferLimits {
+    const val MAXIMUM_OBJECT_COUNT = 20_000
+    const val MAXIMUM_ARCHIVE_ENTRY_COUNT = MAXIMUM_OBJECT_COUNT + 1
+    const val MAXIMUM_MANIFEST_BYTES = 16 * 1_024 * 1_024
+    const val MAXIMUM_IMPORT_CHECKPOINT_BYTES = 64L * 1_024L
+    const val MAXIMUM_EXPORT_CHECKPOINT_BYTES = 16L * 1_024L * 1_024L
+    const val MAXIMUM_PATH_BYTES = 512
+}
+
 enum class ManagedHistoryExportEntryKind {
     CHUNK,
     DOCUMENT,
@@ -462,6 +471,7 @@ class ManagedHistoryExporter(
             }
             if (restore.status != "running" ||
                 restore.selectedObjects < 0 ||
+                restore.selectedObjects > ManagedHistoryTransferLimits.MAXIMUM_OBJECT_COUNT ||
                 restore.selectedBytes < 0 ||
                 restore.deliveredObjects != 0 ||
                 restore.deliveredBytes != 0L ||
@@ -587,7 +597,6 @@ class ManagedHistoryExporter(
                     ) {
                         throw ManagedStorageException.InvalidResponse()
                     }
-                    saveCheckpoint(checkpoint)
                     report(
                         progress,
                         ManagedHistoryExportPhase.CHUNKS,
@@ -668,7 +677,6 @@ class ManagedHistoryExporter(
                 if (checkpoint.exportedObjects > checkpoint.selectedObjects) {
                     throw ManagedStorageException.InvalidResponse()
                 }
-                saveCheckpoint(checkpoint)
                 report(
                     progress,
                     ManagedHistoryExportPhase.DOCUMENTS,
@@ -850,6 +858,7 @@ class ManagedHistoryExporter(
             runCatching { Instant.parse(checkpoint.snapshotAt) }.isFailure ||
             expiresAt == null ||
             checkpoint.selectedObjects < 0 ||
+            checkpoint.selectedObjects > ManagedHistoryTransferLimits.MAXIMUM_OBJECT_COUNT ||
             checkpoint.selectedChunkBytes < 0 ||
             checkpoint.dataClassIndex !in 0..dataClasses.size ||
             checkpoint.exportedObjects != checkpoint.chunks.size +
@@ -883,6 +892,8 @@ class ManagedHistoryExporter(
 
     private fun validPath(path: String): Boolean =
         path.isNotEmpty() &&
+            path.toByteArray(StandardCharsets.UTF_8).size <=
+            ManagedHistoryTransferLimits.MAXIMUM_PATH_BYTES &&
             !path.startsWith("/") &&
             !path.endsWith("/") &&
             !path.contains('\\') &&

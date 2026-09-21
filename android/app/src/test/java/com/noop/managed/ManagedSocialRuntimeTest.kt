@@ -75,6 +75,7 @@ class ManagedSocialRuntimeTest {
                 charge = true,
                 hrv = true,
                 pokeAllowed = true,
+                messagesAllowed = true,
             ),
         )
         val visibility = ManagedSocialRuntime.visibilityUnion(listOf(friend))
@@ -90,12 +91,30 @@ class ManagedSocialRuntimeTest {
         assertTrue(visibility.charge)
         assertTrue(visibility.hrv)
         assertTrue(visibility.pokeAllowed)
+        assertTrue(visibility.messagesAllowed)
         assertFalse(visibility.effort)
+        assertFalse(visibility.photosAllowed)
+        assertFalse(visibility.audioCallsAllowed)
+        assertFalse(visibility.videoCallsAllowed)
         assertEquals(first, repeated)
         assertNotEquals(first, changed)
         assertEquals(
             "1ae7221f2694469e23c6fecd9beb8053439ba79f7eedd7c4f244b6d9cf0dc9ca",
             first,
+        )
+    }
+
+    @Test
+    fun communicationPermissionsDefaultOffAndPatchTracksChanges() {
+        val visibility = ManagedSocialVisibility()
+
+        assertFalse(visibility.messagesAllowed)
+        assertFalse(visibility.photosAllowed)
+        assertFalse(visibility.audioCallsAllowed)
+        assertFalse(visibility.videoCallsAllowed)
+        assertFalse(ManagedSocialVisibilityPatch().hasChange)
+        assertTrue(
+            ManagedSocialVisibilityPatch(messagesAllowed = true).hasChange,
         )
     }
 

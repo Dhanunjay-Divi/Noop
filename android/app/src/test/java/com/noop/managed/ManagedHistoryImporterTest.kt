@@ -1,5 +1,6 @@
 package com.noop.managed
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -117,6 +118,37 @@ class ManagedHistoryImporterTest {
         } catch (_: ManagedStorageException.Conflict) {
             // Expected.
         }
+        assertEquals(0, restore.calls)
+    }
+
+    @Test
+    fun accountFenceStopsImportBeforeAnyLocalMutation() = runTest {
+        val fixture = fixture(listOf(68, 72))
+        val restore = ImportRestoreRecorder()
+        var validations = 0
+
+        try {
+            ManagedHistoryImporter().importArchive(
+                manifestData = fixture.manifest.encoded(),
+                entryPaths = fixture.entries.keys.toList() + "manifest.json",
+                restore = restore,
+                operationValidator = {
+                    validations += 1
+                    if (validations == 3) {
+                        throw CancellationException("account changed")
+                    }
+                },
+                read = { path, maximumBytes ->
+                    fixture.entries[path]
+                        ?.takeIf { it.size <= maximumBytes }
+                        ?: throw ManagedStorageException.InvalidResponse()
+                },
+            )
+            fail("Expected account-fence cancellation")
+        } catch (_: CancellationException) {
+            // Expected.
+        }
+
         assertEquals(0, restore.calls)
     }
 

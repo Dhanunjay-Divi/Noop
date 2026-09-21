@@ -335,7 +335,8 @@ public actor ManagedHistoryImporter {
         let chunkBytes = try manifest.chunks.reduce(Int64(0)) {
             try add($0, Int64($1.compressedBytes))
         }
-        guard manifestData.count <= 8 * 1_024 * 1_024,
+        guard manifestData.count
+                <= ManagedHistoryTransferLimits.maximumManifestBytes,
               manifest.format == "noop_managed_history",
               (1...2).contains(manifest.formatVersion),
               ManagedTimestamp.milliseconds(
@@ -351,7 +352,8 @@ public actor ManagedHistoryImporter {
               manifest.dataClasses.allSatisfy(Self.validDataClass),
               manifest.selectedObjects == manifest.exportedObjects,
               manifest.exportedObjects == objects.count,
-              manifest.exportedObjects <= 1_000_000,
+              manifest.exportedObjects
+                <= ManagedHistoryTransferLimits.maximumObjectCount,
               manifest.selectedChunkBytes == manifest.exportedChunkBytes,
               manifest.exportedChunkBytes == chunkBytes,
               manifest.exportedChunkBytes >= 0,
@@ -389,24 +391,25 @@ public actor ManagedHistoryImporter {
         archiveSHA256: String,
         objects: [Object]
     ) throws {
-        let expectedBytes = objects.prefix(checkpoint.nextObjectIndex).reduce(
-            Int64(0)
-        ) {
-            $0 + $1.chunkBytes
+        guard checkpoint.archiveSHA256 == archiveSHA256 else {
+            throw ManagedStorageError.conflict
+        }
+        guard checkpoint.nextObjectIndex >= 0,
+              checkpoint.nextObjectIndex <= objects.count else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let expectedBytes = try objects.prefix(
+            checkpoint.nextObjectIndex
+        ).reduce(Int64(0)) {
+            try add($0, $1.chunkBytes)
         }
         guard checkpoint.format == "noop_managed_history_import_checkpoint",
               checkpoint.formatVersion
                 == ManagedHistoryImportCheckpoint.currentFormatVersion,
-              checkpoint.archiveSHA256 == archiveSHA256,
-              checkpoint.nextObjectIndex >= 0,
-              checkpoint.nextObjectIndex <= objects.count,
               checkpoint.importedObjects == checkpoint.nextObjectIndex,
               checkpoint.importedChunkBytes == expectedBytes,
               !checkpoint.completed
                 || checkpoint.nextObjectIndex == objects.count else {
-            if checkpoint.archiveSHA256 != archiveSHA256 {
-                throw ManagedStorageError.conflict
-            }
             throw ManagedStorageError.invalidResponse
         }
     }
@@ -647,6 +650,7 @@ public actor ManagedHistoryImporter {
 
     private static func valid(path: String) -> Bool {
         !path.isEmpty
+            && path.utf8.count <= ManagedHistoryTransferLimits.maximumPathBytes
             && !path.hasPrefix("/")
             && !path.hasSuffix("/")
             && !path.contains("\\")

@@ -107,6 +107,51 @@ class ManagedStorageClientTest {
     }
 
     @Test
+    fun accountEnrollmentAcceptsExistingHealthPrivacyState() = runTest {
+        var captured: Request? = null
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured = request
+                response(
+                    request,
+                    200,
+                    """
+                    {
+                      "created": false,
+                      "product_boundary": {
+                        "account_ready": true,
+                        "health_data_consent_granted": true,
+                        "health_data_uploaded": true,
+                        "edge_collection_required": true
+                      }
+                    }
+                    """.trimIndent(),
+                )
+            },
+        )
+
+        assertFalse(
+            client.enrollAccount(
+                authorization,
+                UUID.fromString("523dc89d-eb16-43ba-acd0-040cf76badc2"),
+            ),
+        )
+        assertEquals(
+            "/v1/managed/account/enroll",
+            captured!!.url.encodedPath,
+        )
+        val body = JSONObject(
+            okio.Buffer().also { captured!!.body!!.writeTo(it) }.readUtf8(),
+        )
+        assertEquals("android", body.getString("platform"))
+        assertEquals(
+            authorization.installationId,
+            body.getString("installation_id"),
+        )
+    }
+
+    @Test
     fun retryableServerResponsePreservesBoundedRetryAfter() = runTest {
         val client = ManagedStorageClient(
             config,

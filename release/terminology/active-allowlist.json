@@ -1937,6 +1937,15 @@
     },
     {
       "category": "core",
+      "occurrenceCount": 6,
+      "owner": "project team",
+      "path": "Strand/System/ManagedCloudDocumentAdapter.swift",
+      "reason": "Existing active symbol retained behind the additive compatibility migration.",
+      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
+      "sha256": "762568ebcd450e66c0407d7525b65df840f7a4c59bf8a58ab733f406f02a3379"
+    },
+    {
+      "category": "core",
       "occurrenceCount": 1,
       "owner": "project team",
       "path": "Strand/System/NOOPAppIntents.swift",
@@ -2063,12 +2072,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 14,
+      "occurrenceCount": 11,
       "owner": "project team",
       "path": "StrandiOS/System/ManagedCloudService.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "5b34bf6d9479855b560dd010c84efa467e0fd2567e5c12dbef33a00a63abe5a4"
+      "sha256": "9c86ace7bbb67fcb01e33df24580b598e1ced3b9c09fc63c5cd2de286ee69f19"
     },
     {
       "category": "core",

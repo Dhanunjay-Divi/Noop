@@ -16,6 +16,7 @@ from app.managed_document_keys import (
 )
 from app.managed_identity import ManagedIdentityClaims
 from app.managed_models import (
+    ManagedAccountEnrollment,
     ManagedChunkReservation,
     ManagedChunkStream,
     ManagedClientKeyRegistration,
@@ -41,7 +42,7 @@ DATABASE_ENGINE = os.getenv("NOOP_TEST_DATABASE_ENGINE", "timescaledb")
 POLICY_SHA256 = "e9324e49b411f124635c24b2de509f4e459cb164b7bdd23519c65c778d12d7ef"
 
 
-def test_erasure_request_preserves_job_before_account_lock_order() -> None:
+def test_erasure_mutations_preserve_account_before_job_lock_order() -> None:
     source = inspect.getsource(PostgresManagedRepository.request_erasure)
     advisory = source.index("noop-managed-erasure-account:")
     job_lock = source.index("FROM managed_erasure_jobs", advisory)
@@ -60,6 +61,18 @@ def test_erasure_request_preserves_job_before_account_lock_order() -> None:
     )
     assert cancel_advisory < cancel_job_lock < cancel_account_lock
 
+    finalize_source = inspect.getsource(PostgresManagedRepository.finalize_erasure_jobs)
+    finalize_advisory = finalize_source.index("noop-managed-erasure-account:")
+    finalize_job_lock = finalize_source.index(
+        "FROM managed_erasure_jobs",
+        finalize_advisory,
+    )
+    finalize_for_update = finalize_source.index(
+        "FOR UPDATE",
+        finalize_job_lock,
+    )
+    assert finalize_advisory < finalize_job_lock < finalize_for_update
+
     claim_source = inspect.getsource(PostgresManagedRepository.claim_erasure_deletions)
     assert "JOIN managed_accounts account" in claim_source
     assert "account.status = 'erasure_pending'" in claim_source
@@ -72,6 +85,59 @@ def test_document_mutation_uses_account_erasure_fence() -> None:
     document_lock = source.index("noop-managed-document:", account_fence)
     insert = source.index("INSERT INTO managed_documents", document_lock)
     assert account_fence < document_lock < insert
+
+
+def test_chunk_upload_mutations_use_account_erasure_fence() -> None:
+    for method in (
+        PostgresManagedRepository.reserve_chunk,
+        PostgresManagedRepository.record_upload_grant,
+        PostgresManagedRepository.complete_chunk_upload,
+    ):
+        source = inspect.getsource(method)
+        account_fence = source.index("_lock_active_account_mutation")
+        chunk_access = source.index("managed_chunks", account_fence)
+        assert account_fence < chunk_access
+
+    claim_source = inspect.getsource(PostgresManagedRepository.claim_erasure_deletions)
+    revoke = claim_source.index("UPDATE managed_upload_grants")
+    chunk_alias = claim_source.index("FROM managed_chunks chunk", revoke)
+    capability_expiry = claim_source.index("upload_grant.expires_at > $3", revoke)
+    chunk_delete = claim_source.index("SET state = 'delete_pending'", capability_expiry)
+    assert revoke < chunk_alias < capability_expiry < chunk_delete
+    capability_fence = claim_source[chunk_alias:chunk_delete]
+    assert "upload_grant.status" not in capability_fence
+
+
+def test_capability_mutations_use_account_erasure_fence() -> None:
+    for method in (
+        PostgresManagedRepository.record_access_grant,
+        PostgresManagedRepository.create_restore,
+        PostgresManagedRepository.create_export,
+        PostgresManagedRepository.complete_export,
+    ):
+        source = inspect.getsource(method)
+        account_fence = source.index("_lock_active_account_mutation")
+        first_mutation = min(
+            index
+            for marker in (
+                "INSERT INTO managed_object_access_grants",
+                "INSERT INTO managed_restore_jobs",
+                "INSERT INTO managed_export_jobs",
+                "UPDATE managed_export_jobs",
+            )
+            if (index := source.find(marker)) >= 0
+        )
+        assert account_fence < first_mutation
+
+
+def test_derived_erasure_removes_and_verifies_formula_shadow_rows() -> None:
+    source = inspect.getsource(PostgresManagedRepository.finalize_erasure_jobs)
+    account_fence = source.index("noop-managed-erasure-account:")
+    derived = source.index('if scope == "derived_data"', account_fence)
+    context = source.index("noop.managed_erasure_job_id", derived)
+    delete = source.index("DELETE FROM managed_formula_shadow_results", context)
+    verify = source.index("remaining_formula_shadows", delete)
+    assert account_fence < derived < context < delete < verify
 
 
 async def _wait_for_lock_waiters(pool, *, minimum: int) -> None:
@@ -122,6 +188,21 @@ def _enrollment(
     )
 
 
+def _account_enrollment(
+    installation_id: str,
+    request_id,
+    *,
+    installation_token: str | None = None,
+    platform: str = "ios",
+) -> ManagedAccountEnrollment:
+    return ManagedAccountEnrollment(
+        installation_id=installation_id,
+        platform=platform,
+        installation_token=(installation_token or _installation_token(installation_id)),
+        enrollment_request_id=request_id,
+    )
+
+
 def _installation_token(installation_id: str) -> str:
     encoded = (
         base64.urlsafe_b64encode(
@@ -143,6 +224,7 @@ def _managed(
     primary: PostgresRepository,
     *,
     entitlement_mode: str = "open_beta",
+    account_max_installations: int = 5,
 ) -> PostgresManagedRepository:
     return PostgresManagedRepository(
         primary,
@@ -151,6 +233,7 @@ def _managed(
         default_plan_code="noop_plus_staging",
         default_plan_revision=1,
         consent_policy_kind="managed_storage",
+        account_max_installations=account_max_installations,
         entitlement_mode=entitlement_mode,
         replay_secret="test-managed-replay-secret-at-least-32-bytes",
     )
@@ -320,6 +403,164 @@ async def test_control_retention_accepts_timestamp_parameters() -> None:
     reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
+async def test_account_erasure_fences_chunk_mutations_and_waits_for_upload_grant() -> (
+    None
+):
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=4,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(primary)
+        now = datetime.now(UTC)
+        claims = _claims(f"chunk-erasure-fence-{uuid4()}", now)
+        installation_id = str(uuid4())
+        await repository.enroll(
+            claims=claims,
+            enrollment=_enrollment(installation_id, uuid4()),
+        )
+        principal = await repository.principal_for_identity(claims)
+        source_id = uuid4()
+        await repository.register_source(
+            principal=principal,
+            installation_id=installation_id,
+            registration=ManagedSourceRegistration(
+                source_id=source_id,
+                source_kind="band",
+                platform="ios",
+                logical_source_hash="b" * 64,
+            ),
+        )
+        reservation = ManagedChunkReservation(
+            chunk_id=uuid4(),
+            request_id=uuid4(),
+            source_id=source_id,
+            data_class="essential_timeseries",
+            schema_version=1,
+            content_mode="server_readable",
+            event_start=now - timedelta(hours=1),
+            event_end=now,
+            compression="gzip",
+            content_type="application/vnd.noop.chunk+json",
+            expected_sha256="c" * 64,
+            expected_compressed_bytes=4_096,
+            expected_uncompressed_bytes=16_384,
+            streams=_essential_streams(
+                event_at=now,
+                heart_rate_samples=1,
+            ),
+        )
+        reserved = await repository.reserve_chunk(
+            principal=principal,
+            installation_id=installation_id,
+            reservation=reservation,
+        )
+        grant_expires_at = (await repository.coordination_now()) + timedelta(minutes=10)
+        await repository.record_upload_grant(
+            principal=principal,
+            installation_id=installation_id,
+            chunk_id=reservation.chunk_id,
+            capability_hash="f" * 64,
+            expires_at=grant_expires_at,
+        )
+        await repository.request_erasure(
+            principal=principal,
+            request_id=uuid4(),
+            scope="all_managed_data",
+            confirmation_sha256="a" * 64,
+            identity_deletion_ticket=None,
+            cooling_off=timedelta(0),
+        )
+
+        with pytest.raises(ManagedForbiddenError, match="not active"):
+            await repository.reserve_chunk(
+                principal=principal,
+                installation_id=installation_id,
+                reservation=reservation,
+            )
+        with pytest.raises(ManagedForbiddenError, match="not active"):
+            await repository.record_upload_grant(
+                principal=principal,
+                installation_id=installation_id,
+                chunk_id=reservation.chunk_id,
+                capability_hash="e" * 64,
+                expires_at=grant_expires_at,
+            )
+        with pytest.raises(ManagedForbiddenError, match="not active"):
+            await repository.complete_chunk_upload(
+                principal=principal,
+                installation_id=installation_id,
+                chunk_id=reservation.chunk_id,
+                metadata=ManagedObjectMetadata(
+                    object_key=reserved["object_key"],
+                    generation=1,
+                    metageneration=1,
+                    crc32c="AAAAAA==",
+                    size=4_096,
+                    content_type="application/vnd.noop.chunk+json",
+                    metadata={"noop-sha256": "c" * 64},
+                ),
+            )
+
+        claim_time = await repository.coordination_now()
+        initial_claims = await repository.claim_erasure_deletions(
+            now=claim_time,
+            batch_size=10,
+        )
+        assert [
+            row for row in initial_claims if row["account_id"] == principal.account_id
+        ] == []
+        pool = primary._require_pool()
+        fenced = await pool.fetchrow(
+            """
+            SELECT chunk.state,
+                   upload_grant.status AS grant_status
+            FROM managed_chunks chunk
+            JOIN managed_upload_grants upload_grant
+              ON upload_grant.account_id = chunk.account_id
+             AND upload_grant.chunk_id = chunk.chunk_id
+            WHERE chunk.account_id = $1 AND chunk.chunk_id = $2
+            """,
+            principal.account_id,
+            reservation.chunk_id,
+        )
+        assert fenced["state"] == "uploading"
+        assert fenced["grant_status"] == "revoked"
+
+        claimed = await repository.claim_erasure_deletions(
+            now=grant_expires_at + timedelta(seconds=1),
+            batch_size=10,
+        )
+        assert [
+            row["chunk_id"]
+            for row in claimed
+            if row["account_id"] == principal.account_id
+        ] == [reservation.chunk_id]
+        assert (
+            await pool.fetchval(
+                """
+                SELECT state
+                FROM managed_chunks
+                WHERE account_id = $1 AND chunk_id = $2
+                """,
+                principal.account_id,
+                reservation.chunk_id,
+            )
+            == "delete_pending"
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
 async def test_pilot_mode_requires_verified_claim_for_first_enrollment() -> None:
     primary = PostgresRepository(
         DATABASE_URL or "",
@@ -348,6 +589,148 @@ async def test_pilot_mode_requires_verified_claim_for_first_enrollment() -> None
         )
 
         assert enrolled["created"] is True
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_account_enrollment_is_consent_free_and_upgrades_in_place() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=2,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(primary, entitlement_mode="closed")
+        now = datetime.now(UTC)
+        claims = _claims(f"friends-account-{uuid4()}", now)
+        installation_id = str(uuid4())
+        request_id = uuid4()
+        account_request = _account_enrollment(
+            installation_id,
+            request_id,
+        )
+
+        created = await repository.enroll_account(
+            claims=claims,
+            enrollment=account_request,
+        )
+        repeated = await repository.enroll_account(
+            claims=claims,
+            enrollment=account_request,
+        )
+        principal = await repository.principal_for_identity(claims)
+
+        assert created["created"] is True
+        assert repeated["created"] is False
+        assert repeated["identity_id"] == principal.identity_id
+        assert created["account"]["health_data_consent_granted"] is False
+        assert created["account"]["health_data_uploaded"] is False
+
+        with pytest.raises(
+            ManagedConflictError,
+            match="installation platform does not match enrollment",
+        ):
+            await repository.enroll_account(
+                claims=claims,
+                enrollment=_account_enrollment(
+                    installation_id,
+                    uuid4(),
+                    platform="android",
+                ),
+            )
+
+        pool = primary._require_pool()
+        before_storage = await pool.fetchrow(
+            """
+            SELECT
+                (
+                    SELECT count(*)
+                    FROM managed_subscriptions
+                    WHERE account_id = $1
+                ) AS subscriptions,
+                (
+                    SELECT count(*)
+                    FROM managed_consent_events
+                    WHERE account_id = $1
+                ) AS consent_events,
+                (
+                    SELECT count(*)
+                    FROM managed_retention_policy_snapshots
+                    WHERE account_id = $1
+                ) AS retention_snapshots,
+                (
+                    SELECT count(*)
+                    FROM managed_account_installations
+                    WHERE account_id = $1
+                ) AS installations
+            """,
+            principal.account_id,
+        )
+        assert dict(before_storage) == {
+            "subscriptions": 0,
+            "consent_events": 0,
+            "retention_snapshots": 0,
+            "installations": 1,
+        }
+
+        repository.entitlement_mode = "open_beta"
+        storage = await repository.enroll(
+            claims=claims,
+            enrollment=_enrollment(
+                installation_id,
+                uuid4(),
+            ),
+        )
+        after_principal = await repository.principal_for_identity(claims)
+
+        assert storage["created"] is False
+        assert after_principal.account_id == principal.account_id
+        account_after_storage = await repository.enroll_account(
+            claims=claims,
+            enrollment=account_request,
+        )
+        assert account_after_storage["account"]["health_data_consent_granted"] is True
+        assert account_after_storage["account"]["health_data_uploaded"] is False
+        after_storage = await pool.fetchrow(
+            """
+            SELECT
+                (
+                    SELECT count(*)
+                    FROM managed_subscriptions
+                    WHERE account_id = $1
+                      AND status IN ('trial', 'active', 'grace', 'paused')
+                ) AS subscriptions,
+                (
+                    SELECT count(*)
+                    FROM managed_consent_events
+                    WHERE account_id = $1
+                      AND decision = 'granted'
+                ) AS consent_events,
+                (
+                    SELECT count(*)
+                    FROM managed_retention_policy_snapshots
+                    WHERE account_id = $1
+                ) AS retention_snapshots,
+                (
+                    SELECT count(*)
+                    FROM managed_account_installations
+                    WHERE account_id = $1
+                ) AS installations
+            """,
+            principal.account_id,
+        )
+        assert int(after_storage["subscriptions"]) == 1
+        assert int(after_storage["consent_events"]) == 1
+        assert int(after_storage["retention_snapshots"]) > 0
+        assert int(after_storage["installations"]) == 1
     finally:
         await primary.shutdown()
 
@@ -1218,6 +1601,53 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
     reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
+async def test_account_reenrollment_obeys_a_reduced_installation_limit() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=2,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(
+            primary,
+            entitlement_mode="closed",
+            account_max_installations=2,
+        )
+        now = datetime.now(UTC)
+        claims = _claims(f"installation-limit-{uuid4()}", now)
+        first_installation = str(uuid4())
+        second_installation = str(uuid4())
+
+        await repository.enroll_account(
+            claims=claims,
+            enrollment=_account_enrollment(first_installation, uuid4()),
+        )
+        await repository.enroll_account(
+            claims=claims,
+            enrollment=_account_enrollment(second_installation, uuid4()),
+        )
+
+        repository.account_max_installations = 1
+        with pytest.raises(ManagedQuotaExceededError) as raised:
+            await repository.enroll_account(
+                claims=claims,
+                enrollment=_account_enrollment(first_installation, uuid4()),
+            )
+
+        assert raised.value.maximum_bytes is None
+        assert raised.value.used_bytes == 2
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
 async def test_erasure_cancel_keeps_account_blocked_while_another_job_is_live() -> None:
     primary = PostgresRepository(
         DATABASE_URL or "",
@@ -1541,6 +1971,186 @@ async def test_document_write_cannot_commit_after_account_erasure_fence() -> Non
             )
             == 0
         )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_account_erasure_fences_capability_mutations() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=4,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(primary)
+        now = datetime.now(UTC)
+        claims = _claims(f"capability-erasure-fence-{uuid4()}", now)
+        installation_id = str(uuid4())
+        await repository.enroll(
+            claims=claims,
+            enrollment=_enrollment(installation_id, uuid4()),
+        )
+        principal = await repository.principal_for_identity(claims)
+        source_id = uuid4()
+        await repository.register_source(
+            principal=principal,
+            installation_id=installation_id,
+            registration=ManagedSourceRegistration(
+                source_id=source_id,
+                source_kind="band",
+                platform="ios",
+                logical_source_hash="8" * 64,
+            ),
+        )
+        chunk_id = uuid4()
+        available, _ = await _publish_test_chunk(
+            repository,
+            principal=principal,
+            installation_id=installation_id,
+            reservation=ManagedChunkReservation(
+                chunk_id=chunk_id,
+                request_id=uuid4(),
+                source_id=source_id,
+                data_class="essential_timeseries",
+                schema_version=1,
+                content_mode="server_readable",
+                event_start=now - timedelta(hours=1),
+                event_end=now,
+                compression="gzip",
+                content_type="application/vnd.noop.chunk+json",
+                expected_sha256="9" * 64,
+                expected_compressed_bytes=4_096,
+                expected_uncompressed_bytes=16_384,
+                streams=_essential_streams(
+                    event_at=now,
+                    heart_rate_samples=1,
+                ),
+            ),
+            generation=301,
+            sample_count=1,
+        )
+        client_key_id = uuid4()
+        await repository.register_client_key(
+            principal=principal,
+            installation_id=installation_id,
+            registration=ManagedClientKeyRegistration(
+                client_key_id=client_key_id,
+                purpose="recovery",
+                algorithm="X25519-AESGCM",
+                public_key_base64=None,
+                key_fingerprint="a" * 64,
+                recovery_method="recovery_key",
+                hardware_backed=True,
+            ),
+        )
+        export = await repository.create_export(
+            principal=principal,
+            installation_id=installation_id,
+            request=ManagedExportRequest(
+                request_id=uuid4(),
+                format="noopbak",
+                content_mode="client_encrypted",
+                client_key_id=client_key_id,
+                scope={"all": True},
+                expected_sha256="b" * 64,
+                expected_bytes=4_096,
+                content_type="application/vnd.noop.backup",
+            ),
+        )
+        await repository.request_erasure(
+            principal=principal,
+            request_id=uuid4(),
+            scope="all_managed_data",
+            confirmation_sha256="c" * 64,
+            identity_deletion_ticket=None,
+            cooling_off=timedelta(0),
+        )
+
+        with pytest.raises(ManagedForbiddenError, match="not active"):
+            await repository.record_access_grant(
+                principal=principal,
+                installation_id=installation_id,
+                chunk_id=chunk_id,
+                request_id=uuid4(),
+                capability_hash="d" * 64,
+                purpose="restore",
+                expires_at=now + timedelta(minutes=10),
+            )
+        with pytest.raises(ManagedForbiddenError, match="not active"):
+            await repository.create_restore(
+                principal=principal,
+                installation_id=installation_id,
+                request=ManagedRestoreRequest(
+                    request_id=uuid4(),
+                    data_classes=["essential_timeseries"],
+                    document_kinds=[],
+                    include_documents=False,
+                ),
+            )
+        with pytest.raises(ManagedForbiddenError, match="not active"):
+            await repository.create_export(
+                principal=principal,
+                installation_id=installation_id,
+                request=ManagedExportRequest(
+                    request_id=uuid4(),
+                    format="noopbak",
+                    content_mode="client_encrypted",
+                    client_key_id=client_key_id,
+                    scope={"all": True},
+                    expected_sha256="e" * 64,
+                    expected_bytes=4_096,
+                    content_type="application/vnd.noop.backup",
+                ),
+            )
+        with pytest.raises(ManagedForbiddenError, match="not active"):
+            await repository.complete_export(
+                principal=principal,
+                installation_id=installation_id,
+                export_job_id=UUID(export["export_job_id"]),
+                metadata=ManagedObjectMetadata(
+                    object_key=export["object_key"],
+                    generation=302,
+                    metageneration=1,
+                    crc32c="AAAAAA==",
+                    size=4_096,
+                    content_type="application/vnd.noop.backup",
+                    metadata={"noop-sha256": "b" * 64},
+                ),
+            )
+
+        pool = primary._require_pool()
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_object_access_grants
+                WHERE account_id = $1
+                """,
+                principal.account_id,
+            )
+            == 0
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT status
+                FROM managed_export_jobs
+                WHERE account_id = $1 AND export_job_id = $2
+                """,
+                principal.account_id,
+                UUID(export["export_job_id"]),
+            )
+            == "running"
+        )
+        assert available["state"] == "available"
     finally:
         await primary.shutdown()
 

@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from app.managed_identity import ManagedIdentityClaims
 from app.managed_models import (
+    ManagedAccountEnrollment,
     ManagedChunkReservation,
     ManagedClientKeyRegistration,
     ManagedDocumentMutation,
@@ -50,6 +51,17 @@ SOCIAL_SUMMARY_FIELDS = (
     "sleep_duration",
     "hrv",
     "rhr",
+)
+SOCIAL_COMMUNICATION_FIELDS = (
+    "messages_allowed",
+    "photos_allowed",
+    "audio_calls_allowed",
+    "video_calls_allowed",
+)
+SOCIAL_VISIBILITY_FIELDS = (
+    *SOCIAL_SUMMARY_FIELDS,
+    "poke_allowed",
+    *SOCIAL_COMMUNICATION_FIELDS,
 )
 SOCIAL_FIXED_TIME_ZONE = re.compile(r"^(?:(?:UTC|GMT))?([+-])([0-9]{2}):?([0-9]{2})$")
 SOCIAL_MAX_ACTIVE_INVITES = 10
@@ -417,17 +429,21 @@ class PostgresManagedRepository:
         default_plan_code: str,
         default_plan_revision: int,
         consent_policy_kind: str,
+        account_max_installations: int = 5,
         entitlement_mode: str = "closed",
         replay_secret: str = "",
     ) -> None:
         if entitlement_mode not in {"closed", "pilot", "open_beta", "paid"}:
             raise ValueError("invalid managed entitlement mode")
+        if not 1 <= account_max_installations <= 100:
+            raise ValueError("invalid managed account installation limit")
         self.primary_repository = primary_repository
         self.home_region = home_region
         self.residency_policy_version = residency_policy_version
         self.default_plan_code = default_plan_code
         self.default_plan_revision = default_plan_revision
         self.consent_policy_kind = consent_policy_kind
+        self.account_max_installations = account_max_installations
         self.entitlement_mode = entitlement_mode
         self.replay_secret = replay_secret
 
@@ -744,6 +760,153 @@ class PostgresManagedRepository:
             auth_valid_after=row["auth_valid_after"],
         )
 
+    async def enroll_account(
+        self,
+        *,
+        claims: ManagedIdentityClaims,
+        enrollment: ManagedAccountEnrollment,
+    ) -> dict[str, Any]:
+        pool = self._pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    (
+                        "noop-managed-identity:"
+                        f"{claims.issuer}:{claims.provider_tenant}:"
+                        f"{claims.subject_hash}"
+                    ),
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                identity = await connection.fetchrow(
+                    """
+                    SELECT identity.identity_id,
+                           identity.account_id,
+                           identity.status AS identity_status,
+                           account.status AS account_status,
+                           account.auth_valid_after
+                    FROM managed_external_identities identity
+                    JOIN managed_accounts account USING (account_id)
+                    WHERE identity.issuer = $1
+                      AND identity.provider_tenant = $2
+                      AND identity.subject_hash = $3
+                    FOR UPDATE OF identity, account
+                    """,
+                    claims.issuer,
+                    claims.provider_tenant,
+                    claims.subject_hash,
+                )
+                created = identity is None
+                if identity is None:
+                    account_id = uuid4()
+                    identity_id = uuid4()
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_accounts (
+                            account_id,
+                            storage_namespace,
+                            home_region,
+                            residency_policy_version,
+                            auth_valid_after,
+                            created_at,
+                            updated_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $6)
+                        """,
+                        account_id,
+                        uuid4(),
+                        self.home_region,
+                        self.residency_policy_version,
+                        claims.auth_time,
+                        now,
+                    )
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_external_identities (
+                            identity_id,
+                            account_id,
+                            issuer,
+                            provider_tenant,
+                            subject_hash,
+                            verified_at,
+                            last_seen_at,
+                            created_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7)
+                        """,
+                        identity_id,
+                        account_id,
+                        claims.issuer,
+                        claims.provider_tenant,
+                        claims.subject_hash,
+                        claims.issued_at,
+                        now,
+                    )
+                else:
+                    if (
+                        identity["identity_status"] != "active"
+                        or identity["account_status"] != "active"
+                        or claims.auth_time < identity["auth_valid_after"]
+                    ):
+                        raise ManagedForbiddenError(
+                            "managed account cannot be enrolled"
+                        )
+                    account_id = identity["account_id"]
+                    identity_id = identity["identity_id"]
+                    await connection.execute(
+                        """
+                        UPDATE managed_external_identities
+                        SET last_seen_at = GREATEST(last_seen_at, $2)
+                        WHERE identity_id = $1
+                        """,
+                        identity_id,
+                        claims.issued_at,
+                    )
+
+                await self._enroll_installation(
+                    connection,
+                    account_id=account_id,
+                    enrollment=enrollment,
+                    maximum_installations=self.account_max_installations,
+                    now=now,
+                )
+                privacy_state = await connection.fetchrow(
+                    """
+                    SELECT
+                        COALESCE(
+                            (
+                                SELECT consent.decision = 'granted'
+                                FROM managed_consent_events consent
+                                WHERE consent.account_id = $1
+                                  AND consent.policy_kind = $2
+                                ORDER BY consent.occurred_at DESC,
+                                         consent.recorded_at DESC,
+                                         consent.consent_event_id DESC
+                                LIMIT 1
+                            ),
+                            false
+                        ) AS health_data_consent_granted,
+                        EXISTS (
+                            SELECT 1
+                            FROM managed_chunks chunk
+                            WHERE chunk.account_id = $1
+                              AND chunk.uploaded_at IS NOT NULL
+                              AND chunk.deleted_at IS NULL
+                        ) AS health_data_uploaded
+                    """,
+                    account_id,
+                    self.consent_policy_kind,
+                )
+        return {
+            "created": created,
+            "account": {
+                "status": "active",
+                "health_data_consent_granted": bool(
+                    privacy_state["health_data_consent_granted"]
+                ),
+                "health_data_uploaded": bool(privacy_state["health_data_uploaded"]),
+            },
+            "identity_id": identity_id,
+        }
+
     async def enroll(
         self,
         *,
@@ -811,8 +974,11 @@ class PostgresManagedRepository:
                 created = identity is None
                 if self.entitlement_mode == "closed":
                     raise ManagedForbiddenError("managed storage enrollment is closed")
+                needs_storage_entitlement = (
+                    identity is None or identity["subscription_id"] is None
+                )
                 if (
-                    identity is None
+                    needs_storage_entitlement
                     and self.entitlement_mode != "open_beta"
                     and not (self.entitlement_mode == "pilot" and claims.managed_pilot)
                 ):
@@ -830,12 +996,9 @@ class PostgresManagedRepository:
                         raise ManagedForbiddenError(
                             "managed account cannot be enrolled"
                         )
-                    if identity["subscription_id"] is None:
-                        raise ManagedConfigurationError(
-                            "managed account has no current storage subscription"
-                        )
-                    selected_plan_code = str(identity["plan_code"])
-                    selected_plan_revision = int(identity["plan_revision"])
+                    if identity["subscription_id"] is not None:
+                        selected_plan_code = str(identity["plan_code"])
+                        selected_plan_revision = int(identity["plan_revision"])
                 plan = await connection.fetchrow(
                     """
                     SELECT max_installations
@@ -855,7 +1018,7 @@ class PostgresManagedRepository:
                     selected_plan_code,
                     selected_plan_revision,
                     now,
-                    identity is not None,
+                    identity is not None and identity["subscription_id"] is not None,
                 )
                 rules = await connection.fetch(
                     """
@@ -879,7 +1042,12 @@ class PostgresManagedRepository:
                 if plan is None or {str(row["data_class"]) for row in rules} != set(
                     enrollment.data_classes
                 ):
-                    plan_scope = "account" if identity is not None else "default"
+                    plan_scope = (
+                        "account"
+                        if identity is not None
+                        and identity["subscription_id"] is not None
+                        else "default"
+                    )
                     raise ManagedConfigurationError(
                         f"managed {plan_scope} plan does not cover every "
                         "consented data class"
@@ -887,7 +1055,7 @@ class PostgresManagedRepository:
                 if identity is None:
                     account_id = uuid4()
                     identity_id = uuid4()
-                    subscription_id = uuid4()
+                    subscription_id = None
                     storage_namespace = uuid4()
                     await connection.execute(
                         """
@@ -929,6 +1097,22 @@ class PostgresManagedRepository:
                         claims.issued_at,
                         now,
                     )
+                else:
+                    account_id = identity["account_id"]
+                    identity_id = identity["identity_id"]
+                    subscription_id = identity["subscription_id"]
+                    await connection.execute(
+                        """
+                        UPDATE managed_external_identities
+                        SET last_seen_at = GREATEST(last_seen_at, $2)
+                        WHERE identity_id = $1
+                        """,
+                        identity_id,
+                        claims.issued_at,
+                    )
+
+                if subscription_id is None:
+                    subscription_id = uuid4()
                     await connection.execute(
                         """
                         INSERT INTO managed_subscriptions (
@@ -958,19 +1142,6 @@ class PostgresManagedRepository:
                         selected_plan_code,
                         selected_plan_revision,
                         now,
-                    )
-                else:
-                    account_id = identity["account_id"]
-                    identity_id = identity["identity_id"]
-                    subscription_id = identity["subscription_id"]
-                    await connection.execute(
-                        """
-                        UPDATE managed_external_identities
-                        SET last_seen_at = GREATEST(last_seen_at, $2)
-                        WHERE identity_id = $1
-                        """,
-                        identity_id,
-                        claims.issued_at,
                     )
 
                 await self._enroll_installation(
@@ -1009,7 +1180,7 @@ class PostgresManagedRepository:
         connection: Any,
         *,
         account_id: UUID,
-        enrollment: ManagedEnrollment,
+        enrollment: ManagedAccountEnrollment,
         maximum_installations: int,
         now: datetime,
     ) -> None:
@@ -1032,10 +1203,29 @@ class PostgresManagedRepository:
             """,
             enrollment.installation_id,
         )
+        installation_count = int(
+            await connection.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_account_installations
+                WHERE account_id = $1 AND status <> 'revoked'
+                """,
+                account_id,
+            )
+        )
         if existing_owner is not None:
             if existing_owner["account_id"] != account_id:
                 raise ManagedConflictError(
                     "installation is already enrolled to another account"
+                )
+            if str(existing_owner["platform"]) != enrollment.platform:
+                raise ManagedConflictError(
+                    "installation platform does not match enrollment"
+                )
+            if installation_count > maximum_installations:
+                raise ManagedQuotaExceededError(
+                    maximum_bytes=None,
+                    used_bytes=installation_count,
                 )
             stored_fingerprint = existing_owner["device_key_fingerprint"]
             if (
@@ -1074,18 +1264,10 @@ class PostgresManagedRepository:
                 enrollment.installation_id,
             )
             return
-        installation_count = await connection.fetchval(
-            """
-            SELECT count(*)
-            FROM managed_account_installations
-            WHERE account_id = $1 AND status <> 'revoked'
-            """,
-            account_id,
-        )
-        if int(installation_count) >= maximum_installations:
+        if installation_count >= maximum_installations:
             raise ManagedQuotaExceededError(
                 maximum_bytes=None,
-                used_bytes=int(installation_count),
+                used_bytes=installation_count,
             )
         try:
             await connection.execute(
@@ -1700,6 +1882,10 @@ class PostgresManagedRepository:
         pool = self._pool()
         async with pool.acquire() as connection:
             async with connection.transaction():
+                await self._lock_active_account_mutation(
+                    connection,
+                    principal=principal,
+                )
                 await connection.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                     f"noop-managed-account-quota:{principal.account_id}",
@@ -2259,6 +2445,10 @@ class PostgresManagedRepository:
         request_id = uuid4()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await self._lock_active_account_mutation(
+                    connection,
+                    principal=principal,
+                )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 chunk = await connection.fetchrow(
                     """
@@ -2361,6 +2551,10 @@ class PostgresManagedRepository:
         self._require_active(principal)
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await self._lock_active_account_mutation(
+                    connection,
+                    principal=principal,
+                )
                 chunk = await connection.fetchrow(
                     """
                     SELECT *
@@ -2912,8 +3106,8 @@ class PostgresManagedRepository:
                             )
                     available_chunk = await connection.fetchrow(
                         """
-                        SELECT *
-                        FROM managed_chunks
+                        SELECT chunk.*
+                        FROM managed_chunks chunk
                         WHERE account_id = $1 AND chunk_id = $2
                         """,
                         attempt["account_id"],
@@ -3213,37 +3407,43 @@ class PostgresManagedRepository:
         self._require_active(principal)
         grant_id = uuid4()
         try:
-            status = await self._pool().execute(
-                """
-                INSERT INTO managed_object_access_grants (
-                    access_grant_id,
-                    account_id,
-                    installation_id,
-                    chunk_id,
-                    request_id,
-                    capability_hash,
-                    purpose,
-                    expires_at
-                )
-                SELECT $1, $2, $3, $4, $5, $6, $7, $8
-                FROM managed_chunks chunk
-                JOIN managed_account_installations installation
-                  ON installation.account_id = chunk.account_id
-                 AND installation.installation_id = $3
-                 AND installation.status IN ('active', 'limited')
-                WHERE chunk.account_id = $2
-                  AND chunk.chunk_id = $4
-                  AND chunk.state = 'available'
-                """,
-                grant_id,
-                principal.account_id,
-                installation_id,
-                chunk_id,
-                request_id,
-                capability_hash,
-                purpose,
-                expires_at,
-            )
+            async with self._pool().acquire() as connection:
+                async with connection.transaction():
+                    await self._lock_active_account_mutation(
+                        connection,
+                        principal=principal,
+                    )
+                    status = await connection.execute(
+                        """
+                        INSERT INTO managed_object_access_grants (
+                            access_grant_id,
+                            account_id,
+                            installation_id,
+                            chunk_id,
+                            request_id,
+                            capability_hash,
+                            purpose,
+                            expires_at
+                        )
+                        SELECT $1, $2, $3, $4, $5, $6, $7, $8
+                        FROM managed_chunks chunk
+                        JOIN managed_account_installations installation
+                          ON installation.account_id = chunk.account_id
+                         AND installation.installation_id = $3
+                         AND installation.status IN ('active', 'limited')
+                        WHERE chunk.account_id = $2
+                          AND chunk.chunk_id = $4
+                          AND chunk.state = 'available'
+                        """,
+                        grant_id,
+                        principal.account_id,
+                        installation_id,
+                        chunk_id,
+                        request_id,
+                        capability_hash,
+                        purpose,
+                        expires_at,
+                    )
         except Exception as error:
             if getattr(error, "sqlstate", None) == "23505":
                 raise ManagedConflictError(
@@ -3647,6 +3847,18 @@ class PostgresManagedRepository:
                         job["erasure_job_id"],
                         now,
                     )
+                    if job["scope"] in {"all_managed_data", "account"}:
+                        await connection.execute(
+                            """
+                            UPDATE managed_upload_grants
+                            SET status = 'revoked',
+                                revoked_at = $2
+                            WHERE account_id = $1
+                              AND status = 'issued'
+                            """,
+                            job["account_id"],
+                            now,
+                        )
                     if job["scope"] not in {
                         "raw_chunks",
                         "all_managed_data",
@@ -3687,16 +3899,24 @@ class PostgresManagedRepository:
                         break
                     chunks = await connection.fetch(
                         """
-                        SELECT *
-                        FROM managed_chunks
-                        WHERE account_id = $1
-                          AND state NOT IN ('delete_pending', 'deleted')
+                        SELECT chunk.*
+                        FROM managed_chunks chunk
+                        WHERE chunk.account_id = $1
+                          AND chunk.state NOT IN ('delete_pending', 'deleted')
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM managed_upload_grants upload_grant
+                              WHERE upload_grant.account_id = chunk.account_id
+                                AND upload_grant.chunk_id = chunk.chunk_id
+                                AND upload_grant.expires_at > $3
+                          )
                         ORDER BY event_start, chunk_id
                         FOR UPDATE SKIP LOCKED
                         LIMIT $2
                         """,
                         job["account_id"],
                         remaining,
+                        now,
                     )
                     for chunk in chunks:
                         if chunk["state"] in {"reserved", "uploading"}:
@@ -3850,25 +4070,36 @@ class PostgresManagedRepository:
         completed: list[dict[str, Any]] = []
         async with self._pool().acquire() as connection:
             async with connection.transaction():
-                jobs = await connection.fetch(
+                candidates = await connection.fetch(
                     """
-                    SELECT *
+                    SELECT erasure_job_id, account_id
                     FROM managed_erasure_jobs
                     WHERE status IN ('running', 'verifying')
                     ORDER BY requested_at, erasure_job_id
-                    FOR UPDATE SKIP LOCKED
                     LIMIT $1
                     """,
                     min(batch_size, 50),
                 )
-                for job in jobs:
-                    account_id = job["account_id"]
+                for candidate in candidates:
+                    account_id = candidate["account_id"]
+                    await connection.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                        f"noop-managed-erasure-account:{account_id}",
+                    )
+                    job = await connection.fetchrow(
+                        """
+                        SELECT *
+                        FROM managed_erasure_jobs
+                        WHERE erasure_job_id = $1
+                          AND status IN ('running', 'verifying')
+                        FOR UPDATE
+                        """,
+                        candidate["erasure_job_id"],
+                    )
+                    if job is None:
+                        continue
                     scope = str(job["scope"])
                     if scope in {"all_managed_data", "account"}:
-                        await connection.execute(
-                            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                            f"noop-managed-erasure-account:{account_id}",
-                        )
                         account_status = await connection.fetchval(
                             """
                             SELECT status
@@ -3962,6 +4193,48 @@ class PostgresManagedRepository:
                                     statement,
                                     account_id,
                                 )
+                            )
+                    if scope == "derived_data":
+                        await connection.execute(
+                            """
+                            SELECT set_config(
+                                'noop.managed_erasure_account_id',
+                                $1::text,
+                                true
+                            )
+                            """,
+                            str(account_id),
+                        )
+                        await connection.execute(
+                            """
+                            SELECT set_config(
+                                'noop.managed_erasure_job_id',
+                                $1::text,
+                                true
+                            )
+                            """,
+                            str(job["erasure_job_id"]),
+                        )
+                        database_rows += affected(
+                            await connection.execute(
+                                """
+                                DELETE FROM managed_formula_shadow_results
+                                WHERE account_id = $1
+                                """,
+                                account_id,
+                            )
+                        )
+                        remaining_formula_shadows = await connection.fetchval(
+                            """
+                            SELECT count(*)
+                            FROM managed_formula_shadow_results
+                            WHERE account_id = $1
+                            """,
+                            account_id,
+                        )
+                        if int(remaining_formula_shadows or 0) != 0:
+                            raise ManagedConflictError(
+                                "managed derived-data erasure verification failed"
                             )
                     if scope in {"all_managed_data", "account"}:
                         for statement in (
@@ -5133,6 +5406,10 @@ class PostgresManagedRepository:
         self._require_active(principal)
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await self._lock_active_account_mutation(
+                    connection,
+                    principal=principal,
+                )
                 # Serialize the restore anchor with change publication. A writer that
                 # commits after this point receives a sequence above change_sequence,
                 # so it is either in this snapshot or in the following change feed.
@@ -5316,6 +5593,10 @@ class PostgresManagedRepository:
             raise ManagedConflictError("managed export scope is too large")
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await self._lock_active_account_mutation(
+                    connection,
+                    principal=principal,
+                )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 existing = await connection.fetchrow(
                     """
@@ -5419,6 +5700,10 @@ class PostgresManagedRepository:
     ) -> dict[str, Any]:
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await self._lock_active_account_mutation(
+                    connection,
+                    principal=principal,
+                )
                 row = await connection.fetchrow(
                     """
                     SELECT *
@@ -6801,8 +7086,7 @@ class PostgresManagedRepository:
     @staticmethod
     def _public_visibility(row: Any, prefix: str) -> dict[str, bool]:
         return {
-            field: bool(row[f"{prefix}{field}"])
-            for field in (*SOCIAL_SUMMARY_FIELDS, "poke_allowed")
+            field: bool(row[f"{prefix}{field}"]) for field in SOCIAL_VISIBILITY_FIELDS
         }
 
     async def _social_visibility_union(
@@ -6902,6 +7186,10 @@ class PostgresManagedRepository:
                    own.hrv AS own_hrv,
                    own.rhr AS own_rhr,
                    own.poke_allowed AS own_poke_allowed,
+                   own.messages_allowed AS own_messages_allowed,
+                   own.photos_allowed AS own_photos_allowed,
+                   own.audio_calls_allowed AS own_audio_calls_allowed,
+                   own.video_calls_allowed AS own_video_calls_allowed,
                    shared.charge AS shared_charge,
                    shared.effort AS shared_effort,
                    shared.rest AS shared_rest,
@@ -6909,6 +7197,10 @@ class PostgresManagedRepository:
                    shared.hrv AS shared_hrv,
                    shared.rhr AS shared_rhr,
                    shared.poke_allowed AS shared_poke_allowed,
+                   shared.messages_allowed AS shared_messages_allowed,
+                   shared.photos_allowed AS shared_photos_allowed,
+                   shared.audio_calls_allowed AS shared_audio_calls_allowed,
+                   shared.video_calls_allowed AS shared_video_calls_allowed,
                    latest.day AS latest_day,
                    latest.charge AS latest_charge,
                    latest.effort AS latest_effort,
@@ -7041,7 +7333,15 @@ class PostgresManagedRepository:
                         rhr = COALESCE($8, visibility.rhr),
                         poke_allowed =
                             COALESCE($9, visibility.poke_allowed),
-                        updated_at = $10
+                        messages_allowed =
+                            COALESCE($10, visibility.messages_allowed),
+                        photos_allowed =
+                            COALESCE($11, visibility.photos_allowed),
+                        audio_calls_allowed =
+                            COALESCE($12, visibility.audio_calls_allowed),
+                        video_calls_allowed =
+                            COALESCE($13, visibility.video_calls_allowed),
+                        updated_at = $14
                     WHERE visibility.owner_profile_id = $1
                       AND visibility.reader_profile_id = $2
                       AND EXISTS (
@@ -7059,7 +7359,11 @@ class PostgresManagedRepository:
                         sleep_duration AS value_sleep_duration,
                         hrv AS value_hrv,
                         rhr AS value_rhr,
-                        poke_allowed AS value_poke_allowed
+                        poke_allowed AS value_poke_allowed,
+                        messages_allowed AS value_messages_allowed,
+                        photos_allowed AS value_photos_allowed,
+                        audio_calls_allowed AS value_audio_calls_allowed,
+                        video_calls_allowed AS value_video_calls_allowed
                     """,
                     profile["profile_id"],
                     friend_profile_id,
@@ -7070,6 +7374,10 @@ class PostgresManagedRepository:
                     patch.hrv,
                     patch.rhr,
                     patch.poke_allowed,
+                    patch.messages_allowed,
+                    patch.photos_allowed,
+                    patch.audio_calls_allowed,
+                    patch.video_calls_allowed,
                     now,
                 )
                 if row is not None:

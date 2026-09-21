@@ -1,5 +1,14 @@
 import Foundation
 
+public enum ManagedHistoryTransferLimits {
+    public static let maximumObjectCount = 20_000
+    public static let maximumArchiveEntryCount = maximumObjectCount + 1
+    public static let maximumManifestBytes = 16 * 1_024 * 1_024
+    public static let maximumImportCheckpointBytes = 64 * 1_024
+    public static let maximumExportCheckpointBytes = 16 * 1_024 * 1_024
+    public static let maximumPathBytes = 512
+}
+
 public struct ManagedHistoryExportEntry: Equatable, Sendable {
     public enum Kind: String, Sendable {
         case chunk
@@ -290,13 +299,25 @@ public struct ManagedHistoryExportManifest: Codable, Equatable, Sendable {
         encoder.keyEncodingStrategy = .convertToSnakeCase
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         do {
-            return try encoder.encode(self)
+            let data = try encoder.encode(self)
+            guard data.count
+                    <= ManagedHistoryTransferLimits.maximumManifestBytes else {
+                throw ManagedStorageError.encoding
+            }
+            return data
         } catch {
+            if let managed = error as? ManagedStorageError {
+                throw managed
+            }
             throw ManagedStorageError.encoding
         }
     }
 
     public static func decoded(from data: Data) throws -> Self {
+        guard data.count
+                <= ManagedHistoryTransferLimits.maximumManifestBytes else {
+            throw ManagedStorageError.decoding
+        }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         do {
@@ -558,6 +579,8 @@ public actor ManagedHistoryExporter {
             )
             guard restore.status == "running",
                   restore.selectedObjects >= 0,
+                  restore.selectedObjects
+                    <= ManagedHistoryTransferLimits.maximumObjectCount,
                   restore.selectedBytes >= 0,
                   restore.deliveredObjects == 0,
                   restore.deliveredBytes == 0,
@@ -698,7 +721,6 @@ public actor ManagedHistoryExporter {
                             <= checkpoint.selectedChunkBytes else {
                         throw ManagedStorageError.invalidResponse
                     }
-                    try await saveCheckpoint?(checkpoint)
                     await report(
                         .chunks,
                         completedObjects: checkpoint.exportedObjects,
@@ -785,7 +807,6 @@ public actor ManagedHistoryExporter {
                 guard checkpoint.exportedObjects <= checkpoint.selectedObjects else {
                     throw ManagedStorageError.invalidResponse
                 }
-                try await saveCheckpoint?(checkpoint)
                 await report(
                     .documents,
                     completedObjects: checkpoint.exportedObjects,
@@ -969,6 +990,8 @@ public actor ManagedHistoryExporter {
                   (now.timeIntervalSince1970 * 1_000).rounded(.down)
               ),
               checkpoint.selectedObjects >= 0,
+              checkpoint.selectedObjects
+                <= ManagedHistoryTransferLimits.maximumObjectCount,
               checkpoint.selectedChunkBytes >= 0,
               checkpoint.dataClassIndex >= 0,
               checkpoint.dataClassIndex <= dataClasses.count,
@@ -1014,6 +1037,7 @@ public actor ManagedHistoryExporter {
 
     private static func valid(path: String) -> Bool {
         !path.isEmpty
+            && path.utf8.count <= ManagedHistoryTransferLimits.maximumPathBytes
             && !path.hasPrefix("/")
             && !path.hasSuffix("/")
             && !path.contains("\\")

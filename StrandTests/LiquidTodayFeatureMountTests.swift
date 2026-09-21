@@ -371,6 +371,25 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             ),
             .retry
         )
+        XCTAssertFalse(
+            IntelligenceEngine.shouldReconcileComputedScoreRange(
+                hasFreshScores: false,
+                traversingFormulaHistory: false
+            )
+        )
+        XCTAssertTrue(
+            IntelligenceEngine.shouldReconcileComputedScoreRange(
+                hasFreshScores: true,
+                traversingFormulaHistory: false
+            )
+        )
+        XCTAssertTrue(
+            IntelligenceEngine.shouldReconcileComputedScoreRange(
+                hasFreshScores: false,
+                traversingFormulaHistory: true
+            ),
+            "Formula traversal must invalidate stale prior-revision rows even when raw HR is gone."
+        )
     }
 
     func testMacRestorePickerHasNonCollapsingFrame() throws {

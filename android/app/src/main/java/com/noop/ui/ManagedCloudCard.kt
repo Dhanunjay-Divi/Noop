@@ -7,7 +7,6 @@ import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import java.time.Instant
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,9 +67,13 @@ import com.noop.managed.ManagedCloudService
 import com.noop.managed.ManagedInstallation
 import com.noop.managed.ManagedLocalRetentionPolicy
 import java.text.SimpleDateFormat
-import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun NoopPlusScreen() {
@@ -594,9 +597,17 @@ private fun ManagedCloudSetupSheet(
                         title = stringResource(R.string.managed_cloud_deletion_scheduled_title),
                         detail = stringResource(R.string.managed_cloud_deletion_scheduled_detail),
                     )
-                    state.deletionNotBefore?.let {
+                    state.deletionNotBefore?.let { raw ->
+                        val formatted = managedDeletionEligibilityTime(raw)
                         Text(
-                            stringResource(R.string.managed_cloud_deletion_after, it),
+                            formatted?.let {
+                                stringResource(
+                                    R.string.managed_cloud_deletion_after,
+                                    it,
+                                )
+                            } ?: stringResource(
+                                R.string.managed_cloud_deletion_time_unavailable,
+                            ),
                             style = NoopType.footnote,
                             color = Palette.textSecondary,
                         )
@@ -859,6 +870,17 @@ private fun managedRelativeTime(value: String): String {
         DateUtils.getRelativeTimeSpanString(Instant.parse(value).toEpochMilli()).toString()
     }.getOrDefault(fallback)
 }
+
+internal fun managedDeletionEligibilityTime(
+    value: String,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+    locale: Locale = Locale.getDefault(),
+): String? = runCatching {
+    DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+        .withLocale(locale)
+        .withZone(zoneId)
+        .format(Instant.parse(value))
+}.getOrNull()
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this

@@ -38,7 +38,7 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-class ManagedEnrollment(StrictModel):
+class ManagedAccountEnrollment(StrictModel):
     installation_id: str = Field(
         min_length=1,
         max_length=64,
@@ -47,13 +47,6 @@ class ManagedEnrollment(StrictModel):
     platform: ManagedClientPlatform
     installation_token: SecretStr
     enrollment_request_id: UUID
-    policy_version: str = Field(
-        min_length=1,
-        max_length=64,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
-    )
-    policy_sha256: str = Field(pattern=SHA256_PATTERN)
-    data_classes: list[str] = Field(min_length=1, max_length=32)
     device_key_fingerprint: str | None = Field(
         default=None,
         pattern=SHA256_PATTERN,
@@ -71,6 +64,16 @@ class ManagedEnrollment(StrictModel):
         ):
             raise ValueError("installation_token is invalid")
         return value
+
+
+class ManagedEnrollment(ManagedAccountEnrollment):
+    policy_version: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+    )
+    policy_sha256: str = Field(pattern=SHA256_PATTERN)
+    data_classes: list[str] = Field(min_length=1, max_length=32)
 
     @field_validator("data_classes")
     @classmethod
@@ -757,6 +760,10 @@ class ManagedSocialVisibilityPatch(StrictModel):
     hrv: bool | None = None
     rhr: bool | None = None
     poke_allowed: bool | None = None
+    messages_allowed: bool | None = None
+    photos_allowed: bool | None = None
+    audio_calls_allowed: bool | None = None
+    video_calls_allowed: bool | None = None
 
     @model_validator(mode="after")
     def has_change(self) -> "ManagedSocialVisibilityPatch":

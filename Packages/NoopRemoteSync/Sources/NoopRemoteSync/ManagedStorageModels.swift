@@ -79,6 +79,40 @@ public enum ManagedStoragePlatform: String, Codable, Sendable {
     case macOS = "macos"
 }
 
+public struct ManagedAccountEnrollmentRequest: Codable, Equatable, Sendable {
+    public let installationID: String
+    public let installationToken: String
+    public let platform: ManagedStoragePlatform
+    public let enrollmentRequestID: UUID
+    public let deviceKeyFingerprint: String?
+
+    public init(
+        installationID: String,
+        installationToken: String,
+        platform: ManagedStoragePlatform,
+        enrollmentRequestID: UUID,
+        deviceKeyFingerprint: String? = nil
+    ) {
+        self.installationID = installationID
+        self.installationToken = installationToken
+        self.platform = platform
+        self.enrollmentRequestID = enrollmentRequestID
+        self.deviceKeyFingerprint = deviceKeyFingerprint
+    }
+}
+
+public struct ManagedAccountEnrollmentResponse: Codable, Sendable {
+    public struct ProductBoundary: Codable, Equatable, Sendable {
+        public let accountReady: Bool
+        public let healthDataConsentGranted: Bool
+        public let healthDataUploaded: Bool
+        public let edgeCollectionRequired: Bool
+    }
+
+    public let created: Bool
+    public let productBoundary: ProductBoundary
+}
+
 public struct ManagedEnrollmentRequest: Codable, Equatable, Sendable {
     public let installationID: String
     public let installationToken: String

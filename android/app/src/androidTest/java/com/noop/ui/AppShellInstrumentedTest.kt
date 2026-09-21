@@ -185,11 +185,9 @@ class AppShellInstrumentedTest {
                     .isNotEmpty()
             }.getOrDefault(false)
         }
-        compose.onNodeWithTag("noop.friends.source.managed").performClick()
-        compose.onNodeWithTag("noop.friends.source.managed").assertIsSelected()
-        compose.onNodeWithTag("noop.friends.source.selfHosted").performClick()
-        compose.onNodeWithTag("noop.friends.source.selfHosted").assertIsSelected()
         compose.onNodeWithTag("noop.screen.friends").assertIsDisplayed()
+        compose.onNodeWithTag("noop.friends.source.managed").assertDoesNotExist()
+        compose.onNodeWithTag("noop.friends.source.selfHosted").assertDoesNotExist()
     }
 
     @Test

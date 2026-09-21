@@ -74,6 +74,56 @@ class ManagedDocumentCiphertextInboxTest {
     }
 
     @Test
+    fun outgoingReconciliationRemovesOnlySupersededGenerations() {
+        val root = Files.createTempDirectory("managed-document-reconcile").toFile()
+        try {
+            val key = ManagedDocumentKey(UUID.randomUUID(), ByteArray(32) { 5 })
+            val inbox = ManagedDocumentCiphertextInbox(
+                root,
+                configuredAccountScopeHash = firstAccount,
+                clock = { 1 },
+            )
+            inbox.outgoingEnvelope(
+                firstAccount,
+                "c".repeat(64),
+                1,
+                ManagedDocumentKind.JOURNAL,
+                UUID.randomUUID(),
+                1,
+                key,
+                "old".toByteArray(),
+            )
+            inbox.outgoingEnvelope(
+                firstAccount,
+                "d".repeat(64),
+                2,
+                ManagedDocumentKind.JOURNAL,
+                UUID.randomUUID(),
+                2,
+                key,
+                "current".toByteArray(),
+            )
+
+            assertEquals(
+                1,
+                inbox.reconcileOutgoing(
+                    firstAccount,
+                    listOf(
+                        ManagedDocumentCiphertextInboxOutgoingReference(
+                            localIdentifier = "d".repeat(64),
+                            generation = 2,
+                            revision = 2,
+                        ),
+                    ),
+                ),
+            )
+            assertEquals(1, inbox.pendingOutgoingCount())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun accountsUseDistinctOpaqueDirectoriesAndCannotCrossBind() {
         val root = Files.createTempDirectory("managed-document-inbox").toFile()
         try {
@@ -190,6 +240,156 @@ class ManagedDocumentCiphertextInboxTest {
                     clock = { 1 },
                 ).pendingOutgoingCount(),
             )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun outgoingCiphertextIsNotAgeEvictedBeforeAcknowledgement() {
+        val root = Files.createTempDirectory("managed-document-inbox").toFile()
+        try {
+            val key = ManagedDocumentKey(UUID.randomUUID(), ByteArray(32) { 3 })
+            val documentId = UUID.randomUUID()
+            ManagedDocumentCiphertextInbox(
+                root,
+                configuredAccountScopeHash = firstAccount,
+                policy = ManagedDocumentCiphertextInboxPolicy(
+                    maximumRecordCount = 1,
+                    maximumTotalBytes = 64 * 1024,
+                    maximumAgeMilliseconds = 1,
+                ),
+                clock = { 1 },
+            ).outgoingEnvelope(
+                firstAccount, "row", 1, ManagedDocumentKind.JOURNAL,
+                documentId, 1, key, "pending".toByteArray(),
+            )
+
+            assertEquals(
+                1,
+                ManagedDocumentCiphertextInbox(
+                    root,
+                    configuredAccountScopeHash = firstAccount,
+                    policy = ManagedDocumentCiphertextInboxPolicy(
+                        maximumRecordCount = 1,
+                        maximumTotalBytes = 64 * 1024,
+                        maximumAgeMilliseconds = 1,
+                    ),
+                    clock = { 10 },
+                ).pendingOutgoingCount(),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun outgoingCiphertextSurvivesWallClockRollback() {
+        val root = Files.createTempDirectory("managed-document-clock-rollback").toFile()
+        try {
+            val key = ManagedDocumentKey(UUID.randomUUID(), ByteArray(32) { 4 })
+            val documentId = UUID.randomUUID()
+            val first = ManagedDocumentCiphertextInbox(
+                root,
+                configuredAccountScopeHash = firstAccount,
+                clock = { 10_000 },
+            )
+            val ciphertext = first.outgoingEnvelope(
+                firstAccount,
+                "clock-protected",
+                1,
+                ManagedDocumentKind.JOURNAL,
+                documentId,
+                1,
+                key,
+                "pending after clock correction".toByteArray(),
+            )
+
+            val restarted = ManagedDocumentCiphertextInbox(
+                root,
+                configuredAccountScopeHash = firstAccount,
+                clock = { 1_000 },
+            )
+            assertEquals(1, restarted.pendingOutgoingCount())
+            assertArrayEquals(
+                ciphertext,
+                restarted.outgoingEnvelope(
+                    firstAccount,
+                    "clock-protected",
+                    1,
+                    ManagedDocumentKind.JOURNAL,
+                    documentId,
+                    1,
+                    key,
+                    "pending after clock correction".toByteArray(),
+                ),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun outgoingCiphertextIsNotQuotaEvictedBeforeAcknowledgement() {
+        val root = Files.createTempDirectory("managed-document-inbox").toFile()
+        try {
+            val key = ManagedDocumentKey(UUID.randomUUID(), ByteArray(32) { 4 })
+            val first = ManagedDocumentCiphertextInbox(
+                root,
+                configuredAccountScopeHash = firstAccount,
+                policy = ManagedDocumentCiphertextInboxPolicy(
+                    maximumRecordCount = 2,
+                    maximumTotalBytes = 64 * 1024,
+                ),
+                clock = { 1 },
+            )
+            first.outgoingEnvelope(
+                firstAccount,
+                "first-row",
+                1,
+                ManagedDocumentKind.JOURNAL,
+                UUID.randomUUID(),
+                1,
+                key,
+                "pending".toByteArray(),
+            )
+            val tightened = ManagedDocumentCiphertextInbox(
+                root,
+                configuredAccountScopeHash = firstAccount,
+                policy = ManagedDocumentCiphertextInboxPolicy(
+                    maximumRecordCount = 1,
+                    maximumTotalBytes = 64 * 1024,
+                ),
+                clock = { 2 },
+            )
+            first.outgoingEnvelope(
+                firstAccount,
+                "second-existing-row",
+                1,
+                ManagedDocumentKind.JOURNAL,
+                UUID.randomUUID(),
+                1,
+                key,
+                "also pending".toByteArray(),
+            )
+            assertEquals(
+                ManagedDocumentCiphertextInboxSweepDisposition.QUOTA_BLOCKED,
+                tightened.startupMaintenance().sweepDisposition,
+            )
+
+            assertThrows(ManagedStorageException.QuotaExceeded::class.java) {
+                first.outgoingEnvelope(
+                    firstAccount,
+                    "second-row",
+                    1,
+                    ManagedDocumentKind.JOURNAL,
+                    UUID.randomUUID(),
+                    1,
+                    key,
+                    "new".toByteArray(),
+                )
+            }
+            assertEquals(2, first.pendingOutgoingCount())
         } finally {
             root.deleteRecursively()
         }

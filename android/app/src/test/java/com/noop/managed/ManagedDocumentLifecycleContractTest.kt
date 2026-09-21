@@ -61,11 +61,8 @@ class ManagedDocumentLifecycleContractTest {
             "    private fun purgeManagedDocumentLocalState()",
             "    private fun restoreAfterCanceledErasure()",
         )
-        assertTrue(
-            purgeState.contains(
-                "val scopeHash = preferences.enrolledScopeHash",
-            ),
-        )
+        assertTrue(purgeState.contains("preferences.enrolledScopeHash"))
+        assertTrue(purgeState.contains("preferences.accountAccessScopeHash"))
         assertFalse(purgeState.contains("accountScopeHash()"))
     }
 
@@ -99,18 +96,22 @@ class ManagedDocumentLifecycleContractTest {
         assertFalse(disconnect.contains("purgeManagedDocumentLocalState"))
         val release = disconnect.indexOf("releaseManagedDocumentProfile()")
         val signOut = disconnect.indexOf("runtime().auth.signOut()")
-        val clear = disconnect.indexOf("preferences.clearEnrollment()")
+        val clear = disconnect.indexOf(
+            "preferences.clearEnrollment(preserveLegacyScope = true)",
+        )
+        val clearAccount = disconnect.indexOf("preferences.clearAccountAccess()")
         val signedOut = disconnect.indexOf(
-            "setPhase(ManagedCloudPhase.SIGNED_OUT)",
+            "phase = ManagedCloudPhase.SIGNED_OUT",
         )
         assertTrue(release >= 0)
         assertTrue(release < signOut)
         assertTrue(signOut < clear)
-        assertTrue(clear < signedOut)
+        assertTrue(clear < clearAccount)
+        assertTrue(clearAccount < signedOut)
         assertFalse(disconnect.contains("preferences.disconnect()"))
 
         val clearEnrollment = preferencesSource().section(
-            "    fun clearEnrollment()",
+            "    fun clearEnrollment(preserveLegacyScope: Boolean = false)",
             "    private fun stableRequestId(",
         )
         listOf(
@@ -125,6 +126,45 @@ class ManagedDocumentLifecycleContractTest {
         assertFalse(clearEnrollment.contains("ManagedDocumentKeyVault"))
         assertFalse(clearEnrollment.contains("ManagedDocumentCiphertextInbox"))
         assertFalse(clearEnrollment.contains("purgeManagedDocumentLocalState"))
+        assertTrue(clearEnrollment.contains("KEY_RETAINED_LEGACY_SCOPE_PREFIX"))
+        assertTrue(clearEnrollment.contains("if (preserveLegacyScope)"))
+        assertTrue(clearEnrollment.contains("editor.remove("))
+    }
+
+    @Test
+    fun managedHistoryImportSerializesAndRevalidatesAccountBoundary() {
+        val source = serviceSource()
+        val import = source.section(
+            "    suspend fun importCompleteCloudHistory(",
+            "    internal suspend fun syncForWorker()",
+        )
+        val disconnect = source.section(
+            "    suspend fun disconnect()",
+            "    suspend fun sendDeletionCode(",
+        )
+
+        assertTrue(import.contains("syncMutex.withLock"))
+        assertTrue(import.contains("if (managedDisconnecting)"))
+        assertTrue(import.contains("val operationValidator: suspend () -> Unit"))
+        assertTrue(import.contains("accountScopeHash() == scopeHash"))
+        assertTrue(import.contains("state.value.phase != ManagedCloudPhase.ENROLLED"))
+        assertTrue(import.contains("operationValidator = operationValidator"))
+        assertTrue(disconnect.contains("managedDisconnecting = true"))
+        assertTrue(
+            disconnect.indexOf("managedDisconnecting = true") <
+                disconnect.indexOf("syncMutex.withLock"),
+        )
+
+        val importer = File(
+            managedTestRepositoryRoot(),
+            "android/app/src/main/java/com/noop/managed/ManagedHistoryImport.kt",
+        ).readText()
+        assertTrue(
+            importer.contains(
+                "ManagedHistoryTransferLimits.MAXIMUM_OBJECT_COUNT",
+            ),
+        )
+        assertFalse(importer.contains("const val MAX_OBJECTS = 1_000_000"))
     }
 
     @Test

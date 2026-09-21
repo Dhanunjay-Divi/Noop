@@ -80,6 +80,27 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(managed.contains("Local NOOP and folder backup continue to work."))
     }
 
+    func testManagedHistoryImportIsReachableFromEnrolledNoopPlusUI()
+        throws
+    {
+        let managed = try sourceText(
+            "StrandiOS/System/ManagedCloudViews.swift"
+        )
+
+        XCTAssertTrue(managed.contains("Import complete cloud history"))
+        XCTAssertTrue(managed.contains("confirmHistoryImport = true"))
+        XCTAssertTrue(managed.contains(".fileImporter("))
+        XCTAssertTrue(managed.contains("allowedContentTypes: [.zip]"))
+        XCTAssertTrue(
+            managed.contains("service.importCompleteCloudHistory(")
+        )
+        XCTAssertTrue(
+            managed.contains(
+                #".accessibilityIdentifier("noop.noop-plus.import-history")"#
+            )
+        )
+    }
+
     // MARK: - M5 gate (S1 grouping): every destination stays reachable after grouping
 
     /// The S1 macOS sidebar grouping (#805) folds the flat `NavItem` cases into collapsible

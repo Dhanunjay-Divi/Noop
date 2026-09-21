@@ -3255,8 +3255,13 @@ final class IntelligenceEngine: ObservableObject {
         // evidence is promoted only after that complete window commits: a freshly computed in-memory day
         // paired with an old or partially written stored row must never be labeled as the current algorithm.
         var persistedWhoopStrapDays = Set<String>()
-        var scorePersistenceSucceeded = dailies.isEmpty
-        if !dailies.isEmpty {
+        let shouldReconcileScoreRange =
+            Self.shouldReconcileComputedScoreRange(
+                hasFreshScores: !dailies.isEmpty,
+                traversingFormulaHistory: traverseResolvableHistory
+            )
+        var scorePersistenceSucceeded = !shouldReconcileScoreRange
+        if shouldReconcileScoreRange {
             do {
                 let persistedDays = try await store.reconcileComputedScoreRange(
                     deviceId: computedId,
@@ -3982,6 +3987,13 @@ final class IntelligenceEngine: ObservableObject {
         claims: [AnalysisInputGenerationClaim]
     ) -> Bool {
         force || !generationSnapshotSucceeded || !claims.isEmpty
+    }
+
+    nonisolated static func shouldReconcileComputedScoreRange(
+        hasFreshScores: Bool,
+        traversingFormulaHistory: Bool
+    ) -> Bool {
+        hasFreshScores || traversingFormulaHistory
     }
 
     /// Consumes one selected historical turn before any async read or persistence work. If that attempt

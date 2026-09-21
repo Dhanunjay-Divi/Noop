@@ -53,6 +53,10 @@ data class ManagedSocialVisibility(
     val hrv: Boolean = false,
     val rhr: Boolean = false,
     val pokeAllowed: Boolean = false,
+    val messagesAllowed: Boolean = false,
+    val photosAllowed: Boolean = false,
+    val audioCallsAllowed: Boolean = false,
+    val videoCallsAllowed: Boolean = false,
 )
 
 data class ManagedSocialVisibilityPatch(
@@ -63,6 +67,10 @@ data class ManagedSocialVisibilityPatch(
     val hrv: Boolean? = null,
     val rhr: Boolean? = null,
     val pokeAllowed: Boolean? = null,
+    val messagesAllowed: Boolean? = null,
+    val photosAllowed: Boolean? = null,
+    val audioCallsAllowed: Boolean? = null,
+    val videoCallsAllowed: Boolean? = null,
 ) {
     val hasChange: Boolean
         get() = charge != null ||
@@ -71,7 +79,11 @@ data class ManagedSocialVisibilityPatch(
             sleepDuration != null ||
             hrv != null ||
             rhr != null ||
-            pokeAllowed != null
+            pokeAllowed != null ||
+            messagesAllowed != null ||
+            photosAllowed != null ||
+            audioCallsAllowed != null ||
+            videoCallsAllowed != null
 }
 
 data class ManagedSocialSummary(

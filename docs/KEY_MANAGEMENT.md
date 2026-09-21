@@ -36,6 +36,12 @@ secrets, but they still require origin/application restrictions and inventory.
 - Production access is least privilege, time bounded where supported, audited,
   and separate from staging. Human administrators do not use runtime service
   identities for routine access.
+- Database migration and runtime credentials use different PostgreSQL
+  principals, Secret Manager containers, IAM bindings, and pinned numeric
+  versions. API, processor, and lifecycle identities must never receive access
+  to the migration secret. The runtime principal must own no database object,
+  inherit no role, and have no schema/database creation, role administration,
+  replication, bypass-RLS, trigger, truncate, or reference authority.
 - High-impact production actions require two-person review once the operations
   team has more than one authorized operator: signing-key export, KMS
   destruction, production database credential replacement, firmware root
@@ -64,6 +70,12 @@ secrets, but they still require origin/application restrictions and inventory.
 - Runtime database, replay, bootstrap, provider, CI, and deployment credentials
   require staged dual-read/dual-key rollover or an equivalent no-downtime
   procedure, followed by verification and revocation of the old version.
+- A database migration runs first under the migration-only credential. While
+  runtime workloads remain drained and disabled, the operator reruns the
+  least-privilege runtime provisioner against the completed schema, verifies
+  effective grants by reconnecting as the exact runtime principal, publishes a
+  new runtime secret version, and pins that version for the matching rollout.
+  Workloads never resolve either database credential through `latest`.
 - Mobile installation and social capability credentials rotate on device
   removal, account recovery, leave/delete, block, suspected link/token leak,
   or explicit user action.
@@ -92,7 +104,7 @@ secrets, but they still require origin/application restrictions and inventory.
 | GitHub/CI/deployment | Repository/environment secret store; scoped tokens; protected approvals | Source excludes known credential files/formats and pins release inputs. Hosted protection and final credential inventory remain owner gates. |
 | Apple distribution/notarization/APNs | Apple-managed team roles and approved signing pipeline | Unsigned builds are verified. Production certificates, profiles, APNs key, custody, and rotation evidence are not present. |
 | Android signing/Play/FCM | Non-exportable or tightly controlled release key plus Play roles | Unsigned/debug builds are verified. Production keystore, Play signing, FCM server authority, and recovery evidence are not present. |
-| GCP data/runtime | Workload identities, KMS, Secret Manager, restricted database roles | Private synthetic staging uses source-defined least privilege, KMS, secret bindings, PITR, and no broad invoker. Production projects and drills remain gated. |
+| GCP data/runtime | Workload identities, KMS, Secret Manager, distinct migration and per-workload runtime database roles | Private synthetic staging preserves `noop-staging-database-url` as migration-only and uses separate pinned secrets for the private API, managed API, processor, managed lifecycle, and feedback lifecycle. Each identity can read only its own credential and no runtime identity can read the migration secret. Public traffic, production projects, live provisioning, and drills remain gated. |
 | Firebase identity/App Check | Restricted app identifiers plus provider-side identity/attestation policy | Synthetic app identities are source-defined. Signed physical-client enforcement and recovery remain gated. |
 | Paging provider | Restricted outbound API credential; separate webhook-verification secret; environment-specific senders | Real provider credentials, India registration, callback origin, carrier tests, failover, and 24/7 operation are absent. Previously disclosed credentials must never be reused. |
 | User/self-hosted services | User-controlled token in Keychain/Keystore; origin-bound transport | Implemented locally; NOOP diagnostics and reports exclude values. |

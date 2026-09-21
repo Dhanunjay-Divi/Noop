@@ -570,9 +570,27 @@ public actor WhoopManagedDocumentAdapter:
            try await documentKeys.recoveryEnrollmentComplete(
                accountScopeHash: accountScopeHash
            ) {
-            guard ciphertextInbox != nil else {
+            guard let ciphertextInbox else {
                 throw ManagedStorageError.invalidConfiguration
             }
+            let durableReferences =
+                try await store.pendingManagedCiphertextReferences(
+                    accountScopeHash: accountScopeHash
+                )
+            let retained = durableReferences.map { reference in
+                ManagedDocumentCiphertextInboxOutgoingReference(
+                    localIdentifier: Self.localIdentifier(
+                        tableName: reference.tableName,
+                        localKey: reference.localKey
+                    ),
+                    generation: reference.generation,
+                    revision: reference.nextRevision
+                )
+            }
+            try await ciphertextInbox.reconcileOutgoing(
+                accountScopeHash: accountScopeHash,
+                retaining: retained
+            )
             local += try await store.pendingManagedDocuments(
                 accountScopeHash: accountScopeHash,
                 contentMode: .clientEncrypted,
@@ -597,12 +615,9 @@ public actor WhoopManagedDocumentAdapter:
                 tableName: candidate.tableName,
                 keyJSON: candidate.keyJSON
             )
-            let localIdentifier = ManagedDigest.sha256(
-                Data(
-                    (
-                        candidate.tableName + "\0" + candidate.localKey
-                    ).utf8
-                )
+            let localIdentifier = Self.localIdentifier(
+                tableName: candidate.tableName,
+                localKey: candidate.localKey
             )
             let payloadData: Data?
             if let payloadJSON = candidate.payloadJSON {
@@ -1058,6 +1073,15 @@ public actor WhoopManagedDocumentAdapter:
                         + (contentSHA256 ?? "deleted")
                 ).utf8
             )
+        )
+    }
+
+    private static func localIdentifier(
+        tableName: String,
+        localKey: String
+    ) -> String {
+        ManagedDigest.sha256(
+            Data((tableName + "\0" + localKey).utf8)
         )
     }
 

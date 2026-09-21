@@ -55,6 +55,24 @@ class ManagedAccountScopeTest {
     }
 
     @Test
+    fun retainedV1ScopeRecoversAfterDisconnectAndReEnrollment() {
+        val uid = "legacy-user"
+        val legacy = ManagedAccountScope.legacy(uid)
+        val recovered = ManagedAccountScope.resolve(
+            projectId = "noop-india",
+            tenantId = null,
+            uid = uid,
+            enrolledDataScopeHash = legacy,
+            persistedIdentityScopeHash = null,
+            persistedDataScopeVersion = null,
+        )
+
+        assertEquals(legacy, recovered.dataScopeHash)
+        assertEquals(1, recovered.dataScopeVersion)
+        assertTrue(recovered.requiresPersistence)
+    }
+
+    @Test
     fun newEnrollmentUsesV2Candidate() {
         val binding = ManagedAccountScope.resolve(
             projectId = "noop-india",

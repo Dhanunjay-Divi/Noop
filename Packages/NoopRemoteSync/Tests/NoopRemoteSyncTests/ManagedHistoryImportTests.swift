@@ -112,6 +112,76 @@ final class ManagedHistoryImportTests: XCTestCase {
         XCTAssertEqual(calls, 0)
     }
 
+    func testNegativeCheckpointIndexFailsClosedBeforeReadingArchive()
+        async throws
+    {
+        let fixture = try makeFixture(bpms: [68, 72])
+        let checkpoint = ManagedHistoryImportCheckpoint(
+            archiveSHA256: ManagedDigest.sha256(
+                try fixture.manifest.encoded()
+            ),
+            nextObjectIndex: -1,
+            importedObjects: -1
+        )
+        let restore = ImportRestoreRecorder()
+        let reads = ImportReadRecorder()
+
+        do {
+            _ = try await ManagedHistoryImporter().importArchive(
+                manifestData: try fixture.manifest.encoded(),
+                entryPaths: Array(fixture.entries.keys) + ["manifest.json"],
+                resumeFrom: checkpoint,
+                restore: restore,
+                read: { path, maximumBytes in
+                    await reads.record()
+                    guard let data = fixture.entries[path],
+                          data.count <= maximumBytes else {
+                        throw ManagedStorageError.invalidResponse
+                    }
+                    return data
+                }
+            )
+            XCTFail("Expected negative checkpoint rejection")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let readCount = await reads.count()
+        let restoreCalls = await restore.applyCalls()
+        XCTAssertEqual(readCount, 0)
+        XCTAssertEqual(restoreCalls, 0)
+    }
+
+    func testOversizedManifestFailsBeforeReadingOrRestoring()
+        async throws
+    {
+        let restore = ImportRestoreRecorder()
+        let reads = ImportReadRecorder()
+        let oversized = Data(
+            count: ManagedHistoryTransferLimits.maximumManifestBytes + 1
+        )
+
+        do {
+            _ = try await ManagedHistoryImporter().importArchive(
+                manifestData: oversized,
+                entryPaths: ["manifest.json"],
+                restore: restore,
+                read: { _, _ in
+                    await reads.record()
+                    return Data()
+                }
+            )
+            XCTFail("Expected oversized manifest rejection")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .decoding)
+        }
+
+        let readCount = await reads.count()
+        let restoreCalls = await restore.applyCalls()
+        XCTAssertEqual(readCount, 0)
+        XCTAssertEqual(restoreCalls, 0)
+    }
+
     func testLegacyV1ManifestRemainsImportable() async throws {
         let fixture = try makeFixture(bpms: [68], formatVersion: 1)
         let restore = ImportRestoreRecorder()
@@ -344,6 +414,18 @@ private actor ImportCheckpointRecorder {
 
     func latest() -> ManagedHistoryImportCheckpoint? {
         checkpoint
+    }
+}
+
+private actor ImportReadRecorder {
+    private var reads = 0
+
+    func record() {
+        reads += 1
+    }
+
+    func count() -> Int {
+        reads
     }
 }
 

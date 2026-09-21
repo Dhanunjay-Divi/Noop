@@ -111,6 +111,12 @@ class RoomManagedDocumentAdapter internal constructor(
             if (encryptionEnabled && ciphertextInbox == null) {
                 throw ManagedStorageException.InvalidResponse()
             }
+            if (encryptionEnabled) {
+                ciphertextInbox?.reconcileOutgoing(
+                    accountScopeHash,
+                    pendingEncryptedCiphertextReferences(localProfileId),
+                )
+            }
             val local = pendingCandidates(localProfileId, limit, encryptionEnabled)
             local.map { candidate ->
                 val kind = ManagedDocumentKind.fromWire(candidate.documentKind)
@@ -413,6 +419,69 @@ class RoomManagedDocumentAdapter internal constructor(
             }
         }
         return dirty.map { row -> candidate(db, row, includeClientEncrypted) }
+    }
+
+    private fun pendingEncryptedCiphertextReferences(
+        localProfileId: String,
+    ): List<ManagedDocumentCiphertextInboxOutgoingReference> {
+        val encryptedSpecs = TABLE_SPECS.filterNot {
+            isServerReadableKind(it.kind)
+        }
+        val predicates = encryptedSpecs.map {
+            "(dirty.tableName = ? AND dirty.documentKind = ?)"
+        } + "(dirty.tableName = ? AND dirty.documentKind = ?)"
+        val arguments = buildList<Any?> {
+            add(accountScopeHash)
+            add(localProfileId)
+            encryptedSpecs.forEach { spec ->
+                add(spec.table)
+                add(spec.kind.wireValue)
+            }
+            add(PREFERENCES_TABLE)
+            add(ManagedDocumentKind.PREFERENCES.wireValue)
+        }.toTypedArray()
+        return database.openHelper.readableDatabase.query(
+            SimpleSQLiteQuery(
+                """
+                    SELECT dirty.tableName,
+                           dirty.localKey,
+                           dirty.generation,
+                           COALESCE(state.remoteRevision, 0)
+                    FROM managedDocumentDirty AS dirty
+                    LEFT JOIN managedDocumentState AS state
+                      ON state.accountScopeHash = ?
+                     AND state.tableName = dirty.tableName
+                     AND state.localKey = dirty.localKey
+                    WHERE dirty.localProfileId = ?
+                      AND dirty.operation = 'upsert'
+                      AND dirty.generation >
+                          COALESCE(state.acknowledgedGeneration, 0)
+                      AND (${predicates.joinToString(" OR ")})
+                    ORDER BY dirty.tableName, dirty.localKey
+                """.trimIndent(),
+                arguments,
+            ),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    val generation = cursor.getLong(2)
+                    val baseRevision = cursor.getLong(3)
+                    if (generation <= 0L || baseRevision < 0L) {
+                        throw ManagedStorageException.InvalidResponse()
+                    }
+                    add(
+                        ManagedDocumentCiphertextInboxOutgoingReference(
+                            localIdentifier = ManagedDigest.sha256(
+                                "${cursor.getString(0)}\u0000${cursor.getString(1)}"
+                                    .toByteArray(StandardCharsets.UTF_8),
+                            ),
+                            generation = generation,
+                            revision = baseRevision + 1,
+                        ),
+                    )
+                }
+            }
+        }
     }
 
     private fun candidate(

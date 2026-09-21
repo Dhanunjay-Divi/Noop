@@ -765,7 +765,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             #"source: "stream""#
         ))
         XCTAssertTrue(service.contains(
-            "beginAccountBoundaryTransition(reason: \"disconnect_completed\")"
+            "reason: \"disconnect_requested\""
         ))
         XCTAssertTrue(service.contains(
             "stopManagedSafetyLocationSharing(reason: \"account_boundary\")"
@@ -1581,13 +1581,13 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         let appleWait = try XCTUnwrap(
             appleDisconnect.range(of: "await waitForManagedPushRegistrations()")
         )
-        let appleSyncWait = try XCTUnwrap(
-            appleDisconnect.range(of: "await waitForManagedSyncCompletion()")
+        let appleQuiesce = try XCTUnwrap(
+            appleDisconnect.range(of: "await cancelAndAwaitAccountOperations()")
         )
         let appleRevoke = try XCTUnwrap(
             appleDisconnect.range(of: "client().revokePushInstallation(")
         )
-        XCTAssertLessThan(appleSyncWait.lowerBound, appleWait.lowerBound)
+        XCTAssertLessThan(appleQuiesce.lowerBound, appleWait.lowerBound)
         XCTAssertLessThan(appleWait.lowerBound, appleRevoke.lowerBound)
         XCTAssertTrue(appleDisconnect.contains(
             "\"managed_sync.disconnect_serialization\""
@@ -1713,10 +1713,16 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             "\"managed_sync.profile_binding\""
         ))
         XCTAssertTrue(service.contains(
-            "guard accountScopeHash == nil || !disconnecting else { return }"
+            "guard !accountTransitioning,"
         ))
         XCTAssertTrue(service.contains(
-            "accountScopeHash == nil || !self.disconnecting"
+            "accountScopeHash == nil || !disconnecting else {"
+        ))
+        XCTAssertTrue(service.contains(
+            "!self.accountTransitioning,"
+        ))
+        XCTAssertTrue(service.contains(
+            "accountScopeHash == nil || !self.disconnecting else {"
         ))
         XCTAssertTrue(service.contains(
             "scheduleManagedDocumentProfileBinding(\n            accountScopeHash: try? accountScopeHash()"
@@ -1739,13 +1745,13 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
                 of: "updateManagedDocumentProfileBinding(\n                    accountScopeHash: nil"
             )
         )
-        let syncWait = try XCTUnwrap(
-            disconnect.range(of: "await waitForManagedSyncCompletion()")
+        let quiesce = try XCTUnwrap(
+            disconnect.range(of: "await cancelAndAwaitAccountOperations()")
         )
         let signOut = try XCTUnwrap(
             disconnect.range(of: "try Auth.auth().signOut()")
         )
-        XCTAssertLessThan(syncWait.lowerBound, release.lowerBound)
+        XCTAssertLessThan(quiesce.lowerBound, release.lowerBound)
         XCTAssertLessThan(release.lowerBound, signOut.lowerBound)
 
         let android = try source(

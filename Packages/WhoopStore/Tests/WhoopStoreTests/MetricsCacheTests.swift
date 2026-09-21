@@ -741,6 +741,89 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(unmanaged.map(\.value), [30])
     }
 
+    func testComputedScoreReconciliationEmptyReplacementDeletesOnlyScopedComputedRows() async throws {
+        let store = try await WhoopStore.inMemory()
+        let computed = "my-whoop-noop"
+        let imported = "my-whoop"
+        let otherComputed = "other-whoop-noop"
+        try await store.upsertDailyMetrics([
+            computedDay("2026-05-09", recovery: 49),
+            computedDay("2026-05-10", recovery: 50),
+            computedDay("2026-05-11", recovery: 51),
+            computedDay("2026-05-12", recovery: 52),
+            computedDay("2026-05-13", recovery: 53),
+        ], deviceId: computed)
+        try await store.upsertDailyMetrics([
+            computedDay("2026-05-11", recovery: 91),
+        ], deviceId: imported)
+        try await store.upsertDailyMetrics([
+            computedDay("2026-05-11", recovery: 81),
+        ], deviceId: otherComputed)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-09", key: "sleep_performance", value: 69),
+            MetricPoint(day: "2026-05-10", key: "sleep_performance", value: 70),
+            MetricPoint(day: "2026-05-11", key: "rest_confidence", value: 1),
+            MetricPoint(day: "2026-05-12", key: "rest_evidence_flags", value: 12),
+            MetricPoint(day: "2026-05-11", key: "sleep_debt_min", value: 30),
+            MetricPoint(day: "2026-05-13", key: "sleep_performance", value: 73),
+        ], deviceId: computed)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-11", key: "sleep_performance", value: 99),
+        ], deviceId: imported)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-11", key: "sleep_performance", value: 89),
+        ], deviceId: otherComputed)
+
+        let receipt = try await store.reconcileComputedScoreRange(
+            deviceId: computed,
+            from: "2026-05-10",
+            to: "2026-05-12",
+            dailyRows: [],
+            managedMetricKeys: [
+                "sleep_performance",
+                "rest_confidence",
+                "rest_evidence_flags",
+            ],
+            metricRows: []
+        )
+
+        XCTAssertTrue(receipt.isEmpty)
+        let selectedDaily = try await store.dailyMetrics(
+            deviceId: computed, from: "2026-05-01", to: "2026-05-31")
+        XCTAssertEqual(selectedDaily.map(\.day), ["2026-05-09", "2026-05-13"])
+        let importedDaily = try await store.dailyMetrics(
+            deviceId: imported, from: "2026-05-10", to: "2026-05-12")
+        XCTAssertEqual(importedDaily.map(\.recovery), [91])
+        let otherDaily = try await store.dailyMetrics(
+            deviceId: otherComputed, from: "2026-05-10", to: "2026-05-12")
+        XCTAssertEqual(otherDaily.map(\.recovery), [81])
+
+        let selectedPerformance = try await store.metricSeries(
+            deviceId: computed, key: "sleep_performance",
+            from: "2026-05-01", to: "2026-05-31")
+        XCTAssertEqual(selectedPerformance.map(\.day), ["2026-05-09", "2026-05-13"])
+        let selectedConfidence = try await store.metricSeries(
+            deviceId: computed, key: "rest_confidence",
+            from: "2026-05-10", to: "2026-05-12")
+        XCTAssertTrue(selectedConfidence.isEmpty)
+        let selectedEvidence = try await store.metricSeries(
+            deviceId: computed, key: "rest_evidence_flags",
+            from: "2026-05-10", to: "2026-05-12")
+        XCTAssertTrue(selectedEvidence.isEmpty)
+        let unmanaged = try await store.metricSeries(
+            deviceId: computed, key: "sleep_debt_min",
+            from: "2026-05-10", to: "2026-05-12")
+        XCTAssertEqual(unmanaged.map(\.value), [30])
+        let importedPerformance = try await store.metricSeries(
+            deviceId: imported, key: "sleep_performance",
+            from: "2026-05-10", to: "2026-05-12")
+        XCTAssertEqual(importedPerformance.map(\.value), [99])
+        let otherPerformance = try await store.metricSeries(
+            deviceId: otherComputed, key: "sleep_performance",
+            from: "2026-05-10", to: "2026-05-12")
+        XCTAssertEqual(otherPerformance.map(\.value), [89])
+    }
+
     func testComputedScoreReconciliationRollsBackAfterLateFailure() async throws {
         enum InjectedFailure: Error { case stop }
 

@@ -102,6 +102,7 @@ class Settings:
     managed_residency_policy_version: str = "staging-v1"
     managed_default_plan_code: str = "noop_plus_staging"
     managed_default_plan_revision: int = 1
+    managed_account_max_installations: int = 5
     managed_consent_policy_kind: str = "managed_storage"
     managed_consent_policy_version: str | None = None
     managed_consent_policy_sha256: str | None = None
@@ -275,6 +276,10 @@ class Settings:
             managed_default_plan_revision=_positive_int(
                 "NOOP_MANAGED_DEFAULT_PLAN_REVISION",
                 1,
+            ),
+            managed_account_max_installations=_positive_int(
+                "NOOP_MANAGED_ACCOUNT_MAX_INSTALLATIONS",
+                5,
             ),
             managed_consent_policy_kind=os.getenv(
                 "NOOP_MANAGED_CONSENT_POLICY_KIND",
@@ -727,6 +732,10 @@ class Settings:
                 raise RuntimeError(
                     "NOOP_MANAGED_CONSENT_POLICY_SHA256 must be a lowercase "
                     "SHA-256 digest"
+                )
+            if not 1 <= self.managed_account_max_installations <= 100:
+                raise RuntimeError(
+                    "NOOP_MANAGED_ACCOUNT_MAX_INSTALLATIONS must be between 1 and 100"
                 )
             if not 60 <= self.managed_upload_ttl_seconds <= 3600:
                 raise RuntimeError(

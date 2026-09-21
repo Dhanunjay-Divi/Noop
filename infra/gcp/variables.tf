@@ -228,6 +228,138 @@ variable "database_tier" {
   }
 }
 
+variable "migration_database_url_secret_version" {
+  description = "Pinned Secret Manager version for the migration-only PostgreSQL credential."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      (
+        var.migration_database_url_secret_version == null
+        && !(
+          var.enable_managed_database
+          && (var.migration_image != null || var.runtime_image != null)
+        )
+      )
+      || (
+        var.migration_database_url_secret_version != null
+        && can(regex(
+          "^[1-9][0-9]*$",
+          var.migration_database_url_secret_version,
+        ))
+      )
+    )
+    error_message = "A positive migration_database_url_secret_version is required before any migration image can run."
+  }
+}
+
+variable "runtime_database_url_secret_version" {
+  description = "Pinned Secret Manager version for the restricted private-API PostgreSQL credential."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      (
+        var.runtime_database_url_secret_version == null
+        && !var.enable_private_api
+      )
+      || (
+        var.runtime_database_url_secret_version != null
+        && can(regex(
+          "^[1-9][0-9]*$",
+          var.runtime_database_url_secret_version,
+        ))
+      )
+    )
+    error_message = "A positive runtime_database_url_secret_version is required before the private API can run."
+  }
+}
+
+variable "managed_api_database_url_secret_version" {
+  description = "Pinned Secret Manager version for the managed API PostgreSQL credential."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      (var.managed_api_database_url_secret_version == null && !var.enable_managed_runtime)
+      || (
+        var.managed_api_database_url_secret_version != null
+        && can(regex(
+          "^[1-9][0-9]*$",
+          var.managed_api_database_url_secret_version,
+        ))
+      )
+    )
+    error_message = "A positive managed_api_database_url_secret_version is required before the managed API can run."
+  }
+}
+
+variable "managed_processor_database_url_secret_version" {
+  description = "Pinned Secret Manager version for the managed processor PostgreSQL credential."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      (var.managed_processor_database_url_secret_version == null && !var.enable_managed_runtime)
+      || (
+        var.managed_processor_database_url_secret_version != null
+        && can(regex(
+          "^[1-9][0-9]*$",
+          var.managed_processor_database_url_secret_version,
+        ))
+      )
+    )
+    error_message = "A positive managed_processor_database_url_secret_version is required before the managed processor can run."
+  }
+}
+
+variable "managed_lifecycle_database_url_secret_version" {
+  description = "Pinned Secret Manager version for the managed lifecycle PostgreSQL credential."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      (var.managed_lifecycle_database_url_secret_version == null && !var.enable_managed_runtime)
+      || (
+        var.managed_lifecycle_database_url_secret_version != null
+        && can(regex(
+          "^[1-9][0-9]*$",
+          var.managed_lifecycle_database_url_secret_version,
+        ))
+      )
+    )
+    error_message = "A positive managed_lifecycle_database_url_secret_version is required before the managed lifecycle can run."
+  }
+}
+
+variable "feedback_lifecycle_database_url_secret_version" {
+  description = "Pinned Secret Manager version for the feedback lifecycle PostgreSQL credential."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      (
+        var.feedback_lifecycle_database_url_secret_version == null
+        && !var.enable_feedback_lifecycle
+      )
+      || (
+        var.feedback_lifecycle_database_url_secret_version != null
+        && can(regex(
+          "^[1-9][0-9]*$",
+          var.feedback_lifecycle_database_url_secret_version,
+        ))
+      )
+    )
+    error_message = "A positive feedback_lifecycle_database_url_secret_version is required before the feedback lifecycle can run."
+  }
+}
+
 variable "runtime_image" {
   description = "Digest-pinned API image. Null creates no Cloud Run workloads."
   type        = string

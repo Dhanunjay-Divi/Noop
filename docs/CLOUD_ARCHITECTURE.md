@@ -179,8 +179,10 @@ the unit for approved refurbishment, reprovisioning, or destruction.
 
 ## Managed Friends boundary
 
-Managed Friends is an optional social projection inside NOOP+, not a public
-social network and not a dependency of core NOOP or self-hosted Friends:
+Friends is one NOOP-hosted account service, not a public social network and not
+a dependency of local band collection. Customer apps do not expose provider
+selection, local-server setup, or self-hosting. Product packaging remains a
+separate later decision and does not weaken the service's privacy boundary:
 
 - Each enrolled account may separately create one managed Friends profile. The
   service assigns a random, rotatable exact-match NOOP ID; there is no browseable
@@ -193,6 +195,9 @@ social network and not a dependency of core NOOP or self-hosted Friends:
   friend access to any subset of Charge, Effort, Rest, sleep duration, HRV, and
   resting heart rate. Raw streams, locations, journals, stages, workouts,
   routes, and device identifiers are not part of the projection.
+- Each owner separately controls whether a specific friend may message, send
+  photos, start audio calls, or start video calls. All four permissions default
+  false. A friendship alone grants none of them.
 - Badges acknowledge connection or the presence of seven/30 projected days.
   They do not rank health values, compare users, or affect a wellness metric.
 - Pokes require the recipient's global opt-in and per-friend permission, and
@@ -204,11 +209,15 @@ social network and not a dependency of core NOOP or self-hosted Friends:
   app therefore does not receive an immediate poke. Any future wake path must
   use a minimal opaque payload, avoid health/profile content, support token
   deletion and rotation, and pass privacy and physical-device review.
+- Message, photo, and call transports are not implemented. They remain hidden
+  until E2EE and key recovery, reporting and moderation, retention and deletion,
+  encrypted media, opaque push, authenticated ephemeral signaling, TURN,
+  CallKit/Telecom, abuse controls, and physical-device evidence pass.
 
 PostgreSQL holds this bounded control and six-field projection state. Expired
 invites, requests, pokes, summaries, and revoked aliases are lifecycle-managed;
 deleting a managed Friends profile cascades its social state without deleting
-the NOOP+ backup account or on-device data.
+cloud backup history or on-device data.
 
 ## Retention and deletion
 

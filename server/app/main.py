@@ -1159,6 +1159,9 @@ def create_app(
                 default_plan_code=runtime_settings.managed_default_plan_code,
                 default_plan_revision=(runtime_settings.managed_default_plan_revision),
                 consent_policy_kind=(runtime_settings.managed_consent_policy_kind),
+                account_max_installations=(
+                    runtime_settings.managed_account_max_installations
+                ),
                 entitlement_mode=runtime_settings.managed_entitlement_mode,
                 replay_secret=runtime_settings.managed_replay_secret or "",
             )

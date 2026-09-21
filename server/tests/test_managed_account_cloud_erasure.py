@@ -27,7 +27,11 @@ from app.managed_formula_repository import (
     FormulaShadowAccountUnavailableError,
 )
 from app.managed_identity import ManagedIdentityClaims
-from app.managed_models import ManagedEnrollment
+from app.managed_models import (
+    ManagedAccountEnrollment,
+    ManagedEnrollment,
+    ManagedSocialProfileCreate,
+)
 from app.managed_repository import PostgresManagedRepository
 from app.managed_repository import ManagedNotFoundError
 from app.repository import PostgresRepository
@@ -62,6 +66,9 @@ def test_account_erasure_support_is_additive_to_immutable_migrations() -> None:
     erasure_sql = (MIGRATIONS / "052_managed_account_cloud_erasure.sql").read_text(
         encoding="utf-8"
     )
+    derived_erasure_sql = (
+        MIGRATIONS / "057_managed_formula_shadow_derived_erasure.sql"
+    ).read_text(encoding="utf-8")
     assert "ADD COLUMN last_reconsented_at" in reconsent_sql
     assert "managed_formula_shadow_immutable" in reconsent_sql
     assert "managed_account_cloud_erasure_tombstones" in erasure_sql
@@ -74,6 +81,11 @@ def test_account_erasure_support_is_additive_to_immutable_migrations() -> None:
     assert "managed_erasure_job_account_job_unique" in erasure_sql
     assert "FOREIGN KEY (account_id, erasure_job_id)" in erasure_sql
     assert "status = 'retired'" in erasure_sql
+    assert "noop_managed_formula_shadow_erasure_context" in derived_erasure_sql
+    assert "job.scope = 'derived_data'" in derived_erasure_sql
+    assert "account.status = 'active'" in derived_erasure_sql
+    assert "job.scope IN ('all_managed_data', 'account')" in derived_erasure_sql
+    assert "noop_managed_formula_shadow_delete_guard" in derived_erasure_sql
 
 
 def _primary() -> PostgresRepository:
@@ -135,6 +147,15 @@ def _enrollment(installation_id: str) -> ManagedEnrollment:
             "raw_motion",
             "user_documents",
         ],
+    )
+
+
+def _account_enrollment(installation_id: str) -> ManagedAccountEnrollment:
+    return ManagedAccountEnrollment(
+        installation_id=installation_id,
+        platform="ios",
+        installation_token=_installation_token(installation_id),
+        enrollment_request_id=uuid4(),
     )
 
 
@@ -202,6 +223,247 @@ def _formula_execution(account_id: UUID):
             value=local.server_value,
         ),
     )
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_account_only_friends_erasure_requires_no_storage_consent() -> None:
+    primary = _primary()
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        now = datetime.now(UTC)
+        claims = _claims(f"account-only-erasure-{uuid4()}", now)
+        installation_id = str(uuid4())
+        installation_token_hash = hashlib.sha256(
+            _installation_token(installation_id).encode("ascii")
+        ).hexdigest()
+        await managed.enroll_account(
+            claims=claims,
+            enrollment=_account_enrollment(installation_id),
+        )
+        principal = await managed.principal_for_identity(claims)
+        social_profile = await managed.create_social_profile(
+            principal=principal,
+            request=ManagedSocialProfileCreate(
+                request_id=uuid4(),
+                display_name="Synthetic account erasure",
+            ),
+        )
+        pool = primary._require_pool()
+
+        storage_state = await pool.fetchrow(
+            """
+            SELECT
+                (
+                    SELECT count(*)
+                    FROM managed_subscriptions
+                    WHERE account_id = $1
+                ) AS subscriptions,
+                (
+                    SELECT count(*)
+                    FROM managed_consent_events
+                    WHERE account_id = $1
+                ) AS consent_events,
+                (
+                    SELECT count(*)
+                    FROM managed_retention_policy_snapshots
+                    WHERE account_id = $1
+                ) AS retention_snapshots,
+                (
+                    SELECT count(*)
+                    FROM managed_account_installations
+                    WHERE account_id = $1
+                ) AS installations,
+                (
+                    SELECT count(*)
+                    FROM managed_social_profiles
+                    WHERE account_id = $1
+                ) AS social_profiles,
+                (
+                    SELECT count(*)
+                    FROM managed_social_aliases
+                    WHERE profile_id = $2
+                ) AS social_aliases
+            """,
+            principal.account_id,
+            UUID(social_profile["profile_id"]),
+        )
+        assert dict(storage_state) == {
+            "subscriptions": 0,
+            "consent_events": 0,
+            "retention_snapshots": 0,
+            "installations": 1,
+            "social_profiles": 1,
+            "social_aliases": 1,
+        }
+
+        requested = await managed.request_erasure(
+            principal=principal,
+            request_id=uuid4(),
+            scope="account",
+            confirmation_sha256="a" * 64,
+            identity_deletion_ticket=b"t" * 64,
+            cooling_off=timedelta(0),
+        )
+        erasure_job_id = UUID(requested["erasure_job_id"])
+        receipt, receipt_platform = await managed.get_erasure_receipt(
+            erasure_job_id=erasure_job_id,
+            installation_id=installation_id,
+            installation_token_hash=installation_token_hash,
+        )
+        assert receipt["status"] == "cooling_off"
+        assert receipt_platform == "ios"
+
+        lifecycle_now = await managed.coordination_now()
+        await managed.claim_erasure_deletions(
+            now=lifecycle_now,
+            batch_size=10,
+        )
+        assert (
+            await managed.finalize_erasure_jobs(
+                now=lifecycle_now,
+                batch_size=10,
+            )
+            == []
+        )
+
+        tombstone = await pool.fetchrow(
+            """
+            SELECT authority_state_rows,
+                   authority_transition_rows,
+                   formula_shadow_rows,
+                   document_key_rows,
+                   document_key_version_rows,
+                   managed_identity_link_rows
+            FROM managed_account_cloud_erasure_tombstones
+            WHERE account_id = $1
+              AND erasure_job_id = $2
+            """,
+            principal.account_id,
+            erasure_job_id,
+        )
+        assert tombstone is not None
+        assert all(int(value or 0) == 0 for value in tombstone.values())
+
+        finished = await managed.mark_identity_deletion_succeeded(
+            account_id=principal.account_id,
+            erasure_job_id=erasure_job_id,
+            now=lifecycle_now,
+        )
+        assert finished["status"] == "completed"
+        completed_receipt, completed_platform = await managed.get_erasure_receipt(
+            erasure_job_id=erasure_job_id,
+            installation_id=installation_id,
+            installation_token_hash=installation_token_hash,
+        )
+        assert completed_receipt["status"] == "completed"
+        assert completed_platform == "ios"
+        erased_state = await pool.fetchrow(
+            """
+            SELECT
+                (
+                    SELECT count(*)
+                    FROM managed_external_identities
+                    WHERE account_id = $1
+                ) AS identities,
+                (
+                    SELECT count(*)
+                    FROM managed_social_profiles
+                    WHERE account_id = $1
+                ) AS social_profiles,
+                (
+                    SELECT count(*)
+                    FROM managed_social_aliases
+                    WHERE profile_id = $2
+                ) AS social_aliases
+            """,
+            principal.account_id,
+            UUID(social_profile["profile_id"]),
+        )
+        assert dict(erased_state) == {
+            "identities": 0,
+            "social_profiles": 0,
+            "social_aliases": 0,
+        }
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_derived_data_erasure_removes_formula_shadow_only() -> None:
+    primary = _primary()
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        now = datetime.now(UTC)
+        claims = _claims(f"derived-formula-erasure-{uuid4()}", now)
+        installation_id = str(uuid4())
+        await managed.enroll(
+            claims=claims,
+            enrollment=_enrollment(installation_id),
+        )
+        principal = await managed.principal_for_identity(claims)
+        formula_repository = PostgresManagedFormulaRepository(primary)
+        await formula_repository.publish_shadow(
+            principal=principal,
+            request_id=uuid4(),
+            execution=_formula_execution(principal.account_id),
+            now=now,
+        )
+        requested = await managed.request_erasure(
+            principal=principal,
+            request_id=uuid4(),
+            scope="derived_data",
+            confirmation_sha256="d" * 64,
+            identity_deletion_ticket=None,
+            cooling_off=timedelta(0),
+        )
+        job_id = UUID(requested["erasure_job_id"])
+        lifecycle_now = await managed.coordination_now()
+        assert (
+            await managed.claim_erasure_deletions(
+                now=lifecycle_now,
+                batch_size=10,
+            )
+            == []
+        )
+        completed = await managed.finalize_erasure_jobs(
+            now=lifecycle_now,
+            batch_size=10,
+        )
+        assert [row["erasure_job_id"] for row in completed] == [job_id]
+
+        pool = primary._require_pool()
+        state = await pool.fetchrow(
+            """
+            SELECT account.status AS account_status,
+                   job.status AS job_status,
+                   (
+                       SELECT count(*)
+                       FROM managed_formula_shadow_results
+                       WHERE account_id = account.account_id
+                   ) AS formula_rows
+            FROM managed_accounts account
+            JOIN managed_erasure_jobs job USING (account_id)
+            WHERE account.account_id = $1
+              AND job.erasure_job_id = $2
+            """,
+            principal.account_id,
+            job_id,
+        )
+        assert state["account_status"] == "active"
+        assert state["job_status"] == "completed"
+        assert int(state["formula_rows"]) == 0
+    finally:
+        await primary.shutdown()
 
 
 @pytest.mark.skipif(

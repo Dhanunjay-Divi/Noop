@@ -52,11 +52,17 @@ run "feedback_lifecycle_can_drain_with_ingestion_disabled" {
     managed_android_sha256_fingerprints = [
       "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
     ]
-    enable_managed_database   = true
-    runtime_image             = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    enable_managed_runtime    = true
-    enable_feedback_lifecycle = true
-    enable_feedback_ingestion = false
+    enable_managed_database                        = true
+    migration_database_url_secret_version          = "1"
+    runtime_database_url_secret_version            = "1"
+    managed_api_database_url_secret_version        = "1"
+    managed_processor_database_url_secret_version  = "1"
+    managed_lifecycle_database_url_secret_version  = "1"
+    feedback_lifecycle_database_url_secret_version = "1"
+    runtime_image                                  = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    enable_managed_runtime                         = true
+    enable_feedback_lifecycle                      = true
+    enable_feedback_ingestion                      = false
   }
 
   assert {
@@ -104,13 +110,19 @@ run "feedback_lifecycle_rejects_an_invalid_drain_key_ring" {
     managed_android_sha256_fingerprints = [
       "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
     ]
-    enable_managed_database                  = true
-    runtime_image                            = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    enable_managed_runtime                   = true
-    enable_feedback_lifecycle                = true
-    enable_feedback_ingestion                = false
-    feedback_capability_primary_key_version  = "v1"
-    feedback_capability_previous_key_version = "v1"
+    enable_managed_database                        = true
+    migration_database_url_secret_version          = "1"
+    runtime_database_url_secret_version            = "1"
+    managed_api_database_url_secret_version        = "1"
+    managed_processor_database_url_secret_version  = "1"
+    managed_lifecycle_database_url_secret_version  = "1"
+    feedback_lifecycle_database_url_secret_version = "1"
+    runtime_image                                  = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    enable_managed_runtime                         = true
+    enable_feedback_lifecycle                      = true
+    enable_feedback_ingestion                      = false
+    feedback_capability_primary_key_version        = "v1"
+    feedback_capability_previous_key_version       = "v1"
   }
 
   expect_failures = [var.enable_feedback_lifecycle]
@@ -127,11 +139,17 @@ run "feedback_ingestion_requires_external_abuse_gate" {
     managed_android_sha256_fingerprints = [
       "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
     ]
-    enable_managed_database   = true
-    runtime_image             = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    enable_managed_runtime    = true
-    enable_feedback_lifecycle = true
-    enable_feedback_ingestion = true
+    enable_managed_database                        = true
+    migration_database_url_secret_version          = "1"
+    runtime_database_url_secret_version            = "1"
+    managed_api_database_url_secret_version        = "1"
+    managed_processor_database_url_secret_version  = "1"
+    managed_lifecycle_database_url_secret_version  = "1"
+    feedback_lifecycle_database_url_secret_version = "1"
+    runtime_image                                  = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    enable_managed_runtime                         = true
+    enable_feedback_lifecycle                      = true
+    enable_feedback_ingestion                      = true
   }
 
   expect_failures = [var.enable_feedback_ingestion]
@@ -149,6 +167,12 @@ run "feedback_ingestion_uses_drain_switch_and_pinned_key_versions" {
       "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
     ]
     enable_managed_database                             = true
+    migration_database_url_secret_version               = "1"
+    runtime_database_url_secret_version                 = "1"
+    managed_api_database_url_secret_version             = "1"
+    managed_processor_database_url_secret_version       = "1"
+    managed_lifecycle_database_url_secret_version       = "1"
+    feedback_lifecycle_database_url_secret_version      = "1"
     runtime_image                                       = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     enable_managed_runtime                              = true
     enable_feedback_lifecycle                           = true
@@ -216,13 +240,19 @@ run "public_managed_api_without_feedback_ingestion_is_not_feedback_ready" {
     managed_android_sha256_fingerprints = [
       "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
     ]
-    enable_managed_database               = true
-    runtime_image                         = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    enable_managed_runtime                = true
-    enable_feedback_lifecycle             = true
-    enable_feedback_ingestion             = false
-    enable_public_managed_api             = true
-    feedback_external_abuse_gate_approved = true
+    enable_managed_database                        = true
+    migration_database_url_secret_version          = "1"
+    runtime_database_url_secret_version            = "1"
+    managed_api_database_url_secret_version        = "1"
+    managed_processor_database_url_secret_version  = "1"
+    managed_lifecycle_database_url_secret_version  = "1"
+    feedback_lifecycle_database_url_secret_version = "1"
+    runtime_image                                  = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    enable_managed_runtime                         = true
+    enable_feedback_lifecycle                      = true
+    enable_feedback_ingestion                      = false
+    enable_public_managed_api                      = true
+    feedback_external_abuse_gate_approved          = true
   }
 
   assert {
@@ -243,6 +273,12 @@ run "feedback_public_readiness_requires_ingestion_and_public_invocation" {
       "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
     ]
     enable_managed_database                             = true
+    migration_database_url_secret_version               = "1"
+    runtime_database_url_secret_version                 = "1"
+    managed_api_database_url_secret_version             = "1"
+    managed_processor_database_url_secret_version       = "1"
+    managed_lifecycle_database_url_secret_version       = "1"
+    feedback_lifecycle_database_url_secret_version      = "1"
     runtime_image                                       = "asia-south1-docker.pkg.dev/noop-feedback-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     enable_managed_runtime                              = true
     enable_feedback_lifecycle                           = true

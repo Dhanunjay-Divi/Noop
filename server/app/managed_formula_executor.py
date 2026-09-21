@@ -62,8 +62,14 @@ class FormulaDayContext:
         except ZoneInfoNotFoundError as exc:
             raise FormulaInputContractError("timezone_name is unknown") from exc
         local_start = datetime.combine(local_day, time.min, tzinfo=zone)
+        try:
+            next_local_day = date.fromordinal(local_day.toordinal() + 1)
+        except ValueError as exc:
+            raise FormulaInputContractError(
+                "local_day is outside the supported range"
+            ) from exc
         local_end = datetime.combine(
-            date.fromordinal(local_day.toordinal() + 1),
+            next_local_day,
             time.min,
             tzinfo=zone,
         )

@@ -3,6 +3,7 @@ package com.noop.managed
 import java.io.File
 import java.io.IOException
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -88,6 +89,36 @@ class ManagedHistoryExportResetPolicyTest {
                 ),
             )
         }
+    }
+
+    @Test
+    fun archiveEntryCountIsRejectedBeforeFullEnumeration() {
+        assertTrue(
+            managedHistoryArchiveEntryCountAllowed(
+                ManagedHistoryTransferLimits.MAXIMUM_ARCHIVE_ENTRY_COUNT,
+            ),
+        )
+        assertFalse(
+            managedHistoryArchiveEntryCountAllowed(
+                ManagedHistoryTransferLimits.MAXIMUM_ARCHIVE_ENTRY_COUNT + 1,
+            ),
+        )
+        assertTrue(managedHistoryExportCheckpointMaximumBytes() > 8L * 1_024L * 1_024L)
+        assertEquals(
+            16L * 1_024L * 1_024L,
+            managedHistoryExportCheckpointMaximumBytes(),
+        )
+
+        val writer = source(
+            "src/main/java/com/noop/managed/ManagedHistoryArchiveWriter.kt",
+            "app/src/main/java/com/noop/managed/ManagedHistoryArchiveWriter.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedHistoryArchiveWriter.kt",
+        )
+        assertNotNull(writer)
+        val countCheck = writer!!.indexOf("managedHistoryArchiveEntryCountAllowed(zip.size())")
+        val enumeration = writer.indexOf("zip.entries().asSequence()")
+        assertTrue(countCheck >= 0)
+        assertTrue(countCheck < enumeration)
     }
 
     @Test

@@ -29,10 +29,28 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>FirebaseAppCheckTokenAutoRefreshEnabled</key>
+	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.healthcare-fitness</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
+	<key>NOOPManagedAPIKey</key>
+	<string>$(NOOP_MANAGED_API_KEY)</string>
+	<key>NOOPManagedAPIURL</key>
+	<string>$(NOOP_MANAGED_API_URL)</string>
+	<key>NOOPManagedAllowLocalHTTP</key>
+	<string>$(NOOP_MANAGED_ALLOW_LOCAL_HTTP)</string>
+	<key>NOOPManagedGCMSenderID</key>
+	<string>$(NOOP_MANAGED_GCM_SENDER_ID)</string>
+	<key>NOOPManagedGoogleAppID</key>
+	<string>$(NOOP_MANAGED_MACOS_GOOGLE_APP_ID)</string>
+	<key>NOOPManagedPolicySHA256</key>
+	<string>$(NOOP_MANAGED_POLICY_SHA256)</string>
+	<key>NOOPManagedPolicyVersion</key>
+	<string>$(NOOP_MANAGED_POLICY_VERSION)</string>
+	<key>NOOPManagedProjectID</key>
+	<string>$(NOOP_MANAGED_PROJECT_ID)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

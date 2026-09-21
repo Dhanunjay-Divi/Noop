@@ -73,10 +73,21 @@ gated:
 
 1. Standard PostgreSQL integration tests must pass.
 2. Provision the deletion-protected PostgreSQL 16 Cloud SQL instance.
-3. Create database credentials and secret versions outside OpenTofu state.
+3. With every workload disabled, provision the migration owner outside
+   OpenTofu state. Keep the existing `noop-staging-database-url` container as
+   migration-only and pin its printed numeric version in
+   `migration_database_url_secret_version`.
 4. Build from a clean commit and select the immutable image digest.
 5. Execute the one-shot Cloud Run migration job.
-6. Only then enable the internal-ingress, IAM-protected API. Its startup probe
+6. After migration succeeds and while runtime workloads remain disabled,
+   provision and verify the five non-owner runtime principals. Publish each
+   credential only to its workload-specific Secret Manager container and pin
+   its printed version in `runtime_database_url_secret_version`,
+   `managed_api_database_url_secret_version`,
+   `managed_processor_database_url_secret_version`,
+   `managed_lifecycle_database_url_secret_version`, or
+   `feedback_lifecycle_database_url_secret_version`.
+7. Only then enable the internal-ingress, IAM-protected API. Its startup probe
    calls `/readyz`, runtime migration is disabled, minimum instances are zero,
    and no broad invoker binding is created.
 
@@ -103,6 +114,41 @@ sequence usage only where inserts need it, revoke default `PUBLIC` schema-create
 rights, and keep restore credentials separate and offline. Verify exact grants
 in staging by running API, worker, migration, backup, and restore checks under
 their production roles. Code cannot prove cloud IAM or managed-database grants.
+
+The current GCP synthetic-staging stack uses one migration owner and five
+non-owner runtime principals:
+
+- `noop_migration` is the schema/object owner used only by the Cloud Run
+  migration job. Its legacy-named Secret Manager container remains
+  `noop-staging-database-url` to preserve state, but only the migration service
+  account receives `secretAccessor`.
+- `noop_app_runtime` serves only the private API through
+  `noop-staging-runtime-database-url`.
+- `noop_managed_api` serves only the managed API through
+  `noop-staging-managed-api-database-url`.
+- `noop_managed_processor` serves only the processor through
+  `noop-staging-managed-processor-database-url`.
+- `noop_managed_lifecycle` serves only the managed lifecycle job through
+  `noop-staging-managed-lifecycle-database-url`.
+- `noop_feedback_lifecycle` serves only the feedback lifecycle job through
+  `noop-staging-feedback-lifecycle-database-url`.
+
+For every runtime profile, the provisioner removes inherited role memberships,
+requires the exact PostgreSQL migration manifest for the release, verifies the
+principal owns no object, denies database/schema creation and role
+administration, revokes public function execution, and grants only the
+profile-specific current table, sequence, and directly invoked
+non-security-definer function allowlist.
+
+Run `infra/gcp/scripts/configure-runtime-secrets.sh migration` before selecting
+the first migration image. After the guarded migration completes, drain and
+disable every runtime and run
+`infra/gcp/scripts/configure-runtime-secrets.sh runtime`. The second phase must
+be repeated after every migration and before its matching runtime rollout,
+because future objects deliberately receive no implicit runtime grant. All six
+Cloud Run database-secret references use explicit positive numeric versions;
+`latest` is forbidden. Credential provisioning does not authorize public
+traffic, and `enable_public_managed_api` remains false.
 
 ### Deployment ordering
 

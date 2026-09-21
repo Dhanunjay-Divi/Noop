@@ -130,8 +130,8 @@ resource "google_cloud_run_v2_job" "migrate" {
           name = "NOOP_DATABASE_URL"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.database_url.secret_id
-              version = "latest"
+              secret  = google_secret_manager_secret.migration_database_url.secret_id
+              version = var.migration_database_url_secret_version
             }
           }
         }
@@ -255,8 +255,8 @@ resource "google_cloud_run_v2_service" "api" {
         name = "NOOP_DATABASE_URL"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.database_url.secret_id
-            version = "latest"
+            secret  = google_secret_manager_secret.runtime_database_url.secret_id
+            version = var.runtime_database_url_secret_version
           }
         }
       }
@@ -557,6 +557,10 @@ resource "google_cloud_run_v2_service" "managed_api" {
         value = "1"
       }
       env {
+        name  = "NOOP_MANAGED_ACCOUNT_MAX_INSTALLATIONS"
+        value = "5"
+      }
+      env {
         name  = "NOOP_MANAGED_CONSENT_POLICY_KIND"
         value = "managed_storage"
       }
@@ -572,8 +576,8 @@ resource "google_cloud_run_v2_service" "managed_api" {
         name = "NOOP_DATABASE_URL"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.database_url.secret_id
-            version = "latest"
+            secret  = google_secret_manager_secret.managed_api_database_url.secret_id
+            version = var.managed_api_database_url_secret_version
           }
         }
       }
@@ -934,8 +938,8 @@ resource "google_cloud_run_v2_service" "managed_processor" {
         name = "NOOP_DATABASE_URL"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.database_url.secret_id
-            version = "latest"
+            secret  = google_secret_manager_secret.managed_processor_database_url.secret_id
+            version = var.managed_processor_database_url_secret_version
           }
         }
       }
@@ -1041,6 +1045,14 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value = "false"
         }
         env {
+          name  = "NOOP_SAFETY_ESCALATION_ROUNDS"
+          value = "4"
+        }
+        env {
+          name  = "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS"
+          value = "900"
+        }
+        env {
           name  = "NOOP_DB_POOL_MIN_SIZE"
           value = "1"
         }
@@ -1080,8 +1092,8 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           name = "NOOP_DATABASE_URL"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.database_url.secret_id
-              version = "latest"
+              secret  = google_secret_manager_secret.managed_lifecycle_database_url.secret_id
+              version = var.managed_lifecycle_database_url_secret_version
             }
           }
         }
@@ -1297,8 +1309,8 @@ resource "google_cloud_run_v2_job" "feedback_lifecycle" {
           name = "NOOP_DATABASE_URL"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.database_url.secret_id
-              version = "latest"
+              secret  = google_secret_manager_secret.feedback_lifecycle_database_url.secret_id
+              version = var.feedback_lifecycle_database_url_secret_version
             }
           }
         }

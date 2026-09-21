@@ -3,6 +3,7 @@ package com.noop.managed
 import androidx.work.NetworkType
 import com.noop.testing.FakeSharedPreferences
 import com.noop.ui.Terms
+import java.io.File
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
@@ -33,12 +34,65 @@ class ManagedCloudSchedulerTest {
     }
 
     @Test
+    fun accountOnlyFriendsSchedulingDoesNotEnableStorageOrSafetyScopes() {
+        val root = File(System.getProperty("user.dir") ?: ".")
+        val service = listOf(
+            "src/main/java/com/noop/managed/ManagedCloudService.kt",
+            "app/src/main/java/com/noop/managed/ManagedCloudService.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
+        ).map { File(root, it) }.first(File::isFile).readText()
+
+        assertTrue(
+            service.contains(
+                "(accountReady && preferences.socialEnabled)",
+            ),
+        )
+        assertTrue(
+            service.contains(
+                "state.value.phase == ManagedCloudPhase.ENROLLED &&\n" +
+                    "            preferences.automatic",
+            ),
+        )
+        assertTrue(
+            service.contains(
+                "state.value.accountAccessReady && preferences.socialEnabled",
+            ),
+        )
+        assertTrue(
+            service.contains(
+                "if (!state.value.accountAccessReady ||",
+            ),
+        )
+        assertTrue(
+            service.split("?: preferences.accountAccessScopeHash").size - 1 >= 2,
+        )
+    }
+
+    @Test
     fun successfulPartialPassContinuesWithoutEnteringFailureBackoff() {
         assertTrue(ManagedCloudScheduler.successfulPassNeedsContinuation(hasMore = true))
         assertEquals(
             false,
             ManagedCloudScheduler.successfulPassNeedsContinuation(hasMore = false),
         )
+    }
+
+    @Test
+    fun successfulCoreContinuationIsEnqueuedBeforeOtherScopeFailureReturns() {
+        val root = File(System.getProperty("user.dir") ?: ".")
+        val source = listOf(
+            "src/main/java/com/noop/managed/ManagedCloudScheduler.kt",
+            "app/src/main/java/com/noop/managed/ManagedCloudScheduler.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedCloudScheduler.kt",
+        ).map { File(root, it) }.first(File::isFile).readText()
+        val worker = source.substringAfter("class ManagedCloudWorker(")
+            .substringBefore("class ManagedSafetyPushWorker(")
+        val continuation = worker.indexOf("if (continuationNeeded)")
+        val failureReturn = worker.indexOf("if (failures.isNotEmpty())")
+
+        assertTrue(continuation >= 0)
+        assertTrue(failureReturn >= 0)
+        assertTrue(continuation < failureReturn)
     }
 
     @Test
@@ -430,6 +484,35 @@ class ManagedCloudSchedulerTest {
         assertEquals(
             ManagedCloudScheduler.RetryWorkerDecision.RETRY,
             ManagedCloudScheduler.retryWorkerDecision(persistenceFailure),
+        )
+    }
+
+    @Test
+    fun mixedRetryableAndUnexpectedFailuresStillFailTheGenericWorker() {
+        val failures = listOf(
+            ManagedCloudScheduler.CatchUpFailure(
+                ManagedCloudScheduler.CatchUpScope.CORE,
+                ManagedStorageException.Network(),
+            ),
+            ManagedCloudScheduler.CatchUpFailure(
+                ManagedCloudScheduler.CatchUpScope.SOCIAL,
+                IllegalStateException("synthetic unexpected failure"),
+            ),
+        )
+
+        assertEquals(
+            ManagedCloudScheduler.RetryWorkerDecision.FAILURE,
+            ManagedCloudScheduler.retryWorkerDecision(
+                ManagedCloudScheduler.RetryEnqueueOutcome.SCHEDULED,
+                failures,
+            ),
+        )
+        assertEquals(
+            ManagedCloudScheduler.RetryWorkerDecision.RETRY,
+            ManagedCloudScheduler.retryWorkerDecision(
+                ManagedCloudScheduler.RetryEnqueueOutcome.WORKER_RETRY,
+                failures,
+            ),
         )
     }
 

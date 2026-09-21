@@ -1,13 +1,14 @@
 package com.noop.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -68,11 +70,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -91,117 +93,37 @@ import com.noop.managed.ManagedSocialRequest
 import com.noop.managed.ManagedSocialSummary
 import com.noop.managed.ManagedSocialVisibility
 import com.noop.managed.ManagedSocialVisibilityPatch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
-private const val FRIENDS_SOURCE_KEY = "friends.source.v1"
-private const val FRIENDS_SOURCE_MANAGED = "managed"
-private const val FRIENDS_SOURCE_SELF_HOSTED = "selfHosted"
-
 @Composable
-internal fun FriendsScreen(onOpenBackupSync: () -> Unit) {
+internal fun FriendsScreen() {
     val context = LocalContext.current
     val service = remember {
         (context.applicationContext as? NoopApplication)?.managedCloud
             ?: ManagedCloudService.get(context)
     }
-    val state by service.state.collectAsStateWithLifecycle()
-    var source by rememberSaveable {
-        mutableStateOf(
-            NoopPrefs.of(context)
-                .getString(FRIENDS_SOURCE_KEY, FRIENDS_SOURCE_MANAGED)
-                .takeIf {
-                    it == FRIENDS_SOURCE_MANAGED || it == FRIENDS_SOURCE_SELF_HOSTED
-                } ?: FRIENDS_SOURCE_MANAGED,
-        )
-    }
-
-    fun select(value: String) {
-        source = value
-        NoopPrefs.of(context).edit().putString(FRIENDS_SOURCE_KEY, value).apply()
-    }
-
-    LaunchedEffect(state.hasPendingSocialInvite, state.pendingSocialNoopId) {
-        if (state.hasPendingSocialInvite || state.pendingSocialNoopId != null) {
-            select(FRIENDS_SOURCE_MANAGED)
-        }
-    }
-
-    val picker: @Composable () -> Unit = {
-        FriendsSourcePicker(
-            selected = source,
-            onSelected = ::select,
-        )
-    }
-    if (source == FRIENDS_SOURCE_MANAGED) {
-        ManagedFriendsScreen(service = service, sourcePicker = picker)
-    } else {
-        SelfHostedFriendsScreen(
-            onOpenBackupSync = onOpenBackupSync,
-            sourcePicker = picker,
-        )
-    }
-}
-
-@Composable
-private fun FriendsSourcePicker(
-    selected: String,
-    onSelected: (String) -> Unit,
-) {
-    Surface(
-        color = Palette.surfaceInset,
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(modifier = Modifier.padding(3.dp)) {
-            listOf(
-                FRIENDS_SOURCE_MANAGED to stringResource(R.string.managed_friends_source_noop_plus),
-                FRIENDS_SOURCE_SELF_HOSTED to
-                    stringResource(R.string.managed_friends_source_self_hosted),
-            ).forEach { (value, label) ->
-                val active = selected == value
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(
-                            if (active) {
-                                Palette.surfaceRaised
-                            } else {
-                                androidx.compose.ui.graphics.Color.Transparent
-                            },
-                        )
-                        .testTag("noop.friends.source.$value")
-                        .clickable(role = Role.Tab) { onSelected(value) }
-                        .semantics { this.selected = active }
-                        .padding(vertical = 10.dp),
-                ) {
-                    Text(
-                        text = label,
-                        style = NoopType.footnote,
-                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (active) Palette.textPrimary else Palette.textSecondary,
-                    )
-                }
-            }
-        }
-    }
+    ManagedFriendsScreen(service = service)
 }
 
 @Composable
 private fun ManagedFriendsScreen(
     service: ManagedCloudService,
-    sourcePicker: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val activity = remember(context) { context.findFriendsActivity() }
     val state by service.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var displayName by rememberSaveable {
         mutableStateOf(ProfileStore.from(context).displayName)
     }
     var searchId by rememberSaveable { mutableStateOf("") }
+    var phoneNumber by rememberSaveable { mutableStateOf("") }
+    var verificationCode by rememberSaveable { mutableStateOf("") }
     var pokeOptIn by rememberSaveable { mutableStateOf(false) }
     var quietStart by rememberSaveable { mutableStateOf("22:00") }
     var quietEnd by rememberSaveable { mutableStateOf("07:00") }
@@ -212,14 +134,19 @@ private fun ManagedFriendsScreen(
     }
     var confirmRotate by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var confirmAccountDeletion by rememberSaveable { mutableStateOf(false) }
+    var accountDeletionCodeRequested by rememberSaveable {
+        mutableStateOf(false)
+    }
+    var accountDeletionCode by rememberSaveable { mutableStateOf("") }
     var showInvite by rememberSaveable { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {}
 
-    LaunchedEffect(service) {
+    LaunchedEffect(service, state.accountAccessReady) {
         service.bootstrap()
-        if (service.state.value.phase == ManagedCloudPhase.ENROLLED) {
+        if (state.accountAccessReady) {
             service.refreshSocial()
         }
     }
@@ -260,6 +187,38 @@ private fun ManagedFriendsScreen(
             onConfirm = {
                 confirmDelete = false
                 scope.launch { service.deleteSocialProfile() }
+            },
+        )
+    }
+    if (confirmAccountDeletion) {
+        AlertDialog(
+            onDismissRequest = { confirmAccountDeletion = false },
+            title = {
+                Text(stringResource(R.string.managed_friends_delete_account_title))
+            },
+            text = {
+                Text(stringResource(R.string.managed_friends_delete_account_detail))
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !state.busy && activity != null,
+                    onClick = {
+                        confirmAccountDeletion = false
+                        accountDeletionCodeRequested = true
+                        val host = activity ?: return@TextButton
+                        scope.launch { service.sendDeletionCode(host) }
+                    },
+                ) {
+                    Text(
+                        stringResource(R.string.managed_cloud_send_code),
+                        color = Palette.statusCritical,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmAccountDeletion = false }) {
+                    Text(stringResource(R.string.managed_cloud_cancel))
+                }
             },
         )
     }
@@ -348,7 +307,7 @@ private fun ManagedFriendsScreen(
         modifier = Modifier.testTag("noop.screen.friends"),
         trailing = {
             IconButton(
-                enabled = state.phase == ManagedCloudPhase.ENROLLED && !state.busy,
+                enabled = state.accountAccessReady && !state.busy,
                 onClick = { scope.launch { service.refreshSocial() } },
                 modifier = Modifier.semantics {
                     contentDescription =
@@ -367,10 +326,40 @@ private fun ManagedFriendsScreen(
             }
         },
     ) {
-        sourcePicker()
-        if (state.phase != ManagedCloudPhase.ENROLLED) {
-            ManagedCloudBackupCard()
-            ManagedFriendsBoundaryCard()
+        if (state.phase == ManagedCloudPhase.DELETION_SCHEDULED) {
+            ManagedFriendsDeletionScheduled(
+                busy = state.busy,
+                status = state.status,
+                notBefore = state.deletionNotBefore,
+                onCancel = {
+                    scope.launch { service.cancelAccountDeletion() }
+                },
+                onRefresh = {
+                    scope.launch { service.refreshDeletionStatus() }
+                },
+            )
+        } else if (!state.accountAccessReady) {
+            ManagedFriendsAccountAccess(
+                phase = state.phase,
+                busy = state.busy,
+                phoneNumber = phoneNumber,
+                verificationCode = verificationCode,
+                onPhoneNumberChange = { phoneNumber = it },
+                onVerificationCodeChange = { verificationCode = it },
+                onSendCode = {
+                    activity?.let { currentActivity ->
+                        scope.launch {
+                            service.sendCode(currentActivity, phoneNumber)
+                        }
+                    }
+                },
+                onVerifyCode = {
+                    scope.launch { service.verifyCode(verificationCode) }
+                },
+                onContinue = {
+                    scope.launch { service.enrollAccount() }
+                },
+            )
         } else if (state.socialProfile == null) {
             ManagedProfileSetup(
                 name = displayName,
@@ -380,6 +369,24 @@ private fun ManagedFriendsScreen(
                 onNameChange = { displayName = it.take(64) },
                 onCreate = {
                     scope.launch { service.createSocialProfile(displayName) }
+                },
+            )
+            ManagedFriendsAccountManagement(
+                busy = state.busy,
+                status = state.status,
+                deletionCodeRequested = accountDeletionCodeRequested,
+                deletionCode = accountDeletionCode,
+                onDeletionCodeChange = {
+                    accountDeletionCode = it.take(12)
+                },
+                onDisconnect = {
+                    scope.launch { service.disconnect() }
+                },
+                onDelete = { confirmAccountDeletion = true },
+                onScheduleDeletion = {
+                    scope.launch {
+                        service.requestAccountDeletion(accountDeletionCode)
+                    }
                 },
             )
         } else {
@@ -489,6 +496,24 @@ private fun ManagedFriendsScreen(
                 onUnblock = { profileToUnblock = it },
                 onDelete = { confirmDelete = true },
             )
+            ManagedFriendsAccountManagement(
+                busy = state.busy,
+                status = state.status,
+                deletionCodeRequested = accountDeletionCodeRequested,
+                deletionCode = accountDeletionCode,
+                onDeletionCodeChange = {
+                    accountDeletionCode = it.take(12)
+                },
+                onDisconnect = {
+                    scope.launch { service.disconnect() }
+                },
+                onDelete = { confirmAccountDeletion = true },
+                onScheduleDeletion = {
+                    scope.launch {
+                        service.requestAccountDeletion(accountDeletionCode)
+                    }
+                },
+            )
         }
         if (state.socialStatus.isNotBlank()) {
             Text(
@@ -502,27 +527,255 @@ private fun ManagedFriendsScreen(
 }
 
 @Composable
-private fun ManagedFriendsBoundaryCard() {
+private fun ManagedFriendsAccountManagement(
+    busy: Boolean,
+    status: String,
+    deletionCodeRequested: Boolean,
+    deletionCode: String,
+    onDeletionCodeChange: (String) -> Unit,
+    onDisconnect: () -> Unit,
+    onDelete: () -> Unit,
+    onScheduleDeletion: () -> Unit,
+) {
     NoopCard {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Icon(Icons.Filled.Lock, contentDescription = null, tint = Palette.statusPositive)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            ManagedLead(
+                Icons.Filled.Lock,
+                stringResource(R.string.managed_friends_account_title),
+                stringResource(R.string.managed_friends_account_active_detail),
+            )
+            if (status.isNotBlank()) {
                 Text(
-                    stringResource(R.string.managed_friends_two_options_title),
-                    style = NoopType.headline,
-                    color = Palette.textPrimary,
+                    status,
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+            }
+            NoopButton(
+                text = stringResource(R.string.managed_cloud_disconnect_phone),
+                kind = NoopButtonKind.Secondary,
+                fullWidth = true,
+                enabled = !busy,
+                onClick = onDisconnect,
+            )
+            NoopButton(
+                text = stringResource(R.string.managed_friends_delete_account_action),
+                leadingIcon = Icons.Filled.Delete,
+                kind = NoopButtonKind.Tertiary,
+                fullWidth = true,
+                enabled = !busy,
+                onClick = onDelete,
+            )
+            if (deletionCodeRequested) {
+                OutlinedTextField(
+                    value = deletionCode,
+                    onValueChange = onDeletionCodeChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !busy,
+                    singleLine = true,
+                    label = {
+                        Text(stringResource(R.string.managed_cloud_fresh_code))
+                    },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.NumberPassword,
+                    ),
+                )
+                NoopButton(
+                    text = if (busy) {
+                        stringResource(R.string.managed_cloud_verifying)
+                    } else {
+                        stringResource(R.string.managed_cloud_schedule_deletion)
+                    },
+                    leadingIcon = Icons.Filled.Delete,
+                    kind = NoopButtonKind.Destructive,
+                    fullWidth = true,
+                    enabled = !busy && deletionCode.isNotBlank(),
+                    onClick = onScheduleDeletion,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ManagedFriendsDeletionScheduled(
+    busy: Boolean,
+    status: String,
+    notBefore: String?,
+    onCancel: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    NoopCard(tint = Palette.statusWarning) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            ManagedLead(
+                Icons.Filled.Refresh,
+                stringResource(R.string.managed_cloud_deletion_scheduled_title),
+                stringResource(R.string.managed_friends_deletion_scheduled_detail),
+            )
+            notBefore?.let { raw ->
+                val formatted = managedDeletionEligibilityTime(raw)
+                Text(
+                    formatted?.let {
+                        stringResource(R.string.managed_cloud_deletion_after, it)
+                    } ?: stringResource(
+                        R.string.managed_cloud_deletion_time_unavailable,
+                    ),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+            }
+            if (status.isNotBlank()) {
+                Text(
+                    status,
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+            }
+            NoopButton(
+                text = if (busy) {
+                    stringResource(R.string.managed_cloud_working)
+                } else {
+                    stringResource(R.string.managed_cloud_cancel_deletion)
+                },
+                fullWidth = true,
+                enabled = !busy,
+                onClick = onCancel,
+            )
+            NoopButton(
+                text = if (busy) {
+                    stringResource(R.string.managed_cloud_checking)
+                } else {
+                    stringResource(R.string.managed_cloud_check_deletion)
+                },
+                leadingIcon = Icons.Filled.Refresh,
+                kind = NoopButtonKind.Secondary,
+                fullWidth = true,
+                enabled = !busy,
+                onClick = onRefresh,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ManagedFriendsAccountAccess(
+    phase: ManagedCloudPhase,
+    busy: Boolean,
+    phoneNumber: String,
+    verificationCode: String,
+    onPhoneNumberChange: (String) -> Unit,
+    onVerificationCodeChange: (String) -> Unit,
+    onSendCode: () -> Unit,
+    onVerifyCode: () -> Unit,
+    onContinue: () -> Unit,
+) {
+    Surface(
+        color = Palette.surfaceRaised,
+        shape = RoundedCornerShape(Metrics.cardRadius),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(Metrics.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = Palette.accent,
                 )
                 Text(
-                    stringResource(R.string.managed_friends_two_options_body),
-                    style = NoopType.footnote,
+                    stringResource(R.string.managed_friends_account_title),
+                    style = NoopType.title2,
+                    color = Palette.textPrimary,
+                )
+            }
+            Text(
+                stringResource(R.string.managed_friends_account_detail),
+                style = NoopType.body,
+                color = Palette.textSecondary,
+            )
+            when (phase) {
+                ManagedCloudPhase.UNAVAILABLE -> Text(
+                    stringResource(R.string.managed_friends_account_unavailable),
+                    style = NoopType.body,
+                    color = Palette.statusWarning,
+                )
+                ManagedCloudPhase.SIGNED_OUT -> {
+                    OutlinedTextField(
+                        value = phoneNumber,
+                        onValueChange = onPhoneNumberChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !busy,
+                        singleLine = true,
+                        label = {
+                            Text(stringResource(R.string.managed_cloud_phone_label))
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Phone,
+                        ),
+                    )
+                    NoopButton(
+                        text = if (busy) {
+                            stringResource(R.string.managed_cloud_sending)
+                        } else {
+                            stringResource(R.string.managed_cloud_send_code)
+                        },
+                        fullWidth = true,
+                        enabled = !busy && phoneNumber.isNotBlank(),
+                        onClick = onSendCode,
+                    )
+                }
+                ManagedCloudPhase.CODE_SENT -> {
+                    OutlinedTextField(
+                        value = verificationCode,
+                        onValueChange = onVerificationCodeChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !busy,
+                        singleLine = true,
+                        label = {
+                            Text(stringResource(R.string.managed_cloud_code_label))
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.NumberPassword,
+                        ),
+                    )
+                    NoopButton(
+                        text = if (busy) {
+                            stringResource(R.string.managed_cloud_verifying)
+                        } else {
+                            stringResource(R.string.managed_cloud_verify_code)
+                        },
+                        fullWidth = true,
+                        enabled = !busy && verificationCode.isNotBlank(),
+                        onClick = onVerifyCode,
+                    )
+                }
+                ManagedCloudPhase.CONSENT_REQUIRED -> NoopButton(
+                    text = stringResource(R.string.managed_friends_account_continue),
+                    fullWidth = true,
+                    enabled = !busy,
+                    onClick = onContinue,
+                )
+                ManagedCloudPhase.ENROLLED,
+                ManagedCloudPhase.DELETION_SCHEDULED,
+                -> Text(
+                    stringResource(R.string.managed_friends_account_finishing),
+                    style = NoopType.body,
                     color = Palette.textSecondary,
                 )
             }
         }
     }
+}
+
+private tailrec fun Context.findFriendsActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findFriendsActivity()
+    else -> null
 }
 
 @Composable
@@ -920,7 +1173,7 @@ private fun ManagedFriendCard(
                         color = Palette.textPrimary,
                     )
                     Text(
-                        friend.latest?.day
+                        friend.latest?.day?.let(::managedFriendDayLabel)
                             ?: stringResource(R.string.managed_friends_waiting_shared_day),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
@@ -1217,7 +1470,7 @@ private fun ManagedFriendSettingsDialog(
                     history.forEachIndexed { index, day ->
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
-                                day.day,
+                                managedFriendDayLabel(day.day),
                                 style = NoopType.footnote,
                                 color = Palette.textTertiary,
                             )
@@ -1234,6 +1487,22 @@ private fun ManagedFriendSettingsDialog(
                     HorizontalDivider(color = Palette.hairline)
                 }
                 ManagedSharingToggles(sharing) { sharing = it }
+                HorizontalDivider(color = Palette.hairline)
+                Text(
+                    stringResource(
+                        R.string.managed_friends_communication_permissions,
+                    ),
+                    style = NoopType.headline,
+                    color = Palette.textPrimary,
+                )
+                Text(
+                    stringResource(
+                        R.string.managed_friends_communication_detail,
+                    ),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+                ManagedCommunicationToggles(sharing) { sharing = it }
                 NoopButton(
                     text = stringResource(R.string.managed_friends_save_sharing),
                     leadingIcon = Icons.Filled.Check,
@@ -1249,6 +1518,10 @@ private fun ManagedFriendSettingsDialog(
                                 hrv = sharing.hrv,
                                 rhr = sharing.rhr,
                                 pokeAllowed = sharing.pokeAllowed,
+                                messagesAllowed = sharing.messagesAllowed,
+                                photosAllowed = sharing.photosAllowed,
+                                audioCallsAllowed = sharing.audioCallsAllowed,
+                                videoCallsAllowed = sharing.videoCallsAllowed,
                             ),
                         )
                     },
@@ -1288,6 +1561,14 @@ private fun ManagedFriendSettingsDialog(
     }
 }
 
+private fun managedFriendDayLabel(day: String): String =
+    runCatching {
+        LocalDate.parse(day).format(
+            DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+                .withLocale(Locale.getDefault()),
+        )
+    }.getOrDefault(day)
+
 @Composable
 private fun ManagedSharingToggles(
     value: ManagedSocialVisibility,
@@ -1323,6 +1604,34 @@ private fun ManagedSharingToggles(
 }
 
 @Composable
+private fun ManagedCommunicationToggles(
+    value: ManagedSocialVisibility,
+    onChange: (ManagedSocialVisibility) -> Unit,
+) {
+    listOf(
+        R.string.managed_friends_allow_messages to value.messagesAllowed,
+        R.string.managed_friends_allow_photos to value.photosAllowed,
+        R.string.managed_friends_allow_audio_calls to value.audioCallsAllowed,
+        R.string.managed_friends_allow_video_calls to value.videoCallsAllowed,
+    ).forEachIndexed { index, (label, checked) ->
+        ManagedToggleRow(
+            label = stringResource(label),
+            checked = checked,
+            onCheckedChange = { enabled ->
+                onChange(
+                    when (index) {
+                        0 -> value.copy(messagesAllowed = enabled)
+                        1 -> value.copy(photosAllowed = enabled)
+                        2 -> value.copy(audioCallsAllowed = enabled)
+                        else -> value.copy(videoCallsAllowed = enabled)
+                    },
+                )
+            },
+        )
+    }
+}
+
+@Composable
 private fun ManagedToggleRow(
     label: String,
     checked: Boolean,
@@ -1330,7 +1639,16 @@ private fun ManagedToggleRow(
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
+            .semantics(mergeDescendants = true) {
+                contentDescription = label
+            },
     ) {
         Text(
             label,
@@ -1338,7 +1656,7 @@ private fun ManagedToggleRow(
             color = Palette.textPrimary,
             modifier = Modifier.weight(1f),
         )
-        NoopToggleSwitch(checked = checked, onCheckedChange = onCheckedChange)
+        NoopToggleSwitch(checked = checked, onCheckedChange = null)
     }
 }
 
@@ -1516,6 +1834,18 @@ private fun sharingLabels(value: ManagedSocialVisibility): String {
         if (value.rhr) add(stringResource(R.string.managed_friends_rhr))
         if (value.pokeAllowed) {
             add(stringResource(R.string.managed_friends_poke_action))
+        }
+        if (value.messagesAllowed) {
+            add(stringResource(R.string.managed_friends_allow_messages))
+        }
+        if (value.photosAllowed) {
+            add(stringResource(R.string.managed_friends_allow_photos))
+        }
+        if (value.audioCallsAllowed) {
+            add(stringResource(R.string.managed_friends_allow_audio_calls))
+        }
+        if (value.videoCallsAllowed) {
+            add(stringResource(R.string.managed_friends_allow_video_calls))
         }
     }
     return labels.joinToString(", ").ifBlank {

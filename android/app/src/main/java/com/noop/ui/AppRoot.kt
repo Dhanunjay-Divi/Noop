@@ -640,11 +640,7 @@ fun AppRoot(
                     )
                 }
                 composable(Destination.Friends.route) {
-                    FriendsScreen(
-                        onOpenBackupSync = {
-                            openTopLevel(Destination.BackupSync.route)
-                        },
-                    )
+                    FriendsScreen()
                 }
                 composable(Destination.Hydration.route) {
                     HydrationScreen(

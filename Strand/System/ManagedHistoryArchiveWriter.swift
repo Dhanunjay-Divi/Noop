@@ -11,6 +11,37 @@ enum ManagedHistoryArchiveError: Error, Equatable {
     case alreadyFinalized
 }
 
+enum ManagedHistoryArchiveEntryEnumeration {
+    static func paths<Entries: Sequence>(
+        in entries: Entries,
+        maximumEntryCount: Int =
+            ManagedHistoryTransferLimits.maximumArchiveEntryCount,
+        filePath: (Entries.Element) -> String?
+    ) throws -> [String] {
+        guard maximumEntryCount > 0 else {
+            throw ManagedHistoryArchiveError.invalidArchive
+        }
+        var entryCount = 0
+        var paths: [String] = []
+        var seen: Set<String> = []
+        for entry in entries {
+            let nextCount = entryCount.addingReportingOverflow(1)
+            guard !nextCount.overflow,
+                  nextCount.partialValue <= maximumEntryCount else {
+                throw ManagedHistoryArchiveError.invalidArchive
+            }
+            entryCount = nextCount.partialValue
+            guard let path = filePath(entry) else { continue }
+            guard ManagedHistoryArchiveWriter.valid(path: path),
+                  seen.insert(path).inserted else {
+                throw ManagedHistoryArchiveError.invalidArchive
+            }
+            paths.append(path)
+        }
+        return paths
+    }
+}
+
 actor ManagedHistoryArchiveWriter {
     private let destinationURL: URL
     private var archive: Archive?
@@ -37,10 +68,11 @@ actor ManagedHistoryArchiveWriter {
                     accessMode: .read,
                     pathEncoding: nil
                 )
-                let paths = reader.filter { $0.type == .file }.map(\.path)
-                guard paths.count == Set(paths).count,
-                      !paths.contains("manifest.json"),
-                      paths.allSatisfy(Self.valid(path:)) else {
+                let paths = try ManagedHistoryArchiveEntryEnumeration.paths(
+                    in: reader,
+                    filePath: { $0.type == .file ? $0.path : nil }
+                )
+                guard !paths.contains("manifest.json") else {
                     throw ManagedHistoryArchiveError.invalidArchive
                 }
                 entryPaths = Set(paths)
@@ -85,7 +117,12 @@ actor ManagedHistoryArchiveWriter {
                 accessMode: .read,
                 pathEncoding: nil
             )
-            let actual = Set(reader.filter { $0.type == .file }.map(\.path))
+            let actual = Set(
+                try ManagedHistoryArchiveEntryEnumeration.paths(
+                    in: reader,
+                    filePath: { $0.type == .file ? $0.path : nil }
+                )
+            )
             guard actual == entryPaths,
                   !actual.isEmpty,
                   FileManager.default.fileExists(atPath: destinationURL.path),
@@ -126,6 +163,12 @@ actor ManagedHistoryArchiveWriter {
             }
             return
         }
+        let maximumCount = path == "manifest.json"
+            ? ManagedHistoryTransferLimits.maximumArchiveEntryCount
+            : ManagedHistoryTransferLimits.maximumObjectCount
+        guard entryPaths.count < maximumCount else {
+            throw ManagedHistoryArchiveError.invalidArchive
+        }
         entryPaths.insert(path)
         do {
             try archive.addEntry(
@@ -154,6 +197,8 @@ actor ManagedHistoryArchiveWriter {
 
     fileprivate static func valid(path: String) -> Bool {
         guard !path.isEmpty,
+              path.utf8.count
+                <= ManagedHistoryTransferLimits.maximumPathBytes,
               !path.hasPrefix("/"),
               !path.hasSuffix("/"),
               !path.contains("\\"),
@@ -184,7 +229,6 @@ actor ManagedHistoryArchiveWriter {
 }
 
 actor ManagedHistoryArchiveReader {
-    private static let maximumManifestBytes = 8 * 1_024 * 1_024
     private let sourceURL: URL
 
     init(sourceURL: URL) throws {
@@ -197,10 +241,11 @@ actor ManagedHistoryArchiveReader {
 
     func entryPaths() throws -> [String] {
         let archive = try open()
-        let paths = archive.filter { $0.type == .file }.map(\.path)
-        guard paths.count == Set(paths).count,
-              paths.allSatisfy(ManagedHistoryArchiveWriter.valid(path:)),
-              paths.contains("manifest.json") else {
+        let paths = try ManagedHistoryArchiveEntryEnumeration.paths(
+            in: archive,
+            filePath: { $0.type == .file ? $0.path : nil }
+        )
+        guard paths.contains("manifest.json") else {
             throw ManagedHistoryArchiveError.invalidArchive
         }
         return paths
@@ -209,7 +254,7 @@ actor ManagedHistoryArchiveReader {
     func manifestData() throws -> Data {
         try data(
             for: "manifest.json",
-            maximumBytes: Self.maximumManifestBytes
+            maximumBytes: ManagedHistoryTransferLimits.maximumManifestBytes
         )
     }
 
@@ -252,7 +297,6 @@ actor ManagedHistoryArchiveReader {
 }
 
 actor ManagedHistoryTransferStore {
-    private static let maximumCheckpointBytes = 8 * 1_024 * 1_024
     private static let maximumArchiveBytes: Int64 = 32 * 1_024 * 1_024 * 1_024
     private let directoryURL: URL
     private let exportEntriesURL: URL
@@ -343,6 +387,8 @@ actor ManagedHistoryTransferStore {
         try load(
             ManagedHistoryExportCheckpoint.self,
             from: exportCheckpointURL,
+            maximumBytes:
+                ManagedHistoryTransferLimits.maximumExportCheckpointBytes,
             decode: ManagedHistoryExportCheckpoint.decoded
         )
     }
@@ -350,13 +396,20 @@ actor ManagedHistoryTransferStore {
     func saveExportCheckpoint(
         _ checkpoint: ManagedHistoryExportCheckpoint
     ) throws {
-        try save(checkpoint.encoded(), to: exportCheckpointURL)
+        try save(
+            checkpoint.encoded(),
+            to: exportCheckpointURL,
+            maximumBytes:
+                ManagedHistoryTransferLimits.maximumExportCheckpointBytes
+        )
     }
 
     func loadImportCheckpoint() throws -> ManagedHistoryImportCheckpoint? {
         try load(
             ManagedHistoryImportCheckpoint.self,
             from: importCheckpointURL,
+            maximumBytes:
+                ManagedHistoryTransferLimits.maximumImportCheckpointBytes,
             decode: ManagedHistoryImportCheckpoint.decoded
         )
     }
@@ -364,7 +417,12 @@ actor ManagedHistoryTransferStore {
     func saveImportCheckpoint(
         _ checkpoint: ManagedHistoryImportCheckpoint
     ) throws {
-        try save(checkpoint.encoded(), to: importCheckpointURL)
+        try save(
+            checkpoint.encoded(),
+            to: importCheckpointURL,
+            maximumBytes:
+                ManagedHistoryTransferLimits.maximumImportCheckpointBytes
+        )
     }
 
     func finalizeExport(
@@ -522,24 +580,33 @@ actor ManagedHistoryTransferStore {
     private func load<Value>(
         _ type: Value.Type,
         from url: URL,
+        maximumBytes: Int,
         decode: (Data) throws -> Value
     ) throws -> Value? {
         _ = type
         guard FileManager.default.fileExists(atPath: url.path) else {
             return nil
         }
+        guard maximumBytes >= 0,
+              try Self.fileSize(url) <= Int64(maximumBytes) else {
+            throw ManagedHistoryArchiveError.entryTooLarge
+        }
         let data = try Data(
             contentsOf: url,
             options: [.mappedIfSafe]
         )
-        guard data.count <= Self.maximumCheckpointBytes else {
+        guard data.count <= maximumBytes else {
             throw ManagedHistoryArchiveError.entryTooLarge
         }
         return try decode(data)
     }
 
-    private func save(_ data: Data, to url: URL) throws {
-        guard data.count <= Self.maximumCheckpointBytes else {
+    private func save(
+        _ data: Data,
+        to url: URL,
+        maximumBytes: Int
+    ) throws {
+        guard maximumBytes >= 0, data.count <= maximumBytes else {
             throw ManagedHistoryArchiveError.entryTooLarge
         }
         try data.write(to: url, options: [.atomic])

@@ -242,6 +242,33 @@ class ManagedHistoryExporterTest {
     }
 
     @Test
+    fun oversizedRestoreSelectionFailsBeforeCheckpointOrObjectDownload() = runTest {
+        val transport = ExportTransport(
+            chunks = emptyList(),
+            chunkData = emptyMap(),
+            selectedObjectDelta =
+                ManagedHistoryTransferLimits.MAXIMUM_OBJECT_COUNT + 1,
+        )
+        var checkpoint: ManagedHistoryExportCheckpoint? = null
+
+        try {
+            ManagedHistoryExporter(transport).export(
+                dataClasses = listOf("essential_timeseries"),
+                authorization = { authorization() },
+                saveCheckpoint = { checkpoint = it },
+                consume = {},
+            )
+            fail("Expected oversized restore selection rejection")
+        } catch (_: ManagedStorageException.InvalidResponse) {
+            // Expected.
+        }
+
+        assertNull(checkpoint)
+        assertTrue(transport.chunkStarts.isEmpty())
+        assertNull(transport.completion)
+    }
+
+    @Test
     fun manifestUsesPortableSnakeCaseKeys() {
         val manifest = ManagedHistoryExportManifest(
             format = "noop_managed_history",

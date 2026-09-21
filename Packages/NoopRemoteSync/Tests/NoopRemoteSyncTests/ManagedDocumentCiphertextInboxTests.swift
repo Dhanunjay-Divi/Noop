@@ -93,6 +93,221 @@ final class ManagedDocumentCiphertextInboxTests: XCTestCase {
         XCTAssertEqual(finalOutgoingCount, 0)
     }
 
+    func testOutgoingCiphertextSurvivesAgeSweepUntilAcknowledged()
+        async throws
+    {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let policy = ManagedDocumentCiphertextInboxPolicy(
+            maximumRecordCount: 4,
+            maximumTotalBytes: 1_024 * 1_024,
+            maximumAgeMilliseconds: 10
+        )
+        let key = try ManagedDocumentKey(
+            keyID: UUID(),
+            keyData: Data(repeating: 3, count: 32)
+        )
+        let documentID = UUID()
+        let first = ManagedDocumentCiphertextInbox(
+            root: root,
+            accountScopeHash: firstAccount,
+            policy: policy,
+            clock: { 1 }
+        )
+        let ciphertext = try await first.outgoingEnvelope(
+            accountScopeHash: firstAccount,
+            localIdentifier: "age-protected",
+            generation: 1,
+            documentKind: .journal,
+            documentID: documentID,
+            revision: 1,
+            key: key,
+            plaintext: Data("pending upload".utf8)
+        )
+
+        let restarted = ManagedDocumentCiphertextInbox(
+            root: root,
+            accountScopeHash: firstAccount,
+            policy: policy,
+            clock: { 11 }
+        )
+        let pendingCount = try await restarted.pendingOutgoingCount()
+        let replayed = try await restarted.outgoingEnvelope(
+            accountScopeHash: firstAccount,
+            localIdentifier: "age-protected",
+            generation: 1,
+            documentKind: .journal,
+            documentID: documentID,
+            revision: 1,
+            key: key,
+            plaintext: Data("pending upload".utf8)
+        )
+        XCTAssertEqual(pendingCount, 1)
+        XCTAssertEqual(replayed, ciphertext)
+    }
+
+    func testOutgoingCiphertextSurvivesWallClockRollback()
+        async throws
+    {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let key = try ManagedDocumentKey(
+            keyID: UUID(),
+            keyData: Data(repeating: 4, count: 32)
+        )
+        let documentID = UUID()
+        let first = ManagedDocumentCiphertextInbox(
+            root: root,
+            accountScopeHash: firstAccount,
+            clock: { 10_000 }
+        )
+        let ciphertext = try await first.outgoingEnvelope(
+            accountScopeHash: firstAccount,
+            localIdentifier: "clock-protected",
+            generation: 1,
+            documentKind: .journal,
+            documentID: documentID,
+            revision: 1,
+            key: key,
+            plaintext: Data("pending after clock correction".utf8)
+        )
+
+        let restarted = ManagedDocumentCiphertextInbox(
+            root: root,
+            accountScopeHash: firstAccount,
+            clock: { 1_000 }
+        )
+        let pendingCount = try await restarted.pendingOutgoingCount()
+        let replayed = try await restarted.outgoingEnvelope(
+            accountScopeHash: firstAccount,
+            localIdentifier: "clock-protected",
+            generation: 1,
+            documentKind: .journal,
+            documentID: documentID,
+            revision: 1,
+            key: key,
+            plaintext: Data("pending after clock correction".utf8)
+        )
+        XCTAssertEqual(pendingCount, 1)
+        XCTAssertEqual(replayed, ciphertext)
+    }
+
+    func testReconcileRemovesOnlyAcknowledgedOutgoingOrphans()
+        async throws
+    {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let key = try ManagedDocumentKey(
+            keyID: UUID(),
+            keyData: Data(repeating: 8, count: 32)
+        )
+        let inbox = ManagedDocumentCiphertextInbox(
+            root: root,
+            accountScopeHash: firstAccount
+        )
+        _ = try await inbox.outgoingEnvelope(
+            accountScopeHash: firstAccount,
+            localIdentifier: String(repeating: "1", count: 64),
+            generation: 1,
+            documentKind: .journal,
+            documentID: UUID(),
+            revision: 1,
+            key: key,
+            plaintext: Data("retain".utf8)
+        )
+        _ = try await inbox.outgoingEnvelope(
+            accountScopeHash: firstAccount,
+            localIdentifier: String(repeating: "2", count: 64),
+            generation: 2,
+            documentKind: .journal,
+            documentID: UUID(),
+            revision: 3,
+            key: key,
+            plaintext: Data("remove".utf8)
+        )
+
+        let removed = try await inbox.reconcileOutgoing(
+            accountScopeHash: firstAccount,
+            retaining: [
+                ManagedDocumentCiphertextInboxOutgoingReference(
+                    localIdentifier: String(repeating: "1", count: 64),
+                    generation: 1,
+                    revision: 1
+                ),
+            ]
+        )
+
+        let remaining = try await inbox.pendingOutgoingCount()
+        XCTAssertEqual(removed, 1)
+        XCTAssertEqual(remaining, 1)
+    }
+
+    func testNewOutgoingWriteFailsWhenOnlyUnacknowledgedCiphertextRemains()
+        async throws
+    {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let policy = ManagedDocumentCiphertextInboxPolicy(
+            maximumRecordCount: 1,
+            maximumTotalBytes: 1_024 * 1_024,
+            maximumAgeMilliseconds: 60_000
+        )
+        let key = try ManagedDocumentKey(
+            keyID: UUID(),
+            keyData: Data(repeating: 5, count: 32)
+        )
+        let inbox = ManagedDocumentCiphertextInbox(
+            root: root,
+            accountScopeHash: firstAccount,
+            policy: policy,
+            clock: { 1 }
+        )
+        let firstDocumentID = UUID()
+        let firstCiphertext = try await inbox.outgoingEnvelope(
+            accountScopeHash: firstAccount,
+            localIdentifier: "first",
+            generation: 1,
+            documentKind: .journal,
+            documentID: firstDocumentID,
+            revision: 1,
+            key: key,
+            plaintext: Data("first pending upload".utf8)
+        )
+
+        do {
+            _ = try await inbox.outgoingEnvelope(
+                accountScopeHash: firstAccount,
+                localIdentifier: "second",
+                generation: 1,
+                documentKind: .journal,
+                documentID: UUID(),
+                revision: 1,
+                key: key,
+                plaintext: Data("second pending upload".utf8)
+            )
+            XCTFail("Expected quota rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedDocumentCiphertextInboxError,
+                .quotaExceeded
+            )
+        }
+
+        let pendingCount = try await inbox.pendingOutgoingCount()
+        let replayed = try await inbox.outgoingEnvelope(
+            accountScopeHash: firstAccount,
+            localIdentifier: "first",
+            generation: 1,
+            documentKind: .journal,
+            documentID: firstDocumentID,
+            revision: 1,
+            key: key,
+            plaintext: Data("first pending upload".utf8)
+        )
+        XCTAssertEqual(pendingCount, 1)
+        XCTAssertEqual(replayed, firstCiphertext)
+    }
+
     func testAccountsUseDistinctOpaqueDirectoriesAndCannotCrossBind() async throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }

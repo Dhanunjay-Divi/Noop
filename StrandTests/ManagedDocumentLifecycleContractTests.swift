@@ -98,9 +98,39 @@ final class ManagedDocumentLifecycleContractTests: XCTestCase {
                 "ManagedDocumentRuntimeMode.clientEncrypted.rawValue"
             )
         )
+        XCTAssertTrue(
+            runtime.contains("async throws -> ManagedCloudDocumentAdapter")
+        )
+        XCTAssertFalse(
+            runtime.contains("WhoopManagedDocumentAdapter(")
+        )
         XCTAssertGreaterThanOrEqual(
             source.components(separatedBy: "managedDocumentRuntime(").count - 1,
             3
+        )
+    }
+
+    func testManagedSyncValidatorsUseImmutableActorCapture() throws {
+        let source = try serviceSource()
+
+        XCTAssertEqual(
+            source.components(
+                separatedBy: "[self] in"
+            ).count - 1,
+            2
+        )
+        XCTAssertEqual(
+            source.components(
+                separatedBy:
+                    "@Sendable (Data) async throws -> Void = { [self] payload in"
+            ).count - 1,
+            2
+        )
+        XCTAssertFalse(
+            source.contains(
+                "[weak self] in\n"
+                    + "                try await MainActor.run"
+            )
         )
     }
 
@@ -130,7 +160,8 @@ final class ManagedDocumentLifecycleContractTests: XCTestCase {
         )
         XCTAssertTrue(
             purgeState.contains(
-                "let scopeHash = defaults.string("
+                "let scopeHash =\n"
+                    + "            defaults.string("
             )
         )
         XCTAssertTrue(
@@ -202,26 +233,31 @@ final class ManagedDocumentLifecycleContractTests: XCTestCase {
                     + "                    accountScopeHash: nil"
             )
         )
-        XCTAssertTrue(disconnect.contains("await cancelAndAwaitAccountRefreshes()"))
+        XCTAssertTrue(
+            disconnect.contains("await cancelAndAwaitAccountOperations()")
+        )
         XCTAssertTrue(disconnect.contains("Auth.auth().signOut()"))
         XCTAssertTrue(disconnect.contains("clearEnrollment()"))
         XCTAssertTrue(
             disconnect.contains(
-                #"beginAccountBoundaryTransition(reason: "disconnect_completed")"#
+                #"reason: "disconnect_requested""#
             )
         )
         XCTAssertFalse(
             disconnect.contains("stopManagedSafetyLocationSharing")
         )
-        let signOut = try XCTUnwrap(disconnect.range(of: "Auth.auth().signOut()"))
         let boundary = try XCTUnwrap(
             disconnect.range(
-                of: #"beginAccountBoundaryTransition(reason: "disconnect_completed")"#
+                of: #"reason: "disconnect_requested""#
             )
         )
+        let quiesce = try XCTUnwrap(
+            disconnect.range(of: "await cancelAndAwaitAccountOperations()")
+        )
+        let signOut = try XCTUnwrap(disconnect.range(of: "Auth.auth().signOut()"))
         let clear = try XCTUnwrap(disconnect.range(of: "clearEnrollment()"))
-        XCTAssertLessThan(signOut.lowerBound, boundary.lowerBound)
-        XCTAssertLessThan(boundary.lowerBound, clear.lowerBound)
+        XCTAssertLessThan(boundary.lowerBound, quiesce.lowerBound)
+        XCTAssertLessThan(quiesce.lowerBound, signOut.lowerBound)
         XCTAssertLessThan(signOut.lowerBound, clear.lowerBound)
         XCTAssertTrue(
             disconnect.contains(
@@ -245,7 +281,7 @@ final class ManagedDocumentLifecycleContractTests: XCTestCase {
         let source = try serviceSource()
         let boundary = try section(
             source,
-            from: "    private func makeAccountOperationFence()",
+            from: "    private func makeAccountOperationFence(",
             to: "    private func accountScopeHash()"
         )
         let safety = try section(
@@ -261,10 +297,39 @@ final class ManagedDocumentLifecycleContractTests: XCTestCase {
 
         XCTAssertTrue(source.contains("addStateDidChangeListener"))
         XCTAssertTrue(boundary.contains("accountOperationGeneration &+= 1"))
+        XCTAssertTrue(boundary.contains("accountTransitioning = true"))
         XCTAssertTrue(boundary.contains("managedSyncTask?.cancel()"))
+        XCTAssertTrue(boundary.contains("managedHistoryImportTask?.cancel()"))
         XCTAssertTrue(boundary.contains("socialRefreshTask?.cancel()"))
         XCTAssertTrue(boundary.contains("safetyRefreshTask?.cancel()"))
-        XCTAssertTrue(boundary.contains("cancelAndAwaitAccountRefreshes()"))
+        XCTAssertTrue(boundary.contains("cancelAndAwaitAccountOperations()"))
+        XCTAssertTrue(boundary.contains("if let syncTask"))
+        XCTAssertTrue(boundary.contains("try? await syncTask.value"))
+        XCTAssertTrue(boundary.contains("if let profileBinding"))
+        XCTAssertTrue(boundary.contains("await profileBinding.value"))
+        XCTAssertTrue(
+            boundary.contains(
+                "private func handleAuthStateChange(_ user: User?) async"
+            )
+        )
+        let handler = try section(
+            source,
+            from: "    private func handleAuthStateChange(_ user: User?) async",
+            to: "    private func accountScopeHash()"
+        )
+        let awaitOldWork = try XCTUnwrap(
+            handler.range(of: "await cancelAndAwaitAccountOperations()")
+        )
+        let finishBoundary = try XCTUnwrap(
+            handler.range(
+                of: "finishAccountBoundaryTransition(generation: generation)"
+            )
+        )
+        let rebind = try XCTUnwrap(
+            handler.range(of: "reconcileAuthenticatedState()")
+        )
+        XCTAssertLessThan(awaitOldWork.lowerBound, finishBoundary.lowerBound)
+        XCTAssertLessThan(finishBoundary.lowerBound, rebind.lowerBound)
         XCTAssertTrue(
             safety.contains("try validateAccountOperationFence(fence)")
         )
@@ -345,6 +410,60 @@ final class ManagedDocumentLifecycleContractTests: XCTestCase {
             "\"identifier\"",
         ] {
             XCTAssertFalse(diagnostics.contains(forbidden))
+        }
+    }
+
+    func testManagedHistoryProgressIsLocalizedAcrossSupportedLocales()
+        throws
+    {
+        let catalog = try Data(
+            contentsOf: repoRoot.appendingPathComponent(
+                "Strand/Resources/Localizable.xcstrings"
+            )
+        )
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: catalog) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(root["strings"] as? [String: Any])
+        let locales = [
+            "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant",
+        ]
+        let keys = [
+            "Finishing current phone backup before export…",
+            "Creating a consistent cloud-history snapshot…",
+            "Exporting cloud history: %1$lld of %2$lld objects, %3$@ of %4$@.",
+            "Exporting personal records: %1$lld of %2$lld objects.",
+            "Verifying %lld exported objects and finalizing the archive…",
+            "Validating every object in the cloud-history archive…",
+            "Importing cloud history: %1$lld of %2$lld objects, %3$@ of %4$@.",
+            "Finalizing %lld imported objects…",
+            "NOOP safely paused after a large backup catch-up. Keep the app open, sync again, then retry the complete cloud-history export.",
+        ]
+
+        for key in keys {
+            let entry = try XCTUnwrap(
+                strings[key] as? [String: Any],
+                "Missing managed-history localization: \(key)"
+            )
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any]
+            )
+            for locale in locales {
+                let localization = try XCTUnwrap(
+                    localizations[locale] as? [String: Any],
+                    "Missing \(locale): \(key)"
+                )
+                let unit = try XCTUnwrap(
+                    localization["stringUnit"] as? [String: Any]
+                )
+                XCTAssertEqual(unit["state"] as? String, "translated")
+                XCTAssertFalse(
+                    (unit["value"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty ?? true,
+                    "\(locale): \(key)"
+                )
+            }
         }
     }
 

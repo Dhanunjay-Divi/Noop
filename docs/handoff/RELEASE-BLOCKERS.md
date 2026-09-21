@@ -107,12 +107,13 @@ GitHub Actions results for the ten contexts listed in
 [`../RELEASE_CONTROLS.md`](../RELEASE_CONTROLS.md), including the exact-SHA
 `trusted-release-controls` result.
 
-The September 17-20 UI/cloud-readiness replacement candidate has completed its
-applicable local Apple, Android, package, server, and plan-only OpenTofu
-verification. Final post-documentation policy reruns, the consolidated commit,
-and hosted exact-SHA checks are still pending. Pull request `#16` currently
-points to superseded head `9d859d9a`; it becomes authoritative only after the
-replacement candidate is pushed and all ten contexts pass on that exact SHA.
+The September 17-21 UI/cloud-readiness replacement candidate has completed its
+applicable local Apple, Android, package, server, plan-only OpenTofu, and final
+post-documentation policy verification. The consolidated commit and hosted
+exact-SHA checks are still pending. Pull request `#16` currently points to
+superseded head `3edddda180963444b8eb8caa48e5298623cd66f4`; it becomes
+authoritative only after the replacement candidate is pushed and all ten
+contexts pass on that exact SHA.
 
 Protected source publication and hosted CI prove only the reviewed source
 commit. They do not close the external gates below.

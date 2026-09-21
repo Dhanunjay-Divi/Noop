@@ -18,6 +18,15 @@ feedback_external_abuse_gate_approved = false
 # after the standard-PostgreSQL integration suite passes.
 enable_managed_database = false
 database_tier           = "db-f1-micro"
+# Set these to the exact versions printed by the two database provisioning
+# phases. Never use "latest" for a migration or runtime workload. Each runtime
+# receives a distinct PostgreSQL principal and Secret Manager container.
+migration_database_url_secret_version         = null
+runtime_database_url_secret_version           = null
+managed_api_database_url_secret_version       = null
+managed_processor_database_url_secret_version = null
+managed_lifecycle_database_url_secret_version = null
+feedback_lifecycle_database_url_secret_version = null
 
 # Build from a clean commit, then use the Artifact Registry digest URI rather
 # than a mutable tag. The digest enables the migration job.

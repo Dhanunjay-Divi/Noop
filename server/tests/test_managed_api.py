@@ -63,6 +63,8 @@ class FakeManagedRepository:
             auth_valid_after=claims.auth_time,
         )
         self.enrollments = []
+        self.account_health_data_consent_granted = False
+        self.account_health_data_uploaded = False
         self.installations = [
             {
                 "installation_id": "ios-test-1",
@@ -147,6 +149,20 @@ class FakeManagedRepository:
         return {
             "account": {"status": "active"},
             "storage": {"rules": []},
+            "created": True,
+        }
+
+    async def enroll_account(self, *, claims, enrollment) -> dict:
+        self.enrollments.append((claims, enrollment))
+        return {
+            "account": {
+                "status": "active",
+                "health_data_consent_granted": (
+                    self.account_health_data_consent_granted
+                ),
+                "health_data_uploaded": self.account_health_data_uploaded,
+            },
+            "identity_id": self.principal.identity_id,
             "created": True,
         }
 
@@ -1034,6 +1050,150 @@ def test_managed_enrollment_requires_exact_policy_and_is_explicit() -> None:
         repository.enrollments[0][1].installation_token.get_secret_value()
         == INSTALLATION_TOKEN
     )
+
+
+def test_account_enrollment_reports_existing_privacy_state() -> None:
+    client, repository = _managed_client()
+    repository.account_health_data_consent_granted = True
+    repository.account_health_data_uploaded = True
+
+    with client:
+        response = client.post(
+            "/v1/managed/account/enroll",
+            headers={
+                "Authorization": f"Bearer {MANAGED_TOKEN}",
+                "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+            },
+            json={
+                "installation_id": "ios-test-1",
+                "installation_token": INSTALLATION_TOKEN,
+                "platform": "ios",
+                "enrollment_request_id": str(uuid4()),
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["product_boundary"] == {
+        "account_ready": True,
+        "health_data_consent_granted": True,
+        "health_data_uploaded": True,
+        "edge_collection_required": True,
+    }
+
+
+def test_mobile_enrollment_app_check_is_bound_to_declared_platform(
+    monkeypatch,
+) -> None:
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        managed_api_module,
+        "emit_operational_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    now = datetime.now(UTC)
+    android_assertion = ManagedAppCheckClaims(
+        app_id=ANDROID_APP_ID,
+        issuer=f"https://firebaseappcheck.googleapis.com/{PROJECT_NUMBER}",
+        audience=(f"projects/{PROJECT_NUMBER}",),
+        issued_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    client, repository = _managed_client(
+        additional_app_check_tokens={
+            ANDROID_APP_CHECK_TOKEN: android_assertion,
+        }
+    )
+    storage_body = {
+        "installation_id": "mobile-platform-binding",
+        "installation_token": INSTALLATION_TOKEN,
+        "platform": "ios",
+        "enrollment_request_id": str(uuid4()),
+        "policy_version": "staging-v1",
+        "policy_sha256": POLICY_SHA256,
+        "data_classes": ["essential_timeseries"],
+    }
+    account_body = {
+        key: value
+        for key, value in storage_body.items()
+        if key
+        not in {
+            "policy_version",
+            "policy_sha256",
+            "data_classes",
+        }
+    }
+    ios_headers = {
+        "Authorization": f"Bearer {MANAGED_TOKEN}",
+        "X-Firebase-AppCheck": APP_CHECK_TOKEN,
+    }
+    android_headers = {
+        **ios_headers,
+        "X-Firebase-AppCheck": ANDROID_APP_CHECK_TOKEN,
+    }
+
+    with client:
+        storage_ios_with_android = client.post(
+            "/v1/managed/enroll",
+            headers=android_headers,
+            json=storage_body,
+        )
+        storage_android_with_ios = client.post(
+            "/v1/managed/enroll",
+            headers=ios_headers,
+            json={**storage_body, "platform": "android"},
+        )
+        account_ios_with_android = client.post(
+            "/v1/managed/account/enroll",
+            headers=android_headers,
+            json=account_body,
+        )
+        account_android_with_ios = client.post(
+            "/v1/managed/account/enroll",
+            headers=ios_headers,
+            json={**account_body, "platform": "android"},
+        )
+        accepted_android = client.post(
+            "/v1/managed/account/enroll",
+            headers=android_headers,
+            json={**account_body, "platform": "android"},
+        )
+
+    for response in (
+        storage_ios_with_android,
+        storage_android_with_ios,
+        account_ios_with_android,
+        account_android_with_ios,
+    ):
+        assert response.status_code == 403
+        assert response.json()["detail"] == (
+            "managed app assertion does not match enrollment platform"
+        )
+    assert accepted_android.status_code == 201
+    assert repository.enrollments[-1][1].platform == "android"
+    enrollment_events = [
+        (event, fields)
+        for event, fields in events
+        if event
+        in {
+            "managed_account.enrollment",
+            "managed_storage.enrollment",
+        }
+    ]
+    assert [
+        (
+            event,
+            fields["outcome"],
+            fields["platform"],
+            fields.get("data_class_count"),
+        )
+        for event, fields in enrollment_events
+    ] == [
+        ("managed_storage.enrollment", "rejected", "ios", 1),
+        ("managed_storage.enrollment", "rejected", "android", 1),
+        ("managed_account.enrollment", "rejected", "ios", None),
+        ("managed_account.enrollment", "rejected", "android", None),
+        ("managed_account.enrollment", "created", "android", None),
+    ]
 
 
 def test_macos_enrollment_is_default_off_and_app_check_platform_bound() -> None:

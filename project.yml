@@ -117,8 +117,8 @@ targets:
     # OuraSecrets.example.xcconfig) — absent secrets leave the $(OURA_*) references in the
     # info.properties below empty, which disables the Oura Cloud lane at runtime.
     configFiles:
-      Debug: Strand/Oura/OuraConfig.xcconfig
-      Release: Strand/Oura/OuraConfig.xcconfig
+      Debug: Config/NOOPMac.xcconfig
+      Release: Config/NOOPMac.xcconfig
     info:
       path: Strand/Resources/Info.plist
       properties:
@@ -143,6 +143,15 @@ targets:
         # OuraCredentials.fromBundle. Absent/blank values cleanly disable the Connect-Oura lane.
         OURA_CLIENT_ID: $(OURA_CLIENT_ID)
         OURA_REDIRECT_URI: $(OURA_REDIRECT_URI)
+        FirebaseAppCheckTokenAutoRefreshEnabled: true
+        NOOPManagedProjectID: $(NOOP_MANAGED_PROJECT_ID)
+        NOOPManagedAPIKey: $(NOOP_MANAGED_API_KEY)
+        NOOPManagedGoogleAppID: $(NOOP_MANAGED_MACOS_GOOGLE_APP_ID)
+        NOOPManagedGCMSenderID: $(NOOP_MANAGED_GCM_SENDER_ID)
+        NOOPManagedAPIURL: $(NOOP_MANAGED_API_URL)
+        NOOPManagedPolicyVersion: $(NOOP_MANAGED_POLICY_VERSION)
+        NOOPManagedPolicySHA256: $(NOOP_MANAGED_POLICY_SHA256)
+        NOOPManagedAllowLocalHTTP: $(NOOP_MANAGED_ALLOW_LOCAL_HTTP)
         # Registers the noop:// URL scheme so ASWebAuthenticationSession's OAuth redirect
         # (noop://oura/callback) reaches OuraOAuthProvider instead of bouncing off the OS.
         CFBundleURLTypes:
@@ -152,6 +161,7 @@ targets:
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-write: true
+        com.apple.developer.devicecheck.appattest-environment: $(NOOP_APP_ATTEST_ENVIRONMENT)
         # Outbound client access — used only by explicit opt-ins: BYOK AI Coach, Oura import,
         # and the user's own authenticated self-hosted Noop server.
         # The ad-hoc distributed build applies NO entitlements (unsigned build + ad-hoc
@@ -171,10 +181,21 @@ targets:
         # distributed (ad-hoc) build. The app uses no JIT / unsigned-exec memory, so it's safe.
         ENABLE_HARDENED_RUNTIME: YES
         COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          NOOP_APP_ATTEST_ENVIRONMENT: development
+        Release:
+          NOOP_APP_ATTEST_ENVIRONMENT: production
     dependencies:
       - package: WhoopProtocol
       - package: WhoopStore
       - package: NoopRemoteSync
+      - package: Firebase
+        product: FirebaseAuth
+      - package: Firebase
+        product: FirebaseAppCheck
+      - package: Firebase
+        product: FirebaseCore
       - package: StrandAnalytics
       - package: StrandImport
       - package: StrandDesign

@@ -101,8 +101,10 @@ class ManagedHistoryImporter {
         restore: ManagedRestoreApplying,
         progress: suspend (ManagedHistoryImportProgress) -> Unit = {},
         saveCheckpoint: suspend (ManagedHistoryImportCheckpoint) -> Unit = {},
+        operationValidator: suspend () -> Unit = {},
         read: suspend (path: String, maximumBytes: Int) -> ByteArray,
     ): ManagedHistoryImportSummary {
+        operationValidator()
         val manifest = ManagedHistoryExportManifest.decode(manifestData)
         val objects = validateManifest(manifest, manifestData, entryPaths)
         val archiveSha256 = ManagedDigest.sha256(manifest.encoded())
@@ -118,7 +120,9 @@ class ManagedHistoryImporter {
         report(progress, ManagedHistoryImportPhase.VALIDATING, checkpoint, manifest)
         objects.forEach { archiveObject ->
             coroutineContext.ensureActive()
+            operationValidator()
             val data = read(archiveObject.path, archiveObject.archiveBytes)
+            operationValidator()
             when (archiveObject) {
                 is ArchiveObject.Chunk ->
                     validatedChunk(archiveObject.value, manifest, data)
@@ -140,18 +144,23 @@ class ManagedHistoryImporter {
         report(progress, ManagedHistoryImportPhase.IMPORTING, checkpoint, manifest)
         while (checkpoint.nextObjectIndex < objects.size) {
             coroutineContext.ensureActive()
+            operationValidator()
             val archiveObject = objects[checkpoint.nextObjectIndex]
             val data = read(archiveObject.path, archiveObject.archiveBytes)
+            operationValidator()
             when (archiveObject) {
                 is ArchiveObject.Chunk -> {
                     val value = validatedChunk(archiveObject.value, manifest, data)
+                    operationValidator()
                     restore.apply(value.first, value.second)
                 }
                 is ArchiveObject.Document -> {
                     val document = validatedDocument(archiveObject.value, data)
+                    operationValidator()
                     restore.apply(document, document.asChange())
                 }
             }
+            operationValidator()
             checkpoint.nextObjectIndex += 1
             checkpoint.importedObjects += 1
             checkpoint.importedChunkBytes = addExact(
@@ -159,6 +168,7 @@ class ManagedHistoryImporter {
                 archiveObject.chunkBytes,
             )
             saveCheckpoint(checkpoint)
+            operationValidator()
             report(progress, ManagedHistoryImportPhase.IMPORTING, checkpoint, manifest)
         }
 
@@ -191,7 +201,8 @@ class ManagedHistoryImporter {
         val chunkBytes = manifest.chunks.sumOf {
             it.compressedBytes.toLong()
         }
-        if (manifestData.size > MAX_MANIFEST_BYTES ||
+        if (manifestData.size >
+            ManagedHistoryTransferLimits.MAXIMUM_MANIFEST_BYTES ||
             manifest.format != "noop_managed_history" ||
             manifest.formatVersion !in 1..2 ||
             runCatching { Instant.parse(manifest.createdAt) }.isFailure ||
@@ -203,7 +214,8 @@ class ManagedHistoryImporter {
             manifest.dataClasses.any { !it.matches(DATA_CLASS) } ||
             manifest.selectedObjects != manifest.exportedObjects ||
             manifest.exportedObjects != objects.size ||
-            manifest.exportedObjects > MAX_OBJECTS ||
+            manifest.exportedObjects >
+            ManagedHistoryTransferLimits.MAXIMUM_OBJECT_COUNT ||
             manifest.selectedChunkBytes != manifest.exportedChunkBytes ||
             manifest.exportedChunkBytes != chunkBytes ||
             manifest.exportedChunkBytes < 0 ||
@@ -461,6 +473,8 @@ class ManagedHistoryImporter {
 
     private fun validPath(path: String): Boolean =
         path.isNotEmpty() &&
+            path.toByteArray(StandardCharsets.UTF_8).size <=
+            ManagedHistoryTransferLimits.MAXIMUM_PATH_BYTES &&
             !path.startsWith("/") &&
             !path.endsWith("/") &&
             !path.contains('\\') &&
@@ -492,8 +506,6 @@ class ManagedHistoryImporter {
         }
 
     private companion object {
-        const val MAX_MANIFEST_BYTES = 8 * 1_024 * 1_024
-        const val MAX_OBJECTS = 1_000_000
         const val MAX_COMPRESSED_BYTES = 16 * 1_024 * 1_024
         const val MAX_DOCUMENT_ARCHIVE_BYTES = 2 * 1_024 * 1_024
         const val MIN_ENCRYPTED_BYTES = 17

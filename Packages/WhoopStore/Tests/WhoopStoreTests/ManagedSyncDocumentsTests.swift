@@ -2957,6 +2957,62 @@ final class ManagedSyncDocumentsTests: XCTestCase {
         XCTAssertEqual(afterApply, preferenceRows)
     }
 
+    func testRemoteManagedPreferencesPersistWithoutCreatingUploadEcho()
+        async throws
+    {
+        let store = try await managedStore()
+        let remote = Data(
+            #"{"settings.schemaVersion":4,"units.system":"metric"}"#.utf8
+        )
+        let keyJSON = try JSONSerialization.data(
+            withJSONObject: ["scope": "global"],
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        let documentID = ManagedDocumentStableIdentifier.uuid(
+            documentKind: "preferences",
+            tableName: "preferences",
+            keyJSON: keyJSON
+        )
+        _ = try await store.applyManagedDocument(
+            accountScopeHash: scope,
+            documentKind: "preferences",
+            documentID: documentID.uuidString.lowercased(),
+            revision: 1,
+            contentSHA256: String(repeating: "d", count: 64),
+            payloadJSON: remote,
+            deleted: false,
+            appliedAtMs: 1_000
+        )
+
+        var pending = try await store.pendingManagedDocuments(
+            accountScopeHash: scope,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        XCTAssertTrue(pending.isEmpty)
+
+        try await store.stageManagedPreferences(remote, updatedAtMs: 2_000)
+        pending = try await store.pendingManagedDocuments(
+            accountScopeHash: scope,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        XCTAssertTrue(pending.isEmpty)
+
+        let local = Data(
+            #"{"settings.schemaVersion":4,"units.system":"imperial"}"#.utf8
+        )
+        try await store.stageManagedPreferences(local, updatedAtMs: 3_000)
+        pending = try await store.pendingManagedDocuments(
+            accountScopeHash: scope,
+            contentMode: .clientEncrypted,
+            limit: 10
+        )
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(pending.first?.payloadJSON, local)
+        XCTAssertEqual(pending.first?.generation, 2)
+    }
+
     private func managedStore(
         accountScopeHash: String? = nil
     ) async throws -> WhoopStore {

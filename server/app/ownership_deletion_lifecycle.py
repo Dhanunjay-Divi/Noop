@@ -402,9 +402,10 @@ class PostgresOwnershipDeletionProgressRepository:
     ) -> Sequence[OwnershipManagedDeletionTarget]:
         rows = await self._pool().fetch(
             """
-            WITH candidates AS MATERIALIZED (
+            WITH due_candidates AS MATERIALIZED (
                 SELECT progress.deletion_request_id,
                        progress.target_kind,
+                       request.account_id,
                        identity.issuer,
                        identity.provider_tenant,
                        identity.subject_hash
@@ -443,6 +444,16 @@ class PostgresOwnershipDeletionProgressRepository:
                     progress.deletion_request_id
                 FOR UPDATE OF progress SKIP LOCKED
                 LIMIT $2
+            ),
+            candidates AS MATERIALIZED (
+                SELECT due.*
+                FROM due_candidates due
+                WHERE pg_try_advisory_xact_lock(
+                    hashtextextended(
+                        'noop-ownership-account:' || due.account_id::text,
+                        0
+                    )
+                )
             )
             UPDATE ownership_account_deletion_target_progress progress
             SET current_state = 'processing',

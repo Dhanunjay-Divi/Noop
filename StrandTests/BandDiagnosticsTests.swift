@@ -329,6 +329,24 @@ final class BandDiagnosticsTests: XCTestCase {
             ),
             .ready
         )
+        XCTAssertTrue(
+            BandDiagnostics.notificationRearmFailureShouldReconnect(
+                isConnected: true,
+                isCurrentPeripheral: true
+            )
+        )
+        XCTAssertFalse(
+            BandDiagnostics.notificationRearmFailureShouldReconnect(
+                isConnected: false,
+                isCurrentPeripheral: true
+            )
+        )
+        XCTAssertFalse(
+            BandDiagnostics.notificationRearmFailureShouldReconnect(
+                isConnected: true,
+                isCurrentPeripheral: false
+            )
+        )
         XCTAssertEqual(
             BandDiagnostics.notificationRearmAction(
                 phase: .awaitingDisable,

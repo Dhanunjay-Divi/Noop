@@ -76,7 +76,8 @@ final class ManagedSocialModelsTests: XCTestCase {
             visibility: ManagedSocialVisibility(
                 charge: true,
                 hrv: true,
-                pokeAllowed: true
+                pokeAllowed: true,
+                messagesAllowed: true
             )
         )
 
@@ -91,5 +92,46 @@ final class ManagedSocialModelsTests: XCTestCase {
                 visibility: ManagedSocialVisibility()
             )
         )
+    }
+
+    func testCommunicationPermissionsDefaultOffAndPatchTracksChanges() {
+        let visibility = ManagedSocialVisibility()
+
+        XCTAssertFalse(visibility.messagesAllowed)
+        XCTAssertFalse(visibility.photosAllowed)
+        XCTAssertFalse(visibility.audioCallsAllowed)
+        XCTAssertFalse(visibility.videoCallsAllowed)
+        XCTAssertFalse(ManagedSocialVisibilityPatch().hasChange)
+        XCTAssertTrue(
+            ManagedSocialVisibilityPatch(messagesAllowed: true).hasChange
+        )
+    }
+
+    func testLegacyVisibilityDefaultsMissingCommunicationPermissionsOff() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let visibility = try decoder.decode(
+            ManagedSocialVisibility.self,
+            from: Data(
+                """
+                {
+                  "charge": true,
+                  "effort": false,
+                  "rest": false,
+                  "sleep_duration": false,
+                  "hrv": false,
+                  "rhr": false,
+                  "poke_allowed": true
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertTrue(visibility.charge)
+        XCTAssertTrue(visibility.pokeAllowed)
+        XCTAssertFalse(visibility.messagesAllowed)
+        XCTAssertFalse(visibility.photosAllowed)
+        XCTAssertFalse(visibility.audioCallsAllowed)
+        XCTAssertFalse(visibility.videoCallsAllowed)
     }
 }

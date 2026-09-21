@@ -344,6 +344,13 @@ struct BandDiagnostics {
         }
     }
 
+    static func notificationRearmFailureShouldReconnect(
+        isConnected: Bool,
+        isCurrentPeripheral: Bool
+    ) -> Bool {
+        isConnected && isCurrentPeripheral
+    }
+
     static func notificationRearmTimeoutShouldReconnect(
         expectedGeneration: Int,
         currentGeneration: Int,
@@ -6194,6 +6201,12 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                     channel: channel,
                     reason: error.map(connErrorCategory) ?? "platform_error"
                 )
+                if BandDiagnostics.notificationRearmFailureShouldReconnect(
+                    isConnected: state.connected,
+                    isCurrentPeripheral: self.peripheral === peripheral
+                ) {
+                    central?.cancelPeripheralConnection(peripheral)
+                }
             }
             return
         }

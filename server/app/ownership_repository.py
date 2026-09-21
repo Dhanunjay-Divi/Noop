@@ -2863,6 +2863,27 @@ class PostgresOwnershipRepository:
                     raise OwnershipConflictError(
                         "account deletion can no longer be canceled"
                     )
+                managed_progress = await connection.fetchrow(
+                    """
+                    SELECT current_state,
+                           attempt_count,
+                           managed_erasure_job_id
+                    FROM ownership_account_deletion_target_progress
+                    WHERE deletion_request_id = $1
+                      AND target_kind = 'managed_cloud_data'
+                    FOR UPDATE
+                    """,
+                    deletion_request_id,
+                )
+                if (
+                    managed_progress is None
+                    or managed_progress["current_state"] != "scheduled"
+                    or int(managed_progress["attempt_count"]) != 0
+                    or managed_progress["managed_erasure_job_id"] is not None
+                ):
+                    raise OwnershipConflictError(
+                        "account deletion can no longer be canceled"
+                    )
                 row = await connection.fetchrow(
                     """
                     UPDATE ownership_account_deletion_requests

@@ -65,12 +65,17 @@ run "ownership_deletion_coordination_requires_its_separate_secret" {
     managed_android_sha256_fingerprints = [
       "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
     ]
-    enable_managed_database                = true
-    runtime_image                          = "asia-south1-docker.pkg.dev/noop-ownership-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    ownership_database_url_secret_id       = "noop-ownership-database-url"
-    enable_managed_runtime                 = true
-    enable_ownership_runtime               = true
-    enable_ownership_deletion_coordination = true
+    enable_managed_database                       = true
+    migration_database_url_secret_version         = "1"
+    runtime_database_url_secret_version           = "1"
+    managed_api_database_url_secret_version       = "1"
+    managed_processor_database_url_secret_version = "1"
+    managed_lifecycle_database_url_secret_version = "1"
+    runtime_image                                 = "asia-south1-docker.pkg.dev/noop-ownership-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ownership_database_url_secret_id              = "noop-ownership-database-url"
+    enable_managed_runtime                        = true
+    enable_ownership_runtime                      = true
+    enable_ownership_deletion_coordination        = true
   }
 
   expect_failures = [var.enable_ownership_deletion_coordination]
@@ -87,9 +92,14 @@ run "managed_runtime_omits_ownership_coordination_when_disabled" {
     managed_android_sha256_fingerprints = [
       "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
     ]
-    enable_managed_database = true
-    runtime_image           = "asia-south1-docker.pkg.dev/noop-ownership-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    enable_managed_runtime  = true
+    enable_managed_database                       = true
+    migration_database_url_secret_version         = "1"
+    runtime_database_url_secret_version           = "1"
+    managed_api_database_url_secret_version       = "1"
+    managed_processor_database_url_secret_version = "1"
+    managed_lifecycle_database_url_secret_version = "1"
+    runtime_image                                 = "asia-south1-docker.pkg.dev/noop-ownership-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    enable_managed_runtime                        = true
   }
 
   assert {
@@ -115,11 +125,12 @@ run "migration_image_executes_without_runtime_rollout" {
   command = plan
 
   variables {
-    enable_managed_database = true
-    enable_managed_runtime  = false
-    enable_private_api      = false
-    migration_image         = "asia-south1-docker.pkg.dev/noop-ownership-test/noop/runtime@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    runtime_image           = null
+    enable_managed_database               = true
+    enable_managed_runtime                = false
+    enable_private_api                    = false
+    migration_database_url_secret_version = "1"
+    migration_image                       = "asia-south1-docker.pkg.dev/noop-ownership-test/noop/runtime@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    runtime_image                         = null
   }
 
   assert {
@@ -150,6 +161,11 @@ run "ownership_runtime_is_iam_only_when_every_guard_is_present" {
       "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
     ]
     enable_managed_database                             = true
+    migration_database_url_secret_version               = "1"
+    runtime_database_url_secret_version                 = "1"
+    managed_api_database_url_secret_version             = "1"
+    managed_processor_database_url_secret_version       = "1"
+    managed_lifecycle_database_url_secret_version       = "1"
     runtime_image                                       = "asia-south1-docker.pkg.dev/noop-ownership-test/noop/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ownership_database_url_secret_id                    = "noop-ownership-database-url"
     enable_ownership_runtime                            = true

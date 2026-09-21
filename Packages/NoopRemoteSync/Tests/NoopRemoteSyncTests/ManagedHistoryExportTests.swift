@@ -450,6 +450,37 @@ final class ManagedHistoryExportTests: XCTestCase {
         XCTAssertNil(completion)
     }
 
+    func testOversizedRestoreSelectionFailsBeforeCheckpointOrObjectDownload()
+        async throws
+    {
+        let transport = ExportTransport(
+            chunks: [],
+            chunkData: [:],
+            selectedObjectDelta:
+                ManagedHistoryTransferLimits.maximumObjectCount + 1
+        )
+        let checkpoints = ExportCheckpointRecorder()
+
+        do {
+            _ = try await ManagedHistoryExporter(transport: transport).export(
+                dataClasses: ["essential_timeseries"],
+                authorization: { _ in try Self.authorization() },
+                saveCheckpoint: { value in await checkpoints.save(value) },
+                consume: { _ in }
+            )
+            XCTFail("Expected oversized selection rejection")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let storedCheckpoint = await checkpoints.latest()
+        let chunkPageStarts = await transport.chunkPageStarts()
+        let completion = await transport.completedValues()
+        XCTAssertNil(storedCheckpoint)
+        XCTAssertEqual(chunkPageStarts, [])
+        XCTAssertNil(completion)
+    }
+
     func testManifestEncodingUsesPortableSnakeCaseKeys() throws {
         let manifest = ManagedHistoryExportManifest(
             format: "noop_managed_history",
@@ -562,6 +593,69 @@ final class ManagedHistoryExportTests: XCTestCase {
         XCTAssertEqual(
             try ManagedHistoryImportCheckpoint.decoded(from: checkpointData),
             checkpoint
+        )
+    }
+
+    func testMaximumObjectManifestFitsSharedCeilingAndRoundTrips()
+        throws
+    {
+        let sourceID = UUID()
+        let chunks = (0..<ManagedHistoryTransferLimits.maximumObjectCount)
+            .map { index in
+                ManagedHistoryExportManifest.Chunk(
+                    path: String(
+                        format: "chunks/essential_timeseries/%05d.json",
+                        index
+                    ),
+                    chunkID: UUID(),
+                    sourceID: sourceID,
+                    dataClass: "essential_timeseries",
+                    schemaVersion: 1,
+                    eventStart: "2026-09-20T12:00:00.000Z",
+                    eventEnd: "2026-09-20T12:00:01.000Z",
+                    compression: "none",
+                    contentType: "application/vnd.noop.chunk+json",
+                    sha256: String(repeating: "a", count: 64),
+                    compressedBytes: 1,
+                    uncompressedBytes: 1,
+                    objectGeneration: 1
+                )
+            }
+        let manifest = ManagedHistoryExportManifest(
+            format: "noop_managed_history",
+            formatVersion: 2,
+            createdAt: "2026-09-20T12:00:00.000Z",
+            snapshotAt: "2026-09-20T11:59:59.000Z",
+            changeSequence: 1,
+            dataClasses: ["essential_timeseries"],
+            selectedObjects: chunks.count,
+            selectedChunkBytes: Int64(chunks.count),
+            exportedObjects: chunks.count,
+            exportedChunkBytes: Int64(chunks.count),
+            chunks: chunks,
+            documents: [],
+            integrity: .init(
+                algorithm: "sha256",
+                entryCount: chunks.count,
+                entriesSHA256: String(repeating: "b", count: 64)
+            ),
+            snapshotCursor: .init(
+                formatVersion: 1,
+                snapshotAt: "2026-09-20T11:59:59.000Z",
+                changeSequence: 1
+            )
+        )
+
+        let data = try manifest.encoded()
+
+        XCTAssertGreaterThan(data.count, 8 * 1_024 * 1_024)
+        XCTAssertLessThanOrEqual(
+            data.count,
+            ManagedHistoryTransferLimits.maximumManifestBytes
+        )
+        XCTAssertEqual(
+            try ManagedHistoryExportManifest.decoded(from: data),
+            manifest
         )
     }
 
