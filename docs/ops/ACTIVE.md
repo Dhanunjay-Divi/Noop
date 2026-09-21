@@ -199,6 +199,22 @@ Last updated: **2026-09-21**
   guard, operations validation, terminology ratchet, and diff hygiene pass
   locally. One evidence-only push, final exact-SHA hosted verification,
   protected merge/main trust, and cleanup remain.
+- The next exact-head review identified four P2 contract defects. Watch live-HR
+  selection is remote at `3b69ee07`: freshness and plausible BPM are applied
+  before selecting the newest sample, with invalid-newest/valid-earlier and
+  no-valid-initial-batch ratchets. Local commits `e1e94c67` and `5778e2f0`
+  make Android selected-file staging cancellation responsive without replacing
+  prior durable import state, enforce the formula-shadow `+/-1e308` persistence
+  bound through 422 validation, and reject skipped civil days such as
+  `Pacific/Apia` 2011-12-30 before persistence. Focused evidence is green:
+  Watch source/XCTest type-checks and two policy checks; two Android deterministic
+  staging regressions by source review; 29 executor plus 9 model/API tests; and
+  Ruff check/format. The Android Gradle attempt was stopped before compilation
+  because free disk was 3.4-4.0 GiB with 8.7 GiB swap, below the unchanged
+  10 GiB floor. Superseded heavy GitHub runs were canceled, exact worker-created
+  Android/Watch outputs were removed, and the final combined push, exact-SHA
+  hosted walls, four-thread resolution, protected merge/main trust, and cleanup
+  remain.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
 - Earlier broad local evidence before the late-review follow-up:

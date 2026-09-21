@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `exact-SHA platform checks are green; reviewed terminology regeneration, final hosted release controls, and protected integration pending`
+- State: `four late review defects are corrected with focused evidence; final terminology refresh, exact-SHA hosted walls, and protected integration pending`
 - Owner: project team
 - Branch: `codex/ui-cloud-readiness-20260917`
 - Start commit: `84ee85eeb4aa711e2762591fe0a52dc2ba9cb4f3`
@@ -37,7 +37,14 @@ candidate:
 12. repair unified managed-account links created for identities or accounts that
    were already terminal when migration 047 ran; and
 13. remove the Activity-lifecycle race from the Android app-report entrypoint
-    without weakening review, screenshot consent, or delivery continuity.
+    without weakening review, screenshot consent, or delivery continuity;
+14. make Android managed-history staging cancellation responsive during the
+    initial selected-file copy while preserving prior durable state;
+15. select the newest usable Watch heart-rate sample rather than allowing an
+    implausible newest sample to hide an earlier valid reading;
+16. reject formula-shadow client values outside the database persistence bound
+    through the request contract instead of a database error; and
+17. reject civil days skipped by a timezone transition before persistence.
 
 ## Scope
 
@@ -244,6 +251,31 @@ candidate:
   ten-context check, trusted self-verification, shell entrypoints, calibration
   parity, distribution provenance, private-data filename guard, terminology
   ratchet, operations validation, and diff hygiene.
+- A fresh exact-head review then identified four P2 contract defects. Android
+  managed-history staging now checks coroutine cancellation around every copied
+  chunk, removes the temporary archive, and leaves the previous committed
+  archive and checkpoint untouched. Apple already used a chunked,
+  cancellation-aware copy with an equivalent regression, so no Apple source
+  change was needed.
+- Watch live heart rate now filters each candidate by freshness and plausible
+  BPM before choosing the newest usable sample. An invalid newest sample no
+  longer hides an earlier valid sample, and an initial batch with no usable
+  sample enters the existing no-readable-sample state.
+- Formula-shadow request validation now enforces the migration-049 finite
+  persistence bound of plus or minus `1e308`; adjacent out-of-range floats
+  receive the existing 422 contract response. Formula execution independently
+  applies the same bound. Missing and not-supplied observation semantics remain
+  unchanged.
+- Formula civil-day construction now rejects a converted UTC interval whose end
+  is not strictly after its start. The skipped `2011-12-30` day in
+  `Pacific/Apia` therefore fails with `FormulaInputContractError` before any
+  repository write, while adjacent days remain valid.
+- Superseded Apple, Android, server, and package workflows for `1d475d21` and
+  `3b69ee07` were canceled after the review defects were known, avoiding
+  unnecessary Actions spend. The host had only 3.4-4.0 GiB free and 8.7 GiB
+  swap in use, so no heavy local wall was run below the unchanged 10 GiB floor.
+  Exact worker-created Android build and temporary Watch/typecheck outputs were
+  removed after the workers stopped.
 
 ## Data, privacy, and medical truth
 
@@ -295,6 +327,11 @@ candidate:
   Existing request status and migration-ledger evidence is sufficient; adding
   payload-bearing or per-row logs would increase privacy and volume risk
   without improving diagnosis.
+- Managed-import cancellation continues through the existing bounded
+  `managed_import` operation outcome; the new checks add no sample, path,
+  account, or archive data. Watch selection and formula validation are
+  deterministic input filters whose existing state/HTTP outcomes identify
+  rejection without logging heart-rate or formula values.
 - Android report requests now emit one bounded `report.request` event with only
   fixed `source` and `outcome` categories. It distinguishes `opened`,
   `already_open`, `debounced`, and `existing_delivery` without recording an
@@ -326,6 +363,9 @@ candidate:
 | Android stale-formula follow-up | `ChargeFormulaUpgradeGateTest` passed 3/3; the Full-debug app and complete instrumentation test source compiled in a 41-task bounded Gradle run. The new Room regression is included in the hosted production-shell suite | Formula traversal selects an empty score-window reconciliation, that reconciliation deletes only the computed daily and managed Rest rows, and imported owners plus unrelated series remain untouched | API 35 execution of the new Room regression, physical-device behavior, or formula accuracy |
 | Hosted `825d015c` candidate | 29 hosted checks passed, three were intentionally skipped, and the final Apple and Android build jobs passed. The API 35 production shell alone failed two existing app-report tests at their initial sheet-open waits; the new Room formula regression passed all 8 cases | The candidate is coherent across every other protected wall and the failure is isolated to Activity-bound report request delivery | The corrected report entrypoint or protected integration |
 | Android app-report lifecycle correction | The repository-standard 4 GiB one-worker run passed `AppDiagnosticReportEntryPointTest`, compiled the Full app, and compiled all Full instrumentation source across 41 tasks. A deliberate 1.5 GiB local attempt stopped in the Compose compiler with heap exhaustion before tests. On exact hosted SHA `e1eaa4de`, Android production shell, Review Sample shell, build-and-test, and the required Android aggregate all pass | The current Activity owns Test Centre invocation, no global replay state remains, callback wiring compiles through production navigation, and the API 35 report tests execute successfully against the new entrypoint | Physical shake delivery or report upload service behavior |
+| Android managed-import staging cancellation | Commit `e1e94c67` adds two deterministic regressions for mid-copy cancellation and matching/different checkpoint replacement. Lightweight source and diff checks pass; the bounded Gradle run was stopped before Kotlin compilation when host storage remained below the 10 GiB floor | Cancellation is checked around each copy chunk, partial staging is removed, and the previously committed archive/checkpoint remains unchanged in the focused contract | Android compilation/execution, blocked content-provider reads, process death, or physical document-provider behavior; these remain in hosted/physical gates |
+| Watch live-HR sample selection | Commit `3b69ee07` passed Watch source type-check, XCTest source type-check, two deterministic selection-policy checks, and diff hygiene | Freshness and plausible BPM are applied before newest-sample selection; invalid-newest/valid-earlier and no-valid-initial-batch cases are ratcheted | HealthKit delivery, authorization, sensor accuracy, or physical Watch behavior |
+| Formula persistence-bound and skipped-day validation | Commit `5778e2f0` passes 29 executor tests, 9 focused model/API cases, and Ruff check/format. Exact `+/-1e308` boundaries pass; adjacent floats receive 422; `Pacific/Apia` 2011-12-30 is rejected and adjacent days remain valid | Request and executor validation match the database numeric bound, preserve absence semantics, and reject zero/non-positive UTC civil windows before persistence | The broad PostgreSQL/server wall, production timezone database drift, load, or physiological formula accuracy |
 | Final terminology and policy wall | 17,846 occurrences across 1,585 groups with zero forbidden mappings and a byte-identical active allowlist; the reviewed inventory digest is repinned. The exact 191-case release-control unit wall, standalone 9-check release-control report, required-CI 10-context check, trusted self-verification, shell entrypoints, calibration parity, distribution provenance, private-data guard, operations validation across 82 records, and diff hygiene pass. The earlier complete repository wall passed 355 tests plus 44 subtests, legal inventory verified 230 runtime components and 3 container inputs, and health-claims scanned 1,297 files | The reviewed terminology snapshot, localization catalogs, ten-context release-control contract, operations records, privacy/claims guards, and repository policy tests match the final local tree | Replacement hosted exact-SHA release controls, protected-main trust, physical localization/accessibility, or removal of the separately baselined hardcoded-literal debt |
 | Apple history acknowledgement and generation fence | 23 passed, 0 failed after the final watchdog correction | FIFO callback correlation, callback-only trim credit, and delayed persistence rejection compile and pass in the macOS app target | CoreBluetooth callback timing or firmware trim behavior on a physical band |
 | Android history acknowledgement and generation fence | Expanded six-class Full-debug selector wall passed; Gradle build succeeded | Callback-only acknowledgement, write single-delivery, drain gates, continuation, burst progress, and delayed-session fencing compile and pass | Android GATT timing, process death, or firmware behavior on a physical phone and band |
@@ -380,17 +420,18 @@ data, or cloud resource was removed.
 
 - Pull request: `#16`
 - Current remote PR head:
-  `e1eaa4deafbc1b986e933037acaaec3d4e7367da`
-- Hosted state: every applicable Apple, Android, server, package, operations,
-  localization, claims, license, and trust job passes on the exact SHA. The
-  sole failure is the expected stale generated terminology inventory in
-  `release-controls`; no occurrence/category count or active allowlist changed,
-  and zero forbidden mappings are present.
-- Required next state: regenerate and revalidate the reviewed terminology
-  evidence, make one evidence-only follow-up commit and push, require all ten
-  protected contexts green on that exact SHA, resolve every proven review
-  thread, merge normally, verify protected `main`, and perform exact
-  round-owned cleanup.
+  `3b69ee07e778fac3ca2e64676352c0fdcfb008cf`
+- Current local head:
+  `5778e2f0432286c8f78ccfb8bcee17fa8f8c7f48`
+- Local unpublished commits `e1e94c67` and `5778e2f0` contain the Android
+  cancellation and server formula corrections. The remote Watch-only heavy
+  workflows and the preceding evidence-only heavy workflows were canceled once
+  their SHAs became non-mergeable; completed policy evidence remains retained.
+- Required next state: regenerate and repin terminology evidence for this final
+  source/document state, create one narrow operations/evidence commit, push the
+  combined candidate, require all ten protected contexts green on that exact
+  SHA, resolve the four corrected review threads, merge normally, verify
+  protected `main`, and perform exact round-owned cleanup.
 
 ## Open risks and honest limitations
 
@@ -428,10 +469,11 @@ data, or cloud resource was removed.
 ## Next round
 
 1. Regenerate the reviewed terminology inventory from the final documentation
-   state and rerun the exact release-control wall.
-2. Commit and push that evidence-only correction to pull request `#16`.
+   state, repin its digest, and rerun the lightweight release-control wall.
+2. Commit and push the combined late-review correction to pull request `#16`.
 3. Require all ten hosted contexts on the exact candidate SHA.
-4. Resolve only review threads proven by the final source and evidence.
+4. Resolve the four review threads only after the exact source and hosted
+   evidence prove their corrections.
 5. Merge normally, verify protected `main`, synchronize the canonical
    worktree, and remove exact round-owned generated outputs and logs.
 6. Open a separate SDK-boundary round from protected `main`; implement and test

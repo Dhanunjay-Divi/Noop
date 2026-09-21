@@ -36054,9 +36054,9 @@
       "lineNumbers": [
         57,
         78,
-        206,
-        326,
-        353
+        222,
+        342,
+        369
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36376,11 +36376,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        210,
-        212,
-        334,
-        408,
-        438
+        217,
+        219,
+        374,
+        449,
+        480
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/rounds/2026-09-21-pr16-final-readiness-closeout.md",
@@ -36402,7 +36402,7 @@
       ],
       "occurrenceCount": 6,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "bb71972db993f9096c014e7e754b1ec904705fde69116a483f0d095bb9697ae2",
+      "sha256": "bffe91112041d8aee7dcb468bc4672c24f1f238618b526fbb72d45828e2ae25c",
       "tokenCounts": {
         "whoop": 3,
         "whoopstore": 3
