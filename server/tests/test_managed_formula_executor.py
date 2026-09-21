@@ -103,6 +103,18 @@ def test_maximum_local_day_is_rejected_as_a_contract_error() -> None:
         )
 
 
+def test_utc_underflowing_local_day_is_rejected_as_a_contract_error() -> None:
+    with pytest.raises(
+        FormulaInputContractError,
+        match="local_day is outside the supported range",
+    ):
+        FormulaDayContext.create(
+            account_id=UUID("00000000-0000-4000-8000-000000000001"),
+            local_day=date.min,
+            timezone_name="Asia/Kolkata",
+        )
+
+
 def test_invalid_optional_recovery_inputs_drop_and_renormalize() -> None:
     common = {
         "hrv": 55.0,

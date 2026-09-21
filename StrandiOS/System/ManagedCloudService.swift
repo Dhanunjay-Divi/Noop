@@ -3168,6 +3168,37 @@ final class ManagedCloudService: ObservableObject {
         fence: AccountOperationFence
     ) async throws -> Int {
         try validateAccountOperationFence(fence)
+        let computedDerivedReady =
+            FormulaPublicationGate.computedDerivedReady()
+        let uploaded = try await FormulaPublicationGate
+            .publishSocialSummariesIfReady(
+                computedDerivedReady: computedDerivedReady
+            ) {
+                try await uploadReadySocialSummaries(
+                    repo: repo,
+                    friends: friends,
+                    client: client,
+                    authorization: authorization,
+                    fence: fence
+                )
+            }
+        guard let uploaded else {
+            AppDiagnosticsRecorder.shared.record(
+                "formula_publication",
+                fields: FormulaPublicationGate.deferredDiagnosticFields
+            )
+            return 0
+        }
+        return uploaded
+    }
+
+    private func uploadReadySocialSummaries(
+        repo: Repository,
+        friends: [ManagedSocialFriend],
+        client: ManagedStorageClient,
+        authorization: ManagedAuthorization,
+        fence: AccountOperationFence
+    ) async throws -> Int {
         guard let store = await repo.storeHandle() else {
             throw ManagedCloudError.storeUnavailable
         }

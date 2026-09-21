@@ -3189,10 +3189,13 @@ class PostgresManagedRepository:
         after_event_start: datetime | None,
         after_chunk_id: UUID | None,
         limit: int,
+        content_mode: str = "server_readable",
         snapshot_at: datetime | None = None,
     ) -> list[dict[str, Any]]:
         if (after_event_start is None) != (after_chunk_id is None):
             raise ManagedConflictError("both chunk cursor fields are required")
+        if content_mode not in {"server_readable", "client_encrypted"}:
+            raise ValueError("unsupported managed chunk content mode")
         rows = await self._pool().fetch(
             """
             SELECT *
@@ -3216,12 +3219,13 @@ class PostgresManagedRepository:
               AND ($2::timestamptz IS NULL OR event_end >= $2)
               AND ($3::timestamptz IS NULL OR event_start < $3)
               AND ($4::text IS NULL OR data_class = $4)
+              AND content_mode = $8
               AND (
                   $5::timestamptz IS NULL
                   OR (event_start, chunk_id) > ($5, $6)
               )
             ORDER BY event_start, chunk_id
-            LIMIT $8
+            LIMIT $9
             """,
             principal.account_id,
             start,
@@ -3230,6 +3234,7 @@ class PostgresManagedRepository:
             after_event_start,
             after_chunk_id,
             snapshot_at,
+            content_mode,
             limit,
         )
         return [self._public_chunk(dict(row), duplicate=False) for row in rows]
@@ -5459,6 +5464,7 @@ class PostgresManagedRepository:
                 )
                 filters = {
                     "data_classes": request.data_classes,
+                    "chunk_content_mode": request.chunk_content_mode,
                     "document_kinds": request.document_kinds,
                     "include_documents": request.include_documents,
                     "include_deleted_documents": (request.include_deleted_documents),
@@ -5470,10 +5476,16 @@ class PostgresManagedRepository:
                     ),
                 }
                 if existing is not None:
+                    existing_filters = _decoded_json(existing["filters"])
+                    if isinstance(existing_filters, dict):
+                        existing_filters.setdefault(
+                            "chunk_content_mode",
+                            "server_readable",
+                        )
                     if (
                         request.snapshot_at is not None
                         and existing["snapshot_at"] != request.snapshot_at
-                    ) or _decoded_json(existing["filters"]) != filters:
+                    ) or existing_filters != filters:
                         raise ManagedConflictError("restore request id was reused")
                     return self._public_restore(dict(existing), duplicate=True)
                 installation_exists = await connection.fetchval(
@@ -5509,12 +5521,14 @@ class PostgresManagedRepository:
                       )
                       AND ($4::timestamptz IS NULL OR event_end >= $4)
                       AND ($5::timestamptz IS NULL OR event_start < $5)
+                      AND content_mode = $6
                     """,
                     principal.account_id,
                     snapshot_at,
                     request.data_classes,
                     request.start,
                     request.end,
+                    request.chunk_content_mode,
                 )
                 document_total = 0
                 if request.include_documents:

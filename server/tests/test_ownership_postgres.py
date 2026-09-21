@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import os
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import ModuleType
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
@@ -40,6 +44,21 @@ DATABASE_URL = os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL")
 APPLE_APP_ID = "1:123456789:ios:abcdef12"
 TERMS_SHA256 = "a" * 64
 BAND_IDENTITY_HASH = "b" * 64
+ROOT = Path(__file__).resolve().parents[2]
+OWNERSHIP_PROVISIONER = (
+    ROOT / "infra" / "gcp" / "scripts" / "configure-ownership-database.py"
+)
+
+
+def _load_ownership_provisioner() -> ModuleType:
+    module_name = "noop_test_configure_ownership_database"
+    spec = importlib.util.spec_from_file_location(module_name, OWNERSHIP_PROVISIONER)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -293,6 +312,64 @@ async def test_concurrent_cross_account_registration_rejects_installation_collis
         == 1
     )
     assert await primary._pool.fetchval("SELECT count(*) FROM ownership_accounts") == 1
+
+
+@pytest.mark.asyncio
+async def test_registration_rejects_retired_unified_principal_without_orphaning(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    claims = _claims(f"retired-unified-owner-{uuid4()}")
+    now = datetime.now(UTC)
+    assert primary._pool is not None
+    await primary._pool.execute(
+        """
+        INSERT INTO unified_account_principals (
+            principal_id,
+            issuer,
+            provider_tenant,
+            subject_hash,
+            status,
+            created_at,
+            updated_at,
+            retired_at
+        ) VALUES ($1, $2, $3, $4, 'retired', $5, $5, $5)
+        """,
+        uuid4(),
+        claims.issuer,
+        claims.provider_tenant,
+        claims.subject_hash,
+        now,
+    )
+
+    with pytest.raises(
+        OwnershipForbiddenError,
+        match="ownership account is unavailable",
+    ):
+        await repository.register_account(
+            claims=claims,
+            registration=_registration(
+                installation_id="ios-retired-unified-owner",
+                token_character="U",
+            ),
+        )
+
+    assert (
+        await primary._pool.fetchval(
+            """
+            SELECT count(*)
+            FROM ownership_external_identities
+            WHERE issuer = $1
+              AND provider_tenant = $2
+              AND subject_hash = $3
+            """,
+            claims.issuer,
+            claims.provider_tenant,
+            claims.subject_hash,
+        )
+        == 0
+    )
+    assert await primary._pool.fetchval("SELECT count(*) FROM ownership_accounts") == 0
 
 
 @pytest.mark.asyncio
@@ -3221,11 +3298,13 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
     inherited_role = f"noop_ownership_parent_{uuid4().hex}"
     owned_schema = f"ownership_owned_{uuid4().hex}"
     test_sequence = f"ownership_sequence_{uuid4().hex}"
+    ordinary_function = f"ownership_owned_function_{uuid4().hex}"
     password = uuid4().hex + uuid4().hex
     quoted_role = f'"{role}"'
     quoted_inherited_role = f'"{inherited_role}"'
     quoted_owned_schema = f'"{owned_schema}"'
     quoted_test_sequence = f'"{test_sequence}"'
+    quoted_ordinary_function = f'"{ordinary_function}"'
     database_name = await primary._pool.fetchval("SELECT current_database()")
     quoted_database = '"' + str(database_name).replace('"', '""') + '"'
     await primary._pool.execute(
@@ -3238,9 +3317,31 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
     )
     restricted: PostgresRepository | None = None
     public_schema_create_revoked = False
+    public_database_temporary_granted = bool(
+        await primary._pool.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_database database
+                CROSS JOIN LATERAL aclexplode(
+                    COALESCE(
+                        database.datacl,
+                        acldefault('d', database.datdba)
+                    )
+                ) AS permission
+                WHERE database.datname = current_database()
+                  AND permission.grantee = 0
+                  AND permission.privilege_type = 'TEMPORARY'
+            )
+            """
+        )
+    )
     try:
         await primary._pool.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
         public_schema_create_revoked = True
+        await primary._pool.execute(
+            f"REVOKE TEMPORARY ON DATABASE {quoted_database} FROM PUBLIC"
+        )
         await primary._pool.execute(
             f"GRANT CONNECT ON DATABASE {quoted_database} TO {quoted_role}"
         )
@@ -3310,9 +3411,12 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
                 updated_at,
                 deletion_requested_at
             ) ON TABLE ownership_accounts TO {quoted_role};
-            GRANT UPDATE (
-                canceled_at
-            ) ON TABLE ownership_account_deletion_requests TO {quoted_role}
+                GRANT UPDATE (
+                    canceled_at
+                ) ON TABLE ownership_account_deletion_requests TO {quoted_role};
+                GRANT EXECUTE ON FUNCTION
+                    noop_ownership_lock_unified_principal(text, text, text)
+                TO {quoted_role}
             """
         )
         parsed = urlsplit(DATABASE_URL)
@@ -3341,6 +3445,9 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
         scoped = PostgresOwnershipRepository(restricted)
         assert await scoped.configuration_ready() is True
         assert await scoped.runtime_ready() is True
+        provisioner = _load_ownership_provisioner()
+        async with restricted._require_pool().acquire() as restricted_connection:
+            await provisioner.verify_role(restricted_connection)
 
         await _provision_band(primary)
         claims, _, principal = await _register(
@@ -3412,6 +3519,15 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
         assert await scoped.configuration_ready() is True
 
         await primary._pool.execute(
+            f"GRANT TEMPORARY ON DATABASE {quoted_database} TO {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            f"REVOKE TEMPORARY ON DATABASE {quoted_database} FROM {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
             f"CREATE SCHEMA {quoted_owned_schema} AUTHORIZATION {quoted_role}"
         )
         assert await scoped.configuration_ready() is False
@@ -3428,6 +3544,125 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
         )
         assert await scoped.configuration_ready() is True
         await primary._pool.execute(f"DROP SEQUENCE public.{quoted_test_sequence}")
+
+        await primary._pool.execute(
+            "REVOKE EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"FROM {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            "GRANT EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"TO {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "GRANT EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"TO {quoted_role} WITH GRANT OPTION"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"FROM {quoted_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "GRANT EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"TO {quoted_inherited_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            "REVOKE EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"FROM {quoted_inherited_role}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "GRANT EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            "TO PUBLIC"
+        )
+        assert await scoped.configuration_ready() is False
+        await primary._pool.execute(
+            "REVOKE EXECUTE ON FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            "FROM PUBLIC"
+        )
+        assert await scoped.configuration_ready() is True
+
+        quoted_principal_table_owner = await primary._pool.fetchval(
+            """
+            SELECT format('%I', pg_get_userbyid(candidate.relowner))
+            FROM pg_class candidate
+            JOIN pg_namespace namespace
+              ON namespace.oid = candidate.relnamespace
+            WHERE namespace.nspname = 'public'
+              AND candidate.relname = 'unified_account_principals'
+              AND candidate.relkind IN ('r', 'p')
+            """
+        )
+        assert quoted_principal_table_owner is not None
+        await primary._pool.execute(
+            "ALTER FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"OWNER TO {quoted_inherited_role}"
+        )
+        assert await scoped.configuration_ready() is False
+        with pytest.raises(provisioner.ProvisioningError):
+            async with restricted._require_pool().acquire() as restricted_connection:
+                await provisioner.verify_role(restricted_connection)
+        await primary._pool.execute(
+            "ALTER FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) "
+            f"OWNER TO {quoted_principal_table_owner}"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            "ALTER FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) STABLE"
+        )
+        assert await scoped.configuration_ready() is False
+        with pytest.raises(provisioner.ProvisioningError):
+            async with restricted._require_pool().acquire() as restricted_connection:
+                await provisioner.verify_role(restricted_connection)
+        await primary._pool.execute(
+            "ALTER FUNCTION "
+            "noop_ownership_lock_unified_principal(text, text, text) VOLATILE"
+        )
+        assert await scoped.configuration_ready() is True
+
+        await primary._pool.execute(
+            f"""
+            CREATE FUNCTION public.{quoted_ordinary_function}()
+            RETURNS integer
+            LANGUAGE sql
+            AS 'SELECT 1';
+            ALTER FUNCTION public.{quoted_ordinary_function}()
+                OWNER TO {quoted_role};
+            """
+        )
+        assert await scoped.configuration_ready() is False
+        with pytest.raises(provisioner.ProvisioningError):
+            await provisioner.assert_role_owns_no_objects(primary._pool, role)
+        with pytest.raises(provisioner.ProvisioningError):
+            async with restricted._require_pool().acquire() as restricted_connection:
+                await provisioner.verify_role(restricted_connection)
+        await primary._pool.execute(
+            "ALTER FUNCTION public."
+            f"{quoted_ordinary_function}() OWNER TO {quoted_principal_table_owner}"
+        )
+        await primary._pool.execute(
+            f"DROP FUNCTION public.{quoted_ordinary_function}()"
+        )
+        assert await scoped.configuration_ready() is True
 
         security_definer_function = f"ownership_escalation_{uuid4().hex}"
         quoted_security_definer_function = f'"{security_definer_function}"'
@@ -3612,6 +3847,9 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
                 f"DROP FUNCTION IF EXISTS public.{quoted_security_definer_function}()"
             )
         await primary._pool.execute(
+            f"DROP FUNCTION IF EXISTS public.{quoted_ordinary_function}()"
+        )
+        await primary._pool.execute(
             f"DROP SEQUENCE IF EXISTS public.{quoted_test_sequence}"
         )
         await primary._pool.execute(
@@ -3622,6 +3860,10 @@ async def test_ownership_readiness_accepts_only_a_restricted_principal(
         await primary._pool.execute(f"DROP ROLE IF EXISTS {quoted_inherited_role}")
         if public_schema_create_revoked:
             await primary._pool.execute("GRANT CREATE ON SCHEMA public TO PUBLIC")
+        if public_database_temporary_granted:
+            await primary._pool.execute(
+                f"GRANT TEMPORARY ON DATABASE {quoted_database} TO PUBLIC"
+            )
 
 
 @pytest.mark.asyncio

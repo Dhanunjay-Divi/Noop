@@ -449,7 +449,10 @@ public actor ManagedSyncCoordinator {
         "raw_motion",
         "derived_summaries",
     ]
-    public static let changeFeedCapabilityVersion = 1
+    // Version 2 makes complete-history restore totals server-readable-only.
+    // Older in-progress checkpoints may include client-encrypted chunks and
+    // therefore must be replaced before resuming.
+    public static let changeFeedCapabilityVersion = 2
 
     private let transport: any ManagedStorageTransport
     private let extractor: any ManagedChunkExtracting

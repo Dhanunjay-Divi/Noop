@@ -786,6 +786,66 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
         XCTAssertNil(checkpoint)
     }
 
+    func testServerReadableRestoreUpgradeDiscardsLegacyInProgressCheckpoint() async throws {
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+        let legacyCheckpoint = ManagedSnapshotRestoreCheckpoint(
+            requestID: UUID(),
+            dataClasses: ["essential_timeseries"],
+            changeFeedCapabilityVersion: 1,
+            restoreJobID: UUID(),
+            snapshotAt: "2026-09-01T01:00:00Z",
+            changeSequence: 11,
+            selectedObjects: 1,
+            selectedBytes: 1,
+            documentsComplete: true,
+            deliveredObjects: 2,
+            deliveredBytes: 2
+        )
+        let state = CoordinatorState(
+            snapshotCheckpoint: legacyCheckpoint,
+            changeFeedCapabilityVersion: 1
+        )
+        let transport = CoordinatorTransport()
+
+        let result = try await ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        ).sync(
+            source: source,
+            authorization: authorization,
+            now: Date(timeIntervalSince1970: 0),
+            dataClasses: ["essential_timeseries"],
+            maxChangePages: 1,
+            maxDocumentUploads: 0
+        )
+
+        let snapshotClearCount = await state.snapshotClearCount()
+        let restoreCreationCount = await transport.restoreCreationCount()
+        let capabilityVersion = await state.currentChangeFeedCapabilityVersion()
+        let checkpoint = await state.currentSnapshotCheckpoint()
+        XCTAssertEqual(snapshotClearCount, 1)
+        XCTAssertEqual(restoreCreationCount, 1)
+        XCTAssertEqual(
+            capabilityVersion,
+            ManagedSyncCoordinator.changeFeedCapabilityVersion
+        )
+        XCTAssertNil(checkpoint)
+        XCTAssertFalse(result.hasMoreChanges)
+    }
+
     func testRejectedCapabilityUpgradeTombstoneDoesNotAdvanceSnapshotCursor() async throws {
         let source = try ManagedSourceDescriptor(
             localSourceID: "strap",

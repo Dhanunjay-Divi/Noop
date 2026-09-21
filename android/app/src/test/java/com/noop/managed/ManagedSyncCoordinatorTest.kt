@@ -302,6 +302,50 @@ class ManagedSyncCoordinatorTest {
     }
 
     @Test
+    fun serverReadableRestoreUpgradeDiscardsLegacyInProgressCheckpoint() = runTest {
+        val state = FakeState(
+            restoreCheckpoint = ManagedSnapshotRestoreCheckpoint(
+                requestId = UUID.randomUUID(),
+                dataClasses = listOf("essential_timeseries"),
+                changeFeedCapabilityVersion = 1,
+                restoreJobId = UUID.randomUUID(),
+                snapshotAt = "2026-09-01T01:00:00Z",
+                changeSequence = 11,
+                selectedObjects = 1,
+                selectedBytes = 1,
+                documentsComplete = true,
+                deliveredObjects = 2,
+                deliveredBytes = 2,
+            ),
+            capabilityVersion = 1,
+        )
+        val transport = FakeTransport()
+
+        val result = ManagedSyncCoordinator(
+            transport,
+            FakeExtractor(),
+            state,
+            FakeRestore(),
+        ).sync(
+            source,
+            authorization,
+            nowMs = 2_000,
+            dataClasses = listOf("essential_timeseries"),
+            maxChangePages = 1,
+            maxDocumentUploads = 0,
+        )
+
+        assertEquals(1, state.snapshotClears)
+        assertEquals(1, transport.restoreCreations)
+        assertEquals(
+            ManagedSyncCoordinator.CHANGE_FEED_CAPABILITY_VERSION,
+            state.capabilityVersion,
+        )
+        assertNull(state.restoreCheckpoint)
+        assertFalse(result.hasMoreChanges)
+    }
+
+    @Test
     fun rejectedCapabilityUpgradeTombstoneDoesNotAdvanceSnapshotCursor() = runTest {
         val state = FakeState(capabilityVersion = 0)
         val transport = FakeTransport(

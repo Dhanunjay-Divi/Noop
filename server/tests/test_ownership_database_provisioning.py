@@ -114,6 +114,12 @@ def test_provisioner_uses_the_exact_runtime_readiness_allowlist() -> None:
         privilege == "UPDATE"
         for _, _, privilege in script.OWNERSHIP_COLUMN_PRIVILEGE_TRIPLES
     )
+    assert script.OWNERSHIP_API_PROFILE.function_signatures == (
+        (
+            "noop_ownership_lock_unified_principal",
+            ("text", "text", "text"),
+        ),
+    )
 
 
 def test_lifecycle_profile_matches_the_exact_coordination_readiness_allowlist() -> None:
@@ -141,6 +147,7 @@ def test_lifecycle_profile_matches_the_exact_coordination_readiness_allowlist() 
         table == "ownership_account_deletion_target_progress" and privilege == "UPDATE"
         for table, _, privilege in column_privileges
     )
+    assert profile.function_signatures == ()
     assert not any(
         restricted in table
         for table, _ in table_privileges
@@ -229,7 +236,9 @@ def test_grants_are_quoted_and_contain_no_unapproved_privilege() -> None:
     statements = script.exact_grant_statements("noop_ownership")
 
     assert len(statements) == (
-        len(script.OWNERSHIP_TABLE_PRIVILEGES) + len(script.OWNERSHIP_COLUMN_PRIVILEGES)
+        len(script.OWNERSHIP_TABLE_PRIVILEGES)
+        + len(script.OWNERSHIP_COLUMN_PRIVILEGES)
+        + len(script.OWNERSHIP_API_PROFILE.function_signatures)
     )
     assert all(statement.endswith('TO "noop_ownership"') for statement in statements)
     assert all("DELETE" not in statement for statement in statements)
@@ -247,6 +256,11 @@ def test_grants_are_quoted_and_contain_no_unapproved_privilege() -> None:
     assert not any(
         statement.startswith("GRANT UPDATE ON TABLE") for statement in statements
     )
+    assert (
+        "GRANT EXECUTE ON FUNCTION "
+        'public."noop_ownership_lock_unified_principal"(text, text, text) '
+        'TO "noop_ownership"'
+    ) in statements
 
 
 def test_post_provision_verifier_covers_runtime_escalation_boundaries() -> None:
@@ -254,12 +268,23 @@ def test_post_provision_verifier_covers_runtime_escalation_boundaries() -> None:
 
     assert "AND NOT rolinherit" in source
     assert "NOT has_database_privilege(current_database(), 'CREATE')" in source
+    assert "NOT has_database_privilege(current_database(), 'TEMPORARY')" in source
+    assert "REVOKE TEMPORARY ON DATABASE" in source
     assert "WHERE relowner = (" in source
     assert "WHERE nspowner = (" in source
     assert "WHERE datdba = (" in source
+    assert "WHERE proowner = (" in source
     assert "has_sequence_privilege" in source
     assert "candidate.prosecdef" in source
+    assert "candidate.provolatile" in source
     assert "has_function_privilege(candidate.oid, 'EXECUTE')" in source
+    assert "oidvectortypes(candidate.proargtypes)" in source
+    assert "runtime_execute_exact" in source
+    assert "execute_acl_exact" in source
+    assert "owner_matches_principal_table" in source
+    assert "OWNERSHIP_PRINCIPAL_LOCK_FUNCTION_BODY" in source
+    assert "OWNERSHIP_PRINCIPAL_LOCK_FUNCTION_CONFIG" in source
+    assert "actual_security_definers != expected_security_definers" in source
 
 
 def test_database_url_round_trips_without_exposing_values_in_arguments() -> None:

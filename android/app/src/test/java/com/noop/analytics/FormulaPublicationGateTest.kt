@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.test.runTest
 
 class FormulaPublicationGateTest {
     @Test
@@ -121,6 +122,42 @@ class FormulaPublicationGateTest {
     }
 
     @Test
+    fun socialSummaryPublicationWaitsForFormulaMigration() {
+        assertFalse(
+            FormulaPublicationGate.shouldPublishSocialSummaries(
+                computedDerivedReady = false,
+            ),
+        )
+        assertTrue(
+            FormulaPublicationGate.shouldPublishSocialSummaries(
+                computedDerivedReady = true,
+            ),
+        )
+    }
+
+    @Test
+    fun managedSocialSummaryUploadBodyWaitsForFormulaMigration() = runTest {
+        var uploadAttempts = 0
+        val deferred = FormulaPublicationGate.publishSocialSummariesIfReady(
+            computedDerivedReady = false,
+        ) {
+            uploadAttempts += 1
+            7
+        }
+        assertEquals(null, deferred)
+        assertEquals(0, uploadAttempts)
+
+        val published = FormulaPublicationGate.publishSocialSummariesIfReady(
+            computedDerivedReady = true,
+        ) {
+            uploadAttempts += 1
+            7
+        }
+        assertEquals(7, published)
+        assertEquals(1, uploadAttempts)
+    }
+
+    @Test
     fun uploadPathsUseTheSharedFailClosedGate() {
         val remoteCoordinator = source(
             "src/main/java/com/noop/sync/RemoteSyncCoordinator.kt",
@@ -147,6 +184,9 @@ class FormulaPublicationGateTest {
         assertTrue(remoteService.contains("hasDeferredComputedDerived"))
         assertTrue(remoteService.contains("!hasDeferredComputedDerived"))
         assertTrue(managedService.contains("FormulaPublicationGate.managedDataClasses"))
+        assertTrue(managedService.contains(
+            "FormulaPublicationGate.publishSocialSummariesIfReady",
+        ))
         assertTrue(managedService.contains("dataClasses = dataClasses"))
     }
 

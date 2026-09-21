@@ -1680,6 +1680,10 @@ final class ManagedStorageClientTests: XCTestCase {
                 ["essential_timeseries", "raw_ppg"]
             )
             XCTAssertEqual(
+                body["chunk_content_mode"] as? String,
+                "server_readable"
+            )
+            XCTAssertEqual(
                 body["include_deleted_documents"] as? Bool,
                 true
             )
@@ -1720,6 +1724,42 @@ final class ManagedStorageClientTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? ManagedStorageError, .conflict)
         }
+    }
+
+    func testSnapshotChunkListRequestsServerReadableContentMode() async throws {
+        let (client, authorization) = try makeClient()
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/managed/chunks")
+            let components = try XCTUnwrap(
+                URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            )
+            func queryValue(_ name: String) -> String? {
+                components.queryItems?.first(where: { $0.name == name })?.value
+            }
+            XCTAssertEqual(queryValue("data_class"), "essential_timeseries")
+            XCTAssertEqual(queryValue("content_mode"), "server_readable")
+            XCTAssertEqual(queryValue("snapshot_at"), "2026-09-01T00:00:00Z")
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"chunks":[],"next_cursor":null}"#.utf8)
+            )
+        }
+
+        let page = try await client.availableChunks(
+            dataClass: "essential_timeseries",
+            snapshotAt: "2026-09-01T00:00:00Z",
+            after: nil,
+            limit: 25,
+            authorization: authorization
+        )
+
+        XCTAssertTrue(page.chunks.isEmpty)
+        XCTAssertNil(page.nextCursor)
     }
 
     func testMissingManagedResourceHasDistinctError() async throws {

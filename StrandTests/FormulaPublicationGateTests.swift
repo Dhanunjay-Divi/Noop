@@ -120,6 +120,40 @@ final class FormulaPublicationGateTests: XCTestCase {
         )
     }
 
+    func testSocialSummaryPublicationWaitsForFormulaMigration() {
+        XCTAssertFalse(
+            FormulaPublicationGate.shouldPublishSocialSummaries(
+                computedDerivedReady: false
+            )
+        )
+        XCTAssertTrue(
+            FormulaPublicationGate.shouldPublishSocialSummaries(
+                computedDerivedReady: true
+            )
+        )
+    }
+
+    func testManagedSocialSummaryUploadBodyWaitsForFormulaMigration() async {
+        var uploadAttempts = 0
+        let deferred = await FormulaPublicationGate.publishSocialSummariesIfReady(
+            computedDerivedReady: false
+        ) {
+            uploadAttempts += 1
+            return 7
+        }
+        XCTAssertNil(deferred)
+        XCTAssertEqual(uploadAttempts, 0)
+
+        let published = await FormulaPublicationGate.publishSocialSummariesIfReady(
+            computedDerivedReady: true
+        ) {
+            uploadAttempts += 1
+            return 7
+        }
+        XCTAssertEqual(published, 7)
+        XCTAssertEqual(uploadAttempts, 1)
+    }
+
     func testUploadPathsUseTheSharedFailClosedGate() throws {
         let remote = try source("Strand/Data/RemoteSyncService.swift")
         XCTAssertTrue(remote.contains("includeDerived: namespace.derived && publishDerived"))
@@ -132,6 +166,9 @@ final class FormulaPublicationGateTests: XCTestCase {
 
         let managed = try source("StrandiOS/System/ManagedCloudService.swift")
         XCTAssertTrue(managed.contains("FormulaPublicationGate.managedDataClasses"))
+        XCTAssertTrue(
+            managed.contains("publishSocialSummariesIfReady")
+        )
         XCTAssertTrue(managed.contains("FormulaPublicationGate.deferredDiagnosticFields"))
     }
 

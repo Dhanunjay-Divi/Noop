@@ -130,6 +130,21 @@ def test_capability_mutations_use_account_erasure_fence() -> None:
         assert account_fence < first_mutation
 
 
+def test_restore_snapshot_filters_chunk_content_mode_consistently() -> None:
+    request = ManagedRestoreRequest(request_id=uuid4())
+    assert request.chunk_content_mode == "server_readable"
+
+    list_source = inspect.getsource(PostgresManagedRepository.list_available_chunks)
+    assert "content_mode = $8" in list_source
+    assert 'content_mode: str = "server_readable"' in list_source
+
+    restore_source = inspect.getsource(PostgresManagedRepository.create_restore)
+    assert '"chunk_content_mode": request.chunk_content_mode' in restore_source
+    assert "AND content_mode = $6" in restore_source
+    assert "request.chunk_content_mode" in restore_source
+    assert "existing_filters.setdefault(" in restore_source
+
+
 def test_derived_erasure_removes_and_verifies_formula_shadow_rows() -> None:
     source = inspect.getsource(PostgresManagedRepository.finalize_erasure_jobs)
     account_fence = source.index("noop-managed-erasure-account:")

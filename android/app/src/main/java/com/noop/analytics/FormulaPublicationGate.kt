@@ -109,6 +109,18 @@ internal object FormulaPublicationGate {
     ): Boolean =
         sourceKind != COMPUTED_SOURCE_KIND || computedDerivedReady
 
+    fun shouldPublishSocialSummaries(
+        computedDerivedReady: Boolean,
+    ): Boolean = computedDerivedReady
+
+    suspend fun <T> publishSocialSummariesIfReady(
+        computedDerivedReady: Boolean,
+        publish: suspend () -> T,
+    ): T? {
+        if (!shouldPublishSocialSummaries(computedDerivedReady)) return null
+        return publish()
+    }
+
     fun managedDataClasses(
         sourceKind: String,
         available: List<String>,

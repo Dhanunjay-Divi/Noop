@@ -1344,6 +1344,7 @@ public actor ManagedStorageClient {
             body: ManagedRestoreRequest(
                 requestID: requestID,
                 dataClasses: classes,
+                chunkContentMode: "server_readable",
                 documentKinds: [.dayOwnership],
                 includeDocuments: true,
                 includeDeletedDocuments: includeDeletedDocuments
@@ -1374,6 +1375,7 @@ public actor ManagedStorageClient {
         }
         var query = [
             "data_class=\(Self.queryValue(dataClass))",
+            "content_mode=server_readable",
             "snapshot_at=\(Self.queryValue(snapshotAt))",
             "limit=\(limit)",
         ]

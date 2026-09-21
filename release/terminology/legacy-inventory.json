@@ -5,7 +5,7 @@
     "customer": 814,
     "fixture": 5587,
     "generated": 21,
-    "historical": 3160,
+    "historical": 3166,
     "import": 871,
     "persisted": 667
   },
@@ -15313,7 +15313,7 @@
       "category": "historical",
       "lineNumbers": [
         4,
-        256
+        293
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/FormulaPublicationGateTests.swift",
@@ -15325,7 +15325,7 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        254
+        291
       ],
       "occurrenceCount": 1,
       "path": "StrandTests/FormulaPublicationGateTests.swift",
@@ -17175,15 +17175,15 @@
       "lineNumbers": [
         14,
         726,
-        3184,
-        3982,
-        3989,
-        4032,
-        4034,
-        4128,
-        4134,
-        4589,
-        5590
+        3215,
+        4013,
+        4020,
+        4063,
+        4065,
+        4159,
+        4165,
+        4620,
+        5621
       ],
       "occurrenceCount": 11,
       "path": "StrandiOS/System/ManagedCloudService.swift",
@@ -22764,15 +22764,15 @@
         31,
         162,
         2399,
-        3157,
-        3157,
-        3166,
-        3166,
-        3179,
-        3180,
-        3181,
-        3738,
-        3740
+        3184,
+        3184,
+        3193,
+        3193,
+        3206,
+        3207,
+        3208,
+        3765,
+        3767
       ],
       "occurrenceCount": 14,
       "path": "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
@@ -36054,12 +36054,15 @@
       "lineNumbers": [
         57,
         78,
-        123
+        167,
+        287,
+        314
       ],
-      "occurrenceCount": 3,
+      "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "7ce2288aac057219b3f88676b2eb4960e5e04d8a89fa99db08dfd1edfc6c41d5",
+      "sha256": "7e5c11f037d121ede907e0c3acfc8d81d8a794a2991c022ea80506d61f1032c8",
       "tokenCounts": {
+        "whoop": 2,
         "whoopstore": 3
       }
     },
@@ -36373,31 +36376,35 @@
     {
       "category": "historical",
       "lineNumbers": [
-        144,
-        213
+        205,
+        207,
+        292,
+        346,
+        375
       ],
-      "occurrenceCount": 2,
+      "occurrenceCount": 5,
       "path": "docs/ops/rounds/2026-09-21-pr16-final-readiness-closeout.md",
-      "sha256": "36bb1b3ba5f8671bc34c61606350461ff3e0ea54ec48992031a22fcdc4f7fa0a",
+      "sha256": "58de2b8bb7599356df323761ee59022bec7a21f814b2bf48946dec328f0f7daa",
       "tokenCounts": {
-        "whoop": 1,
+        "whoop": 4,
         "whoopstore": 1
       }
     },
     {
       "category": "historical",
       "lineNumbers": [
+        8,
         12,
         17,
         38,
         74,
         74
       ],
-      "occurrenceCount": 5,
+      "occurrenceCount": 6,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "8efaf3a549c531be650e336696baa7002b96027cb606172d352f104756fa9739",
+      "sha256": "74b02ba163a21acedc37c7c2d68f189eaace13f8a912b7f5f754d040be4e4f78",
       "tokenCounts": {
-        "whoop": 2,
+        "whoop": 3,
         "whoopstore": 3
       }
     },
@@ -38614,7 +38621,7 @@
       }
     }
   ],
-  "occurrenceCount": 17840,
+  "occurrenceCount": 17846,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

@@ -119,6 +119,24 @@ enum FormulaPublicationGate {
         sourceKind != computedSourceKind || computedDerivedReady
     }
 
+    static func shouldPublishSocialSummaries(
+        computedDerivedReady: Bool
+    ) -> Bool {
+        computedDerivedReady
+    }
+
+    static func publishSocialSummariesIfReady<T>(
+        computedDerivedReady: Bool,
+        publish: () async throws -> T
+    ) async rethrows -> T? {
+        guard shouldPublishSocialSummaries(
+            computedDerivedReady: computedDerivedReady
+        ) else {
+            return nil
+        }
+        return try await publish()
+    }
+
     static func managedDataClasses(
         sourceKind: String,
         available: [String],

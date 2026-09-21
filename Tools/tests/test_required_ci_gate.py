@@ -800,9 +800,16 @@ class RequiredCIGateTests(unittest.TestCase):
             source.count(
                 '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
             ),
-            4,
+            2,
         )
-        self.assertEqual(source.count("--max-workers=2"), 4)
+        self.assertEqual(
+            source.count(
+                '"-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8"'
+            ),
+            2,
+        )
+        self.assertEqual(source.count("--max-workers=2"), 2)
+        self.assertEqual(source.count("--max-workers=1"), 2)
         self.assertEqual(source.count("app/build/noop-managed-device-status/"), 22)
         self.assertEqual(source.count("--no-daemon"), 8)
         self.assertEqual(source.count("--no-configuration-cache"), 8)
@@ -856,15 +863,13 @@ class RequiredCIGateTests(unittest.TestCase):
             expected_disk_floor_count = (
                 0 if "without starting an emulator" in step_name else 1
             )
-            expected_test_heap_count = (
-                1
-                if (
-                    "Run production-shell instrumentation tests" in step_name
-                    or "Retry production-shell once" in step_name
-                    or "Prove Review Sample worker isolation" in step_name
-                    or "Retry Review Sample isolation once" in step_name
-                )
-                else 0
+            production_shell_test = (
+                "Run production-shell instrumentation tests" in step_name
+                or "Retry production-shell once" in step_name
+            )
+            review_sample_test = (
+                "Prove Review Sample worker isolation" in step_name
+                or "Retry Review Sample isolation once" in step_name
             )
             self.assertEqual(
                 block.count("--min-free-disk-gib 4"),
@@ -874,11 +879,21 @@ class RequiredCIGateTests(unittest.TestCase):
                 block.count(
                     '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
                 ),
-                expected_test_heap_count,
+                1 if review_sample_test else 0,
+            )
+            self.assertEqual(
+                block.count(
+                    '"-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8"'
+                ),
+                1 if production_shell_test else 0,
             )
             self.assertEqual(
                 block.count("--max-workers=2"),
-                expected_test_heap_count,
+                1 if review_sample_test else 0,
+            )
+            self.assertEqual(
+                block.count("--max-workers=1"),
+                1 if production_shell_test else 0,
             )
             self.assertEqual(block.count("--max-log-mib 16"), 1)
             status_path = re.search(r"--status-file ([^ \\\\\n]+)", block)

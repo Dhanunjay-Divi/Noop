@@ -592,6 +592,9 @@ class ManagedRestoreRequest(StrictModel):
     request_id: UUID
     snapshot_at: datetime | None = None
     data_classes: list[str] = Field(default_factory=list, max_length=32)
+    chunk_content_mode: Literal["server_readable", "client_encrypted"] = (
+        "server_readable"
+    )
     document_kinds: list[ManagedDocumentKind] = Field(
         default_factory=list,
         max_length=16,

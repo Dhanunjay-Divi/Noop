@@ -2208,11 +2208,14 @@ def test_mobile_restore_is_chunk_only_and_snapshot_query_is_forwarded() -> None:
     assert repository.chunk_list_calls[-1]["snapshot_at"] == datetime(
         2026, 9, 1, 2, tzinfo=UTC
     )
+    assert repository.chunk_list_calls[-1]["content_mode"] == "server_readable"
     assert restore.status_code == 201
     assert tombstone_restore.status_code == 201
     assert restore.json()["restore"]["change_sequence"] == 4
+    assert repository.restore_requests[-2].chunk_content_mode == "server_readable"
     assert repository.restore_requests[-2].include_documents is False
     assert repository.restore_requests[-2].include_deleted_documents is False
+    assert repository.restore_requests[-1].chunk_content_mode == "server_readable"
     assert repository.restore_requests[-1].include_documents is True
     assert repository.restore_requests[-1].include_deleted_documents is True
 

@@ -6,7 +6,7 @@ import hmac
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import (
@@ -2080,6 +2080,9 @@ def managed_router(
         start: datetime | None = None,
         end: datetime | None = None,
         data_class: str | None = None,
+        content_mode: Literal["server_readable", "client_encrypted"] = (
+            "server_readable"
+        ),
         snapshot_at: datetime | None = None,
         after_event_start: datetime | None = None,
         after_chunk_id: UUID | None = None,
@@ -2117,6 +2120,7 @@ def managed_router(
                 start=start,
                 end=end,
                 data_class=data_class,
+                content_mode=content_mode,
                 after_event_start=after_event_start,
                 after_chunk_id=after_chunk_id,
                 limit=limit + 1,

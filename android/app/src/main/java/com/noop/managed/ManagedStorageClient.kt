@@ -1322,6 +1322,7 @@ class ManagedStorageClient(
         val body = JSONObject()
             .put("request_id", requestId.toString())
             .put("data_classes", JSONArray(classes))
+            .put("chunk_content_mode", "server_readable")
             .put(
                 "document_kinds",
                 JSONArray(listOf(ManagedDocumentKind.DAY_OWNERSHIP.wireValue)),
@@ -1354,6 +1355,7 @@ class ManagedStorageClient(
         }
         val query = buildList {
             add("data_class=${queryValue(dataClass)}")
+            add("content_mode=server_readable")
             add("snapshot_at=${queryValue(snapshotAt)}")
             add("limit=$limit")
             after?.let {

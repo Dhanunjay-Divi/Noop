@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable, Literal
 from uuid import UUID, uuid4
 
-from app.managed_identity import ManagedIdentityClaims
+from app.managed_identity import ManagedIdentityClaims, unified_identity_lock_key
 from app.observability import emit_operational_event
 from app.repository import PostgresRepository
 
@@ -178,7 +178,7 @@ class PostgresUnifiedIdentityAuthorityRepository:
         self,
         claims: ManagedIdentityClaims,
     ) -> UnifiedPrincipal:
-        lock_key = _identity_lock_key(claims)
+        lock_key = unified_identity_lock_key(claims)
         outcome = "failed"
         managed_linked = False
         ownership_linked = False
@@ -1290,17 +1290,6 @@ def _baseline_authority_state(
 
 def _optional_digest(value: object) -> str | None:
     return str(value).strip() if value is not None else None
-
-
-def _identity_lock_key(claims: ManagedIdentityClaims) -> str:
-    digest = hashlib.sha256(
-        json.dumps(
-            [claims.issuer, claims.provider_tenant, claims.subject_hash],
-            ensure_ascii=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-    return f"noop-unified-principal:{digest}"
 
 
 def _authority_lock_key(managed_account_id: UUID, data_class: str) -> str:

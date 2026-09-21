@@ -77,12 +77,19 @@ class FormulaDayContext:
         end_offset = local_end.utcoffset()
         if start_offset is None or end_offset is None:
             raise FormulaInputContractError("timezone offsets are unavailable")
+        try:
+            day_start_at = local_start.astimezone(UTC)
+            day_end_at = local_end.astimezone(UTC)
+        except (OverflowError, ValueError) as exc:
+            raise FormulaInputContractError(
+                "local_day is outside the supported range"
+            ) from exc
         return cls(
             account_id=account_id,
             local_day=local_day,
             timezone_name=timezone_name,
-            day_start_at=local_start.astimezone(UTC),
-            day_end_at=local_end.astimezone(UTC),
+            day_start_at=day_start_at,
+            day_end_at=day_end_at,
             utc_offset_start_minutes=int(start_offset.total_seconds() / 60),
             utc_offset_end_minutes=int(end_offset.total_seconds() / 60),
         )

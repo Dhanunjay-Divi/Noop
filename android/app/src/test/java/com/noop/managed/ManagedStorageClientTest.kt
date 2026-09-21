@@ -470,6 +470,38 @@ class ManagedStorageClientTest {
                 body.getJSONArray("data_classes").getString(it)
             },
         )
+        assertEquals("server_readable", body.getString("chunk_content_mode"))
+    }
+
+    @Test
+    fun snapshotChunkListRequestsServerReadableContentMode() = runTest {
+        var captured: Request? = null
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured = request
+                response(
+                    request,
+                    200,
+                    """{"chunks":[],"next_cursor":null}""",
+                )
+            },
+        )
+
+        val page = client.availableChunks(
+            authorization = authorization,
+            dataClass = "essential_timeseries",
+            snapshotAt = "2026-09-01T00:00:00Z",
+            after = null,
+            limit = 25,
+        )
+
+        assertTrue(page.chunks.isEmpty())
+        assertNull(page.nextCursor)
+        assertEquals(
+            "server_readable",
+            captured!!.url.queryParameter("content_mode"),
+        )
     }
 
     @Test

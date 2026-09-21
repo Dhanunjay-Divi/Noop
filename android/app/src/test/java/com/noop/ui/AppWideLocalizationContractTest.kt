@@ -54,8 +54,8 @@ class AppWideLocalizationContractTest {
         )
         assertTrue("Canonical app-wide localization source unavailable", canonical != null)
         assertEquals(
-            "Android base keys match the canonical source after retired presentation copy",
-            canonicalKeys(canonical!!) - RETIRED_ANDROID_KEYS,
+            "Android base keys match the canonical source",
+            canonicalKeys(canonical!!),
             base.keys,
         )
         assertEquals(
@@ -165,9 +165,4 @@ class AppWideLocalizationContractTest {
         }
     }
 
-    private companion object {
-        val RETIRED_ANDROID_KEYS = setOf(
-            "appwide_friends_invite_instructions",
-        )
-    }
 }

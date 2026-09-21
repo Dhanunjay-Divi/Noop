@@ -2669,6 +2669,33 @@ class ManagedCloudService private constructor(context: Context) {
         managedClient: ManagedStorageClient,
         authorization: ManagedAuthorization,
     ): Int {
+        val computedDerivedReady = FormulaPublicationGate.computedDerivedReady(
+            NoopPrefs.of(appContext),
+        )
+        val uploaded = FormulaPublicationGate.publishSocialSummariesIfReady(
+            computedDerivedReady,
+        ) {
+            uploadReadySocialSummaries(
+                friends,
+                managedClient,
+                authorization,
+            )
+        }
+        if (uploaded == null) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "formula_publication",
+                fields = FormulaPublicationGate.DEFERRED_DIAGNOSTIC_FIELDS,
+            )
+            return 0
+        }
+        return uploaded
+    }
+
+    private suspend fun uploadReadySocialSummaries(
+        friends: List<ManagedSocialFriend>,
+        managedClient: ManagedStorageClient,
+        authorization: ManagedAuthorization,
+    ): Int {
         val days = ManagedSocialRuntime.summaryDays()
         if (days.isEmpty()) return 0
         val firstDay = days.first()

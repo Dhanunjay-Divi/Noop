@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
-from app.managed_identity import ManagedIdentityClaims
+from app.managed_identity import ManagedIdentityClaims, unified_identity_lock_key
 from app.ownership_deletion import (
     OwnershipBandRetirementCandidate,
     OwnershipBandRetirementEligibility,
@@ -29,6 +29,56 @@ from app.ownership_models import (
 )
 from app.ownership_possession import OwnershipPossessionEvidence
 from app.repository import PostgresRepository
+
+_OWNERSHIP_PRINCIPAL_LOCK_FUNCTION_BODY = " ".join(
+    """
+    WITH locked_principal AS MATERIALIZED (
+        SELECT
+            principal.principal_id,
+            principal.issuer,
+            principal.provider_tenant,
+            principal.subject_hash,
+            principal.status
+        FROM public.unified_account_principals AS principal
+        WHERE principal.issuer = requested_issuer
+          AND principal.provider_tenant = requested_provider_tenant
+          AND principal.subject_hash =
+              requested_subject_hash::character(64)
+        FOR UPDATE
+    ),
+    linked_ownership AS (
+        INSERT INTO public.unified_ownership_account_links (
+            principal_id,
+            ownership_account_id,
+            ownership_identity_id,
+            issuer,
+            provider_tenant,
+            subject_hash
+        )
+        SELECT
+            principal.principal_id,
+            identity.account_id,
+            identity.identity_id,
+            principal.issuer,
+            principal.provider_tenant,
+            principal.subject_hash
+        FROM locked_principal AS principal
+        JOIN public.ownership_external_identities AS identity
+          ON identity.issuer = principal.issuer
+         AND identity.provider_tenant = principal.provider_tenant
+         AND identity.subject_hash = principal.subject_hash
+        JOIN public.ownership_accounts AS account
+          ON account.account_id = identity.account_id
+        WHERE principal.status = 'active'
+          AND identity.status = 'active'
+          AND account.status = 'active'
+        ON CONFLICT DO NOTHING
+        RETURNING principal_id
+    )
+    SELECT status
+    FROM locked_principal
+    """.split()
+)
 
 
 class OwnershipError(Exception):
@@ -475,6 +525,10 @@ class PostgresOwnershipRepository:
                         current_database(),
                         'CREATE'
                     )
+                    AND NOT has_database_privilege(
+                        current_database(),
+                        'TEMPORARY'
+                    )
                 ) AS database_bounded,
                 NOT EXISTS (
                     SELECT 1
@@ -496,6 +550,14 @@ class PostgresOwnershipRepository:
                     SELECT 1
                     FROM pg_database
                     WHERE datdba = (
+                        SELECT oid
+                        FROM pg_roles
+                        WHERE rolname = current_user
+                    )
+                    UNION ALL
+                    SELECT 1
+                    FROM pg_proc
+                    WHERE proowner = (
                         SELECT oid
                         FROM pg_roles
                         WHERE rolname = current_user
@@ -613,20 +675,122 @@ class PostgresOwnershipRepository:
                           'SELECT,UPDATE,USAGE'
                       )
                 ) AS sequences_bounded,
-                NOT EXISTS (
-                    SELECT 1
-                    FROM pg_proc candidate
-                    JOIN pg_namespace namespace
-                      ON namespace.oid = candidate.pronamespace
-                    WHERE candidate.prosecdef
-                      AND namespace.nspname <> 'information_schema'
-                      AND namespace.nspname !~ '^pg_'
-                      AND has_function_privilege(
-                          candidate.oid,
-                          'EXECUTE'
-                      )
+                (
+                    EXISTS (
+                        SELECT 1
+                        FROM pg_proc candidate
+                        JOIN pg_namespace namespace
+                          ON namespace.oid = candidate.pronamespace
+                        JOIN pg_language language
+                          ON language.oid = candidate.prolang
+                        WHERE candidate.oid = to_regprocedure(
+                            'public.noop_ownership_lock_unified_principal'
+                            '(text,text,text)'
+                        )
+                          AND namespace.nspname = 'public'
+                          AND candidate.prokind = 'f'
+                          AND candidate.prosecdef
+                          AND candidate.provolatile = 'v'
+                          AND candidate.proowner <> (
+                              SELECT oid
+                              FROM pg_roles
+                              WHERE rolname = current_user
+                          )
+                          AND candidate.proowner = (
+                              SELECT relation.relowner
+                              FROM pg_class relation
+                              JOIN pg_namespace relation_namespace
+                                ON relation_namespace.oid =
+                                   relation.relnamespace
+                              WHERE relation_namespace.nspname = 'public'
+                                AND relation.relname =
+                                    'unified_account_principals'
+                                AND relation.relkind IN ('r', 'p')
+                          )
+                          AND candidate.prorettype = 'text'::regtype
+                          AND oidvectortypes(candidate.proargtypes) =
+                              'text, text, text'
+                          AND language.lanname = 'sql'
+                          AND candidate.proconfig = ARRAY[
+                              'search_path=pg_catalog, pg_temp'
+                          ]::text[]
+                          AND btrim(
+                              regexp_replace(
+                                  candidate.prosrc,
+                                  '[[:space:]]+',
+                                  ' ',
+                                  'g'
+                          )
+                          ) = $1
+                          AND has_function_privilege(
+                              candidate.oid,
+                              'EXECUTE'
+                          )
+                          AND EXISTS (
+                              SELECT 1
+                              FROM aclexplode(
+                                  COALESCE(
+                                      candidate.proacl,
+                                      acldefault('f', candidate.proowner)
+                                  )
+                              ) AS permission
+                              WHERE permission.grantee = (
+                                  SELECT oid
+                                  FROM pg_roles
+                                  WHERE rolname = current_user
+                              )
+                                AND permission.privilege_type = 'EXECUTE'
+                                AND NOT permission.is_grantable
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM aclexplode(
+                                  COALESCE(
+                                      candidate.proacl,
+                                      acldefault('f', candidate.proowner)
+                                  )
+                              ) AS permission
+                              WHERE permission.privilege_type = 'EXECUTE'
+                                AND (
+                                    permission.grantee NOT IN (
+                                        candidate.proowner,
+                                        (
+                                            SELECT oid
+                                            FROM pg_roles
+                                            WHERE rolname = current_user
+                                        )
+                                    )
+                                    OR (
+                                        permission.grantee = (
+                                            SELECT oid
+                                            FROM pg_roles
+                                            WHERE rolname = current_user
+                                        )
+                                        AND permission.is_grantable
+                                    )
+                                )
+                          )
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM pg_proc candidate
+                        JOIN pg_namespace namespace
+                          ON namespace.oid = candidate.pronamespace
+                        WHERE candidate.prosecdef
+                          AND namespace.nspname <> 'information_schema'
+                          AND namespace.nspname !~ '^pg_'
+                          AND has_function_privilege(
+                              candidate.oid,
+                              'EXECUTE'
+                          )
+                          AND candidate.oid IS DISTINCT FROM to_regprocedure(
+                              'public.noop_ownership_lock_unified_principal'
+                              '(text,text,text)'
+                          )
+                    )
                 ) AS security_definer_bounded
-            """
+            """,
+            _OWNERSHIP_PRINCIPAL_LOCK_FUNCTION_BODY,
         )
         return bool(
             row is not None
@@ -857,11 +1021,7 @@ class PostgresOwnershipRepository:
             async with connection.transaction():
                 await connection.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                    (
-                        "noop-ownership-identity:"
-                        f"{claims.issuer}:{claims.provider_tenant}:"
-                        f"{claims.subject_hash}"
-                    ),
+                    unified_identity_lock_key(claims),
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 policy = await _current_terms_document(
@@ -881,6 +1041,23 @@ class PostgresOwnershipRepository:
                     raise OwnershipConfigurationError(
                         "ownership terms changed or are unavailable"
                     )
+                unified_principal_status = await connection.fetchval(
+                    """
+                    SELECT public.noop_ownership_lock_unified_principal(
+                        $1,
+                        $2,
+                        $3
+                    )
+                    """,
+                    claims.issuer,
+                    claims.provider_tenant,
+                    claims.subject_hash,
+                )
+                if (
+                    unified_principal_status is not None
+                    and unified_principal_status != "active"
+                ):
+                    raise OwnershipForbiddenError("ownership account is unavailable")
                 identity = await connection.fetchrow(
                     """
                     SELECT identity.identity_id,
@@ -971,6 +1148,23 @@ class PostgresOwnershipRepository:
                     )
 
                 await _lock_account(connection, account_id)
+                unified_principal_status = await connection.fetchval(
+                    """
+                    SELECT public.noop_ownership_lock_unified_principal(
+                        $1,
+                        $2,
+                        $3
+                    )
+                    """,
+                    claims.issuer,
+                    claims.provider_tenant,
+                    claims.subject_hash,
+                )
+                if (
+                    unified_principal_status is not None
+                    and unified_principal_status != "active"
+                ):
+                    raise OwnershipForbiddenError("ownership account is unavailable")
                 await _lock_installation(
                     connection,
                     registration.installation_id,
@@ -2371,11 +2565,7 @@ class PostgresOwnershipRepository:
             async with connection.transaction():
                 await connection.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                    (
-                        "noop-ownership-identity:"
-                        f"{claims.issuer}:{claims.provider_tenant}:"
-                        f"{claims.subject_hash}"
-                    ),
+                    unified_identity_lock_key(claims),
                 )
                 identity = await connection.fetchrow(
                     """

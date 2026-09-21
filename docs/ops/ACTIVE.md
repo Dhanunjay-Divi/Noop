@@ -75,7 +75,7 @@ Last updated: **2026-09-21**
   treats local `strap_trim` only as a diagnostic watermark. Apple reconnects
   fail-closed if a watchdog expires with an acknowledgement in flight. The
   Apple focused suite passes 23/23. Exact-current broad evidence is green:
-  `NoopRemoteSync` 190/190, `WhoopStore` 539/539, macOS 2,213 with one
+  `NoopRemoteSync` 191/191, `WhoopStore` 539/539, macOS 2,213 with one
   intentional skip, iOS simulator 39 with one intentional skip, unsigned
   Release iOS with embedded Watch/widget and zero compiler warnings/errors,
   Android Full and Demo 4,972 each with seven intentional skips across 175
@@ -110,6 +110,49 @@ Last updated: **2026-09-21**
   its ratchet, each variant passed 18/18 focused cases. A narrow follow-up
   commit/push, exact-SHA hosted contexts, thread resolution, protected merge,
   protected-main verification, and cleanup remain.
+- The late Android follow-up is remote at
+  `ad936850d9094ac2c317095f979eebc3b26845ca`. The final two review findings are
+  corrected and verified locally alongside two additional review closures.
+  Formula civil-day UTC conversion rejects underflow/overflow through the
+  existing input contract. Forward migration 059 targets only links created by
+  migration 047 for identities/accounts already terminal at that timestamp,
+  removes dependent authority state, preserves active ownership roots including
+  a concurrent link, retires only true orphans, and restores ordinary guards.
+  Apple and Android defer mixed Friends summaries until formula migration is
+  complete, and complete-history restore/list paths explicitly select
+  `server_readable` chunks while retaining client-encrypted storage. The
+  canonical localization source and generated Apple/Android resources agree
+  after retiring the stale invite key. Hosted Android production-shell runs now
+  use a 1.5 GiB heap and one worker. The final migration repair also removes
+  the historical migration-versus-erasure deadlock, preserves
+  `deletion_pending` principals needed for cancellation, avoids global
+  ownership-table locks, and uses one schema-bound security-definer lock
+  function whose body, principal-table owner, search path, return type,
+  arguments, and exact execute ACL are verified before runtime credentials can
+  be published. Registration takes the principal lock before ownership writes
+  and reconciles the ownership link in the same transaction; the restored link
+  guard is schema-qualified so the hardened function search path cannot shadow
+  or hide its control-plane tables. A final independent database review also
+  unified registration/reconciliation/deletion on one privacy-safe advisory
+  key, restored only tombstone-proven pre-059 erasure principals whose
+  ownership roots predated retirement, and extended runtime verification to
+  helper volatility and `pg_proc` ownership. Current evidence: the complete
+  fresh-database server wall passed 800 tests with only the explicitly opt-in
+  Twilio staging test skipped across 801 collected tests; the final late
+  database/provisioning wall passes 19/19 after the earlier broad 21/21 wall;
+  migration 059 is pinned at
+  `f8fbc7171eaae23b6f5aa8c48c12613189a4ad2567e22c9807eea84c2e8ea1cd`;
+  Ruff check and format pass on the seven final review files after the earlier
+  101-file release-scoped wall; `NoopRemoteSync` passes 192/192; Apple formula
+  contracts pass 12/12; and Android Full/Demo each pass 64/64 focused final
+  cases. The final
+  terminology snapshot records 17,846 occurrences across 1,585 groups with
+  zero forbidden mappings; the complete repository wall passes 355 tests plus
+  44 subtests, and required-CI, release, legal, private-data, health-claims,
+  localization, operations, calibration, trusted-control, and diff gates are
+  green. Only the narrow commit/push, exact-SHA hosted verification,
+  review-thread resolution, protected merge/main trust, and exact cleanup
+  remain.
 - Initial hosted replacement commit `bec61a55c7e45fbb2b1563c891858e439049b9cb`
   reached run `35546684149`. Server source lint passed, but Ruff's format check
   identified seven files. Ruff 0.12.2 applied its canonical formatting to
@@ -119,18 +162,19 @@ Last updated: **2026-09-21**
   replacement push and hosted verification.
 - Xcode 27 is installed and `xcodebuild -license check` exits `0`; the former
   license blocker is resolved.
-- Exact-current local evidence: `NoopRemoteSync` passes 190/190 and
+- Earlier broad local evidence before the late-review follow-up:
+  `NoopRemoteSync` passed 191/191 and
   `WhoopStore` passes 539/539. The complete disposable-PostgreSQL server wall
   passes 784 cases with one intentional skip and two framework deprecation
   warnings. Android Full and Demo each execute 4,972 tests with seven intentional skips and zero
   failures/errors inside one 175-task compile, lint, APK, unit, and
   instrumentation-source wall; lint reports zero Error/Fatal findings. The
-  complete macOS wall passes 2,213 tests with one intentional skip and zero
+  complete macOS wall passed 2,213 tests with one intentional skip and zero
   failures. The unsigned Release iOS graph succeeds with zero compiler errors,
   zero `ManagedCloudService.swift` warnings, and its Watch, complications, and
   widget extensions embedded; the iOS simulator production shell passes 39
-  tests with one intentional skip. The final repository-tool wall passes 305 tests
-  plus 44 subtests, and the latest terminology inventory records 17,837
+  tests with one intentional skip. That repository-tool wall passed 305 tests
+  plus 44 subtests, and its then-current terminology inventory recorded 17,837
   classified occurrences across 1,583 groups with zero forbidden mappings. Thirteen
   database-role tests, 22 production-deployment contracts, and 20 plan-only
   OpenTofu tests pass without apply. Exact replacement-candidate API 35
@@ -240,6 +284,13 @@ Resume from:
 - Implement and verify bounded pager-grade app Safety, independent live-HR
   presentation controls, managed Friends parity, macOS viewer foundations,
   evidence-backed UI refinements, and the supplier wrapper handoff.
+- Preserve the current WHOOP compatibility path for physical regression
+  testing. The private `NoopBandSDK` repository currently contains a
+  binary-free scaffold and integration contract, not an executable supplier
+  adapter or firmware flasher. Implement the neutral core/virtual adapter in a
+  separate reviewed round before adding supplier artifacts; keep real
+  scanning, possession proof, history, haptics, OTA, and flashing behind the
+  supplier-artifact and physical-device gates.
 - Validate every material external finding against current source.
 - Inspect representative current and proposed renders directly.
 - Correct only evidence-backed formula explanation, terminology, loading,
@@ -251,14 +302,14 @@ Resume from:
 
 ## Immediate next actions
 
-1. Run the final repository policy, localization, privacy, claims,
-   provenance, terminology, required-CI, trusted-control, operations-record,
-   and diff walls.
-2. Review the complete intended diff and amend the consolidated replacement
+1. Review the complete intended diff and create the final late-review follow-up
    commit.
-3. Push the corrected exact replacement head once to pull request `#16`.
-4. Require all ten hosted contexts, resolve only source-proven review threads,
+2. Push the corrected exact replacement head once to pull request `#16`.
+3. Require all ten hosted contexts, resolve only source-proven review threads,
    merge normally, and verify the protected-main trusted result.
-5. Remove exact round-owned logs, build outputs, and package caches after their
+4. Remove exact round-owned logs, build outputs, and package caches after their
    results are recorded. Physical hardware, signing/store, legal, carrier,
    credential, production-runtime, and elapsed soak gates remain external.
+5. Start the separate neutral SDK-boundary round only after protected `main` is
+   synchronized; preserve WHOOP as the default test transport until the
+   supplier adapter and firmware pass their physical acceptance matrix.

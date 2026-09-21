@@ -462,6 +462,7 @@ public struct ManagedChangeFeed: Codable, Sendable {
 public struct ManagedRestoreRequest: Codable, Equatable, Sendable {
     public let requestID: UUID
     public let dataClasses: [String]
+    public let chunkContentMode: String
     public let documentKinds: [ManagedDocumentKind]
     public let includeDocuments: Bool
     public let includeDeletedDocuments: Bool
@@ -471,6 +472,7 @@ public struct ManagedRestoreRequest: Codable, Equatable, Sendable {
     public init(
         requestID: UUID,
         dataClasses: [String],
+        chunkContentMode: String = "server_readable",
         documentKinds: [ManagedDocumentKind] = [],
         includeDocuments: Bool = false,
         includeDeletedDocuments: Bool = false,
@@ -479,6 +481,7 @@ public struct ManagedRestoreRequest: Codable, Equatable, Sendable {
     ) {
         self.requestID = requestID
         self.dataClasses = dataClasses
+        self.chunkContentMode = chunkContentMode
         self.documentKinds = documentKinds
         self.includeDocuments = includeDocuments
         self.includeDeletedDocuments = includeDeletedDocuments

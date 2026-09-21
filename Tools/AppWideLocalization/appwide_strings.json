@@ -2738,17 +2738,6 @@
     "zh-Hans": "%1$s（%2$s）",
     "zh-Hant": "%1$s（%2$s）"
   },
-  "appwide.friends.invite.instructions": {
-    "de": "Öffne in Noop Mehr → Freunde und gib die Serveradresse und den Einmalcode ein.",
-    "en": "In Noop, open More → Friends and enter the server address and one-time code.",
-    "es": "En Noop, abre Más → Amigos e introduce la dirección del servidor y el código de un solo uso.",
-    "fr": "Dans Noop, ouvrez Plus → Amis, puis saisissez l’adresse du serveur et le code à usage unique.",
-    "it": "In Noop, apri Altro → Amici e inserisci l’indirizzo del server e il codice monouso.",
-    "pt-PT": "No Noop, abra Mais → Amigos e introduza o endereço do servidor e o código de utilização única.",
-    "ru": "В Noop откройте «Ещё» → «Друзья» и введите адрес сервера и одноразовый код.",
-    "zh-Hans": "在 Noop 中打开“更多”→“好友”，然后输入服务器地址和一次性代码。",
-    "zh-Hant": "在 Noop 中開啟「更多」→「朋友」，然後輸入伺服器位址和一次性代碼。"
-  },
   "appwide.metric_education.body_temp.action": {
     "de": "Prüfe die ursprüngliche Quelle und Messmethode. Bestätige einen unerwarteten Wert mit einem geeigneten Thermometer und hole bei entsprechenden Beschwerden medizinischen Rat ein.",
     "en": "Check the original source and measurement method. Confirm an unexpected value with an appropriate thermometer and seek care when symptoms warrant it.",
