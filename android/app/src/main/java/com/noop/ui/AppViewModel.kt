@@ -1358,6 +1358,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 providedCalibrationCivilDayWindows =
                                     analysisPlan.calibrationCivilDayWindows,
                                 historicalCatchUp = analysisPlan.isHistoricalCatchUp,
+                                traverseResolvableHistory =
+                                    formulaTraversalSelected,
                                 importedDeviceId = analysisSourceId,
                                 maxHROverride = profileStore.hrMaxOverride
                                     .takeIf { it > 0 }?.toDouble(),

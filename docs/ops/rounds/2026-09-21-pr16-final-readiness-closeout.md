@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `all supplier-independent local implementation and verification is green; follow-up commit, hosted checks, and protected integration pending`
+- State: `all supplier-independent local implementation and verification is green; final Android follow-up commit, hosted checks, and protected integration pending`
 - Owner: project team
 - Branch: `codex/ui-cloud-readiness-20260917`
 - Start commit: `84ee85eeb4aa711e2762591fe0a52dc2ba9cb4f3`
@@ -162,9 +162,12 @@ candidate:
   provisioning checks now reject helper volatility drift and any runtime-owned
   ordinary PostgreSQL function, rather than checking table and sequence
   ownership alone.
-- Added an integration regression proving formula migration removes stale
-  computed daily and Rest evidence when retained raw HR is unavailable before
-  marking the traversal complete.
+- Apple and Android formula traversal now remove stale computed daily and
+  managed Rest evidence when the exact historical window no longer has raw or
+  imported inputs to rebuild it. Android threads the explicit traversal intent
+  into the scorer and permits an atomic empty-window replacement only for that
+  migration path; ordinary transient empty passes still preserve the last
+  complete score window.
 - Apple and Android historical-offload progress now advances only after the
   platform confirms the exact acknowledged write. Both stacks fence delayed
   persistence and callbacks across ended sessions; Apple reconnects
@@ -284,6 +287,7 @@ candidate:
 | Final Apple review remediation | 56/56 requested focused cases, 10/10 managed-archive cases, and 10/10 formula cases passed; hosted macOS build passed on candidate `149843c1` | Import reachability, formula migration invalidation, BLE re-arm recovery, macOS viewer transport, and account-task cancellation regressions remain covered | Physical iPhone/macOS behavior, live managed service access, or hardware reconnect timing |
 | Final Android review remediation | Full and Demo each passed 62/62 selected unit cases; Full completed 41 tasks and Demo 58 tasks; app Kotlin and instrumentation-source compilation passed for both variants | Managed account-scope compatibility, managed storage/social serialization, localization/navigation, and removal of the retired Friends presentation compile together | The new account-scope instrumentation case executing on an emulator or physical phone |
 | Late Android review remediation | Full and Demo each passed 12/12 import/Safety cases while compiling app and instrumentation sources; after the localization ratchet each variant passed 18/18 focused cases. Full completed 41 tasks, Demo 58 tasks, and the combined locale rerun 57 tasks | Long managed-history imports have an explicit cancel path and localized terminal status; disabling the active Safety channel blocks registration/delivery while a missing urgent channel may still use the enabled standard fallback | Physical notification-settings behavior, process death during import, or emulator execution of instrumentation cases |
+| Android stale-formula follow-up | `ChargeFormulaUpgradeGateTest` passed 3/3; the Full-debug app and complete instrumentation test source compiled in a 41-task bounded Gradle run. The new Room regression is included in the hosted production-shell suite | Formula traversal selects an empty score-window reconciliation, that reconciliation deletes only the computed daily and managed Rest rows, and imported owners plus unrelated series remain untouched | API 35 execution of the new Room regression, physical-device behavior, or formula accuracy |
 | Final terminology and policy wall | 17,846 occurrences across 1,585 groups with zero forbidden mappings; 355 repository-tool/i18n tests plus 44 subtests passed; required-CI verified 10 contexts; release controls passed 9 checks; operations validation passed across 82 records; legal inventory verified 230 runtime components and 3 container inputs; private-data, health-claims across 1,297 files, calibration parity, trusted-control self-verification, strict/full i18n audit, and diff checks passed | The reviewed terminology snapshot, localization catalogs, ten-context release-control contract, operations records, privacy/claims guards, and repository policy tests match the final local tree | Hosted exact-SHA results, protected-main trust, physical localization/accessibility, or removal of the separately baselined hardcoded-literal debt |
 | Apple history acknowledgement and generation fence | 23 passed, 0 failed after the final watchdog correction | FIFO callback correlation, callback-only trim credit, and delayed persistence rejection compile and pass in the macOS app target | CoreBluetooth callback timing or firmware trim behavior on a physical band |
 | Android history acknowledgement and generation fence | Expanded six-class Full-debug selector wall passed; Gradle build succeeded | Callback-only acknowledgement, write single-delivery, drain gates, continuation, burst progress, and delayed-session fencing compile and pass | Android GATT timing, process death, or firmware behavior on a physical phone and band |
@@ -304,6 +308,27 @@ therefore rejected the PostgreSQL migration-001 checksum. That run collected
 The disposable database was removed. A fresh database with the explicit
 PostgreSQL engine produced the exact-current 800-pass/one-skip result above.
 
+The first local Android follow-up compile used the hosted production-shell
+1.5 GiB heap and stopped with a Kotlin/Compose compiler heap exhaustion before
+tests ran. The bounded runner contained the failure and memory recovered. The
+repository-standard 4 GiB local heap then completed the focused unit test and
+Full-debug instrumentation-source compile successfully. This is a local
+resource-profile distinction, not a source-test failure; hosted Linux retains
+its separately proven 1.5 GiB production-shell contract.
+
+A matching local Demo-flavor rerun was attempted only after deleting the
+recorded Full build outputs, but the bounded runner again stopped before tests
+when free disk crossed the unchanged 10 GiB floor. The floor was not weakened.
+Demo compilation/execution for this final shared-source follow-up therefore
+remains part of the required exact-SHA hosted Android jobs.
+
+Before the rerun, the disposable `noop_pr16_final_r10` PostgreSQL database and
+the exact completed `/private/tmp/noop-pr16-*` logs, artifacts, and virtual
+environment were removed. The active review-thread snapshot and the two new
+Android follow-up log/status pairs were retained until protected integration
+evidence is durable. No unrelated worktree, process, cache, simulator, user
+data, or cloud resource was removed.
+
 ## Physical device and deployment
 
 - Install/update action: not run in this closeout.
@@ -316,17 +341,15 @@ PostgreSQL engine produced the exact-current 800-pass/one-skip result above.
 ## Git and release state
 
 - Pull request: `#16`
-- Remote PR head after the late Android review remediation:
-  `ad936850d9094ac2c317095f979eebc3b26845ca`
-- Local tree: the formula civil-day boundary fix, forward migration 059 and its
-  two engine manifests, atomic ownership-link reconciliation, exact owner and
-  schema-qualified guard verification, formula-gated Friends summaries,
-  server-readable complete-history selection, localization regeneration,
-  Android hosted-memory correction, regressions, and updated operations
-  evidence remain to be committed. Complete local server, focused platform,
-  repository policy, localization, privacy, health-claims, calibration,
-  trusted-control, and diff verification are green.
-- Required next state: one narrow follow-up commit and push, all ten protected
+- Remote PR head before this final Android follow-up:
+  `f8647e4bfaec1b36d857209b7193fd3fe25aa095`
+- Local tree: the Android stale-formula invalidation correction, its JVM and
+  Room regressions, and this updated operations evidence remain to be
+  committed. All earlier exact-current server, Apple, Android, package,
+  repository-policy, localization, privacy, health-claims, calibration,
+  trusted-control, and diff verification remains green; the focused Android
+  rerun above is green on the new local tree.
+- Required next state: one final narrow follow-up commit and push, all ten protected
   contexts green on the exact SHA, every proven review thread resolved, normal
   protected merge, protected-main verification, and exact round-owned cleanup.
 

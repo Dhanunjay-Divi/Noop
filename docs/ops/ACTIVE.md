@@ -150,7 +150,16 @@ Last updated: **2026-09-21**
   zero forbidden mappings; the complete repository wall passes 355 tests plus
   44 subtests, and required-CI, release, legal, private-data, health-claims,
   localization, operations, calibration, trusted-control, and diff gates are
-  green. Only the narrow commit/push, exact-SHA hosted verification,
+  green. A final review then confirmed one Android-only parity gap: an empty
+  formula-traversal segment could preserve prior-revision computed scores while
+  recording migration completion. The local follow-up now threads traversal
+  intent into Android scoring and atomically clears only that computed
+  daily/managed-Rest window when no raw or imported evidence remains; ordinary
+  transient empty passes still preserve the last complete scores. Its focused
+  JVM regression passes 3/3 and the Full-debug app plus instrumentation source
+  compile succeeds. The first 1.5 GiB local compile was bounded and stopped on
+  Kotlin heap exhaustion; the repository-standard 4 GiB local rerun passed.
+  Only the final narrow commit/push, exact-SHA hosted verification,
   review-thread resolution, protected merge/main trust, and exact cleanup
   remain.
 - Initial hosted replacement commit `bec61a55c7e45fbb2b1563c891858e439049b9cb`

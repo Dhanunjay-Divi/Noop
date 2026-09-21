@@ -1054,6 +1054,7 @@ object IntelligenceEngine {
         providedCivilDayWindows: List<AnalysisCivilDayWindow>? = null,
         providedCalibrationCivilDayWindows: List<AnalysisCivilDayWindow>? = null,
         historicalCatchUp: Boolean = false,
+        traverseResolvableHistory: Boolean = false,
         ownerSource: DayOwnerSource? = null,
         // Steps-estimate calibration I/O (kept pure-JVM, mirroring the Effort-rescore flagGet/flagSet):
         // [manualStepCoefficient] is the user's persisted manual override (null/0 = auto-fit), fed into
@@ -1146,7 +1147,7 @@ object IntelligenceEngine {
             val resolvedProfile = profileProvider?.invoke() ?: profile
             val (out, healed) = analyzeRecentOnCpu(repo, resolvedProfile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, analysisTimezoneOffsetSeconds, analysisTimeZone, providedCivilDayWindows,
-                providedCalibrationCivilDayWindows, historicalCatchUp, ownerSource,
+                providedCalibrationCivilDayWindows, historicalCatchUp, traverseResolvableHistory, ownerSource,
                 manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
                 stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, sourceConsumed,
@@ -1159,7 +1160,7 @@ object IntelligenceEngine {
             // are gone), so this can never loop. Mirrors the Swift pendingForcedRescore re-arm.
             else analyzeRecentOnCpu(repo, resolvedProfile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, analysisTimezoneOffsetSeconds, analysisTimeZone, providedCivilDayWindows,
-                providedCalibrationCivilDayWindows, historicalCatchUp, ownerSource,
+                providedCalibrationCivilDayWindows, historicalCatchUp, traverseResolvableHistory, ownerSource,
                 manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
                 stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, sourceConsumed,
@@ -1247,6 +1248,7 @@ object IntelligenceEngine {
         providedCivilDayWindows: List<AnalysisCivilDayWindow>? = null,
         providedCalibrationCivilDayWindows: List<AnalysisCivilDayWindow>? = null,
         historicalCatchUp: Boolean = false,
+        traverseResolvableHistory: Boolean = false,
         ownerSource: DayOwnerSource? = null,
         manualStepCoefficient: Double? = null,
         persistStepsCalibration: (StepsEstimateEngine.Calibration) -> Unit = {},
@@ -2133,11 +2135,16 @@ object IntelligenceEngine {
             }
         }
 
-        // #1196: a transient empty scoring pass is not an instruction to erase the persisted window.
-        // This can occur while an offload/reconnect is incomplete or the active source briefly resolves
-        // empty. Keep the last complete scores until a non-empty pass can replace them.
+        // #1196: a transient empty scoring pass is not normally an instruction to erase the persisted
+        // window. Formula traversal is the exception: when an exact historical window no longer has raw
+        // or imported evidence, retaining its prior-revision scores and then completing migration would
+        // republish stale values. Reconcile that window to the empty result atomically, matching Swift.
         var persistedScoreDays: Set<String> = emptySet()
-        if (dailies.isNotEmpty()) {
+        val shouldReconcileScoreRange = shouldReconcileComputedScoreRange(
+            hasFreshScores = dailies.isNotEmpty(),
+            traversingFormulaHistory = traverseResolvableHistory,
+        )
+        if (shouldReconcileScoreRange) {
             // Persist daily scores and their Rest evidence in one transaction. Its internal range
             // replacement is invisible until commit, so cancellation or failure keeps the prior complete
             // window. The returned exact day set is the post-commit provenance receipt.
@@ -2148,6 +2155,7 @@ object IntelligenceEngine {
                 dailyRows = dailies,
                 managedRestKeys = ScoreConfidence.managedRestSeriesKeys,
                 restRows = restRows,
+                allowEmptyReplacement = traverseResolvableHistory,
             )
         }
         if (activeZoneRows.isNotEmpty()) {
@@ -2489,6 +2497,11 @@ object IntelligenceEngine {
         )
         return persistedOut to healDropped.size
     }
+
+    internal fun shouldReconcileComputedScoreRange(
+        hasFreshScores: Boolean,
+        traversingFormulaHistory: Boolean,
+    ): Boolean = hasFreshScores || traversingFormulaHistory
 
     /**
      * The source-only label for a detected-bout overlap collider in the #975 workouts trace, computed WITHOUT

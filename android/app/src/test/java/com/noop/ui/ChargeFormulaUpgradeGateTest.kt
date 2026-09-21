@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.analytics.ChargeFormulaUpgradeGate
+import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.RestFormulaUpgradeGate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -94,6 +95,28 @@ class ChargeFormulaUpgradeGateTest {
                 nextResolvableHistoryAnchor = null,
                 wasRequired = true,
                 traversalWasSelected = false,
+            ),
+        )
+    }
+
+    @Test
+    fun formulaTraversalReconcilesAnEmptyHistoricalScoreWindow() {
+        assertFalse(
+            IntelligenceEngine.shouldReconcileComputedScoreRange(
+                hasFreshScores = false,
+                traversingFormulaHistory = false,
+            ),
+        )
+        assertTrue(
+            IntelligenceEngine.shouldReconcileComputedScoreRange(
+                hasFreshScores = true,
+                traversingFormulaHistory = false,
+            ),
+        )
+        assertTrue(
+            IntelligenceEngine.shouldReconcileComputedScoreRange(
+                hasFreshScores = false,
+                traversingFormulaHistory = true,
             ),
         )
     }
