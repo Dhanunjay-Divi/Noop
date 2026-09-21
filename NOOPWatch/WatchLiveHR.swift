@@ -180,8 +180,29 @@ final class WatchLiveHR: ObservableObject {
         store.execute(q)
     }
 
-    /// Pull the newest sample out of a batch and publish its BPM. Reads can arrive on a background queue,
-    /// so publish on the main actor.
+    nonisolated private static func newestUsableSample(
+        _ samples: [HKSample]?,
+        now: Date
+    ) -> (endDate: Date, bpm: Int)? {
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        return (samples ?? [])
+            .compactMap { sample -> (endDate: Date, bpm: Int)? in
+                guard let sample = sample as? HKQuantitySample else { return nil }
+                let age = now.timeIntervalSince(sample.endDate)
+                guard age >= 0 && age <= WatchLiveHRPolicy.maximumSampleAge else { return nil }
+
+                let value = sample.quantity.doubleValue(for: unit)
+                guard let rounded = Int(exactly: value.rounded()),
+                      WatchLiveHRPolicy.plausibleBPM.contains(rounded) else {
+                    return nil
+                }
+                return (endDate: sample.endDate, bpm: rounded)
+            }
+            .max(by: { $0.endDate < $1.endDate })
+    }
+
+    /// Pull the newest usable sample out of a batch and publish its BPM. Reads can arrive on a
+    /// background queue, so publish on the main actor.
     nonisolated private static func publishNewest(
         _ samples: [HKSample]?,
         error: Error?,
@@ -199,12 +220,7 @@ final class WatchLiveHR: ObservableObject {
             return
         }
         let now = Date()
-        guard let latest = (samples as? [HKQuantitySample])?
-            .filter({
-                let age = now.timeIntervalSince($0.endDate)
-                return age >= 0 && age <= WatchLiveHRPolicy.maximumSampleAge
-            })
-            .max(by: { $0.endDate < $1.endDate }) else {
+        guard let latest = Self.newestUsableSample(samples, now: now) else {
             guard reportNoSample else { return }
             Task { @MainActor [weak owner] in
                 guard let owner, owner.isCurrentStreamingGeneration(generation) else { return }
@@ -214,13 +230,9 @@ final class WatchLiveHR: ObservableObject {
             }
             return
         }
-        let unit = HKUnit.count().unitDivided(by: .minute())
-        let value = latest.quantity.doubleValue(for: unit)
-        let rounded = Int(value.rounded())
-        guard WatchLiveHRPolicy.plausibleBPM.contains(rounded) else { return }
         Task { @MainActor [weak owner] in
             guard let owner, owner.isCurrentStreamingGeneration(generation) else { return }
-            owner.bpm = rounded
+            owner.bpm = latest.bpm
             owner.latestObservation = latest.endDate
             owner.accessState = .available
             owner.scheduleExpiry(observedAt: latest.endDate, generation: generation)
