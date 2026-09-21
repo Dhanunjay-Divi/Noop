@@ -100,6 +100,16 @@ Last updated: **2026-09-21**
   forbidden mappings. Final consolidated remediation commit/push, all ten
   exact-SHA hosted contexts, remaining reviewed-thread resolution, protected
   merge/main trust, and exact cleanup remain pending.
+- The consolidated PR `#16` remediation is now remote at
+  `1b61ebcac5c0803e6025c0491d1b36feb7aa7af1`. Two later Android review findings
+  were confirmed and corrected locally: complete-history import retains an
+  explicit cancel handle and localized canceled state, and an OS-disabled
+  preferred Safety channel is blocked rather than routed through the standard
+  channel. Full and Demo each passed 12/12 focused import/Safety cases while
+  compiling app and instrumentation sources; after adding all-locale copy and
+  its ratchet, each variant passed 18/18 focused cases. A narrow follow-up
+  commit/push, exact-SHA hosted contexts, thread resolution, protected merge,
+  protected-main verification, and cleanup remain.
 - Initial hosted replacement commit `bec61a55c7e45fbb2b1563c891858e439049b9cb`
   reached run `35546684149`. Server source lint passed, but Ruff's format check
   identified seven files. Ruff 0.12.2 applied its canonical formatting to

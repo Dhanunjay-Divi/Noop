@@ -2435,6 +2435,7 @@
     <string name="managed_cloud_preparing_export">正在准备导出…</string>
     <string name="managed_cloud_export_history">导出完整云端历史</string>
     <string name="managed_cloud_import_history">导入完整云端历史</string>
+    <string name="managed_cloud_cancel_import">取消导入</string>
     <string name="managed_cloud_import_alert_title">导入完整云端历史？</string>
     <string name="managed_cloud_import_alert_detail_android">请选择之前从此账户导出的 NOOP 云端历史 ZIP。导入会验证归档、可靠续传，并可能替换匹配的本地记录。请保持 NOOP 打开直至完成。</string>
     <string name="managed_cloud_disconnect_phone">断开此手机</string>
@@ -2474,6 +2475,7 @@
     <string name="managed_cloud_status_export_preparing_pass">正在准备导出当前手机数据（第 %1$d 轮）…</string>
     <string name="managed_cloud_status_export_saved">完整云端历史已保存到所选的敏感数据归档。</string>
     <string name="managed_cloud_status_export_canceled">云端历史导出已取消。</string>
+    <string name="managed_cloud_status_import_canceled">云端历史导入已取消。</string>
     <string name="managed_cloud_status_device_revoked">已撤销所选 NOOP+ 设备的访问权限。</string>
     <string name="managed_cloud_status_disconnected">此手机已断开 NOOP+。本地和云端数据均未删除。</string>
     <string name="managed_cloud_status_fresh_code_sent">新验证码已发送至 %1$s。</string>

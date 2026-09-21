@@ -22763,16 +22763,16 @@
         30,
         31,
         162,
-        2398,
-        3156,
-        3156,
-        3165,
-        3165,
-        3178,
+        2399,
+        3157,
+        3157,
+        3166,
+        3166,
         3179,
         3180,
-        3737,
-        3739
+        3181,
+        3738,
+        3740
       ],
       "occurrenceCount": 14,
       "path": "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
@@ -36054,7 +36054,7 @@
       "lineNumbers": [
         57,
         78,
-        113
+        123
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/ACTIVE.md",
@@ -36373,8 +36373,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        136,
-        199
+        144,
+        213
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-21-pr16-final-readiness-closeout.md",

@@ -2457,6 +2457,7 @@
     <string name="managed_cloud_preparing_export">Export wird vorbereitet…</string>
     <string name="managed_cloud_export_history">Vollständigen Cloud-Verlauf exportieren</string>
     <string name="managed_cloud_import_history">Vollständigen Cloud-Verlauf importieren</string>
+    <string name="managed_cloud_cancel_import">Import abbrechen</string>
     <string name="managed_cloud_import_alert_title">Vollständigen Cloud-Verlauf importieren?</string>
     <string name="managed_cloud_import_alert_detail_android">Wähle eine NOOP-Cloud-Verlauf-ZIP-Datei, die zuvor aus diesem Konto exportiert wurde. Der Import prüft das Archiv, wird sicher fortgesetzt und kann passende lokale Datensätze ersetzen. Lass NOOP geöffnet, bis der Import abgeschlossen ist.</string>
     <string name="managed_cloud_disconnect_phone">Dieses Telefon trennen</string>
@@ -2496,6 +2497,7 @@
     <string name="managed_cloud_status_export_preparing_pass">Aktuelle Telefondaten werden für den Export vorbereitet (Durchlauf %1$d)…</string>
     <string name="managed_cloud_status_export_saved">Der vollständige Cloud-Verlauf wurde im ausgewählten sensiblen Archiv gespeichert.</string>
     <string name="managed_cloud_status_export_canceled">Der Cloud-Verlaufsexport wurde abgebrochen.</string>
+    <string name="managed_cloud_status_import_canceled">Der Cloud-Verlaufsimport wurde abgebrochen.</string>
     <string name="managed_cloud_status_device_revoked">Dem ausgewählten NOOP+ Gerät wurde der Zugriff entzogen.</string>
     <string name="managed_cloud_status_disconnected">NOOP+ ist auf diesem Telefon getrennt. Lokale und Cloud-Daten wurden nicht gelöscht.</string>
     <string name="managed_cloud_status_fresh_code_sent">Ein neuer Bestätigungscode wurde an %1$s gesendet.</string>

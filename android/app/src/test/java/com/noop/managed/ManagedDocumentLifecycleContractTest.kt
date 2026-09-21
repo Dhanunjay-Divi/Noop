@@ -173,11 +173,21 @@ class ManagedDocumentLifecycleContractTest {
             managedTestRepositoryRoot(),
             "android/app/src/main/java/com/noop/ui/ManagedCloudCard.kt",
         ).readText()
+        val serviceImport = serviceSource().section(
+            "    suspend fun importCompleteCloudHistory(",
+            "    internal suspend fun syncForWorker()",
+        )
 
         assertTrue(source.contains("ActivityResultContracts.OpenDocument()"))
         assertTrue(source.contains("service.importCompleteCloudHistory(uri)"))
+        assertTrue(source.contains("var historyImportJob by remember"))
+        assertTrue(source.contains("scope.launch(start = CoroutineStart.LAZY)"))
+        assertTrue(source.contains("historyImportJob?.cancel()"))
+        assertTrue(source.contains("historyImportJob = null"))
         assertTrue(source.contains("R.string.managed_cloud_import_history"))
+        assertTrue(source.contains("R.string.managed_cloud_cancel_import"))
         assertTrue(source.contains("R.string.managed_cloud_import_alert_title"))
+        assertTrue(source.contains("noop.noop-plus.import-history"))
         assertTrue(
             source.contains(
                 "R.string.managed_cloud_import_alert_detail_android",
@@ -186,6 +196,11 @@ class ManagedDocumentLifecycleContractTest {
         assertTrue(
             source.contains(
                 "historyImportLauncher.launch(arrayOf(\"application/zip\"))",
+            ),
+        )
+        assertTrue(
+            serviceImport.contains(
+                "setStatus(text(R.string.managed_cloud_status_import_canceled))",
             ),
         )
     }

@@ -499,8 +499,10 @@
     <string name="ownership_deletion_acknowledgements_required">Подтвердите уведомления об экспорте и хранении.</string>
     <string name="ownership_deletion_password_required">Введите текущий пароль учетной записи.</string>
     <string name="managed_cloud_import_history">Импортировать полную облачную историю</string>
+    <string name="managed_cloud_cancel_import">Отменить импорт</string>
     <string name="managed_cloud_import_alert_title">Импортировать полную облачную историю?</string>
     <string name="managed_cloud_import_alert_detail_android">Выберите ZIP-файл облачной истории NOOP, ранее экспортированный из этой учетной записи. Импорт проверяет архив, безопасно возобновляется и может заменить совпадающие локальные записи. Не закрывайте NOOP до завершения.</string>
+    <string name="managed_cloud_status_import_canceled">Импорт облачной истории отменён.</string>
     <string name="managed_cloud_delete_account">Удалить облачную учётную запись NOOP</string>
     <string name="managed_cloud_fresh_code">Новый код подтверждения</string>
     <string name="managed_cloud_schedule_deletion">Запланировать удаление учётной записи</string>

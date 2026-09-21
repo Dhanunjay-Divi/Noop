@@ -2441,6 +2441,7 @@
     <string name="managed_cloud_preparing_export">Preparando exportación…</string>
     <string name="managed_cloud_export_history">Exportar todo el historial de la nube</string>
     <string name="managed_cloud_import_history">Importar todo el historial de la nube</string>
+    <string name="managed_cloud_cancel_import">Cancelar importación</string>
     <string name="managed_cloud_import_alert_title">¿Importar todo el historial de la nube?</string>
     <string name="managed_cloud_import_alert_detail_android">Elige un ZIP del historial en la nube de NOOP exportado anteriormente desde esta cuenta. La importación valida el archivo, se reanuda de forma segura y puede sustituir registros locales coincidentes. Mantén NOOP abierto hasta que termine.</string>
     <string name="managed_cloud_disconnect_phone">Desconectar este teléfono</string>
@@ -2480,6 +2481,7 @@
     <string name="managed_cloud_status_export_preparing_pass">Preparando los datos actuales del teléfono para exportarlos (pasada %1$d)…</string>
     <string name="managed_cloud_status_export_saved">El historial completo de la nube se guardó en el archivo sensible seleccionado.</string>
     <string name="managed_cloud_status_export_canceled">Se canceló la exportación del historial de la nube.</string>
+    <string name="managed_cloud_status_import_canceled">Se canceló la importación del historial de la nube.</string>
     <string name="managed_cloud_status_device_revoked">Se revocó el dispositivo NOOP+ seleccionado.</string>
     <string name="managed_cloud_status_disconnected">NOOP+ está desconectado en este teléfono. No se eliminaron los datos locales ni los de la nube.</string>
     <string name="managed_cloud_status_fresh_code_sent">Se envió un nuevo código de verificación a %1$s.</string>

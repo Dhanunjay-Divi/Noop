@@ -183,13 +183,31 @@ internal object ManagedSafetyNotifier {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return ChannelReadiness.READY
         }
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val preferred = activeChannelId(context)
-        if (channelCanPresent(context, preferred)) {
-            return ChannelReadiness.READY
+        return resolveChannelReadiness(
+            preferredIsUrgent = preferred == URGENT_CHANNEL_ID,
+            preferredImportance = manager.getNotificationChannel(preferred)?.importance,
+            standardImportance = manager.getNotificationChannel(CHANNEL_ID)?.importance,
+        )
+    }
+
+    internal fun resolveChannelReadiness(
+        preferredIsUrgent: Boolean,
+        preferredImportance: Int?,
+        standardImportance: Int?,
+    ): ChannelReadiness {
+        if (preferredImportance != null) {
+            return if (preferredImportance == NotificationManager.IMPORTANCE_NONE) {
+                ChannelReadiness.BLOCKED
+            } else {
+                ChannelReadiness.READY
+            }
         }
         return if (
-            preferred == URGENT_CHANNEL_ID &&
-            channelCanPresent(context, CHANNEL_ID)
+            preferredIsUrgent &&
+            standardImportance != null &&
+            standardImportance != NotificationManager.IMPORTANCE_NONE
         ) {
             ChannelReadiness.STANDARD_FALLBACK
         } else {
@@ -206,15 +224,6 @@ internal object ManagedSafetyNotifier {
             ChannelReadiness.BLOCKED -> return NotificationManager.IMPORTANCE_NONE
         }
         return manager.getNotificationChannel(channelId)?.importance
-    }
-
-    private fun channelCanPresent(context: Context, channelId: String): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        return manager.getNotificationChannel(channelId)
-            ?.importance
-            ?.let { it != NotificationManager.IMPORTANCE_NONE }
-            ?: false
     }
 
     private fun ensureChannels(context: Context) {

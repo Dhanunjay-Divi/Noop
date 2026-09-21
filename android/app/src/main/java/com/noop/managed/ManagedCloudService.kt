@@ -687,6 +687,7 @@ class ManagedCloudService private constructor(context: Context) {
                 }
             }
         } catch (error: CancellationException) {
+            setStatus(text(R.string.managed_cloud_status_import_canceled))
             com.noop.AppDiagnosticsRecorder.endOperation(
                 diagnostic,
                 outcome = "canceled",

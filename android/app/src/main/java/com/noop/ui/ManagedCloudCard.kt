@@ -46,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,6 +76,8 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @Composable
@@ -243,6 +246,7 @@ private fun ManagedCloudSetupSheet(
     var confirmHistoryExport by remember { mutableStateOf(false) }
     var confirmHistoryImport by remember { mutableStateOf(false) }
     var pendingRevoke by remember { mutableStateOf<ManagedInstallation?>(null) }
+    var historyImportJob by remember { mutableStateOf<Job?>(null) }
     val historyExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
@@ -260,8 +264,20 @@ private fun ManagedCloudSetupSheet(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             }
-            scope.launch { service.importCompleteCloudHistory(uri) }
+            val job = scope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    service.importCompleteCloudHistory(uri)
+                } finally {
+                    historyImportJob = null
+                }
+            }
+            historyImportJob = job
+            job.start()
         }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { historyImportJob?.cancel() }
     }
 
     LaunchedEffect(state.phase) {
@@ -559,12 +575,26 @@ private fun ManagedCloudSetupSheet(
                         onClick = { confirmHistoryExport = true },
                     )
                     NoopButton(
-                        text = stringResource(R.string.managed_cloud_import_history),
-                        leadingIcon = Icons.Filled.UploadFile,
+                        text = stringResource(
+                            if (historyImportJob != null) {
+                                R.string.managed_cloud_cancel_import
+                            } else {
+                                R.string.managed_cloud_import_history
+                            },
+                        ),
+                        leadingIcon = if (historyImportJob != null) {
+                            Icons.Filled.CancelScheduleSend
+                        } else {
+                            Icons.Filled.UploadFile
+                        },
                         kind = NoopButtonKind.Secondary,
                         fullWidth = true,
-                        enabled = !state.busy,
-                        onClick = { confirmHistoryImport = true },
+                        enabled = historyImportJob != null || !state.busy,
+                        modifier = Modifier.testTag("noop.noop-plus.import-history"),
+                        onClick = {
+                            historyImportJob?.cancel()
+                                ?: run { confirmHistoryImport = true }
+                        },
                     )
                     NoopButton(
                         text = stringResource(R.string.managed_cloud_disconnect_phone),

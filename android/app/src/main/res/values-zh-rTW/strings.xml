@@ -499,8 +499,10 @@
     <string name="ownership_deletion_acknowledgements_required">確認匯出與保留聲明。</string>
     <string name="ownership_deletion_password_required">輸入目前的帳戶密碼。</string>
     <string name="managed_cloud_import_history">匯入完整雲端歷史</string>
+    <string name="managed_cloud_cancel_import">取消匯入</string>
     <string name="managed_cloud_import_alert_title">匯入完整雲端歷史？</string>
     <string name="managed_cloud_import_alert_detail_android">選擇先前從此帳戶匯出的 NOOP 雲端歷史 ZIP。匯入會驗證封存、可靠續傳，並可能取代相符的本機記錄。請保持 NOOP 開啟直到完成。</string>
+    <string name="managed_cloud_status_import_canceled">雲端歷史匯入已取消。</string>
     <string name="managed_cloud_delete_account">刪除 NOOP 雲端帳戶</string>
     <string name="managed_cloud_fresh_code">取得新的驗證碼</string>
     <string name="managed_cloud_schedule_deletion">安排刪除帳戶</string>

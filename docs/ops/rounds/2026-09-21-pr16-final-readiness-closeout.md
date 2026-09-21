@@ -127,6 +127,14 @@ candidate:
   Friends destination remains the managed NOOP account service, and focused
   navigation/localization tests reject restoration of the retired source or
   copy. The separate compatibility backup subsystem remains unchanged.
+- Android complete-history import now retains a cancellable coroutine handle,
+  turns the import action into an enabled cancel command while work is active,
+  cancels when the sheet leaves composition, preserves resumable checkpoints,
+  and surfaces a localized canceled status. Managed Safety now treats an
+  existing but OS-disabled preferred channel as blocked; standard-channel
+  fallback is allowed only when the optional urgent channel is genuinely
+  absent, so registration and delivery do not route around the setting the
+  user disabled.
 - Updated the final independent-review prompt with the authority pipeline,
   storage/retention rules, dead-code criteria, performance and memory checks,
   end-to-end customer flow, and competitor-research safety boundary.
@@ -172,6 +180,11 @@ candidate:
   and session end using fixed outcomes and aggregate counts. No address,
   serial, raw frame, sensor timestamp, health value, or platform error text was
   added.
+- Managed-history cancellation continues to use the existing bounded
+  `managed_import` terminal outcome and now adds only a localized UI status.
+  Safety channel selection continues to record the fixed
+  `managed_safety.channel_readiness` category; no channel names, incident
+  identifiers, contact data, or notification payloads enter diagnostics.
 - Remaining blind spots are physical BLE/background behavior, provider
   delivery, production cloud latency/load, and real-device performance.
 
@@ -191,6 +204,7 @@ candidate:
 | Final server review remediation | 39 focused unit/contract cases passed; 4 focused disposable-PostgreSQL race/erasure cases passed; Ruff 0.12.2 check and format passed on all 5 changed files | Unusable optional baselines are omitted and renormalized; cancellation and managed deletion claims serialize on the account fence | Production Cloud SQL contention, elapsed deletion operations, or formula accuracy |
 | Final Apple review remediation | 56/56 requested focused cases, 10/10 managed-archive cases, and 10/10 formula cases passed; hosted macOS build passed on candidate `149843c1` | Import reachability, formula migration invalidation, BLE re-arm recovery, macOS viewer transport, and account-task cancellation regressions remain covered | Physical iPhone/macOS behavior, live managed service access, or hardware reconnect timing |
 | Final Android review remediation | Full and Demo each passed 62/62 selected unit cases; Full completed 41 tasks and Demo 58 tasks; app Kotlin and instrumentation-source compilation passed for both variants | Managed account-scope compatibility, managed storage/social serialization, localization/navigation, and removal of the retired Friends presentation compile together | The new account-scope instrumentation case executing on an emulator or physical phone |
+| Late Android review remediation | Full and Demo each passed 12/12 import/Safety cases while compiling app and instrumentation sources; after the localization ratchet each variant passed 18/18 focused cases. Full completed 41 tasks, Demo 58 tasks, and the combined locale rerun 57 tasks | Long managed-history imports have an explicit cancel path and localized terminal status; disabling the active Safety channel blocks registration/delivery while a missing urgent channel may still use the enabled standard fallback | Physical notification-settings behavior, process death during import, or emulator execution of instrumentation cases |
 | Final terminology and policy wall | 17,840 occurrences across 1,585 groups with zero forbidden mappings; 54 focused terminology/required-CI tests and the complete 305-test tool wall passed with one intentional skip | The reviewed terminology snapshot, ten-context release-control contract, and repository policy tests match the final local tree | Hosted exact-SHA results or protected-main trust |
 | Apple history acknowledgement and generation fence | 23 passed, 0 failed after the final watchdog correction | FIFO callback correlation, callback-only trim credit, and delayed persistence rejection compile and pass in the macOS app target | CoreBluetooth callback timing or firmware trim behavior on a physical band |
 | Android history acknowledgement and generation fence | Expanded six-class Full-debug selector wall passed; Gradle build succeeded | Callback-only acknowledgement, write single-delivery, drain gates, continuation, burst progress, and delayed-session fencing compile and pass | Android GATT timing, process death, or firmware behavior on a physical phone and band |
@@ -216,15 +230,14 @@ candidate:
 ## Git and release state
 
 - Pull request: `#16`
-- Remote PR head after the Apple integration regression:
-  `149843c109ef85093f62965ac977263180bcc796`
-- Local tree: intentional Android dead-presentation cleanup, server review
-  remediation, terminology snapshot, release-control digest, tests, and
-  operations documentation remain uncommitted.
-- Required next state: one final consolidated remediation commit and push, all ten
-  protected contexts green on the exact SHA, every proven review thread
-  resolved, normal protected merge, protected-main verification, and exact
-  round-owned cleanup.
+- Remote PR head after the consolidated review remediation:
+  `1b61ebcac5c0803e6025c0491d1b36feb7aa7af1`
+- Local tree: two newly confirmed Android review corrections, their localized
+  copy and tests, the regenerated terminology snapshot/release-control digest,
+  and updated operations evidence remain to be committed.
+- Required next state: one narrow follow-up commit and push, all ten protected
+  contexts green on the exact SHA, every proven review thread resolved, normal
+  protected merge, protected-main verification, and exact round-owned cleanup.
 
 ## Open risks and honest limitations
 
@@ -256,9 +269,9 @@ candidate:
 
 ## Next round
 
-1. Review the exact remediation diff and create the final consolidated commit.
-2. Push the final remediation to pull request `#16` without another incremental
-   source push.
+1. Review the exact late Android remediation diff and create its follow-up
+   commit.
+2. Push that reviewed follow-up to pull request `#16`.
 3. Require all ten hosted contexts on the exact candidate SHA.
 4. Resolve only review threads proven by the final source and evidence.
 5. Merge normally, verify protected `main`, synchronize the canonical

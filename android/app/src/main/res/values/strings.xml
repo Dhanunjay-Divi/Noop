@@ -2642,6 +2642,7 @@
     <string name="managed_cloud_preparing_export">Preparing export…</string>
     <string name="managed_cloud_export_history">Export complete cloud history</string>
     <string name="managed_cloud_import_history">Import complete cloud history</string>
+    <string name="managed_cloud_cancel_import">Cancel import</string>
     <string name="managed_cloud_import_alert_title">Import complete cloud history?</string>
     <string name="managed_cloud_import_alert_detail_android">Choose a NOOP cloud-history ZIP previously exported from this account. Import validates the archive, resumes safely, and may replace matching local records. Keep NOOP open until it finishes.</string>
     <string name="managed_cloud_disconnect_phone">Disconnect this phone</string>
@@ -2681,6 +2682,7 @@
     <string name="managed_cloud_status_export_preparing_pass">Preparing current phone data for export (pass %1$d)…</string>
     <string name="managed_cloud_status_export_saved">Complete cloud history was saved to the selected sensitive archive.</string>
     <string name="managed_cloud_status_export_canceled">Cloud-history export was canceled.</string>
+    <string name="managed_cloud_status_import_canceled">Cloud-history import was canceled.</string>
     <string name="managed_cloud_status_device_revoked">The selected NOOP+ device was revoked.</string>
     <string name="managed_cloud_status_disconnected">NOOP+ is disconnected on this phone. Local and cloud data were not deleted.</string>
     <string name="managed_cloud_status_fresh_code_sent">A fresh verification code was sent to %1$s.</string>
