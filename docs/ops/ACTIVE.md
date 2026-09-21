@@ -85,6 +85,21 @@ Last updated: **2026-09-21**
   ratchet records 17,837 classified occurrences across 1,583 groups with zero
   forbidden mappings. Remaining work is consolidated commit/push, hosted
   exact-SHA verification, protected integration, and round-owned cleanup.
+- PR `#16` review remediation advanced the remote head to
+  `149843c109ef85093f62965ac977263180bcc796` with an Apple formula-migration
+  integration regression. The final local tree also omits unusable optional
+  formula baselines without changing `noop-charge-v2`, serializes
+  ownership-deletion claims with cancellation, removes the remaining
+  unreferenced Android self-hosted Friends view model and server-address invite
+  copy, and adds account-scope/localization/navigation regressions. Focused
+  evidence is green: server 39 unit/contract plus 4 disposable-PostgreSQL
+  cases, Apple 56 requested plus 10 archive and 10 formula cases, Android Full
+  and Demo 62/62 each with app and instrumentation-source compilation, and the
+  complete 305-test tool wall with one intentional skip. The terminology
+  snapshot now records 17,840 occurrences across 1,585 groups with zero
+  forbidden mappings. Final consolidated remediation commit/push, all ten
+  exact-SHA hosted contexts, remaining reviewed-thread resolution, protected
+  merge/main trust, and exact cleanup remain pending.
 - Initial hosted replacement commit `bec61a55c7e45fbb2b1563c891858e439049b9cb`
   reached run `35546684149`. Server source lint passed, but Ruff's format check
   identified seven files. Ruff 0.12.2 applied its canonical formatting to

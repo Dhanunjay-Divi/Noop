@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implementation and complete supplier-independent local verification complete; consolidated push, hosted checks, and protected integration pending`
+- State: `review remediation and supplier-independent local verification complete; final consolidated commit, hosted checks, and protected integration pending`
 - Owner: project team
 - Branch: `codex/ui-cloud-readiness-20260917`
 - Start commit: `84ee85eeb4aa711e2762591fe0a52dc2ba9cb4f3`
@@ -101,6 +101,16 @@ candidate:
   incident collapse, the managed push path no longer depends on the legacy
   worker flag, and the GCP source explicitly configures minute-level bounded
   repeat evaluation while provider delivery and public traffic remain disabled.
+- Server formula-shadow execution now omits optional RHR, respiration, and
+  prior-effort baselines when their explicit usability flag is false, matching
+  the existing client behavior without changing the published
+  `noop-charge-v2` revision. Ownership-deletion managed-data claims now acquire
+  the same account advisory lock used by cancellation and recheck the request
+  after that lock, preventing an accepted pre-deadline cancellation from racing
+  a post-deadline destructive claim.
+- Added an integration regression proving formula migration removes stale
+  computed daily and Rest evidence when retained raw HR is unavailable before
+  marking the traversal complete.
 - Apple and Android historical-offload progress now advances only after the
   platform confirms the exact acknowledged write. Both stacks fence delayed
   persistence and callbacks across ended sessions; Apple reconnects
@@ -112,6 +122,11 @@ candidate:
   that had zero authored-code references and belonged only to the retired
   self-hosted Friends presentation. Added platform ratchets that reject their
   return.
+- Removed the remaining unreferenced Android self-hosted Friends view model and
+  server-address invitation copy from all nine Android locales. The routed
+  Friends destination remains the managed NOOP account service, and focused
+  navigation/localization tests reject restoration of the retired source or
+  copy. The separate compatibility backup subsystem remains unchanged.
 - Updated the final independent-review prompt with the authority pipeline,
   storage/retention rules, dead-code criteria, performance and memory checks,
   end-to-end customer flow, and competitor-research safety boundary.
@@ -173,6 +188,10 @@ candidate:
 | Earlier focused terminal-fence PostgreSQL test | Passed against a disposable local PostgreSQL cluster; exact cluster and dependency target removed afterward | Service-owned erasure completion leaves the account fenced and a refreshed identity cannot write managed data | Production Cloud SQL or elapsed deletion operations |
 | Earlier managed client walls | Swift adapter 12/12; Android managed/account/storage/localization 72/72 | Reachable import, preference-echo prevention, social fields, account scope, and scheduler contracts pass | Signed-device, provider, or physical behavior |
 | Earlier server/infrastructure walls | Focused server suite, Ruff, OpenTofu 20/20, and deployment contracts passed | Formula, Safety repeat/collapse, erasure, and plan-only runtime wiring remain coherent | Applied infrastructure or provider delivery |
+| Final server review remediation | 39 focused unit/contract cases passed; 4 focused disposable-PostgreSQL race/erasure cases passed; Ruff 0.12.2 check and format passed on all 5 changed files | Unusable optional baselines are omitted and renormalized; cancellation and managed deletion claims serialize on the account fence | Production Cloud SQL contention, elapsed deletion operations, or formula accuracy |
+| Final Apple review remediation | 56/56 requested focused cases, 10/10 managed-archive cases, and 10/10 formula cases passed; hosted macOS build passed on candidate `149843c1` | Import reachability, formula migration invalidation, BLE re-arm recovery, macOS viewer transport, and account-task cancellation regressions remain covered | Physical iPhone/macOS behavior, live managed service access, or hardware reconnect timing |
+| Final Android review remediation | Full and Demo each passed 62/62 selected unit cases; Full completed 41 tasks and Demo 58 tasks; app Kotlin and instrumentation-source compilation passed for both variants | Managed account-scope compatibility, managed storage/social serialization, localization/navigation, and removal of the retired Friends presentation compile together | The new account-scope instrumentation case executing on an emulator or physical phone |
+| Final terminology and policy wall | 17,840 occurrences across 1,585 groups with zero forbidden mappings; 54 focused terminology/required-CI tests and the complete 305-test tool wall passed with one intentional skip | The reviewed terminology snapshot, ten-context release-control contract, and repository policy tests match the final local tree | Hosted exact-SHA results or protected-main trust |
 | Apple history acknowledgement and generation fence | 23 passed, 0 failed after the final watchdog correction | FIFO callback correlation, callback-only trim credit, and delayed persistence rejection compile and pass in the macOS app target | CoreBluetooth callback timing or firmware trim behavior on a physical band |
 | Android history acknowledgement and generation fence | Expanded six-class Full-debug selector wall passed; Gradle build succeeded | Callback-only acknowledgement, write single-delivery, drain gates, continuation, burst progress, and delayed-session fencing compile and pass | Android GATT timing, process death, or firmware behavior on a physical phone and band |
 | Android Full instrumentation source compile | 33 tasks completed; build succeeded | The changed Room managed-document instrumentation test and Full app instrumentation source compile together | Emulator execution or physical-device behavior |
@@ -197,10 +216,12 @@ candidate:
 ## Git and release state
 
 - Pull request: `#16`
-- Remote PR head before this closeout: `84ee85eeb4aa711e2762591fe0a52dc2ba9cb4f3`
-- Local tree: intentional Apple, Android, server, infrastructure, tests,
-  localization, and operations documentation changes remain uncommitted.
-- Required next state: one consolidated candidate commit and push, all ten
+- Remote PR head after the Apple integration regression:
+  `149843c109ef85093f62965ac977263180bcc796`
+- Local tree: intentional Android dead-presentation cleanup, server review
+  remediation, terminology snapshot, release-control digest, tests, and
+  operations documentation remain uncommitted.
+- Required next state: one final consolidated remediation commit and push, all ten
   protected contexts green on the exact SHA, every proven review thread
   resolved, normal protected merge, protected-main verification, and exact
   round-owned cleanup.
@@ -235,8 +256,9 @@ candidate:
 
 ## Next round
 
-1. Review the exact diff and create the consolidated implementation commit.
-2. Push once to pull request `#16`.
+1. Review the exact remediation diff and create the final consolidated commit.
+2. Push the final remediation to pull request `#16` without another incremental
+   source push.
 3. Require all ten hosted contexts on the exact candidate SHA.
 4. Resolve only review threads proven by the final source and evidence.
 5. Merge normally, verify protected `main`, synchronize the canonical

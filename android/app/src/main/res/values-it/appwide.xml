@@ -210,7 +210,6 @@
     <string name="appwide_fitness_age_younger_one_profile_age">1 anno in meno rispetto all’età del profilo</string>
     <string name="appwide_fitness_age_younger_this_week">%1$s in meno questa settimana</string>
     <string name="appwide_friends_data_boundary">È possibile condividere solo Recupero, Effort, Punteggio del sonno, durata del sonno, HRV e frequenza cardiaca a riposo. Flussi grezzi, posizioni, diario, percorsi, allenamenti e fasi del sonno sono esclusi.</string>
-    <string name="appwide_friends_invite_instructions">In Noop, apri Altro → Amici e inserisci l’indirizzo del server e il codice monouso.</string>
     <string name="appwide_gym_add_first_exercise">Aggiungi il primo esercizio</string>
     <string name="appwide_gym_add_first_exercise_body">Ogni esercizio può avere obiettivi, recupero e regola di progressione propri.</string>
     <string name="appwide_gym_add_time">Aggiungi tempo</string>

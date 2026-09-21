@@ -104,6 +104,15 @@ async def ownership_repository():
         await primary.shutdown()
 
 
+async def _wait_for_lock_waiters(pool, *, minimum: int) -> None:
+    for _ in range(500):
+        waiting = await pool.fetchval("SELECT count(*) FROM pg_locks WHERE NOT granted")
+        if int(waiting) >= minimum:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"expected at least {minimum} lock waiters")
+
+
 def _claims(
     subject: str,
     *,
@@ -2362,6 +2371,212 @@ async def test_account_deletion_worker_claims_due_rows_with_cas_and_leases(
         )
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_pre_deadline_cancellation_fences_post_deadline_managed_claim(
+    ownership_repository,
+) -> None:
+    repository, primary = ownership_repository
+    subject = "account-deletion-cancellation-race-owner"
+    _, registration, principal = await _register(
+        repository,
+        subject=subject,
+        installation_id="ios-account-deletion-cancellation-race",
+        token_character="R",
+    )
+    token_hash = hashlib.sha256(
+        registration.installation_token.get_secret_value().encode("ascii")
+    ).hexdigest()
+    deletion_request_id = uuid4()
+    requested_at = datetime.now(UTC)
+    cancel_before = requested_at + timedelta(seconds=4)
+    assert primary._pool is not None
+    async with primary._pool.acquire() as connection:
+        async with connection.transaction():
+            identity_id = await connection.fetchval(
+                """
+                SELECT identity_id
+                FROM ownership_external_identities
+                WHERE account_id = $1
+                """,
+                principal.account_id,
+            )
+            await connection.execute(
+                """
+                INSERT INTO ownership_account_deletion_requests (
+                    deletion_request_id,
+                    account_id,
+                    request_id,
+                    request_digest,
+                    requester_identity_hash,
+                    requester_installation_hash,
+                    policy_version,
+                    locale,
+                    document_sha256,
+                    export_acknowledged_at,
+                    retention_acknowledged_at,
+                    sessions_revoked_at,
+                    sessions_revoked_count,
+                    requested_at,
+                    cancel_before
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, 'ownership-v1', 'en', $7,
+                    $8, $8, $8, 1, $8, $9
+                )
+                """,
+                deletion_request_id,
+                principal.account_id,
+                uuid4(),
+                "d" * 64,
+                hashlib.sha256(str(identity_id).encode("utf-8")).hexdigest(),
+                hashlib.sha256(
+                    registration.installation_id.encode("utf-8")
+                ).hexdigest(),
+                TERMS_SHA256,
+                requested_at,
+                cancel_before,
+            )
+            await connection.executemany(
+                """
+                INSERT INTO ownership_account_deletion_targets (
+                    deletion_request_id,
+                    target_kind,
+                    initial_state,
+                    blocker,
+                    scheduled_at,
+                    not_before
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                [
+                    (
+                        deletion_request_id,
+                        "managed_cloud_data",
+                        "scheduled",
+                        None,
+                        requested_at,
+                        cancel_before,
+                    ),
+                    (
+                        deletion_request_id,
+                        "identity_provider",
+                        "blocked",
+                        "provider_credentials_unavailable",
+                        requested_at,
+                        cancel_before,
+                    ),
+                    (
+                        deletion_request_id,
+                        "band_retirement",
+                        "not_required",
+                        None,
+                        requested_at,
+                        cancel_before,
+                    ),
+                    (
+                        deletion_request_id,
+                        "ownership_control_plane",
+                        "blocked",
+                        "identity_provider_pending",
+                        requested_at,
+                        cancel_before,
+                    ),
+                ],
+            )
+            await connection.execute(
+                """
+                UPDATE ownership_installations
+                SET status = 'revoked',
+                    revoked_at = $3,
+                    last_seen_at = GREATEST(last_seen_at, $3)
+                WHERE account_id = $1 AND installation_id = $2
+                """,
+                principal.account_id,
+                registration.installation_id,
+                requested_at,
+            )
+            await connection.execute(
+                """
+                UPDATE ownership_accounts
+                SET status = 'deletion_pending',
+                    auth_valid_after = $2,
+                    deletion_requested_at = $2,
+                    updated_at = $2
+                WHERE account_id = $1
+                """,
+                principal.account_id,
+                requested_at,
+            )
+    fresh_claims = _claims(
+        subject,
+        auth_time=datetime.now(UTC) + timedelta(seconds=1),
+    )
+    deletion_principal = await repository.principal_for_account_deletion(fresh_claims)
+    progress = PostgresOwnershipDeletionProgressRepository(primary)
+
+    async with primary._pool.acquire() as blocker:
+        async with blocker.transaction():
+            await blocker.fetchval(
+                """
+                SELECT 1
+                FROM ownership_account_deletion_target_progress
+                WHERE deletion_request_id = $1
+                  AND target_kind = 'managed_cloud_data'
+                FOR UPDATE
+                """,
+                deletion_request_id,
+            )
+            cancel_task = asyncio.create_task(
+                repository.cancel_account_deletion(
+                    principal=deletion_principal,
+                    deletion_request_id=deletion_request_id,
+                    installation_id=registration.installation_id,
+                    installation_token_hash=token_hash,
+                    expected_platform="ios",
+                    identity_auth_time=fresh_claims.auth_time,
+                )
+            )
+            await _wait_for_lock_waiters(primary._pool, minimum=1)
+            assert datetime.now(UTC) < cancel_before
+            await asyncio.sleep(
+                max(
+                    0.0,
+                    (cancel_before - datetime.now(UTC)).total_seconds() + 0.1,
+                )
+            )
+
+            claimed = await asyncio.wait_for(
+                progress.claim_due_managed_targets(
+                    now=datetime.now(UTC),
+                    lease_owner=uuid4(),
+                    lease_seconds=300,
+                    limit=10,
+                ),
+                timeout=2,
+            )
+            assert claimed == []
+
+        canceled = await asyncio.wait_for(cancel_task, timeout=2)
+
+    assert canceled["state"] == "canceled"
+    state = await primary._pool.fetchrow(
+        """
+        SELECT request.canceled_at,
+               progress.current_state,
+               progress.attempt_count,
+               progress.managed_erasure_job_id
+        FROM ownership_account_deletion_requests request
+        JOIN ownership_account_deletion_target_progress progress
+          USING (deletion_request_id)
+        WHERE request.deletion_request_id = $1
+          AND progress.target_kind = 'managed_cloud_data'
+        """,
+        deletion_request_id,
+    )
+    assert state["canceled_at"] is not None
+    assert state["current_state"] == "scheduled"
+    assert state["attempt_count"] == 0
+    assert state["managed_erasure_job_id"] is None
 
 
 @pytest.mark.asyncio

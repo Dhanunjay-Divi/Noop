@@ -174,6 +174,7 @@ class AndroidLocalizationPolicyTest {
         val resources = resourceRoot()
         assumeTrue("Android resources unavailable", resources != null)
         val retiredKeys = setOf(
+            "appwide_friends_invite_instructions",
             "managed_friends_source_self_hosted",
             "managed_friends_two_options_title",
             "managed_friends_two_options_body",
@@ -182,7 +183,7 @@ class AndroidLocalizationPolicyTest {
             .walkTopDown()
             .filter { file ->
                 file.isFile &&
-                    file.name == "strings.xml" &&
+                    file.extension == "xml" &&
                     file.parentFile?.name?.startsWith("values") == true
             }
             .filter { file ->

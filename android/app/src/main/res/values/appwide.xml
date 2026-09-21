@@ -210,7 +210,6 @@
     <string name="appwide_fitness_age_younger_one_profile_age">1 year younger than your profile age</string>
     <string name="appwide_fitness_age_younger_this_week">%1$s younger this week</string>
     <string name="appwide_friends_data_boundary">Only Recovery, Effort, Sleep Score, sleep duration, HRV, and resting heart rate can be shared. Raw streams, locations, journals, routes, workouts, and sleep stages are excluded.</string>
-    <string name="appwide_friends_invite_instructions">In Noop, open More → Friends and enter the server address and one-time code.</string>
     <string name="appwide_gym_add_first_exercise">Add the first exercise</string>
     <string name="appwide_gym_add_first_exercise_body">Each exercise can use its own target, rest, and progression rule.</string>
     <string name="appwide_gym_add_time">Add time</string>

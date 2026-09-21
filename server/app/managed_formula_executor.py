@@ -344,7 +344,7 @@ class ManagedFormulaExecutor:
             )
         ]
         rhr_baseline = inputs.get("rhr_baseline")
-        if rhr_baseline is not None:
+        if rhr_baseline is not None and rhr_baseline.usable:
             terms.append(
                 (
                     cls._z_score(
@@ -357,7 +357,7 @@ class ManagedFormulaExecutor:
             )
         resp = inputs.get("resp")
         resp_baseline = inputs.get("resp_baseline")
-        if resp is not None and resp_baseline is not None:
+        if resp is not None and resp_baseline is not None and resp_baseline.usable:
             terms.append(
                 (
                     cls._z_score(
@@ -396,7 +396,11 @@ class ManagedFormulaExecutor:
             )
         effort = inputs.get("prior_day_effort")
         effort_baseline = inputs.get("effort_baseline")
-        if effort is not None and effort_baseline is not None:
+        if (
+            effort is not None
+            and effort_baseline is not None
+            and effort_baseline.usable
+        ):
             terms.append(
                 (
                     cls._z_score(

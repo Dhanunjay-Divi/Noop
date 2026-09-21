@@ -143,6 +143,73 @@ def test_invalid_optional_recovery_inputs_drop_and_renormalize() -> None:
     assert invalid.server_value == pytest.approx(omitted.server_value, abs=1e-12)
 
 
+@pytest.mark.parametrize(
+    "optional_inputs",
+    [
+        {
+            "rhr_baseline": {
+                "mean": 100.0,
+                "spread": 1.0,
+                "usable": False,
+            }
+        },
+        {
+            "resp": 30.0,
+            "resp_baseline": {
+                "mean": 10.0,
+                "spread": 1.0,
+                "usable": False,
+            },
+        },
+        {
+            "prior_day_effort": 100.0,
+            "effort_baseline": {
+                "mean": 0.0,
+                "spread": 1.0,
+                "usable": False,
+            },
+        },
+    ],
+    ids=["rhr", "respiration", "effort"],
+)
+def test_unusable_optional_baselines_are_omitted_and_renormalized(
+    optional_inputs: dict,
+) -> None:
+    common = {
+        "hrv": 50.0,
+        "rhr": 55.0,
+        "hrv_baseline": {"mean": 50.0, "spread": 5.0, "usable": True},
+    }
+    executor = ManagedFormulaExecutor()
+    context = FormulaDayContext.create(
+        account_id=UUID("00000000-0000-4000-8000-000000000001"),
+        local_day=date(2026, 2, 1),
+        timezone_name="UTC",
+    )
+    provenance = FormulaProvenance(
+        source_kind="synthetic_fixture",
+        source_revision="fixture-v1",
+        input_manifest_sha256="a" * 64,
+    )
+
+    omitted = executor.execute(
+        metric_key="recovery",
+        formula_revision="noop-charge-v2",
+        context=context,
+        inputs=common,
+        provenance=provenance,
+    )
+    unusable = executor.execute(
+        metric_key="recovery",
+        formula_revision="noop-charge-v2",
+        context=context,
+        inputs={**common, **optional_inputs},
+        provenance=provenance,
+    )
+
+    assert unusable.server_value == pytest.approx(omitted.server_value, abs=1e-12)
+
+
 def test_extreme_finite_recovery_inputs_saturate_without_overflow() -> None:
     result = ManagedFormulaExecutor().execute(
         metric_key="recovery",

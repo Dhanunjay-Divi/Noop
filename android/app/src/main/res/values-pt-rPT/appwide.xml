@@ -210,7 +210,6 @@
     <string name="appwide_fitness_age_younger_one_profile_age">1 ano abaixo da idade do perfil</string>
     <string name="appwide_fitness_age_younger_this_week">%1$s mais jovem esta semana</string>
     <string name="appwide_friends_data_boundary">Só podem ser partilhados Recuperação, Effort, Pontuação do sono, duração do sono, VFC e frequência cardíaca em repouso. Fluxos brutos, localizações, diários, percursos, treinos e fases do sono são excluídos.</string>
-    <string name="appwide_friends_invite_instructions">No Noop, abra Mais → Amigos e introduza o endereço do servidor e o código de utilização única.</string>
     <string name="appwide_gym_add_first_exercise">Adicione o primeiro exercício</string>
     <string name="appwide_gym_add_first_exercise_body">Cada exercício pode usar o seu próprio objetivo, descanso e regra de progressão.</string>
     <string name="appwide_gym_add_time">Adicionar tempo</string>

@@ -18,6 +18,15 @@ class PrimaryNavigationContractTest {
         ).firstOrNull(File::isFile)?.readText()
     }
 
+    private fun uiSource(name: String): File? {
+        val root = File(System.getProperty("user.dir") ?: ".")
+        return listOf(
+            File(root, "src/main/java/com/noop/ui/$name"),
+            File(root, "app/src/main/java/com/noop/ui/$name"),
+            File(root, "android/app/src/main/java/com/noop/ui/$name"),
+        ).firstOrNull(File::isFile)
+    }
+
     @Test
     fun localizedLabelWidthsChooseStableSingleLineFit() {
         val englishLabels = listOf("Today", "Trends", "Workouts", "Sleep", "More")
@@ -203,6 +212,7 @@ class PrimaryNavigationContractTest {
         val source = appRootSource()
         assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
         val text = source!!
+        val managedScreen = uiSource("ManagedFriendsScreen.kt")
 
         assertTrue(text.contains(
             "Friends(\"friends\", R.string.nav_friends, Icons.Filled.People)"
@@ -218,6 +228,13 @@ class PrimaryNavigationContractTest {
         ))
         assertTrue(text.contains("composable(Destination.Friends.route)"))
         assertTrue(text.contains("FriendsScreen("))
+        assertTrue("ManagedFriendsScreen.kt is missing", managedScreen != null)
+        assertTrue(managedScreen!!.readText().contains("ManagedCloudService"))
+        assertFalse(managedScreen.readText().contains("FriendsViewModel"))
+        assertFalse(
+            "Retired self-hosted Friends presentation source remains",
+            uiSource("FriendsViewModel.kt")?.exists() == true,
+        )
     }
 
     @Test

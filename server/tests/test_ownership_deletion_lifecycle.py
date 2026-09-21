@@ -31,12 +31,23 @@ def test_claim_serializes_with_cancellation_request_lock() -> None:
     source = inspect.getsource(
         PostgresOwnershipDeletionProgressRepository.claim_due_managed_targets
     )
+    candidate_scan = source.index("candidates = await connection.fetch")
+    account_lock = source.index("pg_try_advisory_xact_lock", candidate_scan)
+    fresh_update = source.index(
+        "UPDATE ownership_account_deletion_target_progress",
+        account_lock,
+    )
+    cancellation_fence = source.index(
+        "request.canceled_at IS NULL",
+        fresh_update,
+    )
+    assert candidate_scan < account_lock < fresh_update < cancellation_fence
     assert "pg_try_advisory_xact_lock" in source
     assert "noop-ownership-account:" in source
-    assert "FOR UPDATE OF progress SKIP LOCKED" in source
     assert "FOR UPDATE OF request" not in source
-    assert source.index("LIMIT $2") < source.index("pg_try_advisory_xact_lock")
-    assert "FROM due_candidates due" in source
+    assert "FOR UPDATE OF progress SKIP LOCKED" not in source
+    assert "async with connection.transaction()" in source
+    assert source.index("LIMIT $2") < account_lock
 
 
 def target(

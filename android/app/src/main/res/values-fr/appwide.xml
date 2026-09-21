@@ -210,7 +210,6 @@
     <string name="appwide_fitness_age_younger_one_profile_age">1 an de moins que votre âge de profil</string>
     <string name="appwide_fitness_age_younger_this_week">%1$s de moins cette semaine</string>
     <string name="appwide_friends_data_boundary">Seuls Récupération, Effort, Score de sommeil, la durée du sommeil, la VFC et la fréquence cardiaque au repos peuvent être partagés. Les flux bruts, positions, journaux, itinéraires, entraînements et phases du sommeil sont exclus.</string>
-    <string name="appwide_friends_invite_instructions">Dans Noop, ouvrez Plus → Amis, puis saisissez l’adresse du serveur et le code à usage unique.</string>
     <string name="appwide_gym_add_first_exercise">Ajoutez le premier exercice</string>
     <string name="appwide_gym_add_first_exercise_body">Chaque exercice peut avoir son propre objectif, repos et règle de progression.</string>
     <string name="appwide_gym_add_time">Ajouter du temps</string>

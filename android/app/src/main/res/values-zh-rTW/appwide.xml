@@ -210,7 +210,6 @@
     <string name="appwide_fitness_age_younger_one_profile_age">比個人資料年齡小 1 歲</string>
     <string name="appwide_fitness_age_younger_this_week">本週年輕 %1$s</string>
     <string name="appwide_friends_data_boundary">只能分享恢復、Effort、睡眠評分、睡眠時長、HRV 和靜息心率。不包括原始資料流、位置、日誌、路線、鍛鍊和睡眠階段。</string>
-    <string name="appwide_friends_invite_instructions">在 Noop 中開啟「更多」→「朋友」，然後輸入伺服器位址和一次性代碼。</string>
     <string name="appwide_gym_add_first_exercise">新增第一個動作</string>
     <string name="appwide_gym_add_first_exercise_body">每個動作都可以使用各自的目標、休息和進階規則。</string>
     <string name="appwide_gym_add_time">增加時長</string>

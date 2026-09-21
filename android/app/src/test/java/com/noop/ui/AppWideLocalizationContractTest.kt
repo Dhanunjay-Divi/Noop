@@ -53,7 +53,11 @@ class AppWideLocalizationContractTest {
             "../../Tools/AppWideLocalization/appwide_strings.json",
         )
         assertTrue("Canonical app-wide localization source unavailable", canonical != null)
-        assertEquals("Android base keys match the canonical source", canonicalKeys(canonical!!), base.keys)
+        assertEquals(
+            "Android base keys match the canonical source after retired presentation copy",
+            canonicalKeys(canonical!!) - RETIRED_ANDROID_KEYS,
+            base.keys,
+        )
         assertEquals(
             "Confirm your adult profile details to see a personalized goal.",
             base["appwide_hydration_target_unavailable"],
@@ -159,5 +163,11 @@ class AppWideLocalizationContractTest {
                 )
             }
         }
+    }
+
+    private companion object {
+        val RETIRED_ANDROID_KEYS = setOf(
+            "appwide_friends_invite_instructions",
+        )
     }
 }

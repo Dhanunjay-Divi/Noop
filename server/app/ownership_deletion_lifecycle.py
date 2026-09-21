@@ -400,94 +400,128 @@ class PostgresOwnershipDeletionProgressRepository:
         lease_seconds: int,
         limit: int,
     ) -> Sequence[OwnershipManagedDeletionTarget]:
-        rows = await self._pool().fetch(
-            """
-            WITH due_candidates AS MATERIALIZED (
-                SELECT progress.deletion_request_id,
-                       progress.target_kind,
-                       request.account_id,
-                       identity.issuer,
-                       identity.provider_tenant,
-                       identity.subject_hash
-                FROM ownership_account_deletion_target_progress progress
-                JOIN ownership_account_deletion_requests request
-                  USING (deletion_request_id)
-                JOIN ownership_external_identities identity
-                  ON identity.account_id = request.account_id
-                 AND encode(
-                        sha256(
-                            convert_to(identity.identity_id::text, 'UTF8')
-                        ),
-                        'hex'
-                     ) = request.requester_identity_hash
-                WHERE progress.target_kind = 'managed_cloud_data'
-                  AND request.canceled_at IS NULL
-                  AND request.cancel_before <= $1
-                  AND progress.attempt_count < $4
-                  AND (
-                        (
-                            progress.current_state = 'scheduled'
-                            AND (
-                                progress.retry_after IS NULL
-                                OR progress.retry_after <= $1
+        claimed: list[Any] = []
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                candidates = await connection.fetch(
+                    """
+                    SELECT progress.deletion_request_id,
+                           request.account_id
+                    FROM ownership_account_deletion_target_progress progress
+                    JOIN ownership_account_deletion_requests request
+                      USING (deletion_request_id)
+                    JOIN ownership_external_identities identity
+                      ON identity.account_id = request.account_id
+                     AND encode(
+                            sha256(
+                                convert_to(identity.identity_id::text, 'UTF8')
+                            ),
+                            'hex'
+                         ) = request.requester_identity_hash
+                    WHERE progress.target_kind = 'managed_cloud_data'
+                      AND request.canceled_at IS NULL
+                      AND request.cancel_before <= $1
+                      AND progress.attempt_count < $3
+                      AND (
+                            (
+                                progress.current_state = 'scheduled'
+                                AND (
+                                    progress.retry_after IS NULL
+                                    OR progress.retry_after <= $1
+                                )
                             )
-                        )
-                        OR (
-                            progress.current_state = 'processing'
-                            AND progress.managed_erasure_job_id IS NULL
-                            AND progress.lease_expires_at <= $1
-                        )
-                  )
-                ORDER BY
-                    request.cancel_before,
-                    progress.updated_at,
-                    progress.deletion_request_id
-                FOR UPDATE OF progress SKIP LOCKED
-                LIMIT $2
-            ),
-            candidates AS MATERIALIZED (
-                SELECT due.*
-                FROM due_candidates due
-                WHERE pg_try_advisory_xact_lock(
-                    hashtextextended(
-                        'noop-ownership-account:' || due.account_id::text,
-                        0
-                    )
+                            OR (
+                                progress.current_state = 'processing'
+                                AND progress.managed_erasure_job_id IS NULL
+                                AND progress.lease_expires_at <= $1
+                            )
+                      )
+                    ORDER BY
+                        request.cancel_before,
+                        progress.updated_at,
+                        progress.deletion_request_id
+                    LIMIT $2
+                    """,
+                    now,
+                    limit,
+                    _MAX_ATTEMPTS,
                 )
-            )
-            UPDATE ownership_account_deletion_target_progress progress
-            SET current_state = 'processing',
-                blocker = NULL,
-                progress_version = progress.progress_version + 1,
-                attempt_count = progress.attempt_count + 1,
-                lease_owner = $3,
-                lease_expires_at =
-                    $1::timestamptz
-                    + make_interval(secs => $5::integer),
-                retry_after = NULL,
-                last_error_kind = NULL,
-                updated_at = $1,
-                completed_at = NULL
-            FROM candidates
-            WHERE progress.deletion_request_id =
-                    candidates.deletion_request_id
-              AND progress.target_kind = candidates.target_kind
-            RETURNING
-                progress.deletion_request_id,
-                progress.progress_version,
-                progress.attempt_count,
-                candidates.issuer,
-                candidates.provider_tenant,
-                candidates.subject_hash,
-                progress.managed_erasure_job_id
-            """,
-            now,
-            limit,
-            lease_owner,
-            _MAX_ATTEMPTS,
-            lease_seconds,
-        )
-        return [_managed_target(row) for row in rows]
+                for candidate in candidates:
+                    account_lock = await connection.fetchval(
+                        """
+                        SELECT pg_try_advisory_xact_lock(
+                            hashtextextended($1, 0)
+                        )
+                        """,
+                        f"noop-ownership-account:{candidate['account_id']}",
+                    )
+                    if not account_lock:
+                        continue
+                    row = await connection.fetchrow(
+                        """
+                        UPDATE ownership_account_deletion_target_progress progress
+                        SET current_state = 'processing',
+                            blocker = NULL,
+                            progress_version = progress.progress_version + 1,
+                            attempt_count = progress.attempt_count + 1,
+                            lease_owner = $5,
+                            lease_expires_at =
+                                $3::timestamptz
+                                + make_interval(secs => $6::integer),
+                            retry_after = NULL,
+                            last_error_kind = NULL,
+                            updated_at = $3,
+                            completed_at = NULL
+                        FROM ownership_account_deletion_requests request
+                        JOIN ownership_external_identities identity
+                          ON identity.account_id = request.account_id
+                         AND encode(
+                                sha256(
+                                    convert_to(identity.identity_id::text, 'UTF8')
+                                ),
+                                'hex'
+                             ) = request.requester_identity_hash
+                        WHERE progress.deletion_request_id = $1
+                          AND progress.target_kind = 'managed_cloud_data'
+                          AND request.deletion_request_id =
+                                progress.deletion_request_id
+                          AND request.account_id = $2
+                          AND request.canceled_at IS NULL
+                          AND request.cancel_before <= $3
+                          AND progress.attempt_count < $4
+                          AND (
+                                (
+                                    progress.current_state = 'scheduled'
+                                    AND (
+                                        progress.retry_after IS NULL
+                                        OR progress.retry_after <= $3
+                                    )
+                                )
+                                OR (
+                                    progress.current_state = 'processing'
+                                    AND progress.managed_erasure_job_id IS NULL
+                                    AND progress.lease_expires_at <= $3
+                                )
+                          )
+                        RETURNING
+                            progress.deletion_request_id,
+                            progress.progress_version,
+                            progress.attempt_count,
+                            identity.issuer,
+                            identity.provider_tenant,
+                            identity.subject_hash,
+                            progress.managed_erasure_job_id
+                        """,
+                        candidate["deletion_request_id"],
+                        candidate["account_id"],
+                        now,
+                        _MAX_ATTEMPTS,
+                        lease_owner,
+                        lease_seconds,
+                    )
+                    if row is not None:
+                        claimed.append(row)
+        return [_managed_target(row) for row in claimed]
 
     async def list_processing_managed_targets(
         self,

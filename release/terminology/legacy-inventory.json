@@ -5,9 +5,9 @@
     "customer": 814,
     "fixture": 5587,
     "generated": 21,
-    "historical": 3158,
+    "historical": 3160,
     "import": 871,
-    "persisted": 666
+    "persisted": 667
   },
   "entries": [
     {
@@ -15305,6 +15305,31 @@
       "occurrenceCount": 1,
       "path": "StrandTests/ExploreRangeGatingTests.swift",
       "sha256": "3d58cec7707d6bd73850c7519eaff35df3349a003a75fac2d94df7a93c78ad63",
+      "tokenCounts": {
+        "my-whoop": 1
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        4,
+        256
+      ],
+      "occurrenceCount": 2,
+      "path": "StrandTests/FormulaPublicationGateTests.swift",
+      "sha256": "69a9ac888d8e9482218aa34e7b67927ff09019e57fc8410e3bce64a6f1bf8025",
+      "tokenCounts": {
+        "whoopstore": 2
+      }
+    },
+    {
+      "category": "persisted",
+      "lineNumbers": [
+        254
+      ],
+      "occurrenceCount": 1,
+      "path": "StrandTests/FormulaPublicationGateTests.swift",
+      "sha256": "84eb4efbb9cdb630576b73bb93eaca7bb9be4747c487570f207ef647f28c569e",
       "tokenCounts": {
         "my-whoop": 1
       }
@@ -33348,7 +33373,7 @@
       "category": "fixture",
       "lineNumbers": [
         101,
-        256
+        257
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/test/java/com/noop/ui/AndroidLocalizationPolicyTest.kt",
@@ -36029,7 +36054,7 @@
       "lineNumbers": [
         57,
         78,
-        98
+        113
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/ACTIVE.md",
@@ -36348,8 +36373,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        121,
-        180
+        136,
+        199
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-21-pr16-final-readiness-closeout.md",
@@ -38589,7 +38614,7 @@
       }
     }
   ],
-  "occurrenceCount": 17837,
+  "occurrenceCount": 17840,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

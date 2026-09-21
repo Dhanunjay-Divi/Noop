@@ -210,7 +210,6 @@
     <string name="appwide_fitness_age_younger_one_profile_age">На 1 год моложе возраста в профиле</string>
     <string name="appwide_fitness_age_younger_this_week">На %1$s моложе на этой неделе</string>
     <string name="appwide_friends_data_boundary">Можно делиться только показателями восстановления, нагрузки, оценки сна, продолжительности сна, ВСР и пульса в покое. Не передаются необработанные потоки, местоположение, журнал, маршруты, тренировки и стадии сна.</string>
-    <string name="appwide_friends_invite_instructions">В Noop откройте «Ещё» → «Друзья» и введите адрес сервера и одноразовый код.</string>
     <string name="appwide_gym_add_first_exercise">Добавьте первое упражнение</string>
     <string name="appwide_gym_add_first_exercise_body">Для каждого упражнения можно задать свою цель, отдых и правило прогрессии.</string>
     <string name="appwide_gym_add_time">Добавлять время</string>
