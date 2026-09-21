@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
+from math import inf, nextafter
 from pathlib import Path
 from uuid import UUID
 
@@ -89,6 +90,30 @@ def test_dst_day_windows_preserve_civil_day_boundaries() -> None:
     assert (fall.day_end_at - fall.day_start_at).total_seconds() == 25 * 3600
     assert fall.utc_offset_start_minutes == -300
     assert fall.utc_offset_end_minutes == -360
+
+
+def test_skipped_civil_day_is_rejected_as_a_contract_error() -> None:
+    with pytest.raises(
+        FormulaInputContractError,
+        match="local_day does not map to a positive UTC interval",
+    ):
+        FormulaDayContext.create(
+            account_id=UUID("00000000-0000-4000-8000-000000000001"),
+            local_day=date(2011, 12, 30),
+            timezone_name="Pacific/Apia",
+        )
+
+
+@pytest.mark.parametrize("local_day", [date(2011, 12, 29), date(2011, 12, 31)])
+def test_days_adjacent_to_skipped_civil_day_remain_valid(local_day: date) -> None:
+    context = FormulaDayContext.create(
+        account_id=UUID("00000000-0000-4000-8000-000000000001"),
+        local_day=local_day,
+        timezone_name="Pacific/Apia",
+    )
+
+    assert context.day_end_at > context.day_start_at
+    assert (context.day_end_at - context.day_start_at).total_seconds() == 24 * 3600
 
 
 def test_maximum_local_day_is_rejected_as_a_contract_error() -> None:
@@ -274,6 +299,35 @@ def test_huge_numeric_input_is_rejected_as_a_contract_error() -> None:
                 source_revision="fixture-v1",
                 input_manifest_sha256="f" * 64,
             ),
+        )
+
+
+@pytest.mark.parametrize("value", [-1e308, 1e308])
+def test_client_observation_accepts_persistence_boundaries(value: float) -> None:
+    observation = ClientFormulaObservation(
+        status="present",
+        formula_revision="noop-charge-v2",
+        value=value,
+    )
+
+    assert observation.value == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [nextafter(-1e308, -inf), nextafter(1e308, inf)],
+)
+def test_client_observation_rejects_values_outside_persistence_bounds(
+    value: float,
+) -> None:
+    with pytest.raises(
+        FormulaInputContractError,
+        match="finite value within the persistence range",
+    ):
+        ClientFormulaObservation(
+            status="present",
+            formula_revision="noop-charge-v2",
+            value=value,
         )
 
 

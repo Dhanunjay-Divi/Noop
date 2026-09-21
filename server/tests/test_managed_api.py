@@ -4,10 +4,13 @@ import base64
 import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from math import inf, nextafter
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 import app.managed_api as managed_api_module
 from app.config import Settings
@@ -21,6 +24,7 @@ from app.managed_identity import (
     StaticManagedTokenVerifier,
 )
 from app.managed_formula_executor import ManagedFormulaExecutor
+from app.managed_models import ManagedFormulaClientObservationInput
 from app.managed_object_store import ManagedObjectCapability, ManagedObjectMetadata
 from app.managed_repository import (
     ManagedForbiddenError,
@@ -1736,6 +1740,157 @@ def test_managed_formula_huge_number_is_a_contract_rejection() -> None:
     assert response.json()["detail"] == (
         "formula shadow request did not match a registered contract"
     )
+
+
+@pytest.mark.parametrize("value", [-1e308, 1e308])
+def test_formula_client_observation_model_accepts_persistence_boundaries(
+    value: float,
+) -> None:
+    observation = ManagedFormulaClientObservationInput(
+        status="present",
+        formula_revision="noop-charge-v2",
+        value=value,
+    )
+
+    assert observation.value == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [nextafter(-1e308, -inf), nextafter(1e308, inf)],
+)
+def test_formula_client_observation_model_rejects_values_outside_bounds(
+    value: float,
+) -> None:
+    with pytest.raises(
+        ValidationError,
+        match="finite value within the persistence range",
+    ):
+        ManagedFormulaClientObservationInput(
+            status="present",
+            formula_revision="noop-charge-v2",
+            value=value,
+        )
+
+
+def test_formula_client_observation_model_preserves_absence_semantics() -> None:
+    missing = ManagedFormulaClientObservationInput(
+        status="missing",
+        formula_revision="noop-charge-v2",
+    )
+    not_supplied = ManagedFormulaClientObservationInput()
+
+    assert missing.value is None
+    assert missing.formula_revision == "noop-charge-v2"
+    assert not_supplied.value is None
+    assert not_supplied.formula_revision is None
+
+    with pytest.raises(ValidationError, match="missing formula observation"):
+        ManagedFormulaClientObservationInput(
+            status="missing",
+            formula_revision="noop-charge-v2",
+            value=0.0,
+        )
+    with pytest.raises(ValidationError, match="omitted formula observation"):
+        ManagedFormulaClientObservationInput(
+            status="not_supplied",
+            formula_revision="noop-charge-v2",
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [nextafter(-1e308, -inf), nextafter(1e308, inf)],
+)
+def test_managed_formula_client_value_outside_persistence_bounds_is_422(
+    value: float,
+) -> None:
+    formula_repository = FakeManagedFormulaRepository()
+    client, _ = _managed_client(
+        formula_repository=formula_repository,
+        formula_shadow=True,
+    )
+    with client:
+        response = client.post(
+            "/v1/managed/formula-shadow/recovery/noop-charge-v2",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "local_day": "2026-09-19",
+                "timezone_name": "UTC",
+                "inputs": {
+                    "hrv": 55.0,
+                    "rhr": 52.0,
+                    "hrv_baseline": {
+                        "mean": 50.0,
+                        "spread": 5.0,
+                        "usable": True,
+                    },
+                },
+                "provenance": {
+                    "source_kind": "synthetic_test",
+                    "source_revision": "fixture-v1",
+                    "input_manifest_sha256": "a" * 64,
+                },
+                "client_observation": {
+                    "status": "present",
+                    "formula_revision": "noop-charge-v2",
+                    "value": value,
+                },
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == [
+        {
+            "type": "value_error",
+            "loc": ["body", "client_observation"],
+            "msg": (
+                "Value error, a present formula observation requires a finite "
+                "value within the persistence range"
+            ),
+            "ctx": {"error": {}},
+        }
+    ]
+    assert formula_repository.publications == []
+
+
+def test_managed_formula_skipped_civil_day_is_a_contract_rejection() -> None:
+    formula_repository = FakeManagedFormulaRepository()
+    client, _ = _managed_client(
+        formula_repository=formula_repository,
+        formula_shadow=True,
+    )
+    with client:
+        response = client.post(
+            "/v1/managed/formula-shadow/recovery/noop-charge-v2",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "local_day": "2011-12-30",
+                "timezone_name": "Pacific/Apia",
+                "inputs": {
+                    "hrv": 55.0,
+                    "rhr": 52.0,
+                    "hrv_baseline": {
+                        "mean": 50.0,
+                        "spread": 5.0,
+                        "usable": True,
+                    },
+                },
+                "provenance": {
+                    "source_kind": "synthetic_test",
+                    "source_revision": "fixture-v1",
+                    "input_manifest_sha256": "a" * 64,
+                },
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "formula shadow request did not match a registered contract"
+    )
+    assert formula_repository.publications == []
 
 
 def test_formula_metric_event_cardinality_is_registry_bounded(

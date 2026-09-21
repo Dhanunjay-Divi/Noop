@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 import re
 import unicodedata
 from datetime import UTC, date, datetime, timedelta
@@ -16,6 +17,7 @@ from app.models import INSTALLATION_ID_PATTERN, StrictModel
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 MANAGED_KEY_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 MANAGED_INSTALLATION_TOKEN_PATTERN = r"^noopm_[A-Za-z0-9_-]{43}$"
+MANAGED_FORMULA_VALUE_ABS_MAX = 1e308
 ManagedClientPlatform = Literal["ios", "android", "macos"]
 MANAGED_SOCIAL_ALIAS_PATTERN = (
     r"^NOOP-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-"
@@ -145,6 +147,16 @@ class ManagedFormulaClientObservationInput(StrictModel):
             return self
         if self.value is None:
             raise ValueError("a present formula observation requires a value")
+        if (
+            not math.isfinite(self.value)
+            or not -MANAGED_FORMULA_VALUE_ABS_MAX
+            <= self.value
+            <= MANAGED_FORMULA_VALUE_ABS_MAX
+        ):
+            raise ValueError(
+                "a present formula observation requires a finite value "
+                "within the persistence range"
+            )
         return self
 
 

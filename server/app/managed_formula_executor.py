@@ -31,6 +31,7 @@ _SOURCE_KIND = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _REVISION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _TIME_ZONE = re.compile(r"^[A-Za-z0-9_+.-]+(?:/[A-Za-z0-9_+.-]+)*$")
+_PERSISTED_FLOAT_ABS_MAX = 1e308
 
 
 class FormulaInputContractError(ValueError):
@@ -84,6 +85,10 @@ class FormulaDayContext:
             raise FormulaInputContractError(
                 "local_day is outside the supported range"
             ) from exc
+        if day_end_at <= day_start_at:
+            raise FormulaInputContractError(
+                "local_day does not map to a positive UTC interval"
+            )
         return cls(
             account_id=account_id,
             local_day=local_day,
@@ -142,9 +147,10 @@ class ClientFormulaObservation:
                     "a missing client observation cannot carry a value"
                 )
             return
-        if self.status != "present" or not _finite_number(self.value):
+        if self.status != "present" or not _persistable_number(self.value):
             raise FormulaInputContractError(
-                "a present client observation requires a finite value"
+                "a present client observation requires a finite value "
+                "within the persistence range"
             )
 
 
@@ -522,6 +528,19 @@ def _finite_number(value: Any) -> bool:
         raise FormulaInputContractError(
             "formula numeric input is outside the supported range"
         ) from error
+
+
+def _persistable_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        number = float(value)
+    except OverflowError:
+        return False
+    return (
+        math.isfinite(number)
+        and -_PERSISTED_FLOAT_ABS_MAX <= number <= _PERSISTED_FLOAT_ABS_MAX
+    )
 
 
 def _integer(value: Any) -> int | None:
