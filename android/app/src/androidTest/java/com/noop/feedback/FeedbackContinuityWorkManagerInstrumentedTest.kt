@@ -54,8 +54,26 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
     fun removeUniqueWork() {
         runBlocking {
             workManager.cancelUniqueWork(uniqueWorkName).await()
+            withTimeout(15_000L) {
+                while (
+                    FeedbackContinuityWorkInspector.snapshots(
+                        workManager,
+                        uniqueWorkName,
+                    ).any { !it.state.isFinished }
+                ) {
+                    delay(50L)
+                }
+            }
         }
-        File(context.filesDir, "feedback/outbox/$localId").deleteRecursively()
+        val recordDirectory = File(context.filesDir, "feedback/outbox/$localId")
+        assertTrue(
+            "Feedback continuity test record must be removed after workers quiesce",
+            recordDirectory.deleteRecursively(),
+        )
+        assertTrue(
+            "Feedback continuity test record must not leak into later test classes",
+            !recordDirectory.exists(),
+        )
     }
 
     @Test

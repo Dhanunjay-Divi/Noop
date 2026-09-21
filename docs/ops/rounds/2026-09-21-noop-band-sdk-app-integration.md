@@ -121,6 +121,16 @@ Success means:
   without adding a new hosted job.
 - Updated the SDK handoff, first-release plan/checklist, decision ledger,
   active handoff, and terminology inventory.
+- Diagnosed the final hosted Android production-shell failure from retained CI
+  artifacts rather than retrying it blindly. The managed device started the
+  complete shell wall and failed only two App Report presentation cases after
+  an earlier WorkManager continuity class, so it was neither an emulator
+  startup loss nor an SDK assertion.
+- Hardened that continuity class's test-only teardown: it now waits for every
+  generation of its exact unique work to reach a terminal state before
+  deleting and asserting removal of its exact feedback record. This preserves
+  production feedback restoration while preventing a retiring test worker
+  from leaking nonterminal outbox state into later UI tests.
 
 ## Data, privacy, and medical truth
 
@@ -172,6 +182,8 @@ Success means:
 | Android Full app boundary | `NoopBandSdkIntegrationTest` passed 4/4 under `testFullDebugUnitTest` in 18 seconds on the final tree | Full-variant app source, generation fences, durable checkpoint restoration, explicit terminals, bounded diagnostics, and all shared scenarios compile and pass | Instrumentation, OEM background, BLE, or physical behavior |
 | Android Demo compile | `compileDemoDebugKotlin` passed independently in 1m38s | The Demo variant consumes the same final source successfully | Demo runtime rendering or device behavior |
 | Android memory classification | One combined Full+Demo invocation let the two Compose compilers overlap and exhausted a 3 GiB Kotlin heap; separate no-daemon, no-parallel, two-worker commands passed | The failure was an avoidable verification command shape, not a source failure; variant walls must stay sequential | Every future machine configuration |
+| Hosted production-shell diagnosis | PR `#17` run `35643099439` started 120 API 35 tests; 116 passed, two App Report cases timed out before their explanation sheets appeared, and the retained result protobuf contained real test cases | The red required context was a real cross-test state leak, not a zero-test infrastructure event or SDK behavior failure | The local correction until rerun on the protected exact SHA |
+| Feedback cleanup instrumentation regression | Full instrumentation source compiled, then the five continuity cases followed by all eight AppShell cases passed 13/13 on `pixel2Api35` in 2m37s | WorkManager generations quiesce before the exact test record is removed, and both previously failing report sheets open in the same managed-device sequence | The complete hosted production-shell wall or physical Android behavior |
 | Apple app boundary | Xcode 27 focused macOS test passed 5/5 in the real app target, including WHOOP-default routing, source-scoped restore, explicit terminals, generation invalidation, and bounded failure categories | App-target compilation and shared Apple boundary behavior are green on the current host | iOS runtime, universal/macOS-15, BLE, background, or hardware behavior |
 | Bounded disk exception and cleanup | The final isolated Apple rerun used an 8 GiB runner floor after measuring 13 GiB free and a prior 3.2 GiB DerivedData footprint; it passed, then the exact DerivedData and generated `.swiftpm` directory were removed and the artifact verifier passed | The final Apple test could run without risking the concurrent UI cache, while round-owned disk use returned immediately | Future host capacity without the same preflight and cleanup |
 | Final repository policy wall | 310/310 tests passed with one intentional skip; 9 release checks; required-CI 10 contexts; trusted self-check; shell syntax and ShellCheck; Actionlint; calibration parity; terminology; distribution provenance; private-data and health-claims guards; strict Apple/Android localization; 83 operations records; and diff hygiene passed | The exact local candidate satisfies the repository-controlled release, trust, privacy, claims, localization, and operations contracts | Hosted exact-SHA enforcement or protected integration |
@@ -202,9 +214,9 @@ Success means:
   `ce09fa67038865a35bc32698730953bd379d726f`; final SDK-export replacement
   `d8028186898b934f34ec50a98614f7e67d06d947`.
 - Branch and remote state: PR `#17` is open from the dedicated branch; the
-  local implementation head is `d8028186`, while the remote head remains
-  `ce09fa67` until the final record commit and one consolidated replacement
-  push.
+  remote head is `599454f4`. The test-isolation follow-up and this evidence
+  record are the next consolidated commit; the exact replacement SHA remains
+  subject to all protected checks.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and
   `Dhanunjay-Divi/NoopBandSDK` both report `PRIVATE` with default branch
   `main`.
@@ -221,16 +233,18 @@ Success means:
 
 ## Open risks and honest limitations
 
-- Focused Apple and Android app-target verification is green, but the complete
-  protected Apple/Android walls must rerun on the final exact SHA.
+- Focused Apple and Android app-target verification is green, including the
+  exact Android class ordering that previously leaked feedback state, but the
+  complete protected Apple/Android walls must rerun on the final exact SHA.
 - A source-only adapter seam cannot establish that a supplier band is
   compatible or flashable.
 
 ## Next round
 
-1. Commit and push the final SDK-export replacement candidate once.
+1. Commit and push the feedback-isolation follow-up once.
 2. Require every exact-SHA protected context, including the full Apple and
-   Android app walls, then resolve all 16 review threads from matching evidence.
+   Android app walls, then resolve remaining review threads from matching
+   evidence.
 3. Merge normally, verify protected `main`, and remove exact round-owned logs,
    DerivedData, exports, package scratch data, and the dedicated worktree.
 4. Keep the supplier adapter/flasher disabled until the exact SDK, firmware,
